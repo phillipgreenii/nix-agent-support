@@ -14,5 +14,7 @@
     ./programs/ollama
     ./programs/opencode
     ./programs/tuicr
+    ./programs/neovim-claude
+    ./programs/cmux-claude
   ];
 }
