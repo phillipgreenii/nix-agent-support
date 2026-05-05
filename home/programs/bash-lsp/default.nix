@@ -13,7 +13,7 @@ in
     enable = lib.mkEnableOption "Bash LSP plugin for Claude";
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
     phillipgreenii.programs.claude.plugins.local.plugins.bash-lsp = {
       description = "Bash/Shell language server for code intelligence";
       source = "bash-lsp";

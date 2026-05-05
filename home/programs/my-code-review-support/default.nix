@@ -20,7 +20,7 @@ in
     contentPackage = lib.mkPackageOption pkgs "my-code-review-support" { };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
     phillipgreenii.programs.claude.plugins.local.plugins.my-code-review-support = {
       description = "AI-powered code review support for GitHub PRs";
       source = "my-code-review-support";
