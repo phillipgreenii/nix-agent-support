@@ -7,5 +7,6 @@
     ./programs/claude-theme
     ./programs/pgii-local-plugins
     ./programs/pgii-claude-plugins
+    ./programs/agent-rules
   ];
 }
