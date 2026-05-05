@@ -62,7 +62,7 @@ in
       plugins = lib.mapAttrsToList (name: plugin: {
         inherit name;
         inherit (plugin) description source;
-        version = cfg.plugins.local.version;
+        inherit (cfg.plugins.local) version;
       }) cfg.plugins.local.plugins;
     };
 

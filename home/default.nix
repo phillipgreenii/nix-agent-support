@@ -6,5 +6,6 @@
     ./programs/claude-status-line
     ./programs/claude-theme
     ./programs/pgii-local-plugins
+    ./programs/pgii-claude-plugins
   ];
 }
