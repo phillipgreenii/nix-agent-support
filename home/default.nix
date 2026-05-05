@@ -16,5 +16,14 @@
     ./programs/tuicr
     ./programs/neovim-claude
     ./programs/cmux-claude
+    ./programs/agent-activity
+    ./programs/bash-lsp
+    ./programs/claude-activity
+    ./programs/claude-agents-tui
+    ./programs/claude-extended-tool-approver
+    ./programs/gh-prreview
+    ./programs/git-tools
+    ./programs/my-code-review-support
+    ./programs/wait-for-agents
   ];
 }
