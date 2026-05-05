@@ -25,5 +25,6 @@
     ./programs/git-tools
     ./programs/my-code-review-support
     ./programs/wait-for-agents
+    ./programs/beads
   ];
 }
