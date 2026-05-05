@@ -1,6 +1,6 @@
 { ... }:
 {
   imports = [
-    # modules added as they are migrated
+    ./programs/claude
   ];
 }
