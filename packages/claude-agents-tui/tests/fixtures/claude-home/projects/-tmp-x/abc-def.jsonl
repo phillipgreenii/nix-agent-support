@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u1","timestamp":"2026-04-23T10:00:00Z","message":{"role":"user","content":"do the thing"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-04-23T10:00:05Z","message":{"model":"claude-sonnet-4-6","role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":42}}}

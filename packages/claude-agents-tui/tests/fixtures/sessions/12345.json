@@ -1,0 +1,9 @@
+{
+  "pid": 12345,
+  "sessionId": "abc-def",
+  "cwd": "/tmp/x",
+  "startedAt": 1776000000000,
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "name": "demo"
+}

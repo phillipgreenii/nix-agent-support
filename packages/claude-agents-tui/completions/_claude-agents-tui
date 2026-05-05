@@ -1,0 +1,9 @@
+#compdef claude-agents-tui
+_arguments \
+  '--wait-until-idle[headless mode]' \
+  '--maximum-wait[max seconds]:seconds:' \
+  '--time-between-checks[poll interval]:seconds:' \
+  '--consecutive-idle-checks[idle checks]:count:' \
+  '--caffeinate[keep awake]' \
+  '--version[print version]' \
+  '--help[show help]'

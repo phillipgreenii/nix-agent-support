@@ -1,0 +1,12 @@
+#compdef wait-for-agents-to-finish
+
+_wait_for_agents_to_finish() {
+    _arguments \
+        '--maximum-wait[Maximum wait time in seconds]:seconds:' \
+        '--time-between-checks[Check interval in seconds]:seconds:' \
+        '--consecutive-idle-checks[Consecutive idle checks required before exiting (default: 3)]:count:' \
+        '--caffeinate[Keep Mac awake while waiting]' \
+        '(-h --help)'{-h,--help}'[Show help message]'
+}
+
+_wait_for_agents_to_finish "$@"

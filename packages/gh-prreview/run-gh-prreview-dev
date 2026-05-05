@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Development runner for gh-prreview - runs CLI from source without Nix build
+# Usage: ./run-gh-prreview-dev [command] [args...]
+
+set -euo pipefail
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set up environment variables for testing
+export GH_PRREVIEW_REVIEW_PATH="/tmp/gh-prreview-test-reviews"
+export GH_PRREVIEW_OLD_PR_DAYS="30"
+export GH_PRREVIEW_WATCH_LABELS="team/findev,team/jvm-guild"
+export GH_PRREVIEW_WATCH_USERS="csziprecruiter,greenchairjosephl,KenMGJ,meyronr,stephenh-zip"
+
+# Create test directory
+mkdir -p "$GH_PRREVIEW_REVIEW_PATH"
+
+# Validate MONOREPO_ROOT is set (supports legacy ZR_MONOREPO)
+MONOREPO_ROOT="${MONOREPO_ROOT:-${ZR_MONOREPO:-}}"
+if [ -z "$MONOREPO_ROOT" ]; then
+  echo "Error: MONOREPO_ROOT environment variable is not set" >&2
+  exit 1
+fi
+
+# Add src to PYTHONPATH so we can import gh_prreview
+export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH:-}"
+
+# Change to test repo and run via nix develop
+cd "$MONOREPO_ROOT"
+
+echo "Running gh-prreview from source..."
+exec nix develop "$SCRIPT_DIR/../..#gh-prreview" --command bash -c "time python3 -m gh_prreview.cli.main \"\$@\"" -- "$@"

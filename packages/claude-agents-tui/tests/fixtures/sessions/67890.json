@@ -1,0 +1,8 @@
+{
+  "pid": 67890,
+  "sessionId": "ghi-jkl",
+  "cwd": "/tmp/y",
+  "startedAt": 1776000001000,
+  "kind": "interactive",
+  "entrypoint": "cli"
+}

@@ -1,0 +1,32 @@
+#compdef agent-activity-api
+
+_agent-activity-api() {
+    local -a commands
+    commands=(
+        'list:List all active agents with formatted output'
+        'wait:Wait for all agents to finish'
+        'is-agent-active:Check if any agent is active'
+        'clean:Clean stale markers from all tools'
+        'help:Show help message'
+        'version:Show version information'
+    )
+
+    local -a wait_args
+    wait_args=(
+        '--maximum-wait[Maximum wait time in seconds]:seconds:'
+        '--time-between-checks[Check interval in seconds]:seconds:'
+        '--caffeinate[Keep Mac awake while waiting]'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'command' commands
+    elif (( CURRENT > 2 )); then
+        case "$words[2]" in
+            wait)
+                _arguments $wait_args
+                ;;
+        esac
+    fi
+}
+
+_agent-activity-api "$@"

@@ -1,0 +1,22 @@
+#compdef git-branch-maintenance
+
+_git_branch_maintenance() {
+    local -a flags
+    flags=(
+        '--ff[Fast-forward all branches to origin/main]'
+        '--rebase[Rebase all branches onto origin/main]'
+        '--delete-merged[Delete branches that are merged into main]'
+        '--delete-merged-worktrees[Allow deletion of worktrees during --delete-merged]'
+        '--protect-branch[Add a protected branch for this run]:branch:__git_branch_names'
+        '--protect-worktree[Add a protected worktree for this run]:path:_directories'
+        '--dry-run[Show what would happen without making changes]'
+        '--force[Skip working directory validation]'
+        '--help[Show help message]'
+    )
+
+    _arguments \
+        $flags \
+        '*:branch:__git_branch_names'
+}
+
+_git_branch_maintenance "$@"

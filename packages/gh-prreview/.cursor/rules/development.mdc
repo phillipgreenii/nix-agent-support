@@ -1,0 +1,116 @@
+---
+globs: packages/gh-prreview/**
+---
+
+# gh-prreview Development Rules (Python Implementation)
+
+## Testing During Development
+
+- **CRITICAL**: Test commands using `./run-gh-prreview-dev [command] [args...]` - runs the actual CLI from source without requiring a Nix build
+  - Example: `./run-gh-prreview-dev list-awaiting`
+  - Example: `./run-gh-prreview-dev checkout 12345`
+  - Automatically enters `nix develop` shell with all dependencies
+  - Sets up test environment variables (GH_PRREVIEW_REVIEW_PATH, etc.)
+  - Requires `$MONOREPO_ROOT` environment variable to be set (legacy `$ZR_MONOREPO` also supported)
+  - Changes to `$MONOREPO_ROOT` directory automatically
+- Run `check-all.sh` for full checks (format, lint, type checking, and tests)
+  - **Must be run inside `nix develop` shell** or via `nix develop ../..#gh-prreview --command ./check-all.sh`
+  - Supports flags: `--no-fix`, `--quick`, `--suppress-coverage-check`
+  - Assumes all tools (ruff, mypy, pytest) are available in PATH
+- Run specific tests: `python3 -m pytest tests/unit/models/test_pr.py -v` (inside nix develop shell)
+- Test CLI directly: `PYTHONPATH=src python3 -m gh_prreview.cli.main --help` (inside nix develop shell)
+
+## Code Quality
+
+- All code must pass ruff formatting: `ruff format src tests`
+- All code must pass ruff linting: `ruff check src tests`
+- All code must pass mypy type checking: `mypy src`
+- Maintain 80%+ test coverage (checked by pytest)
+
+## Python Guidelines
+
+- Use `from __future__ import annotations` at the top of every module for Python 3.9+ compatibility
+- Use type hints on all function signatures
+- Use Protocol classes for dependency injection (enables easy mocking in tests)
+- Use dataclasses for models (frozen=True when immutable)
+- Prefer async/await for GitHub API calls
+
+## Structure
+
+- `src/gh_prreview/` - Source code
+  - `models/` - Data models (Config, PR, Review, Worktree)
+  - `services/` - Services (GitHub API, Git, Config, Output)
+  - `commands/` - Command implementations
+  - `cli/` - Click CLI entry point
+- `tests/` - Test code
+  - `unit/` - Unit tests (test individual components)
+  - `integration/` - Integration tests (test CLI end-to-end)
+  - `conftest.py` - Shared fixtures
+
+## Documentation
+
+- README.md MUST be updated after significant changes
+- Docstrings required for all public functions and classes
+- Keep MIGRATION_COMPLETE.md updated with any architectural changes
+
+## Version Management
+
+- Version is in `pyproject.toml` and `src/gh_prreview/__init__.py`
+- Nix build auto-generates version with date and git hash
+- Follow semantic versioning (major.minor.patch)
+
+## Common Development Tasks
+
+```bash
+# Run CLI from source (with test config, no Nix build required)
+# Requires: export MONOREPO_ROOT=/path/to/monorepo
+./run-gh-prreview-dev list-awaiting      # Test list-awaiting command
+./run-gh-prreview-dev list-awaiting --deep
+./run-gh-prreview-dev list-local         # Test list-local command
+./run-gh-prreview-dev checkout 12345     # Test checkout command
+./run-gh-prreview-dev remove 12345       # Test remove command
+
+# Full checks before commit (run from nix develop shell)
+nix develop ../..#gh-prreview --command ./check-all.sh  # Auto-fix mode (default)
+nix develop ../..#gh-prreview --command ./check-all.sh --no-fix  # Check-only mode (for CI)
+nix develop ../..#gh-prreview --command ./check-all.sh --quick  # Skip slow checks
+
+# Or enter the shell first, then run check-all.sh
+nix develop ../..#gh-prreview
+./check-all.sh                      # Now you can run directly
+
+# Run pytest tests (inside nix develop shell)
+python3 -m pytest tests/unit -v                      # All unit tests
+python3 -m pytest tests/unit/services/test_github.py -v  # Specific test
+python3 -m pytest --cov=gh_prreview --cov-report=html     # With coverage
+
+# Enter development shell manually
+nix develop ../..#gh-prreview
+
+# Test CLI directly (inside nix develop shell)
+PYTHONPATH=src python3 -m gh_prreview.cli.main --help
+PYTHONPATH=src python3 -m gh_prreview.cli.main list-local
+```
+
+## Development Environment
+
+- Development shell is defined in root `flake.nix` as `devShells.gh-prreview`
+- Includes Python 3.11, pytest, mypy, ruff, gh, git, and all Python dependencies
+- Both `run-gh-prreview-dev` and `check-all.sh` automatically enter the dev shell
+- Manual entry: `nix develop ../..#gh-prreview`
+
+## Environment Variables
+
+- **Required**: `MONOREPO_ROOT` - Path to the monorepo (used by `run-gh-prreview-dev`; legacy `ZR_MONOREPO` also supported)
+- **Auto-set by run-gh-prreview-dev**:
+  - `GH_PRREVIEW_REVIEW_PATH=/tmp/gh-prreview-test-reviews`
+  - `GH_PRREVIEW_OLD_PR_DAYS=30`
+  - `GH_PRREVIEW_WATCH_LABELS=team/findev,team/jvm-guild`
+  - `GH_PRREVIEW_WATCH_USERS=csziprecruiter,greenchairjosephl,KenMGJ,meyronr,stephenh-zip`
+
+## Notes
+
+- Temporary test scripts should be removed once the problem is solved
+- **CRITICAL**: Testing and debugging should use `./run-gh-prreview-dev [command]` rather than rebuilding with Nix repeatedly
+- Pre-commit hooks automatically run `check-all.sh` when gh-prreview files are staged
+- CI uses `nix flake check` which runs `checks.test-gh-prreview` (calls `check-all.sh --no-fix --quick --suppress-coverage-check`)

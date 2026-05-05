@@ -1,0 +1,23 @@
+#compdef claude-activity-api
+
+_claude_activity_api() {
+  local -a commands
+  commands=(
+    'list:List active conversations (JSON array)'
+    'is-agent-active:Exit 0 if working, 1 if idle'
+    'clean:Remove stale or orphaned session files'
+    'help:Show help message'
+  )
+
+  _arguments -C \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'claude-activity-api commands' commands
+      ;;
+  esac
+}
+
+_claude_activity_api "$@"

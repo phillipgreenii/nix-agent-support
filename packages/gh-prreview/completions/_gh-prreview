@@ -1,0 +1,46 @@
+#compdef gh-prreview gh
+
+_gh_prreview() {
+    local -a commands
+    commands=(
+        'checkout:Checkout a PR as a git worktree for review'
+        'remove:Remove PR review worktrees and their local branches'
+        'list-local:List all locally checked out PRs'
+        'list-awaiting:List PRs awaiting your review'
+        'help:Show help message'
+    )
+
+    local -a remove_flags
+    remove_flags=(
+        '--closed[Remove all closed/merged PRs]'
+    )
+
+    local -a list_awaiting_flags
+    list_awaiting_flags=(
+        '--deep[Search older PRs (increases limit to 500)]'
+        '--debug[Enable debug output]'
+        '--include-draft[Include draft PRs]'
+    )
+
+    _arguments -C \
+        '1: :->command' \
+        '*:: :->args'
+
+    case $state in
+        command)
+            _describe 'command' commands
+            ;;
+        args)
+            case $words[1] in
+                remove)
+                    _arguments $remove_flags
+                    ;;
+                list-awaiting)
+                    _arguments $list_awaiting_flags
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_gh_prreview "$@"

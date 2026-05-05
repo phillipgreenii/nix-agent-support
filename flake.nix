@@ -54,12 +54,18 @@
     {
       self,
       nixpkgs,
+      llm-agents,
       phillipgreenii-nix-overlay,
       phillipgreenii-nix-base,
       flake-utils,
       ...
     }:
     let
+      # Injects ccusage from llm-agents into pkgs so claude-agents-tui can callPackage it.
+      llmAgentsCcusageOverlay = final: _prev: {
+        inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
+      };
+
       # Overlay populated incrementally as packages are migrated.
       overlay =
         final: _prev:
@@ -69,11 +75,68 @@
             inherit (final) lib;
             inherit self;
           };
+          gitHash = phillipgreenii-nix-base.lib.mkGitHash (self.rev or self.dirtyRev or null);
         in
         {
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           bash-scripting = final.callPackage ./packages/bash-scripting { };
+          my-code-review-support-cli = final.callPackage ./packages/my-code-review-support-cli {
+            inherit gitHash;
+          };
+          my-code-review-support = final.callPackage ./packages/my-code-review-support { };
+          claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
+          claude-agents-tui = final.callPackage ./packages/claude-agents-tui { };
+          gh-prreview = final.callPackage ./packages/gh-prreview { inherit gitHash; };
+          claude-activity =
+            let
+              result = import ./packages/claude-activity {
+                pkgs = final;
+                inherit bashBuilders;
+              };
+            in
+            final.symlinkJoin {
+              name = "claude-activity";
+              paths = result.packages;
+            };
+          agent-activity =
+            let
+              result = import ./packages/agent-activity {
+                pkgs = final;
+                inherit bashBuilders;
+                inherit (final) claude-activity;
+              };
+            in
+            final.symlinkJoin {
+              name = "agent-activity";
+              paths = result.packages;
+              postBuild = ''
+                ln -s agent-activity-api $out/bin/agent-activity
+              '';
+            };
+          wait-for-agents =
+            let
+              result = import ./packages/wait-for-agents {
+                pkgs = final;
+                inherit bashBuilders;
+                inherit (final) claude-agents-tui;
+              };
+            in
+            final.symlinkJoin {
+              name = "wait-for-agents";
+              paths = result.packages;
+            };
+          git-tools =
+            let
+              result = import ./packages/git-tools {
+                pkgs = final;
+                inherit bashBuilders;
+              };
+            in
+            final.symlinkJoin {
+              name = "git-tools";
+              paths = result.packages;
+            };
         };
 
       systemOutputs = flake-utils.lib.eachDefaultSystem (
@@ -83,6 +146,7 @@
             inherit system;
             overlays = [
               phillipgreenii-nix-overlay.overlays.default
+              llmAgentsCcusageOverlay
               overlay
             ];
           };

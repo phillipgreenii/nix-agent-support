@@ -1,0 +1,21 @@
+{
+  "blocks": [
+    {
+      "id": "2026-04-23T19:00:00.000Z",
+      "startTime": "2026-04-23T19:00:00.000Z",
+      "endTime": "2026-04-24T00:00:00.000Z",
+      "isActive": true,
+      "entries": 309,
+      "tokenCounts": {
+        "inputTokens": 1367,
+        "outputTokens": 92638,
+        "cacheCreationInputTokens": 1079545,
+        "cacheReadInputTokens": 15527024
+      },
+      "totalTokens": 16700574,
+      "costUSD": 11.12,
+      "burnRate": { "tokensPerMinute": 208897.48, "costPerHour": 8.34 },
+      "projection": { "totalCost": 36.75, "remainingMinutes": 184 }
+    }
+  ]
+}
