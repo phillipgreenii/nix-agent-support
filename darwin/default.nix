@@ -1,6 +1,6 @@
 { ... }:
 {
   imports = [
-    # modules added as they are migrated
+    ./modules/pg2-agent
   ];
 }
