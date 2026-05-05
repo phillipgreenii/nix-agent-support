@@ -17,11 +17,13 @@ in
 
     home.file.".local/share/pgii-local-plugins/agent-rules/CLAUDE.md".source = rulesFile;
 
-    home.file.".local/share/pgii-local-plugins/agent-rules/plugin.json".text = builtins.toJSON {
-      name = "agent-rules";
-      inherit (cfg.plugins.local) version;
-      description = "Personal Claude Code agent rules";
-      type = "prompt";
-    };
+    home.file.".local/share/pgii-local-plugins/agent-rules/.claude-plugin/plugin.json".text =
+      builtins.toJSON
+        {
+          name = "agent-rules";
+          inherit (cfg.plugins.local) version;
+          description = "Personal Claude Code agent rules";
+          type = "prompt";
+        };
   };
 }
