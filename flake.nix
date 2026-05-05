@@ -80,6 +80,7 @@
         {
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
+          inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           bash-scripting = final.callPackage ./packages/bash-scripting { };
           my-code-review-support-cli = final.callPackage ./packages/my-code-review-support-cli {
             inherit gitHash;
