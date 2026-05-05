@@ -1,0 +1,7 @@
+#compdef command-name
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(-f --flag)'{-f,--flag}'[Description]:value:' \
+  '*:positional:_files'

@@ -73,6 +73,7 @@
         {
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
+          bash-scripting = final.callPackage ./packages/bash-scripting { };
         };
 
       systemOutputs = flake-utils.lib.eachDefaultSystem (

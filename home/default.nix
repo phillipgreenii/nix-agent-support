@@ -8,5 +8,6 @@
     ./programs/pgii-local-plugins
     ./programs/pgii-claude-plugins
     ./programs/agent-rules
+    ./programs/bash-scripting
   ];
 }
