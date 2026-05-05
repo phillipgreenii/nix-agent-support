@@ -20,7 +20,7 @@ in
       home.packages = [ pkgs.llm-agentsPkgs.claude-code ];
 
       programs.vscode.extensions = lib.mkAfter [
-        pkgs.open-vsx."anthropic"."claude-code"
+        pkgs.vscode-extensions.anthropic.claude-code
       ];
     };
 
