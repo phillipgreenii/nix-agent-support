@@ -2,12 +2,10 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 let
   cfg = config.phillipgreenii.programs.claude;
-  vscodeExts = inputs.nix-vscode-extensions.extensions.${pkgs.system};
 in
 {
   options.phillipgreenii.programs.claude.enable =
@@ -22,7 +20,7 @@ in
       home.packages = [ pkgs.llm-agentsPkgs.claude-code ];
 
       programs.vscode.extensions = lib.mkAfter [
-        vscodeExts.open-vsx."anthropic"."claude-code"
+        pkgs.open-vsx."anthropic"."claude-code"
       ];
     };
 
