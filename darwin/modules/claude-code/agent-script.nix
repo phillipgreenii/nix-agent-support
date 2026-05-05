@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  agentScriptLib = import ../../lib/agent-script.nix;
+  agentScriptLib = import ../../../lib/agent-script.nix;
 in
 agentScriptLib.mkAgentScript {
   name = "Claude";
