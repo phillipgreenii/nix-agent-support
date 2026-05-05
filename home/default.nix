@@ -26,5 +26,6 @@
     ./programs/my-code-review-support
     ./programs/wait-for-agents
     ./programs/beads
+    ./programs/serena
   ];
 }
