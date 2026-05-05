@@ -29,7 +29,6 @@ in
           name = "bash-scripting";
           description = "Claude skill: bash scripting conventions for the mkBashBuilders framework";
           inherit (config.phillipgreenii.programs.claude.plugins.local) version;
-          type = "skill";
         };
       };
 

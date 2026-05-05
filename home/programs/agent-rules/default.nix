@@ -23,7 +23,6 @@ in
           name = "agent-rules";
           inherit (cfg.plugins.local) version;
           description = "Personal Claude Code agent rules";
-          type = "prompt";
         };
   };
 }
