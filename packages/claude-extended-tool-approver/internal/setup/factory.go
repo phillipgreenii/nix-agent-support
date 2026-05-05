@@ -7,6 +7,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/buildtools"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/claudetools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
@@ -43,6 +44,7 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 	dockerRule := docker.New(eng, pe)
 
 	eng.RegisterRules(
+		configrules.New(),
 		envvars.New(),
 		assume.New(),
 		new(webfetch.Rule),
