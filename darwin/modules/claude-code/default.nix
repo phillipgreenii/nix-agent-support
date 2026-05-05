@@ -10,7 +10,8 @@ let
   vscodeExts = inputs.nix-vscode-extensions.extensions.${pkgs.system};
 in
 {
-  options.phillipgreenii.programs.claude.enable = lib.mkEnableOption "Claude Code and associated tooling";
+  options.phillipgreenii.programs.claude.enable =
+    lib.mkEnableOption "Claude Code and associated tooling";
 
   config = lib.mkIf cfg.enable {
     # Bridge to home-manager so HM modules can gate on the same flag
