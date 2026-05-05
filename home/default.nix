@@ -27,5 +27,7 @@
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena
+    ./programs/pw-reset-agents
+    ./programs/pw-agent-activity
   ];
 }

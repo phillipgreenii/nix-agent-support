@@ -137,6 +137,8 @@
               name = "git-tools";
               paths = result.packages;
             };
+          pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
+          pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
         };
 
       systemOutputs = flake-utils.lib.eachDefaultSystem (
