@@ -27,6 +27,7 @@ in
             };
             source = lib.mkOption {
               type = lib.types.str;
+              example = "agent-rules";
               description = "Relative path from marketplace root to plugin directory";
             };
             enabledByDefault = lib.mkOption {

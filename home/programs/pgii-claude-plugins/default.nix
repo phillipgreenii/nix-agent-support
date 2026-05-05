@@ -24,6 +24,7 @@ let
 
   allPlugins = allMarketplacePlugins ++ allOfficialPlugins;
 
+  # lib.listToAttrs keeps last occurrence; avoid listing same plugin in both marketplaces and officialPlugins
   computedEnabled = lib.listToAttrs (
     map (
       p:
@@ -47,21 +48,25 @@ in
             plugins = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
+              description = "Plugin names to install from this marketplace";
             };
           };
         }
       );
       default = { };
+      description = "GitHub-based marketplaces and their plugins to install";
     };
 
     officialPlugins = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
+      description = "Plugins to install from claude-plugins-official";
     };
 
     lspPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
+      description = "LSP server binary packages to install";
     };
 
     enabledByDefault = lib.mkOption {
