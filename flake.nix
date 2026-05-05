@@ -102,7 +102,94 @@
             formatting = treefmtEval.config.build.check self;
             linting = checks-lib.linting ./.;
             test-update-locks-lib = checks-lib.testUpdateLocksLib { };
-            # Per-module tests added as modules are migrated
+
+            # Test claude-status-line wrapper and part scripts
+            test-claude-status-line =
+              let
+                slScripts = import ./home/programs/claude-status-line/scripts.nix {
+                  inherit pkgs lib;
+                };
+                wrapperScript = slScripts.mkWrapperScript slScripts.defaultParts;
+              in
+              checks-lib.testBashScripts {
+                package = pkgs.writeShellScriptBin "claude-status-line" ''
+                  exec ${wrapperScript} "$@"
+                '';
+                tests = ./home/programs/claude-status-line;
+                extraInputs = [ ];
+              };
+
+            # Validate claude-theme token map: parse as JSON and assert required keys.
+            # Uses mock Catppuccin Mocha hex values; actual values come from
+            # config.lib.stylix.colors at module evaluation time.
+            test-claude-theme-json =
+              let
+                mockColors = {
+                  base00 = "1e1e2e";
+                  base01 = "181825";
+                  base02 = "313244";
+                  base03 = "45475a";
+                  base04 = "585b70";
+                  base05 = "cdd6f4";
+                  base06 = "f5e0dc";
+                  base07 = "b4befe";
+                  base08 = "f38ba8";
+                  base09 = "fab387";
+                  base0A = "f9e2af";
+                  base0B = "a6e3a1";
+                  base0C = "89dceb";
+                  base0D = "89b4fa";
+                  base0E = "cba6f7";
+                  base0F = "f2cdcd";
+                };
+                tokenMap = import ./home/programs/claude-theme/colors.nix {
+                  colors = mockColors;
+                };
+                themeFile = pkgs.writeText "test-stylix-theme.json" (
+                  builtins.toJSON {
+                    name = "Stylix";
+                    base = "dark";
+                    overrides = tokenMap;
+                  }
+                );
+              in
+              pkgs.runCommand "check-claude-theme-json" { buildInputs = [ pkgs.jq ]; } ''
+                # Validate JSON is well-formed
+                ${pkgs.jq}/bin/jq empty < ${themeFile}
+
+                # Assert required semantic tokens are present
+                ${pkgs.jq}/bin/jq -e '
+                  .overrides | (
+                    has("claude") and
+                    has("error") and
+                    has("success") and
+                    has("warning") and
+                    has("text") and
+                    has("background") and
+                    has("diffAdded") and
+                    has("diffRemoved") and
+                    has("rate_limit_fill") and
+                    has("clawd_body") and
+                    has("red_FOR_SUBAGENTS_ONLY") and
+                    has("autoAccept") and
+                    has("rainbow_red")
+                  )
+                ' < ${themeFile}
+
+                # Assert all values are hex color strings starting with #
+                ${pkgs.jq}/bin/jq -e '
+                  .overrides | to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
+                ' < ${themeFile}
+
+                # Assert token count is reasonable (at least 30)
+                count=$(${pkgs.jq}/bin/jq '.overrides | length' < ${themeFile})
+                [ "$count" -ge 30 ] || {
+                  echo "Expected at least 30 tokens, got $count"
+                  exit 1
+                }
+
+                touch $out
+              '';
           };
 
           packages = {
