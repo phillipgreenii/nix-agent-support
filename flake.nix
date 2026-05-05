@@ -104,6 +104,25 @@
             linting = checks-lib.linting ./.;
             test-update-locks-lib = checks-lib.testUpdateLocksLib { };
 
+            test-ollama-wrapper =
+              let
+                wrapper = import ./home/programs/ollama/wrapper.nix {
+                  inherit pkgs lib;
+                  # Stub: bats mocks the binary via OLLAMA_BIN. Using a failing stub
+                  # strengthens the override contract — any regression where the wrapper
+                  # bypasses OLLAMA_BIN trips this immediately.
+                  ollamaPackage = pkgs.writeShellScriptBin "ollama" ''
+                    echo "stub ollama: not for runtime use" >&2
+                    exit 1
+                  '';
+                };
+              in
+              checks-lib.testBashScripts {
+                package = wrapper;
+                tests = ./home/programs/ollama/tests;
+                extraInputs = [ ];
+              };
+
             # Test claude-status-line wrapper and part scripts
             test-claude-status-line =
               let

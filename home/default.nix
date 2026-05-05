@@ -9,5 +9,10 @@
     ./programs/pgii-claude-plugins
     ./programs/agent-rules
     ./programs/bash-scripting
+    ./programs/agentsview
+    ./programs/ccusage
+    ./programs/ollama
+    ./programs/opencode
+    ./programs/tuicr
   ];
 }
