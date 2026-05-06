@@ -35,9 +35,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.caffeinateOn = !m.caffeinateOn
 		case "R":
 			m.autoResume = !m.autoResume
-			if m.autoResume && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired && !m.countdownTick {
-				m.countdownTick = true
-				return m, countdownTickCmd()
+			if m.autoResume && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
+				fireAt := m.tree.WindowResetsAt.Add(m.autoResumeDelay)
+				cmds := []tea.Cmd{autoResumeFireCmd(fireAt)}
+				if !m.countdownTick {
+					m.countdownTick = true
+					cmds = append(cmds, countdownTickCmd())
+				}
+				return m, tea.Batch(cmds...)
 			}
 		case "down", "j":
 			m.cursor++
@@ -157,7 +162,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.autoResumeFired = true
 		m.countdownTick = false
-		m.tree.WindowResetsAt = time.Time{}
+		// Shallow-copy to avoid mutating the shared tree pointer.
+		t := *m.tree
+		t.WindowResetsAt = time.Time{}
+		m.tree = &t
 	case TreeUpdatedMsg:
 		m.tree = msg.Tree
 		m.rebuildFlatRows()
