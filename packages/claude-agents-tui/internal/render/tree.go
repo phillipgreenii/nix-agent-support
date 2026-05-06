@@ -227,3 +227,50 @@ func truncate(s string, max int) string {
 func osc8Link(url, text string) string {
 	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
 }
+
+// RenderPathNode renders one PathNode row with collapse glyph, indentation, and rollup stats.
+// selected controls the cursor mark prefix. collapsed controls the ▶/▼ glyph.
+func RenderPathNode(n *aggregate.PathNode, opts TreeOpts, selected, collapsed bool) string {
+	cursorMark := "  "
+	if selected {
+		cursorMark = opts.Theme.Cursor.Render(">") + " "
+	}
+	glyph := "▼"
+	if collapsed {
+		glyph = "▶"
+	}
+	indent := strings.Repeat("  ", n.Depth)
+	label := glyph + " " + indent + n.DisplayPath
+	rollup := nodeRollup(n, opts)
+
+	rowWidth := prefixCols + minLabelWidth + statsBlockCols
+	if opts.Width > 0 {
+		rowWidth = opts.Width
+	}
+	// Subtract cursor mark width (2) from available space.
+	available := rowWidth - 2
+	leftWidth := max(available-lipgloss.Width(rollup)-1, lipgloss.Width(label))
+	pathStyle := opts.Theme.DirRow.Width(leftWidth).Align(lipgloss.Left)
+	return cursorMark + pathStyle.Render(label) + " " + rollup + "\n"
+}
+
+// nodeRollup formats the rollup statistics line for a PathNode row.
+func nodeRollup(n *aggregate.PathNode, opts TreeOpts) string {
+	var parts []string
+	if n.WorkingN > 0 {
+		parts = append(parts, fmt.Sprintf("%d●", n.WorkingN))
+	}
+	if n.IdleN > 0 {
+		parts = append(parts, fmt.Sprintf("%d○", n.IdleN))
+	}
+	if n.DormantN > 0 && opts.ShowAll {
+		parts = append(parts, fmt.Sprintf("%d✕", n.DormantN))
+	}
+	if opts.CostMode {
+		parts = append(parts, fmt.Sprintf("$%.2f", n.TotalCostUSD))
+	} else {
+		parts = append(parts, fmt.Sprintf("%s tok", FmtTok(n.TotalTokens)))
+	}
+	parts = append(parts, fmt.Sprintf("%sk/m", fmtK(n.BurnRateSum)))
+	return strings.Join(parts, "  ")
+}
