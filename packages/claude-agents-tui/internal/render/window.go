@@ -137,3 +137,60 @@ func RenderWindow(tree *aggregate.Tree, rows []Row, scrollOffset, bodyHeight int
 
 	return sb.String()
 }
+
+// RenderWindowTree renders a height-bounded window of rows produced by FlattenPathTree.
+// PathNodeKind rows use row.Node + row.Collapsed. SessionKind rows use row.Session directly.
+func RenderWindowTree(nodes []*aggregate.PathNode, rows []Row, scrollOffset, bodyHeight int, opts TreeOpts) string {
+	if len(rows) == 0 || bodyHeight <= 0 {
+		return ""
+	}
+
+	budget := bodyHeight
+
+	topInd := scrollOffset > 0
+	if topInd {
+		budget--
+	}
+
+	lastVis := LastVisibleIdx(rows, scrollOffset, budget)
+	botInd := lastVis < len(rows)-1
+	if botInd {
+		budget--
+		lastVis = LastVisibleIdx(rows, scrollOffset, budget)
+	}
+
+	var sb strings.Builder
+
+	if topInd {
+		n := countSessionRows(rows, 0, scrollOffset)
+		sb.WriteString(opts.Theme.Prompt.Render(fmt.Sprintf("  ↑ %s", pluralSession(n))))
+		sb.WriteString("\n")
+	}
+
+	for i := scrollOffset; i <= lastVis; i++ {
+		row := rows[i]
+		switch row.Kind {
+		case PathNodeKind:
+			selected := opts.HasCursor && i == opts.Cursor
+			sb.WriteString(RenderPathNode(row.Node, opts, selected, row.Collapsed))
+		case BlankKind:
+			sb.WriteString("\n")
+		case SessionKind:
+			prefix, cont := "├─", "│"
+			if row.IsLastInGroup {
+				prefix, cont = "└─", " "
+			}
+			indent := strings.Repeat("  ", row.Depth)
+			selected := opts.HasCursor && i == opts.Cursor
+			sb.WriteString(renderSession(row.Session, opts, indent+prefix, cont, selected))
+		}
+	}
+
+	if botInd {
+		n := countSessionRows(rows, lastVis+1, len(rows))
+		sb.WriteString(opts.Theme.Prompt.Render(fmt.Sprintf("  ↓ %s", pluralSession(n))))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
