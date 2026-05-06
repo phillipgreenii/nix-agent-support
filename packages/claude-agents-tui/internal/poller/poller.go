@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/burnrate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/subshell"
 	"github.com/phillipgreenii/claude-agents-tui/internal/transcript"
 )
@@ -25,6 +26,7 @@ type Poller struct {
 	CCUsageFn        func(ctx context.Context) ([]byte, error)
 	CCUsageStateFn   func() (probed bool, err error)
 	PRLookupFn       func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
+	Signalers        []signal.Signaler
 
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
@@ -66,6 +68,8 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		ctxSnap, _ := transcript.LatestContext(path)
 		subs, _ := transcript.OpenSubagents(path)
 		waiting, _ := transcript.IsAwaitingInput(path)
+		resetsAt, _ := transcript.RateLimitPause(path)
+		s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
 		shells, _ := subshellCounter.Count(s.PID)
 
 		// Burn rate: add delta (tokens generated since last poll) to ring buffers.
@@ -89,15 +93,16 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnLong[s.SessionID].Add(now, delta)
 
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
-			ContextTokens: ctxSnap.ContextTokens,
-			SessionTokens: ctxSnap.TotalTokens,
-			Model:         ctxSnap.Model,
-			FirstPrompt:   fp,
-			SubagentCount: subs,
-			SubshellCount: shells,
-			AwaitingInput: waiting,
-			BurnRateShort: p.burnShort[s.SessionID].Rate(now),
-			BurnRateLong:  p.burnLong[s.SessionID].Rate(now),
+			ContextTokens:     ctxSnap.ContextTokens,
+			SessionTokens:     ctxSnap.TotalTokens,
+			Model:             ctxSnap.Model,
+			FirstPrompt:       fp,
+			SubagentCount:     subs,
+			SubshellCount:     shells,
+			AwaitingInput:     waiting,
+			RateLimitResetsAt: resetsAt,
+			BurnRateShort:     p.burnShort[s.SessionID].Rate(now),
+			BurnRateLong:      p.burnLong[s.SessionID].Rate(now),
 		}
 	}
 
@@ -177,4 +182,15 @@ func sessionMtime(sessions []*session.Session, id string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// detectTerminalHost returns the Name() of the first Signaler whose Detect returns true,
+// or "unknown" if none match.
+func detectTerminalHost(signalers []signal.Signaler, pid int) string {
+	for _, s := range signalers {
+		if s.Detect(pid) {
+			return s.Name()
+		}
+	}
+	return "unknown"
 }
