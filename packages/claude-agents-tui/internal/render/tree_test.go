@@ -348,13 +348,11 @@ func TestRenderPathNodeDepthIndentation(t *testing.T) {
 	// display path than depth=0. The label is formatted as glyph + " " + indent + displayPath.
 	// We find the glyph marker and measure the space between glyph and the path text.
 	glyphSep := "▼ "
-	idx0 := strings.Index(out0, glyphSep)
-	idx1 := strings.Index(out1, glyphSep)
-	if idx0 < 0 || idx1 < 0 {
+	_, after0, found0 := strings.Cut(out0, glyphSep)
+	_, after1, found1 := strings.Cut(out1, glyphSep)
+	if !found0 || !found1 {
 		t.Fatalf("could not find glyph separator in output: depth0=%q depth1=%q", out0, out1)
 	}
-	after0 := out0[idx0+len(glyphSep):]
-	after1 := out1[idx1+len(glyphSep):]
 	// Count leading spaces (indentation) before the display path text.
 	trimmed0 := strings.TrimLeft(after0, " ")
 	trimmed1 := strings.TrimLeft(after1, " ")
