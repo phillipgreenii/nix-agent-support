@@ -13,6 +13,6 @@ in
     lib.mkEnableOption "Serena MCP server for semantic code intelligence";
 
   config = lib.mkIf cfg.enable {
-    home.packages = [ inputs.serena.packages.${pkgs.system}.serena ];
+    home.packages = [ inputs.serena.packages.${pkgs.stdenv.hostPlatform.system}.serena ];
   };
 }

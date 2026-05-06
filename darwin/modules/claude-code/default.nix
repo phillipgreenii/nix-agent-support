@@ -19,7 +19,7 @@ in
     home-manager.users.phillipg = {
       home.packages = [ pkgs.llm-agentsPkgs.claude-code ];
 
-      programs.vscode.extensions = lib.mkAfter [
+      programs.vscode.profiles.default.extensions = lib.mkAfter [
         pkgs.vscode-extensions.anthropic.claude-code
       ];
     };
