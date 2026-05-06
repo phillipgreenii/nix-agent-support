@@ -74,7 +74,7 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 // that matches a tmux pane's shell pid from listOutput.
 func (t *TmuxSignaler) findPaneForPID(ctx context.Context, listOutput string, targetPID int) string {
 	panePIDs := map[int]string{}
-	for _, line := range strings.Split(strings.TrimSpace(listOutput), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(listOutput), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
