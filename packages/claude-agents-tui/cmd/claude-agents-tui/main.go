@@ -110,11 +110,13 @@ func main() {
 		Now:   time.Now,
 		PID:   os.Getpid(),
 	}
+	cacheDir := filepath.Join(home, ".cache", "claude-agents-tui")
 	model := tui.NewModel(tui.Options{
 		Tree:       &aggregate.Tree{},
 		Poller:     p,
 		Interval:   cfg.RefreshInterval,
 		Caffeinate: mgr,
+		CacheDir:   cacheDir,
 	})
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
