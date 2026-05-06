@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // State holds the set of collapsed path tree nodes.
@@ -65,6 +66,7 @@ func (s *State) Save(cacheDir string) error {
 	for p := range s.collapsed {
 		raw.CollapsedPaths = append(raw.CollapsedPaths, p)
 	}
+	sort.Strings(raw.CollapsedPaths)
 	data, err := json.Marshal(raw)
 	if err != nil {
 		return err
