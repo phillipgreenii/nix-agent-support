@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 )
 
 func TestModelInitialView(t *testing.T) {
@@ -179,5 +180,123 @@ func TestRowAtReturnsCorrectRow(t *testing.T) {
 	}
 	if _, ok := m.rowAt(999); ok {
 		t.Error("rowAt out of bounds should return ok=false")
+	}
+}
+
+// mockSignaler records Send calls for test assertions.
+type mockSignaler struct {
+	name   string
+	detect bool
+	sent   []string
+}
+
+func (m *mockSignaler) Name() string              { return m.name }
+func (m *mockSignaler) Detect(_ int) bool         { return m.detect }
+func (m *mockSignaler) Send(pid int, text string) error {
+	m.sent = append(m.sent, fmt.Sprintf("%d:%s", pid, text))
+	return nil
+}
+
+func TestAutoResumeFireSignalsIdleSessions(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	resetsAt := time.Now().Add(-1 * time.Minute)
+	tree := &aggregate.Tree{
+		WindowResetsAt: resetsAt,
+		Dirs: []*aggregate.Directory{{
+			Path: "/p",
+			Sessions: []*aggregate.SessionView{{
+				Session:           &session.Session{PID: 42, Status: session.Idle},
+				SessionEnrichment: aggregate.SessionEnrichment{RateLimitResetsAt: resetsAt},
+			}},
+		}},
+	}
+	m := NewModel(Options{
+		Tree:              tree,
+		Signalers:         []signal.Signaler{mock},
+		AutoResumeDelay:   0,
+		AutoResumeMessage: "continue",
+	})
+	m.autoResume = true
+	m.Update(autoResumeFireMsg{})
+	if len(mock.sent) != 1 || mock.sent[0] != "42:continue" {
+		t.Errorf("sent = %v, want [\"42:continue\"]", mock.sent)
+	}
+	if !m.tree.WindowResetsAt.IsZero() {
+		t.Error("WindowResetsAt should be cleared after fire")
+	}
+	if !m.autoResumeFired {
+		t.Error("autoResumeFired should be true after fire")
+	}
+}
+
+func TestAutoResumeFireSkipsWorkingSessions(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	resetsAt := time.Now().Add(-1 * time.Minute)
+	tree := &aggregate.Tree{
+		WindowResetsAt: resetsAt,
+		Dirs: []*aggregate.Directory{{
+			Path: "/p",
+			Sessions: []*aggregate.SessionView{{
+				Session:           &session.Session{PID: 99, Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{},
+			}},
+		}},
+	}
+	m := NewModel(Options{
+		Tree:              tree,
+		Signalers:         []signal.Signaler{mock},
+		AutoResumeDelay:   0,
+		AutoResumeMessage: "continue",
+	})
+	m.autoResume = true
+	m.Update(autoResumeFireMsg{})
+	if len(mock.sent) != 0 {
+		t.Errorf("sent = %v, want empty (Working session must be skipped)", mock.sent)
+	}
+}
+
+func TestAutoResumeFireIgnoredWhenAutoResumeOff(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	resetsAt := time.Now().Add(-1 * time.Minute)
+	tree := &aggregate.Tree{
+		WindowResetsAt: resetsAt,
+		Dirs: []*aggregate.Directory{{
+			Path: "/p",
+			Sessions: []*aggregate.SessionView{{
+				Session: &session.Session{PID: 42, Status: session.Idle},
+			}},
+		}},
+	}
+	m := NewModel(Options{Tree: tree, Signalers: []signal.Signaler{mock}})
+	m.autoResume = false
+	m.Update(autoResumeFireMsg{})
+	if len(mock.sent) != 0 {
+		t.Errorf("sent = %v, want empty (autoResume off)", mock.sent)
+	}
+}
+
+func TestRToggleEnablesAutoResume(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	if m.autoResume {
+		t.Fatal("autoResume should start false")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	if !m.autoResume {
+		t.Error("autoResume should be true after R key")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	if m.autoResume {
+		t.Error("autoResume should toggle back to false on second R")
+	}
+}
+
+func TestAutoResumeFiredResetWhenWindowClears(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Interval: time.Second})
+	resetsAt := time.Now().Add(-1 * time.Minute)
+	m.tree = &aggregate.Tree{WindowResetsAt: resetsAt}
+	m.autoResumeFired = true
+	m.Update(pollResultMsg{tree: &aggregate.Tree{}, anyWorking: false})
+	if m.autoResumeFired {
+		t.Error("autoResumeFired should reset when WindowResetsAt clears")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
+	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
 )
 
@@ -17,6 +18,9 @@ type Options struct {
 	Interval   time.Duration
 	Caffeinate *caffeinate.Manager
 	CacheDir   string // used to load/save tree collapse state
+	Signalers         []signal.Signaler
+	AutoResumeDelay   time.Duration
+	AutoResumeMessage string
 }
 
 type Model struct {
@@ -38,6 +42,13 @@ type Model struct {
 	anyWorking bool
 	polling    bool
 
+	autoResume        bool
+	autoResumeFired   bool
+	countdownTick     bool
+	signalers         []signal.Signaler
+	autoResumeDelay   time.Duration
+	autoResumeMessage string
+
 	cacheDir  string
 	treeState *treestate.State
 	pathNodes []*aggregate.PathNode
@@ -46,13 +57,16 @@ type Model struct {
 
 func NewModel(o Options) *Model {
 	m := &Model{
-		tree:       o.Tree,
-		poller:     o.Poller,
-		interval:   o.Interval,
-		caffeinate: o.Caffeinate,
-		theme:      render.NewTheme(render.DetectColors()),
-		cacheDir:   o.CacheDir,
-		treeState:  treestate.Load(o.CacheDir),
+		tree:              o.Tree,
+		poller:            o.Poller,
+		interval:          o.Interval,
+		caffeinate:        o.Caffeinate,
+		theme:             render.NewTheme(render.DetectColors()),
+		cacheDir:          o.CacheDir,
+		treeState:         treestate.Load(o.CacheDir),
+		signalers:         o.Signalers,
+		autoResumeDelay:   o.AutoResumeDelay,
+		autoResumeMessage: o.AutoResumeMessage,
 	}
 	m.rebuildFlatRows()
 	return m

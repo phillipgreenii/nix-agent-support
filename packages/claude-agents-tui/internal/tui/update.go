@@ -1,10 +1,16 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
+	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 )
 
 type TreeUpdatedMsg struct{ Tree *aggregate.Tree }
@@ -27,6 +33,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forceID = !m.forceID
 		case "C":
 			m.caffeinateOn = !m.caffeinateOn
+		case "R":
+			m.autoResume = !m.autoResume
+			if m.autoResume && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired && !m.countdownTick {
+				m.countdownTick = true
+				return m, countdownTickCmd()
+			}
 		case "down", "j":
 			m.cursor++
 			m.clampCursor()
@@ -99,9 +111,53 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = nil
 			m.scrollOffset = 0
 		}
+		if m.autoResumeFired && msg.tree.WindowResetsAt.IsZero() {
+			m.autoResumeFired = false
+		}
+		if m.autoResume && !msg.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
+			fireAt := msg.tree.WindowResetsAt.Add(m.autoResumeDelay)
+			cmds := []tea.Cmd{autoResumeFireCmd(fireAt)}
+			if !m.countdownTick {
+				m.countdownTick = true
+				cmds = append(cmds, countdownTickCmd())
+			}
+			return m, tea.Batch(cmds...)
+		}
 	case pollErrMsg:
 		m.polling = false
 		m.lastErr = msg.err
+	case countdownTickMsg:
+		if m.autoResume && m.tree != nil && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
+			return m, countdownTickCmd()
+		}
+		m.countdownTick = false
+
+	case autoResumeFireMsg:
+		if !m.autoResume || m.tree == nil || m.tree.WindowResetsAt.IsZero() || m.autoResumeFired {
+			return m, nil
+		}
+		fireAt := m.tree.WindowResetsAt.Add(m.autoResumeDelay)
+		if time.Now().Before(fireAt) {
+			return m, nil
+		}
+		for _, d := range m.tree.Dirs {
+			for _, sv := range d.Sessions {
+				if sv.Status == session.Working {
+					continue
+				}
+				sig := signal.ResolveSignaler(m.signalers, sv.PID)
+				if sig == nil {
+					fmt.Fprintf(os.Stderr, "auto-resume: no signaler for pid %d\n", sv.PID)
+					continue
+				}
+				if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
+					fmt.Fprintf(os.Stderr, "auto-resume: send failed pid %d: %v\n", sv.PID, err)
+				}
+			}
+		}
+		m.autoResumeFired = true
+		m.countdownTick = false
+		m.tree.WindowResetsAt = time.Time{}
 	case TreeUpdatedMsg:
 		m.tree = msg.Tree
 		m.rebuildFlatRows()
