@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
+	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
 )
 
 type Options struct {
@@ -15,6 +16,7 @@ type Options struct {
 	Poller     Poller
 	Interval   time.Duration
 	Caffeinate *caffeinate.Manager
+	CacheDir   string // used to load/save tree collapse state
 }
 
 type Model struct {
@@ -35,16 +37,25 @@ type Model struct {
 	lastErr    error
 	anyWorking bool
 	polling    bool
+
+	cacheDir  string
+	treeState *treestate.State
+	pathNodes []*aggregate.PathNode
+	flatRows  []render.Row
 }
 
 func NewModel(o Options) *Model {
-	return &Model{
+	m := &Model{
 		tree:       o.Tree,
 		poller:     o.Poller,
 		interval:   o.Interval,
 		caffeinate: o.Caffeinate,
 		theme:      render.NewTheme(render.DetectColors()),
+		cacheDir:   o.CacheDir,
+		treeState:  treestate.Load(o.CacheDir),
 	}
+	m.rebuildFlatRows()
+	return m
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -55,33 +66,37 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.pollNow(), tickCmd(m.interval))
 }
 
-func (m *Model) clampCursor() {
-	maxIdx := 0
-	if m.tree != nil {
-		for _, d := range m.tree.Dirs {
-			maxIdx += len(d.Sessions)
-		}
+// rebuildFlatRows rebuilds pathNodes and flatRows from the current tree and treeState.
+// Must be called after m.tree or m.treeState changes.
+func (m *Model) rebuildFlatRows() {
+	if m.tree == nil {
+		m.pathNodes = nil
+		m.flatRows = nil
+		return
 	}
-	if m.cursor >= maxIdx {
-		m.cursor = maxIdx - 1
+	opts := render.TreeOpts{ShowAll: m.showAll}
+	m.pathNodes = aggregate.BuildPathTree(m.tree.Dirs)
+	m.flatRows = render.FlattenPathTree(m.pathNodes, m.treeState, opts)
+}
+
+// rowAt returns the Row at index idx in flatRows, and whether it exists.
+func (m *Model) rowAt(idx int) (render.Row, bool) {
+	if idx < 0 || idx >= len(m.flatRows) {
+		return render.Row{}, false
+	}
+	return m.flatRows[idx], true
+}
+
+func (m *Model) clampCursor() {
+	n := len(m.flatRows)
+	if n == 0 {
+		m.cursor = 0
+		return
+	}
+	if m.cursor >= n {
+		m.cursor = n - 1
 	}
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
-}
-
-func (m *Model) sessionAt(idx int) *aggregate.SessionView {
-	i := 0
-	if m.tree == nil {
-		return nil
-	}
-	for _, d := range m.tree.Dirs {
-		for _, s := range d.Sessions {
-			if i == idx {
-				return s
-			}
-			i++
-		}
-	}
-	return nil
 }

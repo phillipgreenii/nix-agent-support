@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
 
@@ -126,5 +127,57 @@ func TestSyncScrollReturnsToZeroWhenCursorReturnsToTop(t *testing.T) {
 
 	if m.scrollOffset != 0 {
 		t.Errorf("expected scrollOffset=0 after cursor returns to top, got %d", m.scrollOffset)
+	}
+}
+
+func TestRebuildFlatRowsBuildsOnPollResult(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:     "/p",
+		Sessions: []*aggregate.SessionView{{Session: &session.Session{SessionID: "a", Status: session.Working}}},
+		WorkingN: 1,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.Update(pollResultMsg{tree: tree})
+	if len(m.flatRows) == 0 {
+		t.Error("flatRows should be populated after pollResultMsg")
+	}
+}
+
+func TestClampCursorUsesAllRows(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "a", Status: session.Working}},
+		},
+		WorkingN: 1,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.cursor = 999
+	m.clampCursor()
+	if m.cursor >= len(m.flatRows) {
+		t.Errorf("cursor should be clamped to flatRows length, got %d (len=%d)", m.cursor, len(m.flatRows))
+	}
+}
+
+func TestRowAtReturnsCorrectRow(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "s1", Status: session.Working}},
+		},
+		WorkingN: 1,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	// flatRows: PathNodeKind(0), SessionKind(1), BlankKind(2)
+	row, ok := m.rowAt(0)
+	if !ok {
+		t.Fatal("rowAt(0) should return a row")
+	}
+	if row.Kind != render.PathNodeKind {
+		t.Errorf("rows[0] should be PathNodeKind, got %v", row.Kind)
+	}
+	if _, ok := m.rowAt(999); ok {
+		t.Error("rowAt out of bounds should return ok=false")
 	}
 }
