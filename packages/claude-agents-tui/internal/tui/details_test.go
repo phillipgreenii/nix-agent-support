@@ -8,6 +8,17 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
 
+func TestDetailsShowsTerminalHost(t *testing.T) {
+	sv := &aggregate.SessionView{
+		Session:           &session.Session{SessionID: "id1", TerminalHost: "tmux"},
+		SessionEnrichment: aggregate.SessionEnrichment{},
+	}
+	out := RenderDetails(sv)
+	if !strings.Contains(out, "tmux") {
+		t.Errorf("details missing terminal host:\n%s", out)
+	}
+}
+
 func TestDetailsOverlayShowsPerModelBreakdown(t *testing.T) {
 	sv := &aggregate.SessionView{
 		Session: &session.Session{SessionID: "id1", Name: "n1", Cwd: "/p", PID: 42, Kind: "interactive"},

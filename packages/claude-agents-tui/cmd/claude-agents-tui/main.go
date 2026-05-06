@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
 	"github.com/phillipgreenii/claude-agents-tui/internal/poller"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/tui"
 )
 
@@ -57,6 +58,8 @@ func main() {
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 
+	signalers := signal.DefaultSignalers()
+
 	p := &poller.Poller{
 		SessionsDir:      session.DefaultSessionsDir(),
 		ClaudeHome:       filepath.Join(home, ".claude"),
@@ -70,6 +73,7 @@ func main() {
 		CCUsageFn:        ccusageCache.Get,
 		CCUsageStateFn:   func() (bool, error) { return ccusageCache.Probed(), ccusageCache.LastErr() },
 		PRLookupFn:       prCache.Get,
+		Signalers:        signalers,
 	}
 
 	if *waitMode {
@@ -112,11 +116,14 @@ func main() {
 	}
 	cacheDir := filepath.Join(home, ".cache", "claude-agents-tui")
 	model := tui.NewModel(tui.Options{
-		Tree:       &aggregate.Tree{},
-		Poller:     p,
-		Interval:   cfg.RefreshInterval,
-		Caffeinate: mgr,
-		CacheDir:   cacheDir,
+		Tree:              &aggregate.Tree{},
+		Poller:            p,
+		Interval:          cfg.RefreshInterval,
+		Caffeinate:        mgr,
+		CacheDir:          cacheDir,
+		Signalers:         signalers,
+		AutoResumeDelay:   cfg.AutoResumeDelay,
+		AutoResumeMessage: cfg.AutoResumeMessage,
 	})
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {

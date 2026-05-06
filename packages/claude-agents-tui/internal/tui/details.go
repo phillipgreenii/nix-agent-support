@@ -15,6 +15,7 @@ func RenderDetails(sv *aggregate.SessionView) string {
 	sb.WriteString(fmt.Sprintf("Name:      %s\n", sv.Name))
 	sb.WriteString(fmt.Sprintf("ID:        %s\n", sv.SessionID))
 	sb.WriteString(fmt.Sprintf("PID:       %d\n", sv.PID))
+	sb.WriteString(fmt.Sprintf("Terminal:  %s\n", sv.TerminalHost))
 	sb.WriteString(fmt.Sprintf("Cwd:       %s\n", sv.Cwd))
 	sb.WriteString(fmt.Sprintf("Kind:      %s\n", sv.Kind))
 	sb.WriteString(fmt.Sprintf("Model:     %s\n", sv.SessionEnrichment.Model))
