@@ -70,6 +70,16 @@ idle_threshold_s = 300
 	}
 }
 
+func TestConfigDefaultsAutoResume(t *testing.T) {
+	cfg := defaults()
+	if cfg.AutoResumeDelay != 45*time.Second {
+		t.Errorf("AutoResumeDelay = %v, want 45s", cfg.AutoResumeDelay)
+	}
+	if cfg.AutoResumeMessage != "continue" {
+		t.Errorf("AutoResumeMessage = %q, want \"continue\"", cfg.AutoResumeMessage)
+	}
+}
+
 func TestPartialOverridePreservesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

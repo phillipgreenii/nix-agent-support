@@ -34,6 +34,7 @@ type Session struct {
 	Name            string
 	Branch          string
 	StartedAt       time.Time
+	TerminalHost    string // populated by poller: "tmux","ghostty","vscode","unknown"
 	TranscriptMTime time.Time
 	Status          Status
 }

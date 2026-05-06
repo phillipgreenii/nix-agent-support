@@ -23,6 +23,8 @@ type Config struct {
 	IdleThreshold         time.Duration
 	ConsecutiveIdleChecks int
 	MaximumWait           time.Duration
+	AutoResumeDelay       time.Duration
+	AutoResumeMessage     string
 }
 
 type tomlConfig struct {
@@ -38,6 +40,8 @@ type tomlConfig struct {
 	IdleThresholdS        *int     `toml:"idle_threshold_s"`
 	ConsecutiveIdleChecks *int     `toml:"consecutive_idle_checks"`
 	MaximumWaitS          *int     `toml:"maximum_wait_s"`
+	AutoResumeDelayS      *int     `toml:"auto_resume_delay_s"`
+	AutoResumeMessage     *string  `toml:"auto_resume_message"`
 }
 
 func defaults() Config {
@@ -54,6 +58,8 @@ func defaults() Config {
 		IdleThreshold:         10 * time.Minute,
 		ConsecutiveIdleChecks: 3,
 		MaximumWait:           2 * time.Hour,
+		AutoResumeDelay:       45 * time.Second,
+		AutoResumeMessage:     "continue",
 	}
 }
 
@@ -112,6 +118,12 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.MaximumWaitS != nil {
 		cfg.MaximumWait = time.Duration(*raw.MaximumWaitS) * time.Second
+	}
+	if raw.AutoResumeDelayS != nil {
+		cfg.AutoResumeDelay = time.Duration(*raw.AutoResumeDelayS) * time.Second
+	}
+	if raw.AutoResumeMessage != nil {
+		cfg.AutoResumeMessage = *raw.AutoResumeMessage
 	}
 }
 

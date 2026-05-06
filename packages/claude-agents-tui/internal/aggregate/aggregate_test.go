@@ -79,6 +79,32 @@ func TestBuildSessionsSortedByStartedAtDesc(t *testing.T) {
 	}
 }
 
+func TestBuildWindowResetsAtTakesLatest(t *testing.T) {
+	t1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	t2 := t1.Add(30 * time.Minute)
+	sessions := []*session.Session{
+		{SessionID: "a", Cwd: "/p"},
+		{SessionID: "b", Cwd: "/p"},
+		{SessionID: "c", Cwd: "/p"},
+	}
+	enriched := map[string]SessionEnrichment{
+		"a": {RateLimitResetsAt: t1},
+		"b": {RateLimitResetsAt: t2},
+		"c": {},
+	}
+	tree := Build(sessions, enriched, nil, nil, "max_5x")
+	if !tree.WindowResetsAt.Equal(t2) {
+		t.Errorf("WindowResetsAt = %v, want %v", tree.WindowResetsAt, t2)
+	}
+}
+
+func TestBuildWindowResetsAtZeroWhenNoSessions(t *testing.T) {
+	tree := Build(nil, nil, nil, nil, "max_5x")
+	if !tree.WindowResetsAt.IsZero() {
+		t.Errorf("WindowResetsAt = %v, want zero", tree.WindowResetsAt)
+	}
+}
+
 func TestBuildSetsPRInfo(t *testing.T) {
 	sessions := []*session.Session{
 		{SessionID: "a", Cwd: "/p1"},

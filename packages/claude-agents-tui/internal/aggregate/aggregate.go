@@ -12,6 +12,7 @@ import (
 // PlanTier controls the plan-cap lookup used for display-layer projections.
 func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *ccusage.Block, planTier string) *Tree {
 	byDir := map[string]*Directory{}
+	var windowResetsAt time.Time
 	for _, s := range sessions {
 		d, ok := byDir[s.Cwd]
 		if !ok {
@@ -32,6 +33,9 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 			d.IdleN++
 		case session.Dormant:
 			d.DormantN++
+		}
+		if en.RateLimitResetsAt.After(windowResetsAt) {
+			windowResetsAt = en.RateLimitResetsAt
 		}
 	}
 	// Sort sessions within each directory newest-first (stable across polls).
@@ -60,9 +64,10 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 		}
 	}
 	tree := &Tree{
-		ActiveBlock: block,
-		PlanCapUSD:  ccusage.PlanCapUSD(planTier),
-		GeneratedAt: time.Now(),
+		ActiveBlock:    block,
+		PlanCapUSD:     ccusage.PlanCapUSD(planTier),
+		GeneratedAt:    time.Now(),
+		WindowResetsAt: windowResetsAt,
 	}
 	for _, d := range byDir {
 		tree.Dirs = append(tree.Dirs, d)

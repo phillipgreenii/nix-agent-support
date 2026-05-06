@@ -17,7 +17,8 @@ type SessionEnrichment struct {
 	BurnRateShort float64 // tokens/min, short window
 	BurnRateLong  float64 // tokens/min, long window
 	CostUSD       float64 // estimated share, filled by Build
-	AwaitingInput bool    // true when last assistant turn contains unresolved AskUserQuestion
+	AwaitingInput     bool      // true when last assistant turn contains unresolved AskUserQuestion
+	RateLimitResetsAt time.Time // non-zero: session paused; window resets at this time
 }
 
 type Directory struct {
@@ -42,8 +43,9 @@ type Tree struct {
 	ActiveBlock   *ccusage.Block
 	PlanCapUSD    float64
 	GeneratedAt   time.Time
-	CCUsageProbed bool  // true once the first ccusage probe has run
-	CCUsageErr    error // non-nil if ccusage exec failed
+	CCUsageProbed  bool      // true once the first ccusage probe has run
+	CCUsageErr     error     // non-nil if ccusage exec failed
+	WindowResetsAt time.Time // global: max RateLimitResetsAt across all sessions (zero = none)
 }
 
 // TopupShouldDisplay returns true when the current 5h block's actual cost has
