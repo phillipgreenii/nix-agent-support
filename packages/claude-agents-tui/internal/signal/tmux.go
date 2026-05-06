@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // TmuxSignaler sends keys to the tmux pane hosting a process.
@@ -31,7 +32,9 @@ func (t *TmuxSignaler) Detect(pid int) bool {
 			return false
 		}
 		seen[pid] = true
-		out, err := t.run(context.Background(), "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := t.run(ctx, "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
+		cancel()
 		if err != nil {
 			return false
 		}
@@ -52,13 +55,14 @@ func (t *TmuxSignaler) Detect(pid int) bool {
 
 // Send injects text + Enter into the tmux pane that contains pid.
 func (t *TmuxSignaler) Send(pid int, text string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	out, err := t.run(ctx, "tmux", "list-panes", "-a", "-F",
 		"#{pane_pid} #{session_name}:#{window_index}.#{pane_index}")
 	if err != nil {
 		return fmt.Errorf("tmux list-panes: %w", err)
 	}
-	paneID := t.findPaneForPID(string(out), pid)
+	paneID := t.findPaneForPID(ctx, string(out), pid)
 	if paneID == "" {
 		return fmt.Errorf("signal: no tmux pane found for pid %d", pid)
 	}
@@ -68,7 +72,7 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 
 // findPaneForPID walks up the process tree from targetPID until it finds a pid
 // that matches a tmux pane's shell pid from listOutput.
-func (t *TmuxSignaler) findPaneForPID(listOutput string, targetPID int) string {
+func (t *TmuxSignaler) findPaneForPID(ctx context.Context, listOutput string, targetPID int) string {
 	panePIDs := map[int]string{}
 	for _, line := range strings.Split(strings.TrimSpace(listOutput), "\n") {
 		fields := strings.Fields(line)
@@ -91,7 +95,7 @@ func (t *TmuxSignaler) findPaneForPID(listOutput string, targetPID int) string {
 		if paneID, ok := panePIDs[pid]; ok {
 			return paneID
 		}
-		out, err := t.run(context.Background(), "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
+		out, err := t.run(ctx, "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
 		if err != nil {
 			return ""
 		}

@@ -25,13 +25,13 @@ func ResolveSignaler(signalers []Signaler, pid int) Signaler {
 	return nil
 }
 
+var defaultSignalers = []Signaler{
+	&TmuxSignaler{},
+	&CmuxSignaler{},
+	&GhosttySignaler{},
+	&VSCodeSignaler{},
+}
+
 // DefaultSignalers returns the standard ordered list of Signalers.
 // TmuxSignaler is tried first; stubs follow for future implementation.
-func DefaultSignalers() []Signaler {
-	return []Signaler{
-		&TmuxSignaler{},
-		&CmuxSignaler{},
-		&GhosttySignaler{},
-		&VSCodeSignaler{},
-	}
-}
+func DefaultSignalers() []Signaler { return defaultSignalers }
