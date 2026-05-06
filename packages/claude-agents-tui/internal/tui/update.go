@@ -70,6 +70,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.SessionKind {
 				m.selected = row.Session
 			}
+			// PathNodeKind → no-op
 		case "esc":
 			m.selected = nil
 		}
