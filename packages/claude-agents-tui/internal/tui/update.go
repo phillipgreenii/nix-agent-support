@@ -20,6 +20,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.costMode = !m.costMode
 		case "a":
 			m.showAll = !m.showAll
+			m.rebuildFlatRows()
+			m.clampCursor()
+			m.syncScroll()
 		case "n":
 			m.forceID = !m.forceID
 		case "C":
@@ -33,8 +36,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 			}
 			m.syncScroll()
+		case " ":
+			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind {
+				m.treeState.Toggle(row.NodePath)
+				if m.cacheDir != "" {
+					_ = m.treeState.Save(m.cacheDir)
+				}
+				m.rebuildFlatRows()
+				m.clampCursor()
+				m.syncScroll()
+			}
+		case "left", "h":
+			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind && !row.Collapsed {
+				m.treeState.Toggle(row.NodePath)
+				if m.cacheDir != "" {
+					_ = m.treeState.Save(m.cacheDir)
+				}
+				m.rebuildFlatRows()
+				m.clampCursor()
+				m.syncScroll()
+			}
+		case "right", "l":
+			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind && row.Collapsed {
+				m.treeState.Toggle(row.NodePath)
+				if m.cacheDir != "" {
+					_ = m.treeState.Save(m.cacheDir)
+				}
+				m.rebuildFlatRows()
+				m.clampCursor()
+				m.syncScroll()
+			}
 		case "enter":
-			m.selected = m.sessionAt(m.cursor)
+			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.SessionKind {
+				m.selected = row.Session
+			}
 		case "esc":
 			m.selected = nil
 		}
@@ -55,6 +90,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.caffeinate.SetToggle(m.caffeinateOn)
 			m.caffeinate.Tick(msg.anyWorking)
 		}
+		m.rebuildFlatRows()
 		m.clampCursor()
 		m.syncScroll()
 		if m.tree.CCUsageProbed && m.tree.ActiveBlock == nil && m.tree.CCUsageErr == nil {
@@ -67,45 +103,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = msg.err
 	case TreeUpdatedMsg:
 		m.tree = msg.Tree
+		m.rebuildFlatRows()
 		m.clampCursor()
 		m.syncScroll()
 	}
 	return m, nil
 }
 
-// syncScroll adjusts scrollOffset so that the cursor's row is within the
-// visible window. Uses a conservative body-height estimate when the terminal
-// size is not yet known exactly (before the first WindowSizeMsg).
+// syncScroll adjusts scrollOffset so the cursor row is within the visible window.
 func (m *Model) syncScroll() {
-	if m.tree == nil || m.height == 0 {
+	if m.height == 0 || len(m.flatRows) == 0 {
 		return
 	}
-	opts := render.TreeOpts{ShowAll: m.showAll}
-	rows := render.FlattenRows(m.tree, opts)
-	if len(rows) == 0 {
-		return
-	}
-	// Subtract max header lines (7) + legend (1) for a conservative estimate.
 	bodyHeight := max(m.height-8, 3)
-	cursorRowIdx := -1
-	for i, r := range rows {
-		if r.Kind == render.SessionKind && r.FlatIdx == m.cursor {
-			cursorRowIdx = i
-			break
-		}
-	}
-	if cursorRowIdx < 0 {
+	cursorIdx := m.cursor
+	if cursorIdx < 0 || cursorIdx >= len(m.flatRows) {
 		return
 	}
-	if cursorRowIdx < m.scrollOffset {
-		// Scroll back: find the largest offset where the cursor row is still visible.
-		// Walk backward from cursorRowIdx until LastVisibleIdx covers cursorRowIdx.
-		for m.scrollOffset > 0 && render.LastVisibleIdx(rows, m.scrollOffset-1, bodyHeight) >= cursorRowIdx {
+	if cursorIdx < m.scrollOffset {
+		for m.scrollOffset > 0 && render.LastVisibleIdx(m.flatRows, m.scrollOffset-1, bodyHeight) >= cursorIdx {
 			m.scrollOffset--
 		}
 		return
 	}
-	for m.scrollOffset < len(rows) && render.LastVisibleIdx(rows, m.scrollOffset, bodyHeight) < cursorRowIdx {
+	for m.scrollOffset < len(m.flatRows) && render.LastVisibleIdx(m.flatRows, m.scrollOffset, bodyHeight) < cursorIdx {
 		m.scrollOffset++
 	}
 }
