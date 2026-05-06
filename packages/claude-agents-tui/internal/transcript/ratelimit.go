@@ -11,10 +11,10 @@ import (
 // most recent api_error is a rate_limit_error with no subsequent user/assistant event.
 // Uses event.Timestamp + retryInMs — never time.Now() — so the calculation is correct
 // even when the event was written hours before the TUI started.
-func RateLimitPause(path string) (resetsAt time.Time, ok bool) {
+func RateLimitPause(path string) (resetsAt time.Time, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, err
 	}
 	defer f.Close()
 
@@ -44,7 +44,7 @@ func RateLimitPause(path string) (resetsAt time.Time, ok bool) {
 		lines = append(lines, b)
 	}
 	if sc.Err() != nil {
-		return time.Time{}, false
+		return time.Time{}, sc.Err()
 	}
 
 	// Find index of last rate_limit_error api_error event.
@@ -64,7 +64,7 @@ func RateLimitPause(path string) (resetsAt time.Time, ok bool) {
 		}
 	}
 	if apiErrIdx < 0 {
-		return time.Time{}, false
+		return time.Time{}, nil
 	}
 
 	// If any user or assistant event follows the api_error, the session already resumed.
@@ -74,9 +74,9 @@ func RateLimitPause(path string) (resetsAt time.Time, ok bool) {
 			continue
 		}
 		if ev.Type == "user" || ev.Type == "assistant" {
-			return time.Time{}, false
+			return time.Time{}, nil
 		}
 	}
 
-	return apiErrTime.Add(time.Duration(apiErrRetry) * time.Millisecond), true
+	return apiErrTime.Add(time.Duration(apiErrRetry) * time.Millisecond), nil
 }

@@ -19,9 +19,12 @@ func TestRateLimitPauseDetectsError(t *testing.T) {
 	if err := writeTestFile(path, rateEvent(ts, 3600000)+"\n"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := RateLimitPause(path)
-	if !ok {
-		t.Fatal("RateLimitPause ok=false, want true")
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("RateLimitPause err = %v, want nil", err)
+	}
+	if got.IsZero() {
+		t.Fatal("RateLimitPause returned zero time, want renewal time")
 	}
 	want := ts.Add(3600000 * time.Millisecond)
 	if !got.Equal(want) {
@@ -37,9 +40,12 @@ func TestRateLimitPauseFalseAfterUserResumes(t *testing.T) {
 	if err := writeTestFile(path, body); err != nil {
 		t.Fatal(err)
 	}
-	_, ok := RateLimitPause(path)
-	if ok {
-		t.Error("RateLimitPause ok=true, want false (user resumed)")
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Error("RateLimitPause returned non-zero time, want zero (user resumed)")
 	}
 }
 
@@ -49,9 +55,12 @@ func TestRateLimitPauseFalseNoEvent(t *testing.T) {
 	if err := writeTestFile(path, body); err != nil {
 		t.Fatal(err)
 	}
-	_, ok := RateLimitPause(path)
-	if ok {
-		t.Error("RateLimitPause ok=true, want false (no api_error)")
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Error("RateLimitPause returned non-zero time, want zero (no api_error)")
 	}
 }
 
@@ -61,9 +70,12 @@ func TestRateLimitPauseFalseZeroRetry(t *testing.T) {
 	if err := writeTestFile(path, rateEvent(ts, 0)+"\n"); err != nil {
 		t.Fatal(err)
 	}
-	_, ok := RateLimitPause(path)
-	if ok {
-		t.Error("RateLimitPause ok=true, want false (retryInMs=0)")
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Error("RateLimitPause returned non-zero time, want zero (retryInMs=0)")
 	}
 }
 
@@ -75,8 +87,11 @@ func TestRateLimitPauseFalseAssistantResumes(t *testing.T) {
 	if err := writeTestFile(path, body); err != nil {
 		t.Fatal(err)
 	}
-	_, ok := RateLimitPause(path)
-	if ok {
-		t.Error("RateLimitPause ok=true, want false (assistant event follows error)")
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Error("RateLimitPause returned non-zero time, want zero (assistant event follows error)")
 	}
 }
