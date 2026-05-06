@@ -13,7 +13,7 @@ import (
 // nSessions builds a tree with one dir "/p" containing n working sessions.
 func nSessions(n int) *aggregate.Tree {
 	d := &aggregate.Directory{Path: "/p"}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		d.Sessions = append(d.Sessions, &aggregate.SessionView{
 			Session: &session.Session{
 				SessionID: fmt.Sprintf("id-%d", i),
