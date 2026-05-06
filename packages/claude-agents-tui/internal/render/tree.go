@@ -134,8 +134,14 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 	if selected {
 		cursorMark = opts.Theme.Cursor.Render(">") + " "
 	}
-	sym := symbol(s.Status, s.SessionEnrichment.AwaitingInput, opts.Theme)
-	label := fmt.Sprintf("%s %s", sym, s.Label(opts.ForceID))
+	sym := symbol(s.Status, s.SessionEnrichment.AwaitingInput, !s.SessionEnrichment.RateLimitResetsAt.IsZero(), opts.Theme)
+	var label string
+	if !s.SessionEnrichment.RateLimitResetsAt.IsZero() {
+		resetStr := s.SessionEnrichment.RateLimitResetsAt.Local().Format("15:04")
+		label = fmt.Sprintf("%s %s %s", sym, resetStr, s.Label(opts.ForceID))
+	} else {
+		label = fmt.Sprintf("%s %s", sym, s.Label(opts.ForceID))
+	}
 	modelShort := shortModel(s.SessionEnrichment.Model)
 	pct := sessionSharePct(s.SessionEnrichment.SessionTokens, opts.TotalSessionTokens)
 	bar := progressBar(pct, 5)
@@ -168,7 +174,10 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 	return out
 }
 
-func symbol(st session.Status, awaiting bool, theme Theme) string {
+func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) string {
+	if rateLimited {
+		return "⏸"
+	}
 	switch st {
 	case session.Working:
 		return theme.Working.Render("●")

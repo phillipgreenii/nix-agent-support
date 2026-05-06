@@ -14,13 +14,16 @@ func (m *Model) View() string {
 		return RenderDetails(m.selected)
 	}
 	header := render.Header(m.tree, render.HeaderOpts{
-		CaffeinateOn: m.caffeinateOn,
-		ShowAll:      m.showAll,
-		CostMode:     m.costMode,
-		ForceID:      m.forceID,
-		Theme:        m.theme,
+		CaffeinateOn:    m.caffeinateOn,
+		ShowAll:         m.showAll,
+		CostMode:        m.costMode,
+		ForceID:         m.forceID,
+		Theme:           m.theme,
+		AutoResume:      m.autoResume,
+		WindowResetsAt:  m.tree.WindowResetsAt,
+		AutoResumeDelay: m.autoResumeDelay,
 	})
-	legend := "● working  ○ idle  ? awaiting  ✕ dormant   🤖 subagents  🐚 shells  🌿 branch       [↑↓jk] nav  [space/←→/hl] collapse  [enter] details"
+	legend := "● working  ○ idle  ⏸ paused  ? awaiting  ✕ dormant   🤖 subagents  🐚 shells  🌿 branch       [↑↓jk] nav  [space/←→/hl] collapse  [enter] details  [R] auto-resume"
 
 	var body string
 	noBlock := m.tree.CCUsageProbed && m.tree.ActiveBlock == nil && m.tree.CCUsageErr == nil

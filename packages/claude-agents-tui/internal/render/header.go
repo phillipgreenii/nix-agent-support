@@ -9,15 +9,18 @@ import (
 )
 
 type HeaderOpts struct {
-	CaffeinateOn   bool
-	GraceRemaining time.Duration
-	TopupPoolUSD   float64
-	TopupConsumed  float64
-	Now            time.Time
-	ShowAll        bool
-	CostMode       bool
-	ForceID        bool
-	Theme          Theme
+	CaffeinateOn    bool
+	GraceRemaining  time.Duration
+	TopupPoolUSD    float64
+	TopupConsumed   float64
+	Now             time.Time
+	ShowAll         bool
+	CostMode        bool
+	ForceID         bool
+	Theme           Theme
+	AutoResume      bool
+	WindowResetsAt  time.Time
+	AutoResumeDelay time.Duration
 }
 
 func Header(tree *aggregate.Tree, opts HeaderOpts) string {
@@ -106,6 +109,17 @@ func Header(tree *aggregate.Tree, opts HeaderOpts) string {
 	}
 
 	fmt.Fprintf(&sb, "Updated %s\n", opts.Now.Format("15:04:05"))
+	if opts.AutoResume && !opts.WindowResetsAt.IsZero() {
+		fireAt := opts.WindowResetsAt.Add(opts.AutoResumeDelay)
+		remaining := fireAt.Sub(opts.Now)
+		if remaining > 0 {
+			mins := int(remaining.Minutes())
+			secs := int(remaining.Seconds()) - mins*60
+			fmt.Fprintf(&sb, "⏸ resuming in %d:%02d\n", mins, secs)
+		} else {
+			sb.WriteString("⏸ resuming…\n")
+		}
+	}
 	return sb.String()
 }
 
