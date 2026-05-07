@@ -45,24 +45,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 		case "M":
-			if m.tree == nil {
-				return m, nil
-			}
-			for _, d := range m.tree.Dirs {
-				for _, sv := range d.Sessions {
-					if sv.Status == session.Working {
-						continue
-					}
-					sig := signal.ResolveSignaler(m.signalers, sv.PID)
-					if sig == nil {
-						fmt.Fprintf(os.Stderr, "manual-resume: no signaler for pid %d\n", sv.PID)
-						continue
-					}
-					if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
-						fmt.Fprintf(os.Stderr, "manual-resume: send failed pid %d: %v\n", sv.PID, err)
-					}
-				}
-			}
+			m.signalNonWorking("manual-resume")
 		case "down", "j":
 			m.cursor++
 			m.clampCursor()
@@ -164,21 +147,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Now().Before(fireAt) {
 			return m, nil
 		}
-		for _, d := range m.tree.Dirs {
-			for _, sv := range d.Sessions {
-				if sv.Status == session.Working {
-					continue
-				}
-				sig := signal.ResolveSignaler(m.signalers, sv.PID)
-				if sig == nil {
-					fmt.Fprintf(os.Stderr, "auto-resume: no signaler for pid %d\n", sv.PID)
-					continue
-				}
-				if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
-					fmt.Fprintf(os.Stderr, "auto-resume: send failed pid %d: %v\n", sv.PID, err)
-				}
-			}
-		}
+		m.signalNonWorking("auto-resume")
 		m.autoResumeFired = true
 		m.countdownTick = false
 		// Shallow-copy to avoid mutating the shared tree pointer.
@@ -192,6 +161,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncScroll()
 	}
 	return m, nil
+}
+
+// signalNonWorking sends m.autoResumeMessage to every non-Working session via
+// the resolved signaler. label is the log-prefix used for stderr diagnostics
+// ("auto-resume" or "manual-resume"). No-op when m.tree is nil.
+func (m *Model) signalNonWorking(label string) {
+	if m.tree == nil {
+		return
+	}
+	for _, d := range m.tree.Dirs {
+		for _, sv := range d.Sessions {
+			if sv.Status == session.Working {
+				continue
+			}
+			sig := signal.ResolveSignaler(m.signalers, sv.PID)
+			if sig == nil {
+				fmt.Fprintf(os.Stderr, "%s: no signaler for pid %d\n", label, sv.PID)
+				continue
+			}
+			if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: send failed pid %d: %v\n", label, sv.PID, err)
+			}
+		}
+	}
 }
 
 // syncScroll adjusts scrollOffset so the cursor row is within the visible window.
