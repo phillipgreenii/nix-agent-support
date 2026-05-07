@@ -11,7 +11,7 @@ globs: packages/gh-prreview/**
   - Example: `./run-gh-prreview-dev checkout 12345`
   - Automatically enters `nix develop` shell with all dependencies
   - Sets up test environment variables (GH_PRREVIEW_REVIEW_PATH, etc.)
-  - Requires `$MONOREPO_ROOT` environment variable to be set (legacy `$ZR_MONOREPO` also supported)
+  - Requires `$MONOREPO_ROOT` environment variable to be set
   - Changes to `$MONOREPO_ROOT` directory automatically
 - Run `check-all.sh` for full checks (format, lint, type checking, and tests)
   - **Must be run inside `nix develop` shell** or via `nix develop ../..#gh-prreview --command ./check-all.sh`
@@ -101,12 +101,12 @@ PYTHONPATH=src python3 -m gh_prreview.cli.main list-local
 
 ## Environment Variables
 
-- **Required**: `MONOREPO_ROOT` - Path to the monorepo (used by `run-gh-prreview-dev`; legacy `ZR_MONOREPO` also supported)
+- **Required**: `MONOREPO_ROOT` - Path to the monorepo (used by `run-gh-prreview-dev`)
 - **Auto-set by run-gh-prreview-dev**:
   - `GH_PRREVIEW_REVIEW_PATH=/tmp/gh-prreview-test-reviews`
   - `GH_PRREVIEW_OLD_PR_DAYS=30`
-  - `GH_PRREVIEW_WATCH_LABELS=team/findev,team/jvm-guild`
-  - `GH_PRREVIEW_WATCH_USERS=csziprecruiter,greenchairjosephl,KenMGJ,meyronr,stephenh-zip`
+  - `GH_PRREVIEW_WATCH_LABELS=team/alpha,team/beta`
+  - `GH_PRREVIEW_WATCH_USERS=user1,user2,user3`
 
 ## Notes
 

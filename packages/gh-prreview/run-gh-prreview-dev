@@ -10,14 +10,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Set up environment variables for testing
 export GH_PRREVIEW_REVIEW_PATH="/tmp/gh-prreview-test-reviews"
 export GH_PRREVIEW_OLD_PR_DAYS="30"
-export GH_PRREVIEW_WATCH_LABELS="team/findev,team/jvm-guild"
-export GH_PRREVIEW_WATCH_USERS="csziprecruiter,greenchairjosephl,KenMGJ,meyronr,stephenh-zip"
+export GH_PRREVIEW_WATCH_LABELS="team/alpha,team/beta"
+export GH_PRREVIEW_WATCH_USERS="user1,user2,user3"
 
 # Create test directory
 mkdir -p "$GH_PRREVIEW_REVIEW_PATH"
 
-# Validate MONOREPO_ROOT is set (supports legacy ZR_MONOREPO)
-MONOREPO_ROOT="${MONOREPO_ROOT:-${ZR_MONOREPO:-}}"
+# Validate MONOREPO_ROOT is set
 if [ -z "$MONOREPO_ROOT" ]; then
   echo "Error: MONOREPO_ROOT environment variable is not set" >&2
   exit 1

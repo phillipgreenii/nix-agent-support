@@ -6,8 +6,6 @@ A GitHub CLI extension for managing PR review worktrees efficiently.
 
 ## Installation
 
-The extension is managed via Nix and installed automatically. The source is located at `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-support-apps/packages/gh-prreview`.
-
 To verify:
 
 ```bash

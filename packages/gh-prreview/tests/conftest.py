@@ -18,7 +18,7 @@ def sample_config(tmp_path: Path) -> GhPrreviewConfig:
     """
     return GhPrreviewConfig(
         review_path=tmp_path / "reviews",
-        watch_labels=["team/findev", "team/jvm-guild"],
+        watch_labels=["team/alpha", "team/beta"],
         watch_users=["alice", "bob"],
         old_pr_days=30,
         debug=False,

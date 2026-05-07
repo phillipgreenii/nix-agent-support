@@ -58,12 +58,12 @@ class TestConfigService:
     ) -> None:
         """Comma-separated labels should be parsed into list."""
         monkeypatch.setenv("GH_PRREVIEW_REVIEW_PATH", str(tmp_path))
-        monkeypatch.setenv("GH_PRREVIEW_WATCH_LABELS", "team/findev, team/jvm-guild, urgent")
+        monkeypatch.setenv("GH_PRREVIEW_WATCH_LABELS", "team/alpha, team/beta, urgent")
 
         service = ConfigService()
         config = service.load_config()
 
-        assert config.watch_labels == ["team/findev", "team/jvm-guild", "urgent"]
+        assert config.watch_labels == ["team/alpha", "team/beta", "urgent"]
 
     def test_empty_watch_lists_are_valid(
         self,
@@ -188,7 +188,7 @@ class TestConfigService:
                 result.stdout = ""
                 if cmd[3] == "prreview.watch-labels":
                     result.returncode = 0
-                    result.stdout = "team/findev, team/jvm-guild"
+                    result.stdout = "team/alpha, team/beta"
                 return result
             return subprocess.run(cmd, *args, **kwargs)
 
@@ -197,7 +197,7 @@ class TestConfigService:
         service = ConfigService()
         config = service.load_config()
 
-        assert config.watch_labels == ["team/findev", "team/jvm-guild"]
+        assert config.watch_labels == ["team/alpha", "team/beta"]
 
     def test_watch_users_from_gh_config_fallback(
         self,

@@ -142,7 +142,6 @@ func TestPathEvaluator_ProjectRoot(t *testing.T) {
 
 func TestDetectProjectRoot_MONOREPO_ROOT_CWDInside(t *testing.T) {
 	t.Setenv("MONOREPO_ROOT", "/mono/root")
-	t.Setenv("ZR_MONOREPO", "")
 	if got := DetectProjectRoot("/mono/root/subdir"); got != "/mono/root" {
 		t.Errorf("DetectProjectRoot with MONOREPO_ROOT (cwd inside) = %q, want /mono/root", got)
 	}
@@ -150,7 +149,6 @@ func TestDetectProjectRoot_MONOREPO_ROOT_CWDInside(t *testing.T) {
 
 func TestDetectProjectRoot_MONOREPO_ROOT_CWDIsRoot(t *testing.T) {
 	t.Setenv("MONOREPO_ROOT", "/mono/root")
-	t.Setenv("ZR_MONOREPO", "")
 	if got := DetectProjectRoot("/mono/root"); got != "/mono/root" {
 		t.Errorf("DetectProjectRoot with MONOREPO_ROOT (cwd is root) = %q, want /mono/root", got)
 	}
@@ -159,7 +157,6 @@ func TestDetectProjectRoot_MONOREPO_ROOT_CWDIsRoot(t *testing.T) {
 func TestDetectProjectRoot_MONOREPO_ROOT_CWDOutside(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("MONOREPO_ROOT", "/mono/root")
-	t.Setenv("ZR_MONOREPO", "")
 	// CWD is outside MONOREPO_ROOT and has no .git, so should fall back to cwd
 	got := DetectProjectRoot(tmp)
 	if got == "/mono/root" {
@@ -170,27 +167,9 @@ func TestDetectProjectRoot_MONOREPO_ROOT_CWDOutside(t *testing.T) {
 	}
 }
 
-func TestDetectProjectRoot_LegacyZR_MONOREPO_CWDInside(t *testing.T) {
-	t.Setenv("MONOREPO_ROOT", "")
-	t.Setenv("ZR_MONOREPO", "/legacy/root")
-	if got := DetectProjectRoot("/legacy/root/pkg/foo"); got != "/legacy/root" {
-		t.Errorf("DetectProjectRoot with ZR_MONOREPO (cwd inside) = %q, want /legacy/root", got)
-	}
-}
-
-func TestDetectProjectRoot_LegacyZR_MONOREPO_CWDOutside(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("MONOREPO_ROOT", "")
-	t.Setenv("ZR_MONOREPO", "/legacy/root")
-	got := DetectProjectRoot(tmp)
-	if got == "/legacy/root" {
-		t.Errorf("DetectProjectRoot should NOT return env var root when cwd is outside it, got %q", got)
-	}
-}
 
 func TestDetectProjectRoot_MONOREPO_ROOT_TakesPrecedence(t *testing.T) {
 	t.Setenv("MONOREPO_ROOT", "/new/root")
-	t.Setenv("ZR_MONOREPO", "/old/root")
 	if got := DetectProjectRoot("/new/root/subdir"); got != "/new/root" {
 		t.Errorf("DetectProjectRoot MONOREPO_ROOT should take precedence, got %q, want /new/root", got)
 	}
@@ -206,9 +185,8 @@ func TestDetectProjectRoot_EnvVarIgnoredFallsToGitWalk(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	t.Setenv("ZR_MONOREPO", "/mono/repo")
-	t.Setenv("MONOREPO_ROOT", "")
-	// CWD is inside the temp git repo, outside ZR_MONOREPO — should find .git
+	t.Setenv("MONOREPO_ROOT", "/mono/repo")
+	// CWD is inside the temp git repo, outside MONOREPO_ROOT — should find .git
 	got := DetectProjectRoot(subdir)
 	if got != tmp {
 		t.Errorf("DetectProjectRoot = %q, want %q (git walk should find .git)", got, tmp)
@@ -222,7 +200,6 @@ func TestDetectProjectRoot_WalksUpForGit(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	t.Setenv("MONOREPO_ROOT", "")
-	t.Setenv("ZR_MONOREPO", "")
 	got := DetectProjectRoot(gitDir)
 	if got != gitDir {
 		t.Errorf("DetectProjectRoot(%s) = %q, want %q", gitDir, got, gitDir)
@@ -232,7 +209,6 @@ func TestDetectProjectRoot_WalksUpForGit(t *testing.T) {
 func TestDetectProjectRoot_FallbackToCwd(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("MONOREPO_ROOT", "")
-	t.Setenv("ZR_MONOREPO", "")
 	got := DetectProjectRoot(tmp)
 	if got != tmp {
 		t.Errorf("DetectProjectRoot(%s) = %q, want %q (fallback to cwd)", tmp, got, tmp)
@@ -435,57 +411,77 @@ func TestPathAccess_CanWrite(t *testing.T) {
 }
 
 func TestPathEvaluator_IsDenyRead_ConfiguredPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&SandboxFilesystemConfig{
-		DenyRead: []string{"/Users/phillipg/.ssh"},
+		DenyRead: []string{filepath.Join(home, ".ssh")},
 	})
-	if !pe.IsDenyRead("/Users/phillipg/.ssh/id_rsa") {
-		t.Error("IsDenyRead(/Users/phillipg/.ssh/id_rsa) = false, want true")
+	if !pe.IsDenyRead(filepath.Join(home, ".ssh", "id_rsa")) {
+		t.Errorf("IsDenyRead(%s) = false, want true", filepath.Join(home, ".ssh", "id_rsa"))
 	}
-	if !pe.IsDenyRead("/Users/phillipg/.ssh") {
-		t.Error("IsDenyRead(/Users/phillipg/.ssh) = false, want true")
+	if !pe.IsDenyRead(filepath.Join(home, ".ssh")) {
+		t.Errorf("IsDenyRead(%s) = false, want true", filepath.Join(home, ".ssh"))
 	}
 }
 
 func TestPathEvaluator_IsDenyRead_AllowReadOverrides(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&SandboxFilesystemConfig{
-		DenyRead:  []string{"/Users/phillipg"},
-		AllowRead: []string{"/Users/phillipg/phillipg_mbp"},
+		DenyRead:  []string{home},
+		AllowRead: []string{filepath.Join(home, "workspace")},
 	})
-	if pe.IsDenyRead("/Users/phillipg/phillipg_mbp/foo.go") {
-		t.Error("IsDenyRead in allowRead region should be false (allowRead takes precedence)")
+	if pe.IsDenyRead(filepath.Join(home, "workspace", "foo.go")) {
+		t.Errorf("IsDenyRead(%s) in allowRead region should be false (allowRead takes precedence)", filepath.Join(home, "workspace", "foo.go"))
 	}
-	if !pe.IsDenyRead("/Users/phillipg/Documents/secret.txt") {
-		t.Error("IsDenyRead outside allowRead region should be true")
+	if !pe.IsDenyRead(filepath.Join(home, "Documents", "secret.txt")) {
+		t.Errorf("IsDenyRead(%s) outside allowRead region should be true", filepath.Join(home, "Documents", "secret.txt"))
 	}
 }
 
 func TestPathEvaluator_IsDenyRead_UnconfiguredPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&SandboxFilesystemConfig{
-		DenyRead: []string{"/Users/phillipg/.ssh"},
+		DenyRead: []string{filepath.Join(home, ".ssh")},
 	})
-	if pe.IsDenyRead("/Users/phillipg/phillipg_mbp/foo.go") {
-		t.Error("IsDenyRead for unconfigured path = true, want false")
+	if pe.IsDenyRead(filepath.Join(home, "workspace", "foo.go")) {
+		t.Errorf("IsDenyRead(%s) for unconfigured path = true, want false", filepath.Join(home, "workspace", "foo.go"))
 	}
 }
 
 func TestPathEvaluator_IsDenyRead_NilConfig(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	// no SetSandboxConfig call — sandboxConfig is nil
-	if pe.IsDenyRead("/Users/phillipg/.ssh/id_rsa") {
-		t.Error("IsDenyRead with nil sandboxConfig = true, want false")
+	if pe.IsDenyRead(filepath.Join(home, ".ssh", "id_rsa")) {
+		t.Errorf("IsDenyRead(%s) with nil sandboxConfig = true, want false", filepath.Join(home, ".ssh", "id_rsa"))
 	}
 }
 
 func TestPathEvaluator_IsDenyWrite_ConfiguredPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&SandboxFilesystemConfig{
-		DenyWrite: []string{"/Users/phillipg/.ssh"},
+		DenyWrite: []string{filepath.Join(home, ".ssh")},
 	})
-	if !pe.IsDenyWrite("/Users/phillipg/.ssh/id_rsa") {
-		t.Error("IsDenyWrite(/Users/phillipg/.ssh/id_rsa) = false, want true")
+	if !pe.IsDenyWrite(filepath.Join(home, ".ssh", "id_rsa")) {
+		t.Errorf("IsDenyWrite(%s) = false, want true", filepath.Join(home, ".ssh", "id_rsa"))
 	}
 }
 
@@ -501,9 +497,13 @@ func TestPathEvaluator_IsDenyWrite_CWDNotExempt(t *testing.T) {
 }
 
 func TestPathEvaluator_IsDenyWrite_NilConfig(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
-	if pe.IsDenyWrite("/Users/phillipg/.ssh/id_rsa") {
-		t.Error("IsDenyWrite with nil sandboxConfig = true, want false")
+	if pe.IsDenyWrite(filepath.Join(home, ".ssh", "id_rsa")) {
+		t.Errorf("IsDenyWrite(%s) with nil sandboxConfig = true, want false", filepath.Join(home, ".ssh", "id_rsa"))
 	}
 }
 
@@ -541,11 +541,15 @@ func TestPathEvaluator_ExtToolApprover_XDGDataHome_ReadWrite(t *testing.T) {
 }
 
 func TestPathEvaluator_AllowWrite_IsReadWrite(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
 	pe := NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&SandboxFilesystemConfig{
-		AllowWrite: []string{"/Users/phillipg/.local/share/contained-claude"},
+		AllowWrite: []string{filepath.Join(home, ".local", "share", "contained-claude")},
 	})
-	if got := pe.Evaluate("/Users/phillipg/.local/share/contained-claude/foo"); got != PathReadWrite {
-		t.Errorf("Evaluate for allowWrite path = %v, want PathReadWrite", got)
+	if got := pe.Evaluate(filepath.Join(home, ".local", "share", "contained-claude", "foo")); got != PathReadWrite {
+		t.Errorf("Evaluate(%s) for allowWrite path = %v, want PathReadWrite", filepath.Join(home, ".local", "share", "contained-claude", "foo"), got)
 	}
 }

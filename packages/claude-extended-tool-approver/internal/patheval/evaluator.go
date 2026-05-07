@@ -489,14 +489,6 @@ func DetectProjectRoot(cwd string) string {
 			return root
 		}
 	}
-	// Backward compatibility: support legacy env var name
-	if root := os.Getenv("ZR_MONOREPO"); root != "" {
-		root = filepath.Clean(root)
-		if strings.HasPrefix(cwd+"/", root+"/") || cwd == root {
-			return root
-		}
-	}
-
 	// Walk up looking for .git
 	dir := cwd
 	for {

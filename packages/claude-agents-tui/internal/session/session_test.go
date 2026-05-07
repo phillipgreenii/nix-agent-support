@@ -22,8 +22,8 @@ func TestStatusString(t *testing.T) {
 }
 
 func TestSessionShortLabelPrefersName(t *testing.T) {
-	s := &Session{Name: "findev-9306", SessionID: "b0b9c488-aaaa-bbbb-cccc-ddddddddeeee"}
-	if got := s.Label(false); got != "findev-9306" {
+	s := &Session{Name: "my-project-9306", SessionID: "b0b9c488-aaaa-bbbb-cccc-ddddddddeeee"}
+	if got := s.Label(false); got != "my-project-9306" {
 		t.Errorf("Label(false) = %q, want name", got)
 	}
 	if got := s.Label(true); got != "b0b9c488-aaaa-bbbb-cccc-ddddddddeeee" {
@@ -51,7 +51,7 @@ func TestTranscriptPathSlugReplacesUnderscores(t *testing.T) {
 	cases := []struct {
 		cwd, want string
 	}{
-		{"/Users/phillipg/phillipg_mbp", "/home/.claude/projects/-Users-phillipg-phillipg-mbp/id.jsonl"},
+		{"/Users/test_user/my_workspace", "/home/.claude/projects/-Users-test-user-my-workspace/id.jsonl"},
 		{"/a/b_c_d", "/home/.claude/projects/-a-b-c-d/id.jsonl"},
 		{"/only/slashes", "/home/.claude/projects/-only-slashes/id.jsonl"},
 		{"/both_under/dash-already", "/home/.claude/projects/-both-under-dash-already/id.jsonl"},
