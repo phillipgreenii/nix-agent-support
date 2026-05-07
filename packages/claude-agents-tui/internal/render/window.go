@@ -188,7 +188,8 @@ func RenderWindowTree(nodes []*aggregate.PathNode, rows []Row, scrollOffset, bod
 			if sessionOpts.Width > 0 {
 				sessionOpts.Width -= 2 * row.Depth
 			}
-			sb.WriteString(renderSession(row.Session, sessionOpts, indent+prefix, cont, selected))
+			// Pass indent+cont so the ↳ continuation line aligns with the session prefix.
+			sb.WriteString(renderSession(row.Session, sessionOpts, indent+prefix, indent+cont, selected))
 		}
 	}
 
