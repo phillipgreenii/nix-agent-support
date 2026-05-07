@@ -11,12 +11,9 @@ import (
 
 // allowedDomainSuffixes lists domain suffixes whose endpoints may be fetched
 // without user confirmation. Matched as hostname suffix (with leading dot to
-// avoid partial-label matches, e.g. "evil-zr.org" must not match ".zr.org").
-var allowedDomainSuffixes = []string{
-	".zr.org",
-	".ziprecruiter.com",
-	".zipaws.com",
-}
+// avoid partial-label matches). Consumer-specific domains belong in
+// $XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json.
+var allowedDomainSuffixes = []string{}
 
 // allowedExactHosts lists hostnames that are allowed via exact match
 // (not suffix match), such as localhost and loopback addresses.

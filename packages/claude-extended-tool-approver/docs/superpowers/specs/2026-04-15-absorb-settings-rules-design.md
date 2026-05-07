@@ -241,8 +241,8 @@ and the abstain is accepted as the correct behavior.
 
 ## Out of Scope
 
-- Changes to the ZipRecruiter `settings.local.json` at
-  `phillipg-nix-ziprecruiter/modules/claude-code/settings.local.json` — that
+- Changes to the consumer `settings.local.json` at
+  `your-flake/modules/claude-code/settings.local.json` — that
   file has its own similar rules but is managed separately
 - Changes to `patheval` zones beyond what's needed for sqlite3 (change 8)
 - Refactoring of existing rule modules

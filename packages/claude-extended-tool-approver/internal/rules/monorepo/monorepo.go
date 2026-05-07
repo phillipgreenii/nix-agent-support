@@ -8,25 +8,9 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
-var approvedCommands = map[string]bool{
-	"grazr": true, "gozr": true, "pyzr": true, "shzr": true,
-	"stevedore": true, "epoxy": true, "validate_format": true,
-	"check-airflow-dags.sh": true, "agent-code-review-support": true, "pre-merge-py-check": true,
-	"zr-proto-regenerate.sh": true, "generate-build-deps": true,
-}
+var approvedCommands = map[string]bool{}
 
-var dangerousEnvByWrapper = map[string]map[string]bool{
-	"pyzr": {"PYTHONSTARTUP": true, "PYTHONHOME": true},
-	"gozr": {"GOROOT": true, "GOPROXY": true, "GONOSUMCHECK": true, "GONOSUMDB": true},
-	"grazr": {
-		"GRADLE_USER_HOME":  true,
-		"GRADLE_OPTS":       true,
-		"JAVA_HOME":         true,
-		"JAVA_OPTS":         true,
-		"JAVA_TOOL_OPTIONS": true,
-		"_JAVA_OPTIONS":     true,
-	},
-}
+var dangerousEnvByWrapper = map[string]map[string]bool{}
 
 type Rule struct {
 	eval *patheval.PathEvaluator

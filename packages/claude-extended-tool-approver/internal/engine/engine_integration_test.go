@@ -22,7 +22,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/znself"
 )
 
 func buildFullEngine(projectRoot, cwd string) *Engine {
@@ -44,7 +43,6 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 		monorepo.New(pe),
 		nixRule,
 		dockerRule,
-		znself.New(),
 		safecmds.New(pe),
 		curl.New(),
 		kubectl.New(),
@@ -89,7 +87,7 @@ func TestIntegration_RegressionSuite(t *testing.T) {
 		{"assume rejected", "assume my-role", "Bash", hookio.Reject},
 
 		// Curl to allowed domain
-		{"curl to zr.org", "curl https://grafana.p1.zr.org/api/health", "Bash", hookio.Approve},
+		{"curl to localhost", "curl http://localhost:8080/health", "Bash", hookio.Approve},
 
 		// SQLite3
 		{"sqlite3 select on project db", `sqlite3 /Users/testuser/workspace/my-project/test.db "SELECT 1"`, "Bash", hookio.Approve},
@@ -102,9 +100,6 @@ func TestIntegration_RegressionSuite(t *testing.T) {
 		{"df", "df -h", "Bash", hookio.Approve},
 		{"du in project", "du -sh /Users/testuser/workspace/my-project/src", "Bash", hookio.Approve},
 
-		// Znself
-		{"zn-self-apply rejected", "zn-self-apply", "Bash", hookio.Reject},
-		{"zn-self-build approved", "zn-self-build", "Bash", hookio.Approve},
 	}
 
 	for _, tt := range tests {

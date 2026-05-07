@@ -10,7 +10,7 @@ modules designed to be imported by organization or machine-specific flakes.
 ## Key Architecture
 
 - **Standalone**: Works completely independently without external dependencies
-- **Composable**: Designed to be imported by other flakes (like phillipg-nix-ziprecruiter)
+- **Composable**: Designed to be imported by other flakes (like your-private-flake)
 - **Modular**: One program per module with options colocated with functionality
 - **Declarative**: Programs declare their own dock presence and dependencies
 
@@ -161,7 +161,7 @@ When an ADR relates to a decision in a sibling repository, reference it in the
 
 Example:
 
-    See also: phillipg-nix-ziprecruiter docs/adr/0003-adopt-beads.md
+    See also: your-private-flake docs/adr/0003-adopt-beads.md
 
 ### ADR Index
 

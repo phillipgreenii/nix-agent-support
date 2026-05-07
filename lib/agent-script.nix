@@ -36,7 +36,7 @@
       timeoutSeconds ? 45,
     }:
     ''
-      # ${name} Agent Script for zr-agent
+      # ${name} Agent Script for pg2-agent
       # Accepts positional arguments: <model> <plan> <thinking> <prompt>
       # Exit codes: 0=success, 1=error, 11=auth error, 12=license/usage error
 

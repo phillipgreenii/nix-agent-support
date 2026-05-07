@@ -6,10 +6,10 @@
 
 ## Context
 
-The `claude-extended-tool-approver` (CETA) binary contained three ZR-specific rule sets
-hardcoded in Go source: `monorepo` (ZR wrapper commands like `gozr`, `grazr`, `pyzr`),
-`buildtools` (ZR scripts), and `znself` (`zn-self-*` nix commands). Moving the binary to
-`phillipgreenii-nix-agent-support` required extracting these ZR specifics so the binary
+The `claude-extended-tool-approver` (CETA) binary contained three consumer-specific rule sets
+hardcoded in Go source: `monorepo` (wrapper commands like `mytool`, `mytool2`, `mytool3`),
+`buildtools` (build scripts), and `myself` (`myself-*` nix commands). Moving the binary to
+`phillipgreenii-nix-agent-support` required extracting these consumer specifics so the binary
 remains generic.
 
 ## Decision
@@ -17,11 +17,11 @@ remains generic.
 Add a new `configrules` rule registered first in `internal/setup/factory.go`. It reads
 `$XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json` at startup and approves or
 blocks commands from flat `approvedCommands` and `blockedCommands` lists. Absent file
-is a no-op. The ZR nix module writes this file with ZR-specific entries.
+is a no-op. The consuming nix module writes this file with consumer-specific entries.
 
 Flat lists were chosen over a categorized structure (option 2: `commandEnvRestrictions`)
 for simplicity. This accepts the loss of `dangerousEnvByWrapper` protection, which blocked
-env-var injection into approved wrapper commands (e.g., `GOROOT=/evil gozr test`). The
+env-var injection into approved wrapper commands (e.g., `GOROOT=/evil mytool test`). The
 tradeoff was accepted: the attack surface is limited (only affects commands in the approved
 list) and the simpler config is easier to audit.
 
@@ -29,8 +29,8 @@ list) and the simpler config is easier to audit.
 
 ### Positive
 
-CETA binary is fully generic. ZR rules are declarative Nix config, auditable alongside
-other ZR machine options. Other consumers can add their own approved/blocked commands
+CETA binary is fully generic. Consumer rules are declarative Nix config, auditable alongside
+other machine options. Other consumers can add their own approved/blocked commands
 without modifying the binary.
 
 ### Negative
@@ -54,6 +54,6 @@ practical value is limited.
 
 ### Option 3: existing rules read from config
 
-Would keep ZR rules in the existing rule objects (monorepo, buildtools, znself) but make
+Would keep consumer rules in the existing rule objects (monorepo, buildtools, myself) but make
 their command lists configurable. Rejected: requires touching three existing rule
 implementations rather than adding one new rule.

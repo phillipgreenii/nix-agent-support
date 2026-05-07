@@ -39,7 +39,7 @@ func (s *State) Save(cacheDir string) error
 
 JSON format:
 ```json
-{ "collapsedPaths": ["/Volumes/ziprecruiter/monorepo"] }
+{ "collapsedPaths": ["/path/to/project"] }
 ```
 
 **Stale path handling**: `State` is a plain string set. `FlattenPathTree` only
@@ -78,7 +78,7 @@ func BuildPathTree(dirs []*Directory) []*PathNode
    its child is promoted with a combined display path.
 3. Assign `DisplayPath`: root nodes use their full path; child nodes show only
    the suffix relative to their parent (e.g. `finance/partnerships` under
-   `/Volumes/ziprecruiter/monorepo`).
+   `/path/to/project`).
 4. Compute rollup stats bottom-up during construction.
 
 `aggregate.Tree` and `aggregate.Directory` are unchanged; `BuildPathTree` is
@@ -106,7 +106,7 @@ Collapsed bool    // PathNodeKind: current collapse state
 
 **New `RenderPathTree`** — dir row format:
 ```
-▼ /Volumes/ziprecruiter/monorepo    ●3 ○1  65.7k tok  3.3k/min
+▼ /path/to/project    ●3 ○1  65.7k tok  3.3k/min
   ▶ finance/partnerships            ●1     5.1k tok   1.3k/min
 ```
 

@@ -22,7 +22,6 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/znself"
 )
 
 // NewEngineForCWD constructs a fully-configured engine for the given CWD.
@@ -56,7 +55,6 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		monorepo.New(pe),
 		nixRule,
 		dockerRule,
-		znself.New(),
 		safecmds.New(pe),
 		curl.New(),
 		kubectl.New(),

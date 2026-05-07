@@ -59,7 +59,7 @@ func TestEnvVars_UnknownExpression_Abstain(t *testing.T) {
 func TestEnvVars_SafeStaticVars_Abstain(t *testing.T) {
 	r := New()
 	commands := []string{
-		"PYTHONPATH=/foo bin/pyzr run",
+		"PYTHONPATH=/foo bin/pytool run",
 		"NO_COLOR=1 ls",
 		"GOFLAGS=-count=1 go test",
 		"GIT_DIR=/other git log",

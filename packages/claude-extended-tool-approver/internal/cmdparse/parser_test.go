@@ -177,16 +177,16 @@ func TestNormalizeExecutable_BareCommand(t *testing.T) {
 }
 
 func TestNormalizeExecutable_RelativeFromCwd(t *testing.T) {
-	got := NormalizeExecutable("./bin/grazr", "/project", "/project")
-	if got != "bin/grazr" {
-		t.Errorf("NormalizeExecutable(./bin/grazr) = %q, want bin/grazr", got)
+	got := NormalizeExecutable("./bin/mytool", "/project", "/project")
+	if got != "bin/mytool" {
+		t.Errorf("NormalizeExecutable(./bin/mytool) = %q, want bin/mytool", got)
 	}
 }
 
 func TestNormalizeExecutable_AbsoluteInProject(t *testing.T) {
-	got := NormalizeExecutable("/project/bin/grazr", "/project", "/project")
-	if got != "bin/grazr" {
-		t.Errorf("NormalizeExecutable(/project/bin/grazr) = %q, want bin/grazr", got)
+	got := NormalizeExecutable("/project/bin/mytool", "/project", "/project")
+	if got != "bin/mytool" {
+		t.Errorf("NormalizeExecutable(/project/bin/mytool) = %q, want bin/mytool", got)
 	}
 }
 
@@ -198,9 +198,9 @@ func TestNormalizeExecutable_OutsideProject(t *testing.T) {
 }
 
 func TestNormalizeExecutable_RelativeNoDot(t *testing.T) {
-	got := NormalizeExecutable("bin/grazr", "/project", "/project")
-	if got != "bin/grazr" {
-		t.Errorf("NormalizeExecutable(bin/grazr) = %q, want bin/grazr", got)
+	got := NormalizeExecutable("bin/mytool", "/project", "/project")
+	if got != "bin/mytool" {
+		t.Errorf("NormalizeExecutable(bin/mytool) = %q, want bin/mytool", got)
 	}
 }
 
@@ -309,7 +309,7 @@ func TestParse_CloudflaredAccessCurl(t *testing.T) {
 }
 
 func TestParse_CloudflaredAccessCurlPipe(t *testing.T) {
-	got := Parse(`cloudflared access curl "https://example.zr.org/api" | jq '.'`)
+	got := Parse(`cloudflared access curl "https://example.internal/api" | jq '.'`)
 	if len(got) != 2 {
 		t.Fatalf("len(Parse) = %d, want 2", len(got))
 	}
@@ -350,7 +350,7 @@ func TestExtractComment(t *testing.T) {
 		input string
 		want  string
 	}{
-		{`curl https://api.zr.org # health check`, "health check"},
+		{`curl https://api.example.internal # health check`, "health check"},
 		{`echo "foo # bar"`, ""},
 		{`echo 'foo # bar'`, ""},
 		{"cmd #", ""},
@@ -365,10 +365,10 @@ func TestExtractComment(t *testing.T) {
 }
 
 func TestStripComment(t *testing.T) {
-	got := StripComment(`curl https://api.zr.org # health check`)
-	want := "curl https://api.zr.org"
+	got := StripComment(`curl https://api.example.internal # health check`)
+	want := "curl https://api.example.internal"
 	if got != want {
-		t.Errorf("StripComment(%q) = %q, want %q", "curl https://api.zr.org # health check", got, want)
+		t.Errorf("StripComment(%q) = %q, want %q", "curl https://api.example.internal # health check", got, want)
 	}
 }
 
@@ -446,14 +446,14 @@ func TestParse_CommentOnlyLine(t *testing.T) {
 }
 
 func TestParse_CommentExtraction(t *testing.T) {
-	got := Parse("curl https://api.zr.org # health check")
+	got := Parse("curl https://api.example.internal # health check")
 	if len(got) != 1 {
 		t.Fatalf("len(Parse) = %d, want 1", len(got))
 	}
 	if got[0].Comment != "health check" {
 		t.Errorf("Comment = %q, want health check", got[0].Comment)
 	}
-	wantArgs := []string{"https://api.zr.org"}
+	wantArgs := []string{"https://api.example.internal"}
 	if !reflect.DeepEqual(got[0].Args, wantArgs) {
 		t.Errorf("Args = %v, want %v (must not include #, health, check)", got[0].Args, wantArgs)
 	}

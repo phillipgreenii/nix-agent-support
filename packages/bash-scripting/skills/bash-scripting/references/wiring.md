@@ -32,17 +32,17 @@ in
 }
 ```
 
-## Module with library + scripts (ZR pattern)
+## Module with library + scripts (project pattern)
 
 ```nix
 # modules/zm/scripts.nix
-{ pkgs, bashBuilders, zr-lib, globalWorktreePath, ... }:
+{ pkgs, bashBuilders, myproject-lib, globalWorktreePath, ... }:
 let
   testSupport = ./test-support;
 
   zm-lib = pkgs.callPackage ./lib {
     inherit (bashBuilders) mkBashLibrary;
-    inherit pkgs zr-lib testSupport;
+    inherit pkgs myproject-lib testSupport;
   };
 
   zm-cmd-one = pkgs.callPackage ./zm-cmd-one {
@@ -100,7 +100,7 @@ The `zm-scripts` package is built in the flake overlay (where `self` is availabl
 | Simplest             | `support-apps/packages/nix-tools/check-flakes/` | Single script, completions, tldr, tests                 |
 | Library + scripts    | `support-apps/packages/claude-activity/`        | Shared lib + 3 scripts + wrapper pattern                |
 | Flake overlay wiring | `personal/home/programs/cmux/scripts.nix`       | Build at overlay, consume in home-manager               |
-| Config injection     | `ziprecruiter/modules/zn/`                      | 11 scripts, library, JSON config, composition           |
-| Most complex         | `ziprecruiter/modules/zm/`                      | 14 scripts, library, exported + local config, git hooks |
+| Config injection     | `your-flake/modules/your-module/`               | 11 scripts, library, JSON config, composition           |
+| Most complex         | `your-flake/modules/your-complex-module/`       | 14 scripts, library, exported + local config, git hooks |
 
 Every migration has been validated through `nix flake check`.

@@ -113,7 +113,7 @@ For each pattern, choose the closest existing module under `internal/rules/`. Cu
 | `safecmds`    | Generic safe read-only Bash commands (`ls`, `cat`, `head`, `pwd`, etc.). |
 | `sqlite3`     | `sqlite3` CLI.                                                           |
 | `webfetch`    | `WebFetch` tool / URL fetching.                                          |
-| `znself`      | `zn-self-*` user commands.                                               |
+| `configrules` | Consumer-specific approved/blocked commands from XDG config file.        |
 
 If no existing module fits, propose a new module name in the bead.
 

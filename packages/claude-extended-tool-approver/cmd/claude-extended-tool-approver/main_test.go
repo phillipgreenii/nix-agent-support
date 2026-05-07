@@ -149,22 +149,6 @@ func TestIntegration_EnvVars_DangerousEnvVar_DeferredAllow(t *testing.T) {
 	}
 }
 
-func TestIntegration_EnvVars_SafeEnvOnApprovedCommand_Allow(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"PYTHONPATH=/foo bin/pyzr run test"},"cwd":"/tmp"}`
-	result := runHook(t, input)
-	if d := getDecision(result); d != "allow" {
-		t.Errorf("PYTHONPATH bin/pyzr run test: decision = %q, want allow", d)
-	}
-}
-
-func TestIntegration_EnvVars_WrapperDangerousEnv_Abstain(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"PYTHONSTARTUP=/evil.py bin/pyzr run"},"cwd":"/tmp"}`
-	result := runHook(t, input)
-	if len(result) != 0 {
-		t.Errorf("PYTHONSTARTUP with bin/pyzr: expected empty JSON (abstain), got %v", result)
-	}
-}
-
 func TestIntegration_EnvVars_NoEnvVars_Allow(t *testing.T) {
 	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
 	result := runHook(t, input)
@@ -234,27 +218,11 @@ func TestIntegration_BdSync_Allow(t *testing.T) {
 
 // --- curl integration tests ---
 
-func TestIntegration_Curl_ZrOrg_Allow(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"curl https://captains-log.zr.org/api/v1/builds/foo"},"cwd":"/tmp"}`
+func TestIntegration_Curl_Localhost_Allow(t *testing.T) {
+	input := `{"tool_name":"Bash","tool_input":{"command":"curl http://localhost:8080/health"},"cwd":"/tmp"}`
 	result := runHook(t, input)
 	if d := getDecision(result); d != "allow" {
-		t.Errorf("curl to zr.org: decision = %q, want allow", d)
-	}
-}
-
-func TestIntegration_Curl_ZiprecruiterCom_Allow(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"curl https://api.ziprecruiter.com/path"},"cwd":"/tmp"}`
-	result := runHook(t, input)
-	if d := getDecision(result); d != "allow" {
-		t.Errorf("curl to ziprecruiter.com: decision = %q, want allow", d)
-	}
-}
-
-func TestIntegration_CloudflaredAccessCurl_ZrOrg_Allow(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"cloudflared access curl \"https://captains-log.zr.org/api/v1/builds/foo\" 2>/dev/null | jq '.'"},"cwd":"/tmp"}`
-	result := runHook(t, input)
-	if d := getDecision(result); d != "allow" {
-		t.Errorf("cloudflared access curl to zr.org: decision = %q, want allow", d)
+		t.Errorf("curl to localhost: decision = %q, want allow", d)
 	}
 }
 
@@ -266,11 +234,11 @@ func TestIntegration_Curl_ExternalDomain_Abstain(t *testing.T) {
 	}
 }
 
-func TestIntegration_Curl_PostToZrOrg_Abstain(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"curl -X POST https://captains-log.zr.org/api"},"cwd":"/tmp"}`
+func TestIntegration_Curl_PostToAllowedDomain_Abstain(t *testing.T) {
+	input := `{"tool_name":"Bash","tool_input":{"command":"curl -X POST https://api.github.com/repos/foo/bar"},"cwd":"/tmp"}`
 	result := runHook(t, input)
 	if len(result) != 0 {
-		t.Errorf("curl -X POST to zr.org: expected empty JSON (abstain), got %v", result)
+		t.Errorf("curl -X POST to github.com: expected empty JSON (abstain), got %v", result)
 	}
 }
 
@@ -455,8 +423,8 @@ func TestIntegration_InputProcessor_SkipsDeny(t *testing.T) {
 	}
 	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
 
-	// znself rule rejects zn-self-apply/zn-self-upgrade
-	input := `{"tool_name":"Bash","tool_input":{"command":"zn-self-apply"},"cwd":"/tmp"}`
+	// nix rule rejects darwin-rebuild switch
+	input := `{"tool_name":"Bash","tool_input":{"command":"darwin-rebuild switch"},"cwd":"/tmp"}`
 	result := runHook(t, input)
 
 	d := getDecision(result)

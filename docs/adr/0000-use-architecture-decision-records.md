@@ -15,7 +15,7 @@ deliberate extraction effort; the decisions that shaped its design should be doc
 
 Maintain Architecture Decision Records (ADRs) in `docs/adr/` following the
 lightweight format already used in sibling repositories (`phillipgreenii-nix-personal`,
-`phillipgreenii-nix-support-apps`, `phillipg-nix-ziprecruiter`).
+`phillipgreenii-nix-support-apps`).
 
 - Draft ADRs: `docs/adr/draft-{short-title}.md`
 - Accepted ADRs: `docs/adr/NNNN-{short-title}.md` (sequentially numbered)

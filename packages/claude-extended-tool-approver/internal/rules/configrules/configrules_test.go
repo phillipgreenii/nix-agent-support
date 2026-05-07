@@ -24,46 +24,46 @@ func writeConfig(t *testing.T, dir string, cfg Config) {
 
 func TestConfigRules_ApprovedCommand(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr", "grazr"}})
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool", "mytool2"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
-		ToolInput: mustJSON(map[string]string{"command": "gozr test ./..."}),
+		ToolInput: mustJSON(map[string]string{"command": "mytool test ./..."}),
 	})
 	if got.Decision != hookio.Approve {
-		t.Errorf("gozr: got %s, want approve", got.Decision)
+		t.Errorf("mytool: got %s, want approve", got.Decision)
 	}
 }
 
 func TestConfigRules_BlockedCommand(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, Config{BlockedCommands: []string{"zn-self-apply", "zn-self-upgrade"}})
+	writeConfig(t, dir, Config{BlockedCommands: []string{"my-self-apply", "my-self-upgrade"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
-		ToolInput: mustJSON(map[string]string{"command": "zn-self-apply"}),
+		ToolInput: mustJSON(map[string]string{"command": "my-self-apply"}),
 	})
 	if got.Decision != hookio.Reject {
-		t.Errorf("zn-self-apply: got %s, want reject", got.Decision)
+		t.Errorf("my-self-apply: got %s, want reject", got.Decision)
 	}
 }
 
 func TestConfigRules_ApprovedCommandWithEnvVars_Abstains(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr", "pyzr"}})
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool", "pytool"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
-		ToolInput: mustJSON(map[string]string{"command": "PYTHONSTARTUP=/evil.py bin/pyzr run"}),
+		ToolInput: mustJSON(map[string]string{"command": "PYTHONSTARTUP=/evil.py bin/pytool run"}),
 	})
 	if got.Decision != hookio.Abstain {
-		t.Errorf("pyzr with env var: got %s, want abstain", got.Decision)
+		t.Errorf("pytool with env var: got %s, want abstain", got.Decision)
 	}
 }
 
 func TestConfigRules_AbstainForUnknown(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr"}, BlockedCommands: []string{"zn-self-apply"}})
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool"}, BlockedCommands: []string{"my-self-apply"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
@@ -78,7 +78,7 @@ func TestConfigRules_AbstainWhenFileAbsent(t *testing.T) {
 	r := NewFromFile("/nonexistent/path/rules.json")
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
-		ToolInput: mustJSON(map[string]string{"command": "gozr test ./..."}),
+		ToolInput: mustJSON(map[string]string{"command": "mytool test ./..."}),
 	})
 	if got.Decision != hookio.Abstain {
 		t.Errorf("missing file: got %s, want abstain", got.Decision)
@@ -87,7 +87,7 @@ func TestConfigRules_AbstainWhenFileAbsent(t *testing.T) {
 
 func TestConfigRules_NonBashAbstains(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr"}})
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
 	got := r.Evaluate(&hookio.HookInput{
 		ToolName:  "Read",

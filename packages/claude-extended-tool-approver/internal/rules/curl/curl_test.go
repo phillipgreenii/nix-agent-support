@@ -20,17 +20,9 @@ func makeInput(cmd string) *hookio.HookInput {
 	}
 }
 
-func TestCurl_ReadOnly_ZrOrg_Approve(t *testing.T) {
+func TestCurl_ReadOnly_GitHub_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeInput("curl https://captains-log.zr.org/api/v1/builds/foo"))
-	if got.Decision != hookio.Approve {
-		t.Errorf("got %s, want approve", got.Decision)
-	}
-}
-
-func TestCurl_ReadOnly_ZiprecruiterCom_Approve(t *testing.T) {
-	r := New()
-	got := r.Evaluate(makeInput("curl https://something.ziprecruiter.com/path"))
+	got := r.Evaluate(makeInput("curl https://api.github.com/repos/foo/bar"))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -39,12 +31,12 @@ func TestCurl_ReadOnly_ZiprecruiterCom_Approve(t *testing.T) {
 func TestCurl_ReadOnly_WithFlags_Approve(t *testing.T) {
 	r := New()
 	cmds := []string{
-		"curl -s https://captains-log.zr.org/api/v1/builds/foo",
-		"curl -v https://captains-log.zr.org/api/v1/builds/foo",
-		"curl -s -o /dev/null https://captains-log.zr.org/api/v1/builds/foo",
-		"curl -X GET https://captains-log.zr.org/api/v1/builds/foo",
-		"curl --request HEAD https://captains-log.zr.org/api/v1/builds/foo",
-		"curl -XGET https://captains-log.zr.org/api/v1/builds/foo",
+		"curl -s https://api.github.com/repos/foo/bar",
+		"curl -v https://api.github.com/repos/foo/bar",
+		"curl -s -o /dev/null https://api.github.com/repos/foo/bar",
+		"curl -X GET https://api.github.com/repos/foo/bar",
+		"curl --request HEAD https://api.github.com/repos/foo/bar",
+		"curl -XGET https://api.github.com/repos/foo/bar",
 	}
 	for _, cmd := range cmds {
 		got := r.Evaluate(makeInput(cmd))
@@ -54,21 +46,21 @@ func TestCurl_ReadOnly_WithFlags_Approve(t *testing.T) {
 	}
 }
 
-func TestCurl_NonZrDomain_Abstain(t *testing.T) {
+func TestCurl_ExternalDomain_Abstain(t *testing.T) {
 	r := New()
 	got := r.Evaluate(makeInput("curl https://evil.com/steal"))
 	if got.Decision != hookio.Abstain {
-		t.Errorf("got %s, want abstain (non-ZR domain)", got.Decision)
+		t.Errorf("got %s, want abstain (non-allowed domain)", got.Decision)
 	}
 }
 
 func TestCurl_WriteMethod_Abstain(t *testing.T) {
 	r := New()
 	cmds := []string{
-		"curl -X POST https://captains-log.zr.org/api",
-		"curl --request DELETE https://captains-log.zr.org/api",
-		"curl -XPUT https://captains-log.zr.org/api",
-		"curl -XPATCH https://captains-log.zr.org/api",
+		"curl -X POST https://api.github.com/repos/foo/bar",
+		"curl --request DELETE https://api.github.com/repos/foo/bar",
+		"curl -XPUT https://api.github.com/repos/foo/bar",
+		"curl -XPATCH https://api.github.com/repos/foo/bar",
 	}
 	for _, cmd := range cmds {
 		got := r.Evaluate(makeInput(cmd))
@@ -81,16 +73,16 @@ func TestCurl_WriteMethod_Abstain(t *testing.T) {
 func TestCurl_DataFlags_Abstain(t *testing.T) {
 	r := New()
 	cmds := []string{
-		`curl -d '{"key":"val"}' https://captains-log.zr.org/api`,
-		`curl --data '{"key":"val"}' https://captains-log.zr.org/api`,
-		`curl --data-raw 'foo' https://captains-log.zr.org/api`,
-		`curl --data-binary @file https://captains-log.zr.org/api`,
-		`curl --data-urlencode 'key=val' https://captains-log.zr.org/api`,
-		`curl --json '{}' https://captains-log.zr.org/api`,
-		`curl -F 'file=@upload.txt' https://captains-log.zr.org/api`,
-		`curl --form 'field=value' https://captains-log.zr.org/api`,
-		`curl -T localfile https://captains-log.zr.org/api`,
-		`curl --upload-file localfile https://captains-log.zr.org/api`,
+		`curl -d '{"key":"val"}' https://api.github.com/repos`,
+		`curl --data '{"key":"val"}' https://api.github.com/repos`,
+		`curl --data-raw 'foo' https://api.github.com/repos`,
+		`curl --data-binary @file https://api.github.com/repos`,
+		`curl --data-urlencode 'key=val' https://api.github.com/repos`,
+		`curl --json '{}' https://api.github.com/repos`,
+		`curl -F 'file=@upload.txt' https://api.github.com/repos`,
+		`curl --form 'field=value' https://api.github.com/repos`,
+		`curl -T localfile https://api.github.com/repos`,
+		`curl --upload-file localfile https://api.github.com/repos`,
 	}
 	for _, cmd := range cmds {
 		got := r.Evaluate(makeInput(cmd))
@@ -102,7 +94,7 @@ func TestCurl_DataFlags_Abstain(t *testing.T) {
 
 func TestCurl_Pipeline_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeInput("curl https://captains-log.zr.org/api | jq '.'"))
+	got := r.Evaluate(makeInput("curl https://api.github.com/repos/foo/bar | jq '.'"))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve (curl piped to jq)", got.Decision)
 	}
@@ -129,11 +121,10 @@ func TestCurl_NonBashTool_Abstain(t *testing.T) {
 }
 
 func TestCurl_MixedDomains_Abstain(t *testing.T) {
-	// If a command has curl to both a ZR domain and an external domain, abstain
 	r := New()
-	got := r.Evaluate(makeInput("curl https://captains-log.zr.org/api && curl https://evil.com/data"))
+	got := r.Evaluate(makeInput("curl https://api.github.com/repos && curl https://evil.com/data"))
 	if got.Decision != hookio.Abstain {
-		t.Errorf("got %s, want abstain (second curl targets non-ZR domain)", got.Decision)
+		t.Errorf("got %s, want abstain (second curl targets non-allowed domain)", got.Decision)
 	}
 }
 
@@ -141,14 +132,6 @@ func TestCurl_Name(t *testing.T) {
 	r := New()
 	if got := r.Name(); got != "curl" {
 		t.Errorf("Name() = %q, want curl", got)
-	}
-}
-
-func TestCurl_ReadOnly_ZipawsCom_Approve(t *testing.T) {
-	r := New()
-	got := r.Evaluate(makeInput("curl https://something.zipaws.com/path"))
-	if got.Decision != hookio.Approve {
-		t.Errorf("got %s, want approve", got.Decision)
 	}
 }
 
@@ -190,29 +173,6 @@ func TestCurl_DotLocalhost_Approve(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := r.Evaluate(makeInput(tt.command))
-			if got.Decision != tt.want {
-				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
-			}
-		})
-	}
-}
-
-func TestCurl_ZrOrgSubdomains(t *testing.T) {
-	r := New()
-	tests := []struct {
-		name    string
-		command string
-		want    hookio.Decision
-	}{
-		{"grafana.p1.zr.org", "curl https://grafana.p1.zr.org/api/dashboards", hookio.Approve},
-		{"deep.sub.zr.org", "curl https://deep.sub.domain.zr.org/path", hookio.Approve},
-		{"bare zr.org not matched", "curl https://zr.org/path", hookio.Abstain},
-		{"evil-zr.org not matched", "curl https://evil-zr.org/path", hookio.Abstain},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			got := r.Evaluate(input)
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}

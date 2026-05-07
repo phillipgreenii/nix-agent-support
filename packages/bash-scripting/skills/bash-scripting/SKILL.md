@@ -213,11 +213,11 @@ mkBashLibrary {
   name = "module-lib";
   src = ./.;
   description = "...";
-  libraries = [ zr-lib ];
+  libraries = [ myproject-lib ];
 }
 ```
 
-The composed library file contains `source ${zr-lib}` prepended to `module-lib.bash`.
+The composed library file contains `source ${myproject-lib}` prepended to `module-lib.bash`.
 
 Circular library dependencies cause nix evaluation to fail; if you hit this, extract the shared logic into a third library.
 
@@ -306,7 +306,7 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 
 ## Workflow: Adding a New Script
 
-1. Choose the right module: public CLI → support-apps; personal tool → phillipgreenii-nix-personal; work-specific → phillipg-nix-ziprecruiter.
+1. Choose the right module: public CLI → support-apps; personal tool → phillipgreenii-nix-personal; work-specific → your-private-flake.
 2. Create the directory structure per the templates above.
 3. Write `<name>.sh` with `# shellcheck shell=bash`, `show_help()`, case-based arg parsing, no shebang/set flags.
 4. Create the tldr page (`<name>.md`) if public — start from [`assets/tldr.md`](assets/tldr.md).
@@ -346,5 +346,5 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 - **Framework implementation**: `phillipgreenii-nix-personal/lib/bash-builders.nix`
 - **Framework design spec**: `phillipgreenii-nix-personal/docs/superpowers/specs/2026-04-02-mkbashbuilders-framework-design.md`
 - **Framework test fixtures**: `phillipgreenii-nix-personal/lib/bash-builders-tests/`
-- **ADR 0033** (ziprecruiter): Nix-wrapped `.sh` format (no shebang, no set flags, shellcheck directive)
-- **ADR 0022** (ziprecruiter): Tldr pages inside module directories
+- Nix-wrapped `.sh` format: no shebang, no set flags, shellcheck directive at top
+- Tldr pages: place inside the module directory alongside the script

@@ -126,7 +126,7 @@ preloads. Manual `ollama pull`s persist on disk but are not declarative.
 ### Add a model to auto-preload
 
 Edit your machine config (e.g.
-`phillipg-nix-ziprecruiter/machines/phillipg-mbp-02/default.nix`):
+`your-flake/machines/your-host/default.nix`):
 
 ```nix
 home-manager.users.phillipg.phillipgreenii.programs.ollama.loadModels = [

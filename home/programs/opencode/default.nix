@@ -90,7 +90,7 @@ in
           phillipgreenii.programs.opencode.enable requires the
           mkLlmAgentsOverlay (provides `pkgs.llm-agentsPkgs`). Apply it at
           the consuming machine config (see
-          phillipg-nix-ziprecruiter/machines/default.nix).
+          your-flake/machines/default.nix).
         '';
       }
     ];

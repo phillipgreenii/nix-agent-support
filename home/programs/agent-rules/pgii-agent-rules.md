@@ -52,9 +52,9 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 
 #### System Commands
 
-- **CRITICAL**: NEVER run `zn-self-apply`, `zn-self-upgrade`, or `pn-workspace-apply` — these are user-only commands
+- **CRITICAL**: NEVER run system activation commands (e.g., `darwin-rebuild switch`) without explicit user request — these are user-only commands
 - **CRITICAL**: NEVER use `sudo`
-- SHOULD run `zn-self-build` when building/validating nix changes
+- When building/validating nix changes without activation, use a build-only command
 
 #### Version Control
 

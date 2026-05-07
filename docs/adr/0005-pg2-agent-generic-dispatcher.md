@@ -1,4 +1,4 @@
-# pg2-agent: Generic Rename of zr-agent
+# pg2-agent: Generic Agent Dispatcher
 
 **Status**: Accepted
 **Date**: 2026-05-01
@@ -6,8 +6,8 @@
 
 ## Context
 
-The priority-based AI agent dispatcher was named `zr-agent` and lived in
-`phillipg-nix-ziprecruiter`. The name implied ZR ownership, but the dispatcher
+The priority-based AI agent dispatcher was named `project-agent` and lived in
+a private monorepo. The name implied project-specific ownership, but the dispatcher
 logic is fully generic: register agents by priority, try them in order, propagate
 exit codes.
 
@@ -28,8 +28,8 @@ via `phillipgreenii.programs.pg2-agent.agents.*` without re-implementing the dis
 
 ### Negative
 
-Users with muscle memory for `zr-agent` commands must update. Any external docs
-or scripts referencing `zr-agent` need updating.
+Users with muscle memory for `project-agent` commands must update. Any external docs
+or scripts referencing `project-agent` need updating.
 
 ### Neutral
 
