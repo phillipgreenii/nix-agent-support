@@ -12,7 +12,7 @@ func (m *Model) View() string {
 		return "loading…"
 	}
 	if m.selected != nil {
-		return RenderDetails(m.selected)
+		return RenderDetails(m.selected, m.width)
 	}
 	header := render.Header(m.tree, render.HeaderOpts{
 		CaffeinateOn:    m.caffeinateOn,
