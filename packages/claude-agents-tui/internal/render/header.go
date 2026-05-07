@@ -58,8 +58,12 @@ func Header(tree *aggregate.Tree, opts HeaderOpts) string {
 		nameLabel = th.ActiveToggle.Render("name")
 	}
 
-	fmt.Fprintf(&sb, "[C]affeinate: %s  |  [t] %s · %s  |  [a] %s · %s  |  [n] %s · %s  |  [q]\n\n",
-		caff, tokLabel, costLabel, activeLabel, allLabel, nameLabel, idLabel)
+	autoResumeLabel := "○ off"
+	if opts.AutoResume {
+		autoResumeLabel = th.ActiveToggle.Render("● on")
+	}
+	fmt.Fprintf(&sb, "[C]affeinate: %s  |  [t] %s · %s  |  [a] %s · %s  |  [n] %s · %s  |  [R] auto-resume: %s  |  [q]\n\n",
+		caff, tokLabel, costLabel, activeLabel, allLabel, nameLabel, idLabel, autoResumeLabel)
 
 	switch {
 	case !tree.CCUsageProbed:

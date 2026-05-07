@@ -23,7 +23,7 @@ func (m *Model) View() string {
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
 	})
-	legend := "● working  ○ idle  ⏸ paused  ? awaiting  ✕ dormant   🤖 subagents  🐚 shells  🌿 branch       [↑↓jk] nav  [space/←→/hl] collapse  [enter] details  [R] auto-resume"
+	legend := "● working  ○ idle  ⏸ paused  ? awaiting  ✕ dormant   🤖 subagents  🐚 shells  🌿 branch       [↑↓jk] nav  [space/←→/hl] collapse  [enter] details"
 
 	var body string
 	noBlock := m.tree.CCUsageProbed && m.tree.ActiveBlock == nil && m.tree.CCUsageErr == nil
