@@ -221,3 +221,117 @@ func TestParseLimitResetTextRejectsUnknownText(t *testing.T) {
 		}
 	}
 }
+
+// TestParseLimitResetTextHourOnly covers the bare-hour variation observed in
+// real transcripts ("resets 1pm (TZ)") which lacks a :MM component.
+func TestParseLimitResetTextHourOnly(t *testing.T) {
+	// Event 2026-05-05 17:12 UTC = 13:12 EDT.
+	ev := time.Date(2026, 5, 5, 17, 12, 0, 0, time.UTC)
+	cases := []struct {
+		in   string
+		want time.Time
+	}{
+		// 1pm EDT = 17:00 UTC. 13:12 EDT precedes 13:00 EDT only when ev > 13:00 EDT,
+		// here ev=13:12 EDT is AFTER 13:00 EDT, so candidate rolls to next day 17:00 UTC.
+		{"resets 1pm (America/New_York)", time.Date(2026, 5, 6, 17, 0, 0, 0, time.UTC)},
+		// 2pm EDT = 18:00 UTC same day (13:12 EDT < 14:00 EDT).
+		{"resets 2pm (America/New_York)", time.Date(2026, 5, 5, 18, 0, 0, 0, time.UTC)},
+		// 12am EDT = 04:00 UTC next day.
+		{"resets 12am (America/New_York)", time.Date(2026, 5, 6, 4, 0, 0, 0, time.UTC)},
+		// 12pm EDT = 16:00 UTC. ev (13:12 EDT) < 12:00 EDT? No — ev is 13:12 EDT,
+		// which is AFTER 12:00 EDT, so rolls to next day 16:00 UTC.
+		{"resets 12pm (America/New_York)", time.Date(2026, 5, 6, 16, 0, 0, 0, time.UTC)},
+		// 10am UTC, ev=17:12 UTC > 10:00 UTC → next day.
+		{"resets 10am (UTC)", time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		got, ok := parseLimitResetText(c.in, ev)
+		if !ok {
+			t.Errorf("%q: ok=false, want true", c.in)
+			continue
+		}
+		if !got.Equal(c.want) {
+			t.Errorf("%q: got %v, want %v", c.in, got.UTC(), c.want)
+		}
+	}
+}
+
+// TestParseLimitResetTextDatePrefixed covers the weekly-limit variation observed
+// in real transcripts: "resets Apr 13, 11am (TZ)".
+func TestParseLimitResetTextDatePrefixed(t *testing.T) {
+	// Event 2026-04-06 12:00 UTC. "Apr 13, 11am (America/New_York)" →
+	// 2026-04-13 11:00 EDT = 2026-04-13 15:00 UTC.
+	ev := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	got, ok := parseLimitResetText("You've hit your limit · resets Apr 13, 11am (America/New_York)", ev)
+	if !ok {
+		t.Fatal("ok=false, want true")
+	}
+	want := time.Date(2026, 4, 13, 15, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got.UTC(), want)
+	}
+}
+
+// TestParseLimitResetTextDatePrefixedWithMinutes asserts the same prefix form
+// works when the time has minutes ("Apr 13, 11:30am").
+func TestParseLimitResetTextDatePrefixedWithMinutes(t *testing.T) {
+	ev := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	got, ok := parseLimitResetText("resets Apr 13, 11:30am (America/New_York)", ev)
+	if !ok {
+		t.Fatal("ok=false, want true")
+	}
+	want := time.Date(2026, 4, 13, 15, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got.UTC(), want)
+	}
+}
+
+// TestParseLimitResetTextDatePrefixedYearRollover covers the case where the
+// month+day in the message has already passed in the event's year and must be
+// resolved as the same date in the *next* year.
+func TestParseLimitResetTextDatePrefixedYearRollover(t *testing.T) {
+	// Event 2026-12-30 12:00 UTC, reset "Jan 5, 11am (UTC)" → must be 2027-01-05.
+	ev := time.Date(2026, 12, 30, 12, 0, 0, 0, time.UTC)
+	got, ok := parseLimitResetText("resets Jan 5, 11am (UTC)", ev)
+	if !ok {
+		t.Fatal("ok=false, want true")
+	}
+	want := time.Date(2027, 1, 5, 11, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got.UTC(), want)
+	}
+}
+
+// TestParseLimitResetTextDatePrefixedAllMonths verifies every month abbreviation
+// observed/expected resolves correctly.
+func TestParseLimitResetTextDatePrefixedAllMonths(t *testing.T) {
+	ev := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		in       string
+		wantYear int
+		wantMon  time.Month
+	}{
+		{"resets Jan 15, 9am (UTC)", 2026, time.January},
+		{"resets Feb 1, 9am (UTC)", 2026, time.February},
+		{"resets Mar 1, 9am (UTC)", 2026, time.March},
+		{"resets Apr 1, 9am (UTC)", 2026, time.April},
+		{"resets May 1, 9am (UTC)", 2026, time.May},
+		{"resets Jun 1, 9am (UTC)", 2026, time.June},
+		{"resets Jul 1, 9am (UTC)", 2026, time.July},
+		{"resets Aug 1, 9am (UTC)", 2026, time.August},
+		{"resets Sep 1, 9am (UTC)", 2026, time.September},
+		{"resets Oct 1, 9am (UTC)", 2026, time.October},
+		{"resets Nov 1, 9am (UTC)", 2026, time.November},
+		{"resets Dec 1, 9am (UTC)", 2026, time.December},
+	}
+	for _, c := range cases {
+		got, ok := parseLimitResetText(c.in, ev)
+		if !ok {
+			t.Errorf("%q: ok=false, want true", c.in)
+			continue
+		}
+		if got.Year() != c.wantYear || got.Month() != c.wantMon {
+			t.Errorf("%q: got %v-%v, want %d-%v", c.in, got.Year(), got.Month(), c.wantYear, c.wantMon)
+		}
+	}
+}

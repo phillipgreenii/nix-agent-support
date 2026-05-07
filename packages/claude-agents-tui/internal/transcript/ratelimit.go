@@ -10,28 +10,49 @@ import (
 	"time"
 )
 
-// limitResetRe captures hour, minute, am/pm marker, and IANA TZ id.
-// Matches strings like: "resets 3:30pm (America/New_York)".
-var limitResetRe = regexp.MustCompile(`resets\s+(\d{1,2}):(\d{2})(am|pm)\s+\(([^)]+)\)`)
+// limitResetRe captures the rate-limit reset clause. Variations seen in real
+// transcripts:
+//
+//	resets 3:30pm (America/New_York)        — H:MM clock + TZ
+//	resets 1pm (America/New_York)           — bare hour + TZ
+//	resets Apr 13, 11am (America/New_York)  — month + day + clock + TZ (weekly limit)
+//	resets Apr 13, 11:30am (UTC)            — month + day + H:MM + TZ
+//
+// Capture groups: 1=month-abbr (opt), 2=day (opt), 3=hour, 4=minute (opt),
+// 5=am|pm, 6=IANA TZ.
+var limitResetRe = regexp.MustCompile(`resets\s+(?:([A-Z][a-z]{2})\s+(\d{1,2}),\s+)?(\d{1,2})(?::(\d{2}))?(am|pm)\s+\(([^)]+)\)`)
+
+var monthAbbrev = map[string]time.Month{
+	"Jan": time.January, "Feb": time.February, "Mar": time.March, "Apr": time.April,
+	"May": time.May, "Jun": time.June, "Jul": time.July, "Aug": time.August,
+	"Sep": time.September, "Oct": time.October, "Nov": time.November, "Dec": time.December,
+}
 
 // parseLimitResetText resolves the next occurrence of the clock time + IANA TZ
 // in the message strictly after eventTime (the next reset window is always in
-// the future). Returns (zero, false) on any parse failure (bad clock time,
-// unknown TZ, regex miss).
+// the future). When the message includes a month + day prefix (weekly-limit
+// shape), the reset time is anchored to that calendar date; rollover is by
+// year. When omitted, rollover is by 24 hours. Returns (zero, false) on any
+// parse failure (bad clock time, unknown TZ, regex miss).
 func parseLimitResetText(text string, eventTime time.Time) (time.Time, bool) {
 	m := limitResetRe.FindStringSubmatch(text)
 	if m == nil {
 		return time.Time{}, false
 	}
-	hour, err := strconv.Atoi(m[1])
+	monthStr, dayStr, hourStr, minStr, ampm, tzStr := m[1], m[2], m[3], m[4], m[5], m[6]
+
+	hour, err := strconv.Atoi(hourStr)
 	if err != nil || hour < 1 || hour > 12 {
 		return time.Time{}, false
 	}
-	minute, err := strconv.Atoi(m[2])
-	if err != nil || minute < 0 || minute > 59 {
-		return time.Time{}, false
+	minute := 0
+	if minStr != "" {
+		minute, err = strconv.Atoi(minStr)
+		if err != nil || minute < 0 || minute > 59 {
+			return time.Time{}, false
+		}
 	}
-	switch strings.ToLower(m[3]) {
+	switch strings.ToLower(ampm) {
 	case "am":
 		if hour == 12 {
 			hour = 0
@@ -41,11 +62,28 @@ func parseLimitResetText(text string, eventTime time.Time) (time.Time, bool) {
 			hour += 12
 		}
 	}
-	loc, err := time.LoadLocation(m[4])
+	loc, err := time.LoadLocation(tzStr)
 	if err != nil {
 		return time.Time{}, false
 	}
 	evLocal := eventTime.In(loc)
+
+	if monthStr != "" {
+		month, ok := monthAbbrev[monthStr]
+		if !ok {
+			return time.Time{}, false
+		}
+		day, err := strconv.Atoi(dayStr)
+		if err != nil || day < 1 || day > 31 {
+			return time.Time{}, false
+		}
+		candidate := time.Date(evLocal.Year(), month, day, hour, minute, 0, 0, loc)
+		if !candidate.After(eventTime) {
+			candidate = candidate.AddDate(1, 0, 0)
+		}
+		return candidate.UTC(), true
+	}
+
 	candidate := time.Date(evLocal.Year(), evLocal.Month(), evLocal.Day(), hour, minute, 0, 0, loc)
 	if !candidate.After(eventTime) {
 		candidate = candidate.Add(24 * time.Hour)
