@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"syscall"
 )
 
 type Proc struct {
@@ -27,6 +28,16 @@ func (p *Proc) Spawn(tuiPID int) error {
 	}
 	p.cmd = cmd
 	return nil
+}
+
+// IsAlive returns true if the caffeinate process was spawned and is still running.
+func (p *Proc) IsAlive() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		return false
+	}
+	return p.cmd.Process.Signal(syscall.Signal(0)) == nil
 }
 
 func (p *Proc) Kill() error {

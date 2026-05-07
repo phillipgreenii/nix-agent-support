@@ -11,11 +11,12 @@ const (
 )
 
 type Manager struct {
-	Grace time.Duration
-	Spawn func(tuiPID int) error
-	Kill  func() error
-	Now   func() time.Time
-	PID   int
+	Grace   time.Duration
+	Spawn   func(tuiPID int) error
+	Kill    func() error
+	IsAlive func() bool // optional; if set, checked each Tick to detect unexpected exits
+	Now     func() time.Time
+	PID     int
 
 	state        State
 	toggle       bool
@@ -51,6 +52,10 @@ func (m *Manager) GraceRemaining() time.Duration {
 func (m *Manager) Tick(anyWorking bool) {
 	if !m.toggle {
 		return
+	}
+	// If caffeinate died unexpectedly, reset so it can be re-spawned.
+	if m.state != StateOff && m.IsAlive != nil && !m.IsAlive() {
+		m.state = StateOff
 	}
 	now := m.Now()
 	switch m.state {

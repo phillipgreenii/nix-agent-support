@@ -109,11 +109,12 @@ func main() {
 	proc := &caffeinate.Proc{}
 	defer func() { _ = proc.Kill() }()
 	mgr := &caffeinate.Manager{
-		Grace: cfg.CaffeinateGrace,
-		Spawn: proc.Spawn,
-		Kill:  proc.Kill,
-		Now:   time.Now,
-		PID:   os.Getpid(),
+		Grace:   cfg.CaffeinateGrace,
+		Spawn:   proc.Spawn,
+		Kill:    proc.Kill,
+		IsAlive: proc.IsAlive,
+		Now:     time.Now,
+		PID:     os.Getpid(),
 	}
 	cacheDir := filepath.Join(home, ".cache", "claude-agents-tui")
 	model := tui.NewModel(tui.Options{

@@ -142,6 +142,32 @@ func TestNoRespawnAfterGraceExpiresIfStillIdle(t *testing.T) {
 	}
 }
 
+func TestUnexpectedExitResetsStateAndRespawns(t *testing.T) {
+	alive := true
+	spawned := 0
+	m := &Manager{
+		Grace:   5 * time.Second,
+		Spawn:   func(int) error { spawned++; return nil },
+		Kill:    func() error { return nil },
+		IsAlive: func() bool { return alive },
+		Now:     func() time.Time { return time.Unix(0, 0) },
+	}
+	m.SetToggle(true)
+	m.Tick(true) // spawn, state → Running
+	if spawned != 1 {
+		t.Fatalf("want 1 spawn, got %d", spawned)
+	}
+	// caffeinate dies unexpectedly
+	alive = false
+	m.Tick(true) // should detect dead process, reset to Off, re-spawn
+	if spawned != 2 {
+		t.Errorf("want 2 spawns after unexpected exit, got %d", spawned)
+	}
+	if m.State() != StateArmedRunning {
+		t.Errorf("State = %v, want ArmedRunning after respawn", m.State())
+	}
+}
+
 func TestToggleOffKillsImmediately(t *testing.T) {
 	killed := 0
 	m := &Manager{
