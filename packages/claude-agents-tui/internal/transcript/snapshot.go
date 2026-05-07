@@ -25,7 +25,10 @@ type Snapshot struct {
 func Scan(path string) (Snapshot, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Snapshot{}, nil // missing path → zero values, no error
+		if os.IsNotExist(err) {
+			return Snapshot{}, nil
+		}
+		return Snapshot{}, err
 	}
 	defer f.Close()
 
@@ -64,6 +67,13 @@ func Scan(path string) (Snapshot, error) {
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
 			continue
 		}
+		for _, b := range ev.Message.Content {
+			if b.Type == "tool_result" && b.ToolUseID != "" {
+				delete(pendingAUQ, b.ToolUseID)
+				delete(openTasks, b.ToolUseID)
+			}
+		}
+
 		switch ev.Type {
 		case "user":
 			if !firstPromptDone {
@@ -71,12 +81,6 @@ func Scan(path string) (Snapshot, error) {
 				if cleaned := cleanPromptText(text); cleaned != "" && !strings.HasPrefix(cleaned, "<") {
 					snap.FirstPrompt = cleaned
 					firstPromptDone = true
-				}
-			}
-			for _, b := range ev.Message.Content {
-				if b.Type == "tool_result" && b.ToolUseID != "" {
-					delete(pendingAUQ, b.ToolUseID)
-					delete(openTasks, b.ToolUseID)
 				}
 			}
 			if hasAPIErr {

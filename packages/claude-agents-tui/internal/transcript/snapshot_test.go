@@ -77,6 +77,13 @@ func TestScanRateLimitPause(t *testing.T) {
 	}
 }
 
+func TestScanMissingFile(t *testing.T) {
+	_, err := Scan("/nonexistent/path/transcript.jsonl")
+	if err != nil {
+		t.Errorf("Scan missing file should return nil error, got %v", err)
+	}
+}
+
 func TestScanRateLimitClearedAfterResume(t *testing.T) {
 	ts := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
 	path := t.TempDir() + "/rl.jsonl"
