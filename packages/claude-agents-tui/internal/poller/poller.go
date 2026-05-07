@@ -13,6 +13,13 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/transcript"
 )
 
+type cachedTranscript struct {
+	path          string
+	mtime         time.Time
+	snap          transcript.Snapshot
+	subshellCount int
+}
+
 type Poller struct {
 	SessionsDir      string
 	ClaudeHome       string
@@ -31,6 +38,9 @@ type Poller struct {
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
+
+	terminalHostCache map[int]string
+	transcriptCache   map[string]cachedTranscript
 }
 
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
@@ -48,6 +58,8 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnShort = make(map[string]*burnrate.Buffer)
 		p.burnLong = make(map[string]*burnrate.Buffer)
 		p.prevTotalTokens = make(map[string]int)
+		p.transcriptCache = make(map[string]cachedTranscript)
+		p.terminalHostCache = make(map[int]string)
 	}
 
 	enriched := map[string]aggregate.SessionEnrichment{}
@@ -64,18 +76,35 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			anyWorking = true
 		}
 
-		fp, _ := transcript.FirstPrompt(path)
-		ctxSnap, _ := transcript.LatestContext(path)
-		subs, _ := transcript.OpenSubagents(path)
-		waiting, _ := transcript.IsAwaitingInput(path)
-		resetsAt, _ := transcript.RateLimitPause(path)
-		s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
-		shells, _ := subshellCounter.Count(s.PID)
+		// Transcript cache: re-read only when path or mtime changed.
+		var snap transcript.Snapshot
+		var shells int
+		if cached, hit := p.transcriptCache[s.SessionID]; hit &&
+			path != "" && cached.path == path && cached.mtime.Equal(mtime) {
+			snap = cached.snap
+			shells = cached.subshellCount
+		} else {
+			snap, _ = transcript.Scan(path)
+			shells, _ = subshellCounter.Count(s.PID)
+			if path != "" {
+				p.transcriptCache[s.SessionID] = cachedTranscript{
+					path: path, mtime: mtime, snap: snap, subshellCount: shells,
+				}
+			}
+		}
+
+		// TerminalHost cache: detect once per PID lifetime.
+		if host, hit := p.terminalHostCache[s.PID]; hit {
+			s.TerminalHost = host
+		} else {
+			s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
+			p.terminalHostCache[s.PID] = s.TerminalHost
+		}
 
 		// Burn rate: add delta (tokens generated since last poll) to ring buffers.
 		prev := p.prevTotalTokens[s.SessionID]
-		delta := max(ctxSnap.TotalTokens-prev, 0)
-		p.prevTotalTokens[s.SessionID] = ctxSnap.TotalTokens
+		delta := max(snap.TotalTokens-prev, 0)
+		p.prevTotalTokens[s.SessionID] = snap.TotalTokens
 
 		winShort := p.BurnWindowShort
 		if winShort == 0 {
@@ -93,14 +122,14 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnLong[s.SessionID].Add(now, delta)
 
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
-			ContextTokens:     ctxSnap.ContextTokens,
-			SessionTokens:     ctxSnap.TotalTokens,
-			Model:             ctxSnap.Model,
-			FirstPrompt:       fp,
-			SubagentCount:     subs,
+			ContextTokens:     snap.ContextTokens,
+			SessionTokens:     snap.TotalTokens,
+			Model:             snap.Model,
+			FirstPrompt:       snap.FirstPrompt,
+			SubagentCount:     snap.SubagentCount,
 			SubshellCount:     shells,
-			AwaitingInput:     waiting,
-			RateLimitResetsAt: resetsAt,
+			AwaitingInput:     snap.AwaitingInput,
+			RateLimitResetsAt: snap.RateLimitResetsAt,
 			BurnRateShort:     p.burnShort[s.SessionID].Rate(now),
 			BurnRateLong:      p.burnLong[s.SessionID].Rate(now),
 		}
@@ -116,6 +145,17 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			delete(p.burnShort, id)
 			delete(p.burnLong, id)
 			delete(p.prevTotalTokens, id)
+			delete(p.transcriptCache, id)
+		}
+	}
+	// Prune terminalHostCache by PID (different key space from session ID).
+	activePIDs := make(map[int]bool, len(sessions))
+	for _, s := range sessions {
+		activePIDs[s.PID] = true
+	}
+	for pid := range p.terminalHostCache {
+		if !activePIDs[pid] {
+			delete(p.terminalHostCache, pid)
 		}
 	}
 

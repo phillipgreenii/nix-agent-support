@@ -80,6 +80,67 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 	}
 }
 
+func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
+	p := &Poller{
+		SessionsDir: "../../tests/fixtures/sessions",
+		ClaudeHome:  "../../tests/fixtures/claude-home",
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Now() },
+	}
+	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.terminalHostCache) == 0 {
+		t.Error("terminalHostCache should be populated after Snapshot")
+	}
+}
+
+func TestSnapshotPopulatesTranscriptCache(t *testing.T) {
+	p := &Poller{
+		SessionsDir: "../../tests/fixtures/sessions",
+		ClaudeHome:  "../../tests/fixtures/claude-home",
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Now() },
+	}
+	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.transcriptCache) == 0 {
+		t.Error("transcriptCache should be populated after Snapshot")
+	}
+}
+
+func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
+	p := &Poller{
+		SessionsDir: "../../tests/fixtures/sessions",
+		ClaudeHome:  "../../tests/fixtures/claude-home",
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Now() },
+	}
+	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	firstCache := make(map[int]string, len(p.terminalHostCache))
+	for pid, host := range p.terminalHostCache {
+		firstCache[pid] = host
+	}
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for pid, host := range firstCache {
+		if got := p.terminalHostCache[pid]; got != host {
+			t.Errorf("terminalHostCache[%d]: first=%q second=%q (changed unexpectedly)", pid, host, got)
+		}
+	}
+}
+
 func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	type call struct{ cwd, branch string }
 	var calls []call
