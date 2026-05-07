@@ -33,18 +33,28 @@ func Scan(path string) (Snapshot, error) {
 	defer f.Close()
 
 	type scanEv struct {
-		Type      string    `json:"type"`
-		Subtype   string    `json:"subtype"`
-		Timestamp time.Time `json:"timestamp"`
-		RetryInMs int64     `json:"retryInMs"`
-		Message   Message   `json:"message"`
-		Error     struct {
+		Type      string          `json:"type"`
+		Subtype   string          `json:"subtype"`
+		Timestamp time.Time       `json:"timestamp"`
+		RetryInMs int64           `json:"retryInMs"`
+		Message   Message         `json:"message"`
+		Error     json.RawMessage `json:"error"`
+	}
+
+	// nestedErrType extracts the legacy rate_limit_error type from the
+	// nested error object shape: {"error":{"error":{"type":"..."}}}
+	nestedErrType := func(raw json.RawMessage) string {
+		var nested struct {
 			Error struct {
 				Error struct {
 					Type string `json:"type"`
 				} `json:"error"`
 			} `json:"error"`
-		} `json:"error"`
+		}
+		if json.Unmarshal(raw, &nested) == nil {
+			return nested.Error.Error.Type
+		}
+		return ""
 	}
 
 	var snap Snapshot
@@ -74,6 +84,15 @@ func Scan(path string) (Snapshot, error) {
 			}
 		}
 
+		// Auxiliary parse: only the synthetic-assistant rate-limit shape sets
+		// these top-level fields. Failure leaves all zero values (old shape).
+		var aux struct {
+			Error             string `json:"error"`
+			IsApiErrorMessage bool   `json:"isApiErrorMessage"`
+		}
+		_ = json.Unmarshal(sc.Bytes(), &aux)
+		isSyntheticRateLimit := ev.Type == "assistant" && aux.Error == "rate_limit" && aux.IsApiErrorMessage
+
 		switch ev.Type {
 		case "user":
 			if !firstPromptDone {
@@ -88,6 +107,24 @@ func Scan(path string) (Snapshot, error) {
 			}
 
 		case "assistant":
+			if isSyntheticRateLimit {
+				// Synthetic rate-limit message has zero usage and is NOT a user/assistant
+				// resume. Read the reset time from the text and record it.
+				var text string
+				for _, b := range ev.Message.Content {
+					if b.Type == "text" {
+						text = b.Text
+						break
+					}
+				}
+				if t, ok := parseLimitResetText(text, ev.Timestamp); ok {
+					lastAPIErrTime = t
+					lastAPIErrRetry = 0 // sentinel: lastAPIErrTime is absolute
+					hasAPIErr = true
+					resumedAfterAPIErr = false
+				}
+				break
+			}
 			u := ev.Message.Usage
 			ctx := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 			if ctx > 0 {
@@ -112,7 +149,7 @@ func Scan(path string) (Snapshot, error) {
 
 		case "system":
 			if ev.Subtype == "api_error" &&
-				ev.Error.Error.Error.Type == "rate_limit_error" && ev.RetryInMs > 0 {
+				nestedErrType(ev.Error) == "rate_limit_error" && ev.RetryInMs > 0 {
 				lastAPIErrTime = ev.Timestamp
 				lastAPIErrRetry = ev.RetryInMs
 				hasAPIErr = true
@@ -130,7 +167,12 @@ func Scan(path string) (Snapshot, error) {
 	snap.SubagentCount = len(openTasks)
 	snap.AwaitingInput = len(pendingAUQ) > 0
 	if hasAPIErr && !resumedAfterAPIErr {
-		snap.RateLimitResetsAt = lastAPIErrTime.Add(time.Duration(lastAPIErrRetry) * time.Millisecond)
+		if lastAPIErrRetry == 0 {
+			// Synthetic shape: lastAPIErrTime is already the absolute reset time.
+			snap.RateLimitResetsAt = lastAPIErrTime
+		} else {
+			snap.RateLimitResetsAt = lastAPIErrTime.Add(time.Duration(lastAPIErrRetry) * time.Millisecond)
+		}
 	}
 	return snap, nil
 }

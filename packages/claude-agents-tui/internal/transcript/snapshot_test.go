@@ -100,3 +100,39 @@ func TestScanRateLimitClearedAfterResume(t *testing.T) {
 		t.Errorf("RateLimitResetsAt should be zero after user resumes, got %v", snap.RateLimitResetsAt)
 	}
 }
+
+func TestScanSyntheticRateLimit(t *testing.T) {
+	ts := time.Date(2026, 5, 5, 17, 12, 37, 0, time.UTC)
+	path := t.TempDir() + "/synth.jsonl"
+	body := `{"type":"assistant","timestamp":"` + ts.UTC().Format(time.RFC3339Nano) +
+		`","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 3:30pm (America/New_York)"}]},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	want := time.Date(2026, 5, 5, 19, 30, 0, 0, time.UTC)
+	if !snap.RateLimitResetsAt.Equal(want) {
+		t.Errorf("RateLimitResetsAt = %v, want %v", snap.RateLimitResetsAt.UTC(), want)
+	}
+}
+
+func TestScanSyntheticRateLimitClearedByLaterUser(t *testing.T) {
+	ts := time.Date(2026, 5, 5, 17, 12, 37, 0, time.UTC)
+	path := t.TempDir() + "/synth_cleared.jsonl"
+	body := `{"type":"assistant","timestamp":"` + ts.UTC().Format(time.RFC3339Nano) +
+		`","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 3:30pm (America/New_York)"}]},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}` + "\n" +
+		`{"type":"user","timestamp":"2026-05-05T19:35:00Z","message":{"role":"user","content":"continue"}}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if !snap.RateLimitResetsAt.IsZero() {
+		t.Errorf("RateLimitResetsAt = %v, want zero (user resumed)", snap.RateLimitResetsAt)
+	}
+}
