@@ -182,7 +182,13 @@ func RenderWindowTree(nodes []*aggregate.PathNode, rows []Row, scrollOffset, bod
 			}
 			indent := strings.Repeat("  ", row.Depth)
 			selected := opts.HasCursor && i == opts.Cursor
-			sb.WriteString(renderSession(row.Session, opts, indent+prefix, cont, selected))
+			// Reduce reported width by indent size so labelStyle computes the
+			// correct label column — prefixCols assumes no indentation.
+			sessionOpts := opts
+			if sessionOpts.Width > 0 {
+				sessionOpts.Width -= 2 * row.Depth
+			}
+			sb.WriteString(renderSession(row.Session, sessionOpts, indent+prefix, cont, selected))
 		}
 	}
 
