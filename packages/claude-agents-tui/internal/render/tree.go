@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
 
@@ -120,7 +121,7 @@ func renderDirRow(d *aggregate.Directory, opts TreeOpts) string {
 		branchStr = "  🌿 " + opts.Theme.Branch.Render(d.Branch)
 		if d.PRInfo != nil {
 			prNum := osc8Link(d.PRInfo.URL, fmt.Sprintf("#%d", d.PRInfo.Number))
-			prTitle := truncate(d.PRInfo.Title, 40)
+			prTitle := wrap.Line(d.PRInfo.Title, 40)
 			branchStr += "  →  " + prNum + " " + prTitle
 		}
 	}
@@ -169,7 +170,7 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 		tail,
 	)
 	if s.SessionEnrichment.FirstPrompt != "" {
-		out += fmt.Sprintf("  %s    ↳ %s\n", cont, opts.Theme.Prompt.Render(fmt.Sprintf("%q", truncate(s.SessionEnrichment.FirstPrompt, 80))))
+		out += fmt.Sprintf("  %s    ↳ %s\n", cont, opts.Theme.Prompt.Render(fmt.Sprintf("%q", wrap.Line(s.SessionEnrichment.FirstPrompt, 80))))
 	}
 	return out
 }
@@ -221,13 +222,6 @@ func FmtTok(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
 }
 
 // osc8Link wraps text in an OSC 8 terminal hyperlink. Terminals that support
