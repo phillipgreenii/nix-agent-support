@@ -104,12 +104,12 @@ func TestHeaderToggleBothOptionsPresent(t *testing.T) {
 		{
 			name:    "defaults",
 			opts:    HeaderOpts{},
-			wantAll: []string{"tokens", "cost", "active", "all", "name", "id"},
+			wantAll: []string{"tokens", "cost", "active", "all", "name", "id", "[M] resume now"},
 		},
 		{
 			name:    "CostMode+ShowAll+ForceID",
 			opts:    HeaderOpts{CostMode: true, ShowAll: true, ForceID: true},
-			wantAll: []string{"tokens", "cost", "active", "all", "name", "id"},
+			wantAll: []string{"tokens", "cost", "active", "all", "name", "id", "[M] resume now"},
 		},
 	}
 	for _, tc := range cases {
