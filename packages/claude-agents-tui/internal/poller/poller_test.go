@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
@@ -126,10 +127,7 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	firstCache := make(map[int]string, len(p.terminalHostCache))
-	for pid, host := range p.terminalHostCache {
-		firstCache[pid] = host
-	}
+	firstCache := maps.Clone(p.terminalHostCache)
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
