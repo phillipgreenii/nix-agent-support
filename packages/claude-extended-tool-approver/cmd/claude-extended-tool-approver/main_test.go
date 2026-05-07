@@ -3,25 +3,55 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
-func moduleRoot(t *testing.T) string {
-	t.Helper()
+var cliBinary string
+
+func TestMain(m *testing.M) {
+	root, err := findModuleRoot()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	f, err := os.CreateTemp("", "claude-extended-tool-approver-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	f.Close()
+	cliBinary = f.Name()
+
+	build := exec.Command("go", "build", "-o", cliBinary, "./cmd/claude-extended-tool-approver")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "build failed: %v\n%s\n", err, out)
+		os.Remove(cliBinary)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	os.Remove(cliBinary)
+	os.Exit(code)
+}
+
+func findModuleRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("go.mod not found")
+			return "", fmt.Errorf("go.mod not found")
 		}
 		dir = parent
 	}
@@ -29,8 +59,7 @@ func moduleRoot(t *testing.T) string {
 
 func runHook(t *testing.T, input string) map[string]any {
 	t.Helper()
-	cmd := exec.Command("go", "run", "./cmd/claude-extended-tool-approver")
-	cmd.Dir = moduleRoot(t)
+	cmd := exec.Command(cliBinary)
 	cmd.Env = os.Environ()
 	cmd.Stdin = bytes.NewBufferString(input)
 	out, err := cmd.Output()
@@ -81,8 +110,7 @@ func TestIntegration_UnknownCommand(t *testing.T) {
 }
 
 func TestIntegration_BadJSON(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/claude-extended-tool-approver")
-	cmd.Dir = moduleRoot(t)
+	cmd := exec.Command(cliBinary)
 	cmd.Env = os.Environ()
 	cmd.Stdin = bytes.NewBufferString("not json")
 	out, err := cmd.Output()
@@ -286,9 +314,7 @@ func TestIntegration_SessionEnd_ReturnsEmpty(t *testing.T) {
 
 func runCLI(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	cmdArgs := append([]string{"run", "./cmd/claude-extended-tool-approver"}, args...)
-	cmd := exec.Command("go", cmdArgs...)
-	cmd.Dir = moduleRoot(t)
+	cmd := exec.Command(cliBinary, args...)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

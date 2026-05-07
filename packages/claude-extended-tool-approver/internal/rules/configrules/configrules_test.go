@@ -48,6 +48,19 @@ func TestConfigRules_BlockedCommand(t *testing.T) {
 	}
 }
 
+func TestConfigRules_ApprovedCommandWithEnvVars_Abstains(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr", "pyzr"}})
+	r := NewFromFile(filepath.Join(dir, "rules.json"))
+	got := r.Evaluate(&hookio.HookInput{
+		ToolName:  "Bash",
+		ToolInput: mustJSON(map[string]string{"command": "PYTHONSTARTUP=/evil.py bin/pyzr run"}),
+	})
+	if got.Decision != hookio.Abstain {
+		t.Errorf("pyzr with env var: got %s, want abstain", got.Decision)
+	}
+}
+
 func TestConfigRules_AbstainForUnknown(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, Config{ApprovedCommands: []string{"gozr"}, BlockedCommands: []string{"zn-self-apply"}})

@@ -36,9 +36,7 @@ func setupShowTestDB(t *testing.T) string {
 
 func runSubcommand(t *testing.T, dataDir string, args ...string) ([]byte, error) {
 	t.Helper()
-	fullArgs := append([]string{"run", "./cmd/claude-extended-tool-approver"}, args...)
-	cmd := exec.Command("go", fullArgs...)
-	cmd.Dir = moduleRoot(t)
+	cmd := exec.Command(cliBinary, args...)
 	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dataDir)
 	return cmd.CombinedOutput()
 }

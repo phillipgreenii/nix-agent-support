@@ -79,6 +79,9 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		if r.approved[base] {
+			if len(pc.EnvVars) > 0 {
+				return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			}
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "config-rules: " + base + " is in approved list",
