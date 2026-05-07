@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 )
 
@@ -47,7 +48,7 @@ func (m *Model) View() string {
 			TotalSessionTokens: totalTok,
 		}
 		if m.height > 0 {
-			headerLines := strings.Count(header, "\n")
+			headerLines := visualLineCount(header, m.width)
 			bodyHeight := max(m.height-headerLines-1, 1) // 1 for legend
 			body = render.RenderWindowTree(m.pathNodes, m.flatRows, m.scrollOffset, bodyHeight, opts)
 		} else {
@@ -55,4 +56,20 @@ func (m *Model) View() string {
 		}
 	}
 	return strings.Join([]string{header, body, legend}, "\n")
+}
+
+// visualLineCount returns the number of terminal lines the string will occupy
+// at the given terminal width, accounting for line wrapping. Width ≤ 0 falls
+// back to counting newlines.
+func visualLineCount(s string, width int) int {
+	total := 0
+	for _, line := range strings.Split(s, "\n") {
+		w := lipgloss.Width(line) // strips ANSI, measures display width
+		if width <= 0 || w == 0 {
+			total++
+		} else {
+			total += (w + width - 1) / width
+		}
+	}
+	return total
 }
