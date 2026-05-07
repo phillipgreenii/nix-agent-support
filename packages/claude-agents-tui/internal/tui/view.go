@@ -63,7 +63,7 @@ func (m *Model) View() string {
 // back to counting newlines.
 func visualLineCount(s string, width int) int {
 	total := 0
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		w := lipgloss.Width(line) // strips ANSI, measures display width
 		if width <= 0 || w == 0 {
 			total++
