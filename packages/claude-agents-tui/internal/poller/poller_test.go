@@ -141,6 +141,33 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 	}
 }
 
+func TestSnapshotTranscriptCacheRetainsAcrossPolls(t *testing.T) {
+	p := &Poller{
+		SessionsDir: "../../tests/fixtures/sessions",
+		ClaudeHome:  "../../tests/fixtures/claude-home",
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Now() },
+	}
+	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	firstCache := make(map[string]string, len(p.transcriptCache))
+	for id, entry := range p.transcriptCache {
+		firstCache[id] = entry.path
+	}
+
+	if _, _, err := p.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for id, path := range firstCache {
+		if got := p.transcriptCache[id].path; got != path {
+			t.Errorf("transcriptCache[%s].path: first=%q second=%q (changed unexpectedly)", id, path, got)
+		}
+	}
+}
+
 func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	type call struct{ cwd, branch string }
 	var calls []call
