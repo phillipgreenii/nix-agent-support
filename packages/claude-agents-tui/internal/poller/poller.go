@@ -13,6 +13,13 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/transcript"
 )
 
+// stalePauseGrace bounds how far past the rate-limit reset the TUI will still
+// treat a session as paused. Beyond this, the session was likely abandoned
+// during the window; auto-resume should not fire to every such session on
+// toggle. 5 minutes is large enough to avoid races with the natural fire path
+// and small enough that abandoned sessions are quickly cleared.
+const stalePauseGrace = 5 * time.Minute
+
 type cachedTranscript struct {
 	path          string
 	mtime         time.Time
@@ -121,6 +128,15 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnShort[s.SessionID].Add(now, delta)
 		p.burnLong[s.SessionID].Add(now, delta)
 
+		// Drop a rate-limit reset that's already in the past beyond a small
+		// grace window. The session was paused but never resumed (likely
+		// abandoned); without this filter, enabling auto-resume would fire
+		// real keystrokes to every dormant session.
+		rlReset := snap.RateLimitResetsAt
+		if !rlReset.IsZero() && now.After(rlReset.Add(stalePauseGrace)) {
+			rlReset = time.Time{}
+		}
+
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
 			ContextTokens:     snap.ContextTokens,
 			SessionTokens:     snap.TotalTokens,
@@ -129,7 +145,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			SubagentCount:     snap.SubagentCount,
 			SubshellCount:     shells,
 			AwaitingInput:     snap.AwaitingInput,
-			RateLimitResetsAt: snap.RateLimitResetsAt,
+			RateLimitResetsAt: rlReset,
 			BurnRateShort:     p.burnShort[s.SessionID].Rate(now),
 			BurnRateLong:      p.burnLong[s.SessionID].Rate(now),
 		}

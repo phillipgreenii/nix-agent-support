@@ -2,12 +2,102 @@ package poller
 
 import (
 	"context"
+	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
+
+// makeRateLimitFixture writes a session file + transcript with a single
+// synthetic rate-limit event whose reset time is the supplied resetISO. Returns
+// (sessionsDir, claudeHome).
+func makeRateLimitFixture(t *testing.T, resetISO string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	claudeHome := filepath.Join(root, "claude-home")
+	cwd := filepath.Join(root, "cwd")
+	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	projectDir := filepath.Join(claudeHome, "projects", slug)
+	for _, d := range []string{sessionsDir, projectDir, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionJSON := fmt.Sprintf(`{"pid":99001,"sessionId":"rl-sess","cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli"}`, cwd)
+	if err := os.WriteFile(filepath.Join(sessionsDir, "99001.json"), []byte(sessionJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The encoded project dir name is "-<basename>-cwd" produced from cwd above.
+	transcript := `{"type":"assistant","timestamp":"` + resetISO + `","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 1pm (UTC)"}]},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "rl-sess.jsonl"), []byte(transcript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return sessionsDir, claudeHome
+}
+
+func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
+	// Synthetic rate-limit event written 2026-05-05 at 00:00 UTC says
+	// "resets 1pm (UTC)" → reset = 2026-05-05 13:00 UTC. With Now() far past that
+	// (2026-05-06), the enrichment must show RateLimitResetsAt zero.
+	sessionsDir, claudeHome := makeRateLimitFixture(t, "2026-05-05T00:00:00Z")
+	p := &Poller{
+		SessionsDir: sessionsDir,
+		ClaudeHome:  claudeHome,
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
+		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+	}
+	tree, _, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range tree.Dirs {
+		for _, s := range d.Sessions {
+			if !s.SessionEnrichment.RateLimitResetsAt.IsZero() {
+				t.Errorf("RateLimitResetsAt = %v, want zero (stale beyond grace)", s.SessionEnrichment.RateLimitResetsAt)
+			}
+		}
+	}
+	if !tree.WindowResetsAt.IsZero() {
+		t.Errorf("WindowResetsAt = %v, want zero (no live pauses)", tree.WindowResetsAt)
+	}
+}
+
+func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
+	// Reset at 2026-05-05 13:00 UTC, Now() = 2026-05-05 13:02 UTC (only 2 min
+	// past — within stalePauseGrace). The reset MUST be preserved so the auto-
+	// resume path can still fire.
+	sessionsDir, claudeHome := makeRateLimitFixture(t, "2026-05-05T00:00:00Z")
+	p := &Poller{
+		SessionsDir: sessionsDir,
+		ClaudeHome:  claudeHome,
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
+		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+	}
+	tree, _, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 5, 5, 13, 0, 0, 0, time.UTC)
+	found := false
+	for _, d := range tree.Dirs {
+		for _, s := range d.Sessions {
+			if s.SessionEnrichment.RateLimitResetsAt.Equal(want) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("RateLimitResetsAt was filtered prematurely; tree=%+v", tree.Dirs)
+	}
+}
 
 func TestSnapshotProducesTree(t *testing.T) {
 	p := &Poller{
