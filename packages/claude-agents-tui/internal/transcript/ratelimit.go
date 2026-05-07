@@ -15,8 +15,9 @@ import (
 var limitResetRe = regexp.MustCompile(`resets\s+(\d{1,2}):(\d{2})(am|pm)\s+\(([^)]+)\)`)
 
 // parseLimitResetText resolves the next occurrence of the clock time + IANA TZ
-// in the message at or after eventTime. Returns (zero, false) on any parse
-// failure (bad clock time, unknown TZ, regex miss).
+// in the message strictly after eventTime (the next reset window is always in
+// the future). Returns (zero, false) on any parse failure (bad clock time,
+// unknown TZ, regex miss).
 func parseLimitResetText(text string, eventTime time.Time) (time.Time, bool) {
 	m := limitResetRe.FindStringSubmatch(text)
 	if m == nil {
