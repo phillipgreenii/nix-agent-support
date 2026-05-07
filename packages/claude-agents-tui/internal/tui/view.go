@@ -5,14 +5,22 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
+	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
 )
 
 func (m *Model) View() string {
+	// Defer rendering until the first WindowSizeMsg arrives. The View contract
+	// is "every line ≤ effectiveWidth"; we cannot honor it without knowing the
+	// width, and a partial frame would be fed to bubbletea's diff engine and
+	// soft-wrapped by the terminal.
+	if m.width == 0 {
+		return "loading…"
+	}
 	if m.tree == nil {
 		return "loading…"
 	}
 	if m.selected != nil {
-		return RenderDetails(m.selected, m.width)
+		return wrap.Block(RenderDetails(m.selected, m.width), wrap.EffectiveWidth(m.width))
 	}
 	header := render.Header(m.tree, render.HeaderOpts{
 		CaffeinateOn:    m.caffeinateOn,
@@ -56,20 +64,23 @@ func (m *Model) View() string {
 			body = render.RenderWindowTree(m.pathNodes, m.flatRows, 0, 10000, opts)
 		}
 	}
-	return strings.Join([]string{header, body, legend}, "\n")
+	joined := strings.Join([]string{header, body, legend}, "\n")
+	return wrap.Block(joined, wrap.EffectiveWidth(m.width))
 }
 
 // visualLineCount returns the number of terminal lines the string will occupy
 // at the given terminal width, accounting for line wrapping. Width ≤ 0 falls
-// back to counting newlines.
+// back to wrap.FallbackWidth so the count stays consistent with the rest of
+// the rendering pipeline.
 func visualLineCount(s string, width int) int {
+	ew := wrap.EffectiveWidth(width)
 	total := 0
 	for line := range strings.SplitSeq(s, "\n") {
 		w := lipgloss.Width(line) // strips ANSI, measures display width
-		if width <= 0 || w == 0 {
+		if w == 0 {
 			total++
 		} else {
-			total += (w + width - 1) / width
+			total += (w + ew - 1) / ew
 		}
 	}
 	return total
