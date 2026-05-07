@@ -23,6 +23,7 @@ func (m *Model) View() string {
 		AutoResume:      m.autoResume,
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
+		Width:           m.width,
 	})
 	legend := render.Legend(m.width)
 

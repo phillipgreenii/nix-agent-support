@@ -93,8 +93,8 @@ func TestHeaderIncludesRefreshTimestamp(t *testing.T) {
 }
 
 func TestHeaderToggleBothOptionsPresent(t *testing.T) {
-	// Verify both sides of every toggle appear in the header regardless
-	// of toggle state. This catches accidental omissions when state flips.
+	// Verify both sides of every toggle appear in the header regardless of
+	// toggle state. Pinned to WIDE width so full-word labels apply.
 	tree := &aggregate.Tree{}
 	cases := []struct {
 		name    string
@@ -103,12 +103,12 @@ func TestHeaderToggleBothOptionsPresent(t *testing.T) {
 	}{
 		{
 			name:    "defaults",
-			opts:    HeaderOpts{},
+			opts:    HeaderOpts{Width: 200},
 			wantAll: []string{"tokens", "cost", "active", "all", "name", "id", "[M] resume now"},
 		},
 		{
 			name:    "CostMode+ShowAll+ForceID",
-			opts:    HeaderOpts{CostMode: true, ShowAll: true, ForceID: true},
+			opts:    HeaderOpts{Width: 200, CostMode: true, ShowAll: true, ForceID: true},
 			wantAll: []string{"tokens", "cost", "active", "all", "name", "id", "[M] resume now"},
 		},
 	}

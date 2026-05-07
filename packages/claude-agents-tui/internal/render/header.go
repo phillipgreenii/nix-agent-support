@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
 )
 
 type HeaderOpts struct {
@@ -21,6 +22,7 @@ type HeaderOpts struct {
 	AutoResume      bool
 	WindowResetsAt  time.Time
 	AutoResumeDelay time.Duration
+	Width           int // terminal columns; 0 falls back to wrap.FallbackWidth
 }
 
 func Header(tree *aggregate.Tree, opts HeaderOpts) string {
@@ -29,42 +31,88 @@ func Header(tree *aggregate.Tree, opts HeaderOpts) string {
 	}
 	var sb strings.Builder
 
-	caff := "○ off"
+	caffWide := "○ off"
+	caffGlyph := "○"
 	if opts.CaffeinateOn {
+		caffGlyph = "●"
 		if opts.GraceRemaining > 0 {
-			caff = fmt.Sprintf("● on %ds", int(opts.GraceRemaining.Seconds()))
+			caffWide = fmt.Sprintf("● on %ds", int(opts.GraceRemaining.Seconds()))
 		} else {
-			caff = "● on"
+			caffWide = "● on"
 		}
 	}
 
 	th := opts.Theme
-	tokLabel, costLabel := "tokens", "cost"
-	if opts.CostMode {
-		costLabel = th.ActiveToggle.Render("cost")
-	} else {
-		tokLabel = th.ActiveToggle.Render("tokens")
-	}
-	activeLabel, allLabel := "active", "all"
-	if opts.ShowAll {
-		allLabel = th.ActiveToggle.Render("all")
-	} else {
-		activeLabel = th.ActiveToggle.Render("active")
-	}
-	nameLabel, idLabel := "name", "id"
-	if opts.ForceID {
-		idLabel = th.ActiveToggle.Render("id")
-	} else {
-		nameLabel = th.ActiveToggle.Render("name")
+	autoResumeWide := "○ off"
+	autoResumeGlyph := "○"
+	if opts.AutoResume {
+		autoResumeWide = th.ActiveToggle.Render("● on")
+		autoResumeGlyph = th.ActiveToggle.Render("●")
 	}
 
-	autoResumeLabel := "○ off"
-	if opts.AutoResume {
-		autoResumeLabel = th.ActiveToggle.Render("● on")
+	tier := wrap.Tier(opts.Width)
+	switch tier {
+	case wrap.TierWide:
+		tokLabel, costLabel := "tokens", "cost"
+		if opts.CostMode {
+			costLabel = th.ActiveToggle.Render("cost")
+		} else {
+			tokLabel = th.ActiveToggle.Render("tokens")
+		}
+		activeLabel, allLabel := "active", "all"
+		if opts.ShowAll {
+			allLabel = th.ActiveToggle.Render("all")
+		} else {
+			activeLabel = th.ActiveToggle.Render("active")
+		}
+		nameLabel, idLabel := "name", "id"
+		if opts.ForceID {
+			idLabel = th.ActiveToggle.Render("id")
+		} else {
+			nameLabel = th.ActiveToggle.Render("name")
+		}
+		fmt.Fprintf(&sb, "[C]affeinate: %s  |  [t] %s · %s  |  [a] %s · %s  |  [n] %s · %s  |  [q]\n",
+			caffWide, tokLabel, costLabel, activeLabel, allLabel, nameLabel, idLabel)
+		fmt.Fprintf(&sb, "[R] auto-resume: %s  |  [M] resume now\n\n", autoResumeWide)
+	case wrap.TierNarrow:
+		tokLabel, costLabel := "tok", "cost"
+		if opts.CostMode {
+			costLabel = th.ActiveToggle.Render("cost")
+		} else {
+			tokLabel = th.ActiveToggle.Render("tok")
+		}
+		actLabel, allLabel := "act", "all"
+		if opts.ShowAll {
+			allLabel = th.ActiveToggle.Render("all")
+		} else {
+			actLabel = th.ActiveToggle.Render("act")
+		}
+		nmLabel, idLabel := "nm", "id"
+		if opts.ForceID {
+			idLabel = th.ActiveToggle.Render("id")
+		} else {
+			nmLabel = th.ActiveToggle.Render("nm")
+		}
+		fmt.Fprintf(&sb, "[C] %s  |  [t] %s · %s  |  [a] %s · %s  |  [n] %s · %s  |  [q]\n",
+			caffWide, tokLabel, costLabel, actLabel, allLabel, nmLabel, idLabel)
+		fmt.Fprintf(&sb, "[R] auto: %s  |  [M] resume\n\n", autoResumeWide)
+	default: // TierTiny — keys-only, show only active variant per toggle
+		tokOrCost := "tok"
+		if opts.CostMode {
+			tokOrCost = "cost"
+		}
+		actOrAll := "act"
+		if opts.ShowAll {
+			actOrAll = "all"
+		}
+		nmOrID := "nm"
+		if opts.ForceID {
+			nmOrID = "id"
+		}
+		fmt.Fprintf(&sb, "[C]%s  [t]%s  [a]%s  [n]%s  [q]\n",
+			caffGlyph, th.ActiveToggle.Render(tokOrCost), th.ActiveToggle.Render(actOrAll), th.ActiveToggle.Render(nmOrID))
+		fmt.Fprintf(&sb, "[R]%s  [M]now\n\n", autoResumeGlyph)
 	}
-	fmt.Fprintf(&sb, "[C]affeinate: %s  |  [t] %s · %s  |  [a] %s · %s  |  [n] %s · %s  |  [q]\n",
-		caff, tokLabel, costLabel, activeLabel, allLabel, nameLabel, idLabel)
-	fmt.Fprintf(&sb, "[R] auto-resume: %s  |  [M] resume now\n\n", autoResumeLabel)
 
 	switch {
 	case !tree.CCUsageProbed:
