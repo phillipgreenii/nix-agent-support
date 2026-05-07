@@ -300,3 +300,71 @@ func TestAutoResumeFiredResetWhenWindowClears(t *testing.T) {
 		t.Error("autoResumeFired should reset when WindowResetsAt clears")
 	}
 }
+
+func TestManualFireSendsToAllNonWorkingRegardlessOfAutoResume(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	tree := &aggregate.Tree{
+		Dirs: []*aggregate.Directory{{
+			Path: "/p",
+			Sessions: []*aggregate.SessionView{
+				{Session: &session.Session{PID: 11, Status: session.Idle}},
+				{Session: &session.Session{PID: 22, Status: session.Working}},
+				{Session: &session.Session{PID: 33, Status: session.Idle}},
+			},
+		}},
+	}
+	m := NewModel(Options{
+		Tree:              tree,
+		Signalers:         []signal.Signaler{mock},
+		AutoResumeMessage: "go",
+	})
+	// autoResume left false on purpose — manual fire MUST work without the toggle.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'M'}})
+	if len(mock.sent) != 2 {
+		t.Fatalf("sent = %v, want 2 entries (PIDs 11 and 33)", mock.sent)
+	}
+	want := map[string]bool{"11:go": false, "33:go": false}
+	for _, s := range mock.sent {
+		if _, ok := want[s]; !ok {
+			t.Errorf("unexpected send %q", s)
+		}
+		want[s] = true
+	}
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("missing send %q", k)
+		}
+	}
+}
+
+func TestManualFireDoesNotMutateTree(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	resetsAt := time.Now().Add(30 * time.Minute)
+	tree := &aggregate.Tree{
+		WindowResetsAt: resetsAt,
+		Dirs: []*aggregate.Directory{{
+			Path:     "/p",
+			Sessions: []*aggregate.SessionView{{Session: &session.Session{PID: 7, Status: session.Idle}}},
+		}},
+	}
+	m := NewModel(Options{
+		Tree: tree, Signalers: []signal.Signaler{mock}, AutoResumeMessage: "go",
+	})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'M'}})
+	if !m.tree.WindowResetsAt.Equal(resetsAt) {
+		t.Errorf("WindowResetsAt mutated; got %v, want %v", m.tree.WindowResetsAt, resetsAt)
+	}
+	if m.autoResumeFired {
+		t.Error("autoResumeFired must not be set by manual fire")
+	}
+}
+
+func TestManualFireNilTreeNoCrash(t *testing.T) {
+	mock := &mockSignaler{name: "mock", detect: true}
+	m := NewModel(Options{Tree: nil, Signalers: []signal.Signaler{mock}, AutoResumeMessage: "go"})
+	// Defensive: must not panic, must not send anything.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'M'}})
+	if len(mock.sent) != 0 {
+		t.Errorf("sent = %v, want empty (nil tree)", mock.sent)
+	}
+}

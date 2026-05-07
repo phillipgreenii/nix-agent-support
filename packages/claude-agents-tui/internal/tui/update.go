@@ -44,6 +44,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Batch(cmds...)
 			}
+		case "M":
+			if m.tree == nil {
+				return m, nil
+			}
+			for _, d := range m.tree.Dirs {
+				for _, sv := range d.Sessions {
+					if sv.Status == session.Working {
+						continue
+					}
+					sig := signal.ResolveSignaler(m.signalers, sv.PID)
+					if sig == nil {
+						fmt.Fprintf(os.Stderr, "manual-resume: no signaler for pid %d\n", sv.PID)
+						continue
+					}
+					if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
+						fmt.Fprintf(os.Stderr, "manual-resume: send failed pid %d: %v\n", sv.PID, err)
+					}
+				}
+			}
 		case "down", "j":
 			m.cursor++
 			m.clampCursor()
