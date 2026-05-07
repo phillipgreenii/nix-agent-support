@@ -77,6 +77,18 @@ func RateLimitPause(path string) (resetsAt time.Time, err error) {
 			} `json:"error"`
 		} `json:"error"`
 	}
+	type syntheticScan struct {
+		Type              string    `json:"type"`
+		Timestamp         time.Time `json:"timestamp"`
+		Error             string    `json:"error"`
+		IsApiErrorMessage bool      `json:"isApiErrorMessage"`
+		Message           struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
 	type typeOnly struct {
 		Type string `json:"type"`
 	}
@@ -93,36 +105,57 @@ func RateLimitPause(path string) (resetsAt time.Time, err error) {
 		return time.Time{}, sc.Err()
 	}
 
-	// Find index of last rate_limit_error api_error event.
-	apiErrIdx := -1
-	var apiErrTime time.Time
-	var apiErrRetry int64
+	// Find index of last rate-limit event (either shape) and compute its absolute reset time.
+	lastIdx := -1
+	var lastResetsAt time.Time
 	for i, line := range lines {
+		// Old shape: system/api_error/rate_limit_error/retryInMs.
 		var ev rateLimitScan
-		if err := json.Unmarshal(line, &ev); err != nil {
+		if err := json.Unmarshal(line, &ev); err == nil &&
+			ev.Type == "system" && ev.Subtype == "api_error" &&
+			ev.Error.Error.Error.Type == "rate_limit_error" && ev.RetryInMs > 0 {
+			lastIdx = i
+			lastResetsAt = ev.Timestamp.Add(time.Duration(ev.RetryInMs) * time.Millisecond)
 			continue
 		}
-		if ev.Type == "system" && ev.Subtype == "api_error" &&
-			ev.Error.Error.Error.Type == "rate_limit_error" && ev.RetryInMs > 0 {
-			apiErrIdx = i
-			apiErrTime = ev.Timestamp
-			apiErrRetry = ev.RetryInMs
+		// New synthetic-assistant shape: error="rate_limit" + isApiErrorMessage.
+		var s syntheticScan
+		if err := json.Unmarshal(line, &s); err == nil &&
+			s.Type == "assistant" && s.Error == "rate_limit" && s.IsApiErrorMessage {
+			var text string
+			for _, b := range s.Message.Content {
+				if b.Type == "text" {
+					text = b.Text
+					break
+				}
+			}
+			if t, ok := parseLimitResetText(text, s.Timestamp); ok {
+				lastIdx = i
+				lastResetsAt = t
+			}
 		}
 	}
-	if apiErrIdx < 0 {
+	if lastIdx < 0 {
 		return time.Time{}, nil
 	}
 
-	// If any user or assistant event follows the api_error, the session already resumed.
-	for _, line := range lines[apiErrIdx+1:] {
+	// If a *non-synthetic* user or assistant event follows the rate-limit, the session resumed.
+	for _, line := range lines[lastIdx+1:] {
 		var ev typeOnly
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
-		if ev.Type == "user" || ev.Type == "assistant" {
-			return time.Time{}, nil
+		if ev.Type != "user" && ev.Type != "assistant" {
+			continue
 		}
+		// A synthetic rate-limit assistant must NOT count as a resume. Re-parse to check.
+		var s syntheticScan
+		if json.Unmarshal(line, &s) == nil &&
+			s.Type == "assistant" && s.Error == "rate_limit" && s.IsApiErrorMessage {
+			continue
+		}
+		return time.Time{}, nil
 	}
 
-	return apiErrTime.Add(time.Duration(apiErrRetry) * time.Millisecond), nil
+	return lastResetsAt, nil
 }

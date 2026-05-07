@@ -148,6 +148,63 @@ func TestParseLimitResetTextTwelveHour(t *testing.T) {
 	}
 }
 
+// syntheticRateLimitEvent returns a JSONL line for the new rate-limit shape.
+func syntheticRateLimitEvent(ts time.Time, text string) string {
+	return `{"type":"assistant","timestamp":"` + ts.UTC().Format(time.RFC3339Nano) +
+		`","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"` +
+		text + `"}]},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}`
+}
+
+func TestRateLimitPauseDetectsSyntheticAssistant(t *testing.T) {
+	ts := time.Date(2026, 5, 5, 17, 12, 37, 0, time.UTC) // 13:12 EDT
+	path := t.TempDir() + "/t.jsonl"
+	body := syntheticRateLimitEvent(ts, "You've hit your limit · resets 3:30pm (America/New_York)") + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	want := time.Date(2026, 5, 5, 19, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got.UTC(), want)
+	}
+}
+
+func TestRateLimitPauseSyntheticClearedByLaterUser(t *testing.T) {
+	ts := time.Date(2026, 5, 5, 17, 12, 37, 0, time.UTC)
+	path := t.TempDir() + "/t.jsonl"
+	body := syntheticRateLimitEvent(ts, "You've hit your limit · resets 3:30pm (America/New_York)") + "\n" +
+		`{"type":"user","timestamp":"2026-05-05T19:35:00Z","message":{"role":"user","content":"continue"}}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero (user resumed after rate-limit)", got)
+	}
+}
+
+func TestRateLimitPauseSyntheticIgnoredWhenTextUnparseable(t *testing.T) {
+	ts := time.Date(2026, 5, 5, 17, 12, 37, 0, time.UTC)
+	path := t.TempDir() + "/t.jsonl"
+	body := syntheticRateLimitEvent(ts, "You've hit your limit · come back tomorrow") + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero (text not parseable)", got)
+	}
+}
+
 func TestParseLimitResetTextRejectsUnknownText(t *testing.T) {
 	ev := time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
 	cases := []string{
