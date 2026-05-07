@@ -1,6 +1,6 @@
 ---
 name: perform-draft-review-pr
-description: "Perform a comprehensive code review of a PR using parallel subagents for code changes, commit structure, and PR organization. Use this skill whenever the user wants to review a PR, run a code review, check PR quality, or prepare review comments. Requires Task tool (max-mode) for subagent orchestration."
+description: "Perform a comprehensive code review of a PR using parallel subagents for code changes, commit structure, and PR organization. Sends review findings to mayor inbox instead of posting directly to GitHub. Use this skill whenever the user wants to review a PR, run a code review, or check PR quality. Requires Task tool (max-mode) for subagent orchestration."
 ---
 
 # Perform Draft Review PR
@@ -75,7 +75,7 @@ The `review-orchestrator` will handle the complete workflow:
 1. Run `my-code-review-support-cli setup <PR>`
 2. Spawn `review-code-changes`, `review-pr-structure`, and `review-jira-alignment` subagents in parallel
 3. Combine JSON results from all subagents (JIRA alignment errors are reported but don't fail the review)
-4. Run `my-code-review-support-cli post <PR_NUMBER>`
+4. Save combined JSON to `/tmp/pr-review-<PR>-<timestamp>.json` and mail findings to `mayor/` inbox
 5. Run `my-code-review-support-cli cleanup <worktree_path>`
 6. Return summary
 

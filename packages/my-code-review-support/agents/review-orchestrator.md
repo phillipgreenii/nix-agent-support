@@ -1,6 +1,6 @@
 ---
 name: review-orchestrator
-description: Review orchestrator. Coordinates setup, spawns review subagents, and posts comments.
+description: Review orchestrator. Coordinates setup, spawns review subagents, and mails feedback to mayor.
 tools: Bash, Read, Glob, Grep
 model: sonnet
 ---
@@ -79,17 +79,47 @@ Follow this workflow:
    }
    ```
 
-   If a subagent returned an error object, include that error under `warnings` in the combined output and continue. Specifically: if `review-jira-alignment` returns an error (JIRA access unavailable), surface it under `warnings` but do **not** abort — continue posting code and structure findings. The other two agents' results are still valid.
+   If a subagent returned an error object, include that error under `warnings` in the combined output and continue. Specifically: if `review-jira-alignment` returns an error (JIRA access unavailable), surface it under `warnings` but do **not** abort — continue code and structure findings. The other two agents' results are still valid.
 
-4. Run `my-code-review-support-cli post <PR_NUMBER>`
+4. Save the combined JSON to `/tmp/pr-review-<PR_NUMBER>-<YYYYMMDDHHMMSS>.json` and mail it to `mayor/` (see Mailing Review Feedback below). Do NOT run `my-code-review-support-cli post`.
 5. Run `my-code-review-support-cli cleanup <worktree_path>`
 6. Report summary
+
+## Mailing Review Feedback
+
+After combining results, send the feedback to the mayor for review:
+
+```bash
+REVIEW_FILE="/tmp/pr-review-<PR_NUMBER>-$(date +%Y%m%d%H%M%S).json"
+cat <combined-json> > "$REVIEW_FILE"
+
+# Format a human-readable summary of the comments
+COMMENT_COUNT=$(jq '.comments | length' "$REVIEW_FILE")
+ERRORS=$(jq '[.comments[] | select(.severity=="error")] | length' "$REVIEW_FILE")
+WARNINGS=$(jq '[.comments[] | select(.severity=="warning")] | length' "$REVIEW_FILE")
+SUGGESTIONS=$(jq '[.comments[] | select(.severity=="suggestion")] | length' "$REVIEW_FILE")
+
+BODY=$(cat <<EOF
+PR #<PR_NUMBER> review complete. $COMMENT_COUNT comment(s): $ERRORS error(s), $WARNINGS warning(s), $SUGGESTIONS suggestion(s).
+
+To post to GitHub:
+  cat $REVIEW_FILE | my-code-review-support-cli post <PR_NUMBER>
+
+Comments:
+$(jq -r '.comments[] | "[\(.severity | ascii_upcase)] \(.path // "PR-level"):\(.lines[0] // "—") — \(.message)"' "$REVIEW_FILE")
+EOF
+)
+
+gt mail send mayor/ -s "PR Review Ready: #<PR_NUMBER>" -m "$BODY"
+```
+
+Do not delete `$REVIEW_FILE` — the mayor may use it to post comments.
 
 See `references/common.md` for error handling patterns.
 
 ## Summary Report Format
 
-After posting, report this summary:
+After mailing, report this summary:
 
 ```markdown
 ## PR Review Summary
@@ -98,14 +128,13 @@ After posting, report this summary:
 **Branch**: <head_branch>
 **Commit**: <commit_sha> (verified)
 **Base**: <base_branch>
-**Comments added**: <comments_posted>
-**Duplicates skipped**: <duplicates_skipped>
-**Review mode**: <mode>
+**Comments found**: <total_comments> (<errors> errors, <warnings> warnings, <suggestions> suggestions)
+**Review file**: /tmp/pr-review-<pr_number>-<timestamp>.json
+**Sent to**: mayor/ inbox
 
 ### Next Steps
 
-1. View pending review in GitHub: <url>
-2. Edit or remove agent comments as needed
-3. Add your own observations
-4. Submit review when ready
+1. Check inbox: `gt mail inbox`
+2. Review the comments in the mail
+3. To post to GitHub: `cat /tmp/pr-review-<pr_number>-<timestamp>.json | my-code-review-support-cli post <pr_number>`
 ```
