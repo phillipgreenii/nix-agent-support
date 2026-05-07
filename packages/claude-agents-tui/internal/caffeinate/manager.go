@@ -55,13 +55,14 @@ func (m *Manager) Tick(anyWorking bool) {
 	now := m.Now()
 	switch m.state {
 	case StateOff:
-		_ = m.Spawn(m.PID)
-		if anyWorking {
-			m.state = StateArmedRunning
-		} else {
-			m.state = StateArmedCountdown
-			m.countdownEnd = now.Add(m.Grace)
+		// Only spawn when sessions are active; if toggle was just turned on with no
+		// working sessions, or grace expired and sessions are still idle, stay off
+		// until work resumes — avoids perpetual kill/respawn cycle.
+		if !anyWorking {
+			return
 		}
+		_ = m.Spawn(m.PID)
+		m.state = StateArmedRunning
 	case StateArmedRunning:
 		if !anyWorking {
 			m.state = StateArmedCountdown

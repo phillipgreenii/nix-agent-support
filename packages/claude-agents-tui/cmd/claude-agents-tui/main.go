@@ -107,6 +107,7 @@ func main() {
 
 	// interactive TUI
 	proc := &caffeinate.Proc{}
+	defer func() { _ = proc.Kill() }()
 	mgr := &caffeinate.Manager{
 		Grace: cfg.CaffeinateGrace,
 		Spawn: proc.Spawn,
