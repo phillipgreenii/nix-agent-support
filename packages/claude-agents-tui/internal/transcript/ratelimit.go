@@ -54,9 +54,15 @@ func parseLimitResetText(text string, eventTime time.Time) (time.Time, bool) {
 }
 
 // RateLimitPause returns the time the usage window reopens when the transcript's
-// most recent api_error is a rate_limit_error with no subsequent user/assistant event.
-// Uses event.Timestamp + retryInMs — never time.Now() — so the calculation is correct
-// even when the event was written hours before the TUI started.
+// most recent rate-limit event has no subsequent (non-synthetic) user/assistant
+// event. Two event shapes are recognized:
+//   - system/api_error/rate_limit_error with retryInMs (legacy).
+//   - synthetic-assistant with error="rate_limit"+isApiErrorMessage; reset time
+//     parsed from the message text via parseLimitResetText.
+//
+// Reset times derive from event.Timestamp (legacy: + retryInMs; synthetic: from
+// text), never time.Now() — so the calculation is correct even when the event
+// was written hours before the TUI started.
 func RateLimitPause(path string) (resetsAt time.Time, err error) {
 	f, err := os.Open(path)
 	if err != nil {
