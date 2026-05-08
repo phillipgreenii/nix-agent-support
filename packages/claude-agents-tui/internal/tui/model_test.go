@@ -368,3 +368,85 @@ func TestManualFireNilTreeNoCrash(t *testing.T) {
 		t.Errorf("sent = %v, want empty (nil tree)", mock.sent)
 	}
 }
+
+// TestCursorDownStopsAtLastSelectable verifies that pressing Down past the
+// last selectable row leaves the cursor on that row (does not roll past or
+// land on a BlankKind separator).
+func TestCursorDownStopsAtLastSelectable(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "s1", Status: session.Working}},
+			{Session: &session.Session{SessionID: "s2", Status: session.Working}},
+			{Session: &session.Session{SessionID: "s3", Status: session.Working}},
+		},
+		WorkingN: 3,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+
+	for range 50 {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	if m.cursor < 0 || m.cursor >= len(m.flatRows) {
+		t.Fatalf("cursor out of bounds: %d (len=%d)", m.cursor, len(m.flatRows))
+	}
+	if m.flatRows[m.cursor].Kind == render.BlankKind {
+		t.Errorf("cursor parked on BlankKind row at idx=%d", m.cursor)
+	}
+}
+
+// TestCursorUpStopsAtFirstSelectable verifies the symmetric Up case.
+func TestCursorUpStopsAtFirstSelectable(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "s1", Status: session.Working}},
+			{Session: &session.Session{SessionID: "s2", Status: session.Working}},
+		},
+		WorkingN: 2,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.cursor = len(m.flatRows) - 1
+	m.clampCursor() // ensure starting cursor is on a selectable row
+
+	for range 50 {
+		m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	}
+
+	if m.flatRows[m.cursor].Kind == render.BlankKind {
+		t.Errorf("cursor parked on BlankKind row at idx=%d", m.cursor)
+	}
+}
+
+// TestClampCursorSnapsOffBlankRow verifies that if external state mutates
+// the cursor onto a BlankKind row, clampCursor moves it to the nearest
+// selectable row.
+func TestClampCursorSnapsOffBlankRow(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "s1", Status: session.Working}},
+		},
+		WorkingN: 1,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+
+	// Find a BlankKind row index, force cursor onto it, then clamp.
+	blankIdx := -1
+	for i, r := range m.flatRows {
+		if r.Kind == render.BlankKind {
+			blankIdx = i
+			break
+		}
+	}
+	if blankIdx < 0 {
+		t.Skip("fixture produced no blank row; clampCursor snap behavior cannot be exercised here")
+	}
+	m.cursor = blankIdx
+	m.clampCursor()
+
+	if m.flatRows[m.cursor].Kind == render.BlankKind {
+		t.Errorf("clampCursor failed to snap off blank row; cursor=%d", m.cursor)
+	}
+}

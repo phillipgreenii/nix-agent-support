@@ -47,13 +47,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "M":
 			m.signalNonWorking("manual-resume")
 		case "down", "j":
-			m.cursor++
+			start := m.cursor + 1
+			if start < len(m.flatRows) {
+				m.cursor = nextSelectable(m.flatRows, start, +1)
+			}
 			m.clampCursor()
 			m.syncScroll()
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
+			start := m.cursor - 1
+			if start >= 0 {
+				m.cursor = nextSelectable(m.flatRows, start, -1)
 			}
+			m.clampCursor()
 			m.syncScroll()
 		case " ":
 			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind {

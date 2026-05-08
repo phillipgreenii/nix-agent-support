@@ -101,6 +101,25 @@ func (m *Model) rowAt(idx int) (render.Row, bool) {
 	return m.flatRows[idx], true
 }
 
+// selectable reports whether the cursor is allowed to land on a row.
+// Blank separator rows are not selectable; sessions and path-tree nodes are.
+func selectable(r render.Row) bool {
+	return r.Kind != render.BlankKind
+}
+
+// nextSelectable scans rows starting at `from` in direction `dir` (+1 or -1)
+// and returns the index of the first selectable row encountered. If no
+// selectable row exists in that direction within bounds, it returns from
+// unchanged so the caller's "stay put when at the edge" semantics work.
+func nextSelectable(rows []render.Row, from, dir int) int {
+	for i := from; i >= 0 && i < len(rows); i += dir {
+		if selectable(rows[i]) {
+			return i
+		}
+	}
+	return from
+}
+
 func (m *Model) clampCursor() {
 	n := len(m.flatRows)
 	if n == 0 {
@@ -112,5 +131,18 @@ func (m *Model) clampCursor() {
 	}
 	if m.cursor < 0 {
 		m.cursor = 0
+	}
+	if !selectable(m.flatRows[m.cursor]) {
+		// Try moving up first (preserves "stay close to where you were"); fall
+		// back to scanning down if nothing selectable exists above.
+		up := nextSelectable(m.flatRows, m.cursor, -1)
+		if selectable(m.flatRows[up]) && up != m.cursor {
+			m.cursor = up
+			return
+		}
+		down := nextSelectable(m.flatRows, m.cursor, +1)
+		if selectable(m.flatRows[down]) {
+			m.cursor = down
+		}
 	}
 }
