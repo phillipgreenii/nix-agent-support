@@ -113,11 +113,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildFlatRows()
 		m.clampCursor()
 		m.syncScroll()
-		if m.tree.CCUsageProbed && m.tree.ActiveBlock == nil && m.tree.CCUsageErr == nil {
-			m.cursor = 0
-			m.selected = nil
-			m.scrollOffset = 0
-		}
 		if m.autoResumeFired && msg.tree.WindowResetsAt.IsZero() {
 			m.autoResumeFired = false
 		}

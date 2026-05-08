@@ -145,6 +145,77 @@ func fixtureCJK() *Model {
 	return NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
 }
 
+// TestViewRendersSessionsWhenCCUsageReportsNoActiveBlock guards against the
+// regression where the body suppresses session rows once ccusage successfully
+// probes and reports no active 5h block. Session data is primary; the missing
+// 5h block is metadata already shown in the header.
+func TestViewRendersSessionsWhenCCUsageReportsNoActiveBlock(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{SessionID: "id-1", Name: "alpha-session", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7",
+				},
+			},
+		},
+		WorkingN: 1,
+	}
+	tree := &aggregate.Tree{
+		Dirs:          []*aggregate.Directory{d},
+		CCUsageProbed: true, // probe completed
+		ActiveBlock:   nil,  // ccusage reports no active block
+		CCUsageErr:    nil,  // no error — it just reports empty
+	}
+	m := NewModel(Options{Tree: tree})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	out := m.View()
+
+	if strings.Contains(out, "Sessions not shown") {
+		t.Errorf("session list was suppressed by no-active-block gate; output:\n%s", out)
+	}
+	if !strings.Contains(out, "alpha-session") {
+		t.Errorf("session name not rendered when ActiveBlock is nil; output:\n%s", out)
+	}
+	// The header should still surface the metadata so the user knows the block
+	// is empty — that's the legitimate signal channel for this state.
+	if !strings.Contains(out, "no active block") {
+		t.Errorf("header should still show 'no active block' metadata; output:\n%s", out)
+	}
+}
+
+// TestPollResultDoesNotResetCursorWhenBlockEmpty pairs with the gate fix:
+// poll results with ActiveBlock=nil must not zero the user's cursor / selection.
+func TestPollResultDoesNotResetCursorWhenBlockEmpty(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "a", Status: session.Working}},
+			{Session: &session.Session{SessionID: "b", Status: session.Working}},
+			{Session: &session.Session{SessionID: "c", Status: session.Working}},
+		},
+		WorkingN: 3,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	m := NewModel(Options{Tree: tree})
+	m.cursor = 2
+
+	// Simulate a poll result with ccusage probed but no active block.
+	probedTree := &aggregate.Tree{
+		Dirs:          []*aggregate.Directory{d},
+		CCUsageProbed: true,
+		ActiveBlock:   nil,
+		CCUsageErr:    nil,
+	}
+	m.Update(pollResultMsg{tree: probedTree})
+
+	if m.cursor == 0 {
+		t.Errorf("cursor was reset to 0 by the no-active-block branch; expected to be preserved")
+	}
+}
+
 func fixtureLongPR() *Model {
 	d := &aggregate.Directory{
 		Path:   "/p",

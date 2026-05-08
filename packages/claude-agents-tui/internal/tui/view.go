@@ -36,10 +36,7 @@ func (m *Model) View() string {
 	legend := render.Legend(m.width)
 
 	var body string
-	noBlock := m.tree.CCUsageProbed && m.tree.ActiveBlock == nil && m.tree.CCUsageErr == nil
-	if noBlock {
-		body = "Sessions not shown — no active block.\n"
-	} else if len(m.flatRows) == 0 {
+	if len(m.flatRows) == 0 {
 		body = "No active sessions.\n"
 	} else {
 		totalTok := 0
