@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
@@ -36,7 +37,7 @@ func (m *Model) View() string {
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
 	})
-	footer := render.Footer(m.width, render.Legend(render.FooterLeftWidth(m.width)), now)
+	footer := render.Footer(m.width, m.selectionStatus(), now)
 
 	zones := []zoneSpec{
 		{name: "controls", content: controls, dropOrder: 1},
@@ -83,4 +84,27 @@ func (m *Model) renderBody(height int) string {
 		return render.RenderWindowTree(m.pathNodes, m.flatRows, 0, 10000, opts)
 	}
 	return render.RenderWindowTree(m.pathNodes, m.flatRows, m.scrollOffset, height, opts)
+}
+
+// selectionStatus returns the dim-styled, single-line status string for the
+// footer's left column. Empty when the cursor is not on a session row, or
+// the selected session has no FirstPrompt.
+func (m *Model) selectionStatus() string {
+	if m.cursor < 0 || m.cursor >= len(m.flatRows) {
+		return ""
+	}
+	row := m.flatRows[m.cursor]
+	if row.Kind != render.SessionKind || row.Session == nil {
+		return ""
+	}
+	fp := row.Session.SessionEnrichment.FirstPrompt
+	if fp == "" {
+		return ""
+	}
+	leftWidth := render.FooterLeftWidth(m.width)
+	if leftWidth < 1 {
+		return ""
+	}
+	text := fmt.Sprintf("%q", wrap.Line(fp, leftWidth))
+	return m.theme.Prompt.Render(text)
 }

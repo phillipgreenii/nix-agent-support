@@ -221,9 +221,6 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 		renderStatsBlock(col1, pctStr, barStr, amount, burn),
 		tail,
 	)
-	if s.SessionEnrichment.FirstPrompt != "" {
-		out += fmt.Sprintf("  %s    ↳ %s\n", cont, opts.Theme.Prompt.Render(fmt.Sprintf("%q", wrap.Line(s.SessionEnrichment.FirstPrompt, 80))))
-	}
 	return out
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
@@ -249,6 +250,85 @@ func TestPollResultDoesNotResetCursorWhenBlockEmpty(t *testing.T) {
 
 	if m.cursor == 0 {
 		t.Errorf("cursor was reset to 0 by the no-active-block branch; expected to be preserved")
+	}
+}
+
+// TestViewFooterShowsSelectedSessionFirstPrompt asserts the footer's left
+// column contains the cursor-selected session's first prompt.
+func TestViewFooterShowsSelectedSessionFirstPrompt(t *testing.T) {
+	sv := &aggregate.SessionView{
+		Session: &session.Session{Name: "n", SessionID: "id", Status: session.Working},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			FirstPrompt:   "selected prompt content",
+			SessionTokens: 100,
+			Model:         "claude-opus-4-7",
+		},
+	}
+	d := &aggregate.Directory{Path: "/p", Sessions: []*aggregate.SessionView{sv}, WorkingN: 1, TotalTokens: 100}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	// Cursor at the first SessionKind row (skip the path-node row).
+	sessionIdx := -1
+	for i, r := range m.flatRows {
+		if r.Kind == render.SessionKind {
+			sessionIdx = i
+			break
+		}
+	}
+	if sessionIdx < 0 {
+		t.Fatalf("fixture produced no session row: %+v", m.flatRows)
+	}
+	m.cursor = sessionIdx
+
+	out := m.View()
+
+	// Find the footer line (the one with the Updated clock).
+	var footer string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Updated ") {
+			footer = line
+			break
+		}
+	}
+	if footer == "" {
+		t.Fatalf("could not locate footer line in output:\n%s", out)
+	}
+	if !strings.Contains(footer, "selected prompt content") {
+		t.Errorf("footer should show selected session's first prompt; output:\n%s", out)
+	}
+}
+
+// TestViewFooterBlankWhenCursorOnPathNode asserts the footer's left column is
+// blank when the cursor is on a PathNodeKind row (not a SessionKind row).
+func TestViewFooterBlankWhenCursorOnPathNode(t *testing.T) {
+	// Build a tree with a path node + sessions; locate a PathNodeKind row.
+	sv := &aggregate.SessionView{
+		Session: &session.Session{Name: "n", SessionID: "id", Status: session.Working},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			FirstPrompt:   "this should NOT appear when cursor is on path node",
+			SessionTokens: 100,
+		},
+	}
+	d := &aggregate.Directory{Path: "/p/sub", Sessions: []*aggregate.SessionView{sv}, WorkingN: 1, TotalTokens: 100}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+
+	// Find a PathNodeKind row and put the cursor there.
+	pathNodeIdx := -1
+	for i, r := range m.flatRows {
+		if r.Kind == render.PathNodeKind {
+			pathNodeIdx = i
+			break
+		}
+	}
+	if pathNodeIdx < 0 {
+		t.Skip("fixture produced no path-node row")
+	}
+	m.cursor = pathNodeIdx
+
+	out := m.View()
+	if strings.Contains(out, "this should NOT appear") {
+		t.Errorf("path-node cursor should not show prompt in footer; output:\n%s", out)
 	}
 }
 

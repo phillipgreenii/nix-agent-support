@@ -45,9 +45,6 @@ func TestTreeRendersSymbolsAndNames(t *testing.T) {
 	if !strings.Contains(out, "my-branch") {
 		t.Errorf("expected name, got:\n%s", out)
 	}
-	if !strings.Contains(out, "fix things") {
-		t.Errorf("expected first prompt, got:\n%s", out)
-	}
 	if !strings.Contains(out, "2🤖") {
 		t.Errorf("expected subagent count, got:\n%s", out)
 	}
@@ -107,17 +104,6 @@ func TestTreeLastSessionUsesBottomAngleConnector(t *testing.T) {
 	if !strings.Contains(rows[1], "└─") {
 		t.Errorf("last row should contain └─, got: %q", rows[1])
 	}
-	// The last session's continuation line must not start with an orphan '│'.
-	// It should instead start with a space (aligned under └─).
-	for line := range strings.SplitSeq(out, "\n") {
-		if strings.Contains(line, "↳ \"beta prompt\"") {
-			if strings.HasPrefix(line, "│") {
-				t.Errorf("last session continuation line has orphan │: %q", line)
-			}
-			return
-		}
-	}
-	t.Errorf("expected continuation line for beta prompt, got:\n%s", out)
 }
 
 func TestTreeIdleAwaitingShowsQuestionMark(t *testing.T) {
@@ -452,6 +438,29 @@ func TestTreeColumnAlignment(t *testing.T) {
 		if edges[i] != edges[0] {
 			t.Errorf("row %d burn-column edge = %d, want %d (matching row 0); rows:\n%s", i, edges[i], edges[0], out)
 		}
+	}
+}
+
+// TestSessionRowOmitsFirstPromptContinuation verifies the per-session prompt
+// continuation row was removed in theme D. The FirstPrompt is now shown only
+// in the footer's selection-status column.
+func TestSessionRowOmitsFirstPromptContinuation(t *testing.T) {
+	s := &aggregate.SessionView{
+		Session: &session.Session{Name: "n", SessionID: "id", Status: session.Working},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			FirstPrompt:   "this prompt should NOT appear under the row anymore",
+			SessionTokens: 100,
+			Model:         "claude-opus-4-7",
+		},
+	}
+	d := &aggregate.Directory{Path: "/p", Sessions: []*aggregate.SessionView{s}, WorkingN: 1, TotalTokens: 100}
+	out := Tree(&aggregate.Tree{Dirs: []*aggregate.Directory{d}}, TreeOpts{TotalSessionTokens: 100, Width: 120})
+
+	if strings.Contains(out, "↳") {
+		t.Errorf("session row should no longer emit the ↳ continuation; got:\n%s", out)
+	}
+	if strings.Contains(out, "this prompt should NOT appear") {
+		t.Errorf("FirstPrompt content leaked into the body:\n%s", out)
 	}
 }
 
