@@ -19,6 +19,7 @@ import (
 // the model must defer rendering and return the literal "loading…".
 func TestViewLineWidthInvariant(t *testing.T) {
 	widths := []int{0, 30, 60, 80, 120, 200}
+	heights := []int{0, 1, 2, 3, 4, 5, 10, 30}
 	fixtures := []struct {
 		name string
 		make func() *Model
@@ -33,29 +34,64 @@ func TestViewLineWidthInvariant(t *testing.T) {
 
 	for _, fx := range fixtures {
 		for _, w := range widths {
-			name := fmt.Sprintf("%s @ width=%d", fx.name, w)
-			t.Run(name, func(t *testing.T) {
-				m := fx.make()
-				if w > 0 {
-					m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
-				}
-				out := m.View()
-
-				if w == 0 {
-					if out != "loading…" {
-						t.Errorf("width=0 should defer rendering; got %q", out)
+			for _, h := range heights {
+				name := fmt.Sprintf("%s @ width=%d height=%d", fx.name, w, h)
+				t.Run(name, func(t *testing.T) {
+					m := fx.make()
+					if w > 0 {
+						m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 					}
-					return
-				}
+					out := m.View()
 
-				ew := wrap.EffectiveWidth(w)
-				for i, line := range strings.Split(out, "\n") {
-					if got := lipgloss.Width(line); got > ew {
-						t.Errorf("line %d width = %d, want <= %d (fixture=%q, width=%d): %q",
-							i, got, ew, fx.name, w, line)
+					if w == 0 {
+						if out != "loading…" {
+							t.Errorf("width=0 should defer; got %q", out)
+						}
+						return
 					}
-				}
-			})
+
+					ew := wrap.EffectiveWidth(w)
+					for i, line := range strings.Split(out, "\n") {
+						if got := lipgloss.Width(line); got > ew {
+							t.Errorf("line %d width = %d, want <= %d (fixture=%q, w=%d, h=%d): %q",
+								i, got, ew, fx.name, w, h, line)
+						}
+					}
+
+					// Line count == height invariant. Detail panel is a single
+					// non-zone string today and is exempt — theme A only owns
+					// the main-tree path. h=0 is the headless bypass.
+					if h > 0 && fx.name != "detail panel open" {
+						if got := strings.Count(out, "\n") + 1; got != h {
+							t.Errorf("line count = %d, want %d (fixture=%q, w=%d, h=%d):\n%s",
+								got, h, fx.name, w, h, out)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestViewNoPhantomBlankRowsBetweenZones asserts that the output of View()
+// does not contain consecutive empty lines between non-empty zones. This
+// guards against a recurrence of the trailing-newline drift where
+// render.Header's terminating "\n" produced "\n\n" after the layout join.
+func TestViewNoPhantomBlankRowsBetweenZones(t *testing.T) {
+	m := fixtureManySessions()
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	out := m.View()
+
+	lines := strings.Split(out, "\n")
+	// A run of consecutive empty lines longer than 1 indicates a phantom row.
+	for i := 1; i < len(lines)-1; i++ {
+		if lines[i] == "" && lines[i+1] == "" {
+			// Allow trailing padding only — last lines may be intentional padding.
+			// A phantom blank lands somewhere in the middle.
+			if i < len(lines)/2 {
+				t.Errorf("phantom blank row at lines %d-%d:\n%s", i, i+1, out)
+				return
+			}
 		}
 	}
 }
