@@ -21,83 +21,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if isQuit(msg) {
 			return m, tea.Quit
 		}
-		switch msg.String() {
-		case "t":
-			m.costMode = !m.costMode
-		case "a":
-			m.showAll = !m.showAll
-			m.rebuildFlatRows()
-			m.clampCursor()
-			m.syncScroll()
-		case "n":
-			m.forceID = !m.forceID
-		case "C":
-			m.caffeinateOn = !m.caffeinateOn
-		case "R":
-			m.autoResume = !m.autoResume
-			if m.autoResume && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
-				fireAt := m.tree.WindowResetsAt.Add(m.autoResumeDelay)
-				cmds := []tea.Cmd{autoResumeFireCmd(fireAt)}
-				if !m.countdownTick {
-					m.countdownTick = true
-					cmds = append(cmds, countdownTickCmd())
+		s := msg.String()
+		for _, b := range Bindings {
+			for _, k := range b.Keys {
+				if k == s {
+					if cmd := b.Handle(m); cmd != nil {
+						return m, cmd
+					}
+					return m, nil
 				}
-				return m, tea.Batch(cmds...)
 			}
-		case "M":
-			m.signalNonWorking("manual-resume")
-		case "down", "j":
-			start := m.cursor + 1
-			if start < len(m.flatRows) {
-				m.cursor = nextSelectable(m.flatRows, start, +1)
-			}
-			m.clampCursor()
-			m.syncScroll()
-		case "up", "k":
-			start := m.cursor - 1
-			if start >= 0 {
-				m.cursor = nextSelectable(m.flatRows, start, -1)
-			}
-			m.clampCursor()
-			m.syncScroll()
-		case " ":
-			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind {
-				m.treeState.Toggle(row.NodePath)
-				if m.cacheDir != "" {
-					_ = m.treeState.Save(m.cacheDir)
-				}
-				m.rebuildFlatRows()
-				m.clampCursor()
-				m.syncScroll()
-			}
-		case "left", "h":
-			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind && !row.Collapsed {
-				m.treeState.Toggle(row.NodePath)
-				if m.cacheDir != "" {
-					_ = m.treeState.Save(m.cacheDir)
-				}
-				m.rebuildFlatRows()
-				m.clampCursor()
-				m.syncScroll()
-			}
-		case "right", "l":
-			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.PathNodeKind && row.Collapsed {
-				m.treeState.Toggle(row.NodePath)
-				if m.cacheDir != "" {
-					_ = m.treeState.Save(m.cacheDir)
-				}
-				m.rebuildFlatRows()
-				m.clampCursor()
-				m.syncScroll()
-			}
-		case "enter":
-			if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.SessionKind {
-				m.selected = row.Session
-			}
-			// PathNodeKind → no-op
-		case "esc":
-			m.selected = nil
 		}
+		// No matching binding — no-op fall-through.
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
