@@ -1,6 +1,7 @@
 package render
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -9,6 +10,11 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
+
+// tailRegex matches the optional " <count>🤖" / " <count>🐚" tails appended to
+// session rows. Used by alignment tests to strip tails before measuring the
+// burn-column right edge.
+var tailRegex = regexp.MustCompile(` \d+(🤖|🐚)`)
 
 func TestTreeRendersSymbolsAndNames(t *testing.T) {
 	d := &aggregate.Directory{
@@ -344,20 +350,19 @@ func TestRenderPathNodeDepthIndentation(t *testing.T) {
 	n1 := &aggregate.PathNode{FullPath: "/a/b", DisplayPath: "b", Depth: 1}
 	out0 := RenderPathNode(n0, TreeOpts{}, false, false)
 	out1 := RenderPathNode(n1, TreeOpts{}, false, false)
-	// depth=1 row should have more leading whitespace between the glyph and the
-	// display path than depth=0. The label is formatted as glyph + " " + indent + displayPath.
-	// We find the glyph marker and measure the space between glyph and the path text.
-	glyphSep := "▼ "
-	_, after0, found0 := strings.Cut(out0, glyphSep)
-	_, after1, found1 := strings.Cut(out1, glyphSep)
-	if !found0 || !found1 {
-		t.Fatalf("could not find glyph separator in output: depth0=%q depth1=%q", out0, out1)
+	// The label is now formatted as indent + glyph + " " + displayPath, so
+	// the glyph itself sits at the right column for the node's depth. Each row
+	// starts with the 2-col cursor mark "  " (no cursor selected here). After
+	// the cursor mark, the glyph is preceded by 2*Depth spaces of indent.
+	const cursorMark = "  "
+	idx0 := strings.Index(out0, "▼")
+	idx1 := strings.Index(out1, "▼")
+	if idx0 < 0 || idx1 < 0 {
+		t.Fatalf("could not find glyph in output: depth0=%q depth1=%q", out0, out1)
 	}
-	// Count leading spaces (indentation) before the display path text.
-	trimmed0 := strings.TrimLeft(after0, " ")
-	trimmed1 := strings.TrimLeft(after1, " ")
-	indent0 := len(after0) - len(trimmed0)
-	indent1 := len(after1) - len(trimmed1)
+	// Number of spaces between cursor mark and the glyph == 2 * Depth.
+	indent0 := idx0 - len(cursorMark)
+	indent1 := idx1 - len(cursorMark)
 	if indent1 <= indent0 {
 		t.Errorf("depth=1 should have more indentation than depth=0: depth0=%d depth1=%d", indent0, indent1)
 	}
@@ -380,8 +385,10 @@ func TestRenderPathNodeRollupTokens(t *testing.T) {
 	if !strings.Contains(out, "2●") {
 		t.Errorf("expected '2●' in rollup, got: %q", out)
 	}
-	if !strings.Contains(out, "tok") {
-		t.Errorf("expected 'tok' in rollup, got: %q", out)
+	// FmtTok(12345) == "12.3k". The unified column grid drops the " tok"
+	// suffix the old free-form rollup string used.
+	if !strings.Contains(out, "12.3k") {
+		t.Errorf("expected '12.3k' in rollup amount column, got: %q", out)
 	}
 }
 
@@ -393,5 +400,208 @@ func TestRenderPathNodeRollupCost(t *testing.T) {
 	out := RenderPathNode(n, TreeOpts{CostMode: true}, false, false)
 	if !strings.Contains(out, "$1.23") {
 		t.Errorf("expected '$1.23' in cost rollup, got: %q", out)
+	}
+}
+
+// TestTreeColumnAlignment asserts that all stats-bearing rows in the tree
+// agree on the right edge of each of the five stat columns.
+func TestTreeColumnAlignment(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:        "/p",
+		TotalTokens: 600,
+		BurnRateSum: 30,
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{Name: "a", SessionID: "id-a", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7", SessionTokens: 200, BurnRateShort: 10,
+				},
+			},
+			{
+				Session: &session.Session{Name: "b", SessionID: "id-b", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-sonnet-4-6", SessionTokens: 400, BurnRateShort: 20,
+				},
+			},
+		},
+		WorkingN: 2,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	out := Tree(tree, TreeOpts{TotalSessionTokens: 1000, Width: 120})
+
+	// Find the right edge of the burn column on every non-empty line that
+	// looks like a stats row. With renderStatsBlock the line ends with the
+	// burn column (modulo any trailing tail). We assert all stats rows agree.
+	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	var edges []int
+	for _, r := range rows {
+		// Skip continuation rows ("    ↳ ...") and blank rows.
+		if r == "" || strings.Contains(r, "    ↳ ") {
+			continue
+		}
+		// The burn column ends just before any tail glyphs (🤖/🐚) or end-of-line.
+		// Strip any " <count>🤖" / " <count>🐚" tails, then measure visible width.
+		core := tailRegex.ReplaceAllString(r, "")
+		edges = append(edges, lipgloss.Width(core))
+	}
+
+	if len(edges) < 2 {
+		t.Fatalf("expected at least 2 stats rows, got %d:\n%s", len(edges), out)
+	}
+	for i := 1; i < len(edges); i++ {
+		if edges[i] != edges[0] {
+			t.Errorf("row %d burn-column edge = %d, want %d (matching row 0); rows:\n%s", i, edges[i], edges[0], out)
+		}
+	}
+}
+
+// TestTreeRollupShowsAggregatePct verifies that the directory rollup's % column
+// equals the directory's share of total session tokens.
+func TestTreeRollupShowsAggregatePct(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:        "/p",
+		TotalTokens: 600,
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{Name: "a", SessionID: "id-a", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7", SessionTokens: 600,
+				},
+			},
+		},
+		WorkingN: 1,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	out := Tree(tree, TreeOpts{TotalSessionTokens: 1000})
+	if !strings.Contains(out, "60%") {
+		t.Errorf("expected '60%%' on rollup row (600/1000), got:\n%s", out)
+	}
+}
+
+// TestTreeIndentedPathNodeGlyph verifies that the ▼/▶ glyph sits after the
+// depth indent on a nested PathNode row, not at column 0.
+func TestTreeIndentedPathNodeGlyph(t *testing.T) {
+	node := &aggregate.PathNode{
+		DisplayPath: "leaf",
+		Depth:       2, // indent = "    " (4 spaces)
+	}
+	out := RenderPathNode(node, TreeOpts{}, false, false)
+	// The glyph "▼" should be preceded by 2*Depth = 4 spaces (after the
+	// 2-col cursor mark "  ").
+	prefix := "    " // depth indent (2 * 2 = 4 spaces)
+	if !strings.HasPrefix(out, "  "+prefix+"▼ ") {
+		t.Errorf("expected glyph at column 6 ('  ' cursor + '    ' indent + '▼'), got: %q", out)
+	}
+}
+
+// TestTreeTokensColumnPopulatedInTokenMode verifies that the tokens-or-cost
+// column shows a token figure (e.g., "342.0k") when CostMode is false, not
+// blank space.
+func TestTreeTokensColumnPopulatedInTokenMode(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:        "/p",
+		TotalTokens: 342_000,
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{Name: "a", SessionID: "id-a", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7", SessionTokens: 342_000,
+				},
+			},
+		},
+		WorkingN: 1,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	out := Tree(tree, TreeOpts{TotalSessionTokens: 342_000, CostMode: false})
+	if !strings.Contains(out, "342.0k") {
+		t.Errorf("expected '342.0k' in tokens column, got:\n%s", out)
+	}
+}
+
+// TestCountsColumnFitsAtMaxBuckets verifies that col1 accommodates the worst-case
+// counts string ("99● 99○ 99✕") without lipgloss wrapping it onto a second line.
+func TestCountsColumnFitsAtMaxBuckets(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:        "/p",
+		WorkingN:    99,
+		IdleN:       99,
+		DormantN:    99,
+		TotalTokens: 1000,
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{Name: "a", SessionID: "id-a", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7", SessionTokens: 1000,
+				},
+			},
+		},
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	out := Tree(tree, TreeOpts{ShowAll: true, TotalSessionTokens: 1000, Width: 120})
+
+	// The dir-rollup row is the first non-empty line of output. Confirm it
+	// renders as a single line (no embedded newlines from lipgloss wrapping
+	// an over-budget col1).
+	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(rows) == 0 {
+		t.Fatal("no output")
+	}
+	dirRow := rows[0]
+	if strings.Contains(dirRow, "\n") {
+		t.Errorf("dir row wrapped to multiple lines (col1 overflow):\n%s", dirRow)
+	}
+	// All three counts must appear on the same line.
+	for _, want := range []string{"99●", "99○", "99✕"} {
+		if !strings.Contains(dirRow, want) {
+			t.Errorf("missing %q in dir row: %q", want, dirRow)
+		}
+	}
+}
+
+// TestTreeColumnAlignmentWithTails reruns the alignment invariant with
+// subagent and subshell tails present, ensuring the trim logic correctly
+// strips them so the burn-column right edge still matches across rows.
+func TestTreeColumnAlignmentWithTails(t *testing.T) {
+	d := &aggregate.Directory{
+		Path:        "/p",
+		TotalTokens: 600,
+		BurnRateSum: 30,
+		Sessions: []*aggregate.SessionView{
+			{
+				Session: &session.Session{Name: "a", SessionID: "id-a", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-opus-4-7", SessionTokens: 200, BurnRateShort: 10,
+					SubagentCount: 2, SubshellCount: 1,
+				},
+			},
+			{
+				Session: &session.Session{Name: "b", SessionID: "id-b", Status: session.Working},
+				SessionEnrichment: aggregate.SessionEnrichment{
+					Model: "claude-sonnet-4-6", SessionTokens: 400, BurnRateShort: 20,
+				},
+			},
+		},
+		WorkingN: 2,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+	out := Tree(tree, TreeOpts{TotalSessionTokens: 1000, Width: 120})
+
+	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	var edges []int
+	for _, r := range rows {
+		if r == "" || strings.Contains(r, "    ↳ ") {
+			continue
+		}
+		core := tailRegex.ReplaceAllString(r, "")
+		edges = append(edges, lipgloss.Width(core))
+	}
+
+	if len(edges) < 2 {
+		t.Fatalf("expected at least 2 stats rows, got %d:\n%s", len(edges), out)
+	}
+	for i := 1; i < len(edges); i++ {
+		if edges[i] != edges[0] {
+			t.Errorf("row %d burn-column edge = %d, want %d (matching row 0); rows:\n%s", i, edges[i], edges[0], out)
+		}
 	}
 }

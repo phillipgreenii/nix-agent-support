@@ -11,18 +11,44 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 )
 
-var (
-	styleModel  = lipgloss.NewStyle().Width(10).Align(lipgloss.Right)
-	stylePct    = lipgloss.NewStyle().Width(5).Align(lipgloss.Right)
-	styleBar    = lipgloss.NewStyle().Width(5).Align(lipgloss.Right)
-	styleBurn   = lipgloss.NewStyle().Width(7).Align(lipgloss.Right)
-	styleAmount = lipgloss.NewStyle().Width(8).Align(lipgloss.Right)
+const (
+	col1Width    = 12 // model name (sessions) or counts (rollups). Sized so "99● 99○ 99✕" fits without wrap.
+	colPctWidth  = 5  // "100%"
+	colBarWidth  = 5  // 5-cell bar
+	colAmtWidth  = 10 // FmtTok(...) or "$X.XX"
+	colBurnWidth = 7  // "1.2M/m"
 )
+
+var (
+	styleCol1 = lipgloss.NewStyle().Width(col1Width).Align(lipgloss.Right)
+	stylePct  = lipgloss.NewStyle().Width(colPctWidth).Align(lipgloss.Right)
+	styleBar  = lipgloss.NewStyle().Width(colBarWidth).Align(lipgloss.Right)
+	styleAmt  = lipgloss.NewStyle().Width(colAmtWidth).Align(lipgloss.Right)
+	styleBurn = lipgloss.NewStyle().Width(colBurnWidth).Align(lipgloss.Right)
+)
+
+// renderStatsBlock returns the five-column stats string applied to any row.
+// All five values are pre-formatted strings; this helper applies the
+// right-alignment styling and joins with single spaces. The total visible
+// width equals statsBlockCols.
+func renderStatsBlock(col1, pct, bar, amount, burn string) string {
+	return fmt.Sprintf("%s %s %s %s %s",
+		styleCol1.Render(col1),
+		stylePct.Render(pct),
+		styleBar.Render(bar),
+		styleAmt.Render(amount),
+		styleBurn.Render(burn),
+	)
+}
 
 func labelStyle(termWidth int) lipgloss.Style {
 	w := minLabelWidth
 	if termWidth > 0 {
-		if dyn := termWidth - prefixCols - statsBlockCols; dyn > w {
+		// Account for the 2-col "  " separator the session format places
+		// between the styled label and the stats block (in addition to
+		// prefixCols, which only covers cursor + branch glyph + the single
+		// space after it).
+		if dyn := termWidth - prefixCols - 2 - statsBlockCols; dyn > w {
 			w = dyn
 		}
 	}
@@ -42,9 +68,10 @@ type TreeOpts struct {
 	TotalSessionTokens int // sum of SessionTokens across all visible sessions; 0 = hide pct
 }
 
-// statsBlockCols is the width of everything after the label:
-// 2 spaces + model(10) + sp + pct(5) + sp + bar(5) + sp + burn(7) + sp + amount(8) = 41
-const statsBlockCols = 41
+// statsBlockCols is the total width of the right-side stats block including
+// the single space between each of the five columns:
+//   col1(12) + sp + pct(5) + sp + bar(5) + sp + amount(10) + sp + burn(7) = 43
+const statsBlockCols = col1Width + 1 + colPctWidth + 1 + colBarWidth + 1 + colAmtWidth + 1 + colBurnWidth
 
 // prefixCols accounts for the cursor mark ("  " or "> ") plus the branch glyph
 // ("├─") plus the space after it: 2 + 2 + 1 = 5.
@@ -91,31 +118,55 @@ func visibleSessions(ss []*aggregate.SessionView, showAll bool) []*aggregate.Ses
 	return out
 }
 
-func dirRollup(d *aggregate.Directory, opts TreeOpts) string {
-	parts := []string{}
-	if d.WorkingN > 0 {
-		parts = append(parts, fmt.Sprintf("%d●", d.WorkingN))
+// dirRollupCols formats the five stat columns for a directory rollup row.
+// Counts go into col1; %, bar, amount, and burn share the same grid as session rows.
+func dirRollupCols(d *aggregate.Directory, opts TreeOpts) (col1, pct, bar, amount, burn string) {
+	col1 = countsString(d.WorkingN, d.IdleN, d.DormantN, opts.ShowAll)
+
+	rollupPct := 0.0
+	if opts.TotalSessionTokens > 0 {
+		rollupPct = 100 * float64(d.TotalTokens) / float64(opts.TotalSessionTokens)
 	}
-	if d.IdleN > 0 {
-		parts = append(parts, fmt.Sprintf("%d○", d.IdleN))
-	}
-	if d.DormantN > 0 && opts.ShowAll {
-		parts = append(parts, fmt.Sprintf("%d✕", d.DormantN))
-	}
+	pct = fmt.Sprintf("%.0f%%", rollupPct)
+	bar = progressBar(rollupPct, colBarWidth)
+
+	amount = FmtTok(d.TotalTokens)
 	if opts.CostMode {
-		parts = append(parts, fmt.Sprintf("$%.2f", d.TotalCostUSD))
-	} else {
-		parts = append(parts, fmt.Sprintf("%s tok", FmtTok(d.TotalTokens)))
+		amount = fmt.Sprintf("$%.2f", d.TotalCostUSD)
 	}
-	return strings.Join(parts, " · ")
+	burn = fmt.Sprintf("%sk/m", fmtK(d.BurnRateSum))
+	return
+}
+
+// countsString formats the rollup counts column ("3● 1○ 1✕"), omitting zero
+// counts and dormant unless ShowAll is on.
+func countsString(workingN, idleN, dormantN int, showAll bool) string {
+	parts := []string{}
+	if workingN > 0 {
+		parts = append(parts, fmt.Sprintf("%d●", workingN))
+	}
+	if idleN > 0 {
+		parts = append(parts, fmt.Sprintf("%d○", idleN))
+	}
+	if dormantN > 0 && showAll {
+		parts = append(parts, fmt.Sprintf("%d✕", dormantN))
+	}
+	return strings.Join(parts, " ")
 }
 
 func renderDirRow(d *aggregate.Directory, opts TreeOpts) string {
-	rollup := dirRollup(d, opts)
-	rowWidth := prefixCols + minLabelWidth + statsBlockCols
+	col1, pct, bar, amount, burn := dirRollupCols(d, opts)
+	stats := renderStatsBlock(col1, pct, bar, amount, burn)
+
+	// Match the session row's visible width: prefix(5) + label(32) + "  "(2)
+	// + stats(41). prefixCols already covers cursor + branch glyph + the
+	// single space after it; the extra 2 cols here are the "  " separator
+	// the session format puts between the label and the stats block.
+	rowWidth := prefixCols + minLabelWidth + 2 + statsBlockCols
 	if opts.Width > 0 {
 		rowWidth = opts.Width
 	}
+
 	branchStr := ""
 	if d.Branch != "" {
 		branchStr = "  🌿 " + opts.Theme.Branch.Render(d.Branch)
@@ -125,9 +176,10 @@ func renderDirRow(d *aggregate.Directory, opts TreeOpts) string {
 			branchStr += "  →  " + prNum + " " + prTitle
 		}
 	}
-	leftWidth := max(rowWidth-lipgloss.Width(rollup)-1, lipgloss.Width(d.Path))
+
+	leftWidth := max(rowWidth-lipgloss.Width(stats)-1, lipgloss.Width(d.Path))
 	pathStyle := opts.Theme.DirRow.Width(leftWidth).Align(lipgloss.Left)
-	return pathStyle.Render(d.Path+branchStr) + " " + rollup + "\n"
+	return pathStyle.Render(d.Path+branchStr) + " " + stats + "\n"
 }
 
 func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string, selected bool) string {
@@ -143,10 +195,17 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 	} else {
 		label = fmt.Sprintf("%s %s", sym, s.Label(opts.ForceID))
 	}
-	modelShort := shortModel(s.SessionEnrichment.Model)
+
+	col1 := shortModel(s.SessionEnrichment.Model)
 	pct := sessionSharePct(s.SessionEnrichment.SessionTokens, opts.TotalSessionTokens)
-	bar := progressBar(pct, 5)
+	pctStr := fmt.Sprintf("%.0f%%", pct)
+	barStr := progressBar(pct, colBarWidth)
+	amount := FmtTok(s.SessionEnrichment.SessionTokens)
+	if opts.CostMode {
+		amount = fmt.Sprintf("$%.2f", s.SessionEnrichment.CostUSD)
+	}
 	burn := fmt.Sprintf("%sk/m", fmtK(s.SessionEnrichment.BurnRateShort))
+
 	tail := ""
 	if s.SessionEnrichment.SubagentCount > 0 {
 		tail += fmt.Sprintf(" %d🤖", s.SessionEnrichment.SubagentCount)
@@ -154,19 +213,12 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 	if s.SessionEnrichment.SubshellCount > 0 {
 		tail += fmt.Sprintf(" %d🐚", s.SessionEnrichment.SubshellCount)
 	}
-	amount := ""
-	if opts.CostMode {
-		amount = fmt.Sprintf("$%.2f", s.SessionEnrichment.CostUSD)
-	}
-	out := fmt.Sprintf("%s%s %s  %s %s %s %s %s%s\n",
+
+	out := fmt.Sprintf("%s%s %s  %s%s\n",
 		cursorMark,
 		prefix,
 		labelStyle(opts.Width).Render(label),
-		styleModel.Render(modelShort),
-		stylePct.Render(fmt.Sprintf("%.0f%%", pct)),
-		styleBar.Render(bar),
-		styleBurn.Render(burn),
-		styleAmount.Render(amount),
+		renderStatsBlock(col1, pctStr, barStr, amount, burn),
 		tail,
 	)
 	if s.SessionEnrichment.FirstPrompt != "" {
@@ -243,37 +295,38 @@ func RenderPathNode(n *aggregate.PathNode, opts TreeOpts, selected, collapsed bo
 		glyph = "▶"
 	}
 	indent := strings.Repeat("  ", n.Depth)
-	label := glyph + " " + indent + n.DisplayPath
-	rollup := nodeRollup(n, opts)
+	// Glyph sits AFTER the depth indent so the collapse structure mirrors the tree.
+	label := indent + glyph + " " + n.DisplayPath
 
-	rowWidth := prefixCols + minLabelWidth + statsBlockCols
+	col1, pct, bar, amount, burn := nodeRollupCols(n, opts)
+	stats := renderStatsBlock(col1, pct, bar, amount, burn)
+
+	// Match the session row width (see renderDirRow for the math).
+	rowWidth := prefixCols + minLabelWidth + 2 + statsBlockCols
 	if opts.Width > 0 {
 		rowWidth = opts.Width
 	}
-	// Subtract cursor mark width (2) from available space.
-	available := rowWidth - 2
-	leftWidth := max(available-lipgloss.Width(rollup)-1, lipgloss.Width(label))
+	available := rowWidth - 2 // subtract cursor-mark width
+	leftWidth := max(available-lipgloss.Width(stats)-1, lipgloss.Width(label))
 	pathStyle := opts.Theme.DirRow.Width(leftWidth).Align(lipgloss.Left)
-	return cursorMark + pathStyle.Render(label) + " " + rollup + "\n"
+	return cursorMark + pathStyle.Render(label) + " " + stats + "\n"
 }
 
-// nodeRollup formats the rollup statistics line for a PathNode row.
-func nodeRollup(n *aggregate.PathNode, opts TreeOpts) string {
-	var parts []string
-	if n.WorkingN > 0 {
-		parts = append(parts, fmt.Sprintf("%d●", n.WorkingN))
+// nodeRollupCols formats the five stat columns for a path-node rollup row.
+func nodeRollupCols(n *aggregate.PathNode, opts TreeOpts) (col1, pct, bar, amount, burn string) {
+	col1 = countsString(n.WorkingN, n.IdleN, n.DormantN, opts.ShowAll)
+
+	rollupPct := 0.0
+	if opts.TotalSessionTokens > 0 {
+		rollupPct = 100 * float64(n.TotalTokens) / float64(opts.TotalSessionTokens)
 	}
-	if n.IdleN > 0 {
-		parts = append(parts, fmt.Sprintf("%d○", n.IdleN))
-	}
-	if n.DormantN > 0 && opts.ShowAll {
-		parts = append(parts, fmt.Sprintf("%d✕", n.DormantN))
-	}
+	pct = fmt.Sprintf("%.0f%%", rollupPct)
+	bar = progressBar(rollupPct, colBarWidth)
+
+	amount = FmtTok(n.TotalTokens)
 	if opts.CostMode {
-		parts = append(parts, fmt.Sprintf("$%.2f", n.TotalCostUSD))
-	} else {
-		parts = append(parts, fmt.Sprintf("%s tok", FmtTok(n.TotalTokens)))
+		amount = fmt.Sprintf("$%.2f", n.TotalCostUSD)
 	}
-	parts = append(parts, fmt.Sprintf("%sk/m", fmtK(n.BurnRateSum)))
-	return strings.Join(parts, "  ")
+	burn = fmt.Sprintf("%sk/m", fmtK(n.BurnRateSum))
+	return
 }
