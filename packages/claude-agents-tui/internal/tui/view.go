@@ -36,7 +36,7 @@ func (m *Model) View() string {
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
 	})
-	footer := render.Footer(m.width, now)
+	footer := render.Footer(m.width, render.Legend(render.FooterLeftWidth(m.width)), now)
 
 	zones := []zoneSpec{
 		{name: "controls", content: controls, dropOrder: 1},
