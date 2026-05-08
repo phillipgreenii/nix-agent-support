@@ -29,25 +29,20 @@ Theme C ships:
 
 ### Aggregate state (commit C1)
 
-`internal/aggregate/tree.go` gains two fields each on `PathNode` and `Directory`:
+`Directory.TotalTokens` and `PathNode.TotalTokens` already sum `SessionEnrichment.SessionTokens` across descendants — the field theme C needs for the rollup `%` calculation already exists. `PathNode.BurnRateSum` also already exists.
+
+The single missing field is `Directory.BurnRateSum`:
 
 ```go
 type Directory struct {
     // existing fields...
-    SessionTokensSum int     // NEW: sum of SessionEnrichment.SessionTokens across children
-    BurnRateSum      float64 // NEW: sum of SessionEnrichment.BurnRateShort across children
-}
-
-type PathNode struct {
-    // existing fields...
-    SessionTokensSum int     // NEW: sum across all descendant sessions
-    // BurnRateSum already exists on PathNode today.
+    BurnRateSum float64 // NEW: sum of SessionEnrichment.BurnRateShort across children
 }
 ```
 
-`SessionTokensSum` populates during `aggregate.Build` (for `Directory`) and `aggregate.BuildPathTree` (for `PathNode`) by summing the relevant field across descendants. `Directory.BurnRateSum` is added so directory rollups can show burn rate (today's `dirRollup` has no burn column at all; theme C adds it).
+This is added so directory rollups can show a burn-rate column (today's `dirRollup` has no burn column at all; theme C adds it). Populated during `aggregate.Build` by accumulating `en.BurnRateShort` alongside the existing `d.TotalTokens += en.SessionTokens`.
 
-The percentage shown on a rollup row is `100 * SessionTokensSum / TotalSessionTokens` (where `TotalSessionTokens` is the existing global sum already passed into `TreeOpts`).
+The percentage shown on a rollup row is `100 * TotalTokens / TotalSessionTokens` (where `TotalSessionTokens` is the existing global sum already passed into `TreeOpts`).
 
 ### Column grid (commit C2)
 
@@ -112,14 +107,14 @@ func renderStatsBlock(col1, pct, bar, amount, burn string) string {
 **Directory rollup row (today's `dirRollup`):**
 
 - `col1` = compact counts: `<workingN>● <idleN>○ <dormantN>✕` (each only included when > 0; dormant only when `ShowAll`).
-- `pct` = `fmt.Sprintf("%.0f%%", 100 * SessionTokensSum / TotalSessionTokens)`
+- `pct` = `fmt.Sprintf("%.0f%%", 100 * d.TotalTokens / TotalSessionTokens)` (rollup share)
 - `bar` = `progressBar(rollupPct, 5)`
 - `amount` = `FmtTok(d.TotalTokens)` or `$d.TotalCostUSD` per toggle
 - `burn` = sum of children burn rates → `fmt.Sprintf("%sk/m", fmtK(burnSum))`. (Today `dirRollup` shows no burn at all; theme C adds it. Today's `nodeRollup` already does this.)
 
 **Path-node rollup row (today's `RenderPathNode` + `nodeRollup`):**
 
-- Same as directory rollup — same five columns, same content rules. `n.SessionTokensSum`, `n.WorkingN`, `n.IdleN`, `n.DormantN`, `n.TotalTokens`, `n.TotalCostUSD`, `n.BurnRateSum` all already exist; the SessionTokensSum addition is the only new field.
+- Same as directory rollup — same five columns, same content rules. `n.WorkingN`, `n.IdleN`, `n.DormantN`, `n.TotalTokens`, `n.TotalCostUSD`, `n.BurnRateSum` all already exist on `PathNode` today. No new field needed.
 
 ### Indented collapse glyph (commit C2)
 
@@ -146,10 +141,9 @@ The label column's width budget shrinks by `2*depth` for nested rows. `labelStyl
 
 Two commits, both independently revertable:
 
-1. **`feat(aggregate): add SessionTokensSum to PathNode + Directory`**
-   - `aggregate.Tree.Build` populates `Directory.SessionTokensSum`.
-   - `aggregate.BuildPathTree` populates `PathNode.SessionTokensSum`.
-   - Unit tests in `aggregate_test.go` and `pathtree_test.go` assert the sum equals the sum of child session SessionTokens.
+1. **`feat(aggregate): add Directory.BurnRateSum`**
+   - `aggregate.Build` populates `Directory.BurnRateSum` by accumulating `en.BurnRateShort`.
+   - Unit test in `aggregate_test.go` asserts the sum equals the sum of child session burn rates.
    - No renderer change. The new field is unused; build still passes.
 
 2. **`feat(render): unified column grid + indented glyphs`**
@@ -165,21 +159,19 @@ Two commits, both independently revertable:
 ### Unit — `aggregate_test.go` (commit C1)
 
 ```go
-func TestBuildPopulatesSessionTokensSum(t *testing.T) {
+func TestBuildPopulatesDirectoryBurnRateSum(t *testing.T) {
     tree := Build(...)
     for _, d := range tree.Dirs {
-        sum := 0
+        var sum float64
         for _, sv := range d.Sessions {
-            sum += sv.SessionEnrichment.SessionTokens
+            sum += sv.SessionEnrichment.BurnRateShort
         }
-        if d.SessionTokensSum != sum {
-            t.Errorf(...)
+        if d.BurnRateSum != sum {
+            t.Errorf("dir %q BurnRateSum = %.2f, want %.2f", d.Path, d.BurnRateSum, sum)
         }
     }
 }
 ```
-
-Same shape for `PathNode` in `pathtree_test.go`, recursively summing across descendants.
 
 ### Unit — `tree_test.go` (commit C2)
 
