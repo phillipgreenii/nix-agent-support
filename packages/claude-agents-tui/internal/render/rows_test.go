@@ -62,7 +62,7 @@ func TestFlattenRowsStructure(t *testing.T) {
 	}
 }
 
-func TestFlattenRowsLineCountWithPrompt(t *testing.T) {
+func TestFlattenRowsSessionLineCount(t *testing.T) {
 	d := &aggregate.Directory{
 		Path: "/p",
 		Sessions: []*aggregate.SessionView{
@@ -78,8 +78,8 @@ func TestFlattenRowsLineCountWithPrompt(t *testing.T) {
 	}
 	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
 	rows := FlattenRows(tree, TreeOpts{})
-	if rows[1].LineCount != 2 {
-		t.Errorf("session with FirstPrompt: want LineCount=2, got %d", rows[1].LineCount)
+	if rows[1].LineCount != 1 {
+		t.Errorf("session with FirstPrompt: want LineCount=1, got %d", rows[1].LineCount)
 	}
 	if rows[2].LineCount != 1 {
 		t.Errorf("session without FirstPrompt: want LineCount=1, got %d", rows[2].LineCount)

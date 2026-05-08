@@ -91,13 +91,11 @@ func Tree(tree *aggregate.Tree, opts TreeOpts) string {
 		sb.WriteString(renderDirRow(d, opts))
 		for i, s := range visible {
 			prefix := "├─"
-			cont := "│"
 			if i == len(visible)-1 {
 				prefix = "└─"
-				cont = " "
 			}
 			selected := opts.HasCursor && rowIdx == opts.Cursor
-			sb.WriteString(renderSession(s, opts, prefix, cont, selected))
+			sb.WriteString(renderSession(s, opts, prefix, selected))
 			rowIdx++
 		}
 		sb.WriteString("\n")
@@ -182,7 +180,7 @@ func renderDirRow(d *aggregate.Directory, opts TreeOpts) string {
 	return pathStyle.Render(d.Path+branchStr) + " " + stats + "\n"
 }
 
-func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string, selected bool) string {
+func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selected bool) string {
 	cursorMark := "  "
 	if selected {
 		cursorMark = opts.Theme.Cursor.Render(">") + " "

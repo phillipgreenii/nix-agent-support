@@ -19,7 +19,7 @@ func TestSessionRowShowsPauseGlyph(t *testing.T) {
 		},
 	}
 	opts := TreeOpts{Theme: NewTheme(false)}
-	row := renderSession(sv, opts, "└─", " ", false)
+	row := renderSession(sv, opts, "└─", false)
 	if !strings.Contains(row, "⏸") {
 		t.Errorf("row missing ⏸ glyph:\n%s", row)
 	}
@@ -34,7 +34,7 @@ func TestSessionRowShowsResetTime(t *testing.T) {
 		},
 	}
 	opts := TreeOpts{Theme: NewTheme(false)}
-	row := renderSession(sv, opts, "└─", " ", false)
+	row := renderSession(sv, opts, "└─", false)
 	localTime := resetsAt.Local().Format("15:04")
 	if !strings.Contains(row, localTime) {
 		t.Errorf("row missing reset time %q:\n%s", localTime, row)

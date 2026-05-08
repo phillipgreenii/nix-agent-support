@@ -127,7 +127,7 @@ func (m *Model) syncScroll() {
 	if m.height == 0 || len(m.flatRows) == 0 {
 		return
 	}
-	bodyHeight := max(m.height-8, 3)
+	bodyHeight := max(m.height-4, 3)
 	cursorIdx := m.cursor
 	if cursorIdx < 0 || cursorIdx >= len(m.flatRows) {
 		return

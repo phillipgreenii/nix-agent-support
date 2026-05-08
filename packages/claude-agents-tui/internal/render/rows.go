@@ -30,7 +30,7 @@ type Row struct {
 	Session       *aggregate.SessionView // SessionKind: direct session pointer (path-tree mode)
 	Node          *aggregate.PathNode    // PathNodeKind: direct node pointer
 
-	LineCount int // terminal lines this row occupies (1 or 2)
+	LineCount int // terminal lines this row occupies (currently always 1)
 }
 
 // FlattenRows converts a Tree into an ordered slice of Rows for window rendering.
@@ -44,17 +44,13 @@ func FlattenRows(tree *aggregate.Tree, opts TreeOpts) []Row {
 			continue
 		}
 		rows = append(rows, Row{Kind: DirHeaderKind, DirIdx: dirIdx, LineCount: 1})
-		for sessIdx, s := range visible {
-			lc := 1
-			if s.SessionEnrichment.FirstPrompt != "" {
-				lc = 2
-			}
+		for sessIdx := range visible {
 			rows = append(rows, Row{
 				Kind:      SessionKind,
 				DirIdx:    dirIdx,
 				SessIdx:   sessIdx,
 				FlatIdx:   flatIdx,
-				LineCount: lc,
+				LineCount: 1,
 			})
 			flatIdx++
 		}
@@ -85,17 +81,13 @@ func FlattenPathTree(nodes []*aggregate.PathNode, state *treestate.State, opts T
 		}
 		visible := visibleSessions(n.DirectSessions, opts.ShowAll)
 		for i, s := range visible {
-			lc := 1
-			if s.SessionEnrichment.FirstPrompt != "" {
-				lc = 2
-			}
 			rows = append(rows, Row{
 				Kind:          SessionKind,
 				Depth:         n.Depth,
 				FlatIdx:       flatIdx,
 				IsLastInGroup: i == len(visible)-1,
 				Session:       s,
-				LineCount:     lc,
+				LineCount:     1,
 			})
 			flatIdx++
 		}

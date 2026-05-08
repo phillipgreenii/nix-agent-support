@@ -120,12 +120,12 @@ func RenderWindow(tree *aggregate.Tree, rows []Row, scrollOffset, bodyHeight int
 			}
 			s := visible[row.SessIdx]
 			isLast := row.SessIdx == len(visible)-1
-			prefix, cont := "├─", "│"
+			prefix := "├─"
 			if isLast {
-				prefix, cont = "└─", " "
+				prefix = "└─"
 			}
 			selected := opts.HasCursor && row.FlatIdx == opts.Cursor
-			sb.WriteString(renderSession(s, opts, prefix, cont, selected))
+			sb.WriteString(renderSession(s, opts, prefix, selected))
 		}
 	}
 
@@ -176,9 +176,9 @@ func RenderWindowTree(nodes []*aggregate.PathNode, rows []Row, scrollOffset, bod
 		case BlankKind:
 			sb.WriteString("\n")
 		case SessionKind:
-			prefix, cont := "├─", "│"
+			prefix := "├─"
 			if row.IsLastInGroup {
-				prefix, cont = "└─", " "
+				prefix = "└─"
 			}
 			indent := strings.Repeat("  ", row.Depth)
 			selected := opts.HasCursor && i == opts.Cursor
@@ -188,8 +188,7 @@ func RenderWindowTree(nodes []*aggregate.PathNode, rows []Row, scrollOffset, bod
 			if sessionOpts.Width > 0 {
 				sessionOpts.Width -= 2 * row.Depth
 			}
-			// Pass indent+cont so the ↳ continuation line aligns with the session prefix.
-			sb.WriteString(renderSession(row.Session, sessionOpts, indent+prefix, indent+cont, selected))
+			sb.WriteString(renderSession(row.Session, sessionOpts, indent+prefix, selected))
 		}
 	}
 
