@@ -129,3 +129,29 @@ func TestBuildSetsPRInfo(t *testing.T) {
 		t.Error("/p2 should have nil PRInfo (not in prByDir)")
 	}
 }
+
+func TestBuildPopulatesDirectoryBurnRateSum(t *testing.T) {
+	sessions := []*session.Session{
+		{SessionID: "a", Cwd: "/p1"},
+		{SessionID: "b", Cwd: "/p1"},
+		{SessionID: "c", Cwd: "/p2"},
+	}
+	enriched := map[string]SessionEnrichment{
+		"a": {BurnRateShort: 100},
+		"b": {BurnRateShort: 50},
+		"c": {BurnRateShort: 200},
+	}
+	tree := Build(sessions, enriched, nil, nil, "")
+
+	byPath := map[string]*Directory{}
+	for _, d := range tree.Dirs {
+		byPath[d.Path] = d
+	}
+
+	if got := byPath["/p1"].BurnRateSum; got != 150 {
+		t.Errorf("/p1 BurnRateSum = %.0f, want 150", got)
+	}
+	if got := byPath["/p2"].BurnRateSum; got != 200 {
+		t.Errorf("/p2 BurnRateSum = %.0f, want 200", got)
+	}
+}

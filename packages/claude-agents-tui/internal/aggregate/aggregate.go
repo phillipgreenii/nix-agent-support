@@ -26,6 +26,7 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 			d.Branch = s.Branch
 		}
 		d.TotalTokens += en.SessionTokens
+		d.BurnRateSum += en.BurnRateShort
 		switch s.Status {
 		case session.Working:
 			d.WorkingN++

@@ -31,6 +31,7 @@ type Directory struct {
 	DormantN     int
 	TotalTokens  int
 	TotalCostUSD float64
+	BurnRateSum  float64 // NEW: sum of children's BurnRateShort
 }
 
 type SessionView struct {
