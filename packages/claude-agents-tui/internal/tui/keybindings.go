@@ -38,12 +38,14 @@ var Bindings = []Binding{
 // --- Handlers (one per Binding) ---
 
 func handleOpenHelp(m *Model) tea.Cmd {
-	// Stub for commit 1; commit 2 wires modal state.
+	m.activeModal = ModalHelp
+	m.modalScrollOffset = 0
 	return nil
 }
 
 func handleOpenLegend(m *Model) tea.Cmd {
-	// Stub for commit 1; commit 2 wires modal state.
+	m.activeModal = ModalLegend
+	m.modalScrollOffset = 0
 	return nil
 }
 
@@ -52,6 +54,12 @@ func handleQuit(m *Model) tea.Cmd {
 }
 
 func handleDown(m *Model) tea.Cmd {
+	if m.activeModal != ModalNone {
+		m.modalScrollOffset++
+		// Caller (Modal renderer) clamps; the model's offset is allowed to
+		// overshoot temporarily.
+		return nil
+	}
 	start := m.cursor + 1
 	if start < len(m.flatRows) {
 		m.cursor = nextSelectable(m.flatRows, start, +1)
@@ -62,6 +70,12 @@ func handleDown(m *Model) tea.Cmd {
 }
 
 func handleUp(m *Model) tea.Cmd {
+	if m.activeModal != ModalNone {
+		if m.modalScrollOffset > 0 {
+			m.modalScrollOffset--
+		}
+		return nil
+	}
 	start := m.cursor - 1
 	if start >= 0 {
 		m.cursor = nextSelectable(m.flatRows, start, -1)
@@ -105,6 +119,10 @@ func handleCollapse(m *Model) tea.Cmd {
 }
 
 func handleEsc(m *Model) tea.Cmd {
+	if m.activeModal != ModalNone {
+		m.activeModal = ModalNone
+		return nil
+	}
 	m.selected = nil
 	return nil
 }

@@ -12,6 +12,15 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
 )
 
+// ModalKind selects which full-screen modal is currently open.
+type ModalKind int
+
+const (
+	ModalNone ModalKind = iota
+	ModalHelp
+	ModalLegend
+)
+
 type Options struct {
 	Tree       *aggregate.Tree
 	Poller     Poller
@@ -29,10 +38,12 @@ type Model struct {
 	forceID       bool
 	costMode      bool
 	caffeinateOn  bool
-	width, height int
-	selected      *aggregate.SessionView
-	cursor        int
-	scrollOffset  int
+	width, height     int
+	selected          *aggregate.SessionView
+	activeModal       ModalKind
+	modalScrollOffset int
+	cursor            int
+	scrollOffset      int
 	theme         render.Theme
 
 	poller     Poller

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
@@ -14,6 +15,9 @@ func (m *Model) View() string {
 	}
 	if m.tree == nil {
 		return "loading…"
+	}
+	if m.activeModal != ModalNone {
+		return wrap.Block(m.renderModal(), wrap.EffectiveWidth(m.width))
 	}
 	if m.selected != nil {
 		return wrap.Block(RenderDetails(m.selected, m.width), wrap.EffectiveWidth(m.width))
@@ -107,4 +111,28 @@ func (m *Model) selectionStatus() string {
 	}
 	text := fmt.Sprintf("%q", wrap.Line(fp, leftWidth))
 	return m.theme.Prompt.Render(text)
+}
+
+// renderModal returns the full-screen modal content for the active modal.
+func (m *Model) renderModal() string {
+	switch m.activeModal {
+	case ModalHelp:
+		return render.HelpModal(bindingsToHelpRows(), m.width, m.height, m.modalScrollOffset)
+	case ModalLegend:
+		return render.LegendModal(m.width, m.height, m.modalScrollOffset)
+	}
+	return ""
+}
+
+// bindingsToHelpRows converts Bindings into the (Keys, Description) pairs the
+// help modal renders. Keys are " | "-joined for display.
+func bindingsToHelpRows() []render.HelpRow {
+	out := make([]render.HelpRow, 0, len(Bindings))
+	for _, b := range Bindings {
+		out = append(out, render.HelpRow{
+			Keys:        strings.Join(b.Keys, " | "),
+			Description: b.Description,
+		})
+	}
+	return out
 }

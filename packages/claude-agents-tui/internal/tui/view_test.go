@@ -332,6 +332,81 @@ func TestViewFooterBlankWhenCursorOnPathNode(t *testing.T) {
 	}
 }
 
+// TestQuestionMarkOpensHelpModal — pressing ? sets activeModal=ModalHelp.
+func TestQuestionMarkOpensHelpModal(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if m.activeModal != ModalHelp {
+		t.Errorf("? should open help modal, activeModal = %v", m.activeModal)
+	}
+	out := m.View()
+	if !strings.Contains(out, "Help — keybindings") {
+		t.Errorf("view should render help title:\n%s", out)
+	}
+}
+
+// TestLOpensLegendModal — pressing l sets activeModal=ModalLegend.
+func TestLOpensLegendModal(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.activeModal != ModalLegend {
+		t.Errorf("l should open legend modal, activeModal = %v", m.activeModal)
+	}
+	out := m.View()
+	if !strings.Contains(out, "Legend — symbols") {
+		t.Errorf("view should render legend title:\n%s", out)
+	}
+}
+
+// TestEscClosesModalBeforeDetailPanel — esc closes modal first.
+func TestEscClosesModalBeforeDetailPanel(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.activeModal = ModalHelp
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.activeModal != ModalNone {
+		t.Errorf("esc should close modal, got %v", m.activeModal)
+	}
+}
+
+// TestModalScrollDoesNotMoveCursor — when modal active, j/k scroll modal not cursor.
+func TestModalScrollDoesNotMoveCursor(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "a", Status: session.Working}},
+			{Session: &session.Session{SessionID: "b", Status: session.Working}},
+		},
+		WorkingN: 2,
+	}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.activeModal = ModalHelp
+
+	cursorBefore := m.cursor
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.cursor != cursorBefore {
+		t.Errorf("cursor moved while modal active: was %d, now %d", cursorBefore, m.cursor)
+	}
+	if m.modalScrollOffset != 2 {
+		t.Errorf("modalScrollOffset = %d, want 2", m.modalScrollOffset)
+	}
+}
+
+// TestHelpModalContainsAllBindings — every binding's description appears in [?] modal.
+func TestHelpModalContainsAllBindings(t *testing.T) {
+	rows := bindingsToHelpRows()
+	out := render.HelpModal(rows, 200, 60, 0)
+	for _, b := range Bindings {
+		if !strings.Contains(out, b.Description) {
+			t.Errorf("help modal missing %q (Keys=%v); got:\n%s", b.Description, b.Keys, out)
+		}
+	}
+}
+
 func fixtureLongPR() *Model {
 	d := &aggregate.Directory{
 		Path:   "/p",
