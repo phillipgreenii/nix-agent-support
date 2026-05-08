@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"strings"
+	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
@@ -18,30 +18,43 @@ func (m *Model) View() string {
 		return wrap.Block(RenderDetails(m.selected, m.width), wrap.EffectiveWidth(m.width))
 	}
 
-	header := strings.TrimRight(render.Header(m.tree, render.HeaderOpts{
-		CaffeinateOn:    m.caffeinateOn,
-		ShowAll:         m.showAll,
-		CostMode:        m.costMode,
-		ForceID:         m.forceID,
-		Theme:           m.theme,
+	now := time.Now()
+	controls := render.Controls(render.ControlsOpts{
+		CaffeinateOn: m.caffeinateOn,
+		ShowAll:      m.showAll,
+		CostMode:     m.costMode,
+		ForceID:      m.forceID,
+		AutoResume:   m.autoResume,
+		Theme:        m.theme,
+		Width:        m.width,
+	})
+	blockRow := render.BlockRow(m.tree, render.BlockRowOpts{Width: m.width, Now: now})
+	alerts := render.Alerts(m.tree, render.AlertsOpts{
+		Now:             now,
+		Width:           m.width,
 		AutoResume:      m.autoResume,
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
-		Width:           m.width,
-	}), "\n")
-	status := strings.TrimRight(render.Legend(m.width), "\n")
+	})
+	footer := render.Footer(m.width, now)
 
 	zones := []zoneSpec{
-		{name: "header", content: header, dropOrder: 1},
-		{
+		{name: "controls", content: controls, dropOrder: 1},
+		{name: "block", content: blockRow, dropOrder: 2},
+	}
+	if alerts != "" {
+		zones = append(zones, zoneSpec{name: "alert", content: alerts, dropOrder: 3})
+	}
+	zones = append(zones,
+		zoneSpec{
 			name: "body",
 			fill: true,
 			renderFill: func(h int) string {
 				return m.renderBody(h)
 			},
 		},
-		{name: "status", content: status, dropOrder: 2},
-	}
+		zoneSpec{name: "footer", content: footer, dropOrder: 4},
+	)
 
 	return layoutZones(zones, wrap.EffectiveWidth(m.width), m.height)
 }

@@ -32,7 +32,12 @@ func Run(ctx context.Context, o Opts) int {
 		if err != nil {
 			fmt.Fprintf(o.Writer, "error: %v\n", err)
 		} else {
-			fmt.Fprint(o.Writer, render.Header(tree, render.HeaderOpts{}))
+			now := time.Now()
+			fmt.Fprintln(o.Writer, render.Controls(render.ControlsOpts{}))
+			fmt.Fprintln(o.Writer, render.BlockRow(tree, render.BlockRowOpts{Now: now}))
+			if a := render.Alerts(tree, render.AlertsOpts{Now: now}); a != "" {
+				fmt.Fprintln(o.Writer, a)
+			}
 			fmt.Fprint(o.Writer, render.Tree(tree, render.TreeOpts{}))
 		}
 		if anyWorking {
