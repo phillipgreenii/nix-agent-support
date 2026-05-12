@@ -30,6 +30,7 @@ let
       cfg.sandbox == null && cfg.sandboxEnabled != null
     ) ".sandbox.enabled = ${builtins.toJSON cfg.sandboxEnabled}"
     ++ lib.optional (cfg.theme != null) ".theme = ${builtins.toJSON cfg.theme}"
+    ++ lib.mapAttrsToList (name: val: ".env[\"${name}\"] = ${builtins.toJSON val}") cfg.env
     ++ [
       (
         if cfg.noFlicker then ".env.CLAUDE_CODE_NO_FLICKER = \"1\"" else "del(.env.CLAUDE_CODE_NO_FLICKER)"
@@ -124,6 +125,22 @@ in
       type = lib.types.bool;
       default = true;
       description = "Set CLAUDE_CODE_NO_FLICKER=1 in ~/.claude/settings.json env to suppress terminal flicker";
+    };
+
+    env = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          ENABLE_PROMPT_CACHING_1H = "1";
+        }
+      '';
+      description = ''
+        Extra environment variables to merge into `.env` in `~/.claude/settings.json`.
+        Each entry is applied as a jq assignment, so keys overwrite any existing
+        value at that path. `CLAUDE_CODE_NO_FLICKER` is still controlled by the
+        `noFlicker` option and applied after this attrset.
+      '';
     };
 
     theme = lib.mkOption {
