@@ -22,7 +22,7 @@ Add an `internal/cmuxstatus` package with a `Reporter` interface and two impleme
 - **Immediate push on user toggle**: when the user presses `C` (caffeinate) or `R` (auto-resume), `m.reporter.Push(snapshot)` fires synchronously inside the keybinding handler after the bool flip.
 - **Periodic push on poll tick**: every Nth poll cycle (default 5; configurable as `cmux_sidebar_interval_ticks`) the Model calls `m.reporter.Push(snapshot)` with the freshly aggregated values. Notifications fire as a separate discrete event (5h-block reset + nudge dispatched). On `tea.Quit` the Model calls `m.reporter.Clear()`.
 
-Pushing the full snapshot every time keeps the reporter stateless (no diffing), the wiring uniform (toggle and tick share one code path), and the sidebar self-healing (a missed update on one slot is rectified by the next push). The cmux subprocess cost is 4 calls per push (3 `set-status` + 1 `set-progress`).
+Pushing the full snapshot every time keeps the reporter stateless (no diffing), the wiring uniform (toggle and tick share one code path), and the sidebar self-healing (a missed update on one slot is rectified by the next push). The cmux subprocess cost is 2 calls per push (1 `set-status` + 1 `set-progress`).
 
 Reporter construction is gated on `CMUX_WORKSPACE_ID` and a new optional config flag `cmux_sidebar_enable` (default true). When either is unset, `NewReporter` returns the `Noop` implementation and every method is a no-op. No subprocesses run, no socket touches.
 
@@ -30,20 +30,24 @@ Reporter construction is gated on `CMUX_WORKSPACE_ID` and a new optional config 
 
 | Slot | Key / target | Source of truth | Update trigger |
 | --- | --- | --- | --- |
-| Status | `caffeinate` | `m.caffeinateOn` | Immediate on `C` toggle |
-| Status | `nudge` | `m.autoResume` | Immediate on `R` toggle |
-| Status | `state` | aggregate state across `m.tree.Dirs[].Sessions[]` | Every N ticks |
-| Progress | (singleton) | `m.tree.ActiveBlock.StartTime` → `EndTime`, clamped to [0,1]; forced to 1.0 while `m.tree.WindowResetsAt != 0` | Every N ticks |
+| Status | `claude-agents` | aggregate state + caffeinate + nudge toggles | Immediate on `C`/`R` toggle; every N ticks |
+| Progress | (singleton) | `100 * m.tree.ActiveBlock.CostUSD / m.tree.PlanCapUSD`, clamped to [0,1]; forced to 1.0 while `m.tree.WindowResetsAt != 0` | Every N ticks |
 | Notification | (one-shot) | `autoResumeFireMsg` handler at the moment of fire | Per nudge event |
 
-Status values, icons, and colors (subject to refinement during smoke test):
+The single status pill keyed `claude-agents` collapses all toggle and state information into one entry (cmux has no ordering guarantee for multi-pill sets). Value format: `<state> [• caff] [• nudge]` where the toggle suffixes are appended only when the respective toggle is on.
 
-- `caffeinate`: `"on"` (icon `bolt`, color `#ffcc00`) / `"off"` (icon `bolt`, color `#888888`).
-- `nudge`: `"on"` (icon `bell`, color `#00aaff`) / `"off"` (icon `bell`, color `#888888`).
-- `state`: `"working"` (icon `play`, `#00cc66`) / `"idle"` (icon `pause`, `#888888`) / `"paused (resets HH:MM)"` (icon `clock`, `#ff8800`) / `"dormant"` (icon `moon`, `#555555`).
-  - Aggregate state = highest precedence of any non-Working session's status, with `paused` winning over everything when `m.tree.WindowResetsAt` is set. If at least one session is Working and no pause: `working`. Else `idle` / `dormant`.
+Status values, icons, and colors:
 
-Progress label: `"5h block %.0f%% used"` based on `100 * (now - StartTime) / (EndTime - StartTime)`. While paused (`WindowResetsAt != 0`): label is `"5h block exhausted — waiting for reset"`, value `1.0`.
+- `claude-agents`: state text leads; icon and color follow aggregate state.
+  - `"working"` (icon `play`, color `#00cc66`)
+  - `"idle"` (icon `pause`, color `#888888`)
+  - `"paused (resets HH:MM)"` (icon `clock`, color `#ff8800`)
+  - `"dormant"` (icon `moon`, color `#555555`)
+  - Aggregate state = highest precedence across sessions, with `paused` winning over everything when `m.tree.WindowResetsAt` is set. If at least one session is Working and no pause: `working`. Else `idle` / `dormant`.
+- Toggle suffixes (appended only when on): `" • caff"` for caffeinate, `" • nudge"` for auto-resume.
+- Examples: `"working"`, `"working • caff"`, `"working • caff • nudge"`, `"paused (resets 15:30) • caff • nudge"`, `"idle"`.
+
+Progress metric: `100 * block.CostUSD / tree.PlanCapUSD` (matches the TUI header). Bar value is clamped to [0,1]. Label is `"5h block N% of cap"` where N is the raw unclamped percent (allowing >100 when over-budget). When `PlanCapUSD <= 0`, `HasProgress=false` and no `cmux set-progress` call fires (mirrors the TUI's "plan cap unknown" branch). While paused (`WindowResetsAt != 0`): label is `"5h block exhausted — waiting for reset"`, value `1.0`.
 
 Notification fires from the `autoResumeFireMsg` handler, after `signalNonWorking` returns:
 
@@ -95,12 +99,10 @@ Method failures are non-fatal: any `cmux` subprocess error is routed through the
 
 Per call:
 
-1. `cmux set-status caffeinate <on|off> --icon bolt --color <hex>`
-2. `cmux set-status nudge      <on|off> --icon bell --color <hex>`
-3. `cmux set-status state      <text>   --icon <icon> --color <hex>`
-4. If `s.HasProgress`: `cmux set-progress <value> --label "<label>"`; otherwise skip.
+1. `cmux set-status claude-agents <value> --icon <icon> --color <hex>` where `<value>` is `<state> [• caff] [• nudge]`.
+2. If `s.HasProgress`: `cmux set-progress <value> --label "<label>"`; otherwise skip.
 
-All four invocations share a 5-second `context.WithTimeout` per Push. If any fails, the rest still attempt — partial-success is better than all-or-nothing for sidebar UX. Each failure logs one line to `signal-errors.log` and execution continues.
+Both invocations share a 5-second `context.WithTimeout` per Push. If call 1 fails, call 2 still attempts — partial-success is better than all-or-nothing for sidebar UX. Each failure logs one line to `signal-errors.log` and execution continues.
 
 ### Files
 
@@ -145,19 +147,21 @@ func aggregateState(tree *aggregate.Tree) (cmuxstatus.State, time.Time) {
     }
 }
 
-func windowProgress(tree *aggregate.Tree) (float64, string, bool) {
+func windowProgress(tree *aggregate.Tree, now time.Time) (float64, string, bool) {
+    _ = now // retained for signature parity; the cost-based metric doesn't depend on wall-clock
     if tree == nil { return 0, "", false }
     if !tree.WindowResetsAt.IsZero() {
         return 1.0, "5h block exhausted — waiting for reset", true
     }
     b := tree.ActiveBlock
-    if b == nil || b.EndTime.Before(b.StartTime) || b.EndTime.Equal(b.StartTime) {
+    if b == nil || tree.PlanCapUSD <= 0 {
         return 0, "", false
     }
-    used := float64(time.Since(b.StartTime)) / float64(b.EndTime.Sub(b.StartTime))
-    if used < 0 { used = 0 }
-    if used > 1 { used = 1 }
-    return used, fmt.Sprintf("5h block %.0f%% used", used*100), true
+    pct := 100 * b.CostUSD / tree.PlanCapUSD
+    v := pct / 100
+    if v < 0 { v = 0 }
+    if v > 1 { v = 1 }
+    return v, fmt.Sprintf("5h block %.0f%% of cap", pct), true
 }
 ```
 
@@ -176,7 +180,7 @@ Cross-workspace status broadcasting (e.g. iterate all workspaces and push status
 
 `Cmux.Notify(title, body)` issues `cmux notify --title "<title>" --body "<body>"` — one subprocess call. Errors route to `logf`.
 
-`Cmux.Clear()` issues `cmux clear-status caffeinate`, `cmux clear-status nudge`, `cmux clear-status state`, `cmux clear-progress`. Four subprocess calls. Notifications are not cleared (cmux owns notification retention). Errors route to `logf`. Best-effort — partial failures are ignored.
+`Cmux.Clear()` issues `cmux clear-status claude-agents` and `cmux clear-progress`. Two subprocess calls. Notifications are not cleared (cmux owns notification retention). Errors route to `logf`. Best-effort — partial failures are ignored.
 
 `Noop` has empty method bodies. Constructed when `CMUX_WORKSPACE_ID` is empty or `cmux_sidebar_enable=false`.
 
@@ -204,13 +208,14 @@ A value of `0` or negative for the tick interval is treated as "every tick".
 
 `internal/cmuxstatus/reporter_test.go`:
 
-- `TestCmuxReporterPushEmitsFourSubprocessCalls` — one `Push` call with `HasProgress=true` produces exactly 3 `cmux set-status` calls (caffeinate, nudge, state) plus 1 `cmux set-progress`. Assert arg shapes.
-- `TestCmuxReporterPushSkipsProgressWhenNoActiveBlock` — `HasProgress=false` → only 3 `set-status` calls, zero `set-progress`.
-- `TestCmuxReporterPushClampsProgress` — values `-1`, `0.5`, `2.5` produce clamped `0`, `0.5`, `1.0` respectively.
-- `TestCmuxReporterPushPartialFailureContinues` — `RunCmd` returns an error on the second call; the third and fourth calls still attempt; `logf` is invoked once with the error string.
-- `TestCmuxReporterNotifyEmitsCmuxNotify`.
-- `TestCmuxReporterClearIssuesAllSidebarKeysAndProgress`.
-- `TestNoopReporterDoesNothing` — every method runs without subprocess calls.
+- `TestCmuxPushEmitsOneStatusPlusProgress` — one `Push` call with `HasProgress=true` produces exactly 1 `cmux set-status claude-agents` call plus 1 `cmux set-progress`. Assert arg shapes including toggle suffixes.
+- `TestCmuxPushOmitsToggleSuffixesWhenOff` — `HasProgress=false`, both toggles off → 1 `set-status` call with value `"idle"`, no caff/nudge suffix.
+- `TestCmuxPushCaffOnlyShowsCaff` / `TestCmuxPushNudgeOnlyShowsNudge` — single-toggle suffix appears only when that toggle is on.
+- `TestCmuxPushClampsProgress` — values `-1`, `0.5`, `2.5` produce clamped `0`, `0.5`, `1.0` respectively.
+- `TestCmuxPushPartialFailureContinuesAndLogs` — `RunCmd` returns an error on the first call (status); the second (progress) still attempts; `logf` is invoked once.
+- `TestCmuxNotifyEmitsCmuxNotify`.
+- `TestCmuxClearIssuesTwoCalls` — `Clear()` produces exactly 2 calls: `clear-status claude-agents` + `clear-progress`.
+- `TestNewReporterReturnsNoop*` — every method runs without subprocess calls outside cmux or when disabled.
 
 `internal/tui/model_test.go` additions:
 
@@ -239,12 +244,12 @@ Fake reporter is a struct implementing `Reporter` with call recorders, defined i
 
 ### Performance
 
-- Toggle press: 1 `Push` → 4 subprocesses (3 set-status + 1 set-progress), each sub-ms socket round-trip.
-- Periodic push (every 5 ticks ≈ 5s with default 1s poll): same 4 subprocesses.
+- Toggle press: 1 `Push` → 2 subprocesses (1 set-status + 1 set-progress), each sub-ms socket round-trip.
+- Periodic push (every 5 ticks ≈ 5s with default 1s poll): same 2 subprocesses.
 - Notification: 1 subprocess on the discrete event.
-- Quit: 4 subprocesses for `Clear`.
+- Quit: 2 subprocesses for `Clear`.
 
-Steady-state load with no user input: ~48 subprocesses/minute (4 per push × ~12 pushes/minute). Burst on rapid toggle: bounded by keystroke rate. Trivial in absolute terms.
+Steady-state load with no user input: ~24 subprocesses/minute (2 per push × ~12 pushes/minute). Burst on rapid toggle: bounded by keystroke rate. Trivial in absolute terms.
 
 ## Consequences
 
