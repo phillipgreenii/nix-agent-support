@@ -147,12 +147,14 @@ func handleToggleID(m *Model) tea.Cmd {
 
 func handleToggleCaffeinate(m *Model) tea.Cmd {
 	m.caffeinateOn = !m.caffeinateOn
+	m.reporter.Push(m.buildSidebarSnapshot())
 	return nil
 }
 
 func handleToggleAutoResume(m *Model) tea.Cmd {
 	m.autoResume = !m.autoResume
-	if m.autoResume && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
+	m.reporter.Push(m.buildSidebarSnapshot())
+	if m.autoResume && m.tree != nil && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
 		fireAt := m.tree.WindowResetsAt.Add(m.autoResumeDelay)
 		cmds := []tea.Cmd{autoResumeFireCmd(fireAt)}
 		if !m.countdownTick {

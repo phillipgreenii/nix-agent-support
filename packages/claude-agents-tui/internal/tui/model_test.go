@@ -506,3 +506,37 @@ func TestModelClearsSidebarOnQuit(t *testing.T) {
 		t.Errorf("expected 1 Clear on quit, got %d", fr.clears)
 	}
 }
+
+func TestModelPushesSidebarOnCaffeinateToggle(t *testing.T) {
+	fr := &fakeReporter{}
+	m := NewModel(Options{Reporter: fr, SidebarIntervalTicks: 5})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	if len(fr.pushes) != 1 {
+		t.Errorf("expected 1 Push on C, got %d", len(fr.pushes))
+	}
+}
+
+func TestModelPushesSidebarOnAutoResumeToggle(t *testing.T) {
+	fr := &fakeReporter{}
+	m := NewModel(Options{Reporter: fr, SidebarIntervalTicks: 5})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	if len(fr.pushes) != 1 {
+		t.Errorf("expected 1 Push on R, got %d", len(fr.pushes))
+	}
+}
+
+func TestModelNotifiesOnAutoResumeFire(t *testing.T) {
+	fr := &fakeReporter{}
+	m := NewModel(Options{Reporter: fr, SidebarIntervalTicks: 5})
+	tree := &aggregate.Tree{
+		WindowResetsAt: time.Now().Add(-1 * time.Second),
+		Dirs: []*aggregate.Directory{
+			{Sessions: []*aggregate.SessionView{{Session: &session.Session{PID: 12345, Status: session.Idle}}}},
+		},
+	}
+	m.SetTreeAndAutoResumeForTest(tree, true)
+	m.Update(AutoResumeFireForTest())
+	if len(fr.notifies) != 1 {
+		t.Errorf("expected 1 Notify on auto-resume fire, got %d", len(fr.notifies))
+	}
+}

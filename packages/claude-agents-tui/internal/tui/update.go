@@ -90,7 +90,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Now().Before(fireAt) {
 			return m, nil
 		}
-		m.signalNonWorking("auto-resume")
+		n := m.signalNonWorkingAndCount("auto-resume")
+		m.reporter.Notify("claude-agents-tui",
+			fmt.Sprintf("5h window reset. Nudged %d idle session(s) to continue.", n))
 		m.autoResumeFired = true
 		m.countdownTick = false
 		// Shallow-copy to avoid mutating the shared tree pointer.
@@ -104,6 +106,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncScroll()
 	}
 	return m, nil
+}
+
+// signalNonWorkingAndCount mirrors signalNonWorking but returns the number of
+// non-Working sessions iterated. Used by the auto-resume notification body so
+// the count of nudged sessions can be reported to the user.
+func (m *Model) signalNonWorkingAndCount(label string) int {
+	if m.tree == nil {
+		return 0
+	}
+	count := 0
+	for _, d := range m.tree.Dirs {
+		for _, sv := range d.Sessions {
+			if sv.Status == session.Working {
+				continue
+			}
+			count++
+			sig := signal.ResolveSignaler(m.signalers, sv.PID)
+			if sig == nil {
+				m.signalLog(fmt.Sprintf("%s: no signaler for pid %d", label, sv.PID))
+				continue
+			}
+			if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
+				m.signalLog(fmt.Sprintf("%s: send failed pid %d: %v", label, sv.PID, err))
+			}
+		}
+	}
+	return count
 }
 
 // signalNonWorking sends m.autoResumeMessage to every non-Working session via
