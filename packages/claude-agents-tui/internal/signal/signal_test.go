@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 )
@@ -27,6 +28,55 @@ func fakeRun(processTree map[int][2]string, paneList string) func(context.Contex
 				return []byte(paneList), nil
 			}
 			if len(args) >= 2 && args[0] == "send-keys" {
+				return []byte(""), nil
+			}
+			return nil, fmt.Errorf("tmux: unexpected args %v", args)
+		}
+		return nil, fmt.Errorf("unexpected command: %s", name)
+	}
+}
+
+// fakeMultiSocketRun supports the new multi-socket TmuxSignaler. It serves:
+//
+//   - `ps -A -o pid,comm,args`            -> psListAll output
+//   - `ps -o ppid=,comm= -p <pid>`        -> processTree[<pid>]
+//   - `tmux -L <name> list-panes -a -F …` -> panesBySocket[<name>] (no entry = error)
+//   - `tmux -L <name> send-keys …`        -> records to sentKeys (always succeeds)
+//
+// processTree maps pid -> [ppid, comm]. panesBySocket maps socket name to the
+// stdout body of list-panes (one line per pane: "<pane_pid> <pane_id>").
+func fakeMultiSocketRun(
+	psListAll string,
+	processTree map[int][2]string,
+	panesBySocket map[string]string,
+	sentKeys *[]string,
+) func(context.Context, string, ...string) ([]byte, error) {
+	return func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch name {
+		case "ps":
+			// Multi-socket survey: ps -A -o pid,comm,args
+			if len(args) >= 1 && args[0] == "-A" {
+				return []byte(psListAll), nil
+			}
+			// Ancestry walk: ps -o ppid=,comm= -p <pid>
+			pidStr := args[len(args)-1]
+			pid, _ := strconv.Atoi(pidStr)
+			if entry, ok := processTree[pid]; ok {
+				return []byte(entry[0] + " " + entry[1]), nil
+			}
+			return nil, fmt.Errorf("ps: no such pid %d", pid)
+		case "tmux":
+			if len(args) >= 3 && args[0] == "-L" && args[2] == "list-panes" {
+				body, ok := panesBySocket[args[1]]
+				if !ok {
+					return nil, fmt.Errorf("tmux -L %s: no server", args[1])
+				}
+				return []byte(body), nil
+			}
+			if len(args) >= 3 && args[0] == "-L" && args[2] == "send-keys" {
+				if sentKeys != nil {
+					*sentKeys = append(*sentKeys, "tmux "+strings.Join(args, " "))
+				}
 				return []byte(""), nil
 			}
 			return nil, fmt.Errorf("tmux: unexpected args %v", args)
@@ -139,5 +189,101 @@ func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "")}
 	if sig.Detect(1000) {
 		t.Error("Detect = true for tmuxinator ancestor; want false (exact 'tmux' match only)")
+	}
+}
+
+const psSampleSingleServer = `28346 tmux tmux -u -L gc new-session -d -s mayor
+12345 zsh -zsh
+67890 claude /usr/bin/claude
+`
+
+const psSampleTwoServers = `28346 tmux tmux -u -L gc new-session -d -s mayor
+36990 tmux tmux -u -L work attach
+99999 bash -bash
+`
+
+func TestTmuxEnumerateSingleServer(t *testing.T) {
+	panes := map[string]string{
+		"gc": "100 mayor:0.0\n200 mayor:0.1\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := signal.EnumeratePanesForTest(sig, ctx)
+	if err != nil {
+		t.Fatalf("EnumeratePanes: %v", err)
+	}
+	if loc, ok := locs[100]; !ok || loc.SocketName != "gc" || loc.PaneID != "mayor:0.0" {
+		t.Errorf("locs[100] = %+v, want {gc, mayor:0.0}", loc)
+	}
+	if loc, ok := locs[200]; !ok || loc.SocketName != "gc" || loc.PaneID != "mayor:0.1" {
+		t.Errorf("locs[200] = %+v, want {gc, mayor:0.1}", loc)
+	}
+}
+
+func TestTmuxEnumerateTwoServers(t *testing.T) {
+	panes := map[string]string{
+		"gc":   "100 mayor:0.0\n",
+		"work": "300 dev:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes, nil),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := signal.EnumeratePanesForTest(sig, ctx)
+	if err != nil {
+		t.Fatalf("EnumeratePanes: %v", err)
+	}
+	if locs[100].SocketName != "gc" || locs[100].PaneID != "mayor:0.0" {
+		t.Errorf("locs[100] = %+v, want {gc, mayor:0.0}", locs[100])
+	}
+	if locs[300].SocketName != "work" || locs[300].PaneID != "dev:0.0" {
+		t.Errorf("locs[300] = %+v, want {work, dev:0.0}", locs[300])
+	}
+}
+
+func TestTmuxEnumerationSkipsDeadSocket(t *testing.T) {
+	// `work` socket has no entry → fakeMultiSocketRun returns an error.
+	// Enumeration should still surface `gc`.
+	panes := map[string]string{
+		"gc": "100 mayor:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes, nil),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := signal.EnumeratePanesForTest(sig, ctx)
+	if err != nil {
+		t.Fatalf("EnumeratePanes: %v", err)
+	}
+	if locs[100].SocketName != "gc" {
+		t.Errorf("locs[100] = %+v, want gc despite work failing", locs[100])
+	}
+	if _, hasWork := locs[300]; hasWork {
+		t.Errorf("locs[300] present despite work socket failing")
+	}
+}
+
+func TestTmuxEnumerateDefaultSocketWhenNoDashL(t *testing.T) {
+	const psNoDashL = `28346 tmux tmux new-session -d -s default
+`
+	panes := map[string]string{
+		"default": "500 mysession:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psNoDashL, nil, panes, nil),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := signal.EnumeratePanesForTest(sig, ctx)
+	if err != nil {
+		t.Fatalf("EnumeratePanes: %v", err)
+	}
+	if locs[500].SocketName != "default" {
+		t.Errorf("locs[500] = %+v, want default socket", locs[500])
 	}
 }

@@ -92,6 +92,70 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 	return err
 }
 
+// enumeratePanes discovers running tmux servers via `ps -A -o pid,comm,args`
+// (filtering comm == "tmux", parsing argv for `-L <name>`, defaulting absent
+// `-L` to "default"), then runs `tmux -L <name> list-panes -a -F "..."` per
+// deduplicated socket name and merges results into a single map keyed by
+// pane shell pid.
+//
+// Per-socket errors (e.g. server died between ps and list-panes) are silently
+// skipped — partial discovery is the normal case for transient process churn.
+// A failure of the `ps` call itself returns an error.
+func (t *TmuxSignaler) enumeratePanes(ctx context.Context) (map[int]paneLoc, error) {
+	psOut, err := t.run(ctx, "ps", "-A", "-o", "pid,comm,args")
+	if err != nil {
+		return nil, fmt.Errorf("ps -A: %w", err)
+	}
+	socketNames := parseTmuxSocketNames(string(psOut))
+	result := map[int]paneLoc{}
+	for _, name := range socketNames {
+		out, err := t.run(ctx, "tmux", "-L", name, "list-panes", "-a", "-F",
+			"#{pane_pid} #{session_name}:#{window_index}.#{pane_index}")
+		if err != nil {
+			continue
+		}
+		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			pid, err := strconv.Atoi(fields[0])
+			if err != nil {
+				continue
+			}
+			result[pid] = paneLoc{socketName: name, paneID: fields[1]}
+		}
+	}
+	return result, nil
+}
+
+// parseTmuxSocketNames takes `ps -A -o pid,comm,args` stdout and returns the
+// deduplicated list of `-L <name>` values found across rows where the second
+// field (comm) is exactly "tmux". Rows without an explicit `-L` flag yield
+// the name "default".
+func parseTmuxSocketNames(psOut string) []string {
+	seen := map[string]bool{}
+	var names []string
+	for line := range strings.SplitSeq(strings.TrimSpace(psOut), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[1] != "tmux" {
+			continue
+		}
+		name := "default"
+		for i := 2; i < len(fields)-1; i++ {
+			if fields[i] == "-L" {
+				name = fields[i+1]
+				break
+			}
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // findPaneForPID walks up the process tree from targetPID until it finds a pid
 // that matches a tmux pane's shell pid from listOutput. Will be replaced in
 // Task 6 with a multi-socket-aware walker.
