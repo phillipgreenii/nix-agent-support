@@ -6,8 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
+
+// surfaceCacheTTL is how long a cmux --json top --processes result stays fresh.
+// Within one signalNonWorking pass we want a single enumeration to serve every
+// per-pid Detect, but we also want fresh data between user-triggered nudges.
+const surfaceCacheTTL = 2 * time.Second
 
 // CmuxSignaler sends keys to the cmux surface hosting a process.
 // RunCmd and LookupEnv are injectable for tests; nil values fall back to
@@ -15,6 +21,11 @@ import (
 type CmuxSignaler struct {
 	RunCmd    func(ctx context.Context, name string, args ...string) ([]byte, error)
 	LookupEnv func(key string) (string, bool)
+
+	cacheMu   sync.Mutex
+	cacheAt   time.Time
+	cacheLocs map[int]surfaceLoc
+	cacheErr  error
 }
 
 // surfaceLoc identifies a cmux surface by its enclosing workspace and surface ref.
@@ -59,25 +70,47 @@ func (c *CmuxSignaler) lookupEnv(key string) (string, bool) {
 	return os.LookupEnv(key)
 }
 
-// Detect returns true when claude-agents-tui is itself running inside cmux.
-// Outside cmux the signaler is silently inert.
+// Detect returns true when claude-agents-tui is itself running inside cmux AND
+// the target pid is in some cmux surface's tty_process_pids. Pids reachable via
+// other transports (tmux, VS Code extension, plain terminal) yield false so
+// ResolveSignaler can fall through cleanly.
 func (c *CmuxSignaler) Detect(pid int) bool {
-	_ = pid // cmux's socket is instance-global; reachability depends on the caller, not the target.
-	v, _ := c.lookupEnv("CMUX_WORKSPACE_ID")
-	return v != ""
+	if v, _ := c.lookupEnv("CMUX_WORKSPACE_ID"); v == "" {
+		return false
+	}
+	locs, err := c.cachedSurfaces()
+	if err != nil {
+		return false
+	}
+	_, ok := locs[pid]
+	return ok
+}
+
+// cachedSurfaces returns the surface map, caching for surfaceCacheTTL so that a
+// single signalNonWorking pass over N sessions runs the enumeration once, not N
+// times. Both Detect and Send go through this helper. Errors are cached for the
+// same window so a transient cmux failure doesn't fan out into N error reports.
+func (c *CmuxSignaler) cachedSurfaces() (map[int]surfaceLoc, error) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if c.cacheAt != (time.Time{}) && time.Since(c.cacheAt) < surfaceCacheTTL {
+		return c.cacheLocs, c.cacheErr
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := c.enumerateSurfaces(ctx)
+	c.cacheLocs, c.cacheErr, c.cacheAt = locs, err, time.Now()
+	return locs, err
 }
 
 // Send injects text followed by Enter into the cmux surface hosting pid.
 //
 // Steps:
-//  1. One shot `cmux --json top --processes` to enumerate every surface.
-//  2. Match pid directly into each surface's tty_process_pids.
+//  1. Reuse the cached surface enumeration (or refresh it).
+//  2. Look up pid in the surface map.
 //  3. cmux send + cmux send-key enter against the matched workspace+surface.
 func (c *CmuxSignaler) Send(pid int, text string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	locs, err := c.enumerateSurfaces(ctx)
+	locs, err := c.cachedSurfaces()
 	if err != nil {
 		return fmt.Errorf("cmux enumerate: %w", err)
 	}
@@ -85,6 +118,8 @@ func (c *CmuxSignaler) Send(pid int, text string) error {
 	if !ok {
 		return fmt.Errorf("signal: no cmux surface found for pid %d", pid)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	if _, err := c.run(ctx, "cmux", "send", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, text); err != nil {
 		return fmt.Errorf("cmux send: %w", err)
 	}
