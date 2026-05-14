@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
+	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/config"
 	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
 	"github.com/phillipgreenii/claude-agents-tui/internal/poller"
@@ -101,6 +102,7 @@ func main() {
 			ConsecutiveIdleChecks: idle,
 			Maximum:               maxWait,
 			Writer:                os.Stdout,
+			CmuxSidebarEnable:     cfg.CmuxSidebarEnable,
 		})
 		os.Exit(code)
 	}
@@ -117,15 +119,25 @@ func main() {
 		PID:     os.Getpid(),
 	}
 	cacheDir := filepath.Join(home, ".cache", "claude-agents-tui")
+	errLog := &tui.ErrorLogger{CacheDir: cacheDir}
+
+	reporter := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable: cfg.CmuxSidebarEnable,
+		Logf:   errLog.LogString,
+	})
+
 	model := tui.NewModel(tui.Options{
-		Tree:              &aggregate.Tree{},
-		Poller:            p,
-		Interval:          cfg.RefreshInterval,
-		Caffeinate:        mgr,
-		CacheDir:          cacheDir,
-		Signalers:         signalers,
-		AutoResumeDelay:   cfg.AutoResumeDelay,
-		AutoResumeMessage: cfg.AutoResumeMessage,
+		Tree:                 &aggregate.Tree{},
+		Poller:               p,
+		Interval:             cfg.RefreshInterval,
+		Caffeinate:           mgr,
+		CacheDir:             cacheDir,
+		Signalers:            signalers,
+		AutoResumeDelay:      cfg.AutoResumeDelay,
+		AutoResumeMessage:    cfg.AutoResumeMessage,
+		Reporter:             reporter,
+		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
+		ErrorLogger:          errLog,
 	})
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
