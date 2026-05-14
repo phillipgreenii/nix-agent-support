@@ -399,7 +399,7 @@ func TestModalScrollDoesNotMoveCursor(t *testing.T) {
 // TestHelpModalContainsAllBindings — every binding's description appears in [?] modal.
 func TestHelpModalContainsAllBindings(t *testing.T) {
 	rows := bindingsToHelpRows()
-	out := render.HelpModal(rows, 200, 60, 0)
+	out := render.HelpModal(rows, "", 200, 60, 0)
 	for _, b := range Bindings {
 		if !strings.Contains(out, b.Description) {
 			t.Errorf("help modal missing %q (Keys=%v); got:\n%s", b.Description, b.Keys, out)

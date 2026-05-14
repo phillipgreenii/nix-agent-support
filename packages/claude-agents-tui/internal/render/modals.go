@@ -33,7 +33,7 @@ type HelpRow struct {
 //	↓ N more
 //
 // The box's footer always shows: "[esc] close   [↑↓] scroll".
-func Modal(title string, rows []ModalRow, width, height, scroll int) string {
+func Modal(title string, rows []ModalRow, extraFooter string, width, height, scroll int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
@@ -141,6 +141,13 @@ func Modal(title string, rows []ModalRow, width, height, scroll int) string {
 		content.WriteString(r)
 		content.WriteString("\n")
 	}
+	if extraFooter != "" {
+		if lipgloss.Width(extraFooter) > contentWidth {
+			extraFooter = extraFooter[:contentWidth]
+		}
+		content.WriteString(extraFooter)
+		content.WriteString("\n")
+	}
 	content.WriteString(footerHint)
 
 	box := lipgloss.NewStyle().
@@ -153,13 +160,14 @@ func Modal(title string, rows []ModalRow, width, height, scroll int) string {
 }
 
 // HelpModal is a thin wrapper over Modal with a "Help — keybindings" title.
-// Caller passes pre-built HelpRow slice (typically derived from tui.Bindings).
-func HelpModal(rows []HelpRow, width, height, scroll int) string {
+// extraFooter renders as one line below the keybindings table and above the
+// built-in close-hint. Empty string disables it.
+func HelpModal(rows []HelpRow, extraFooter string, width, height, scroll int) string {
 	mrows := make([]ModalRow, len(rows))
 	for i, r := range rows {
 		mrows[i] = ModalRow{Left: r.Keys, Right: r.Description}
 	}
-	return Modal("Help — keybindings", mrows, width, height, scroll)
+	return Modal("Help — keybindings", mrows, extraFooter, width, height, scroll)
 }
 
 // legendRows is the hand-curated symbol list shown by LegendModal.
@@ -176,5 +184,5 @@ var legendRows = []ModalRow{
 
 // LegendModal renders the hand-curated symbol legend.
 func LegendModal(width, height, scroll int) string {
-	return Modal("Legend — symbols", legendRows, width, height, scroll)
+	return Modal("Legend — symbols", legendRows, "", width, height, scroll)
 }

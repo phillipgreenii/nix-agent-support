@@ -117,7 +117,7 @@ func (m *Model) selectionStatus() string {
 func (m *Model) renderModal() string {
 	switch m.activeModal {
 	case ModalHelp:
-		return render.HelpModal(bindingsToHelpRows(), m.width, m.height, m.modalScrollOffset)
+		return render.HelpModal(bindingsToHelpRows(), "", m.width, m.height, m.modalScrollOffset)
 	case ModalLegend:
 		return render.LegendModal(m.width, m.height, m.modalScrollOffset)
 	}
