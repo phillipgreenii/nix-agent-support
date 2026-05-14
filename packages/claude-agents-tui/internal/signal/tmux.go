@@ -156,6 +156,24 @@ func parseTmuxSocketNames(psOut string) []string {
 	return names
 }
 
+// cachedPanes returns the pane map, caching for tmuxCacheTTL. Mirrors
+// CmuxSignaler.cachedSurfaces — a single signalNonWorking pass over N
+// non-Working sessions runs ps + per-socket list-panes once, not N times.
+// Errors are cached for the same window so a transient ps failure doesn't
+// fan out into N error reports.
+func (t *TmuxSignaler) cachedPanes() (map[int]paneLoc, error) {
+	t.cacheMu.Lock()
+	defer t.cacheMu.Unlock()
+	if t.cacheAt != (time.Time{}) && time.Since(t.cacheAt) < tmuxCacheTTL {
+		return t.cacheLocs, t.cacheErr
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locs, err := t.enumeratePanes(ctx)
+	t.cacheLocs, t.cacheErr, t.cacheAt = locs, err, time.Now()
+	return locs, err
+}
+
 // findPaneForPID walks up the process tree from targetPID until it finds a pid
 // that matches a tmux pane's shell pid from listOutput. Will be replaced in
 // Task 6 with a multi-socket-aware walker.

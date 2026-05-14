@@ -287,3 +287,31 @@ func TestTmuxEnumerateDefaultSocketWhenNoDashL(t *testing.T) {
 		t.Errorf("locs[500] = %+v, want default socket", locs[500])
 	}
 }
+
+func TestTmuxCachedPanesCachesAcrossCalls(t *testing.T) {
+	psCalls := 0
+	listCalls := 0
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "ps" && len(args) >= 1 && args[0] == "-A":
+			psCalls++
+			return []byte(psSampleSingleServer), nil
+		case name == "tmux" && len(args) >= 3 && args[0] == "-L" && args[2] == "list-panes":
+			listCalls++
+			return []byte("100 mayor:0.0\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected: %s %v", name, args)
+	}
+	sig := &signal.TmuxSignaler{RunCmd: run}
+	for i := 0; i < 5; i++ {
+		if _, err := signal.CachedPanesForTest(sig); err != nil {
+			t.Fatalf("CachedPanes #%d: %v", i, err)
+		}
+	}
+	if psCalls != 1 {
+		t.Errorf("ps -A ran %d times; want 1 (cache should coalesce)", psCalls)
+	}
+	if listCalls != 1 {
+		t.Errorf("tmux list-panes ran %d times; want 1 (cache should coalesce)", listCalls)
+	}
+}
