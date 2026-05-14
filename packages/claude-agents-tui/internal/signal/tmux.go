@@ -6,13 +6,33 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// TmuxSignaler sends keys to the tmux pane hosting a process.
+// tmuxCacheTTL is how long an enumeration result stays fresh. Mirrors
+// CmuxSignaler's surfaceCacheTTL so a single signalNonWorking pass over N
+// non-Working sessions runs ps + per-socket list-panes once, not N times.
+const tmuxCacheTTL = 2 * time.Second
+
+// paneLoc identifies a tmux pane by the socket name (`-L`) of its server and
+// the canonical pane target string (`<session>:<window>.<pane>`).
+type paneLoc struct {
+	socketName string
+	paneID     string
+}
+
+// TmuxSignaler sends keys to the tmux pane hosting a process. Multi-socket
+// aware: discovers running tmux servers via ps, enumerates panes per socket,
+// caches the result for tmuxCacheTTL.
 // RunCmd is injectable for tests; nil defaults to exec.CommandContext.
 type TmuxSignaler struct {
 	RunCmd func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	cacheMu   sync.Mutex
+	cacheAt   time.Time
+	cacheLocs map[int]paneLoc
+	cacheErr  error
 }
 
 func (t *TmuxSignaler) Name() string { return "tmux" }
@@ -25,6 +45,7 @@ func (t *TmuxSignaler) run(ctx context.Context, name string, args ...string) ([]
 }
 
 // Detect returns true if any ancestor process of pid is named "tmux".
+// Will be replaced in Task 5 with a pid-aware implementation.
 func (t *TmuxSignaler) Detect(pid int) bool {
 	seen := map[int]bool{}
 	for {
@@ -54,6 +75,7 @@ func (t *TmuxSignaler) Detect(pid int) bool {
 }
 
 // Send injects text + Enter into the tmux pane that contains pid.
+// Will be replaced in Task 6 with a multi-socket implementation.
 func (t *TmuxSignaler) Send(pid int, text string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -71,7 +93,8 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 }
 
 // findPaneForPID walks up the process tree from targetPID until it finds a pid
-// that matches a tmux pane's shell pid from listOutput.
+// that matches a tmux pane's shell pid from listOutput. Will be replaced in
+// Task 6 with a multi-socket-aware walker.
 func (t *TmuxSignaler) findPaneForPID(ctx context.Context, listOutput string, targetPID int) string {
 	panePIDs := map[int]string{}
 	for line := range strings.SplitSeq(strings.TrimSpace(listOutput), "\n") {
