@@ -174,6 +174,26 @@ func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
 	}
 }
 
-// Stubs filled in by Task 4.
-func (c *cmuxReporter) Notify(string, string) {}
-func (c *cmuxReporter) Clear()                {}
+// Notify issues one cmux notify call. Failures log but do not panic.
+func (c *cmuxReporter) Notify(title, body string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := c.run(ctx, "cmux", "notify", "--title", title, "--body", body); err != nil {
+		c.log(fmt.Sprintf("cmux notify: %v", err))
+	}
+}
+
+// Clear removes every sidebar entry this reporter owns. Best-effort; partial
+// failures are logged and ignored.
+func (c *cmuxReporter) Clear() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, key := range []string{"caffeinate", "nudge", "state"} {
+		if _, err := c.run(ctx, "cmux", "clear-status", key); err != nil {
+			c.log(fmt.Sprintf("cmux clear-status %s: %v", key, err))
+		}
+	}
+	if _, err := c.run(ctx, "cmux", "clear-progress"); err != nil {
+		c.log(fmt.Sprintf("cmux clear-progress: %v", err))
+	}
+}

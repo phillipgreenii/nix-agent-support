@@ -177,3 +177,72 @@ func TestCmuxPushPausedStateIncludesResetTime(t *testing.T) {
 		t.Errorf("state call = %q, want it to mention the reset time 15:30", calls[2])
 	}
 }
+
+func TestCmuxNotifyEmitsCmuxNotify(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	r.Notify("claude-agents-tui", "5h reset, nudged 3 sessions")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 cmux notify call, got %d: %v", len(calls), calls)
+	}
+	if !strings.Contains(calls[0], "notify --title claude-agents-tui --body 5h reset, nudged 3 sessions") {
+		t.Errorf("call = %q, want cmux notify with title+body", calls[0])
+	}
+}
+
+func TestCmuxClearIssuesFourCalls(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	r.Clear()
+	if len(calls) != 4 {
+		t.Fatalf("expected 4 clear calls, got %d: %v", len(calls), calls)
+	}
+	want := []string{
+		"clear-status caffeinate",
+		"clear-status nudge",
+		"clear-status state",
+		"clear-progress",
+	}
+	for i, w := range want {
+		if !strings.Contains(calls[i], w) {
+			t.Errorf("call[%d] = %q, want substring %q", i, calls[i], w)
+		}
+	}
+}
+
+func TestCmuxPushPartialFailureContinuesAndLogs(t *testing.T) {
+	var calls []string
+	var logs []string
+	// Fail the SECOND call (nudge); the third and fourth must still attempt.
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, "cmux "+strings.Join(args, " "))
+		if len(calls) == 2 {
+			return nil, fmt.Errorf("simulated nudge failure")
+		}
+		return []byte(""), nil
+	}
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    run,
+		LookupEnv: inCmuxEnv(),
+		Logf:      func(s string) { logs = append(logs, s) },
+	})
+	r.Push(cmuxstatus.Snapshot{HasProgress: true, Progress: 0.1, ProgressLabel: "x"})
+	if len(calls) != 4 {
+		t.Errorf("expected 4 attempts despite failure, got %d: %v", len(calls), calls)
+	}
+	if len(logs) != 1 {
+		t.Errorf("expected 1 log line for the failed call, got %d: %v", len(logs), logs)
+	}
+	if len(logs) >= 1 && !strings.Contains(logs[0], "simulated nudge failure") {
+		t.Errorf("log[0] = %q, want it to mention the failure", logs[0])
+	}
+}
