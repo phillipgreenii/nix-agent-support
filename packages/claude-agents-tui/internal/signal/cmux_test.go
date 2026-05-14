@@ -116,3 +116,33 @@ func TestCmuxSendFindsSurfaceInOwnWorkspace(t *testing.T) {
 		t.Errorf("call[1] = %q, want cmux send-key Enter targeting workspace:1 surface:4", sent[1])
 	}
 }
+
+func TestCmuxSendCrossesWorkspaces(t *testing.T) {
+	// Caller (claude-agents-tui) runs in workspace:1.
+	// Agent pid 2000 lives in workspace:2, surface:7.
+	surfaces := []fakeSurface{
+		{"workspace:1", "surface:1", []int{100, 1000}},
+		{"workspace:1", "surface:2", []int{200, 1100}},
+		{"workspace:2", "surface:7", []int{300, 2000}},
+		{"workspace:2", "surface:8", []int{400, 2100}},
+	}
+	var sent []string
+	sig := &signal.CmuxSignaler{
+		RunCmd:    fakeCmuxRun(surfaces, &sent),
+		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "workspace:1"}),
+	}
+	if err := sig.Send(2000, "continue"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("expected 2 cmux calls, got %d: %v", len(sent), sent)
+	}
+	for i, call := range sent {
+		if !strings.Contains(call, "--workspace workspace:2") {
+			t.Errorf("call[%d] = %q, want --workspace workspace:2 (not caller's workspace:1)", i, call)
+		}
+		if !strings.Contains(call, "--surface surface:7") {
+			t.Errorf("call[%d] = %q, want --surface surface:7", i, call)
+		}
+	}
+}
