@@ -18,6 +18,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if isQuit(msg) {
+			m.reporter.Clear()
 			return m, tea.Quit
 		}
 		s := msg.String()
@@ -52,6 +53,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildFlatRows()
 		m.clampCursor()
 		m.syncScroll()
+		m.tickCount++
+		n := m.sidebarIntervalTicks
+		if n <= 0 {
+			n = 1
+		}
+		if m.tickCount%n == 0 {
+			m.reporter.Push(m.buildSidebarSnapshot())
+		}
 		if m.autoResumeFired && msg.tree.WindowResetsAt.IsZero() {
 			m.autoResumeFired = false
 		}

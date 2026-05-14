@@ -37,6 +37,8 @@ type Options struct {
 	Signalers         []signal.Signaler
 	AutoResumeDelay   time.Duration
 	AutoResumeMessage string
+	Reporter             cmuxstatus.Reporter
+	SidebarIntervalTicks int
 }
 
 type Model struct {
@@ -67,6 +69,10 @@ type Model struct {
 	autoResumeDelay   time.Duration
 	autoResumeMessage string
 
+	reporter             cmuxstatus.Reporter
+	sidebarIntervalTicks int
+	tickCount            int
+
 	cacheDir  string
 	treeState *treestate.State
 	pathNodes []*aggregate.PathNode
@@ -78,16 +84,21 @@ type Model struct {
 
 func NewModel(o Options) *Model {
 	m := &Model{
-		tree:              o.Tree,
-		poller:            o.Poller,
-		interval:          o.Interval,
-		caffeinate:        o.Caffeinate,
-		theme:             render.NewTheme(render.DetectColors()),
-		cacheDir:          o.CacheDir,
-		treeState:         treestate.Load(o.CacheDir),
-		signalers:         o.Signalers,
-		autoResumeDelay:   o.AutoResumeDelay,
-		autoResumeMessage: o.AutoResumeMessage,
+		tree:                 o.Tree,
+		poller:               o.Poller,
+		interval:             o.Interval,
+		caffeinate:           o.Caffeinate,
+		theme:                render.NewTheme(render.DetectColors()),
+		cacheDir:             o.CacheDir,
+		treeState:            treestate.Load(o.CacheDir),
+		signalers:            o.Signalers,
+		autoResumeDelay:      o.AutoResumeDelay,
+		autoResumeMessage:    o.AutoResumeMessage,
+		reporter:             o.Reporter,
+		sidebarIntervalTicks: o.SidebarIntervalTicks,
+	}
+	if m.reporter == nil {
+		m.reporter = noopReporter{}
 	}
 	m.rebuildFlatRows()
 	return m
@@ -223,6 +234,29 @@ func aggregateState(tree *aggregate.Tree) (cmuxstatus.State, time.Time) {
 		return cmuxstatus.StateIdle, time.Time{}
 	default:
 		return cmuxstatus.StateDormant, time.Time{}
+	}
+}
+
+// noopReporter is the fallback when Options.Reporter is nil. Keeps every Model
+// call non-nil-safe without forcing every caller to construct a real Reporter.
+type noopReporter struct{}
+
+func (noopReporter) Push(cmuxstatus.Snapshot) {}
+func (noopReporter) Notify(string, string)    {}
+func (noopReporter) Clear()                   {}
+
+// buildSidebarSnapshot collects current TUI state into a Snapshot for push.
+func (m *Model) buildSidebarSnapshot() cmuxstatus.Snapshot {
+	state, resetAt := aggregateState(m.tree)
+	prog, label, ok := windowProgress(m.tree, time.Now())
+	return cmuxstatus.Snapshot{
+		CaffeinateOn:  m.caffeinateOn,
+		NudgeOn:       m.autoResume,
+		State:         state,
+		PausedResetAt: resetAt,
+		Progress:      prog,
+		ProgressLabel: label,
+		HasProgress:   ok,
 	}
 }
 

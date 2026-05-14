@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
@@ -467,5 +468,41 @@ func TestSignalLogWritesToCacheDirNotStderr(t *testing.T) {
 	got := string(data)
 	if !strings.Contains(got, "hello world") || !strings.Contains(got, "second line") {
 		t.Errorf("log contents = %q, want both lines", got)
+	}
+}
+
+type fakeReporter struct {
+	pushes   []cmuxstatus.Snapshot
+	notifies [][2]string
+	clears   int
+}
+
+func (f *fakeReporter) Push(s cmuxstatus.Snapshot) { f.pushes = append(f.pushes, s) }
+func (f *fakeReporter) Notify(title, body string) {
+	f.notifies = append(f.notifies, [2]string{title, body})
+}
+func (f *fakeReporter) Clear() { f.clears++ }
+
+func TestModelPushesEveryNTicks(t *testing.T) {
+	fr := &fakeReporter{}
+	m := NewModel(Options{
+		Reporter:             fr,
+		SidebarIntervalTicks: 3,
+	})
+	// Drive 5 poll-result messages; expect Push at ticks 3 only (5 ticks total, N=3).
+	for i := 0; i < 5; i++ {
+		m.Update(PollResultForTest(&aggregate.Tree{}, false))
+	}
+	if len(fr.pushes) != 1 {
+		t.Errorf("expected 1 Push across 5 ticks with N=3, got %d", len(fr.pushes))
+	}
+}
+
+func TestModelClearsSidebarOnQuit(t *testing.T) {
+	fr := &fakeReporter{}
+	m := NewModel(Options{Reporter: fr, SidebarIntervalTicks: 5})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if fr.clears != 1 {
+		t.Errorf("expected 1 Clear on quit, got %d", fr.clears)
 	}
 }
