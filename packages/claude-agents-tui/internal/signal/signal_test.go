@@ -11,31 +11,6 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 )
 
-// fakeRun returns a RunCmd that handles "ps" (process tree lookup) and "tmux" commands.
-// processTree maps pid → [ppid, commName].
-func fakeRun(processTree map[int][2]string, paneList string) func(context.Context, string, ...string) ([]byte, error) {
-	return func(_ context.Context, name string, args ...string) ([]byte, error) {
-		switch name {
-		case "ps":
-			pidStr := args[len(args)-1]
-			pid, _ := strconv.Atoi(pidStr)
-			if entry, ok := processTree[pid]; ok {
-				return []byte(entry[0] + " " + entry[1]), nil
-			}
-			return nil, fmt.Errorf("ps: no such pid %d", pid)
-		case "tmux":
-			if len(args) >= 2 && args[0] == "list-panes" {
-				return []byte(paneList), nil
-			}
-			if len(args) >= 2 && args[0] == "send-keys" {
-				return []byte(""), nil
-			}
-			return nil, fmt.Errorf("tmux: unexpected args %v", args)
-		}
-		return nil, fmt.Errorf("unexpected command: %s", name)
-	}
-}
-
 // fakeMultiSocketRun supports the new multi-socket TmuxSignaler. It serves:
 //
 //   - `ps -A -o pid,comm,args`            -> psListAll output
@@ -90,7 +65,7 @@ func TestTmuxDetectReturnsFalseWhenNoTmuxAncestor(t *testing.T) {
 		1000: {"500", "claude"},
 		500:  {"1", "bash"},
 	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "")}
+	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{}, nil)}
 	if sig.Detect(1000) {
 		t.Error("Detect = true, want false when no tmux ancestor")
 	}
@@ -175,17 +150,21 @@ func TestStubSignalersSendNotImplemented(t *testing.T) {
 
 func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 	// Process ancestry: 1000 (claude) → 500 (bash) → 100 (tmuxinator).
-	// Old HasPrefix("tmux") matched "tmuxinator" too; exact match must reject it.
+	// New Detect requires a pane match, not just a comm match — tmuxinator
+	// has no tmux server so the pane map is empty and Detect returns false.
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
 		500:  {"100", "bash"},
 		100:  {"1", "tmuxinator"},
 	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "")}
+	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{}, nil)}
 	if sig.Detect(1000) {
-		t.Error("Detect = true for tmuxinator ancestor; want false (exact 'tmux' match only)")
+		t.Error("Detect = true for tmuxinator ancestor; want false (must match pane, not just comm)")
 	}
 }
+
+const psNoTmuxServers = `99999 bash -bash
+`
 
 const psSampleDefaultOnly = `28346 tmux tmux new-session -d -s main
 `
