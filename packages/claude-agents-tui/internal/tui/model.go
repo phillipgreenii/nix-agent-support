@@ -12,7 +12,9 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/caffeinate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
+	"github.com/phillipgreenii/claude-agents-tui/internal/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
 )
@@ -188,4 +190,66 @@ func (m *Model) clampCursor() {
 			m.cursor = down
 		}
 	}
+}
+
+// aggregateState collapses the tree into the single state we expose on the
+// cmux sidebar. Paused (rate-limit hit) wins over everything; otherwise any
+// Working session promotes the aggregate to Working; otherwise Idle if any
+// non-dormant session exists; otherwise Dormant.
+func aggregateState(tree *aggregate.Tree) (cmuxstatus.State, time.Time) {
+	if tree == nil {
+		return cmuxstatus.StateUnknown, time.Time{}
+	}
+	if !tree.WindowResetsAt.IsZero() {
+		return cmuxstatus.StatePaused, tree.WindowResetsAt
+	}
+	anyWorking, anyIdle := false, false
+	for _, d := range tree.Dirs {
+		for _, sv := range d.Sessions {
+			switch sv.Status {
+			case session.Working:
+				anyWorking = true
+			case session.Dormant:
+				// ignore
+			default:
+				anyIdle = true
+			}
+		}
+	}
+	switch {
+	case anyWorking:
+		return cmuxstatus.StateWorking, time.Time{}
+	case anyIdle:
+		return cmuxstatus.StateIdle, time.Time{}
+	default:
+		return cmuxstatus.StateDormant, time.Time{}
+	}
+}
+
+// windowProgress derives (used, label, ok) from the active 5h block. When ok
+// is false the caller should leave Snapshot.HasProgress false so the reporter
+// skips the cmux set-progress call.
+func windowProgress(tree *aggregate.Tree, now time.Time) (float64, string, bool) {
+	if tree == nil {
+		return 0, "", false
+	}
+	if !tree.WindowResetsAt.IsZero() {
+		return 1.0, "5h block exhausted — waiting for reset", true
+	}
+	b := tree.ActiveBlock
+	if b == nil {
+		return 0, "", false
+	}
+	span := b.EndTime.Sub(b.StartTime)
+	if span <= 0 {
+		return 0, "", false
+	}
+	used := float64(now.Sub(b.StartTime)) / float64(span)
+	if used < 0 {
+		used = 0
+	}
+	if used > 1 {
+		used = 1
+	}
+	return used, fmt.Sprintf("5h block %.0f%% used", used*100), true
 }

@@ -25,6 +25,8 @@ type Config struct {
 	MaximumWait           time.Duration
 	AutoResumeDelay       time.Duration
 	AutoResumeMessage     string
+	CmuxSidebarEnable        bool
+	CmuxSidebarIntervalTicks int
 }
 
 type tomlConfig struct {
@@ -42,6 +44,8 @@ type tomlConfig struct {
 	MaximumWaitS          *int     `toml:"maximum_wait_s"`
 	AutoResumeDelayS      *int     `toml:"auto_resume_delay_s"`
 	AutoResumeMessage     *string  `toml:"auto_resume_message"`
+	CmuxSidebarEnable        *bool `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks *int  `toml:"cmux_sidebar_interval_ticks"`
 }
 
 func defaults() Config {
@@ -60,6 +64,8 @@ func defaults() Config {
 		MaximumWait:           2 * time.Hour,
 		AutoResumeDelay:       45 * time.Second,
 		AutoResumeMessage:     "continue",
+		CmuxSidebarEnable:        true,
+		CmuxSidebarIntervalTicks: 5,
 	}
 }
 
@@ -124,6 +130,12 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.AutoResumeMessage != nil {
 		cfg.AutoResumeMessage = *raw.AutoResumeMessage
+	}
+	if raw.CmuxSidebarEnable != nil {
+		cfg.CmuxSidebarEnable = *raw.CmuxSidebarEnable
+	}
+	if raw.CmuxSidebarIntervalTicks != nil {
+		cfg.CmuxSidebarIntervalTicks = *raw.CmuxSidebarIntervalTicks
 	}
 }
 

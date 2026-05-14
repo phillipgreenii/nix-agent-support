@@ -80,6 +80,16 @@ func TestConfigDefaultsAutoResume(t *testing.T) {
 	}
 }
 
+func TestConfigDefaultsCmuxSidebar(t *testing.T) {
+	cfg := defaults()
+	if !cfg.CmuxSidebarEnable {
+		t.Errorf("CmuxSidebarEnable = %v, want true by default", cfg.CmuxSidebarEnable)
+	}
+	if cfg.CmuxSidebarIntervalTicks != 5 {
+		t.Errorf("CmuxSidebarIntervalTicks = %v, want 5", cfg.CmuxSidebarIntervalTicks)
+	}
+}
+
 func TestPartialOverridePreservesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
