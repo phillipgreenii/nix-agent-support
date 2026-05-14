@@ -146,3 +146,21 @@ func TestCmuxSendCrossesWorkspaces(t *testing.T) {
 		}
 	}
 }
+
+func TestCmuxSendErrorsWhenNoSurfaceFound(t *testing.T) {
+	// Agent pid 1000 is in no surface's tty_process_pids.
+	surfaces := []fakeSurface{
+		{"workspace:1", "surface:1", []int{9001, 9002}},
+	}
+	sig := &signal.CmuxSignaler{
+		RunCmd:    fakeCmuxRun(surfaces, nil),
+		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "workspace:1"}),
+	}
+	err := sig.Send(1000, "continue")
+	if err == nil {
+		t.Fatal("Send should return error when no surface matches pid")
+	}
+	if !strings.Contains(err.Error(), "no cmux surface found for pid 1000") {
+		t.Errorf("error = %q, want it to mention pid 1000", err.Error())
+	}
+}
