@@ -122,6 +122,7 @@ func aggregateHeadlessState(tree *aggregate.Tree) (cmuxstatus.State, time.Time) 
 }
 
 func windowProgressHeadless(tree *aggregate.Tree, now time.Time) (float64, string, bool) {
+	_ = now // retained for signature parity; the cost-based metric doesn't depend on wall-clock
 	if tree == nil {
 		return 0, "", false
 	}
@@ -129,19 +130,16 @@ func windowProgressHeadless(tree *aggregate.Tree, now time.Time) (float64, strin
 		return 1.0, "5h block exhausted — waiting for reset", true
 	}
 	b := tree.ActiveBlock
-	if b == nil {
+	if b == nil || tree.PlanCapUSD <= 0 {
 		return 0, "", false
 	}
-	span := b.EndTime.Sub(b.StartTime)
-	if span <= 0 {
-		return 0, "", false
+	pct := 100 * b.CostUSD / tree.PlanCapUSD
+	v := pct / 100
+	if v < 0 {
+		v = 0
 	}
-	used := float64(now.Sub(b.StartTime)) / float64(span)
-	if used < 0 {
-		used = 0
+	if v > 1 {
+		v = 1
 	}
-	if used > 1 {
-		used = 1
-	}
-	return used, fmt.Sprintf("5h block %.0f%% used", used*100), true
+	return v, fmt.Sprintf("5h block %.0f%% of cap", pct), true
 }

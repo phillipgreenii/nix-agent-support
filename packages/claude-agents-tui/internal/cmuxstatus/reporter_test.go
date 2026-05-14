@@ -75,7 +75,7 @@ func inCmuxEnv() func(string) (string, bool) {
 	}
 }
 
-func TestCmuxPushEmitsFourSubprocessCalls(t *testing.T) {
+func TestCmuxPushEmitsOneStatusPlusProgress(t *testing.T) {
 	var calls []string
 	r := cmuxstatus.NewReporter(cmuxstatus.Options{
 		Enable:    true,
@@ -84,30 +84,30 @@ func TestCmuxPushEmitsFourSubprocessCalls(t *testing.T) {
 	})
 	r.Push(cmuxstatus.Snapshot{
 		CaffeinateOn:  true,
-		NudgeOn:       false,
+		NudgeOn:       true,
 		State:         cmuxstatus.StateWorking,
 		Progress:      0.5,
-		ProgressLabel: "5h block 50% used",
+		ProgressLabel: "5h block 50% of cap",
 		HasProgress:   true,
 	})
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 cmux calls (3 set-status + 1 set-progress), got %d: %v", len(calls), calls)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 cmux calls (1 set-status + 1 set-progress), got %d: %v", len(calls), calls)
 	}
-	if !strings.Contains(calls[0], "set-status caffeinate on") {
-		t.Errorf("call[0] = %q, want set-status caffeinate on", calls[0])
+	if !strings.Contains(calls[0], "set-status claude-agents") {
+		t.Errorf("call[0] = %q, want set-status claude-agents", calls[0])
 	}
-	if !strings.Contains(calls[1], "set-status nudge off") {
-		t.Errorf("call[1] = %q, want set-status nudge off", calls[1])
+	if !strings.Contains(calls[0], "working • caff • nudge") {
+		t.Errorf("call[0] = %q, want value 'working • caff • nudge'", calls[0])
 	}
-	if !strings.Contains(calls[2], "set-status state working") {
-		t.Errorf("call[2] = %q, want set-status state working", calls[2])
+	if !strings.Contains(calls[0], "--icon play") {
+		t.Errorf("call[0] = %q, want --icon play (working)", calls[0])
 	}
-	if !strings.Contains(calls[3], "set-progress 0.50 --label 5h block 50% used") {
-		t.Errorf("call[3] = %q, want set-progress 0.50 --label '5h block 50%% used'", calls[3])
+	if !strings.Contains(calls[1], "set-progress 0.50") {
+		t.Errorf("call[1] = %q, want set-progress 0.50", calls[1])
 	}
 }
 
-func TestCmuxPushSkipsProgressWhenHasProgressFalse(t *testing.T) {
+func TestCmuxPushOmitsToggleSuffixesWhenOff(t *testing.T) {
 	var calls []string
 	r := cmuxstatus.NewReporter(cmuxstatus.Options{
 		Enable:    true,
@@ -115,16 +115,20 @@ func TestCmuxPushSkipsProgressWhenHasProgressFalse(t *testing.T) {
 		LookupEnv: inCmuxEnv(),
 	})
 	r.Push(cmuxstatus.Snapshot{
-		State:       cmuxstatus.StateIdle,
-		HasProgress: false,
+		CaffeinateOn: false,
+		NudgeOn:      false,
+		State:        cmuxstatus.StateIdle,
+		HasProgress:  false,
 	})
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 cmux calls (no progress), got %d: %v", len(calls), calls)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 cmux call (set-status only, no progress), got %d: %v", len(calls), calls)
 	}
-	for _, c := range calls {
-		if strings.Contains(c, "set-progress") {
-			t.Errorf("unexpected set-progress call: %q", c)
-		}
+	// Value should be exactly "idle" with no trailing toggle text.
+	if !strings.Contains(calls[0], "set-status claude-agents idle ") {
+		t.Errorf("call[0] = %q, want set-status claude-agents 'idle' with no • suffix", calls[0])
+	}
+	if strings.Contains(calls[0], "caff") || strings.Contains(calls[0], "nudge") {
+		t.Errorf("call[0] = %q, want no caff/nudge suffix when both toggles off", calls[0])
 	}
 }
 
@@ -145,12 +149,60 @@ func TestCmuxPushClampsProgress(t *testing.T) {
 			LookupEnv: inCmuxEnv(),
 		})
 		r.Push(cmuxstatus.Snapshot{HasProgress: true, Progress: tc.in, ProgressLabel: "x"})
-		if len(calls) < 4 {
-			t.Fatalf("in=%v: expected 4 calls, got %d: %v", tc.in, len(calls), calls)
+		if len(calls) < 2 {
+			t.Fatalf("in=%v: expected 2 calls, got %d: %v", tc.in, len(calls), calls)
 		}
-		if !strings.Contains(calls[3], tc.wanted) {
-			t.Errorf("in=%v: call[3]=%q, want substring %q", tc.in, calls[3], tc.wanted)
+		if !strings.Contains(calls[1], tc.wanted) {
+			t.Errorf("in=%v: call[1]=%q, want substring %q", tc.in, calls[1], tc.wanted)
 		}
+	}
+}
+
+func TestCmuxPushCaffOnlyShowsCaff(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	r.Push(cmuxstatus.Snapshot{
+		CaffeinateOn: true,
+		NudgeOn:      false,
+		State:        cmuxstatus.StateWorking,
+		HasProgress:  false,
+	})
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0], "working • caff") {
+		t.Errorf("call[0] = %q, want value 'working • caff'", calls[0])
+	}
+	if strings.Contains(calls[0], "nudge") {
+		t.Errorf("call[0] = %q, want no nudge suffix when nudge off", calls[0])
+	}
+}
+
+func TestCmuxPushNudgeOnlyShowsNudge(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	r.Push(cmuxstatus.Snapshot{
+		CaffeinateOn: false,
+		NudgeOn:      true,
+		State:        cmuxstatus.StateWorking,
+		HasProgress:  false,
+	})
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if !strings.Contains(calls[0], "working • nudge") {
+		t.Errorf("call[0] = %q, want value 'working • nudge'", calls[0])
+	}
+	if strings.Contains(calls[0], "caff") {
+		t.Errorf("call[0] = %q, want no caff suffix when caff off", calls[0])
 	}
 }
 
@@ -166,15 +218,11 @@ func TestCmuxPushPausedStateIncludesResetTime(t *testing.T) {
 		State:         cmuxstatus.StatePaused,
 		PausedResetAt: resetAt,
 	})
-	if len(calls) < 3 {
-		t.Fatalf("expected ≥ 3 calls, got %d", len(calls))
+	if len(calls) < 1 {
+		t.Fatalf("expected ≥ 1 call, got %d", len(calls))
 	}
-	if !strings.Contains(calls[2], "paused") {
-		t.Errorf("state call = %q, want it to mention paused", calls[2])
-	}
-	// Wall-clock formatting: just check the hour-minute renders into the value.
-	if !strings.Contains(calls[2], "15:30") {
-		t.Errorf("state call = %q, want it to mention the reset time 15:30", calls[2])
+	if !strings.Contains(calls[0], "paused (resets 15:30)") {
+		t.Errorf("call[0] = %q, want value 'paused (resets 15:30)'", calls[0])
 	}
 }
 
@@ -194,7 +242,7 @@ func TestCmuxNotifyEmitsCmuxNotify(t *testing.T) {
 	}
 }
 
-func TestCmuxClearIssuesFourCalls(t *testing.T) {
+func TestCmuxClearIssuesTwoCalls(t *testing.T) {
 	var calls []string
 	r := cmuxstatus.NewReporter(cmuxstatus.Options{
 		Enable:    true,
@@ -202,30 +250,25 @@ func TestCmuxClearIssuesFourCalls(t *testing.T) {
 		LookupEnv: inCmuxEnv(),
 	})
 	r.Clear()
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 clear calls, got %d: %v", len(calls), calls)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls (1 clear-status + 1 clear-progress), got %d: %v", len(calls), calls)
 	}
-	want := []string{
-		"clear-status caffeinate",
-		"clear-status nudge",
-		"clear-status state",
-		"clear-progress",
+	if !strings.Contains(calls[0], "clear-status claude-agents") {
+		t.Errorf("call[0] = %q, want clear-status claude-agents", calls[0])
 	}
-	for i, w := range want {
-		if !strings.Contains(calls[i], w) {
-			t.Errorf("call[%d] = %q, want substring %q", i, calls[i], w)
-		}
+	if !strings.Contains(calls[1], "clear-progress") {
+		t.Errorf("call[1] = %q, want clear-progress", calls[1])
 	}
 }
 
 func TestCmuxPushPartialFailureContinuesAndLogs(t *testing.T) {
 	var calls []string
 	var logs []string
-	// Fail the SECOND call (nudge); the third and fourth must still attempt.
+	// Fail the FIRST call (status); the second (progress) must still attempt.
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, "cmux "+strings.Join(args, " "))
-		if len(calls) == 2 {
-			return nil, fmt.Errorf("simulated nudge failure")
+		if len(calls) == 1 {
+			return nil, fmt.Errorf("simulated status failure")
 		}
 		return []byte(""), nil
 	}
@@ -236,13 +279,10 @@ func TestCmuxPushPartialFailureContinuesAndLogs(t *testing.T) {
 		Logf:      func(s string) { logs = append(logs, s) },
 	})
 	r.Push(cmuxstatus.Snapshot{HasProgress: true, Progress: 0.1, ProgressLabel: "x"})
-	if len(calls) != 4 {
-		t.Errorf("expected 4 attempts despite failure, got %d: %v", len(calls), calls)
+	if len(calls) != 2 {
+		t.Errorf("expected 2 attempts (status fail + progress retry), got %d: %v", len(calls), calls)
 	}
 	if len(logs) != 1 {
 		t.Errorf("expected 1 log line for the failed call, got %d: %v", len(logs), logs)
-	}
-	if len(logs) >= 1 && !strings.Contains(logs[0], "simulated nudge failure") {
-		t.Errorf("log[0] = %q, want it to mention the failure", logs[0])
 	}
 }

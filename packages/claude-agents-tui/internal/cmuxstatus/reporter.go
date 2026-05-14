@@ -94,19 +94,19 @@ func (c *cmuxReporter) log(msg string) {
 	}
 }
 
-// Push issues 3 cmux set-status calls (caffeinate, nudge, state) and, when
-// HasProgress is true, one cmux set-progress call. All four share one 5-second
+// Push issues 1 cmux set-status call (single pill, key="claude-agents") and,
+// when HasProgress is true, one cmux set-progress call. Both share one 5-second
 // context. Errors per call route to logf but do not short-circuit subsequent
-// calls — partial-success beats all-or-nothing for sidebar UX.
+// calls.
 func (c *cmuxReporter) Push(s Snapshot) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c.runStatus(ctx, "caffeinate", onOff(s.CaffeinateOn), "bolt", caffeinateColor(s.CaffeinateOn))
-	c.runStatus(ctx, "nudge", onOff(s.NudgeOn), "bell", nudgeColor(s.NudgeOn))
-
-	stateVal, stateIcon, stateColor := stateAttrs(s.State, s.PausedResetAt)
-	c.runStatus(ctx, "state", stateVal, stateIcon, stateColor)
+	value, icon, color := pillContent(s)
+	if _, err := c.run(ctx, "cmux", "set-status", "claude-agents", value,
+		"--icon", icon, "--color", color); err != nil {
+		c.log(fmt.Sprintf("cmux set-status claude-agents: %v", err))
+	}
 
 	if s.HasProgress {
 		v := s.Progress
@@ -126,33 +126,19 @@ func (c *cmuxReporter) Push(s Snapshot) {
 	}
 }
 
-// runStatus issues one cmux set-status with icon and color; logs failures.
-func (c *cmuxReporter) runStatus(ctx context.Context, key, value, icon, color string) {
-	_, err := c.run(ctx, "cmux", "set-status", key, value, "--icon", icon, "--color", color)
-	if err != nil {
-		c.log(fmt.Sprintf("cmux set-status %s: %v", key, err))
+// pillContent collapses Snapshot into the single-pill value, icon, and color.
+// State leads ("working", "paused (resets ...)", "idle", "dormant"); the
+// caffeinate and nudge toggles each contribute a "• caff"/"• nudge" suffix
+// only when on. Icon and color follow state.
+func pillContent(s Snapshot) (value, icon, color string) {
+	value, icon, color = stateAttrs(s.State, s.PausedResetAt)
+	if s.CaffeinateOn {
+		value += " • caff"
 	}
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
+	if s.NudgeOn {
+		value += " • nudge"
 	}
-	return "off"
-}
-
-func caffeinateColor(on bool) string {
-	if on {
-		return "#ffcc00"
-	}
-	return "#888888"
-}
-
-func nudgeColor(on bool) string {
-	if on {
-		return "#00aaff"
-	}
-	return "#888888"
+	return value, icon, color
 }
 
 func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
@@ -183,15 +169,13 @@ func (c *cmuxReporter) Notify(title, body string) {
 	}
 }
 
-// Clear removes every sidebar entry this reporter owns. Best-effort; partial
-// failures are logged and ignored.
+// Clear removes the single sidebar entry this reporter owns plus the progress
+// bar. Best-effort; partial failures are logged and ignored.
 func (c *cmuxReporter) Clear() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, key := range []string{"caffeinate", "nudge", "state"} {
-		if _, err := c.run(ctx, "cmux", "clear-status", key); err != nil {
-			c.log(fmt.Sprintf("cmux clear-status %s: %v", key, err))
-		}
+	if _, err := c.run(ctx, "cmux", "clear-status", "claude-agents"); err != nil {
+		c.log(fmt.Sprintf("cmux clear-status claude-agents: %v", err))
 	}
 	if _, err := c.run(ctx, "cmux", "clear-progress"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-progress: %v", err))
