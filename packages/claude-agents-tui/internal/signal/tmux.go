@@ -44,31 +44,45 @@ func (t *TmuxSignaler) run(ctx context.Context, name string, args ...string) ([]
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
-// Detect returns true if any ancestor process of pid is named "tmux".
-// Will be replaced in Task 5 with a pid-aware implementation.
+// Detect returns true iff a known tmux pane lists pid (or one of its
+// ancestors) as its shell pid. Pid-aware via cachedPanes — comm-only matching
+// (pre-Phase-3 behavior) is dropped because it produced false positives when
+// a tmuxinator-like ancestor existed without a matching pane.
 func (t *TmuxSignaler) Detect(pid int) bool {
+	locs, err := t.cachedPanes()
+	if err != nil {
+		return false
+	}
+	return t.findPaneLocForPID(locs, pid) != nil
+}
+
+// findPaneLocForPID walks up the process tree from targetPID until it finds a
+// pid that exists in the locs map, or runs out of ancestors. Returns *paneLoc
+// (not just paneID) so Send (Task 6) can use the socketName too.
+func (t *TmuxSignaler) findPaneLocForPID(locs map[int]paneLoc, targetPID int) *paneLoc {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	seen := map[int]bool{}
+	pid := targetPID
 	for {
 		if pid < 1 || seen[pid] {
-			return false
+			return nil
 		}
 		seen[pid] = true
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if loc, ok := locs[pid]; ok {
+			return &loc
+		}
 		out, err := t.run(ctx, "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
-		cancel()
 		if err != nil {
-			return false
+			return nil
 		}
 		fields := strings.Fields(strings.TrimSpace(string(out)))
-		if len(fields) < 2 {
-			return false
-		}
-		if fields[1] == "tmux" {
-			return true
+		if len(fields) < 1 {
+			return nil
 		}
 		ppid, err := strconv.Atoi(fields[0])
-		if err != nil || ppid <= 1 {
-			return false
+		if err != nil || ppid < 1 {
+			return nil
 		}
 		pid = ppid
 	}

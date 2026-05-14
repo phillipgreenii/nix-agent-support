@@ -85,19 +85,6 @@ func fakeMultiSocketRun(
 	}
 }
 
-func TestTmuxDetectReturnsTrueWhenTmuxIsAncestor(t *testing.T) {
-	// Process tree: 1000 (claude) → 500 (bash) → 100 (tmux)
-	tree := map[int][2]string{
-		1000: {"500", "claude"},
-		500:  {"100", "bash"},
-		100:  {"1", "tmux"},
-	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "")}
-	if !sig.Detect(1000) {
-		t.Error("Detect = false, want true when tmux is ancestor")
-	}
-}
-
 func TestTmuxDetectReturnsFalseWhenNoTmuxAncestor(t *testing.T) {
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
@@ -149,8 +136,15 @@ func TestTmuxSendErrorsWhenNoPaneFound(t *testing.T) {
 }
 
 func TestResolveSignalerReturnsFirstMatch(t *testing.T) {
-	// TmuxSignaler with pid=1 having tmux ancestor
-	always := &signal.TmuxSignaler{RunCmd: fakeRun(map[int][2]string{1: {"0", "tmux"}}, "")}
+	// TmuxSignaler where pid=1 is directly listed as a pane shell pid.
+	// Uses fakeMultiSocketRun so the new pid-aware Detect (which calls
+	// cachedPanes/ps -A) can be served.
+	panes := map[string]string{
+		"gc": "1 mayor:0.0\n",
+	}
+	always := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
+	}
 	never := &signal.CmuxSignaler{}
 	got := signal.ResolveSignaler([]signal.Signaler{never, always}, 1)
 	if got == nil || got.Name() != "tmux" {
@@ -285,6 +279,42 @@ func TestTmuxEnumerateDefaultSocketWhenNoDashL(t *testing.T) {
 	}
 	if locs[500].SocketName != "default" {
 		t.Errorf("locs[500] = %+v, want default socket", locs[500])
+	}
+}
+
+func TestTmuxDetectReturnsTrueOnlyWhenPidInPane(t *testing.T) {
+	// agent 1000 -> bash 500 -> shell 100 (pane gc:mayor:0.0)
+	tree := map[int][2]string{
+		1000: {"500", "claude"},
+		500:  {"100", "bash"},
+	}
+	panes := map[string]string{
+		"gc": "100 mayor:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
+	}
+	if !sig.Detect(1000) {
+		t.Error("Detect(1000) = false, want true (pid in pane gc:mayor:0.0 via ancestor 100)")
+	}
+}
+
+func TestTmuxDetectReturnsFalseWhenPidNotInAnyPane(t *testing.T) {
+	// agent 1000 -> bash 500 -> tmux 200, but server's panes have shell pid
+	// 999. Pid 1000's ancestry never reaches 999.
+	tree := map[int][2]string{
+		1000: {"500", "claude"},
+		500:  {"200", "bash"},
+		200:  {"1", "tmux"},
+	}
+	panes := map[string]string{
+		"gc": "999 mayor:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
+	}
+	if sig.Detect(1000) {
+		t.Error("Detect(1000) = true, want false (no pane has 1000's ancestors)")
 	}
 }
 
