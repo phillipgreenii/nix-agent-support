@@ -109,14 +109,15 @@ func TestResolveSignalerReturnsFirstMatch(t *testing.T) {
 }
 
 func TestResolveSignalerReturnsNilWhenNoneMatch(t *testing.T) {
-	got := signal.ResolveSignaler([]signal.Signaler{&signal.CmuxSignaler{}}, 42)
+	cmux := &signal.CmuxSignaler{LookupEnv: func(string) (string, bool) { return "", false }}
+	got := signal.ResolveSignaler([]signal.Signaler{cmux}, 42)
 	if got != nil {
 		t.Errorf("ResolveSignaler = %v, want nil", got)
 	}
 }
 
 func TestStubSignalersSendNotImplemented(t *testing.T) {
-	stubs := []signal.Signaler{&signal.CmuxSignaler{}, &signal.GhosttySignaler{}, &signal.VSCodeSignaler{}}
+	stubs := []signal.Signaler{&signal.GhosttySignaler{}, &signal.VSCodeSignaler{}}
 	for _, s := range stubs {
 		if s.Detect(1) {
 			t.Errorf("%s.Detect returned true, want false (stub)", s.Name())

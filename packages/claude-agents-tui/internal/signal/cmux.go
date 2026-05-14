@@ -33,9 +33,9 @@ func (c *CmuxSignaler) lookupEnv(key string) (string, bool) {
 // Detect returns true when claude-agents-tui is itself running inside cmux.
 // Outside cmux the signaler is silently inert.
 func (c *CmuxSignaler) Detect(pid int) bool {
-	// TODO Task 3: env check.
-	_ = pid
-	return false
+	_ = pid // cmux's socket is instance-global; reachability depends on the caller, not the target.
+	v, _ := c.lookupEnv("CMUX_WORKSPACE_ID")
+	return v != ""
 }
 
 // Send injects text followed by Enter into the cmux surface hosting pid.
