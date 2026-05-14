@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -64,6 +69,9 @@ type Model struct {
 	treeState *treestate.State
 	pathNodes []*aggregate.PathNode
 	flatRows  []render.Row
+
+	signalLogMu   sync.Mutex
+	signalLogFile io.WriteCloser // lazily opened; nil until first write
 }
 
 func NewModel(o Options) *Model {
@@ -102,6 +110,30 @@ func (m *Model) rebuildFlatRows() {
 	opts := render.TreeOpts{ShowAll: m.showAll}
 	m.pathNodes = aggregate.BuildPathTree(m.tree.Dirs)
 	m.flatRows = render.FlattenPathTree(m.pathNodes, m.treeState, opts)
+}
+
+// signalLog writes a single line to <cacheDir>/signal-errors.log (append mode),
+// opening the file lazily on first use. Silently drops if cacheDir is empty or
+// the file cannot be opened. Never panics. The caller does not provide a
+// trailing newline; this method appends one.
+func (m *Model) signalLog(msg string) {
+	if m.cacheDir == "" {
+		return
+	}
+	m.signalLogMu.Lock()
+	defer m.signalLogMu.Unlock()
+	if m.signalLogFile == nil {
+		if err := os.MkdirAll(m.cacheDir, 0o755); err != nil {
+			return
+		}
+		f, err := os.OpenFile(filepath.Join(m.cacheDir, "signal-errors.log"),
+			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return
+		}
+		m.signalLogFile = f
+	}
+	fmt.Fprintln(m.signalLogFile, msg)
 }
 
 // rowAt returns the Row at index idx in flatRows, and whether it exists.

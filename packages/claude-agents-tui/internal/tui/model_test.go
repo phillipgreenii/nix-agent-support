@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -448,5 +451,21 @@ func TestClampCursorSnapsOffBlankRow(t *testing.T) {
 
 	if m.flatRows[m.cursor].Kind == render.BlankKind {
 		t.Errorf("clampCursor failed to snap off blank row; cursor=%d", m.cursor)
+	}
+}
+
+func TestSignalLogWritesToCacheDirNotStderr(t *testing.T) {
+	dir := t.TempDir()
+	m := NewModel(Options{CacheDir: dir})
+	m.SignalLogForTest("hello world")
+	m.SignalLogForTest("second line")
+	path := filepath.Join(dir, "signal-errors.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "hello world") || !strings.Contains(got, "second line") {
+		t.Errorf("log contents = %q, want both lines", got)
 	}
 }

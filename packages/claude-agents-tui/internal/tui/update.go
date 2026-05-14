@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,11 +111,11 @@ func (m *Model) signalNonWorking(label string) {
 			}
 			sig := signal.ResolveSignaler(m.signalers, sv.PID)
 			if sig == nil {
-				fmt.Fprintf(os.Stderr, "%s: no signaler for pid %d\n", label, sv.PID)
+				m.signalLog(fmt.Sprintf("%s: no signaler for pid %d", label, sv.PID))
 				continue
 			}
 			if err := sig.Send(sv.PID, m.autoResumeMessage); err != nil {
-				fmt.Fprintf(os.Stderr, "%s: send failed pid %d: %v\n", label, sv.PID, err)
+				m.signalLog(fmt.Sprintf("%s: send failed pid %d: %v", label, sv.PID, err))
 			}
 		}
 	}
