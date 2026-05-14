@@ -414,16 +414,21 @@ func TestViewHelpModalIncludesSignalLogPathWhenCacheDirSet(t *testing.T) {
 	m.SetActiveModalForTest(ModalHelp)
 	m.SetSizeForTest(120, 40)
 	out := m.View()
-	// The modal box clips long lines to contentWidth (~78 chars at width=120),
-	// so check for the prefix rather than the full path.
-	fullWant := "Signal errors logged to: " + filepath.Join(tmp, "signal-errors.log")
-	const contentWidth = 78
-	want := fullWant
-	if len(want) > contentWidth {
-		want = want[:contentWidth]
+	// When "Signal errors logged to: <path>" exceeds contentWidth (~78 chars at
+	// width=120), the footer wraps: label on one line, path on the next.
+	// Check that both the label and a recognisable prefix of the path appear.
+	if !strings.Contains(out, "Signal errors logged to:") {
+		t.Errorf("View output missing footer label\n--- output ---\n%s", out)
 	}
-	if !strings.Contains(out, want) {
-		t.Errorf("View output missing %q\n--- output ---\n%s", want, out)
+	logPath := filepath.Join(tmp, "signal-errors.log")
+	// Check a prefix of the path that fits within contentWidth (78) is present.
+	const contentWidth = 78
+	pathWant := logPath
+	if len(pathWant) > contentWidth {
+		pathWant = pathWant[:contentWidth]
+	}
+	if !strings.Contains(out, pathWant) {
+		t.Errorf("View output missing path prefix %q\n--- output ---\n%s", pathWant, out)
 	}
 }
 

@@ -59,6 +59,15 @@ func Modal(title string, rows []ModalRow, extraFooter string, width, height, scr
 		contentHeight = 1
 	}
 
+	footerLines := 0
+	if extraFooter != "" {
+		footerLines = len(wrapFooterLine(extraFooter, contentWidth))
+	}
+	contentHeight -= footerLines
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
 	// Clamp scroll.
 	if scroll < 0 {
 		scroll = 0
@@ -142,11 +151,10 @@ func Modal(title string, rows []ModalRow, extraFooter string, width, height, scr
 		content.WriteString("\n")
 	}
 	if extraFooter != "" {
-		if lipgloss.Width(extraFooter) > contentWidth {
-			extraFooter = extraFooter[:contentWidth]
+		for _, line := range wrapFooterLine(extraFooter, contentWidth) {
+			content.WriteString(line)
+			content.WriteString("\n")
 		}
-		content.WriteString(extraFooter)
-		content.WriteString("\n")
 	}
 	content.WriteString(footerHint)
 
@@ -185,4 +193,53 @@ var legendRows = []ModalRow{
 // LegendModal renders the hand-curated symbol legend.
 func LegendModal(width, height, scroll int) string {
 	return Modal("Legend — symbols", legendRows, "", width, height, scroll)
+}
+
+// wrapFooterLine renders a footer string as 1+ lines that each fit within
+// width visible columns:
+//
+//   - If the entire line fits, returns one entry.
+//   - Else if a single-space break exists where the left half fits, splits
+//     there: head on the first line, tail wrapped on subsequent lines.
+//   - Else char-wraps the entire line by runes.
+//
+// width <= 0 is treated as no-op (returns the input as a single entry).
+func wrapFooterLine(line string, width int) []string {
+	if width <= 0 || lipgloss.Width(line) <= width {
+		return []string{line}
+	}
+	// Try a single break at the last space within the first `width` runes that
+	// produces a head fitting in width.
+	runes := []rune(line)
+	breakAt := -1
+	for i := width; i >= 0 && i < len(runes); i-- {
+		if runes[i] == ' ' && lipgloss.Width(string(runes[:i])) <= width {
+			breakAt = i
+			break
+		}
+	}
+	if breakAt > 0 {
+		head := string(runes[:breakAt])
+		tail := string(runes[breakAt+1:])
+		return append([]string{head}, charWrap(tail, width)...)
+	}
+	return charWrap(line, width)
+}
+
+// charWrap chunks s into width-wide rune slices.
+func charWrap(s string, width int) []string {
+	runes := []rune(s)
+	if width <= 0 || len(runes) == 0 {
+		return []string{s}
+	}
+	var out []string
+	for len(runes) > 0 {
+		if len(runes) <= width {
+			out = append(out, string(runes))
+			return out
+		}
+		out = append(out, string(runes[:width]))
+		runes = runes[width:]
+	}
+	return out
 }
