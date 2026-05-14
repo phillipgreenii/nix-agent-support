@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -404,6 +405,35 @@ func TestHelpModalContainsAllBindings(t *testing.T) {
 		if !strings.Contains(out, b.Description) {
 			t.Errorf("help modal missing %q (Keys=%v); got:\n%s", b.Description, b.Keys, out)
 		}
+	}
+}
+
+func TestViewHelpModalIncludesSignalLogPathWhenCacheDirSet(t *testing.T) {
+	tmp := t.TempDir()
+	m := NewModel(Options{CacheDir: tmp})
+	m.SetActiveModalForTest(ModalHelp)
+	m.SetSizeForTest(120, 40)
+	out := m.View()
+	// The modal box clips long lines to contentWidth (~78 chars at width=120),
+	// so check for the prefix rather than the full path.
+	fullWant := "Signal errors logged to: " + filepath.Join(tmp, "signal-errors.log")
+	const contentWidth = 78
+	want := fullWant
+	if len(want) > contentWidth {
+		want = want[:contentWidth]
+	}
+	if !strings.Contains(out, want) {
+		t.Errorf("View output missing %q\n--- output ---\n%s", want, out)
+	}
+}
+
+func TestViewHelpModalOmitsLogPathWhenCacheDirEmpty(t *testing.T) {
+	m := NewModel(Options{CacheDir: ""})
+	m.SetActiveModalForTest(ModalHelp)
+	m.SetSizeForTest(120, 40)
+	out := m.View()
+	if strings.Contains(out, "Signal errors logged to") {
+		t.Errorf("View output unexpectedly contains the footer pattern:\n%s", out)
 	}
 }
 

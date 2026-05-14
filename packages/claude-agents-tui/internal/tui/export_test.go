@@ -22,3 +22,9 @@ func (m *Model) SetTreeAndAutoResumeForTest(tree *aggregate.Tree, autoResume boo
 
 // AutoResumeFireForTest constructs the unexported autoResumeFireMsg.
 func AutoResumeFireForTest() tea.Msg { return autoResumeFireMsg{} }
+
+// SetActiveModalForTest forces the modal selection for whitebox view tests.
+func (m *Model) SetActiveModalForTest(kind ModalKind) { m.activeModal = kind }
+
+// SetSizeForTest sets Model.width/height for whitebox view tests.
+func (m *Model) SetSizeForTest(w, h int) { m.width = w; m.height = h }

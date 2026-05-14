@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,11 +14,11 @@ func (m *Model) View() string {
 	if m.width == 0 {
 		return "loading…"
 	}
-	if m.tree == nil {
-		return "loading…"
-	}
 	if m.activeModal != ModalNone {
 		return wrap.Block(m.renderModal(), wrap.EffectiveWidth(m.width))
+	}
+	if m.tree == nil {
+		return "loading…"
 	}
 	if m.selected != nil {
 		return wrap.Block(RenderDetails(m.selected, m.width), wrap.EffectiveWidth(m.width))
@@ -117,7 +118,11 @@ func (m *Model) selectionStatus() string {
 func (m *Model) renderModal() string {
 	switch m.activeModal {
 	case ModalHelp:
-		return render.HelpModal(bindingsToHelpRows(), "", m.width, m.height, m.modalScrollOffset)
+		extra := ""
+		if m.cacheDir != "" {
+			extra = "Signal errors logged to: " + filepath.Join(m.cacheDir, "signal-errors.log")
+		}
+		return render.HelpModal(bindingsToHelpRows(), extra, m.width, m.height, m.modalScrollOffset)
 	case ModalLegend:
 		return render.LegendModal(m.width, m.height, m.modalScrollOffset)
 	}
