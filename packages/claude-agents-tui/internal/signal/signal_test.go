@@ -97,29 +97,25 @@ func TestTmuxDetectReturnsFalseWhenNoTmuxAncestor(t *testing.T) {
 }
 
 func TestTmuxSendKeysFindsPaneByAncestor(t *testing.T) {
-	// Process tree: 1000 (claude) → 500 (bash) → 100 (tmux pane shell)
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
 		500:  {"100", "bash"},
 	}
-	paneList := "100 main:0.0\n200 main:0.1\n"
-	var sentKeys []string
-	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if name == "tmux" && len(args) > 0 && args[0] == "send-keys" {
-			sentKeys = append(sentKeys, strings.Join(args, " "))
-			return []byte(""), nil
-		}
-		return fakeRun(tree, paneList)(ctx, name, args...)
+	panes := map[string]string{
+		"default": "100 main:0.0\n200 main:0.1\n",
 	}
-	sig := &signal.TmuxSignaler{RunCmd: run}
+	var sent []string
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent),
+	}
 	if err := sig.Send(1000, "continue"); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if len(sentKeys) != 1 {
-		t.Fatalf("expected 1 send-keys call, got %d", len(sentKeys))
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 send-keys call, got %d: %v", len(sent), sent)
 	}
-	if !strings.Contains(sentKeys[0], "main:0.0") {
-		t.Errorf("send-keys target = %q, want pane main:0.0", sentKeys[0])
+	if !strings.Contains(sent[0], "tmux -L default send-keys -t main:0.0 continue Enter") {
+		t.Errorf("send call = %q, want -L default + -t main:0.0", sent[0])
 	}
 }
 
@@ -128,7 +124,12 @@ func TestTmuxSendErrorsWhenNoPaneFound(t *testing.T) {
 		1000: {"500", "claude"},
 		500:  {"1", "bash"},
 	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "999 other:0.0\n")}
+	panes := map[string]string{
+		"default": "999 other:0.0\n",
+	}
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil),
+	}
 	err := sig.Send(1000, "continue")
 	if err == nil {
 		t.Error("Send should return error when no pane found for PID")
@@ -185,6 +186,9 @@ func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 		t.Error("Detect = true for tmuxinator ancestor; want false (exact 'tmux' match only)")
 	}
 }
+
+const psSampleDefaultOnly = `28346 tmux tmux new-session -d -s main
+`
 
 const psSampleSingleServer = `28346 tmux tmux -u -L gc new-session -d -s mayor
 12345 zsh -zsh
@@ -315,6 +319,31 @@ func TestTmuxDetectReturnsFalseWhenPidNotInAnyPane(t *testing.T) {
 	}
 	if sig.Detect(1000) {
 		t.Error("Detect(1000) = true, want false (no pane has 1000's ancestors)")
+	}
+}
+
+func TestTmuxSendFindsPaneOnNonDefaultSocket(t *testing.T) {
+	// agent 2000 -> bash 600 -> shell 300 (which is pane work:dev:0.0)
+	tree := map[int][2]string{
+		2000: {"600", "claude"},
+		600:  {"300", "bash"},
+	}
+	panes := map[string]string{
+		"gc":   "100 mayor:0.0\n",
+		"work": "300 dev:0.0\n",
+	}
+	var sent []string
+	sig := &signal.TmuxSignaler{
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, tree, panes, &sent),
+	}
+	if err := sig.Send(2000, "continue"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 send-keys call, got %d: %v", len(sent), sent)
+	}
+	if !strings.Contains(sent[0], "tmux -L work send-keys -t dev:0.0 continue Enter") {
+		t.Errorf("send call = %q, want -L work + -t dev:0.0 with Enter", sent[0])
 	}
 }
 

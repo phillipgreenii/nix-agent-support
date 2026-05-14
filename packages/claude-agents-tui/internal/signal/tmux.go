@@ -88,21 +88,22 @@ func (t *TmuxSignaler) findPaneLocForPID(locs map[int]paneLoc, targetPID int) *p
 	}
 }
 
-// Send injects text + Enter into the tmux pane that contains pid.
-// Will be replaced in Task 6 with a multi-socket implementation.
+// Send injects text + Enter into the tmux pane that contains pid. Uses
+// cachedPanes for socket+pane discovery, so signalNonWorking over N sessions
+// pays the enumeration cost once per cache TTL window. The matched pane's
+// socket name is threaded through the send-keys call via -L.
 func (t *TmuxSignaler) Send(pid int, text string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := t.run(ctx, "tmux", "list-panes", "-a", "-F",
-		"#{pane_pid} #{session_name}:#{window_index}.#{pane_index}")
+	locs, err := t.cachedPanes()
 	if err != nil {
-		return fmt.Errorf("tmux list-panes: %w", err)
+		return fmt.Errorf("tmux enumerate: %w", err)
 	}
-	paneID := t.findPaneForPID(ctx, string(out), pid)
-	if paneID == "" {
+	loc := t.findPaneLocForPID(locs, pid)
+	if loc == nil {
 		return fmt.Errorf("signal: no tmux pane found for pid %d", pid)
 	}
-	_, err = t.run(ctx, "tmux", "send-keys", "-t", paneID, text, "Enter")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = t.run(ctx, "tmux", "-L", loc.socketName, "send-keys", "-t", loc.paneID, text, "Enter")
 	return err
 }
 
@@ -188,44 +189,3 @@ func (t *TmuxSignaler) cachedPanes() (map[int]paneLoc, error) {
 	return locs, err
 }
 
-// findPaneForPID walks up the process tree from targetPID until it finds a pid
-// that matches a tmux pane's shell pid from listOutput. Will be replaced in
-// Task 6 with a multi-socket-aware walker.
-func (t *TmuxSignaler) findPaneForPID(ctx context.Context, listOutput string, targetPID int) string {
-	panePIDs := map[int]string{}
-	for line := range strings.SplitSeq(strings.TrimSpace(listOutput), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		ppid, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
-		}
-		panePIDs[ppid] = fields[1]
-	}
-	seen := map[int]bool{}
-	pid := targetPID
-	for {
-		if pid < 1 || seen[pid] {
-			return ""
-		}
-		seen[pid] = true
-		if paneID, ok := panePIDs[pid]; ok {
-			return paneID
-		}
-		out, err := t.run(ctx, "ps", "-o", "ppid=,comm=", "-p", strconv.Itoa(pid))
-		if err != nil {
-			return ""
-		}
-		fields := strings.Fields(strings.TrimSpace(string(out)))
-		if len(fields) < 1 {
-			return ""
-		}
-		ppid, err := strconv.Atoi(fields[0])
-		if err != nil || ppid < 1 {
-			return ""
-		}
-		pid = ppid
-	}
-}
