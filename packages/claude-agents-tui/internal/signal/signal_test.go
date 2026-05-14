@@ -127,3 +127,17 @@ func TestStubSignalersSendNotImplemented(t *testing.T) {
 		}
 	}
 }
+
+func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
+	// Process ancestry: 1000 (claude) → 500 (bash) → 100 (tmuxinator).
+	// Old HasPrefix("tmux") matched "tmuxinator" too; exact match must reject it.
+	tree := map[int][2]string{
+		1000: {"500", "claude"},
+		500:  {"100", "bash"},
+		100:  {"1", "tmuxinator"},
+	}
+	sig := &signal.TmuxSignaler{RunCmd: fakeRun(tree, "")}
+	if sig.Detect(1000) {
+		t.Error("Detect = true for tmuxinator ancestor; want false (exact 'tmux' match only)")
+	}
+}

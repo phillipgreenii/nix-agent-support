@@ -42,7 +42,7 @@ func (t *TmuxSignaler) Detect(pid int) bool {
 		if len(fields) < 2 {
 			return false
 		}
-		if strings.HasPrefix(fields[1], "tmux") {
+		if fields[1] == "tmux" {
 			return true
 		}
 		ppid, err := strconv.Atoi(fields[0])
