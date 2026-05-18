@@ -8,6 +8,7 @@
     ./programs/pgii-local-plugins
     ./programs/pgii-claude-plugins
     ./programs/agent-rules
+    ./programs/pn-workspace-rules
     ./programs/bash-scripting
     ./programs/agentsview
     ./programs/ccusage
