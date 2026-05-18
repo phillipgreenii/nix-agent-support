@@ -10,12 +10,6 @@ let
 
   filters =
     lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
-    ++ lib.mapAttrsToList (
-      name: val: ".extraKnownMarketplaces[\"${name}\"] = ${builtins.toJSON val}"
-    ) cfg.extraKnownMarketplaces
-    ++ lib.optional (
-      cfg.enabledPlugins != { }
-    ) ".enabledPlugins *= ${builtins.toJSON cfg.enabledPlugins}"
     ++ lib.optional (
       cfg.showClearContextOnPlanAccept != null
     ) ".showClearContextOnPlanAccept = ${builtins.toJSON cfg.showClearContextOnPlanAccept}"
@@ -37,9 +31,20 @@ let
       )
     ];
 
+  replaceScript = pkgs.writeShellApplication {
+    name = "claude-settings-replace-managed-keys";
+    runtimeInputs = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    text = builtins.readFile ./replace-managed-keys.sh;
+  };
+
+  hasManagedKeys = cfg.enabledPlugins != { } || cfg.extraKnownMarketplaces != { };
+
   hasSettings = filters != [ ];
   hasPlugins = cfg.plugins != [ ] && cfg.claudeCodePackage != null;
-  hasAnything = hasSettings || hasPlugins;
+  hasAnything = hasSettings || hasPlugins || hasManagedKeys;
 in
 {
   options.phillipgreenii.programs.claude.settings = {
@@ -170,6 +175,15 @@ in
 
       mkdir -p "$HOME/.claude"
       [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+
+      ${lib.optionalString hasManagedKeys ''
+        ${replaceScript}/bin/claude-settings-replace-managed-keys \
+          "$SETTINGS" \
+          '${builtins.toJSON cfg.enabledPlugins}' \
+          '${builtins.toJSON cfg.extraKnownMarketplaces}' \
+          "$HOME/.claude"
+        echo "claude-settings: enabledPlugins and extraKnownMarketplaces replaced"
+      ''}
 
       ${lib.optionalString hasSettings ''
         ${pkgs.jq}/bin/jq '
