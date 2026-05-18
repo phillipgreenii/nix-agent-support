@@ -349,7 +349,13 @@
     // {
       darwinModules.default = ./darwin;
       nixosModules.default = ./nixos;
-      homeModules.default = ./home;
+      homeModules.default =
+        { lib, ... }:
+        {
+          imports = [ ./home ];
+          config.phillipgreenii.programs.claude.plugins.local.version =
+            lib.mkDefault self.lib.pluginVersion;
+        };
       homeModules.install-metadata = phillipgreenii-nix-base.lib.mkInstallMetadata {
         flakeSelf = self;
         name = "phillipgreenii-nix-agent-support";
