@@ -48,3 +48,132 @@ _removed_file_content() {
   [ "$(jq -r '.extraKnownMarketplaces.m.source.repo' "$SETTINGS")" = "x/y" ]
   [ "$(_removed_count)" -eq 0 ]
 }
+
+@test "removes extra enabledPlugins entry and writes removal file" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "enabledPlugins": {
+    "keep@m": true,
+    "drop@m": true
+  }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" \
+    '{"keep@m":true}' \
+    '{}' \
+    "$REMOVED_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.enabledPlugins["drop@m"] // "absent"' "$SETTINGS")" = "absent" ]
+  [ "$(jq -r '.enabledPlugins["keep@m"]' "$SETTINGS")" = "true" ]
+  [ "$(_removed_count)" -eq 1 ]
+
+  removed="$(_removed_file_content)"
+  [ "$(echo "$removed" | jq -r '.enabledPlugins["drop@m"]')" = "true" ]
+}
+
+@test "removes extra extraKnownMarketplaces entry and writes removal file" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "extraKnownMarketplaces": {
+    "keep-mkt": { "source": { "source": "github", "repo": "x/keep" } },
+    "drop-mkt": { "source": { "source": "github", "repo": "x/drop" } }
+  }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" \
+    '{}' \
+    '{"keep-mkt":{"source":{"source":"github","repo":"x/keep"}}}' \
+    "$REMOVED_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.extraKnownMarketplaces["drop-mkt"] // "absent"' "$SETTINGS")" = "absent" ]
+  [ "$(jq -r '.extraKnownMarketplaces["keep-mkt"].source.repo' "$SETTINGS")" = "x/keep" ]
+  [ "$(_removed_count)" -eq 1 ]
+
+  removed="$(_removed_file_content)"
+  [ "$(echo "$removed" | jq -r '.extraKnownMarketplaces["drop-mkt"].source.repo')" = "x/drop" ]
+}
+
+@test "no removal file when settings already match Nix set" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "enabledPlugins": { "foo@m": true },
+  "extraKnownMarketplaces": {
+    "m": { "source": { "source": "github", "repo": "x/y" } }
+  }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" \
+    '{"foo@m":true}' \
+    '{"m":{"source":{"source":"github","repo":"x/y"}}}' \
+    "$REMOVED_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(_removed_count)" -eq 0 ]
+  [ "$(jq -r '.enabledPlugins["foo@m"]' "$SETTINGS")" = "true" ]
+  [ "$(jq -r '.extraKnownMarketplaces.m.source.repo' "$SETTINGS")" = "x/y" ]
+}
+
+@test "single removal file captures both enabledPlugins and extraKnownMarketplaces removals" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "enabledPlugins": { "drop@m": true },
+  "extraKnownMarketplaces": {
+    "drop-mkt": { "source": { "source": "github", "repo": "x/drop" } }
+  }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" \
+    '{}' \
+    '{}' \
+    "$REMOVED_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(_removed_count)" -eq 1 ]
+
+  removed="$(_removed_file_content)"
+  [ "$(echo "$removed" | jq -r '.enabledPlugins["drop@m"]')" = "true" ]
+  [ "$(echo "$removed" | jq -r '.extraKnownMarketplaces["drop-mkt"].source.repo')" = "x/drop" ]
+}
+
+@test "second run after removal produces no new removal file" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "enabledPlugins": { "keep@m": true, "drop@m": true }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" '{"keep@m":true}' '{}' "$REMOVED_DIR"
+  [ "$status" -eq 0 ]
+  [ "$(_removed_count)" -eq 1 ]
+
+  # Second run: nothing left to remove
+  run "$SCRIPT" "$SETTINGS" '{"keep@m":true}' '{}' "$REMOVED_DIR"
+  [ "$status" -eq 0 ]
+  [ "$(_removed_count)" -eq 1 ]  # still just the first one
+}
+
+@test "leaves env, permissions, and scalar keys untouched" {
+  cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus[1m]",
+  "includeCoAuthoredBy": false,
+  "env": { "CLAUDE_CODE_NO_FLICKER": "1" },
+  "permissions": { "allow": ["Read(//tmp/**)"] },
+  "enabledPlugins": { "drop@m": true }
+}
+JSON
+
+  run "$SCRIPT" "$SETTINGS" '{}' '{}' "$REMOVED_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.model' "$SETTINGS")" = "opus[1m]" ]
+  [ "$(jq -r '.includeCoAuthoredBy' "$SETTINGS")" = "false" ]
+  [ "$(jq -r '.env.CLAUDE_CODE_NO_FLICKER' "$SETTINGS")" = "1" ]
+  [ "$(jq -r '.permissions.allow[0]' "$SETTINGS")" = "Read(//tmp/**)" ]
+}
