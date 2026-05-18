@@ -8,7 +8,13 @@
 
 bats_require_minimum_version 1.5.0
 
-SCRIPT="${BATS_TEST_DIRNAME}/../replace-managed-keys.sh"
+# Resolve the script: prefer the packaged binary on PATH (Nix build sandbox
+# via testBashScripts), fall back to the sibling source script for direct
+# dev-time runs (`bats tests/`).
+SCRIPT="$(command -v claude-settings-replace-managed-keys || true)"
+if [ -z "$SCRIPT" ]; then
+  SCRIPT="${BATS_TEST_DIRNAME}/../replace-managed-keys.sh"
+fi
 
 setup() {
   TMP="$(mktemp -d)"

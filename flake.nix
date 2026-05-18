@@ -206,6 +206,22 @@
                 extraInputs = [ ];
               };
 
+            test-claude-settings-replace = checks-lib.testBashScripts {
+              package = pkgs.writeShellApplication {
+                name = "claude-settings-replace-managed-keys";
+                runtimeInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+                text = builtins.readFile ./home/programs/claude-settings/replace-managed-keys.sh;
+              };
+              tests = ./home/programs/claude-settings/tests;
+              extraInputs = [
+                pkgs.jq
+                pkgs.coreutils
+              ];
+            };
+
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
