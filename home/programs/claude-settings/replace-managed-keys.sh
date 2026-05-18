@@ -41,7 +41,7 @@ removed=$(jq -n \
 
 if [ "$removed" != "{}" ]; then
   ts=$(date -u +%Y%m%dT%H%M%SZ)
-  removed_file="$removed_dir/.claude-settings-removed-$ts.json"
+  removed_file="$removed_dir/.claude-settings-removed-$ts-$$.json"
   echo "claude-settings: REMOVED on activation (saved to $removed_file):" >&2
   echo "$removed" | jq . >&2
   echo "$removed" > "$removed_file"
