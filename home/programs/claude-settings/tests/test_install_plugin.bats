@@ -63,3 +63,82 @@ _write_manifest() {
   grep -Fxq "plugin install beads@beads-marketplace --scope user" "$CALLS"
   ! grep -Fq "update" "$CALLS"
 }
+
+@test "install fails, update succeeds: echoes updated status on stdout, no warning" {
+  _mock_claude 1 0 "already installed" ""
+
+  run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"beads@beads-marketplace updated"* ]]
+  # No WARNING since the fallback succeeded
+  ! [[ "$output" == *"WARNING"* ]]
+  grep -Fxq "plugin install beads@beads-marketplace --scope user" "$CALLS"
+  grep -Fxq "plugin update beads@beads-marketplace --scope user" "$CALLS"
+}
+
+@test "install and update both fail: warning with stderr from both" {
+  _mock_claude 1 1 "install boom" "update boom"
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]   # non-fatal
+  # stderr (captured separately) contains warning + both subcommand stderrs
+  [[ "$stderr" == *"WARNING beads@beads-marketplace install/update failed"* ]]
+  [[ "$stderr" == *"install boom"* ]]
+  [[ "$stderr" == *"update boom"* ]]
+  # stdout has no success line
+  ! [[ "$output" == *"installed"* ]]
+  ! [[ "$output" == *"updated"* ]]
+}
+
+@test "valid manifest in cache is preserved" {
+  _mock_claude 0 0 "" ""
+  _write_manifest "beads-marketplace" "beads" "1.0.4" '{"name":"beads","version":"1.0.4"}'
+
+  run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ -f "$CACHE_ROOT/beads-marketplace/beads/1.0.4/.claude-plugin/plugin.json" ]
+}
+
+@test "corrupt manifest (parse error) is removed with WARNING on stderr" {
+  _mock_claude 0 0 "" ""
+  # The actual failure mode hit in production: unresolved git merge markers.
+  _write_manifest "beads-marketplace" "beads" "1.0.4" \
+'{"name":"beads",
+<<<<<<< Updated upstream
+=======
+"version":"1.0.4",
+>>>>>>> Stashed changes
+}'
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ ! -d "$CACHE_ROOT/beads-marketplace/beads/1.0.4" ]
+  [[ "$stderr" == *"WARNING corrupt manifest"* ]]
+  [[ "$stderr" == *"removing"* ]]
+}
+
+@test "structurally-broken manifest (missing .version) is removed" {
+  _mock_claude 0 0 "" ""
+  _write_manifest "beads-marketplace" "beads" "1.0.4" '{"name":"beads"}'
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ ! -d "$CACHE_ROOT/beads-marketplace/beads/1.0.4" ]
+  [[ "$stderr" == *"WARNING corrupt manifest"* ]]
+}
+
+@test "no cache dir: install proceeds, no validation warning" {
+  _mock_claude 0 0 "" ""
+  # No cache populated for this plugin.
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "caveman@caveman" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"caveman@caveman installed"* ]]
+  ! [[ "$stderr" == *"WARNING"* ]]
+}
