@@ -62,7 +62,8 @@ in
       owner.name = "phillipgreenii";
       plugins = lib.mapAttrsToList (name: plugin: {
         inherit name;
-        inherit (plugin) description source;
+        inherit (plugin) description;
+        source = "./${plugin.source}";
         inherit (cfg.plugins.local) version;
       }) cfg.plugins.local.plugins;
     };
