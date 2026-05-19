@@ -1,5 +1,5 @@
-issue_prefix: pnas
-issue-prefix: pnas
+issue_prefix: nas
+issue-prefix: nas
 dolt.auto-start: false
 gc.endpoint_origin: inherited_city
 gc.endpoint_status: verified
