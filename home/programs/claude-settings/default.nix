@@ -40,6 +40,15 @@ let
     text = builtins.readFile ./replace-managed-keys.sh;
   };
 
+  installPluginScript = pkgs.writeShellApplication {
+    name = "claude-settings-install-plugin";
+    runtimeInputs = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    text = builtins.readFile ./install-plugin.sh;
+  };
+
   hasManagedKeys = cfg.enabledPlugins != { } || cfg.extraKnownMarketplaces != { };
 
   hasSettings = filters != [ ];
@@ -200,13 +209,10 @@ in
 
         ${lib.concatStringsSep "\n" (
           map (plugin: ''
-            if $CLAUDE plugin install "${plugin}" --scope user 2>/dev/null; then
-              echo "claude-settings: ${plugin} installed"
-            elif $CLAUDE plugin update "${plugin}" --scope user 2>/dev/null; then
-              echo "claude-settings: ${plugin} updated"
-            else
-              echo "claude-settings: ${plugin} install/update failed (non-fatal)"
-            fi
+            ${installPluginScript}/bin/claude-settings-install-plugin \
+              "$CLAUDE" \
+              "${plugin}" \
+              "$HOME/.claude/plugins/cache"
           '') cfg.plugins
         )}
       ''}
