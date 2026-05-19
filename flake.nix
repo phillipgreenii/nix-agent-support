@@ -222,6 +222,22 @@
               ];
             };
 
+            test-claude-settings-install-plugin = checks-lib.testBashScripts {
+              package = pkgs.writeShellApplication {
+                name = "claude-settings-install-plugin";
+                runtimeInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+                text = builtins.readFile ./home/programs/claude-settings/install-plugin.sh;
+              };
+              tests = ./home/programs/claude-settings/tests/test_install_plugin.bats;
+              extraInputs = [
+                pkgs.jq
+                pkgs.coreutils
+              ];
+            };
+
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
@@ -353,8 +369,7 @@
         { lib, ... }:
         {
           imports = [ ./home ];
-          config.phillipgreenii.programs.claude.plugins.local.version =
-            lib.mkDefault self.lib.pluginVersion;
+          config.phillipgreenii.programs.claude.plugins.local.version = lib.mkDefault self.lib.pluginVersion;
         };
       homeModules.install-metadata = phillipgreenii-nix-base.lib.mkInstallMetadata {
         flakeSelf = self;
