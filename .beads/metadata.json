@@ -1,0 +1,9 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 24158,
+  "dolt_database": "pnas",
+  "project_id": "9c7291a1-c3b8-4b20-9e9a-4a6df292e38b"
+}

@@ -5,3 +5,8 @@ result
 # compiled Go binary checked in by accident during package migration; rebuilds
 # dirty the working tree on every `go build` in the package dir
 /packages/claude-agents-tui/claude-agents-tui
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
