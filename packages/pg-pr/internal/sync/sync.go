@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -205,73 +206,99 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	healthyRepos := map[string]bool{}
 
 	for _, rcfg := range e.deps.Cfg.Repos {
-		rs := RepoSummary{Repo: rcfg.Remote}
-		state := repoState{LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339)}
+		func() {
+			repoCtx, repoSpan := startRepoSpan(ctx, rcfg.Remote)
+			defer repoSpan.End()
 
-		prs, err := e.enumerate(ctx, rcfg)
-		if err != nil {
-			rs.Error = err.Error()
-			state.LastError = &repoErr{Code: "enum_failed", Message: err.Error()}
-			summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: err.Error()})
+			rs := RepoSummary{Repo: rcfg.Remote}
+			state := repoState{LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339)}
+
+			prs, err := e.enumerate(repoCtx, rcfg)
+			if err != nil {
+				recordSpanErr(repoSpan, err)
+				rs.Error = err.Error()
+				state.LastError = &repoErr{Code: "enum_failed", Message: err.Error()}
+				summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: err.Error()})
+				summary.Repos = append(summary.Repos, rs)
+				repoStates[rcfg.Remote] = state
+				return
+			}
+			for _, pr := range prs {
+				observed[prKey{Repo: rcfg.Remote, Number: pr.Number}] = pr
+			}
+			rs.PRs = len(prs)
 			summary.Repos = append(summary.Repos, rs)
+			summary.TotalPRs += len(prs)
+			healthyRepos[rcfg.Remote] = true
 			repoStates[rcfg.Remote] = state
-			continue
-		}
-		for _, pr := range prs {
-			observed[prKey{Repo: rcfg.Remote, Number: pr.Number}] = pr
-		}
-		rs.PRs = len(prs)
-		summary.Repos = append(summary.Repos, rs)
-		summary.TotalPRs += len(prs)
-		healthyRepos[rcfg.Remote] = true
-		repoStates[rcfg.Remote] = state
+		}()
 	}
 
 	// Upsert beads for each observed PR. Track whether the call was a
 	// create or an update by comparing pre/post existence.
 	preExisting, _ := e.listExistingByKey(ctx)
 	for key, pr := range observed {
-		fields := beads.MergeRequestFields{
-			Repo:         key.Repo,
-			PRNumber:     pr.Number,
-			State:        stateForPR(pr),
-			Branch:       pr.Branch,
-			Base:         pr.Base,
-			Author:       pr.Author,
-			URL:          pr.URL,
-			LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
-			Draft:        pr.Draft,
-		}
-		prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
-		if err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    key.Repo,
-				Message: fmt.Sprintf("PR #%d: %v", pr.Number, err),
-			})
-			continue
-		}
-		if alreadyClosed {
-			continue
-		}
-		if _, was := preExisting[key]; was {
-			summary.BeadsUpdated++
-		} else {
-			summary.BeadsCreated++
-		}
+		func() {
+			prCtx, prSpan := startPRSpan(ctx, key.Repo, pr.Number, pr.Author)
+			defer prSpan.End()
+			startedAt := e.deps.Now()
+			defer func() {
+				telemetry.SyncPRDuration.
+					WithLabelValues(key.Repo).
+					Observe(e.deps.Now().Sub(startedAt).Seconds())
+			}()
 
-		// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
-		if err := e.processFeedback(ctx, key.Repo, pr, prBeadID, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    key.Repo,
-				Message: fmt.Sprintf("PR #%d feedback: %v", pr.Number, err),
-			})
-		}
-		if err := e.maybePromoteDraft(ctx, key.Repo, pr, prBeadID, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    key.Repo,
-				Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
-			})
-		}
+			fields := beads.MergeRequestFields{
+				Repo:         key.Repo,
+				PRNumber:     pr.Number,
+				State:        stateForPR(pr),
+				Branch:       pr.Branch,
+				Base:         pr.Base,
+				Author:       pr.Author,
+				URL:          pr.URL,
+				LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
+				Draft:        pr.Draft,
+			}
+			bdCtx, bdSpan := startBeadsSpan(prCtx, "EnsureMergeRequest", key.Repo, pr.Number)
+			prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(bdCtx, pr.URL, fields)
+			recordSpanErr(bdSpan, err)
+			bdSpan.End()
+			if err != nil {
+				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
+				recordSpanErr(prSpan, err)
+				summary.Errors = append(summary.Errors, SummaryError{
+					Repo:    key.Repo,
+					Message: fmt.Sprintf("PR #%d: %v", pr.Number, err),
+				})
+				return
+			}
+			if alreadyClosed {
+				return
+			}
+			if _, was := preExisting[key]; was {
+				summary.BeadsUpdated++
+			} else {
+				summary.BeadsCreated++
+			}
+
+			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
+			if err := e.processFeedback(prCtx, key.Repo, pr, prBeadID, summary); err != nil {
+				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
+				recordSpanErr(prSpan, err)
+				summary.Errors = append(summary.Errors, SummaryError{
+					Repo:    key.Repo,
+					Message: fmt.Sprintf("PR #%d feedback: %v", pr.Number, err),
+				})
+			}
+			if err := e.maybePromoteDraft(prCtx, key.Repo, pr, prBeadID, summary); err != nil {
+				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
+				recordSpanErr(prSpan, err)
+				summary.Errors = append(summary.Errors, SummaryError{
+					Repo:    key.Repo,
+					Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
+				})
+			}
+		}()
 	}
 
 	// Phase 6 B3: process queued replies (LLM stored reply_draft; we post +
@@ -337,6 +364,12 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	}
 
 	summary.FinishedAt = e.deps.Now()
+	// Record last-successful-sync per repo. Only the repos whose
+	// enumeration succeeded are eligible — partial-failure repos are
+	// skipped so dashboards don't show a misleadingly fresh timestamp.
+	for repo := range healthyRepos {
+		telemetry.ObserveSyncSuccess(repo, summary.FinishedAt)
+	}
 	if len(summary.Errors) > 0 {
 		return summary, fmt.Errorf("sync: %d error(s) (see Summary.Errors)", len(summary.Errors))
 	}
@@ -359,7 +392,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	}
 
 	summary := &Summary{StartedAt: e.deps.Now()}
-	pr, err := provider.GetPR(ctx, repo, number)
+	getCtx, getSpan := startVCSSpan(ctx, "GetPR", repo, number)
+	pr, err := provider.GetPR(getCtx, repo, number)
+	recordSpanErr(getSpan, err)
+	getSpan.End()
 	if err != nil {
 		summary.FinishedAt = e.deps.Now()
 		summary.Errors = append(summary.Errors, SummaryError{
@@ -443,7 +479,10 @@ func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.P
 	seen := map[int]struct{}{}
 	out := make([]api.PR, 0)
 
-	myPRs, err := provider.ListMyPRs(ctx, rcfg.Remote)
+	myCtx, mySpan := startVCSSpan(ctx, "ListMyPRs", rcfg.Remote, 0)
+	myPRs, err := provider.ListMyPRs(myCtx, rcfg.Remote)
+	recordSpanErr(mySpan, err)
+	mySpan.End()
 	if err != nil {
 		return nil, fmt.Errorf("list my PRs: %w", err)
 	}
@@ -455,7 +494,10 @@ func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.P
 	}
 
 	if len(rcfg.TeamMembers) > 0 {
-		teamPRs, err := provider.ListTeamPRs(ctx, rcfg.Remote, rcfg.TeamMembers)
+		teamCtx, teamSpan := startVCSSpan(ctx, "ListTeamPRs", rcfg.Remote, 0)
+		teamPRs, err := provider.ListTeamPRs(teamCtx, rcfg.Remote, rcfg.TeamMembers)
+		recordSpanErr(teamSpan, err)
+		teamSpan.End()
 		if err != nil {
 			return nil, fmt.Errorf("list team PRs: %w", err)
 		}
@@ -637,7 +679,10 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 	var events []feedbackEvent
 	provider, _ := e.providerFor(rcfg)
 	if reader, ok := provider.(CommentReader); ok {
-		comments, err := reader.ListComments(ctx, repo, pr.Number)
+		commCtx, commSpan := startVCSSpan(ctx, "ListComments", repo, pr.Number)
+		comments, err := reader.ListComments(commCtx, repo, pr.Number)
+		recordSpanErr(commSpan, err)
+		commSpan.End()
 		if err != nil {
 			return fmt.Errorf("list comments: %w", err)
 		}
@@ -650,7 +695,10 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 		if !ok {
 			continue
 		}
-		runs, err := cp.ListRuns(ctx, repo, pr.Number)
+		ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
+		runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
+		recordSpanErr(ciSpan, err)
+		ciSpan.End()
 		if err != nil {
 			// CI errors are non-fatal — the rest of the cycle should still
 			// progress.
@@ -724,7 +772,8 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 			summary.CyclesCreated++
 		}
 
-		if _, err := e.deps.Beads.CreateFeedback(ctx, beads.CreateFeedbackInput{
+		bdCtx, bdSpan := startBeadsSpan(ctx, "CreateFeedback", repo, pr.Number)
+		_, err = e.deps.Beads.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
 			ProcessingCycleID: cycleID,
 			Kind:              ev.kind,
 			ExternalID:        ev.externalID,
@@ -732,10 +781,14 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 			AuthorRole:        ev.authorRole,
 			Title:             ev.title,
 			Body:              ev.body,
-		}); err != nil {
+		})
+		recordSpanErr(bdSpan, err)
+		bdSpan.End()
+		if err != nil {
 			return fmt.Errorf("create feedback: %w", err)
 		}
 		summary.FeedbackCreated++
+		telemetry.FeedbackCreatedTotal.WithLabelValues(repo, string(ev.kind)).Inc()
 	}
 	return nil
 }
@@ -784,7 +837,10 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, 
 		if !ok {
 			continue
 		}
-		runs, err := cp.ListRuns(ctx, repo, pr.Number)
+		ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
+		runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
+		recordSpanErr(ciSpan, err)
+		ciSpan.End()
 		if err != nil {
 			return nil
 		}
