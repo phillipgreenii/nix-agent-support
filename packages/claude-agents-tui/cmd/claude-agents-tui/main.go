@@ -34,7 +34,11 @@ var version = "dev"
 //   - The flag-first case (e.g. --wait-until-idle) routes to tui because
 //     no current TUI flags collide with a subcommand name.
 func pickSubcommand(args []string) (cmd string, rest []string) {
-	known := map[string]bool{"daemon": true}
+	known := map[string]bool{
+		"daemon":            true,
+		"status":            true,
+		"agents-busy-check": true,
+	}
 	if len(args) < 2 {
 		return "tui", nil
 	}
@@ -49,6 +53,10 @@ func main() {
 	switch cmd {
 	case "daemon":
 		runDaemon(rest)
+	case "status":
+		runStatus(rest)
+	case "agents-busy-check":
+		runAgentsBusyCheck(rest)
 	case "tui":
 		runTUI(rest)
 	default:
