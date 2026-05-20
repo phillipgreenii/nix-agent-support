@@ -267,7 +267,7 @@ func (c *Client) FindMergeRequestForFeedback(ctx context.Context, feedbackID str
 	const maxHops = 8
 	visited := map[string]struct{}{feedbackID: {}}
 	cur := feedbackID
-	for hop := 0; hop < maxHops; hop++ {
+	for range maxHops {
 		out, err := c.Runner.Run(ctx, "dep", "list", cur, "--direction=down", "--json")
 		if err != nil {
 			return nil, fmt.Errorf("walk parents of %s: %w", cur, err)
