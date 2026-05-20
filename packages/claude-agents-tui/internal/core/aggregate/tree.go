@@ -40,13 +40,33 @@ type SessionView struct {
 }
 
 type Tree struct {
-	Dirs          []*Directory
-	ActiveBlock   *ccusage.Block
-	PlanCapUSD    float64
-	GeneratedAt   time.Time
+	Dirs           []*Directory
+	ActiveBlock    *ccusage.Block
+	ActiveWeek     *ccusage.WeeklyEntry // populated by daemon when ccusage weekly data is available
+	PlanCapUSD     float64
+	WeekCapUSD     float64 // used by week tracker integration
+	GeneratedAt    time.Time
 	CCUsageProbed  bool      // true once the first ccusage probe has run
 	CCUsageErr     error     // non-nil if ccusage exec failed
 	WindowResetsAt time.Time // global: max RateLimitResetsAt across all sessions (zero = none)
+}
+
+// Sessions returns a flat list of every SessionView across all Directories.
+// Intended for callers that operate per-session without caring about
+// directory grouping (label decoration, telemetry emission, etc.).
+func (t *Tree) Sessions() []*SessionView {
+	if t == nil {
+		return nil
+	}
+	var n int
+	for _, d := range t.Dirs {
+		n += len(d.Sessions)
+	}
+	out := make([]*SessionView, 0, n)
+	for _, d := range t.Dirs {
+		out = append(out, d.Sessions...)
+	}
+	return out
 }
 
 // TopupShouldDisplay returns true when the current 5h block's actual cost has
