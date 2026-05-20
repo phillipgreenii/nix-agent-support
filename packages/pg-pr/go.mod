@@ -1,9 +1,10 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr
 
-go 1.24.13
+go 1.25.0
 
 require (
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sys v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

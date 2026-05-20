@@ -225,17 +225,17 @@ func TestSyncCommand_SinglePRRequiresRepo(t *testing.T) {
 	}
 }
 
-func TestSyncCommand_DaemonStubMessage(t *testing.T) {
+func TestSyncCommand_DaemonInvalidInterval(t *testing.T) {
 	defer setStubsForSync(t, &stubVCS{}, &stubBeads{}, minimalCLICfg())()
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"sync", "--daemon"})
+	rootCmd.SetArgs([]string{"sync", "--daemon", "--interval", "not-a-duration"})
 
 	err := rootCmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "Phase 3") {
-		t.Fatalf("expected Phase 3 deferral message, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid --interval") {
+		t.Fatalf("expected --interval parse error, got %v", err)
 	}
 }
 

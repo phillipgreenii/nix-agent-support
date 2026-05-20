@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
@@ -21,6 +22,7 @@ type syncFlags struct {
 	repo       string
 	daemon     bool
 	interval   string
+	logJSON    bool
 }
 
 var syFlags syncFlags
@@ -52,9 +54,6 @@ With --pr <number>, sync refreshes a single PR. --repo owner/name is
 required when --pr is passed and the working directory is outside a
 configured repo.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		if syFlags.daemon {
-			return errors.New("sync --daemon: lands in Phase 3 (the spec earmarks this for the daemon work-stream)")
-		}
 		ctx := cmd.Context()
 		cfg, err := loadConfigForCLI(ctx)
 		if err != nil {
@@ -63,6 +62,21 @@ configured repo.`,
 		engine, err := newSyncEngineForCLI(cfg)
 		if err != nil {
 			return err
+		}
+
+		if syFlags.daemon {
+			interval, err := time.ParseDuration(syFlags.interval)
+			if err != nil {
+				return fmt.Errorf("invalid --interval: %w", err)
+			}
+			var logger = sync.NewTextLogger()
+			if syFlags.logJSON {
+				logger = sync.NewJSONLogger()
+			}
+			return engine.Daemon(ctx, sync.DaemonOpts{
+				Interval: interval,
+				Logger:   logger,
+			})
 		}
 
 		var summary *sync.Summary
@@ -125,8 +139,10 @@ func init() {
 	syncCmd.Flags().StringVar(&syFlags.repo, "repo", "",
 		"Repository in owner/name form (required with --pr)")
 	syncCmd.Flags().BoolVar(&syFlags.daemon, "daemon", false,
-		"Run as a daemon (lands in Phase 3)")
+		"Run as a daemon: loop Sync at --interval until SIGINT/SIGTERM")
 	syncCmd.Flags().StringVar(&syFlags.interval, "interval", "10m",
 		"Daemon poll interval (effective only with --daemon)")
+	syncCmd.Flags().BoolVar(&syFlags.logJSON, "log-json", false,
+		"Emit structured JSON logs to stderr (effective only with --daemon)")
 	rootCmd.AddCommand(syncCmd)
 }
