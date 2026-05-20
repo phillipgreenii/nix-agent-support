@@ -322,7 +322,6 @@ func TestRepoFromRemoteParsesGitHubURLs(t *testing.T) {
 		{"https://example.com/owner/repo.git", "", "", true},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.url, func(t *testing.T) {
 			tmp := t.TempDir()
 			initRepo(t, tmp)
