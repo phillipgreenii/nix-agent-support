@@ -115,6 +115,9 @@ func Run(ctx context.Context, p Paths) error {
 	}
 	defer lis.Close()
 
+	_, stop := serve(lis)
+	defer stop()
+
 	<-ctx.Done()
 	return nil
 }
