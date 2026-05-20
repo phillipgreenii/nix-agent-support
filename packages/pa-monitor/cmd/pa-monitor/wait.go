@@ -66,31 +66,57 @@ func runWaitUntilAgentsFinished(args []string) {
 			continue
 		}
 
+		// Heartbeat-miss watchdog: per spec, the client treats no
+		// messages within 2× heartbeat interval as a hung daemon and
+		// reconnects. Default heartbeat = 1000ms here → 2s budget.
+		const hbBudget = 2 * time.Second
+		type recvResult struct {
+			msg *pb.WatchStateEvent
+			err error
+		}
+		recvCh := make(chan recvResult, 1)
+		next := func() {
+			go func() {
+				m, e := stream.Recv()
+				recvCh <- recvResult{m, e}
+			}()
+		}
+		next()
+
+	streamLoop:
 		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				break // stream closed; outer loop retries
-			}
-			st := msg.GetState()
-			if st == nil {
-				continue
-			}
-			anyBusy := false
-			for _, d := range st.GetDirs() {
-				if d.GetWorkingN() > 0 {
-					anyBusy = true
-					break
+			select {
+			case <-ctx.Done():
+				break streamLoop
+			case <-time.After(hbBudget):
+				fmt.Fprintln(os.Stderr, "wait: heartbeat missed, reconnecting")
+				break streamLoop
+			case r := <-recvCh:
+				if r.err != nil {
+					break streamLoop
 				}
-			}
-			if anyBusy {
-				streak = 0
-			} else {
-				streak++
-				if streak >= *consecutive {
-					cancel()
-					client.Close()
-					fmt.Fprintln(os.Stderr, "all idle")
-					os.Exit(0)
+				next()
+				st := r.msg.GetState()
+				if st == nil {
+					continue
+				}
+				anyBusy := false
+				for _, d := range st.GetDirs() {
+					if d.GetWorkingN() > 0 {
+						anyBusy = true
+						break
+					}
+				}
+				if anyBusy {
+					streak = 0
+				} else {
+					streak++
+					if streak >= *consecutive {
+						cancel()
+						client.Close()
+						fmt.Fprintln(os.Stderr, "all idle")
+						os.Exit(0)
+					}
 				}
 			}
 		}
