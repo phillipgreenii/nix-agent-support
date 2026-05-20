@@ -10,7 +10,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/subshell"
-	"github.com/phillipgreenii/claude-agents-tui/internal/transcript"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/transcript"
 )
 
 // stalePauseGrace bounds how far past the rate-limit reset the TUI will still
