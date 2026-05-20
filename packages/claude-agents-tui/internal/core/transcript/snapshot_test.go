@@ -6,7 +6,7 @@ import (
 )
 
 func TestScanMatchesIndividualFunctions(t *testing.T) {
-	path := "../../tests/fixtures/transcripts/basic.jsonl"
+	path := "../../../tests/fixtures/transcripts/basic.jsonl"
 
 	snap, err := Scan(path)
 	if err != nil {

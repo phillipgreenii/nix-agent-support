@@ -3,7 +3,7 @@ package transcript
 import "testing"
 
 func TestOpenSubagentsFromFixture(t *testing.T) {
-	n, err := OpenSubagents("../../tests/fixtures/transcripts/basic.jsonl")
+	n, err := OpenSubagents("../../../tests/fixtures/transcripts/basic.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}

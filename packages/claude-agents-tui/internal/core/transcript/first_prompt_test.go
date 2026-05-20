@@ -9,7 +9,7 @@ import (
 func writeTestFile(path, body string) error { return os.WriteFile(path, []byte(body), 0o600) }
 
 func TestFirstPromptFromFixture(t *testing.T) {
-	got, err := FirstPrompt("../../tests/fixtures/transcripts/basic.jsonl")
+	got, err := FirstPrompt("../../../tests/fixtures/transcripts/basic.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}

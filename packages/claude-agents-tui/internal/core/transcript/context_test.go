@@ -3,7 +3,7 @@ package transcript
 import "testing"
 
 func TestLatestContextFromFixture(t *testing.T) {
-	res, err := LatestContext("../../tests/fixtures/transcripts/basic.jsonl")
+	res, err := LatestContext("../../../tests/fixtures/transcripts/basic.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
