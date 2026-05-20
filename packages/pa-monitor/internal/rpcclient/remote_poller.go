@@ -30,6 +30,15 @@ func NewRemotePoller() (*RemotePoller, error) {
 	}, nil
 }
 
+// NewRemotePollerForSocket pins the poller to an explicit socket path,
+// bypassing XDG-based resolution. Tests use this.
+func NewRemotePollerForSocket(socket string) *RemotePoller {
+	return &RemotePoller{
+		backoff: 1 * time.Second,
+		socket:  socket,
+	}
+}
+
 // Snapshot calls GetState and translates the proto to *aggregate.Tree.
 // On any RPC failure returns the last-known tree (or empty), the
 // derived any-working bool, and the error.
@@ -43,7 +52,13 @@ func (r *RemotePoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, err
 	}
 
 	if r.client == nil {
-		c, err := Dial(ctx)
+		var c *Client
+		var err error
+		if r.socket != "" {
+			c, err = DialPath(ctx, r.socket)
+		} else {
+			c, err = Dial(ctx)
+		}
 		if err != nil {
 			r.scheduleBackoff()
 			return r.lastTree, anyWorking(r.lastTree), err
