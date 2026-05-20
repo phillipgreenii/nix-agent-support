@@ -51,3 +51,57 @@ func TestDiscoverSkipsMalformedFiles(t *testing.T) {
 		t.Errorf("want 1 session (malformed skipped), got %d", len(got))
 	}
 }
+
+func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFile(dir+"/1.json", `{"pid":42,"sessionId":"s1","cwd":"/x"}`); err != nil {
+		t.Fatal(err)
+	}
+	envByPID := map[int]map[string]string{
+		42: {"GC_RIG": "beads", "CMUX_WORKSPACE_ID": "ws1"},
+	}
+	d := &Discoverer{
+		SessionsDir: dir,
+		PidAlive:    func(int) bool { return true },
+		ReadEnv: func(pid int) (map[string]string, error) {
+			return envByPID[pid], nil
+		},
+	}
+	got, err := d.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sessions", len(got))
+	}
+	if got[0].Env["GC_RIG"] != "beads" {
+		t.Errorf("env GC_RIG = %q", got[0].Env["GC_RIG"])
+	}
+	if got[0].Env["CMUX_WORKSPACE_ID"] != "ws1" {
+		t.Errorf("env CMUX_WORKSPACE_ID = %q", got[0].Env["CMUX_WORKSPACE_ID"])
+	}
+}
+
+func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFile(dir+"/1.json", `{"pid":42,"sessionId":"s1"}`); err != nil {
+		t.Fatal(err)
+	}
+	d := &Discoverer{
+		SessionsDir: dir,
+		PidAlive:    func(int) bool { return true },
+		ReadEnv: func(pid int) (map[string]string, error) {
+			return nil, os.ErrPermission
+		},
+	}
+	got, err := d.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sessions", len(got))
+	}
+	if got[0].Env != nil && len(got[0].Env) != 0 {
+		t.Errorf("expected empty env on reader failure, got %+v", got[0].Env)
+	}
+}

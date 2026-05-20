@@ -21,6 +21,9 @@ type rawSession struct {
 type Discoverer struct {
 	SessionsDir string
 	PidAlive    func(int) bool
+	// ReadEnv returns the process environment for pid. Nil falls back to
+	// ReadProcessEnv. Tests inject a deterministic implementation.
+	ReadEnv func(pid int) (map[string]string, error)
 }
 
 // DefaultPidAlive returns true when the pid is alive (kill -0 semantic).
@@ -61,6 +64,12 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		if d.PidAlive != nil && !d.PidAlive(r.PID) {
 			continue
 		}
+		readEnv := d.ReadEnv
+		if readEnv == nil {
+			readEnv = ReadProcessEnv
+		}
+		env, _ := readEnv(r.PID) // best-effort; empty map on failure
+
 		out = append(out, &Session{
 			PID:        r.PID,
 			SessionID:  r.SessionID,
@@ -69,6 +78,7 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 			Entrypoint: r.Entrypoint,
 			Name:       r.Name,
 			StartedAt:  time.UnixMilli(r.StartedAt),
+			Env:        env,
 		})
 	}
 	return out, nil

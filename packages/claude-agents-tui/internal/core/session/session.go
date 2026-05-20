@@ -37,6 +37,13 @@ type Session struct {
 	TerminalHost    string // populated by poller: "tmux","ghostty","vscode","unknown"
 	TranscriptMTime time.Time
 	Status          Status
+
+	// Env is the process environment of the agent process, populated by the
+	// poller via per-OS readers. Empty when the env could not be read (dead
+	// pid, permission denied, unsupported OS). Detectors must tolerate
+	// nil/empty maps. Static for the lifetime of a session — read once,
+	// reused.
+	Env map[string]string
 }
 
 // Label returns the display label. If forceID is true, returns the full SessionID.
