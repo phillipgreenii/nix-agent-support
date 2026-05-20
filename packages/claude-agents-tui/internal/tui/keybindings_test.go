@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 )
 
 func TestBindingsAllDocumented(t *testing.T) {

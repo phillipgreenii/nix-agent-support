@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 )
 
 // LastVisibleIdx returns the index of the last row from rows[offset:] that

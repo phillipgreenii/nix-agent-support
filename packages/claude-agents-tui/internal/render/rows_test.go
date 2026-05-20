@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
 )
