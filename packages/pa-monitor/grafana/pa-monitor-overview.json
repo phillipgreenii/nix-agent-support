@@ -1,0 +1,141 @@
+{
+  "title": "pa-monitor overview",
+  "uid": "pa-monitor-overview",
+  "tags": ["pa-monitor", "claude-agents"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "scope",
+        "label": "scope",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(pa_monitor_sessions_count, workspace_scope)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "value": "$__all", "text": "All" }
+      },
+      {
+        "name": "plan_tier",
+        "label": "plan_tier",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(pa_monitor_sessions_count, plan_tier)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "value": "$__all", "text": "All" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sessions by state",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (state) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+      }
+    },
+    {
+      "id": 2,
+      "title": "5h block usage vs cap",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "pa_monitor_block_cost_usd{plan_tier=~\"$plan_tier\"}",
+          "legendFormat": "block.id={{block_id}} ({{plan_tier}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "id": 3,
+      "title": "Weekly usage vs cap",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "pa_monitor_week_cost_usd{plan_tier=~\"$plan_tier\"}",
+          "legendFormat": "week.id={{week_id}} ({{plan_tier}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "id": 4,
+      "title": "Block limit hits (1d)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 7, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(increase(pa_monitor_block_usage_limit_hits_total[1d]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Week limit hits (7d)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 16, "y": 7, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(increase(pa_monitor_week_usage_limit_hits_total[7d]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Caffeinate active",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "pa_monitor_caffeinate_active",
+          "legendFormat": "active",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(pa_monitor_caffeinate_rounds_total[5m]))",
+          "legendFormat": "rounds/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Nudges sent (split by post_window)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum by (post_window) (increase(pa_monitor_signal_sends_total[5m]))",
+          "legendFormat": "post_window={{post_window}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

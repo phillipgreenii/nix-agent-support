@@ -53,5 +53,14 @@ in
         EnvironmentVariables = emitterEnv;
       };
     };
+
+    # Register the generic dashboard with the workspace observability
+    # provider when present. Safe to assign even when observability is
+    # disabled — the provider list is consumed by services.grafana when
+    # phillipgreenii.observability.enable is true; ignored otherwise.
+    phillipgreenii.observability.dashboardProviders.pa-monitor = lib.mkIf (obs != null) {
+      folder = "Claude Agents";
+      dashboards = [ "${cfg.package.src}/grafana/pa-monitor-overview.json" ];
+    };
   };
 }
