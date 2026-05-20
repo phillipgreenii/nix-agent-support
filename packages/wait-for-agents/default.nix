@@ -1,12 +1,12 @@
 {
   pkgs,
   bashBuilders,
-  claude-agents-tui,
+  pa-monitor,
 }:
 let
   wait-for-agents-to-finish = pkgs.callPackage ./wait-for-agents-to-finish {
     inherit (bashBuilders) mkBashScript;
-    inherit pkgs claude-agents-tui;
+    inherit pkgs pa-monitor;
   };
 in
 {

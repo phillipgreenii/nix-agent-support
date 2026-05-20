@@ -61,7 +61,7 @@
       ...
     }:
     let
-      # Injects ccusage from llm-agents into pkgs so claude-agents-tui can callPackage it.
+      # Injects ccusage from llm-agents into pkgs so pa-monitor can callPackage it.
       llmAgentsCcusageOverlay = final: _prev: {
         inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
       };
@@ -91,7 +91,7 @@
           };
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
-          claude-agents-tui = final.callPackage ./packages/claude-agents-tui { };
+          pa-monitor = final.callPackage ./packages/pa-monitor { };
           gh-prreview = final.callPackage ./packages/gh-prreview { inherit gitHash; };
           claude-activity =
             let
@@ -124,7 +124,7 @@
               result = import ./packages/wait-for-agents {
                 pkgs = final;
                 inherit bashBuilders;
-                inherit (final) claude-agents-tui;
+                inherit (final) pa-monitor;
               };
             in
             final.symlinkJoin {

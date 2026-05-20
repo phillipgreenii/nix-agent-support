@@ -1,7 +1,7 @@
 {
   mkBashScript,
   pkgs,
-  claude-agents-tui,
+  pa-monitor,
 }:
 mkBashScript {
   name = "wait-for-agents-to-finish";
@@ -9,10 +9,10 @@ mkBashScript {
   description = "Wait for AI agents to finish working";
   runtimeDeps = [
     pkgs.coreutils
-    claude-agents-tui
+    pa-monitor
   ];
   testDeps = [
     pkgs.coreutils
-    claude-agents-tui
+    pa-monitor
   ];
 }

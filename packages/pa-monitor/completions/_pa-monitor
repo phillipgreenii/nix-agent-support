@@ -1,0 +1,25 @@
+#compdef pa-monitor
+_pa_monitor() {
+  local -a subcmds
+  subcmds=(
+    'daemon:run the long-running daemon process'
+    'tui:interactive TUI'
+    'status:one-shot dump of daemon state'
+    'caffeinate:toggle the caffeinate manager (on|off|toggle)'
+    'nudge:send a nudge to one or more sessions'
+    'info:print session or path details'
+    'agents-busy-check:exit 0 iff any agent is busy'
+    'wait-until-agents-finished:block until all agents idle'
+    'config:show loaded config'
+    'cmux-bridge:run inside a cmux pane to drive the sidebar'
+  )
+  if (( CURRENT == 2 )); then
+    _describe 'subcommand' subcmds
+    return
+  fi
+  case $words[2] in
+    caffeinate) _values 'action' on off toggle ;;
+    config)     _values 'action' show ;;
+  esac
+}
+_pa_monitor "$@"

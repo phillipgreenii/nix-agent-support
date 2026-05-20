@@ -20,7 +20,7 @@
     ./programs/agent-activity
     ./programs/bash-lsp
     ./programs/claude-activity
-    ./programs/claude-agents-tui
+    ./programs/pa-monitor
     ./programs/claude-extended-tool-approver
     ./programs/gh-prreview
     ./programs/git-tools
