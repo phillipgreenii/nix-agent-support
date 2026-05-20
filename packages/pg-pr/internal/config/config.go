@@ -1,35 +1,217 @@
-// Package config loads pg-pr configuration from $XDG_CONFIG_HOME/pg-pr/config.yaml
-// (or $PG_PR_CONFIG if set). Phase 0 stub; YAML parsing lands in Phase 1.
+// Package config loads pg-pr configuration from a YAML file.
+//
+// Resolution order (highest priority first):
+//
+//  1. $PG_PR_CONFIG (explicit override; missing file is an error).
+//  2. $XDG_CONFIG_HOME/pg-pr/config.yaml.
+//  3. ~/.config/pg-pr/config.yaml.
+//
+// Phase 1 only loads the fields the sync engine needs: self_login,
+// worktree_root, and a list of repos with team-member / watch-label
+// configuration. Additional fields (issues, cicd, pr_body_template,
+// ci_only_attempts_threshold) are parsed when present but are not yet
+// consumed.
 package config
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-var ErrNotImplemented = errors.New("config: not implemented in this phase")
+// ErrNoConfig is returned by Load when no config file is found.
+var ErrNoConfig = errors.New("config: no config file found")
 
 // Config is the parsed pg-pr configuration.
 type Config struct {
-	SelfLogin               string
-	WorktreeRoot            string
-	Repos                   []RepoConfig
-	DaemonInterval          string
-	CIOnlyAttemptsThreshold int
+	// Path is the absolute path the config was loaded from. Populated by Load.
+	Path string `yaml:"-"`
+
+	SelfLogin               string       `yaml:"self_login"`
+	WorktreeRoot            string       `yaml:"worktree_root"`
+	Repos                   []RepoConfig `yaml:"repos"`
+	DaemonInterval          string       `yaml:"daemon_interval,omitempty"`
+	CIOnlyAttemptsThreshold int          `yaml:"ci_only_attempts_threshold,omitempty"`
 }
 
 // RepoConfig is a single repo's configuration.
 type RepoConfig struct {
-	Path           string
-	Remote         string
-	VCS            string
-	CICD           []string
-	Issues         string
-	Org            string
-	TeamMembers    []string
-	WatchLabels    []string
-	PRBodyTemplate string
+	Path           string   `yaml:"path"`
+	Remote         string   `yaml:"remote"`
+	VCS            string   `yaml:"vcs"`
+	CICD           []string `yaml:"cicd,omitempty"`
+	Issues         string   `yaml:"issues,omitempty"`
+	Org            string   `yaml:"org,omitempty"`
+	TeamMembers    []string `yaml:"team_members,omitempty"`
+	WatchLabels    []string `yaml:"watch_labels,omitempty"`
+	PRBodyTemplate string   `yaml:"pr_body_template,omitempty"`
 }
 
-// Load reads and parses the config file. Phase 0 stub.
-func Load(_ context.Context) (*Config, error) { return nil, ErrNotImplemented }
+// Load reads and parses the config file using the resolution order described
+// in the package doc. If no config file is found and no explicit
+// $PG_PR_CONFIG override is set, Load returns ErrNoConfig wrapped with a
+// helpful path string.
+func Load(_ context.Context) (*Config, error) {
+	return LoadFromEnv(envProcess{})
+}
+
+// LoadFile loads from an explicit path. Useful in tests; production code
+// should use Load.
+func LoadFile(path string) (*Config, error) {
+	if path == "" {
+		return nil, errors.New("config: empty path")
+	}
+	expanded, err := expandHome(path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", expanded, err)
+	}
+	cfg, err := parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", expanded, err)
+	}
+	cfg.Path = expanded
+	if err := finalize(cfg); err != nil {
+		return nil, fmt.Errorf("config: validate %s: %w", expanded, err)
+	}
+	return cfg, nil
+}
+
+// envSource is the minimal interface Load needs to look up env + home dir.
+// Exposed so tests can inject a fixed environment without monkey-patching.
+type envSource interface {
+	Getenv(string) string
+	UserHomeDir() (string, error)
+}
+
+type envProcess struct{}
+
+func (envProcess) Getenv(k string) string       { return os.Getenv(k) }
+func (envProcess) UserHomeDir() (string, error) { return os.UserHomeDir() }
+
+// LoadFromEnv is the env-injectable variant of Load. Public for tests.
+func LoadFromEnv(env envSource) (*Config, error) {
+	if explicit := env.Getenv("PG_PR_CONFIG"); explicit != "" {
+		cfg, err := LoadFile(explicit)
+		if err != nil {
+			// If PG_PR_CONFIG is set but missing, give a focused message.
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("config: $PG_PR_CONFIG=%s does not exist", explicit)
+			}
+			return nil, err
+		}
+		return cfg, nil
+	}
+
+	candidates := defaultCandidates(env)
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return LoadFile(p)
+		}
+	}
+
+	return nil, fmt.Errorf("%w: looked in %s; create one or set $PG_PR_CONFIG",
+		ErrNoConfig, strings.Join(candidates, ", "))
+}
+
+// defaultCandidates returns the list of paths Load checks in order.
+func defaultCandidates(env envSource) []string {
+	var out []string
+	if xdg := env.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		out = append(out, filepath.Join(xdg, "pg-pr", "config.yaml"))
+	}
+	if home, err := env.UserHomeDir(); err == nil && home != "" {
+		out = append(out, filepath.Join(home, ".config", "pg-pr", "config.yaml"))
+	}
+	return out
+}
+
+// parse decodes the YAML bytes into a Config without finalization.
+func parse(data []byte) (*Config, error) {
+	var cfg Config
+	dec := yaml.NewDecoder(strings.NewReader(string(data)))
+	dec.KnownFields(false)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// finalize validates required fields and expands ~ in path-like fields.
+func finalize(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("nil config")
+	}
+	if strings.TrimSpace(cfg.SelfLogin) == "" {
+		return errors.New("self_login is required")
+	}
+	if strings.TrimSpace(cfg.WorktreeRoot) == "" {
+		return errors.New("worktree_root is required")
+	}
+	wr, err := expandHome(cfg.WorktreeRoot)
+	if err != nil {
+		return fmt.Errorf("worktree_root: %w", err)
+	}
+	cfg.WorktreeRoot = wr
+
+	if len(cfg.Repos) == 0 {
+		return errors.New("repos: at least one repo is required")
+	}
+	seen := make(map[string]struct{})
+	for i := range cfg.Repos {
+		r := &cfg.Repos[i]
+		if strings.TrimSpace(r.Remote) == "" {
+			return fmt.Errorf("repos[%d]: remote is required", i)
+		}
+		if !strings.Contains(r.Remote, "/") {
+			return fmt.Errorf("repos[%d]: remote %q is not in owner/name form", i, r.Remote)
+		}
+		if _, dup := seen[r.Remote]; dup {
+			return fmt.Errorf("repos[%d]: duplicate remote %q", i, r.Remote)
+		}
+		seen[r.Remote] = struct{}{}
+		if strings.TrimSpace(r.VCS) == "" {
+			r.VCS = "github"
+		}
+		if r.Path != "" {
+			p, err := expandHome(r.Path)
+			if err != nil {
+				return fmt.Errorf("repos[%d].path: %w", i, err)
+			}
+			r.Path = p
+		}
+	}
+	return nil
+}
+
+// expandHome expands a leading `~` or `~/` to the current user's home dir.
+// Pure-string paths (no `~`) pass through unchanged.
+func expandHome(p string) (string, error) {
+	if p == "" {
+		return "", nil
+	}
+	if p == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand ~: %w", err)
+		}
+		return home, nil
+	}
+	if strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand ~: %w", err)
+		}
+		return filepath.Join(home, p[2:]), nil
+	}
+	return p, nil
+}
