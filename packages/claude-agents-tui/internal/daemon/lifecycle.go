@@ -10,6 +10,11 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/block"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/poller"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/week"
 	"github.com/phillipgreenii/claude-agents-tui/internal/otel"
 )
 
@@ -102,12 +107,24 @@ func (s *socketListener) Close() error {
 // is optional. Emitter, when non-nil, is shut down on Run return so any
 // batched metrics/logs flush before the process exits.
 //
-// Tick controls a placeholder poll cadence; the real poller + tracker
-// integration lands in Plan 3 alongside the client refactor.
+// When Poller is non-nil, each tick calls Snapshot, folds the result
+// into the shared state visible to gRPC handlers, and feeds the block
+// and week trackers (if provided).
 type RunOptions struct {
-	Paths   Paths
-	Emitter *otel.Emitter
-	Tick    time.Duration
+	Paths        Paths
+	Emitter      *otel.Emitter
+	Tick         time.Duration
+	Poller       *poller.Poller
+	BlockTracker *block.Tracker
+	WeekTracker  *week.Tracker
+	// WeeklyFn fetches the current week entry. Nil → never polled.
+	WeeklyFn func(ctx context.Context) (*ccusage.WeeklyEntry, error)
+	// PlanTier is forwarded as the `plan_tier` attribute on emitted
+	// limit-hit events/counters.
+	PlanTier string
+	// WeeklyEvery controls how often WeeklyFn is invoked relative to
+	// the main tick. 0 means once per tick.
+	WeeklyEvery int
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -125,10 +142,30 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 	defer lis.Close()
 
-	_, stop := serve(lis)
+	state := newSharedState()
+	_, stop := serve(lis, state)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())
+
+	// Wire tracker callbacks to emitter counters/events.
+	if opts.BlockTracker != nil && opts.Emitter != nil {
+		opts.BlockTracker.OnLimitHit = func() {
+			opts.Emitter.RecordBlockLimitHit(map[string]string{
+				"plan_tier": opts.PlanTier,
+				"block.id":  opts.BlockTracker.ID(),
+			})
+		}
+	}
+	if opts.WeekTracker != nil && opts.Emitter != nil {
+		opts.WeekTracker.OnLimitHit = func() {
+			opts.Emitter.RecordWeekLimitHit(map[string]string{
+				"plan_tier": opts.PlanTier,
+				"week.id":   opts.WeekTracker.ID(),
+				"source":    "computed",
+			})
+		}
+	}
 
 	tick := opts.Tick
 	if tick <= 0 {
@@ -137,17 +174,51 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	t := time.NewTicker(tick)
 	defer t.Stop()
 
+	tickCount := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			// Plan 3 plumbs the poller + trackers + label cache through
-			// here. For Plan 2 the tick just keeps the loop alive so
-			// emitter callbacks (when wired in Plan 3) have something
-			// to observe.
+			tickCount++
+			if opts.Poller == nil {
+				continue
+			}
+			tree, _, err := opts.Poller.Snapshot(ctx)
+			if err != nil {
+				continue
+			}
+			fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
+			if fetchWeek {
+				if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
+					tree.ActiveWeek = w
+				}
+			}
+			if opts.BlockTracker != nil {
+				opts.BlockTracker.Update(tree.ActiveBlock)
+			}
+			if opts.WeekTracker != nil {
+				opts.WeekTracker.Update(tree.ActiveWeek)
+			}
+			updateGauges(opts.Emitter, tree, opts.PlanTier)
+			state.setTree(tree)
 		}
 	}
+}
+
+// updateGauges pushes per-state session counts into the emitter gauges.
+// nil-safe on emitter.
+func updateGauges(e *otel.Emitter, tree *aggregate.Tree, planTier string) {
+	if e == nil || tree == nil {
+		return
+	}
+	byState := map[string]int{}
+	for _, d := range tree.Dirs {
+		byState["working"] += d.WorkingN
+		byState["idle"] += d.IdleN
+		byState["dormant"] += d.DormantN
+	}
+	e.RecordSessionsCount(byState, map[string]string{"plan_tier": planTier})
 }
 
 // Run is a thin compat wrapper preserving the original signature used by
