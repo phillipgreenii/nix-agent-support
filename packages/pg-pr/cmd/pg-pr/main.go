@@ -8,6 +8,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
 
 // Version is set at build time via -ldflags.
@@ -35,6 +37,18 @@ func init() {
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// Telemetry. Init never returns an error in practice — missing OTLP
+	// endpoint installs a noop provider, bad endpoint logs a one-line
+	// stderr warning and continues. The shutdown func flushes any
+	// in-flight spans before the process exits.
+	shutdown, _ := telemetry.Init(ctx, "pg-pr", Version)
+	defer func() {
+		shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+		defer cancelShutdown()
+		_ = shutdown(shutdownCtx)
+	}()
+
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

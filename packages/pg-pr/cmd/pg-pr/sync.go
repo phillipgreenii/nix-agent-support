@@ -17,12 +17,13 @@ import (
 
 // syncFlags holds the parsed CLI flags for `pg-pr sync`.
 type syncFlags struct {
-	jsonOutput bool
-	pr         int
-	repo       string
-	daemon     bool
-	interval   string
-	logJSON    bool
+	jsonOutput  bool
+	pr          int
+	repo        string
+	daemon      bool
+	interval    string
+	logJSON     bool
+	metricsAddr string
 }
 
 var syFlags syncFlags
@@ -74,8 +75,9 @@ configured repo.`,
 				logger = sync.NewJSONLogger()
 			}
 			return engine.Daemon(ctx, sync.DaemonOpts{
-				Interval: interval,
-				Logger:   logger,
+				Interval:    interval,
+				Logger:      logger,
+				MetricsAddr: syFlags.metricsAddr,
 			})
 		}
 
@@ -147,5 +149,7 @@ func init() {
 		"Daemon poll interval (effective only with --daemon)")
 	syncCmd.Flags().BoolVar(&syFlags.logJSON, "log-json", false,
 		"Emit structured JSON logs to stderr (effective only with --daemon)")
+	syncCmd.Flags().StringVar(&syFlags.metricsAddr, "metrics-addr", sync.DefaultMetricsAddr,
+		"Daemon Prometheus scrape address (effective only with --daemon; empty disables)")
 	rootCmd.AddCommand(syncCmd)
 }
