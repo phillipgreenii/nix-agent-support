@@ -40,6 +40,14 @@ type Emitter struct {
 	logProvider     *sdklog.LoggerProvider
 	logger          otellog.Logger
 
+	// Counters — sync (not observable). Nil when SDK uninitialised.
+	blockLimitHits    metric.Int64Counter
+	weekLimitHits     metric.Int64Counter
+	caffeinateRounds  metric.Int64Counter
+	caffeinateGrace   metric.Int64Counter
+	contextLimitHits  metric.Int64Counter
+	nudgesSent        metric.Int64Counter
+
 	mu                  sync.Mutex
 	sessionsObs         []stateObs
 	caffeinateActiveVal int64
@@ -101,6 +109,27 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+
+	// Synchronous counters for transition events.
+	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
+		return err
+	}
+	if e.weekLimitHits, err = meter.Int64Counter("pa_monitor.week.usage.limit_hits_total"); err != nil {
+		return err
+	}
+	if e.caffeinateRounds, err = meter.Int64Counter("pa_monitor.caffeinate.rounds_total"); err != nil {
+		return err
+	}
+	if e.caffeinateGrace, err = meter.Int64Counter("pa_monitor.caffeinate.grace_expirations_total"); err != nil {
+		return err
+	}
+	if e.contextLimitHits, err = meter.Int64Counter("pa_monitor.session.context.limit_hits_total"); err != nil {
+		return err
+	}
+	if e.nudgesSent, err = meter.Int64Counter("pa_monitor.signal.sends_total"); err != nil {
+		return err
+	}
+
 	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
 		e.mu.Lock()
 		obs := e.sessionsObs
@@ -164,6 +193,78 @@ func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	e.caffeinateActiveVal = v
 	e.caffeinateAttrs = kv
 	e.mu.Unlock()
+}
+
+// RecordBlockLimitHit increments pa_monitor.block.usage.limit_hits_total
+// and emits the matching log event. nil-safe.
+func (e *Emitter) RecordBlockLimitHit(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.blockLimitHits != nil {
+		e.blockLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("block.usage.limit_hit", attrs)
+}
+
+// RecordWeekLimitHit increments pa_monitor.week.usage.limit_hits_total
+// and emits the matching log event. nil-safe.
+func (e *Emitter) RecordWeekLimitHit(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.weekLimitHits != nil {
+		e.weekLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("week.usage.limit_hit", attrs)
+}
+
+// RecordCaffeinateRound increments pa_monitor.caffeinate.rounds_total
+// and emits caffeinate.start. nil-safe.
+func (e *Emitter) RecordCaffeinateRound(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.caffeinateRounds != nil {
+		e.caffeinateRounds.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("caffeinate.start", attrs)
+}
+
+// RecordCaffeinateGraceExpired increments the grace-expiration counter
+// and emits the matching log event. nil-safe.
+func (e *Emitter) RecordCaffeinateGraceExpired(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.caffeinateGrace != nil {
+		e.caffeinateGrace.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("caffeinate.grace_expired", attrs)
+}
+
+// RecordContextLimitHit increments pa_monitor.session.context.limit_hits_total
+// and emits the matching log event. nil-safe.
+func (e *Emitter) RecordContextLimitHit(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.contextLimitHits != nil {
+		e.contextLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("session.context.limit_hit", attrs)
+}
+
+// RecordNudgeSent increments pa_monitor.signal.sends_total and emits
+// the nudge.sent log event. nil-safe.
+func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.nudgesSent != nil {
+		e.nudgesSent.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("nudge.sent", attrs)
 }
 
 // LogEvent emits one log record at info level with the given attributes
