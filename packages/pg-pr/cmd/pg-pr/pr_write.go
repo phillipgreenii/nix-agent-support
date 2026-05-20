@@ -142,9 +142,8 @@ On success, a corresponding merge-request bead is created via
 beads.EnsureMergeRequest so subsequent pg-pr sync runs treat the PR as
 known.
 
-NOTE: --reviewers and --labels are accepted but only used to populate
-the merge-request bead metadata in this phase; upstream PR-level
-reviewer-assignment and label-application land in a later phase.`,
+--reviewers and --labels are pushed directly to the upstream PR via
+gh's --reviewer/--label flags (one repeated flag per entry).`,
 	Args: cobra.NoArgs,
 	RunE: runPRCreate,
 }
@@ -179,8 +178,10 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 	base = strings.TrimPrefix(base, "origin/")
 
 	draft := !prWF.noDraft
+	reviewers := splitCSV(prWF.reviewers)
+	labels := splitCSV(prWF.labels)
 	provider := vcsProviderFor(repo)
-	pr, err := provider.CreatePR(ctx, repo, draft, prWF.title, body, headBranch, base)
+	pr, err := provider.CreatePR(ctx, repo, draft, prWF.title, body, headBranch, base, reviewers, labels)
 	if err != nil {
 		return err
 	}
@@ -496,8 +497,8 @@ func init() {
 	prCreateCmd.Flags().StringVar(&prWF.title, "title", "", "PR title (required)")
 	prCreateCmd.Flags().StringVar(&prWF.head, "head", "", "Head branch (defaults to current branch)")
 	prCreateCmd.Flags().StringVar(&prWF.base, "base", "origin/main", "Base branch")
-	prCreateCmd.Flags().StringVar(&prWF.reviewers, "reviewers", "", "Comma-separated list of reviewers (metadata-only this phase)")
-	prCreateCmd.Flags().StringVar(&prWF.labels, "labels", "", "Comma-separated list of labels (metadata-only this phase)")
+	prCreateCmd.Flags().StringVar(&prWF.reviewers, "reviewers", "", "Comma-separated list of reviewers to assign on the GitHub PR")
+	prCreateCmd.Flags().StringVar(&prWF.labels, "labels", "", "Comma-separated list of labels to apply on the GitHub PR")
 	prCreateCmd.Flags().BoolVar(&prWF.noDraft, "no-draft", false, "Open the PR ready-for-review instead of as a draft")
 	addRepoFlag(prCreateCmd)
 	addBodyFlags(prCreateCmd)

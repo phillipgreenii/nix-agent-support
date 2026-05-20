@@ -368,7 +368,7 @@ func TestCreatePR_PostsTitleBodyHeadBaseAndDraft(t *testing.T) {
 	gh.responses["pr view"] = []byte(samplePRView)
 	p := NewWithRunner(gh)
 
-	pr, err := p.CreatePR(context.Background(), "foo/bar", true, "feat: x", "the body", "feat/x", "main")
+	pr, err := p.CreatePR(context.Background(), "foo/bar", true, "feat: x", "the body", "feat/x", "main", nil, nil)
 	if err != nil {
 		t.Fatalf("CreatePR: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestCreatePR_WithoutDraft(t *testing.T) {
 	gh.responses["pr view"] = []byte(samplePRView)
 	p := NewWithRunner(gh)
 
-	if _, err := p.CreatePR(context.Background(), "foo/bar", false, "t", "b", "h", "main"); err != nil {
+	if _, err := p.CreatePR(context.Background(), "foo/bar", false, "t", "b", "h", "main", nil, nil); err != nil {
 		t.Fatalf("CreatePR: %v", err)
 	}
 	for _, c := range gh.calls {
@@ -419,19 +419,80 @@ func TestCreatePR_WithoutDraft(t *testing.T) {
 	}
 }
 
+func TestCreatePR_PushesReviewersAndLabels(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/55\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	_, err := p.CreatePR(context.Background(), "foo/bar", true, "t", "b", "feat/x", "main",
+		[]string{"alice", "bob"},
+		[]string{"area/cli", " priority/p2 "})
+	if err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	var createArgs []string
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			createArgs = c
+			break
+		}
+	}
+	if createArgs == nil {
+		t.Fatalf("expected pr create call, got %v", gh.calls)
+	}
+	joined := strings.Join(createArgs, " ")
+	// One --reviewer per entry.
+	if strings.Count(joined, "--reviewer alice") != 1 {
+		t.Errorf("expected --reviewer alice once: %v", createArgs)
+	}
+	if strings.Count(joined, "--reviewer bob") != 1 {
+		t.Errorf("expected --reviewer bob once: %v", createArgs)
+	}
+	if strings.Count(joined, "--label area/cli") != 1 {
+		t.Errorf("expected --label area/cli: %v", createArgs)
+	}
+	if strings.Count(joined, "--label priority/p2") != 1 {
+		t.Errorf("expected --label priority/p2 (trimmed): %v", createArgs)
+	}
+}
+
+func TestCreatePR_OmitsReviewerAndLabelFlagsWhenEmpty(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/77\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	if _, err := p.CreatePR(context.Background(), "foo/bar", true, "t", "b", "h", "main",
+		nil, nil); err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			joined := strings.Join(c, " ")
+			if strings.Contains(joined, "--reviewer") {
+				t.Fatalf("expected no --reviewer flag when reviewers is empty: %v", c)
+			}
+			if strings.Contains(joined, "--label") {
+				t.Fatalf("expected no --label flag when labels is empty: %v", c)
+			}
+		}
+	}
+}
+
 func TestCreatePR_ValidatesInputs(t *testing.T) {
 	p := NewWithRunner(newFakeGH())
 	ctx := context.Background()
-	if _, err := p.CreatePR(ctx, "", true, "t", "b", "h", "m"); err == nil {
+	if _, err := p.CreatePR(ctx, "", true, "t", "b", "h", "m", nil, nil); err == nil {
 		t.Fatalf("expected error for empty repo")
 	}
-	if _, err := p.CreatePR(ctx, "a/b", true, "", "b", "h", "m"); err == nil {
+	if _, err := p.CreatePR(ctx, "a/b", true, "", "b", "h", "m", nil, nil); err == nil {
 		t.Fatalf("expected error for empty title")
 	}
-	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "", "m"); err == nil {
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "", "m", nil, nil); err == nil {
 		t.Fatalf("expected error for empty branch")
 	}
-	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "h", ""); err == nil {
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "h", "", nil, nil); err == nil {
 		t.Fatalf("expected error for empty base")
 	}
 }

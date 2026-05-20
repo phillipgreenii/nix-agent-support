@@ -18,7 +18,7 @@ type Provider interface {
 	GetPR(ctx context.Context, repo string, number int) (*api.PR, error)
 	ListMyPRs(ctx context.Context, repo string) ([]api.PR, error)
 	ListTeamPRs(ctx context.Context, repo string, members []string) ([]api.PR, error)
-	CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string) (*api.PR, error)
+	CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string, reviewers, labels []string) (*api.PR, error)
 	UpdatePR(ctx context.Context, repo string, number int, body string) error
 	SetDraft(ctx context.Context, repo string, number int, draft bool) error
 	SetAutomerge(ctx context.Context, repo string, number int, enabled bool) error

@@ -218,8 +218,10 @@ func validateRepo(repo string) error {
 
 // CreatePR opens a new pull request via `gh pr create`. The body is fed on
 // stdin (via `--body-file -`) so multi-line bodies work without quoting
-// headaches. Returns the freshly created PR shape.
-func (p *Provider) CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string) (*api.PR, error) {
+// headaches. Returns the freshly created PR shape. reviewers and labels
+// are pushed via gh's `--reviewer` and `--label` flags (gh accepts each
+// repeated for multiple values).
+func (p *Provider) CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string, reviewers, labels []string) (*api.PR, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, err
 	}
@@ -242,6 +244,20 @@ func (p *Provider) CreatePR(ctx context.Context, repo string, draft bool, title,
 	}
 	if draft {
 		args = append(args, "--draft")
+	}
+	for _, r := range reviewers {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		args = append(args, "--reviewer", r)
+	}
+	for _, l := range labels {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		args = append(args, "--label", l)
 	}
 	out, err := p.gh.RunStdin(ctx, []byte(body), args...)
 	if err != nil {

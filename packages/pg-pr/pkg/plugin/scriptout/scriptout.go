@@ -113,12 +113,14 @@ type PostReviewArgs struct {
 
 // CreatePRArgs is the args shape for create_pr.
 type CreatePRArgs struct {
-	Repo   string `json:"repo"`
-	Draft  bool   `json:"draft"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Branch string `json:"branch"`
-	Base   string `json:"base"`
+	Repo      string   `json:"repo"`
+	Draft     bool     `json:"draft"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Branch    string   `json:"branch"`
+	Base      string   `json:"base"`
+	Reviewers []string `json:"reviewers,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
 }
 
 // dispatchEnv bundles stdin/stdout/stderr so tests can swap them out.
@@ -228,7 +230,7 @@ func dispatchVCS(ctx context.Context, p vcs.Provider, req *Request) (any, error)
 		if err := decodeArgs(req, &a); err != nil {
 			return nil, err
 		}
-		return p.CreatePR(ctx, a.Repo, a.Draft, a.Title, a.Body, a.Branch, a.Base)
+		return p.CreatePR(ctx, a.Repo, a.Draft, a.Title, a.Body, a.Branch, a.Base, a.Reviewers, a.Labels)
 	case OpUpdatePR:
 		var a struct {
 			Repo   string `json:"repo"`

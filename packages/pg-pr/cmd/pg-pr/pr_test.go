@@ -27,7 +27,7 @@ func (f *fakeVCS) GetPR(_ context.Context, repo string, n int) (*api.PR, error) 
 }
 func (f *fakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error)             { return nil, nil }
 func (f *fakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) { return nil, nil }
-func (f *fakeVCS) CreatePR(context.Context, string, bool, string, string, string, string) (*api.PR, error) {
+func (f *fakeVCS) CreatePR(context.Context, string, bool, string, string, string, string, []string, []string) (*api.PR, error) {
 	return nil, nil
 }
 func (f *fakeVCS) UpdatePR(context.Context, string, int, string) error   { return nil }

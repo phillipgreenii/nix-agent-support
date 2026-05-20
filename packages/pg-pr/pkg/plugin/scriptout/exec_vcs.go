@@ -66,8 +66,17 @@ func (e *execVCSProvider) ListTeamPRs(ctx context.Context, repo string, members 
 	return out, nil
 }
 
-func (e *execVCSProvider) CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string) (*api.PR, error) {
-	args := CreatePRArgs{Repo: repo, Draft: draft, Title: title, Body: body, Branch: branch, Base: base}
+func (e *execVCSProvider) CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string, reviewers, labels []string) (*api.PR, error) {
+	args := CreatePRArgs{
+		Repo:      repo,
+		Draft:     draft,
+		Title:     title,
+		Body:      body,
+		Branch:    branch,
+		Base:      base,
+		Reviewers: reviewers,
+		Labels:    labels,
+	}
 	raw, err := invokeWithArgs(ctx, e.binary, OpCreatePR, args)
 	if err != nil {
 		return nil, err

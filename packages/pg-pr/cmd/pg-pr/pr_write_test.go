@@ -33,6 +33,8 @@ type writeFakeVCS struct {
 type writeCreateCall struct {
 	repo, title, body, head, base string
 	draft                         bool
+	reviewers                     []string
+	labels                        []string
 }
 type writeUpdateCall struct {
 	repo string
@@ -61,8 +63,11 @@ func (f *writeFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { re
 func (f *writeFakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
 	return nil, nil
 }
-func (f *writeFakeVCS) CreatePR(_ context.Context, repo string, draft bool, title, body, head, base string) (*api.PR, error) {
-	f.createCalls = append(f.createCalls, writeCreateCall{repo, title, body, head, base, draft})
+func (f *writeFakeVCS) CreatePR(_ context.Context, repo string, draft bool, title, body, head, base string, reviewers, labels []string) (*api.PR, error) {
+	f.createCalls = append(f.createCalls, writeCreateCall{
+		repo: repo, title: title, body: body, head: head, base: base, draft: draft,
+		reviewers: reviewers, labels: labels,
+	})
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
@@ -221,6 +226,67 @@ func TestPRCreate_NoDraftFlag(t *testing.T) {
 	}
 	if len(fv.createCalls) != 1 || fv.createCalls[0].draft {
 		t.Fatalf("expected draft=false with --no-draft; got %+v", fv.createCalls)
+	}
+}
+
+func TestPRCreate_ReviewersAndLabels_PushedToVCS(t *testing.T) {
+	resetPRWriteFlags()
+	fv, fb := swapFakes(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "feat/x",
+		"--body", "b",
+		"--reviewers", "alice, bob",
+		"--labels", "ci, area/cli",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 {
+		t.Fatalf("createCalls: %+v", fv.createCalls)
+	}
+	got := fv.createCalls[0]
+	if len(got.reviewers) != 2 || got.reviewers[0] != "alice" || got.reviewers[1] != "bob" {
+		t.Errorf("reviewers: got %v want [alice bob]", got.reviewers)
+	}
+	if len(got.labels) != 2 || got.labels[0] != "ci" || got.labels[1] != "area/cli" {
+		t.Errorf("labels: got %v want [ci area/cli]", got.labels)
+	}
+	if len(fb.ensureCalls) != 1 {
+		t.Errorf("expected merge-request bead to be recorded")
+	}
+}
+
+func TestPRCreate_NoReviewersOrLabels_EmptySlices(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--body", "b",
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 {
+		t.Fatalf("createCalls: %+v", fv.createCalls)
+	}
+	got := fv.createCalls[0]
+	if len(got.reviewers) != 0 || len(got.labels) != 0 {
+		t.Errorf("reviewers/labels should be empty: %+v", got)
 	}
 }
 

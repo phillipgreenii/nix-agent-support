@@ -33,7 +33,7 @@ func (f *reviewFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { r
 func (f *reviewFakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
 	return nil, nil
 }
-func (f *reviewFakeVCS) CreatePR(context.Context, string, bool, string, string, string, string) (*api.PR, error) {
+func (f *reviewFakeVCS) CreatePR(context.Context, string, bool, string, string, string, string, []string, []string) (*api.PR, error) {
 	return nil, nil
 }
 func (f *reviewFakeVCS) UpdatePR(context.Context, string, int, string) error   { return nil }
