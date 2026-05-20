@@ -18,18 +18,22 @@ func New() *Provider { return &Provider{} }
 
 var errStub = errors.New("github vcs: not implemented (Phase 0 stub)")
 
-func (p *Provider) GetPR(context.Context, string, int) (*api.PR, error)              { return nil, errStub }
-func (p *Provider) ListMyPRs(context.Context, string) ([]api.PR, error)              { return nil, errStub }
-func (p *Provider) ListTeamPRs(context.Context, string, []string) ([]api.PR, error)  { return nil, errStub }
+func (p *Provider) GetPR(context.Context, string, int) (*api.PR, error) { return nil, errStub }
+func (p *Provider) ListMyPRs(context.Context, string) ([]api.PR, error) { return nil, errStub }
+func (p *Provider) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
+	return nil, errStub
+}
 func (p *Provider) CreatePR(context.Context, string, bool, string, string, string, string) (*api.PR, error) {
 	return nil, errStub
 }
-func (p *Provider) UpdatePR(context.Context, string, int, string) error              { return errStub }
-func (p *Provider) SetDraft(context.Context, string, int, bool) error                { return errStub }
-func (p *Provider) SetAutomerge(context.Context, string, int, bool) error            { return errStub }
-func (p *Provider) Merge(context.Context, string, int) error                         { return errStub }
-func (p *Provider) Close(context.Context, string, int) error                         { return errStub }
-func (p *Provider) ListComments(context.Context, string, int) ([]api.Comment, error) { return nil, errStub }
+func (p *Provider) UpdatePR(context.Context, string, int, string) error   { return errStub }
+func (p *Provider) SetDraft(context.Context, string, int, bool) error     { return errStub }
+func (p *Provider) SetAutomerge(context.Context, string, int, bool) error { return errStub }
+func (p *Provider) Merge(context.Context, string, int) error              { return errStub }
+func (p *Provider) Close(context.Context, string, int) error              { return errStub }
+func (p *Provider) ListComments(context.Context, string, int) ([]api.Comment, error) {
+	return nil, errStub
+}
 func (p *Provider) AddComment(context.Context, string, int, string) (*api.Comment, error) {
 	return nil, errStub
 }

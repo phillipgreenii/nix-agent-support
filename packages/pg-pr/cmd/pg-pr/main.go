@@ -22,8 +22,9 @@ var rootCmd = &cobra.Command{
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(cmd.OutOrStdout(), "pg-pr %s\n", Version)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "pg-pr %s\n", Version)
+		return err
 	},
 }
 

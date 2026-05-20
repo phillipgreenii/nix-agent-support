@@ -164,6 +164,27 @@
             inherit system;
             src = ./.;
             treefmtWrapper = treefmtEval.config.build.wrapper;
+            extraHooks = {
+              gofmt = {
+                enable = true;
+                files = "^packages/pg-pr/.*\\.go$";
+              };
+              golangci-lint = {
+                enable = true;
+                files = "^packages/pg-pr/.*\\.go$";
+                # Default hook runs `golangci-lint run ./<dir>` from the repo root,
+                # which fails for monorepo modules (no enclosing go.mod). Override
+                # entry to chdir into the pg-pr module first.
+                entry = toString (
+                  pkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
+                    set -e
+                    cd packages/pg-pr
+                    ${pkgs.golangci-lint}/bin/golangci-lint run ./...
+                  ''
+                );
+                pass_filenames = false;
+              };
+            };
           };
         in
         {
