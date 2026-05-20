@@ -24,6 +24,7 @@
     ./programs/claude-extended-tool-approver
     ./programs/gh-prreview
     ./programs/git-tools
+    ./programs/pg-pr
     ./programs/my-code-review-support
     ./programs/wait-for-agents
     ./programs/beads
