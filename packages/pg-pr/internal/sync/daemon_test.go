@@ -5,8 +5,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
 
 // makeDaemonEngine builds an Engine whose Sync is cheap: empty config means
@@ -240,6 +244,83 @@ func TestReplaceCfg_NilIsNoop(t *testing.T) {
 	e.ReplaceCfg(nil)
 	if e.deps.Cfg != pre {
 		t.Fatal("ReplaceCfg(nil) replaced the config")
+	}
+}
+
+func TestDaemon_ServesPrometheusMetrics(t *testing.T) {
+	e := makeDaemonEngine(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Prometheus only emits a series after at least one observation has
+	// been recorded for that label set. Touch each metric so the daemon
+	// scrape produces a complete sample.
+	telemetry.SyncPRDuration.WithLabelValues("test/repo").Observe(0.01)
+	telemetry.SyncErrorsTotal.WithLabelValues("test/repo").Inc()
+
+	listener := make(chan net.Listener, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.Daemon(ctx, DaemonOpts{
+			Interval:    1 * time.Hour, // never tick
+			LockDir:     t.TempDir(),
+			Logger:      discardLogger(),
+			MetricsAddr: "127.0.0.1:0",
+			MetricsListener: func(ln net.Listener) {
+				listener <- ln
+			},
+		})
+	}()
+
+	var ln net.Listener
+	select {
+	case ln = <-listener:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not publish metrics listener within 2s")
+	}
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		t.Fatalf("/metrics status: got %d want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	for _, want := range []string{
+		"pg_pr_sync_pr_duration_seconds",
+		"pg_pr_sync_errors_total",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("/metrics missing %q\nbody:\n%s", want, string(body))
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not exit after cancel")
+	}
+}
+
+func TestDaemon_EmptyMetricsAddrSkipsServer(t *testing.T) {
+	e := makeDaemonEngine(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // exit after first iteration
+
+	err := e.Daemon(ctx, DaemonOpts{
+		Interval:    1 * time.Hour,
+		LockDir:     t.TempDir(),
+		Logger:      discardLogger(),
+		MetricsAddr: "", // disabled
+	})
+	if err != nil {
+		t.Fatalf("Daemon: %v", err)
 	}
 }
 

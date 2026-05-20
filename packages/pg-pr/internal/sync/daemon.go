@@ -17,8 +17,11 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,7 +31,14 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
+
+// DefaultMetricsAddr is the address the daemon's Prometheus scrape
+// endpoint binds to when DaemonOpts.MetricsAddr is unset. Chosen out of
+// the user range (9818) to leave 9100, 9200, and the common otelcol
+// ports free for other tooling.
+const DefaultMetricsAddr = "127.0.0.1:9818"
 
 // DefaultDaemonInterval is used when DaemonOpts.Interval is unset/zero.
 const DefaultDaemonInterval = 10 * time.Minute
@@ -54,6 +64,22 @@ type DaemonOpts struct {
 	// ReloadConfig returns a fresh config on SIGHUP. nil means config.Load.
 	// Tests inject a stub.
 	ReloadConfig func(context.Context) (*config.Config, error)
+
+	// MetricsAddr is the bind address for the Prometheus scrape endpoint
+	// (`/metrics`). An empty string disables the endpoint; the sentinel
+	// "default" (or any unset zero value when MetricsEnabled is true) maps
+	// to DefaultMetricsAddr. Callers wanting the default explicitly should
+	// pass DefaultMetricsAddr.
+	//
+	// The address is interpreted as a `net.Listen` "tcp" address; tests
+	// can pass "127.0.0.1:0" to bind a random port and read the actual
+	// port via the MetricsListener callback.
+	MetricsAddr string
+
+	// MetricsListener, when non-nil, is invoked with the bound
+	// net.Listener after the metrics HTTP server starts. Tests use this
+	// to discover the random port assigned by "127.0.0.1:0".
+	MetricsListener func(net.Listener)
 }
 
 // Daemon runs the sync engine in a loop until ctx is cancelled. Returns nil
@@ -94,9 +120,17 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 		sighup = ch
 	}
 
+	// Start the Prometheus /metrics endpoint. Empty MetricsAddr disables it.
+	metricsShutdown, err := startMetricsServer(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("daemon: start metrics server: %w", err)
+	}
+	defer metricsShutdown()
+
 	opts.Logger.Info("pg-pr daemon starting",
 		"interval", opts.Interval.String(),
-		"lock", lockPath)
+		"lock", lockPath,
+		"metrics_addr", opts.MetricsAddr)
 	defer opts.Logger.Info("pg-pr daemon stopped")
 
 	for {
@@ -176,4 +210,42 @@ func NewJSONLogger() *slog.Logger {
 // NewTextLogger returns a slog.Logger writing human-readable text to stderr.
 func NewTextLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+}
+
+// startMetricsServer launches the Prometheus scrape endpoint in a
+// background goroutine and returns a shutdown closure. When
+// opts.MetricsAddr is empty the function returns a no-op shutdown
+// without binding to any port — useful for one-shot tests.
+//
+// A bind failure (port already in use) is fatal because metrics is a
+// daemon contract; running without it would silently produce empty
+// dashboards. The bound listener is offered to opts.MetricsListener for
+// tests using "127.0.0.1:0".
+func startMetricsServer(_ context.Context, opts DaemonOpts) (func(), error) {
+	if opts.MetricsAddr == "" {
+		return func() {}, nil
+	}
+	ln, err := net.Listen("tcp", opts.MetricsAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen %s: %w", opts.MetricsAddr, err)
+	}
+	if opts.MetricsListener != nil {
+		opts.MetricsListener(ln)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", telemetry.MetricsHandler())
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			opts.Logger.Error("metrics endpoint failed", "err", err.Error())
+		}
+	}()
+	return func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}, nil
 }
