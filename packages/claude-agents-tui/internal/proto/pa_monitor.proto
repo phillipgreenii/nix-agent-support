@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package pa_monitor.v1;
+
+option go_package = "github.com/phillipgreenii/claude-agents-tui/internal/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// Service definition matches the spec's RPC surface. v1 is bare bones:
+// GetState, WatchState (with heartbeat), Ping. Other methods land in later
+// plans as the daemon grows responsibilities.
+service PaMonitor {
+  // GetState returns a snapshot of the daemon's current state.
+  rpc GetState(GetStateRequest) returns (DaemonState);
+
+  // WatchState streams updates whenever state changes. Idle periods are
+  // filled with Heartbeat messages so clients can detect a hung daemon.
+  rpc WatchState(WatchStateRequest) returns (stream WatchStateEvent);
+
+  // Ping is a cheap liveness check used by clients to confirm the daemon
+  // is responsive before issuing a heavier RPC.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message GetStateRequest {}
+
+message WatchStateRequest {
+  // Heartbeat interval requested by the client, in milliseconds. The
+  // server clamps to a sane range. 0 means "use server default".
+  uint32 heartbeat_interval_ms = 1;
+}
+
+message WatchStateEvent {
+  oneof payload {
+    DaemonState state = 1;
+    Heartbeat heartbeat = 2;
+  }
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp ts = 1;
+  uint64 daemon_uptime_seconds = 2;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  google.protobuf.Timestamp ts = 1;
+}
+
+// DaemonState is intentionally minimal in this plan. Plans 2 and 3 grow
+// it with sessions, blocks, weeks, caffeinate, and so on. The placeholder
+// fields below exist only so the wire shape is non-empty during
+// foundation work — real fields land later.
+message DaemonState {
+  google.protobuf.Timestamp now = 1;
+  uint64 daemon_uptime_seconds = 2;
+  string daemon_version = 3;
+}
