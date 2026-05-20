@@ -140,6 +140,15 @@ message SessionView {
   double burn_rate_long = 20;
   double cost_usd = 21;
   bool awaiting_input = 22;
+
+  // Workspace tags pulled from the session's process env. Daemon-side
+  // privacy guard: only specific known keys are forwarded; arbitrary
+  // env is never wire-exposed. Empty when not present in the env.
+  string cmux_workspace_id = 23;
+  string tmux_session = 24;
+  string gc_rig = 25;
+  string gc_agent = 26;
+  string workspace_env = 27; // value of $WORKSPACE
 }
 
 message Block {

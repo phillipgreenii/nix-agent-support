@@ -18,7 +18,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/headless"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
 )
@@ -95,11 +94,6 @@ func runConfigSubcommand(args []string) {
 
 func runTUI(args []string) {
 	fs := flag.NewFlagSet("tui", flag.ExitOnError)
-	waitMode := fs.Bool("wait-until-idle", false, "headless: wait until all sessions idle")
-	maxWaitS := fs.Int("maximum-wait", 0, "headless: maximum wait in seconds (0 = use config)")
-	intervalS := fs.Int("time-between-checks", 0, "headless: poll interval in seconds (0 = use config)")
-	consecutive := fs.Int("consecutive-idle-checks", 0, "headless: consecutive idle checks before exit (0 = use config)")
-	caffeinateFlag := fs.Bool("caffeinate", false, "headless: keep Mac awake during wait")
 	remoteMode := fs.Bool("remote", false, "fetch state from the running daemon over gRPC instead of polling locally")
 	showVersion := fs.Bool("version", false, "print version")
 	if err := fs.Parse(args); err != nil {
@@ -155,35 +149,8 @@ func runTUI(args []string) {
 		Signalers:        signalers,
 	}
 
-	if *waitMode {
-		maxWait := cfg.MaximumWait
-		if *maxWaitS > 0 {
-			maxWait = time.Duration(*maxWaitS) * time.Second
-		}
-		interval := cfg.HeadlessInterval
-		if *intervalS > 0 {
-			interval = time.Duration(*intervalS) * time.Second
-		}
-		idle := cfg.ConsecutiveIdleChecks
-		if *consecutive > 0 {
-			idle = *consecutive
-		}
-		var proc *caffeinate.Proc
-		if *caffeinateFlag {
-			proc = &caffeinate.Proc{}
-			_ = proc.Spawn(os.Getpid())
-			defer func() { _ = proc.Kill() }()
-		}
-		code := headless.Run(context.Background(), headless.Opts{
-			Poller:                p,
-			Interval:              interval,
-			ConsecutiveIdleChecks: idle,
-			Maximum:               maxWait,
-			Writer:                os.Stdout,
-			CmuxSidebarEnable:     cfg.CmuxSidebarEnable,
-		})
-		os.Exit(code)
-	}
+	// Legacy headless --wait-until-idle removed; use the
+	// `wait-until-agents-finished` subcommand instead.
 
 	// interactive TUI
 	proc := &caffeinate.Proc{}
