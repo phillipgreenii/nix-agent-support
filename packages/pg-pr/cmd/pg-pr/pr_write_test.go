@@ -111,9 +111,14 @@ var _ vcs.Provider = (*writeFakeVCS)(nil)
 
 // fakeBeadsClient is the in-memory beads client used by pr_write tests.
 type fakeBeadsClient struct {
-	ensureCalls []beads.MergeRequestFields
-	closeCalls  []string
-	ensureErr   error
+	ensureCalls    []beads.MergeRequestFields
+	closeCalls     []string
+	ensureErr      error
+	findResult     *beads.MergeRequest
+	findErr        error
+	findRepo       string
+	findNumber     int
+	closeReasonLog []string
 }
 
 func (f *fakeBeadsClient) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
@@ -123,9 +128,15 @@ func (f *fakeBeadsClient) EnsureMergeRequest(_ context.Context, _ string, fields
 	}
 	return "test-bd-1", false, nil
 }
-func (f *fakeBeadsClient) CloseMergeRequest(_ context.Context, id, _ string) error {
+func (f *fakeBeadsClient) CloseMergeRequest(_ context.Context, id, reason string) error {
 	f.closeCalls = append(f.closeCalls, id)
+	f.closeReasonLog = append(f.closeReasonLog, reason)
 	return nil
+}
+func (f *fakeBeadsClient) FindByRepoAndNumber(_ context.Context, repo string, n int) (*beads.MergeRequest, error) {
+	f.findRepo = repo
+	f.findNumber = n
+	return f.findResult, f.findErr
 }
 
 func swapFakes(t *testing.T) (*writeFakeVCS, *fakeBeadsClient) {
@@ -349,6 +360,101 @@ func TestPRClose_CallsClose(t *testing.T) {
 	}
 	if len(fv.closeCalls) != 1 || fv.closeCalls[0].num != 7 {
 		t.Fatalf("close not called as expected: %+v", fv.closeCalls)
+	}
+}
+
+func TestPRClose_AlsoClosesBead(t *testing.T) {
+	resetPRWriteFlags()
+	fv, fb := swapFakes(t)
+	fb.findResult = &beads.MergeRequest{
+		ID:     "mr-7",
+		Status: "open",
+		Type:   beads.TypeMergeRequest,
+		Fields: beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 7},
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "close", "7", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.closeCalls) != 1 || fv.closeCalls[0].num != 7 {
+		t.Fatalf("vcs.Close not called: %+v", fv.closeCalls)
+	}
+	if fb.findRepo != "foo/bar" || fb.findNumber != 7 {
+		t.Fatalf("FindByRepoAndNumber args: got %q/%d", fb.findRepo, fb.findNumber)
+	}
+	if len(fb.closeCalls) != 1 || fb.closeCalls[0] != "mr-7" {
+		t.Fatalf("CloseMergeRequest not called as expected: %+v", fb.closeCalls)
+	}
+	if len(fb.closeReasonLog) != 1 || !strings.Contains(fb.closeReasonLog[0], "pg-pr pr close") {
+		t.Fatalf("close reason missing 'pg-pr pr close': %+v", fb.closeReasonLog)
+	}
+	if !strings.Contains(stdout.String(), "Closed merge-request bead mr-7") {
+		t.Errorf("stdout should mention bead close: %q", stdout.String())
+	}
+}
+
+func TestPRClose_NoBead_StillSucceeds(t *testing.T) {
+	resetPRWriteFlags()
+	fv, fb := swapFakes(t)
+	// findResult left nil — no bead exists for this PR.
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "close", "8", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.closeCalls) != 1 {
+		t.Fatalf("vcs.Close should still run: %+v", fv.closeCalls)
+	}
+	if len(fb.closeCalls) != 0 {
+		t.Fatalf("CloseMergeRequest should not run when bead missing: %+v", fb.closeCalls)
+	}
+	if strings.Contains(stdout.String(), "Closed merge-request bead") {
+		t.Errorf("stdout should not mention bead close when none found: %q", stdout.String())
+	}
+}
+
+func TestPRClose_AlreadyClosedBead_SkipsClose(t *testing.T) {
+	resetPRWriteFlags()
+	_, fb := swapFakes(t)
+	fb.findResult = &beads.MergeRequest{
+		ID:     "mr-9",
+		Status: "closed",
+		Type:   beads.TypeMergeRequest,
+		Fields: beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 9},
+	}
+
+	rootCmd.SetOut(io_discard)
+	rootCmd.SetErr(io_discard)
+	rootCmd.SetArgs([]string{"pr", "close", "9", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(fb.closeCalls) != 0 {
+		t.Fatalf("expected CloseMergeRequest to skip closed bead: %+v", fb.closeCalls)
+	}
+}
+
+func TestPRClose_FindError_Warns(t *testing.T) {
+	resetPRWriteFlags()
+	_, fb := swapFakes(t)
+	fb.findErr = errors.New("bd offline")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "close", "10", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute should not fail just because bead lookup failed: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "WARNING: failed to look up merge-request bead") {
+		t.Errorf("expected warning on stderr; got %q", stderr.String())
 	}
 }
 

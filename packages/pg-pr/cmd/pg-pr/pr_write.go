@@ -49,6 +49,7 @@ var beadsClientForPR = func() beadsMergeRequestClient {
 type beadsMergeRequestClient interface {
 	EnsureMergeRequest(ctx context.Context, userTitle string, fields beads.MergeRequestFields) (string, bool, error)
 	CloseMergeRequest(ctx context.Context, id, reason string) error
+	FindByRepoAndNumber(ctx context.Context, repo string, prNumber int) (*beads.MergeRequest, error)
 }
 
 // resolveBody picks the PR body from at most one of --body, --body-file,
@@ -278,18 +279,38 @@ var prCloseCmd = &cobra.Command{
 			return err
 		}
 
-		// Best-effort: close the corresponding merge-request bead.
+		// Best-effort: close the corresponding merge-request bead. The
+		// cascade rule on close also closes children (processing-cycle /
+		// feedback / action) under that bead. If no bead is found, we
+		// silently skip — the next sync will reconcile.
+		beadID := ""
 		bdc := beadsClientForPR()
 		if bdc != nil {
-			// We don't have a quick id lookup helper that doesn't list all
-			// beads; rely on the sync-engine pathway in regular use. For
-			// the CLI close verb, the user is asking to close upstream;
-			// invoking a list+close here adds latency for marginal value.
-			// A follow-up bead will surface this.
-			_ = bdc // intentionally unused for now.
+			mr, ferr := bdc.FindByRepoAndNumber(ctx, repo, num)
+			if ferr != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"WARNING: failed to look up merge-request bead for %s#%d: %v\n",
+					repo, num, ferr)
+			} else if mr != nil && mr.Status != "closed" {
+				if cerr := bdc.CloseMergeRequest(ctx, mr.ID,
+					"closed via pg-pr pr close"); cerr != nil {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"WARNING: failed to close merge-request bead %s: %v\n",
+						mr.ID, cerr)
+				} else {
+					beadID = mr.ID
+				}
+			}
 		}
 
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Closed PR #%d on %s\n", num, repo)
+		if err != nil {
+			return err
+		}
+		if beadID != "" {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+				"ok Closed merge-request bead %s\n", beadID)
+		}
 		return err
 	},
 }
