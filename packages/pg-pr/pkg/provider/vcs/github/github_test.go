@@ -34,13 +34,6 @@ func (f *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 	return []byte("[]"), nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 const samplePRList = `[
   {
     "number": 42,

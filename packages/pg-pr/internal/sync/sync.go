@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,9 +223,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	if mergedState.Repos == nil {
 		mergedState.Repos = map[string]repoState{}
 	}
-	for k, v := range repoStates {
-		mergedState.Repos[k] = v
-	}
+	maps.Copy(mergedState.Repos, repoStates)
 	if err := saveState(e.stateFile(), mergedState); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{
 			Repo:    "(state)",
