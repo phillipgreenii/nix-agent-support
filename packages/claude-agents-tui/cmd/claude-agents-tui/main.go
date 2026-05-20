@@ -181,8 +181,3 @@ func runTUI(args []string) {
 		os.Exit(2)
 	}
 }
-
-func runDaemon(args []string) {
-	fmt.Fprintln(os.Stderr, "daemon: not yet implemented")
-	os.Exit(1)
-}
