@@ -48,6 +48,9 @@ func (m *Model) View() string {
 		{name: "controls", content: controls, dropOrder: 1},
 		{name: "block", content: blockRow, dropOrder: 2},
 	}
+	if banner := m.offlineBanner(now); banner != "" {
+		zones = append(zones, zoneSpec{name: "offline", content: banner, dropOrder: 1})
+	}
 	if alerts != "" {
 		zones = append(zones, zoneSpec{name: "alert", content: alerts, dropOrder: 3})
 	}
@@ -112,6 +115,20 @@ func (m *Model) selectionStatus() string {
 	}
 	text := fmt.Sprintf("%q", wrap.Line(fp, leftWidth))
 	return m.theme.Prompt.Render(text)
+}
+
+// offlineBanner returns a single-line banner shown above the TUI body
+// when the most recent Snapshot call failed (i.e. the daemon is
+// unreachable). Empty string means "online" — banner suppressed.
+func (m *Model) offlineBanner(now time.Time) string {
+	if m.lastErr == nil {
+		return ""
+	}
+	if m.lastSuccessAt.IsZero() {
+		return m.theme.Error.Render("⚠  pa-monitor daemon unreachable — reconnecting…")
+	}
+	age := now.Sub(m.lastSuccessAt).Round(time.Second)
+	return m.theme.Error.Render(fmt.Sprintf("⚠  pa-monitor daemon offline — last data %s ago, reconnecting…", age))
 }
 
 // renderModal returns the full-screen modal content for the active modal.
