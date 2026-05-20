@@ -6,3 +6,15 @@
 - Print version:
 
 `pg-pr version`
+
+- Create a git worktree for a pull request:
+
+`pg-pr worktree add {{pr_number}}`
+
+- List local PR worktrees:
+
+`pg-pr worktree list`
+
+- Remove a PR's worktree (use `--force` to discard uncommitted changes):
+
+`pg-pr worktree remove {{pr_number}}`
