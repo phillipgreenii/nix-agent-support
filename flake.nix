@@ -89,6 +89,7 @@
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit gitHash;
           };
+          pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           claude-agents-tui = final.callPackage ./packages/claude-agents-tui { };
           gh-prreview = final.callPackage ./packages/gh-prreview { inherit gitHash; };
