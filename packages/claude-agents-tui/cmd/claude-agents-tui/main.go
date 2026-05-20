@@ -11,28 +11,64 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
+	"github.com/phillipgreenii/claude-agents-tui/internal/config"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
-	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
-	"github.com/phillipgreenii/claude-agents-tui/internal/config"
-	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/poller"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/tui"
 )
 
 var version = "dev"
 
+// pickSubcommand inspects os.Args-style input and returns the subcommand
+// name plus the remaining args (minus the subcommand token).
+//
+// Rules:
+//   - If args[1] is a known subcommand name, that wins; the rest are its args.
+//   - Otherwise the command is "tui" and args[1:] are its args.
+//   - The flag-first case (e.g. --wait-until-idle) routes to tui because
+//     no current TUI flags collide with a subcommand name.
+func pickSubcommand(args []string) (cmd string, rest []string) {
+	known := map[string]bool{"daemon": true}
+	if len(args) < 2 {
+		return "tui", nil
+	}
+	if known[args[1]] {
+		return args[1], args[2:]
+	}
+	return "tui", args[1:]
+}
+
 func main() {
-	waitMode := flag.Bool("wait-until-idle", false, "headless: wait until all sessions idle")
-	maxWaitS := flag.Int("maximum-wait", 0, "headless: maximum wait in seconds (0 = use config)")
-	intervalS := flag.Int("time-between-checks", 0, "headless: poll interval in seconds (0 = use config)")
-	consecutive := flag.Int("consecutive-idle-checks", 0, "headless: consecutive idle checks before exit (0 = use config)")
-	caffeinateFlag := flag.Bool("caffeinate", false, "headless: keep Mac awake during wait")
-	showVersion := flag.Bool("version", false, "print version")
-	flag.Parse()
+	cmd, rest := pickSubcommand(os.Args)
+	switch cmd {
+	case "daemon":
+		runDaemon(rest)
+	case "tui":
+		runTUI(rest)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
+		os.Exit(2)
+	}
+}
+
+func runTUI(args []string) {
+	fs := flag.NewFlagSet("tui", flag.ExitOnError)
+	waitMode := fs.Bool("wait-until-idle", false, "headless: wait until all sessions idle")
+	maxWaitS := fs.Int("maximum-wait", 0, "headless: maximum wait in seconds (0 = use config)")
+	intervalS := fs.Int("time-between-checks", 0, "headless: poll interval in seconds (0 = use config)")
+	consecutive := fs.Int("consecutive-idle-checks", 0, "headless: consecutive idle checks before exit (0 = use config)")
+	caffeinateFlag := fs.Bool("caffeinate", false, "headless: keep Mac awake during wait")
+	showVersion := fs.Bool("version", false, "print version")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	if *showVersion {
 		fmt.Println("claude-agents-tui", version)
@@ -144,4 +180,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+}
+
+func runDaemon(args []string) {
+	fmt.Fprintln(os.Stderr, "daemon: not yet implemented")
+	os.Exit(1)
 }
