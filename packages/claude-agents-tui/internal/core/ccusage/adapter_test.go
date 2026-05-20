@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseActiveBlock(t *testing.T) {
-	body, err := os.ReadFile("../../tests/fixtures/ccusage/active_block.json")
+	body, err := os.ReadFile("../../../tests/fixtures/ccusage/active_block.json")
 	if err != nil {
 		t.Fatal(err)
 	}

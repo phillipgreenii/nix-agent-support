@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
 )
 
 func TestAlertsEmptyWhenNoneActive(t *testing.T) {

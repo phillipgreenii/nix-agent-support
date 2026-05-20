@@ -13,7 +13,7 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/caffeinate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/config"
 	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
