@@ -18,3 +18,7 @@
 - Remove a PR's worktree (use `--force` to discard uncommitted changes):
 
 `pg-pr worktree remove {{pr_number}}`
+
+- Detect the branch and PR context for the current directory:
+
+`pg-pr branch detect`
