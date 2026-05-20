@@ -41,7 +41,7 @@ in
       default =
         let
           user = config.phillipgreenii.system.primaryUser;
-          home = config.users.users.${user}.home;
+          inherit (config.users.users.${user}) home;
         in
         "${home}/.local/share/beads-web";
       description = "Directory for beads-web data (SQLite DB) and logs";
