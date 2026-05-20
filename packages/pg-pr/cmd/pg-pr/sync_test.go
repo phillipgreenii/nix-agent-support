@@ -45,6 +45,9 @@ func (s *stubBeads) EnsureMergeRequest(_ context.Context, _ string, _ beads.Merg
 	s.created++
 	return "stub-1", false, nil
 }
+func (s *stubBeads) UpdateMergeRequest(_ context.Context, _ string, _ beads.MergeRequestFields) error {
+	return nil
+}
 func (s *stubBeads) CloseMergeRequest(_ context.Context, _, _ string) error {
 	s.closed++
 	return nil
@@ -52,6 +55,30 @@ func (s *stubBeads) CloseMergeRequest(_ context.Context, _, _ string) error {
 func (s *stubBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads.MergeRequest, error) {
 	return nil, nil
 }
+func (s *stubBeads) GetMergeRequest(_ context.Context, _ string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (s *stubBeads) CreateProcessingCycle(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubBeads) FindOpenProcessingCycle(_ context.Context, _ string) (string, bool, error) {
+	return "", false, nil
+}
+func (s *stubBeads) CloseProcessingCycle(_ context.Context, _, _ string) error { return nil }
+func (s *stubBeads) ListChildrenOfPR(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+func (s *stubBeads) CreateFeedback(_ context.Context, _ beads.CreateFeedbackInput) (string, error) {
+	return "", nil
+}
+func (s *stubBeads) MarkFeedbackResolvedUpstream(_ context.Context, _ string) error { return nil }
+func (s *stubBeads) ListFeedback(_ context.Context, _ string, _ bool) ([]beads.Feedback, error) {
+	return nil, nil
+}
+func (s *stubBeads) FindFeedbackByFingerprint(_ context.Context, _, _ string) (*beads.Feedback, error) {
+	return nil, nil
+}
+func (s *stubBeads) CloseFeedback(_ context.Context, _, _ string) error { return nil }
 
 // ----------------------------------------------------------------------
 // Test helpers

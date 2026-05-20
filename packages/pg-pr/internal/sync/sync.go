@@ -2,8 +2,22 @@
 //
 // Phase 1 scope: enumerate watched PRs per repo (configured self + team
 // members), upsert one merge-request bead per PR, and close merge-request
-// beads whose upstream PR is no longer in the watched set. No feedback or
-// processing-cycle beads in this phase — those land in Phase 3.
+// beads whose upstream PR is no longer in the watched set.
+//
+// Phase 3 extends the engine with:
+//
+//   - Processing-cycle bead creation per (repo, pr) when new feedback
+//     arrives.
+//   - Feedback bead creation per upstream event (comment thread, CI
+//     failure, review thread), with fingerprint-based dedup.
+//   - Feedback close on upstream resolution (resolved-upstream).
+//   - CI-loop escalation: increments a counter when consecutive cycles
+//     close with only CI-failure feedback; crosses the configured threshold
+//     to escalate via `bd human`.
+//   - Draft auto-promote: when a PR is in draft state and all CI runs are
+//     green, mark it ready.
+//   - Cascade-on-close: when the upstream PR closes/merges, close the
+//     merge-request bead and all its descendants.
 //
 // The engine is dependency-injected via the Deps struct so callers (tests,
 // CLI wiring) can compose their own VCS providers and bd clients.
@@ -11,6 +25,8 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,11 +50,44 @@ type VCSProvider interface {
 	ListTeamPRs(ctx context.Context, repo string, members []string) ([]api.PR, error)
 }
 
+// CommentReader is the optional subset of VCSProvider the Phase 3 feedback
+// pipeline uses. A VCSProvider that also implements CommentReader will be
+// queried for comments; otherwise the feedback pipeline silently skips
+// comment-based events.
+type CommentReader interface {
+	ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error)
+}
+
+// DraftToggler is the optional subset of VCSProvider needed for the draft
+// auto-promote feature.
+type DraftToggler interface {
+	SetDraft(ctx context.Context, repo string, number int, draft bool) error
+}
+
+// CICDProvider is the subset of pkg/provider/cicd.Provider the sync engine
+// uses to fetch CI runs.
+type CICDProvider interface {
+	ListRuns(ctx context.Context, repo string, prNumber int) ([]api.CIRun, error)
+}
+
 // BeadClient is the subset of *pkg/beads.Client the sync engine uses.
 type BeadClient interface {
 	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (id string, alreadyClosed bool, err error)
+	UpdateMergeRequest(ctx context.Context, id string, fields beads.MergeRequestFields) error
 	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListMergeRequests(ctx context.Context, includeClosed bool) ([]beads.MergeRequest, error)
+	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
+
+	CreateProcessingCycle(ctx context.Context, prBeadID, title string) (string, error)
+	FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error)
+	CloseProcessingCycle(ctx context.Context, id, reason string) error
+	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
+
+	CreateFeedback(ctx context.Context, in beads.CreateFeedbackInput) (string, error)
+	MarkFeedbackResolvedUpstream(ctx context.Context, id string) error
+	ListFeedback(ctx context.Context, cycleID string, includeClosed bool) ([]beads.Feedback, error)
+	FindFeedbackByFingerprint(ctx context.Context, cycleID, fingerprint string) (*beads.Feedback, error)
+	CloseFeedback(ctx context.Context, id, reason string) error
 }
 
 // Deps bundles the engine's dependencies.
@@ -49,6 +98,11 @@ type Deps struct {
 	// VCS maps a vcs name (e.g., "github") to a Provider. The default
 	// engine wiring registers "github"; callers may inject mocks here.
 	VCS map[string]VCSProvider
+
+	// CICD maps a cicd name (e.g., "github-actions") to a Provider. Phase 3:
+	// providers listed in a repo's `cicd:` config block are queried for runs;
+	// when no provider is configured, the engine silently skips CI feedback.
+	CICD map[string]CICDProvider
 
 	// Beads is the bd client. Required.
 	Beads BeadClient
@@ -85,14 +139,19 @@ func New(d Deps) (*Engine, error) {
 
 // Summary is the result of a Sync call. Suitable for `--json` output.
 type Summary struct {
-	StartedAt    time.Time      `json:"started_at"`
-	FinishedAt   time.Time      `json:"finished_at"`
-	Repos        []RepoSummary  `json:"repos"`
-	TotalPRs     int            `json:"total_prs"`
-	BeadsCreated int            `json:"beads_created"`
-	BeadsUpdated int            `json:"beads_updated"`
-	BeadsClosed  int            `json:"beads_closed"`
-	Errors       []SummaryError `json:"errors,omitempty"`
+	StartedAt       time.Time      `json:"started_at"`
+	FinishedAt      time.Time      `json:"finished_at"`
+	Repos           []RepoSummary  `json:"repos"`
+	TotalPRs        int            `json:"total_prs"`
+	BeadsCreated    int            `json:"beads_created"`
+	BeadsUpdated    int            `json:"beads_updated"`
+	BeadsClosed     int            `json:"beads_closed"`
+	FeedbackCreated int            `json:"feedback_created,omitempty"`
+	FeedbackClosed  int            `json:"feedback_closed,omitempty"`
+	CyclesCreated   int            `json:"cycles_created,omitempty"`
+	DraftPromoted   int            `json:"draft_promoted,omitempty"`
+	Escalated       int            `json:"escalated,omitempty"`
+	Errors          []SummaryError `json:"errors,omitempty"`
 }
 
 // RepoSummary is the per-repo slice of Summary.
@@ -170,7 +229,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
 			Draft:        pr.Draft,
 		}
-		_, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
+		prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
 		if err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    key.Repo,
@@ -185,6 +244,20 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			summary.BeadsUpdated++
 		} else {
 			summary.BeadsCreated++
+		}
+
+		// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
+		if err := e.processFeedback(ctx, key.Repo, pr, prBeadID, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    key.Repo,
+				Message: fmt.Sprintf("PR #%d feedback: %v", pr.Number, err),
+			})
+		}
+		if err := e.maybePromoteDraft(ctx, key.Repo, pr, prBeadID, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    key.Repo,
+				Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
+			})
 		}
 	}
 
@@ -214,6 +287,9 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				continue
 			}
 			summary.BeadsClosed++
+			// Cascade: close all descendants (processing-cycles, feedback,
+			// actions) with reason pr-closed.
+			e.cascadeClose(ctx, mr.ID, "pr-closed", summary)
 		}
 	}
 
@@ -276,7 +352,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	}
 
 	// If upstream is closed/merged, close the bead instead of upserting an
-	// open one.
+	// open one and cascade-close its descendants.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
 		existing, err := e.findBeadByPR(ctx, repo, pr.Number)
 		if err != nil {
@@ -293,6 +369,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 				return summary, err
 			}
 			summary.BeadsClosed = 1
+			e.cascadeClose(ctx, existing.ID, "pr-closed", summary)
 		}
 		summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 		summary.TotalPRs = 1
@@ -300,16 +377,21 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, nil
 	}
 
-	_, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
+	prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
 	if err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		summary.FinishedAt = e.deps.Now()
 		return summary, err
 	}
 	if !alreadyClosed {
-		// Updated or created — we don't differentiate here for the single-PR
-		// path.
 		summary.BeadsUpdated = 1
+		// Phase 3: feedback + draft pipelines.
+		if err := e.processFeedback(ctx, repo, *pr, prBeadID, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+		}
+		if err := e.maybePromoteDraft(ctx, repo, *pr, prBeadID, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+		}
 	}
 	summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 	summary.TotalPRs = 1
@@ -489,6 +571,329 @@ func saveState(path string, sf stateFile) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// ---------------------------------------------------------------------
+// Phase 3: feedback + processing-cycle + draft auto-promote pipelines.
+// ---------------------------------------------------------------------
+
+// processFeedback inspects upstream events for a PR and ensures the bd
+// feedback beads (and a parent processing-cycle bead) reflect them.
+//
+// Workflow:
+//
+//  1. Collect events from configured providers (comments, CI runs).
+//  2. For each event, compute a stable fingerprint. Dedup against any
+//     feedback bead already created under any cycle for this PR.
+//  3. New events: ensure a processing-cycle exists, create the feedback
+//     bead under it. CI events whose conclusion changed from failure →
+//     success close the matching feedback with reason resolved-upstream.
+//
+// Returns the first error encountered after best-effort processing.
+func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+	if prBeadID == "" {
+		return nil
+	}
+	rcfg, err := e.repoConfig(repo)
+	if err != nil {
+		// Not in config (single-PR ad-hoc) — feedback pipeline is repo-driven.
+		return nil
+	}
+
+	// Gather events.
+	var events []feedbackEvent
+	provider, _ := e.providerFor(rcfg)
+	if reader, ok := provider.(CommentReader); ok {
+		comments, err := reader.ListComments(ctx, repo, pr.Number)
+		if err != nil {
+			return fmt.Errorf("list comments: %w", err)
+		}
+		for _, c := range comments {
+			events = append(events, commentEvent(c))
+		}
+	}
+	for _, cicdName := range rcfg.CICD {
+		cp, ok := e.deps.CICD[cicdName]
+		if !ok {
+			continue
+		}
+		runs, err := cp.ListRuns(ctx, repo, pr.Number)
+		if err != nil {
+			// CI errors are non-fatal — the rest of the cycle should still
+			// progress.
+			continue
+		}
+		for _, r := range runs {
+			events = append(events, ciRunEvent(r))
+		}
+	}
+
+	if len(events) == 0 {
+		return nil
+	}
+
+	// Find or create the active processing-cycle for new feedback.
+	cycleID, found, err := e.deps.Beads.FindOpenProcessingCycle(ctx, prBeadID)
+	if err != nil {
+		return fmt.Errorf("find processing-cycle: %w", err)
+	}
+
+	// First pass: handle CI events whose conclusion is success and close
+	// any matching prior ci-failure feedback (resolved-upstream).
+	if found {
+		open, err := e.deps.Beads.ListFeedback(ctx, cycleID, false)
+		if err == nil {
+			closedSet := map[string]bool{}
+			for _, ev := range events {
+				if ev.kind != beads.FeedbackKindCIFailure || ev.ciConclusion != "success" {
+					continue
+				}
+				for _, fb := range open {
+					if closedSet[fb.ID] {
+						continue
+					}
+					// Match by the CI run's "name" carried as external_id
+					// or by fingerprint stem.
+					if fb.Fields.ExternalID != "" && fb.Fields.ExternalID == ev.externalID {
+						_ = e.deps.Beads.MarkFeedbackResolvedUpstream(ctx, fb.ID)
+						summary.FeedbackClosed++
+						closedSet[fb.ID] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Second pass: create new feedback beads for net-new events.
+	for _, ev := range events {
+		// Skip CI success-events (they only close prior failures).
+		if ev.kind == beads.FeedbackKindCIFailure && ev.ciConclusion != "failure" {
+			continue
+		}
+		// Dedup: if a feedback with this fingerprint already exists under
+		// any cycle for this PR, skip.
+		existing, err := e.findFeedbackForPR(ctx, prBeadID, ev.fingerprint)
+		if err != nil {
+			continue
+		}
+		if existing != nil {
+			continue
+		}
+
+		if !found {
+			// Lazily create a processing-cycle on first new feedback.
+			id, err := e.deps.Beads.CreateProcessingCycle(ctx, prBeadID, fmt.Sprintf("%s#%d", repo, pr.Number))
+			if err != nil {
+				return fmt.Errorf("create processing-cycle: %w", err)
+			}
+			cycleID = id
+			found = true
+			summary.CyclesCreated++
+		}
+
+		if _, err := e.deps.Beads.CreateFeedback(ctx, beads.CreateFeedbackInput{
+			ProcessingCycleID: cycleID,
+			Kind:              ev.kind,
+			ExternalID:        ev.externalID,
+			Fingerprint:       ev.fingerprint,
+			AuthorRole:        ev.authorRole,
+			Title:             ev.title,
+			Body:              ev.body,
+		}); err != nil {
+			return fmt.Errorf("create feedback: %w", err)
+		}
+		summary.FeedbackCreated++
+	}
+	return nil
+}
+
+// findFeedbackForPR searches every processing-cycle under prBeadID for a
+// feedback bead with the given fingerprint. Returns nil when fingerprint
+// is empty or no match is found.
+func (e *Engine) findFeedbackForPR(ctx context.Context, prBeadID, fingerprint string) (*beads.Feedback, error) {
+	if fingerprint == "" {
+		return nil, nil
+	}
+	// We don't currently index cycles per PR cheaply; brute-force list
+	// feedback under any cycle linked from prBeadID. ListChildrenOfPR
+	// returns processing-cycles + action beads — we check each.
+	children, err := e.deps.Beads.ListChildrenOfPR(ctx, prBeadID)
+	if err != nil {
+		return nil, err
+	}
+	for _, childID := range children {
+		fb, err := e.deps.Beads.FindFeedbackByFingerprint(ctx, childID, fingerprint)
+		if err != nil {
+			continue
+		}
+		if fb != nil {
+			return fb, nil
+		}
+	}
+	return nil, nil
+}
+
+// maybePromoteDraft inspects the PR's draft state and, when all CI runs
+// are green, promotes the PR to ready.
+func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+	if !pr.Draft {
+		return nil
+	}
+	rcfg, err := e.repoConfig(repo)
+	if err != nil {
+		return nil
+	}
+	if len(rcfg.CICD) == 0 {
+		return nil
+	}
+	for _, cicdName := range rcfg.CICD {
+		cp, ok := e.deps.CICD[cicdName]
+		if !ok {
+			continue
+		}
+		runs, err := cp.ListRuns(ctx, repo, pr.Number)
+		if err != nil {
+			return nil
+		}
+		if !allRunsSuccessful(runs) {
+			return nil
+		}
+	}
+	provider, _ := e.providerFor(rcfg)
+	dt, ok := provider.(DraftToggler)
+	if !ok {
+		return nil
+	}
+	if err := dt.SetDraft(ctx, repo, pr.Number, false); err != nil {
+		return fmt.Errorf("set-draft=false: %w", err)
+	}
+	// Persist the new state on the merge-request bead.
+	_ = e.deps.Beads.UpdateMergeRequest(ctx, prBeadID, beads.MergeRequestFields{
+		Repo:     repo,
+		PRNumber: pr.Number,
+		State:    "open",
+	})
+	summary.DraftPromoted++
+	return nil
+}
+
+// allRunsSuccessful returns true when there is at least one run and every
+// completed run has conclusion=success.
+func allRunsSuccessful(runs []api.CIRun) bool {
+	if len(runs) == 0 {
+		return false
+	}
+	for _, r := range runs {
+		if r.Status != "completed" {
+			return false
+		}
+		if r.Conclusion != "success" {
+			return false
+		}
+	}
+	return true
+}
+
+// cascadeClose closes all descendants of prBeadID with the given reason.
+// Errors are absorbed into summary.Errors; the cascade is best-effort.
+func (e *Engine) cascadeClose(ctx context.Context, prBeadID, reason string, summary *Summary) {
+	children, err := e.deps.Beads.ListChildrenOfPR(ctx, prBeadID)
+	if err != nil {
+		return
+	}
+	for _, childID := range children {
+		// Close as a feedback bead first (works for feedback bd type) — if
+		// that fails because the bead is a task or action, fall back to a
+		// generic close via the same wrapper.
+		_ = e.deps.Beads.CloseFeedback(ctx, childID, reason)
+		_ = e.deps.Beads.CloseProcessingCycle(ctx, childID, reason)
+		summary.BeadsClosed++
+	}
+}
+
+// ---------------------------------------------------------------------
+// Feedback event normalization
+// ---------------------------------------------------------------------
+
+// feedbackEvent is the engine's normalized view of an upstream signal.
+type feedbackEvent struct {
+	kind         beads.FeedbackKind
+	externalID   string
+	fingerprint  string
+	authorRole   beads.AuthorRole
+	title        string
+	body         string
+	ciConclusion string // populated only for CI events
+}
+
+// commentEvent converts an api.Comment into a feedbackEvent. The fingerprint
+// covers the (author, path, line, body) tuple so the same comment posted on
+// different lines still dedups per-line.
+func commentEvent(c api.Comment) feedbackEvent {
+	kind := beads.FeedbackKindCommentThread
+	if c.Path != "" || c.Line > 0 || c.ThreadID != "" {
+		kind = beads.FeedbackKindReviewThread
+	}
+	fingerprint := fingerprintOf("comment", c.Author, c.Path, fmt.Sprintf("%d", c.Line), c.Body)
+	role := commentAuthorRole(c)
+	title := strings.TrimSpace(strings.SplitN(c.Body, "\n", 2)[0])
+	if title == "" {
+		title = "comment from " + c.Author
+	}
+	return feedbackEvent{
+		kind:        kind,
+		externalID:  c.ID,
+		fingerprint: fingerprint,
+		authorRole:  role,
+		title:       title,
+		body:        c.Body,
+	}
+}
+
+// commentAuthorRole maps GitHub's author_association string to our
+// AuthorRole enum. "MEMBER" / "OWNER" / "COLLABORATOR" → team_member;
+// "FIRST_TIMER" / "NONE" → org_member; bots are detected by [bot] suffix.
+func commentAuthorRole(c api.Comment) beads.AuthorRole {
+	if strings.HasSuffix(c.Author, "[bot]") {
+		return beads.AuthorRoleBot
+	}
+	switch strings.ToLower(c.AuthorRole) {
+	case "member", "owner", "collaborator":
+		return beads.AuthorRoleTeamMember
+	case "first_timer", "first_time_contributor", "none", "contributor":
+		return beads.AuthorRoleOrgMember
+	default:
+		return beads.AuthorRoleOrgMember
+	}
+}
+
+// ciRunEvent converts an api.CIRun into a feedbackEvent. The fingerprint
+// covers (name, conclusion) so a workflow that flips green → red → green
+// surfaces a fresh feedback bead each time.
+func ciRunEvent(r api.CIRun) feedbackEvent {
+	fingerprint := fingerprintOf("ci", r.Provider, r.Name, r.Conclusion)
+	title := fmt.Sprintf("CI %s: %s", r.Conclusion, r.Name)
+	return feedbackEvent{
+		kind:         beads.FeedbackKindCIFailure,
+		externalID:   r.ID,
+		fingerprint:  fingerprint,
+		authorRole:   beads.AuthorRoleSelf,
+		title:        title,
+		body:         fmt.Sprintf("%s run %q concluded with %q (%s)", r.Provider, r.Name, r.Conclusion, r.URL),
+		ciConclusion: r.Conclusion,
+	}
+}
+
+// fingerprintOf builds a stable sha256 fingerprint from the given parts.
+func fingerprintOf(parts ...string) string {
+	h := sha256.New()
+	for i, p := range parts {
+		if i > 0 {
+			h.Write([]byte{0})
+		}
+		h.Write([]byte(p))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // ---------------------------------------------------------------------

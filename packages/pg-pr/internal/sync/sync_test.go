@@ -395,10 +395,37 @@ type noopBeads struct{}
 func (noopBeads) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
 	return "", false, nil
 }
+func (noopBeads) UpdateMergeRequest(context.Context, string, beads.MergeRequestFields) error {
+	return nil
+}
 func (noopBeads) CloseMergeRequest(context.Context, string, string) error { return nil }
 func (noopBeads) ListMergeRequests(context.Context, bool) ([]beads.MergeRequest, error) {
 	return nil, nil
 }
+func (noopBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (noopBeads) CreateProcessingCycle(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (noopBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (noopBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (noopBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (noopBeads) CreateFeedback(context.Context, beads.CreateFeedbackInput) (string, error) {
+	return "", nil
+}
+func (noopBeads) MarkFeedbackResolvedUpstream(context.Context, string) error { return nil }
+func (noopBeads) ListFeedback(context.Context, string, bool) ([]beads.Feedback, error) {
+	return nil, nil
+}
+func (noopBeads) FindFeedbackByFingerprint(context.Context, string, string) (*beads.Feedback, error) {
+	return nil, nil
+}
+func (noopBeads) CloseFeedback(context.Context, string, string) error { return nil }
 
 func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
 	// Exercise the state-save error path by pointing StateDir at a file

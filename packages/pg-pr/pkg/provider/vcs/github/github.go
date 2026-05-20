@@ -75,7 +75,11 @@ func (cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) (
 }
 
 // errStub marks methods that are not implemented in Phase 1.
-var errStub = errors.New("github vcs: not implemented (Phase 1 stub)")
+//
+// Phase 3 retired this — all Provider methods are now wired. Kept here as a
+// sentinel so old tests asserting against it still compile until they are
+// rewritten.
+var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
 var prListFields = "number,title,headRefName,baseRefName,url,author,isDraft,state,mergedAt,closedAt"
@@ -209,17 +213,200 @@ func validateRepo(repo string) error {
 }
 
 // ---------------------------------------------------------------------
-// Phase-deferred stubs (write paths + unused reads).
+// Write paths (Phase 3).
 // ---------------------------------------------------------------------
 
-func (p *Provider) CreatePR(context.Context, string, bool, string, string, string, string) (*api.PR, error) {
-	return nil, errStub
+// CreatePR opens a new pull request via `gh pr create`. The body is fed on
+// stdin (via `--body-file -`) so multi-line bodies work without quoting
+// headaches. Returns the freshly created PR shape.
+func (p *Provider) CreatePR(ctx context.Context, repo string, draft bool, title, body, branch, base string) (*api.PR, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil, errors.New("github: PR title is required")
+	}
+	if strings.TrimSpace(branch) == "" {
+		return nil, errors.New("github: PR head branch is required")
+	}
+	if strings.TrimSpace(base) == "" {
+		return nil, errors.New("github: PR base branch is required")
+	}
+	args := []string{
+		"pr", "create",
+		"--repo", repo,
+		"--title", title,
+		"--body-file", "-",
+		"--head", branch,
+		"--base", base,
+	}
+	if draft {
+		args = append(args, "--draft")
+	}
+	out, err := p.gh.RunStdin(ctx, []byte(body), args...)
+	if err != nil {
+		return nil, fmt.Errorf("github: create PR: %w", err)
+	}
+	// `gh pr create` prints the new PR URL on stdout. Parse the trailing
+	// number out of it; fall back to a follow-up `pr view` if parsing fails.
+	url := strings.TrimSpace(string(out))
+	num, perr := parsePRNumberFromURL(url)
+	if perr != nil || num == 0 {
+		// As a fallback, try to discover the most recent PR for the branch.
+		return p.lookupPRByBranch(ctx, repo, branch, url)
+	}
+	pr, err := p.GetPR(ctx, repo, num)
+	if err != nil {
+		// Return what we know if GetPR fails.
+		return &api.PR{Repo: repo, Number: num, URL: url, Branch: branch, Base: base, Draft: draft}, nil
+	}
+	return pr, nil
 }
-func (p *Provider) UpdatePR(context.Context, string, int, string) error   { return errStub }
-func (p *Provider) SetDraft(context.Context, string, int, bool) error     { return errStub }
-func (p *Provider) SetAutomerge(context.Context, string, int, bool) error { return errStub }
-func (p *Provider) Merge(context.Context, string, int) error              { return errStub }
-func (p *Provider) Close(context.Context, string, int) error              { return errStub }
+
+// parsePRNumberFromURL extracts the trailing /pull/<n> number from a gh PR
+// URL. Returns (0, error) when the URL is empty or doesn't match.
+func parsePRNumberFromURL(url string) (int, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return 0, errors.New("empty url")
+	}
+	idx := strings.LastIndex(url, "/")
+	if idx < 0 || idx == len(url)-1 {
+		return 0, fmt.Errorf("unrecognized PR URL %q", url)
+	}
+	var n int
+	if _, err := fmt.Sscanf(url[idx+1:], "%d", &n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// lookupPRByBranch is the fallback used when parsing a PR number from the
+// `gh pr create` stdout fails.
+func (p *Provider) lookupPRByBranch(ctx context.Context, repo, branch, url string) (*api.PR, error) {
+	args := []string{
+		"pr", "list",
+		"--repo", repo,
+		"--head", branch,
+		"--state", "open",
+		"--json", prListFields,
+		"--limit", "1",
+	}
+	raw, err := p.gh.Run(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("github: lookup created PR: %w", err)
+	}
+	var prs []ghPR
+	if err := json.Unmarshal(raw, &prs); err != nil {
+		return nil, fmt.Errorf("github: parse pr list JSON: %w", err)
+	}
+	if len(prs) == 0 {
+		return &api.PR{Repo: repo, URL: url, Branch: branch}, nil
+	}
+	out := prs[0].toAPI(repo)
+	return &out, nil
+}
+
+// UpdatePR edits the PR body via `gh pr edit --body-file -`.
+func (p *Provider) UpdatePR(ctx context.Context, repo string, number int, body string) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("github: invalid PR number %d", number)
+	}
+	_, err := p.gh.RunStdin(ctx, []byte(body),
+		"pr", "edit", fmt.Sprintf("%d", number),
+		"--repo", repo,
+		"--body-file", "-",
+	)
+	if err != nil {
+		return fmt.Errorf("github: update PR: %w", err)
+	}
+	return nil
+}
+
+// SetDraft toggles a PR's draft state via `gh pr ready` (mark ready) or
+// `gh pr ready --undo` (convert back to draft).
+func (p *Provider) SetDraft(ctx context.Context, repo string, number int, draft bool) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("github: invalid PR number %d", number)
+	}
+	args := []string{
+		"pr", "ready", fmt.Sprintf("%d", number),
+		"--repo", repo,
+	}
+	if draft {
+		args = append(args, "--undo")
+	}
+	if _, err := p.gh.Run(ctx, args...); err != nil {
+		return fmt.Errorf("github: set draft=%v: %w", draft, err)
+	}
+	return nil
+}
+
+// SetAutomerge enables or disables PR automerge via `gh pr merge --auto` or
+// `gh pr merge --disable-auto`.
+func (p *Provider) SetAutomerge(ctx context.Context, repo string, number int, enabled bool) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("github: invalid PR number %d", number)
+	}
+	args := []string{
+		"pr", "merge", fmt.Sprintf("%d", number),
+		"--repo", repo,
+	}
+	if enabled {
+		args = append(args, "--auto", "--squash")
+	} else {
+		args = append(args, "--disable-auto")
+	}
+	if _, err := p.gh.Run(ctx, args...); err != nil {
+		return fmt.Errorf("github: set automerge=%v: %w", enabled, err)
+	}
+	return nil
+}
+
+// Merge merges the PR immediately. Phase 3 defaults to squash; a future
+// phase can plumb the strategy through config.
+func (p *Provider) Merge(ctx context.Context, repo string, number int) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("github: invalid PR number %d", number)
+	}
+	if _, err := p.gh.Run(ctx,
+		"pr", "merge", fmt.Sprintf("%d", number),
+		"--repo", repo,
+		"--squash",
+	); err != nil {
+		return fmt.Errorf("github: merge PR: %w", err)
+	}
+	return nil
+}
+
+// Close closes a PR without merging via `gh pr close`.
+func (p *Provider) Close(ctx context.Context, repo string, number int) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return fmt.Errorf("github: invalid PR number %d", number)
+	}
+	if _, err := p.gh.Run(ctx,
+		"pr", "close", fmt.Sprintf("%d", number),
+		"--repo", repo,
+	); err != nil {
+		return fmt.Errorf("github: close PR: %w", err)
+	}
+	return nil
+}
 
 // ghIssueComment is the JSON shape returned by the issue-comments endpoint
 // (top-level PR comments).
@@ -360,17 +547,94 @@ func (p *Provider) AddComment(ctx context.Context, repo string, number int, body
 	}, nil
 }
 
-// ReplyToThread is deferred to Phase 3. The GraphQL `addPullRequestReviewThreadReply`
-// mutation requires the review_thread node id, which our Phase 2 ListComments does
-// not yet plumb through. Returning ErrNotImplemented keeps the surface honest.
-func (p *Provider) ReplyToThread(context.Context, string, string, string) (*api.Comment, error) {
-	return nil, fmt.Errorf("github: ReplyToThread: %w (lands in Phase 3 with the GraphQL thread plumbing)", vcs.ErrNotImplemented)
+// addPullRequestReviewThreadReplyMutation is the GraphQL mutation used by
+// ReplyToThread. The thread node id is fed in as a -F field; the reply body
+// is passed via stdin (-F body=@-).
+const addPullRequestReviewThreadReplyMutation = `
+mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) {
+    comment {
+      id
+      body
+      author { login }
+    }
+  }
+}
+`
+
+// resolveReviewThreadMutation marks a review thread as resolved.
+const resolveReviewThreadMutation = `
+mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread { id isResolved }
+  }
+}
+`
+
+// ReplyToThread posts a reply on an existing review thread via GraphQL.
+// threadID is the GitHub review-thread node id (PRRT_…).
+func (p *Provider) ReplyToThread(ctx context.Context, repo, threadID, body string) (*api.Comment, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(threadID) == "" {
+		return nil, errors.New("github: thread id is required")
+	}
+	if strings.TrimSpace(body) == "" {
+		return nil, errors.New("github: reply body is empty")
+	}
+	args := []string{
+		"api", "graphql",
+		"-F", "query=" + addPullRequestReviewThreadReplyMutation,
+		"-F", "threadId=" + threadID,
+		"-F", "body=" + body,
+	}
+	raw, err := p.gh.Run(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("github: reply to thread: %w", err)
+	}
+	var resp struct {
+		Data struct {
+			AddPullRequestReviewThreadReply struct {
+				Comment struct {
+					ID     string `json:"id"`
+					Body   string `json:"body"`
+					Author struct {
+						Login string `json:"login"`
+					} `json:"author"`
+				} `json:"comment"`
+			} `json:"addPullRequestReviewThreadReply"`
+		} `json:"data"`
+	}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		_ = json.Unmarshal(raw, &resp)
+	}
+	c := resp.Data.AddPullRequestReviewThreadReply.Comment
+	return &api.Comment{
+		ID:       c.ID,
+		Author:   c.Author.Login,
+		Body:     c.Body,
+		ThreadID: threadID,
+	}, nil
 }
 
-// ResolveThread is deferred to Phase 3 for the same reason as ReplyToThread:
-// the GraphQL `resolveReviewThread` mutation needs the review_thread node id.
-func (p *Provider) ResolveThread(context.Context, string, string) error {
-	return fmt.Errorf("github: ResolveThread: %w (lands in Phase 3 with the GraphQL thread plumbing)", vcs.ErrNotImplemented)
+// ResolveThread marks a review thread as resolved.
+func (p *Provider) ResolveThread(ctx context.Context, repo, threadID string) error {
+	if err := validateRepo(repo); err != nil {
+		return err
+	}
+	if strings.TrimSpace(threadID) == "" {
+		return errors.New("github: thread id is required")
+	}
+	args := []string{
+		"api", "graphql",
+		"-F", "query=" + resolveReviewThreadMutation,
+		"-F", "threadId=" + threadID,
+	}
+	if _, err := p.gh.Run(ctx, args...); err != nil {
+		return fmt.Errorf("github: resolve thread: %w", err)
+	}
+	return nil
 }
 
 // reviewComment is the on-wire shape sent inside POST /reviews's `comments[]`.

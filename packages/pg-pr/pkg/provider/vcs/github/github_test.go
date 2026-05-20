@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // fakeGH replays canned responses keyed by the first two arguments
@@ -208,11 +207,11 @@ func TestListMyPRs_EmptyArrayIsZeroPRs(t *testing.T) {
 	}
 }
 
-func TestStubMethodsReturnErrStub(t *testing.T) {
-	ctx := context.Background()
-	p := New()
-	if err := p.SetDraft(ctx, "a/b", 1, true); !errors.Is(err, errStub) && err == nil {
-		t.Fatalf("SetDraft should return errStub")
+func TestErrStubSentinelStillCompiles(t *testing.T) {
+	// errStub is kept as a sentinel after Phase 3. Just verify the value
+	// is non-nil so accidental removal flags here.
+	if errStub == nil {
+		t.Fatalf("errStub sentinel must remain non-nil")
 	}
 }
 
@@ -358,19 +357,204 @@ func TestPostReview_SendsJSONPayload(t *testing.T) {
 	}
 }
 
-func TestReplyToThread_NotImplemented(t *testing.T) {
-	p := NewWithRunner(newFakeGH())
-	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "TH_1", "hi"); err == nil ||
-		!errors.Is(err, vcs.ErrNotImplemented) {
-		t.Fatalf("expected vcs.ErrNotImplemented, got %v", err)
+// ----------------------------------------------------------------------
+// Phase 3 write-path tests
+// ----------------------------------------------------------------------
+
+func TestCreatePR_PostsTitleBodyHeadBaseAndDraft(t *testing.T) {
+	gh := newFakeGH()
+	// Stub stdout from `gh pr create` (URL line).
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/42\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	pr, err := p.CreatePR(context.Background(), "foo/bar", true, "feat: x", "the body", "feat/x", "main")
+	if err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	if pr.Number != 42 {
+		t.Fatalf("pr.Number: got %d want 42", pr.Number)
+	}
+	// Verify the underlying args.
+	found := false
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			found = true
+			joined := strings.Join(c, " ")
+			if !strings.Contains(joined, "--draft") {
+				t.Fatalf("expected --draft flag: %v", c)
+			}
+			if !strings.Contains(joined, "--base main") {
+				t.Fatalf("expected --base main: %v", c)
+			}
+			if !strings.Contains(joined, "--head feat/x") {
+				t.Fatalf("expected --head feat/x: %v", c)
+			}
+			if !strings.Contains(joined, "--body-file -") {
+				t.Fatalf("expected --body-file -: %v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected pr create call, got %v", gh.calls)
 	}
 }
 
-func TestResolveThread_NotImplemented(t *testing.T) {
+func TestCreatePR_WithoutDraft(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/7\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	if _, err := p.CreatePR(context.Background(), "foo/bar", false, "t", "b", "h", "main"); err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			joined := strings.Join(c, " ")
+			if strings.Contains(joined, "--draft") {
+				t.Fatalf("expected NO --draft flag when draft=false: %v", c)
+			}
+		}
+	}
+}
+
+func TestCreatePR_ValidatesInputs(t *testing.T) {
 	p := NewWithRunner(newFakeGH())
-	if err := p.ResolveThread(context.Background(), "foo/bar", "TH_1"); err == nil ||
-		!errors.Is(err, vcs.ErrNotImplemented) {
-		t.Fatalf("expected vcs.ErrNotImplemented, got %v", err)
+	ctx := context.Background()
+	if _, err := p.CreatePR(ctx, "", true, "t", "b", "h", "m"); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "", "b", "h", "m"); err == nil {
+		t.Fatalf("expected error for empty title")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "", "m"); err == nil {
+		t.Fatalf("expected error for empty branch")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "h", ""); err == nil {
+		t.Fatalf("expected error for empty base")
+	}
+}
+
+func TestUpdatePR_SendsBodyOnStdin(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.UpdatePR(context.Background(), "foo/bar", 42, "new body"); err != nil {
+		t.Fatalf("UpdatePR: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "pr" || last[1] != "edit" || last[2] != "42" {
+		t.Fatalf("expected pr edit 42: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--body-file -") {
+		t.Fatalf("expected --body-file -: %v", last)
+	}
+}
+
+func TestSetDraft_TogglesViaPrReady(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	// draft=false → mark ready (no --undo)
+	if err := p.SetDraft(context.Background(), "foo/bar", 42, false); err != nil {
+		t.Fatalf("SetDraft(false): %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if strings.Join(last, " ") != "pr ready 42 --repo foo/bar" {
+		t.Fatalf("SetDraft(false) args: %v", last)
+	}
+	// draft=true → undo back to draft
+	if err := p.SetDraft(context.Background(), "foo/bar", 42, true); err != nil {
+		t.Fatalf("SetDraft(true): %v", err)
+	}
+	last = gh.calls[len(gh.calls)-1]
+	if !strings.Contains(strings.Join(last, " "), "--undo") {
+		t.Fatalf("SetDraft(true) should include --undo: %v", last)
+	}
+}
+
+func TestSetAutomerge_OnOff(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.SetAutomerge(context.Background(), "foo/bar", 42, true); err != nil {
+		t.Fatalf("SetAutomerge(true): %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--auto") || !strings.Contains(joined, "--squash") {
+		t.Fatalf("expected --auto --squash: %v", last)
+	}
+	if err := p.SetAutomerge(context.Background(), "foo/bar", 42, false); err != nil {
+		t.Fatalf("SetAutomerge(false): %v", err)
+	}
+	last = gh.calls[len(gh.calls)-1]
+	if !strings.Contains(strings.Join(last, " "), "--disable-auto") {
+		t.Fatalf("expected --disable-auto: %v", last)
+	}
+}
+
+func TestMerge_PostsSquash(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.Merge(context.Background(), "foo/bar", 42); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--squash") {
+		t.Fatalf("expected --squash: %v", last)
+	}
+}
+
+func TestClose_InvokesPrClose(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.Close(context.Background(), "foo/bar", 42); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "pr" || last[1] != "close" || last[2] != "42" {
+		t.Fatalf("expected pr close 42: %v", last)
+	}
+}
+
+func TestReplyToThread_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(
+		`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRC_1","body":"hi","author":{"login":"phillipg"}}}}}`)
+	p := NewWithRunner(gh)
+	c, err := p.ReplyToThread(context.Background(), "foo/bar", "PRRT_xxx", "hi")
+	if err != nil {
+		t.Fatalf("ReplyToThread: %v", err)
+	}
+	if c.ID != "PRC_1" || c.Author != "phillipg" || c.ThreadID != "PRRT_xxx" {
+		t.Fatalf("unexpected comment: %+v", c)
+	}
+}
+
+func TestReplyToThread_ValidatesInputs(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "", "body"); err == nil {
+		t.Fatalf("expected error for empty thread id")
+	}
+	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "x", "  "); err == nil {
+		t.Fatalf("expected error for empty body")
+	}
+}
+
+func TestResolveThread_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.ResolveThread(context.Background(), "foo/bar", "PRRT_xxx"); err != nil {
+		t.Fatalf("ResolveThread: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "threadId=PRRT_xxx") {
+		t.Fatalf("expected threadId arg: %v", last)
 	}
 }
 
