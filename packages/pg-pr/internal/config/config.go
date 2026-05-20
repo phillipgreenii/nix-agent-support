@@ -29,28 +29,31 @@ import (
 var ErrNoConfig = errors.New("config: no config file found")
 
 // Config is the parsed pg-pr configuration.
+//
+// JSON tags mirror the YAML names so `pg-pr config show --json` and
+// `--json`-using tools see snake_case keys (matching the on-disk file).
 type Config struct {
 	// Path is the absolute path the config was loaded from. Populated by Load.
-	Path string `yaml:"-"`
+	Path string `yaml:"-" json:"path,omitempty"`
 
-	SelfLogin               string       `yaml:"self_login"`
-	WorktreeRoot            string       `yaml:"worktree_root"`
-	Repos                   []RepoConfig `yaml:"repos"`
-	DaemonInterval          string       `yaml:"daemon_interval,omitempty"`
-	CIOnlyAttemptsThreshold int          `yaml:"ci_only_attempts_threshold,omitempty"`
+	SelfLogin               string       `yaml:"self_login" json:"self_login"`
+	WorktreeRoot            string       `yaml:"worktree_root" json:"worktree_root"`
+	Repos                   []RepoConfig `yaml:"repos" json:"repos"`
+	DaemonInterval          string       `yaml:"daemon_interval,omitempty" json:"daemon_interval,omitempty"`
+	CIOnlyAttemptsThreshold int          `yaml:"ci_only_attempts_threshold,omitempty" json:"ci_only_attempts_threshold,omitempty"`
 }
 
 // RepoConfig is a single repo's configuration.
 type RepoConfig struct {
-	Path           string   `yaml:"path"`
-	Remote         string   `yaml:"remote"`
-	VCS            string   `yaml:"vcs"`
-	CICD           []string `yaml:"cicd,omitempty"`
-	Issues         string   `yaml:"issues,omitempty"`
-	Org            string   `yaml:"org,omitempty"`
-	TeamMembers    []string `yaml:"team_members,omitempty"`
-	WatchLabels    []string `yaml:"watch_labels,omitempty"`
-	PRBodyTemplate string   `yaml:"pr_body_template,omitempty"`
+	Path           string   `yaml:"path" json:"path,omitempty"`
+	Remote         string   `yaml:"remote" json:"remote"`
+	VCS            string   `yaml:"vcs" json:"vcs,omitempty"`
+	CICD           []string `yaml:"cicd,omitempty" json:"cicd,omitempty"`
+	Issues         string   `yaml:"issues,omitempty" json:"issues,omitempty"`
+	Org            string   `yaml:"org,omitempty" json:"org,omitempty"`
+	TeamMembers    []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
+	WatchLabels    []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
+	PRBodyTemplate string   `yaml:"pr_body_template,omitempty" json:"pr_body_template,omitempty"`
 }
 
 // Load reads and parses the config file using the resolution order described
@@ -191,6 +194,140 @@ func finalize(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+// ValidationIssue describes a single issue raised by Validate. Issues are
+// classified as Errors (fail validation) or Warnings (informational; do not
+// fail). Both surface in `pg-pr config validate` output.
+type ValidationIssue struct {
+	// Severity is "error" or "warning".
+	Severity string `json:"severity"`
+	// Path is a dotted/bracketed pointer into the config tree, e.g.
+	// "repos[0].path" or "self_login".
+	Path string `json:"path"`
+	// Message is the human-readable description.
+	Message string `json:"message"`
+}
+
+// ValidationReport bundles the issues raised by Validate. The HasErrors
+// method reports whether any issue has severity "error"; that is the
+// signal `pg-pr config validate` uses to decide its exit code.
+type ValidationReport struct {
+	Issues []ValidationIssue `json:"issues"`
+}
+
+// HasErrors reports whether the report contains any issue with severity
+// "error".
+func (r *ValidationReport) HasErrors() bool {
+	for _, i := range r.Issues {
+		if i.Severity == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+// Validate runs the full validation pass over a Config that has already
+// been parsed + finalized (i.e. via Load / LoadFile). It re-checks the
+// required-field invariants finalize already enforced (cheap; gives
+// Validate a single, complete contract) and adds the higher-level
+// invariants documented in the spec:
+//
+//   - each repo.path exists on disk (warning only — gives flexibility for
+//     hosts that don't have every clone yet);
+//   - each repo.vcs / repo.cicd[i] / repo.issues names a known provider
+//     (builtin or `exec:`-style);
+//   - each repo.cicd has at least one entry;
+//   - team_members entries are non-empty strings.
+//
+// Validate never mutates cfg. Returns a populated ValidationReport; the
+// returned error is non-nil only when cfg itself is nil.
+func (cfg *Config) Validate() (*ValidationReport, error) {
+	if cfg == nil {
+		return nil, errors.New("config: nil")
+	}
+	rep := &ValidationReport{}
+	add := func(severity, path, msg string) {
+		rep.Issues = append(rep.Issues, ValidationIssue{
+			Severity: severity, Path: path, Message: msg,
+		})
+	}
+
+	if strings.TrimSpace(cfg.SelfLogin) == "" {
+		add("error", "self_login", "required")
+	}
+	if strings.TrimSpace(cfg.WorktreeRoot) == "" {
+		add("error", "worktree_root", "required")
+	}
+	if len(cfg.Repos) == 0 {
+		add("error", "repos", "at least one repo is required")
+	}
+
+	known := knownBuiltinProviders()
+	for i, r := range cfg.Repos {
+		prefix := fmt.Sprintf("repos[%d]", i)
+		if strings.TrimSpace(r.Remote) == "" {
+			add("error", prefix+".remote", "required")
+		} else if !strings.Contains(r.Remote, "/") {
+			add("error", prefix+".remote",
+				fmt.Sprintf("must be owner/name form, got %q", r.Remote))
+		}
+		if r.Path != "" {
+			if _, err := os.Stat(r.Path); err != nil {
+				add("warning", prefix+".path",
+					fmt.Sprintf("does not exist on disk: %s", r.Path))
+			}
+		}
+		if r.VCS != "" && !providerKnown(r.VCS, known) {
+			add("error", prefix+".vcs",
+				fmt.Sprintf("unknown provider %q (expected builtin or 'exec:<binary>')", r.VCS))
+		}
+		if len(r.CICD) == 0 {
+			add("warning", prefix+".cicd",
+				"no CI/CD provider configured; ci subcommands will return an error")
+		}
+		for j, c := range r.CICD {
+			if !providerKnown(c, known) {
+				add("error", fmt.Sprintf("%s.cicd[%d]", prefix, j),
+					fmt.Sprintf("unknown provider %q (expected builtin or 'exec:<binary>')", c))
+			}
+		}
+		if r.Issues != "" && !providerKnown(r.Issues, known) {
+			add("error", prefix+".issues",
+				fmt.Sprintf("unknown provider %q (expected builtin or 'exec:<binary>')", r.Issues))
+		}
+		for j, m := range r.TeamMembers {
+			if strings.TrimSpace(m) == "" {
+				add("error", fmt.Sprintf("%s.team_members[%d]", prefix, j),
+					"empty team-member entry")
+			}
+		}
+	}
+	return rep, nil
+}
+
+// knownBuiltinProviders returns the set of builtin provider names. The
+// set is small enough to enumerate inline — keeping it here avoids a
+// dependency on the provider packages (which would create an import
+// cycle: provider packages depend on config types).
+func knownBuiltinProviders() map[string]struct{} {
+	return map[string]struct{}{
+		"github":         {},
+		"github-actions": {},
+		"github-issues":  {},
+		"jira":           {},
+	}
+}
+
+// providerKnown reports whether name is a known builtin provider or an
+// `exec:<binary>`-style reference. We don't verify the exec binary exists
+// on PATH here; that's the job of `pg-pr auth status`.
+func providerKnown(name string, builtins map[string]struct{}) bool {
+	if strings.HasPrefix(name, "exec:") && len(name) > len("exec:") {
+		return true
+	}
+	_, ok := builtins[name]
+	return ok
 }
 
 // expandHome expands a leading `~` or `~/` to the current user's home dir.

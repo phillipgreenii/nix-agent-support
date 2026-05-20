@@ -280,3 +280,153 @@ func TestLoadFile_Notfound(t *testing.T) {
 		t.Fatalf("expected fs.ErrNotExist, got %v", err)
 	}
 }
+
+// ----------------------------------------------------------------------
+// Validate
+// ----------------------------------------------------------------------
+
+func TestValidate_AllValid(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: tmp,
+		Repos: []RepoConfig{
+			{
+				Remote: "owner/repo",
+				VCS:    "github",
+				CICD:   []string{"github-actions"},
+				Issues: "jira",
+				Path:   tmp,
+			},
+		},
+	}
+	rep, err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if rep.HasErrors() {
+		t.Fatalf("expected no errors, got %+v", rep.Issues)
+	}
+}
+
+func TestValidate_MissingFields(t *testing.T) {
+	cfg := &Config{}
+	rep, err := cfg.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.HasErrors() {
+		t.Fatalf("expected errors, got %+v", rep)
+	}
+	paths := issuePaths(rep)
+	for _, want := range []string{"self_login", "worktree_root", "repos"} {
+		if !contains(paths, want) {
+			t.Errorf("expected error for %q, got %v", want, paths)
+		}
+	}
+}
+
+func TestValidate_UnknownProvider(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos: []RepoConfig{
+			{Remote: "owner/repo", VCS: "bogus", CICD: []string{"also-bogus"}, Issues: "still-bogus"},
+		},
+	}
+	rep, _ := cfg.Validate()
+	paths := issuePaths(rep)
+	for _, want := range []string{"repos[0].vcs", "repos[0].cicd[0]", "repos[0].issues"} {
+		if !contains(paths, want) {
+			t.Errorf("expected error for %q, got %v", want, paths)
+		}
+	}
+}
+
+func TestValidate_ExecProviderAccepted(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos: []RepoConfig{
+			{
+				Remote: "owner/repo",
+				VCS:    "exec:my-vcs",
+				CICD:   []string{"exec:my-cicd"},
+				Issues: "exec:my-issues",
+			},
+		},
+	}
+	rep, _ := cfg.Validate()
+	if rep.HasErrors() {
+		t.Fatalf("exec: providers should be accepted, got: %+v", rep.Issues)
+	}
+}
+
+func TestValidate_MissingPathIsWarning(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos: []RepoConfig{
+			{Remote: "owner/repo", VCS: "github", CICD: []string{"github-actions"}, Path: "/nope/does/not/exist"},
+		},
+	}
+	rep, _ := cfg.Validate()
+	if rep.HasErrors() {
+		t.Fatalf("missing path should be warning, not error: %+v", rep.Issues)
+	}
+	found := false
+	for _, i := range rep.Issues {
+		if i.Path == "repos[0].path" && i.Severity == "warning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for repos[0].path, got %+v", rep.Issues)
+	}
+}
+
+func TestValidate_EmptyCICDIsWarning(t *testing.T) {
+	cfg := &Config{
+		SelfLogin:    "me",
+		WorktreeRoot: "/tmp",
+		Repos:        []RepoConfig{{Remote: "owner/repo", VCS: "github"}},
+	}
+	rep, _ := cfg.Validate()
+	if rep.HasErrors() {
+		t.Fatalf("empty cicd should be warning, got: %+v", rep.Issues)
+	}
+	found := false
+	for _, i := range rep.Issues {
+		if i.Path == "repos[0].cicd" && i.Severity == "warning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for repos[0].cicd: %+v", rep.Issues)
+	}
+}
+
+func TestValidate_NilConfig(t *testing.T) {
+	var cfg *Config
+	if _, err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for nil config")
+	}
+}
+
+// issuePaths returns the .Path of each issue in rep — used for set checks.
+func issuePaths(rep *ValidationReport) []string {
+	out := make([]string, len(rep.Issues))
+	for i, x := range rep.Issues {
+		out[i] = x.Path
+	}
+	return out
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
