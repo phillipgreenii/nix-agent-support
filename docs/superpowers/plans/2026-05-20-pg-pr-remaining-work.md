@@ -323,6 +323,26 @@ func (e *Engine) Daemon(ctx context.Context, interval time.Duration, sighup <-ch
 
 ---
 
+### A15. Global `--json` flag + `PGPR_OUTPUT=json` env var
+
+**Why:** Agents calling pg-pr from heterogeneous contexts (skill, gascity, manual) need a way to force JSON output without a flag at every site. Spec §"CLI surface" intro now says: `--json` flag wins, env var `PGPR_OUTPUT=json` is the global fallback.
+
+**Files:**
+
+- Modify: every `cmd/pg-pr/<group>.go` that has a `--json` flag — read the env var as the flag default before parsing.
+- Cleanest: a small helper `internal/output/format.go` exposing `Resolve(flag bool) bool` that returns `flag || os.Getenv("PGPR_OUTPUT") == "json"`.
+- Tests: table-driven — flag-set / env-set / both / neither — verify each command honors precedence.
+
+**Acceptance:**
+
+- `PGPR_OUTPUT=json pg-pr pr show 1 --repo owner/name` emits JSON.
+- `PGPR_OUTPUT=json pg-pr pr show 1 --repo owner/name --json=false` emits human (explicit flag false beats env). (If cobra makes `--json=false` awkward, then the precedence is: any `--json` presence wins over env.)
+- All existing tests still pass.
+
+**Bd issue:** to be created.
+
+---
+
 ### A10. Pre-commit hook entry for `modules/pg-pr-zr/` in nix-ziprecruiter
 
 **Why:** Phase 4 deferred this. Without it, the ZR extension Go code is not auto-linted.
@@ -407,58 +427,68 @@ These items have meaningful design questions that should go through a brainstorm
 
 ### B1. Unified PR description generation (`beads_pg2-srk`)
 
-**Open design questions:**
+**Decided design** (per user feedback 2026-05-20; see spec §"Post-v1 design directions" → "Unified PR description generation"):
 
-- Where does the canonical prompt live? In the plugin's `pg-pr-write-pr-description/SKILL.md`? Or in a yaml file the CLI ships?
-- How does the CLI-driven path invoke an LLM? Subprocess `claude`? Subprocess `gemini`? Configurable per-user?
-- Auth: how does the CLI subprocess get LLM credentials when not invoked from an existing claude session?
-- How does the session-driven path use the current session's LLM? It can't easily — the LLM IS Claude reading the SKILL.md; the skill itself drives the agent. So really the "session" path is: agent reads the skill, gets the diff via `pg-pr pr files` + `pg-pr pr commits`, writes the description, calls `pg-pr pr update --body-stdin`.
-- For gascity: gascity agents already work like the session path — they read SKILL.md prompts. Same flow.
-- The CLI-direct path (`pg-pr pr create` without an LLM caller) needs to spawn a real LLM agent. That's the new mechanic.
+- **SKILL, not command.** Agents may decide to create PRs autonomously; SKILLs auto-trigger on intent, commands require deliberate invocation. SKILL path: `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-write-pr-description/SKILL.md`.
+- **Context gathering lives in the CLI.** Skill calls `pg-pr pr show --json`, `pg-pr pr files --json`, `pg-pr pr commits --json` to assemble context. CLI already exposes these — skill is thin.
+- **Three callers, one prompt:**
+  - Direct claude session: skill auto-triggers when user asks Claude to create/update a PR.
+  - Gascity: agents in a gascity session also auto-trigger the same skill.
+  - Direct CLI (`pg-pr pr create --generate-description`): CLI shells out via `zr-agent <skill>` (existing generic agent-CLI wrapper in nix-ziprecruiter) which spawns a fresh agent process that reads the same SKILL.md and calls back into `pg-pr` in a new process. Two-process trip is acceptable; consistency over process count.
+- **Body emit path:** skill writes to `pg-pr pr update <n> --body-stdin` or `pg-pr pr create --body-stdin`.
 
-**Prerequisite:** brainstorming skill round. Produce a spec section + ADR.
+**Implementation plan (post-brainstorm-confirmation):**
 
-**Bd:** `beads_pg2-srk` (existing). Update with "needs brainstorm" tag once brainstorm scheduled.
+1. Add `SKILL.md` content with explicit `description:` frontmatter that triggers on PR create/update intent.
+2. Add `--generate-description` flag to `pg-pr pr create` / `pg-pr pr update` that shells out via `zr-agent`.
+3. `zr-agent` binary already exists in `phillipg-nix-ziprecruiter/modules/zr-agent/`; verify it can take a skill path as the prompt source.
+4. Tests with a fake `zr-agent` impl to verify the call shape.
+
+**Bd:** `beads_pg2-srk` (existing).
 
 ### B2. OTEL + Prometheus instrumentation (`beads_pg2-01a`)
 
-**Open design questions:**
+**Decided design** (per user feedback 2026-05-20; see spec §"Post-v1 design directions" → "OTEL + Prometheus instrumentation"):
 
-- Trace boundaries: what's a span? Per sync run? Per repo? Per provider call? Per bd write?
-- Span attributes: what's safe (repo name, pr number, run id)? What's PII (comment body, author email)?
-- Metric set for daemon Prometheus endpoint: per-PR sync duration histogram, sync errors counter (labeled by repo), feedback-bead-created counter, ci-only-attempts gauge, last-successful-sync-time gauge.
-- OTEL endpoint config: env var? config file? Use `~/gc`'s pattern.
-- Daemon's Prometheus scrape endpoint: separate port? Listen on `127.0.0.1:9090` default? Configurable?
-- Graceful degradation: no OTEL endpoint configured = no-op exporter, no startup error.
+- **Span boundary** = one sync run per repo. Provider calls and bd writes nest as child spans.
+- **Allowed trace attributes:** `repo_name`, `pr_number`, `run_id`, `author_email`. Comment body deferred (probably acceptable but waits for privacy review).
+- **Startup behavior:** missing/unreachable OTEL OTLP endpoint emits a one-line stderr warning and continues. NOT a startup error.
+- **OTEL endpoint config:** env vars matching `~/gc`'s convention. Read the existing setup before implementing to match exactly.
+- **Daemon Prometheus endpoint:** scrape endpoint on `127.0.0.1:<port>`. Metrics: per-PR sync duration histogram, sync errors counter (label=repo), feedback beads created counter, ci-only-attempts gauge, last-successful-sync-time gauge.
+- **One-shot sync** emits traces but no metrics endpoint.
 
-**Prerequisite:** brainstorming skill round + read `~/gc`'s OTEL setup for the workspace's conventions.
+**Implementation plan (post-brainstorm-confirmation):**
 
-**Bd:** `beads_pg2-01a` (existing). Same brainstorm tag.
+1. Read `~/gc` workspace's OTEL setup to learn the exact env var names and SDK initialization pattern.
+2. Add OTEL SDK dependency. Initialize tracer + meter providers at CLI startup. No-op gracefully when endpoint missing.
+3. Instrument `internal/sync/sync.go` — one span per `syncRepo(ctx, repoCfg)`. Provider call spans inside.
+4. Add daemon Prometheus endpoint: gorilla/mux or stdlib `http.ServeMux` on a configurable bind address. Use `prometheus/client_golang`.
+5. Tests for span emission (use `tracetest` SDK helpers), metrics endpoint shape, graceful no-op on missing endpoint.
+
+**Bd:** `beads_pg2-01a` (existing).
 
 ### B3. Sync auto-reply to feedback (v2)
 
-**Open design questions:**
+**Decided design** (per user feedback 2026-05-20; see spec §"Open questions / v2 deferrals"):
 
-- Trigger: when does the CLI post a reply? On feedback bead close with a specific reason pattern?
-- Where does the reply text live? On the feedback bead as `reply_draft` metadata? Set by the LLM as part of closing the bead?
-- Idempotency: don't double-post if next sync runs before the bead state changes.
-- Auto-resolve thread: should the reply also resolve the upstream comment thread?
+- **Reply text storage:** bd custom metadata `reply_draft` on the feedback bead. If bd supports proper custom fields per type, use them; otherwise generic metadata.
+- **Trigger:** when sync sees a feedback bead with non-empty `reply_draft` and no `response_id` yet, post via `vcs.ReplyToThread` and store the returned `response_id` back on the bead.
+- **Idempotency:** presence of `response_id` skips the post. Re-runs are safe.
+- **Thread auto-resolve:** NO. Agents must not auto-resolve threads. Resolution stays a human decision.
 
-**Prerequisite:** brainstorm + spec amendment. Spec already lists this in §"v2 deferrals".
-
-**Bd:** to be created (no existing issue).
+**Bd:** to be created.
 
 ### B4. Forgejo VCS provider (v2)
 
-**Open design questions:**
+**Deferred until GitHub implementation has full sign-off.** Per user direction 2026-05-20: plan is fine but do not start implementation until GitHub is fully validated in production. The VCS interface affordance already exists; adding a Forgejo impl is non-breaking when ready.
+
+Open design questions to revisit when GitHub signoff lands:
 
 - Forgejo API differences from GitHub (REST shape, auth flow).
 - Multi-VCS config: a repo with both github and forgejo remotes? Or strictly one VCS per repo?
 - Test environment for forgejo (run a local forgejo container?).
 
-**Prerequisite:** brainstorm. Spec already deferred to v2 (ADR 0010).
-
-**Bd:** to be created.
+**Bd:** to be created with explicit `deferred` status until signoff.
 
 ---
 
@@ -474,6 +504,17 @@ Documented as out-of-scope for current work; tracked for completeness.
 No bd issues for these yet; create as priorities clarify.
 
 ---
+
+## Section C — Bd formulas
+
+bd has 21 reusable workflow formulas (`bd formula list`). When creating future bd issue trees for these tasks, consider:
+
+- `mol-do-work` — simple work formula (read bead, do what it says, close). Good for A6, A8, A15 (small, well-specified).
+- `wf-bugfix` — fast-path bug fix; lightweight planning gate then implement. Good for any bug that comes up.
+- `wf-echo` — test workflow with human-approval step. Not applicable here, but a useful template for `pg-pr ci watch` style work that needs human gates.
+- `mol-scoped-work` — graph-first worktree lifecycle. Possibly useful for cross-repo work like A11/A12.
+
+Use `bd mol pour <formula>` to instantiate. For one-off implementation tasks, plain `bd create --type=task` is usually fine; reach for a formula when a task has multiple steps with structured handoffs.
 
 ## Section D — bd issue creation
 
