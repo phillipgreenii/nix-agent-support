@@ -86,6 +86,9 @@
             inherit gitHash;
           };
           my-code-review-support = final.callPackage ./packages/my-code-review-support { };
+          pg-pr = final.callPackage ./packages/pg-pr {
+            inherit gitHash;
+          };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           claude-agents-tui = final.callPackage ./packages/claude-agents-tui { };
           gh-prreview = final.callPackage ./packages/gh-prreview { inherit gitHash; };
@@ -348,6 +351,10 @@
                 ul_run_step "update-deps-claude-extended-tool-approver" \
                   "update-locks: update claude-extended-tool-approver Go deps" \
                   bash -c 'cd packages/claude-extended-tool-approver && go get -u ./... && go mod tidy'
+
+                ul_run_step "update-deps-pg-pr" \
+                  "update-locks: update pg-pr Go deps" \
+                  bash -c 'cd packages/pg-pr && go get -u ./... && go mod tidy'
 
                 ul_finalize
               '';
