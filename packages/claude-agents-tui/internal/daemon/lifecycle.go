@@ -6,8 +6,11 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/phillipgreenii/claude-agents-tui/internal/otel"
 )
 
 // PIDLock holds the pidfile flock for the lifetime of the daemon process.
@@ -95,21 +98,28 @@ func (s *socketListener) Close() error {
 	return err
 }
 
-// Run is the daemon's main loop. It acquires the pidfile, binds the
-// socket, and blocks until ctx is done. On return — for any reason —
-// both the pidfile and socket file are removed.
+// RunOptions configures a daemon run. Paths is required; everything else
+// is optional. Emitter, when non-nil, is shut down on Run return so any
+// batched metrics/logs flush before the process exits.
 //
-// In this foundation milestone Run has no gRPC server attached yet.
-// Task 24 adds the server skeleton; this function gains a call to start
-// it then.
-func Run(ctx context.Context, p Paths) error {
-	lock, err := AcquirePIDFile(p)
+// Tick controls a placeholder poll cadence; the real poller + tracker
+// integration lands in Plan 3 alongside the client refactor.
+type RunOptions struct {
+	Paths   Paths
+	Emitter *otel.Emitter
+	Tick    time.Duration
+}
+
+// RunWith is the daemon's main loop. It acquires the pidfile, binds the
+// socket, starts the gRPC server, and blocks until ctx is done.
+func RunWith(ctx context.Context, opts RunOptions) error {
+	lock, err := AcquirePIDFile(opts.Paths)
 	if err != nil {
 		return err
 	}
 	defer lock.Release()
 
-	lis, err := BindSocket(p)
+	lis, err := BindSocket(opts.Paths)
 	if err != nil {
 		return err
 	}
@@ -118,6 +128,30 @@ func Run(ctx context.Context, p Paths) error {
 	_, stop := serve(lis)
 	defer stop()
 
-	<-ctx.Done()
-	return nil
+	defer opts.Emitter.Shutdown(context.Background())
+
+	tick := opts.Tick
+	if tick <= 0 {
+		tick = 5 * time.Second
+	}
+	t := time.NewTicker(tick)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			// Plan 3 plumbs the poller + trackers + label cache through
+			// here. For Plan 2 the tick just keeps the loop alive so
+			// emitter callbacks (when wired in Plan 3) have something
+			// to observe.
+		}
+	}
+}
+
+// Run is a thin compat wrapper preserving the original signature used by
+// lifecycle_test.go and any caller that doesn't need RunOptions yet.
+func Run(ctx context.Context, p Paths) error {
+	return RunWith(ctx, RunOptions{Paths: p})
 }
