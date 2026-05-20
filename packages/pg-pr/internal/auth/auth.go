@@ -197,7 +197,7 @@ func checkGitHub(ctx context.Context, name string, r Runners) Status {
 // output, if present. Empty string when the line isn't found — keeps Detail
 // terse for the common case where everything's fine.
 func summarizeGHScopes(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		t := strings.TrimSpace(line)
 		// gh 2.x uses "Token scopes:"; gh 1.x used "✓ Token scopes:" — match either.
 		if i := strings.Index(t, "Token scopes:"); i >= 0 {
@@ -387,7 +387,7 @@ func mergeRunners(r Runners) Runners {
 // firstLine returns the first non-empty line of s, trimmed. Used to keep
 // Detail compact when gh / network errors are multi-line.
 func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		t := strings.TrimSpace(line)
 		if t != "" {
 			return t

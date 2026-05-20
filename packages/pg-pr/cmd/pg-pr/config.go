@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -182,17 +183,7 @@ func countErrors(r *config.ValidationReport) int {
 
 // joinComma joins ss with ", ". Local helper to keep this file self-contained.
 func joinComma(ss []string) string {
-	switch len(ss) {
-	case 0:
-		return ""
-	case 1:
-		return ss[0]
-	}
-	out := ss[0]
-	for _, s := range ss[1:] {
-		out += ", " + s
-	}
-	return out
+	return strings.Join(ss, ", ")
 }
 
 func init() {
