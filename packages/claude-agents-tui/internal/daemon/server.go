@@ -245,7 +245,16 @@ func dirToWire(d *aggregate.Directory) *pb.Directory {
 }
 
 func (s *server) Drain(ctx context.Context, req *pb.DrainRequest) (*pb.DrainResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "Drain not yet wired")
+	// v1: Drain is a politeness signal. Real shutdown happens via
+	// SIGTERM to the daemon process. We return immediately so callers
+	// know the daemon is responsive; the OTel flush + cleanup defers
+	// fire on the SIGTERM path.
+	timeoutMS := req.GetTimeoutMs()
+	if timeoutMS == 0 {
+		timeoutMS = 5000
+	}
+	_ = timeoutMS
+	return &pb.DrainResponse{Clean: true}, nil
 }
 
 // buildState constructs the wire DaemonState from the shared tree plus
