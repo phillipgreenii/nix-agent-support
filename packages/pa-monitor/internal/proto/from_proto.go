@@ -1,0 +1,154 @@
+package proto
+
+import (
+	"errors"
+	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+)
+
+// ToTree is the inverse of FromTree: reconstruct an aggregate.Tree from
+// the wire DaemonState. Used by remote clients (TUI, future cmux-bridge)
+// to render via existing tree-based helpers.
+//
+// Lossy by design: TUI uses Tree primarily for rendering, and renders
+// the full DaemonState anyway. Fields that the renderer doesn't read
+// (PRInfo URL, raw burn-rate window-by-window) are preserved where the
+// proto carries them.
+func ToTree(s *DaemonState) *aggregate.Tree {
+	if s == nil {
+		return nil
+	}
+	t := &aggregate.Tree{
+		PlanCapUSD:    s.GetPlanCapUsd(),
+		WeekCapUSD:    s.GetWeekCapUsd(),
+		CCUsageProbed: s.GetCcusageProbed(),
+		GeneratedAt:   timeFromTS(s.GetNow()),
+	}
+	if e := s.GetCcusageError(); e != "" {
+		t.CCUsageErr = errors.New(e)
+	}
+	if ts := s.GetWindowResetsAt(); ts != nil {
+		t.WindowResetsAt = timeFromTS(ts)
+	}
+	for _, pd := range s.GetDirs() {
+		t.Dirs = append(t.Dirs, dirFromProto(pd))
+	}
+	t.ActiveBlock = blockFromProto(s.GetActiveBlock())
+	t.ActiveWeek = weekFromProto(s.GetActiveWeek())
+	return t
+}
+
+func dirFromProto(pd *Directory) *aggregate.Directory {
+	if pd == nil {
+		return nil
+	}
+	d := &aggregate.Directory{
+		Path:         pd.GetPath(),
+		Branch:       pd.GetBranch(),
+		WorkingN:     int(pd.GetWorkingN()),
+		IdleN:        int(pd.GetIdleN()),
+		DormantN:     int(pd.GetDormantN()),
+		TotalTokens:  int(pd.GetTotalTokens()),
+		TotalCostUSD: pd.GetTotalCostUsd(),
+		BurnRateSum:  pd.GetBurnRateSum(),
+	}
+	if p := pd.GetPrInfo(); p != nil {
+		d.PRInfo = &session.PRInfo{
+			Number: int(p.GetNumber()),
+			Title:  p.GetTitle(),
+			URL:    p.GetUrl(),
+		}
+	}
+	for _, sv := range pd.GetSessions() {
+		d.Sessions = append(d.Sessions, sessionViewFromProto(sv))
+	}
+	return d
+}
+
+func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
+	if sv == nil {
+		return nil
+	}
+	out := &aggregate.SessionView{
+		Session: &session.Session{
+			PID:          int(sv.GetPid()),
+			SessionID:    sv.GetSessionId(),
+			Cwd:          sv.GetCwd(),
+			Kind:         sv.GetKind(),
+			Entrypoint:   sv.GetEntrypoint(),
+			Name:         sv.GetName(),
+			Branch:       sv.GetBranch(),
+			TerminalHost: sv.GetTerminalHost(),
+		},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			ContextTokens: int(sv.GetContextTokens()),
+			Model:         sv.GetModel(),
+			FirstPrompt:   sv.GetFirstPrompt(),
+			SubagentCount: int(sv.GetSubagentCount()),
+			SubshellCount: int(sv.GetSubshellCount()),
+			SessionTokens: int(sv.GetSessionTokens()),
+			BurnRateShort: sv.GetBurnRateShort(),
+			BurnRateLong:  sv.GetBurnRateLong(),
+			CostUSD:       sv.GetCostUsd(),
+			AwaitingInput: sv.GetAwaitingInput(),
+		},
+	}
+	out.StartedAt = timeFromTS(sv.GetStartedAt())
+	out.TranscriptMTime = timeFromTS(sv.GetTranscriptMtime())
+	out.RateLimitResetsAt = timeFromTS(sv.GetRateLimitResetsAt())
+	out.Status = statusFromString(sv.GetStatus())
+	return out
+}
+
+func blockFromProto(b *Block) *ccusage.Block {
+	if b == nil {
+		return nil
+	}
+	return &ccusage.Block{
+		StartTime: timeFromTS(b.GetStartTime()),
+		EndTime:   timeFromTS(b.GetEndTime()),
+		IsActive:  b.GetIsActive(),
+		CostUSD:   b.GetCostUsd(),
+		BurnRate: ccusage.BurnRate{
+			TokensPerMinute: b.GetTokensPerMinute(),
+			CostPerHour:     b.GetCostPerHour(),
+		},
+		Projection: ccusage.Projection{
+			TotalCost:        b.GetProjectionTotalCost(),
+			RemainingMinutes: int(b.GetProjectionRemainingMinutes()),
+		},
+	}
+}
+
+func weekFromProto(w *Week) *ccusage.WeeklyEntry {
+	if w == nil {
+		return nil
+	}
+	return &ccusage.WeeklyEntry{
+		Period:    w.GetPeriod(),
+		TotalCost: w.GetCostUsd(),
+	}
+}
+
+func statusFromString(s string) session.Status {
+	switch s {
+	case "working":
+		return session.Working
+	case "idle":
+		return session.Idle
+	default:
+		return session.Dormant
+	}
+}
+
+// timeFromTS converts a timestamppb proto to time.Time, returning zero
+// when the input is nil.
+func timeFromTS(ts interface{ AsTime() time.Time }) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime()
+}

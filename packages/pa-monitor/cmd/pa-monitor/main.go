@@ -100,6 +100,7 @@ func runTUI(args []string) {
 	intervalS := fs.Int("time-between-checks", 0, "headless: poll interval in seconds (0 = use config)")
 	consecutive := fs.Int("consecutive-idle-checks", 0, "headless: consecutive idle checks before exit (0 = use config)")
 	caffeinateFlag := fs.Bool("caffeinate", false, "headless: keep Mac awake during wait")
+	remoteMode := fs.Bool("remote", false, "fetch state from the running daemon over gRPC instead of polling locally")
 	showVersion := fs.Bool("version", false, "print version")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -108,6 +109,11 @@ func runTUI(args []string) {
 
 	if *showVersion {
 		fmt.Println("pa-monitor", version)
+		return
+	}
+
+	if *remoteMode {
+		runTUIRemote()
 		return
 	}
 
