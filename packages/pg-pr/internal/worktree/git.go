@@ -1,0 +1,160 @@
+package worktree
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// GitClient abstracts the git operations the worktree package needs.
+// The default implementation shells out to the `git` CLI; tests inject
+// fakes.
+type GitClient interface {
+	// RepoFromRemote parses `git -C dir config --get remote.origin.url`
+	// and returns the GitHub owner/repo it points to.
+	RepoFromRemote(ctx context.Context, dir string) (owner, repo string, err error)
+
+	// FetchPR fetches refs/pull/<pr>/head into refs/remotes/origin/pr/<pr>.
+	FetchPR(ctx context.Context, dir string, pr int) error
+
+	// CreateWorktree runs `git worktree add <target> -b <branch> <startPoint>`
+	// from inside dir.
+	CreateWorktree(ctx context.Context, dir, target, branch, startPoint string) error
+
+	// RemoveWorktree runs `git worktree remove [--force] <target>`.
+	RemoveWorktree(ctx context.Context, dir, target string, force bool) error
+
+	// PruneWorktrees runs `git worktree prune`.
+	PruneWorktrees(ctx context.Context, dir string) error
+
+	// DeleteBranch runs `git branch -d|-D <branch>`.
+	DeleteBranch(ctx context.Context, dir, branch string, force bool) error
+
+	// WorktreeInfo returns metadata about the worktree rooted at path.
+	// It returns an error if path is not a git worktree.
+	WorktreeInfo(ctx context.Context, path string) (*Worktree, error)
+}
+
+// CLIGitClient invokes the system `git` binary.
+type CLIGitClient struct{}
+
+// NewCLIGitClient returns a GitClient backed by the system `git` binary.
+func NewCLIGitClient() GitClient { return &CLIGitClient{} }
+
+var ghRemoteRE = regexp.MustCompile(`github\.com[:/]([^/]+)/(.+?)(?:\.git)?$`)
+
+func (g *CLIGitClient) RepoFromRemote(ctx context.Context, dir string) (string, string, error) {
+	out, err := runGit(ctx, dir, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return "", "", err
+	}
+	url := strings.TrimSpace(out)
+	m := ghRemoteRE.FindStringSubmatch(url)
+	if m == nil {
+		return "", "", fmt.Errorf("remote.origin.url is not a github URL: %q", url)
+	}
+	return m[1], m[2], nil
+}
+
+func (g *CLIGitClient) FetchPR(ctx context.Context, dir string, pr int) error {
+	refspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
+	_, err := runGit(ctx, dir, "fetch", "origin", refspec)
+	return err
+}
+
+func (g *CLIGitClient) CreateWorktree(ctx context.Context, dir, target, branch, startPoint string) error {
+	args := []string{"worktree", "add", target, "-b", branch}
+	if startPoint != "" {
+		args = append(args, startPoint)
+	}
+	_, err := runGit(ctx, dir, args...)
+	return err
+}
+
+func (g *CLIGitClient) RemoveWorktree(ctx context.Context, dir, target string, force bool) error {
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, target)
+	_, err := runGit(ctx, dir, args...)
+	return err
+}
+
+func (g *CLIGitClient) PruneWorktrees(ctx context.Context, dir string) error {
+	_, err := runGit(ctx, dir, "worktree", "prune")
+	return err
+}
+
+func (g *CLIGitClient) DeleteBranch(ctx context.Context, dir, branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := runGit(ctx, dir, "branch", flag, branch)
+	return err
+}
+
+func (g *CLIGitClient) WorktreeInfo(ctx context.Context, path string) (*Worktree, error) {
+	// Branch name.
+	branchOut, err := runGit(ctx, path, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("rev-parse HEAD: %w", err)
+	}
+	branch := strings.TrimSpace(branchOut)
+
+	// Uncommitted changes.
+	statusOut, err := runGit(ctx, path, "status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("status: %w", err)
+	}
+	hasChanges := strings.TrimSpace(statusOut) != ""
+
+	// Unpushed commits (0 if no upstream).
+	unpushed := 0
+	if _, err := runGit(ctx, path, "rev-parse", "@{u}"); err == nil {
+		if cnt, err := runGit(ctx, path, "rev-list", "--count", "@{u}..HEAD"); err == nil {
+			if n, parseErr := strconv.Atoi(strings.TrimSpace(cnt)); parseErr == nil {
+				unpushed = n
+			}
+		}
+	}
+
+	return &Worktree{
+		// PRNumber filled in by caller (or pulled from path elsewhere).
+		Path:                 path,
+		Branch:               branch,
+		HasUncommittedChange: hasChanges,
+		UnpushedCommits:      unpushed,
+	}, nil
+}
+
+// runGit invokes `git -C dir <args...>` and returns its stdout. If the
+// command fails, the returned error includes the captured stderr to aid
+// debugging.
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	full := make([]string, 0, len(args)+2)
+	if dir != "" {
+		full = append(full, "-C", dir)
+	}
+	full = append(full, args...)
+
+	cmd := exec.CommandContext(ctx, "git", full...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return stdout.String(), fmt.Errorf("git %s: %w: %s",
+				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		}
+		return stdout.String(), fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return stdout.String(), nil
+}
