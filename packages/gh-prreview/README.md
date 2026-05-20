@@ -1,5 +1,20 @@
 # gh-prreview - GitHub Pull Request Review Extension
 
+> **DEPRECATED.** `gh-prreview` is superseded by [`pg-pr`](../pg-pr/) and
+> will be removed in Phase 4 of the pg-pr consolidation. The package
+> continues to function for one release so existing users can migrate.
+> Each subcommand prints a deprecation notice on invocation; set
+> `GH_PRREVIEW_SUPPRESS_DEPRECATION=1` to mute it.
+>
+> Migration map:
+>
+> | gh-prreview                 | pg-pr                                            |
+> | --------------------------- | ------------------------------------------------ |
+> | `gh prreview checkout N`    | `pg-pr worktree add N`                           |
+> | `gh prreview remove N`      | `pg-pr worktree remove N`                        |
+> | `gh prreview list-local`    | `pg-pr worktree list`                            |
+> | `gh prreview list-awaiting` | `pg-pr sync` then `bd list --type=merge-request` |
+
 A GitHub CLI extension for managing PR review worktrees efficiently.
 
 **Version 2.0**: Now written in Python with comprehensive test coverage and async GitHub API support for improved performance and maintainability.

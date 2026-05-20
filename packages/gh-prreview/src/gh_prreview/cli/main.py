@@ -1,6 +1,13 @@
-"""CLI entry point for gh-prreview."""
+"""CLI entry point for gh-prreview.
+
+DEPRECATED: gh-prreview is superseded by `pg-pr` and will be removed in
+Phase 4 of the pg-pr consolidation. See packages/pg-pr/. Each subcommand
+prints a deprecation notice on invocation but continues to work for one
+release to give consumers time to migrate.
+"""
 
 import asyncio
+import os
 import sys
 
 import click
@@ -17,6 +24,32 @@ from gh_prreview.services.git import GitService
 from gh_prreview.services.github import GitHubService
 
 console = Console()
+
+# Map gh-prreview subcommand to its pg-pr equivalent. Used by the
+# deprecation banner so users see the exact migration target.
+PG_PR_EQUIVALENT: dict[str, str] = {
+    "checkout": "pg-pr worktree add <pr>",
+    "remove": "pg-pr worktree remove <pr>",
+    "list-local": "pg-pr worktree list",
+    "list-awaiting": "pg-pr sync   # then `bd list --type=merge-request`",
+}
+
+
+def _print_deprecation_banner(subcommand: str | None) -> None:
+    """Print a one-line deprecation notice on stderr.
+
+    Suppressed when GH_PRREVIEW_SUPPRESS_DEPRECATION=1 so CI / scripts that
+    can't migrate immediately can still mute the noise.
+    """
+    if os.environ.get("GH_PRREVIEW_SUPPRESS_DEPRECATION") == "1":
+        return
+    equivalent = PG_PR_EQUIVALENT.get(subcommand or "", "pg-pr  # see `pg-pr --help`")
+    msg = (
+        "[yellow]DEPRECATED:[/yellow] gh-prreview is superseded by `pg-pr` "
+        "(will be removed in Phase 4). "
+        f"Use: [cyan]{equivalent}[/cyan]"
+    )
+    Console(stderr=True).print(msg)
 
 
 @click.group()
@@ -41,6 +74,7 @@ def cli(ctx: click.Context, debug: bool) -> None:
     Configuration can also be set via: gh config set prreview.<key> <value>
     """
     ctx.ensure_object(dict)
+    _print_deprecation_banner(ctx.invoked_subcommand)
 
     try:
         config_service = ConfigService()
