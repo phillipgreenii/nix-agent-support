@@ -46,8 +46,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.polling = false
 		m.tree = msg.tree
 		m.anyWorking = msg.anyWorking
-		m.lastSuccessAt = time.Now()
-		m.lastErr = nil
 		if m.caffeinate != nil {
 			m.caffeinate.SetToggle(m.caffeinateOn)
 			m.caffeinate.Tick(msg.anyWorking)

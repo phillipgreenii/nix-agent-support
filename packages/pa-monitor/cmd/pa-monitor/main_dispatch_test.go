@@ -15,7 +15,7 @@ func TestPickSubcommand(t *testing.T) {
 		{"status", []string{"pa-monitor", "status"}, "status", []string{}},
 		{"agents-busy-check", []string{"pa-monitor", "agents-busy-check"}, "agents-busy-check", []string{}},
 		{"agents-busy-check with flag", []string{"pa-monitor", "agents-busy-check", "--consider-daemon-down-as-busy"}, "agents-busy-check", []string{"--consider-daemon-down-as-busy"}},
-		{"flag-first preserves tui", []string{"pa-monitor", "--version"}, "tui", []string{"--version"}},
+		{"flag-first preserves tui", []string{"pa-monitor", "--wait-until-idle"}, "tui", []string{"--wait-until-idle"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

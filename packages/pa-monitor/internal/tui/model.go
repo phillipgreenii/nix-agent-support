@@ -57,13 +57,12 @@ type Model struct {
 	scrollOffset      int
 	theme         render.Theme
 
-	poller        Poller
-	interval      time.Duration
-	caffeinate    *caffeinate.Manager
-	lastErr       error
-	lastSuccessAt time.Time
-	anyWorking    bool
-	polling       bool
+	poller     Poller
+	interval   time.Duration
+	caffeinate *caffeinate.Manager
+	lastErr    error
+	anyWorking bool
+	polling    bool
 
 	autoResume        bool
 	autoResumeFired   bool

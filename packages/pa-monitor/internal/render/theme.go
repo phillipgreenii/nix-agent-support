@@ -18,7 +18,6 @@ type Theme struct {
 	Branch       lipgloss.Style
 	Prompt       lipgloss.Style
 	ActiveToggle lipgloss.Style
-	Error        lipgloss.Style
 }
 
 // DetectColors returns true when the terminal supports ANSI color output.
@@ -42,7 +41,6 @@ func NewTheme(hasColors bool) Theme {
 			Branch:       faint,
 			Prompt:       faint,
 			ActiveToggle: underline,
-			Error:        bold,
 		}
 	}
 	return Theme{
@@ -55,7 +53,5 @@ func NewTheme(hasColors bool) Theme {
 		Branch:       lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		Prompt:       lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		ActiveToggle: underline,
-		// Red foreground for the OFFLINE banner.
-		Error: lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true),
 	}
 }
