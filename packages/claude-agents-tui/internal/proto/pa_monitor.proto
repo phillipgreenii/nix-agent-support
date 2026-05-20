@@ -6,9 +6,9 @@ option go_package = "github.com/phillipgreenii/claude-agents-tui/internal/proto;
 
 import "google/protobuf/timestamp.proto";
 
-// Service definition matches the spec's RPC surface. v1 is bare bones:
-// GetState, WatchState (with heartbeat), Ping. Other methods land in later
-// plans as the daemon grows responsibilities.
+// PaMonitor is the daemon's gRPC surface. Clients (TUI, CLI, cmux-bridge)
+// use it to observe state and to drive daemon-owned operations
+// (caffeinate, nudge, etc.).
 service PaMonitor {
   // GetState returns a snapshot of the daemon's current state.
   rpc GetState(GetStateRequest) returns (DaemonState);
@@ -20,13 +20,36 @@ service PaMonitor {
   // Ping is a cheap liveness check used by clients to confirm the daemon
   // is responsive before issuing a heavier RPC.
   rpc Ping(PingRequest) returns (PingResponse);
+
+  // Caffeinate toggles the caffeinate manager. Result reflects the new
+  // state. Persisted to runtime.json.
+  rpc Caffeinate(CaffeinateRequest) returns (CaffeinateResponse);
+
+  // Nudge sends a signal to one or more session(s) selected by the
+  // Selector.
+  rpc Nudge(NudgeRequest) returns (NudgeResponse);
+
+  // IsAnyBusy returns whether any agent is currently in the working
+  // state. Powers the `agents-busy-check` CLI subcommand.
+  rpc IsAnyBusy(IsAnyBusyRequest) returns (IsAnyBusyResponse);
+
+  // GetSessionInfo returns detailed state about one session.
+  rpc GetSessionInfo(GetSessionInfoRequest) returns (SessionDetail);
+
+  // GetPathInfo returns the directory rollup for a workspace path.
+  rpc GetPathInfo(GetPathInfoRequest) returns (PathRollup);
+
+  // Drain asks the daemon to flush pending telemetry and shut down
+  // cleanly. Used for orderly host shutdown.
+  rpc Drain(DrainRequest) returns (DrainResponse);
 }
 
 message GetStateRequest {}
 
 message WatchStateRequest {
-  // Heartbeat interval requested by the client, in milliseconds. The
-  // server clamps to a sane range. 0 means "use server default".
+  // Heartbeat interval requested by the client, in milliseconds.
+  // 0 means "use server default". Positive values below the server
+  // floor (50ms) are clamped to the floor.
   uint32 heartbeat_interval_ms = 1;
 }
 
@@ -48,12 +71,166 @@ message PingResponse {
   google.protobuf.Timestamp ts = 1;
 }
 
-// DaemonState is intentionally minimal in this plan. Plans 2 and 3 grow
-// it with sessions, blocks, weeks, caffeinate, and so on. The placeholder
-// fields below exist only so the wire shape is non-empty during
-// foundation work — real fields land later.
+// DaemonState is the full server-rendered view of agent activity that
+// clients consume via GetState or WatchState. The shape mirrors
+// aggregate.Tree but is stable across daemon versions (the daemon
+// translates internal types into this proto).
 message DaemonState {
   google.protobuf.Timestamp now = 1;
   uint64 daemon_uptime_seconds = 2;
   string daemon_version = 3;
+
+  repeated Directory dirs = 4;
+  Block active_block = 5;
+  Week active_week = 6;
+  bool caffeinate_active = 7;
+  google.protobuf.Timestamp window_resets_at = 8; // earliest pause-reset across sessions
+  string plan_tier = 9;
+  double plan_cap_usd = 10;
+  double week_cap_usd = 11;
+  bool ccusage_probed = 12;
+  string ccusage_error = 13;
+}
+
+message Directory {
+  string path = 1;
+  string branch = 2;
+  PRInfo pr_info = 3;
+  repeated SessionView sessions = 4;
+  uint32 working_n = 5;
+  uint32 idle_n = 6;
+  uint32 dormant_n = 7;
+  uint64 total_tokens = 8;
+  double total_cost_usd = 9;
+  double burn_rate_sum = 10;
+}
+
+message PRInfo {
+  uint32 number = 1;
+  string title = 2;
+  string state = 3; // OPEN, CLOSED, MERGED
+  string url = 4;
+}
+
+message SessionView {
+  // identity
+  string session_id = 1;
+  uint32 pid = 2;
+  string cwd = 3;
+  string name = 4;
+  string kind = 5;
+  string entrypoint = 6;
+  google.protobuf.Timestamp started_at = 7;
+
+  // status
+  string status = 8;            // "working", "idle", "dormant"
+  string branch = 9;
+  string terminal_host = 10;
+  google.protobuf.Timestamp transcript_mtime = 11;
+  google.protobuf.Timestamp rate_limit_resets_at = 12; // zero = not paused
+
+  // enrichment
+  uint64 context_tokens = 13;
+  string model = 14;
+  string first_prompt = 15;
+  uint32 subagent_count = 16;
+  uint32 subshell_count = 17;
+  uint64 session_tokens = 18;
+  double burn_rate_short = 19;
+  double burn_rate_long = 20;
+  double cost_usd = 21;
+  bool awaiting_input = 22;
+}
+
+message Block {
+  string id = 1;                            // YYYY-MM-DDTHHZ
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  bool is_active = 4;
+  double cost_usd = 5;
+  double tokens_per_minute = 6;
+  double cost_per_hour = 7;
+  double projection_total_cost = 8;
+  uint32 projection_remaining_minutes = 9;
+  double window_pct = 10; // cost_usd / plan_cap_usd
+}
+
+message Week {
+  string id = 1;                            // YYYY-Www
+  string period = 2;                        // YYYY-MM-DD (Monday)
+  double cost_usd = 3;
+  double window_pct = 4; // cost_usd / week_cap_usd
+}
+
+// --- Caffeinate --- //
+
+message CaffeinateRequest {
+  // action: "on", "off", "toggle". Unknown values return INVALID_ARGUMENT.
+  string action = 1;
+}
+
+message CaffeinateResponse {
+  bool active = 1;            // state after the action
+  string cause = 2;           // "manual", "agents_active", or ""
+  google.protobuf.Timestamp until = 3; // grace-period expiry
+}
+
+// --- Nudge --- //
+
+message Selector {
+  oneof target {
+    string session_id = 1;
+    string path = 2;
+    string cmux_workspace_id = 3;
+  }
+}
+
+message NudgeRequest {
+  Selector selector = 1;
+  string text = 2; // optional; daemon supplies a sensible default
+}
+
+message NudgeResponse {
+  uint32 sent_count = 1;
+  uint32 error_count = 2;
+  bool post_window = 3; // true when the nudge fired after a 5h block reset
+}
+
+// --- IsAnyBusy --- //
+
+message IsAnyBusyRequest {}
+
+message IsAnyBusyResponse {
+  bool any_busy = 1;
+  uint32 busy_count = 2;
+}
+
+// --- Session and Path queries --- //
+
+message GetSessionInfoRequest {
+  Selector selector = 1;
+}
+
+message SessionDetail {
+  SessionView view = 1;
+  repeated string label_pairs = 2; // "key=value" entries from labels
+}
+
+message GetPathInfoRequest {
+  string path = 1;
+}
+
+message PathRollup {
+  Directory directory = 1;
+}
+
+// --- Drain --- //
+
+message DrainRequest {
+  // Maximum time to wait for in-flight telemetry to flush.
+  uint32 timeout_ms = 1;
+}
+
+message DrainResponse {
+  bool clean = 1;
 }

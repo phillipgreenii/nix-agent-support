@@ -30,6 +30,22 @@ type PaMonitorClient interface {
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+	// Caffeinate toggles the caffeinate manager. Result reflects the new
+	// state. Persisted to runtime.json.
+	Caffeinate(ctx context.Context, in *CaffeinateRequest, opts ...grpc.CallOption) (*CaffeinateResponse, error)
+	// Nudge sends a signal to one or more session(s) selected by the
+	// Selector.
+	Nudge(ctx context.Context, in *NudgeRequest, opts ...grpc.CallOption) (*NudgeResponse, error)
+	// IsAnyBusy returns whether any agent is currently in the working
+	// state. Powers the `agents-busy-check` CLI subcommand.
+	IsAnyBusy(ctx context.Context, in *IsAnyBusyRequest, opts ...grpc.CallOption) (*IsAnyBusyResponse, error)
+	// GetSessionInfo returns detailed state about one session.
+	GetSessionInfo(ctx context.Context, in *GetSessionInfoRequest, opts ...grpc.CallOption) (*SessionDetail, error)
+	// GetPathInfo returns the directory rollup for a workspace path.
+	GetPathInfo(ctx context.Context, in *GetPathInfoRequest, opts ...grpc.CallOption) (*PathRollup, error)
+	// Drain asks the daemon to flush pending telemetry and shut down
+	// cleanly. Used for orderly host shutdown.
+	Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error)
 }
 
 type paMonitorClient struct {
@@ -90,6 +106,60 @@ func (c *paMonitorClient) Ping(ctx context.Context, in *PingRequest, opts ...grp
 	return out, nil
 }
 
+func (c *paMonitorClient) Caffeinate(ctx context.Context, in *CaffeinateRequest, opts ...grpc.CallOption) (*CaffeinateResponse, error) {
+	out := new(CaffeinateResponse)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/Caffeinate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) Nudge(ctx context.Context, in *NudgeRequest, opts ...grpc.CallOption) (*NudgeResponse, error) {
+	out := new(NudgeResponse)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/Nudge", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) IsAnyBusy(ctx context.Context, in *IsAnyBusyRequest, opts ...grpc.CallOption) (*IsAnyBusyResponse, error) {
+	out := new(IsAnyBusyResponse)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/IsAnyBusy", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) GetSessionInfo(ctx context.Context, in *GetSessionInfoRequest, opts ...grpc.CallOption) (*SessionDetail, error) {
+	out := new(SessionDetail)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/GetSessionInfo", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) GetPathInfo(ctx context.Context, in *GetPathInfoRequest, opts ...grpc.CallOption) (*PathRollup, error) {
+	out := new(PathRollup)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/GetPathInfo", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error) {
+	out := new(DrainResponse)
+	err := c.cc.Invoke(ctx, "/pa_monitor.v1.PaMonitor/Drain", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PaMonitorServer is the server API for PaMonitor service.
 // All implementations must embed UnimplementedPaMonitorServer
 // for forward compatibility
@@ -102,6 +172,22 @@ type PaMonitorServer interface {
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	// Caffeinate toggles the caffeinate manager. Result reflects the new
+	// state. Persisted to runtime.json.
+	Caffeinate(context.Context, *CaffeinateRequest) (*CaffeinateResponse, error)
+	// Nudge sends a signal to one or more session(s) selected by the
+	// Selector.
+	Nudge(context.Context, *NudgeRequest) (*NudgeResponse, error)
+	// IsAnyBusy returns whether any agent is currently in the working
+	// state. Powers the `agents-busy-check` CLI subcommand.
+	IsAnyBusy(context.Context, *IsAnyBusyRequest) (*IsAnyBusyResponse, error)
+	// GetSessionInfo returns detailed state about one session.
+	GetSessionInfo(context.Context, *GetSessionInfoRequest) (*SessionDetail, error)
+	// GetPathInfo returns the directory rollup for a workspace path.
+	GetPathInfo(context.Context, *GetPathInfoRequest) (*PathRollup, error)
+	// Drain asks the daemon to flush pending telemetry and shut down
+	// cleanly. Used for orderly host shutdown.
+	Drain(context.Context, *DrainRequest) (*DrainResponse, error)
 	mustEmbedUnimplementedPaMonitorServer()
 }
 
@@ -117,6 +203,24 @@ func (UnimplementedPaMonitorServer) WatchState(*WatchStateRequest, PaMonitor_Wat
 }
 func (UnimplementedPaMonitorServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedPaMonitorServer) Caffeinate(context.Context, *CaffeinateRequest) (*CaffeinateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Caffeinate not implemented")
+}
+func (UnimplementedPaMonitorServer) Nudge(context.Context, *NudgeRequest) (*NudgeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Nudge not implemented")
+}
+func (UnimplementedPaMonitorServer) IsAnyBusy(context.Context, *IsAnyBusyRequest) (*IsAnyBusyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IsAnyBusy not implemented")
+}
+func (UnimplementedPaMonitorServer) GetSessionInfo(context.Context, *GetSessionInfoRequest) (*SessionDetail, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSessionInfo not implemented")
+}
+func (UnimplementedPaMonitorServer) GetPathInfo(context.Context, *GetPathInfoRequest) (*PathRollup, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPathInfo not implemented")
+}
+func (UnimplementedPaMonitorServer) Drain(context.Context, *DrainRequest) (*DrainResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Drain not implemented")
 }
 func (UnimplementedPaMonitorServer) mustEmbedUnimplementedPaMonitorServer() {}
 
@@ -188,6 +292,114 @@ func _PaMonitor_Ping_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PaMonitor_Caffeinate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CaffeinateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).Caffeinate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/Caffeinate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).Caffeinate(ctx, req.(*CaffeinateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_Nudge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NudgeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).Nudge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/Nudge",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).Nudge(ctx, req.(*NudgeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_IsAnyBusy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IsAnyBusyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).IsAnyBusy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/IsAnyBusy",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).IsAnyBusy(ctx, req.(*IsAnyBusyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_GetSessionInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSessionInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).GetSessionInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/GetSessionInfo",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).GetSessionInfo(ctx, req.(*GetSessionInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_GetPathInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPathInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).GetPathInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/GetPathInfo",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).GetPathInfo(ctx, req.(*GetPathInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_Drain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DrainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).Drain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pa_monitor.v1.PaMonitor/Drain",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).Drain(ctx, req.(*DrainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PaMonitor_ServiceDesc is the grpc.ServiceDesc for PaMonitor service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -202,6 +414,30 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ping",
 			Handler:    _PaMonitor_Ping_Handler,
+		},
+		{
+			MethodName: "Caffeinate",
+			Handler:    _PaMonitor_Caffeinate_Handler,
+		},
+		{
+			MethodName: "Nudge",
+			Handler:    _PaMonitor_Nudge_Handler,
+		},
+		{
+			MethodName: "IsAnyBusy",
+			Handler:    _PaMonitor_IsAnyBusy_Handler,
+		},
+		{
+			MethodName: "GetSessionInfo",
+			Handler:    _PaMonitor_GetSessionInfo_Handler,
+		},
+		{
+			MethodName: "GetPathInfo",
+			Handler:    _PaMonitor_GetPathInfo_Handler,
+		},
+		{
+			MethodName: "Drain",
+			Handler:    _PaMonitor_Drain_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
