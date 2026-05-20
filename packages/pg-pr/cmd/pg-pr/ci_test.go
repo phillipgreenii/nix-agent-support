@@ -205,13 +205,26 @@ func TestCIRerunFailed_AllFail(t *testing.T) {
 	}
 }
 
-func TestBuildCICDProviders_RejectsExec(t *testing.T) {
-	_, err := buildCICDProviders([]string{"exec:custom"})
-	if err == nil {
-		t.Fatal("expected error for exec:* provider")
+func TestBuildCICDProviders_AcceptsExec(t *testing.T) {
+	providers, err := buildCICDProviders([]string{"exec:my-cicd-binary"})
+	if err != nil {
+		t.Fatalf("expected exec:<binary> to be accepted: %v", err)
 	}
-	if !strings.Contains(err.Error(), "exec:*") {
-		t.Errorf("expected exec error msg; got %v", err)
+	if len(providers) != 1 {
+		t.Fatalf("providers: %+v", providers)
+	}
+	if providers[0].Name != "exec:my-cicd-binary" {
+		t.Fatalf("name: %q", providers[0].Name)
+	}
+}
+
+func TestBuildCICDProviders_RejectsExecEmptyBinary(t *testing.T) {
+	_, err := buildCICDProviders([]string{"exec:"})
+	if err == nil {
+		t.Fatal("expected error for exec: with empty binary")
+	}
+	if !strings.Contains(err.Error(), "missing binary") {
+		t.Errorf("expected missing-binary error; got %v", err)
 	}
 }
 

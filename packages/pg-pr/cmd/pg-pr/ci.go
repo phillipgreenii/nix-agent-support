@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/plugin/scriptout"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd/ghactions"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
@@ -73,9 +74,13 @@ func buildCICDProviders(names []string) ([]ciNamedProvider, error) {
 			p.SetPRResolver(githubPRResolver{})
 			out = append(out, ciNamedProvider{Name: ghactions.ProviderName, Provider: p})
 		case strings.HasPrefix(n, "exec:"):
-			return nil, fmt.Errorf("cicd provider %q: exec:* providers are not yet wired in this phase (script-out protocol lands in a follow-up); use the builtin %s", n, ghactions.ProviderName)
+			bin := strings.TrimPrefix(n, "exec:")
+			if bin == "" {
+				return nil, fmt.Errorf("cicd provider %q: exec:* missing binary name (use exec:<binary>)", n)
+			}
+			out = append(out, ciNamedProvider{Name: n, Provider: scriptout.NewExecCICDProvider(bin)})
 		default:
-			return nil, fmt.Errorf("unknown cicd provider %q (builtins: %s; exec:* lands later)", n, ghactions.ProviderName)
+			return nil, fmt.Errorf("unknown cicd provider %q (builtins: %s; exec:<binary> also supported)", n, ghactions.ProviderName)
 		}
 	}
 	if len(out) == 0 {
@@ -106,8 +111,8 @@ var ciCmd = &cobra.Command{
 	Long: `Query the CI/CD providers configured for the PR's repo (per the
 pg-pr config). Repos with multiple cicd entries fan out and results merge.
 
-The builtin provider is github-actions. exec:* providers will be wired
-via the script-out protocol in a follow-up.`,
+The builtin provider is github-actions. External providers are exposed via
+exec:<binary>, where <binary> is a script-out provider binary on $PATH.`,
 }
 
 var ciRunsCmd = &cobra.Command{
