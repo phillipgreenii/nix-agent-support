@@ -243,6 +243,62 @@ func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeR
 	return nil, nil
 }
 
+// FindByRepoAndNumber finds a merge-request bead by repo + pr_number
+// metadata. Returns nil if not found. Includes closed beads. Public
+// wrapper around findByRepoPR for callers outside the beads package.
+func (c *Client) FindByRepoAndNumber(ctx context.Context, repo string, prNumber int) (*MergeRequest, error) {
+	if repo == "" || prNumber <= 0 {
+		return nil, errors.New("merge-request: repo and pr_number required")
+	}
+	return c.findByRepoPR(ctx, repo, prNumber)
+}
+
+// FindMergeRequestForFeedback walks parent-child dependencies up from a
+// feedback bead (feedback → processing-cycle → merge-request) and returns
+// the enclosing merge-request bead, or nil if no such chain exists.
+//
+// The walker uses `bd dep list <id> --direction=down --json` which returns
+// the issues <id> depends on (its parents in the parent-child model). It
+// stops at the first issue of type=merge-request encountered.
+func (c *Client) FindMergeRequestForFeedback(ctx context.Context, feedbackID string) (*MergeRequest, error) {
+	if strings.TrimSpace(feedbackID) == "" {
+		return nil, errors.New("feedback id required")
+	}
+	const maxHops = 8
+	visited := map[string]struct{}{feedbackID: {}}
+	cur := feedbackID
+	for hop := 0; hop < maxHops; hop++ {
+		out, err := c.Runner.Run(ctx, "dep", "list", cur, "--direction=down", "--json")
+		if err != nil {
+			return nil, fmt.Errorf("walk parents of %s: %w", cur, err)
+		}
+		issues, err := parseBDList(out)
+		if err != nil {
+			return nil, err
+		}
+		var next string
+		for _, iss := range issues {
+			if iss.Type == TypeMergeRequest {
+				mr := bdIssueToMergeRequest(iss)
+				return &mr, nil
+			}
+			// Pick the first non-visited parent to recurse into.
+			if _, seen := visited[iss.ID]; seen {
+				continue
+			}
+			if next == "" {
+				next = iss.ID
+			}
+		}
+		if next == "" {
+			return nil, nil
+		}
+		visited[next] = struct{}{}
+		cur = next
+	}
+	return nil, fmt.Errorf("parent walk exceeded %d hops from %s", maxHops, feedbackID)
+}
+
 // encodeMetadata serializes the non-zero fields of f as a JSON object that
 // bd's --metadata flag accepts.
 func encodeMetadata(f MergeRequestFields) (string, error) {

@@ -312,3 +312,77 @@ type fakeRunner struct{}
 func (f *fakeRunner) Run(_ context.Context, _ ...string) (string, error) {
 	return "", nil
 }
+
+func TestFindByRepoAndNumber_HitAndMiss(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	id, _, err := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "foo/bar", PRNumber: 31})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	got, err := c.FindByRepoAndNumber(ctx, "foo/bar", 31)
+	if err != nil {
+		t.Fatalf("FindByRepoAndNumber: %v", err)
+	}
+	if got == nil || got.ID != id {
+		t.Fatalf("expected to find %s, got %+v", id, got)
+	}
+
+	miss, err := c.FindByRepoAndNumber(ctx, "foo/bar", 999)
+	if err != nil {
+		t.Fatalf("miss path: %v", err)
+	}
+	if miss != nil {
+		t.Fatalf("expected nil for unknown pr, got %+v", miss)
+	}
+}
+
+func TestFindByRepoAndNumber_Validates(t *testing.T) {
+	c := NewClientWithRunner(&fakeRunner{})
+	if _, err := c.FindByRepoAndNumber(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error on empty repo")
+	}
+	if _, err := c.FindByRepoAndNumber(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error on zero pr_number")
+	}
+}
+
+func TestFindMergeRequestForFeedback_WalksUp(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "w/x", PRNumber: 11})
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "w/x#11")
+	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
+		ProcessingCycleID: cycleID,
+		Kind:              FeedbackKindCommentThread,
+		ExternalID:        "PRRT_walk",
+		Title:             "walk-up",
+	})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	mr, err := c.FindMergeRequestForFeedback(ctx, fbID)
+	if err != nil {
+		t.Fatalf("FindMergeRequestForFeedback: %v", err)
+	}
+	if mr == nil {
+		t.Fatalf("expected to find merge-request, got nil")
+	}
+	if mr.ID != prID {
+		t.Fatalf("expected %s, got %s", prID, mr.ID)
+	}
+	if mr.Fields.Repo != "w/x" || mr.Fields.PRNumber != 11 {
+		t.Fatalf("metadata not populated: %+v", mr.Fields)
+	}
+}
+
+func TestFindMergeRequestForFeedback_Validates(t *testing.T) {
+	c := NewClientWithRunner(&fakeRunner{})
+	if _, err := c.FindMergeRequestForFeedback(context.Background(), ""); err == nil {
+		t.Fatalf("expected error on empty id")
+	}
+}

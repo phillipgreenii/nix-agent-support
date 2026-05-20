@@ -12,8 +12,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
+
+// beadsClientForComment is overridable so tests can swap an in-memory client.
+var beadsClientForComment = func() beadsFeedbackClient {
+	return beads.NewClient()
+}
+
+// beadsFeedbackClient narrows beads.Client to the methods comment respond
+// needs.
+type beadsFeedbackClient interface {
+	GetFeedback(ctx context.Context, id string) (*beads.Feedback, error)
+	FindMergeRequestForFeedback(ctx context.Context, feedbackID string) (*beads.MergeRequest, error)
+}
 
 // reviewFlags holds the parsed CLI flags for the `pg-pr review` subcommands.
 type reviewFlags struct {
@@ -249,14 +262,77 @@ var commentAddCmd = &cobra.Command{
 var commentRespondCmd = &cobra.Command{
 	Use:   "respond <feedback-id>",
 	Short: "Reply to a review thread by feedback bead id",
-	Long: `Resolve a feedback bead id to (repo, thread-id) and reply on
-the upstream VCS. This subcommand depends on feedback beads carrying
-the upstream thread id, which lands in Phase 3 (epic beads_pg2-ywy).`,
+	Long: `Resolve a feedback bead id to (repo, upstream-thread-id) by reading
+the feedback bead's metadata and walking parent-child deps up to the
+merge-request bead, then reply on the upstream VCS via ReplyToThread.
+
+Supports kind=comment-thread and kind=review-thread. Other kinds
+(ci-failure, review-request, jira-link) cannot be responded to and
+return an error.
+
+The reply body comes from --body, --body-file, or stdin (exactly one).`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
-		_ = args
-		return errors.New("pg-pr comment respond: not implemented in Phase 2; feedback beads' upstream thread ids land in Phase 3 (epic beads_pg2-ywy)")
-	},
+	RunE: runCommentRespond,
+}
+
+func runCommentRespond(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	feedbackID := args[0]
+	body, err := loadCommentBody(cmd, rvF.body, rvF.fromFile)
+	if err != nil {
+		return err
+	}
+
+	bdc := beadsClientForComment()
+	if bdc == nil {
+		return errors.New("comment respond: beads client not available")
+	}
+	fb, err := bdc.GetFeedback(ctx, feedbackID)
+	if err != nil {
+		return fmt.Errorf("comment respond: lookup feedback %s: %w", feedbackID, err)
+	}
+	if fb == nil {
+		return fmt.Errorf("comment respond: feedback bead %s not found", feedbackID)
+	}
+
+	kind := fb.Fields.Kind
+	switch kind {
+	case string(beads.FeedbackKindCommentThread), string(beads.FeedbackKindReviewThread):
+		// proceed
+	case "":
+		return fmt.Errorf("comment respond: feedback bead %s has no kind metadata", feedbackID)
+	default:
+		return fmt.Errorf("comment respond: cannot respond to %s feedback", kind)
+	}
+
+	externalID := fb.Fields.ExternalID
+	if externalID == "" {
+		return fmt.Errorf("comment respond: feedback bead %s missing external_id metadata", feedbackID)
+	}
+
+	mr, err := bdc.FindMergeRequestForFeedback(ctx, feedbackID)
+	if err != nil {
+		return fmt.Errorf("comment respond: resolve merge-request for feedback %s: %w", feedbackID, err)
+	}
+	if mr == nil {
+		return fmt.Errorf("comment respond: no merge-request bead found for feedback %s", feedbackID)
+	}
+	repo := mr.Fields.Repo
+	if repo == "" {
+		return fmt.Errorf("comment respond: merge-request bead %s missing repo metadata", mr.ID)
+	}
+
+	body = marker.Markerify(body)
+	c, err := vcsProviderFor(repo).ReplyToThread(ctx, repo, externalID, body)
+	if err != nil {
+		return fmt.Errorf("comment respond: reply to thread %s: %w", externalID, err)
+	}
+	if output.Resolve(rvF.json) {
+		return writeJSON(cmd.OutOrStdout(), c)
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Replied to %s thread %s on PR %s#%d\n",
+		kind, externalID, repo, mr.Fields.PRNumber)
+	return err
 }
 
 var commentResolveCmd = &cobra.Command{
@@ -317,6 +393,8 @@ func init() {
 	}
 	commentAddCmd.Flags().StringVar(&rvF.body, "body", "", "Comment body (alternative to stdin)")
 	commentAddCmd.Flags().StringVar(&rvF.fromFile, "body-file", "", "Read the comment body from this file")
+	commentRespondCmd.Flags().StringVar(&rvF.body, "body", "", "Reply body (alternative to stdin)")
+	commentRespondCmd.Flags().StringVar(&rvF.fromFile, "body-file", "", "Read the reply body from this file")
 
 	reviewCmd.AddCommand(reviewDraftCmd, reviewPostCmd, reviewSubmitCmd)
 	commentCmd.AddCommand(commentAddCmd, commentRespondCmd, commentResolveCmd)

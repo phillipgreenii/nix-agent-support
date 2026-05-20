@@ -137,3 +137,55 @@ func TestCreateFeedback_Validates(t *testing.T) {
 		t.Fatalf("expected validation error when kind/title missing")
 	}
 }
+
+func TestGetFeedback_ReturnsBead(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "g/h", PRNumber: 4})
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "g/h#4")
+	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
+		ProcessingCycleID: cycleID,
+		Kind:              FeedbackKindCommentThread,
+		ExternalID:        "PRRT_abc",
+		Fingerprint:       "fp-get",
+		Title:             "test feedback",
+	})
+	if err != nil {
+		t.Fatalf("create feedback: %v", err)
+	}
+
+	got, err := c.GetFeedback(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetFeedback: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected to find feedback %s", fbID)
+	}
+	if got.Fields.Kind != string(FeedbackKindCommentThread) {
+		t.Fatalf("kind: got %q", got.Fields.Kind)
+	}
+	if got.Fields.ExternalID != "PRRT_abc" {
+		t.Fatalf("external_id: got %q", got.Fields.ExternalID)
+	}
+}
+
+func TestGetFeedback_NotFound(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	got, err := c.GetFeedback(ctx, "does-not-exist")
+	if err != nil {
+		t.Fatalf("GetFeedback: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
+func TestGetFeedback_Validates(t *testing.T) {
+	c := NewClientWithRunner(&fakeRunner{})
+	if _, err := c.GetFeedback(context.Background(), ""); err == nil {
+		t.Fatalf("expected error on empty id")
+	}
+}

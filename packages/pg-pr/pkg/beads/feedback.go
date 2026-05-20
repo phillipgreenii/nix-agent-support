@@ -157,6 +157,39 @@ func (c *Client) ListFeedback(ctx context.Context, cycleID string, includeClosed
 	return out2, nil
 }
 
+// GetFeedback returns a single feedback bead by ID, or nil if not found
+// (or if the bead is not a feedback issue). Includes closed beads.
+func (c *Client) GetFeedback(ctx context.Context, id string) (*Feedback, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, errors.New("feedback: id required")
+	}
+	out, err := c.Runner.Run(ctx, "list", "--all", "--id="+id, "--json")
+	if err != nil {
+		return nil, fmt.Errorf("get feedback: %w", err)
+	}
+	issues, err := parseBDList(out)
+	if err != nil {
+		return nil, err
+	}
+	for _, iss := range issues {
+		if iss.ID != id {
+			continue
+		}
+		if iss.Type != "" && iss.Type != TypeFeedback {
+			// Not a feedback bead.
+			return nil, nil
+		}
+		fb := Feedback{
+			ID:     iss.ID,
+			Title:  iss.Title,
+			Status: iss.Status,
+			Fields: feedbackFieldsFromMetadata(iss.Metadata),
+		}
+		return &fb, nil
+	}
+	return nil, nil
+}
+
 // FindFeedbackByFingerprint returns the feedback bead under the given
 // processing-cycle whose Fingerprint equals fingerprint, or nil if none
 // match. Includes closed beads so we don't accidentally re-create a
