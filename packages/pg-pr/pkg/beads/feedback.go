@@ -32,6 +32,13 @@ type FeedbackFields struct {
 	ExternalID  string `json:"external_id,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	AuthorRole  string `json:"author_role,omitempty"`
+	// ReplyDraft holds the body the LLM wants the sync engine to post as a
+	// reply to the upstream thread. The sync engine reads it on the next
+	// pass, posts via vcs.ReplyToThread, and writes ResponseID back.
+	ReplyDraft string `json:"reply_draft,omitempty"`
+	// ResponseID is the upstream comment id returned by ReplyToThread; its
+	// presence is the idempotency marker — sync skips posting again when set.
+	ResponseID string `json:"response_id,omitempty"`
 }
 
 // Feedback is a parsed view of a feedback bead.
@@ -226,6 +233,12 @@ func encodeFeedbackMetadata(f FeedbackFields) (string, error) {
 	if f.AuthorRole != "" {
 		m["author_role"] = f.AuthorRole
 	}
+	if f.ReplyDraft != "" {
+		m["reply_draft"] = f.ReplyDraft
+	}
+	if f.ResponseID != "" {
+		m["response_id"] = f.ResponseID
+	}
 	if len(m) == 0 {
 		return "{}", nil
 	}
@@ -248,9 +261,99 @@ func feedbackFieldsFromMetadata(m map[string]any) FeedbackFields {
 			f.Fingerprint = asString(v)
 		case "author_role":
 			f.AuthorRole = asString(v)
+		case "reply_draft":
+			f.ReplyDraft = asString(v)
+		case "response_id":
+			f.ResponseID = asString(v)
 		}
 	}
 	return f
+}
+
+// SetReplyDraft stores body on the feedback bead under the bd metadata key
+// "reply_draft". The body is the text the LLM wants the sync engine to post
+// to the upstream thread on its next pass.
+//
+// We use bd's `--set-metadata key=value` which merges into the existing
+// metadata map (verified against bd CLI; the `--metadata <json>` flag also
+// merges, but --set-metadata avoids round-tripping the full map).
+func (c *Client) SetReplyDraft(ctx context.Context, id, body string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("feedback: id required")
+	}
+	if _, err := c.Runner.Run(ctx, "update", id, "--set-metadata", "reply_draft="+body); err != nil {
+		return fmt.Errorf("set reply_draft on %s: %w", id, err)
+	}
+	return nil
+}
+
+// GetReplyDraft reads the "reply_draft" metadata key from a feedback bead.
+// Missing key returns ("", nil) — not an error — so callers can treat unset
+// uniformly with empty.
+func (c *Client) GetReplyDraft(ctx context.Context, id string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", errors.New("feedback: id required")
+	}
+	fb, err := c.GetFeedback(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if fb == nil {
+		return "", nil
+	}
+	return fb.Fields.ReplyDraft, nil
+}
+
+// SetResponseID stores the upstream response id on a feedback bead under
+// the bd metadata key "response_id". Once set, the sync engine treats the
+// reply as posted and will not re-post — this is the idempotency marker for
+// the B3 reply pipeline.
+func (c *Client) SetResponseID(ctx context.Context, id, responseID string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("feedback: id required")
+	}
+	if _, err := c.Runner.Run(ctx, "update", id, "--set-metadata", "response_id="+responseID); err != nil {
+		return fmt.Errorf("set response_id on %s: %w", id, err)
+	}
+	return nil
+}
+
+// GetResponseID reads the "response_id" metadata key from a feedback bead.
+// Missing key returns ("", nil).
+func (c *Client) GetResponseID(ctx context.Context, id string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", errors.New("feedback: id required")
+	}
+	fb, err := c.GetFeedback(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if fb == nil {
+		return "", nil
+	}
+	return fb.Fields.ResponseID, nil
+}
+
+// ListFeedbackPendingReply returns feedback beads where a reply_draft is
+// queued (non-empty) AND no response_id has been recorded yet. Includes
+// both open and closed feedback — a reply might be queued just before the
+// LLM closes the bead, and the sync engine should still post it.
+func (c *Client) ListFeedbackPendingReply(ctx context.Context) ([]Feedback, error) {
+	all, err := c.ListFeedback(ctx, "" /* all cycles */, true /* includeClosed */)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Feedback, 0, len(all))
+	for _, fb := range all {
+		if fb.Fields.ReplyDraft == "" {
+			continue
+		}
+		if fb.Fields.ResponseID != "" {
+			continue
+		}
+		out = append(out, fb)
+	}
+	return out, nil
 }
 
 // Package-level convenience wrappers using the default Client.
