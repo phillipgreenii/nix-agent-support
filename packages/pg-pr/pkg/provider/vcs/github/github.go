@@ -42,16 +42,26 @@ func NewWithRunner(r ghRunner) *Provider {
 // ghRunner abstracts the `gh` CLI. Implementations return stdout bytes.
 type ghRunner interface {
 	Run(ctx context.Context, args ...string) (stdout []byte, err error)
+	// RunStdin invokes gh with the given args while feeding stdin to the
+	// subprocess. Used by write paths that POST JSON via `--input -`.
+	RunStdin(ctx context.Context, stdin []byte, args ...string) (stdout []byte, err error)
 }
 
 // cliGHRunner is the production runner that invokes the real `gh` binary.
 type cliGHRunner struct{}
 
 func (cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return cliGHRunner{}.RunStdin(ctx, nil, args...)
+}
+
+func (cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -312,15 +322,139 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 
 	return out, nil
 }
-func (p *Provider) AddComment(context.Context, string, int, string) (*api.Comment, error) {
-	return nil, errStub
+
+// AddComment posts a top-level PR comment via the gh CLI.
+//
+// Phase 2: minimal implementation using the `repos/.../issues/<n>/comments`
+// REST endpoint. The returned api.Comment only carries the new comment's
+// NodeID and Body; richer fields land in Phase 3.
+func (p *Provider) AddComment(ctx context.Context, repo string, number int, body string) (*api.Comment, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	if strings.TrimSpace(body) == "" {
+		return nil, errors.New("github: comment body is empty")
+	}
+	raw, err := p.gh.Run(ctx,
+		"api",
+		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
+		"--method", "POST",
+		"-f", fmt.Sprintf("body=%s", body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: add comment: %w", err)
+	}
+	var c ghIssueComment
+	if err := json.Unmarshal(raw, &c); err != nil {
+		// Some gh versions return empty stdout on success; treat as
+		// fire-and-forget rather than a hard error.
+		return &api.Comment{Body: body}, nil
+	}
+	return &api.Comment{
+		ID:     c.NodeID,
+		Author: c.User.Login,
+		Body:   c.Body,
+	}, nil
 }
+
+// ReplyToThread is deferred to Phase 3. The GraphQL `addPullRequestReviewThreadReply`
+// mutation requires the review_thread node id, which our Phase 2 ListComments does
+// not yet plumb through. Returning ErrNotImplemented keeps the surface honest.
 func (p *Provider) ReplyToThread(context.Context, string, string, string) (*api.Comment, error) {
-	return nil, errStub
+	return nil, fmt.Errorf("github: ReplyToThread: %w (lands in Phase 3 with the GraphQL thread plumbing)", vcs.ErrNotImplemented)
 }
-func (p *Provider) ResolveThread(context.Context, string, string) error { return errStub }
-func (p *Provider) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
-	return nil, errStub
+
+// ResolveThread is deferred to Phase 3 for the same reason as ReplyToThread:
+// the GraphQL `resolveReviewThread` mutation needs the review_thread node id.
+func (p *Provider) ResolveThread(context.Context, string, string) error {
+	return fmt.Errorf("github: ResolveThread: %w (lands in Phase 3 with the GraphQL thread plumbing)", vcs.ErrNotImplemented)
+}
+
+// reviewComment is the on-wire shape sent inside POST /reviews's `comments[]`.
+type reviewComment struct {
+	Path        string `json:"path"`
+	Body        string `json:"body"`
+	Line        int    `json:"line,omitempty"`
+	StartLine   int    `json:"start_line,omitempty"`
+	Side        string `json:"side,omitempty"`
+	SubjectType string `json:"subject_type,omitempty"`
+}
+
+// PostReview creates a pending PR review with optional comments.
+//
+// The wire format mirrors GitHub's review-create REST endpoint
+// (`POST repos/.../pulls/<n>/reviews`). `event` is left unspecified so the
+// review is created in PENDING state — agents/humans submit explicitly.
+//
+// Phase 2: comments without a Path become PR-level (subject_type=file when
+// Path is set + Line empty; PR-level when Path empty). The caller already
+// dedups against existing review-comments before calling.
+func (p *Provider) PostReview(ctx context.Context, repo string, number int, body string, comments []api.Comment) (*api.Review, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+
+	rcs := make([]reviewComment, 0, len(comments))
+	for _, c := range comments {
+		if c.Path == "" {
+			// PR-level: fold into review body below.
+			if body != "" {
+				body += "\n\n"
+			}
+			body += c.Body
+			continue
+		}
+		rc := reviewComment{Path: c.Path, Body: c.Body}
+		if c.Line > 0 {
+			rc.Line = c.Line
+			rc.Side = "RIGHT"
+		} else {
+			rc.SubjectType = "file"
+		}
+		rcs = append(rcs, rc)
+	}
+
+	payload := map[string]any{}
+	if body != "" {
+		payload["body"] = body
+	}
+	if len(rcs) > 0 {
+		payload["comments"] = rcs
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("github: marshal review payload: %w", err)
+	}
+
+	raw, err := p.gh.RunStdin(ctx, payloadJSON,
+		"api",
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
+		"--method", "POST",
+		"--input", "-",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: post review: %w", err)
+	}
+	var resp struct {
+		NodeID string `json:"node_id"`
+		State  string `json:"state"`
+		Body   string `json:"body"`
+	}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		_ = json.Unmarshal(raw, &resp)
+	}
+	return &api.Review{
+		ID:    resp.NodeID,
+		State: strings.ToLower(resp.State),
+		Body:  resp.Body,
+	}, nil
 }
 
 // Compile-time check that Provider satisfies vcs.Provider.

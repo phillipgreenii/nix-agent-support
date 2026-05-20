@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // fakeGH replays canned responses keyed by the first two arguments
@@ -32,6 +35,18 @@ func (f *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 		return resp, nil
 	}
 	return []byte("[]"), nil
+}
+
+func (f *fakeGH) RunStdin(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, append([]string(nil), args...))
+	key := strings.Join(args[:min(2, len(args))], " ")
+	if err, ok := f.errs[key]; ok {
+		return nil, err
+	}
+	if resp, ok := f.responses[key]; ok {
+		return resp, nil
+	}
+	return []byte("{}"), nil
 }
 
 const samplePRList = `[
@@ -296,6 +311,69 @@ func TestListComments_ValidatesInput(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// Write path tests (AddComment, PostReview)
+// ----------------------------------------------------------------------
+
+func TestAddComment_PostsToIssueEndpoint(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/issues/42/comments"] = []byte(
+		`{"node_id":"IC_kw","user":{"login":"phillipg"},"body":"hi"}`)
+	p := NewWithRunner(gh)
+
+	c, err := p.AddComment(context.Background(), "foo/bar", 42, "hi")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if c.ID != "IC_kw" || c.Author != "phillipg" {
+		t.Fatalf("unexpected comment: %+v", c)
+	}
+}
+
+func TestAddComment_EmptyBodyRejected(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.AddComment(context.Background(), "foo/bar", 42, "  "); err == nil {
+		t.Fatalf("expected error for whitespace-only body")
+	}
+}
+
+func TestPostReview_SendsJSONPayload(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(
+		`{"node_id":"RV_kw","state":"PENDING","body":"the body"}`)
+	p := NewWithRunner(gh)
+
+	rev, err := p.PostReview(context.Background(), "foo/bar", 42,
+		"top-level body",
+		[]api.Comment{
+			{Path: "main.go", Line: 12, Body: "rename x"},
+			{Path: "", Body: "PR-level note"},
+			{Path: "readme.md", Body: "missing section"}, // file-level
+		})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if rev.ID != "RV_kw" || rev.State != "pending" {
+		t.Fatalf("unexpected review: %+v", rev)
+	}
+}
+
+func TestReplyToThread_NotImplemented(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "TH_1", "hi"); err == nil ||
+		!errors.Is(err, vcs.ErrNotImplemented) {
+		t.Fatalf("expected vcs.ErrNotImplemented, got %v", err)
+	}
+}
+
+func TestResolveThread_NotImplemented(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if err := p.ResolveThread(context.Background(), "foo/bar", "TH_1"); err == nil ||
+		!errors.Is(err, vcs.ErrNotImplemented) {
+		t.Fatalf("expected vcs.ErrNotImplemented, got %v", err)
+	}
+}
+
 func TestListComments_EmptyArrays(t *testing.T) {
 	p := NewWithRunner(&pathFakeGH{
 		responses: map[string][]byte{
@@ -325,4 +403,14 @@ func (f *pathFakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 		return r, nil
 	}
 	return []byte("[]"), nil
+}
+
+func (f *pathFakeGH) RunStdin(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+	if len(args) < 2 {
+		return []byte("{}"), nil
+	}
+	if r, ok := f.responses[args[1]]; ok {
+		return r, nil
+	}
+	return []byte("{}"), nil
 }
