@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/config"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/block"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/poller"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
@@ -60,20 +61,34 @@ func runDaemon(args []string) {
 		os.Exit(1)
 	}
 
-	// Load persisted runtime state (caffeinate toggle). Plan 3 client
-	// surface lets users toggle; the apply step writes back here.
 	runtimePath := filepath.Join(paths.Dir, "runtime.json")
-	if rs, err := daemon.ReadRuntimeState(runtimePath); err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: read runtime state (continuing): %v\n", err)
-	} else {
-		_ = rs // applied via Caffeinate RPC handler once wired
+	rs, rsErr := daemon.ReadRuntimeState(runtimePath)
+	if rsErr != nil {
+		fmt.Fprintf(os.Stderr, "daemon: read runtime state (continuing): %v\n", rsErr)
 	}
 
+	// Caffeinate manager — daemon owns its own Proc so the wrapper PID
+	// is the daemon itself; agents are simply observed by the poller.
+	caffProc := &caffeinate.Proc{}
+	caffMgr := &caffeinate.Manager{
+		Grace:   cfg.CaffeinateGrace,
+		Spawn:   caffProc.Spawn,
+		Kill:    caffProc.Kill,
+		IsAlive: caffProc.IsAlive,
+		Now:     time.Now,
+		PID:     os.Getpid(),
+	}
+	// Ensure caffeinate is killed even if Run returns abnormally.
+	defer func() { _ = caffProc.Kill() }()
+
 	opts := daemon.RunOptions{
-		Paths:    paths,
-		Emitter:  emitter,
-		Tick:     time.Duration(*tickS) * time.Second,
-		PlanTier: cfg.PlanTier,
+		Paths:               paths,
+		Emitter:             emitter,
+		Tick:                time.Duration(*tickS) * time.Second,
+		PlanTier:            cfg.PlanTier,
+		Caffeinate:          caffMgr,
+		InitialCaffeinateOn: rs.CaffeinateOn,
+		RuntimePath:         runtimePath,
 	}
 
 	if !*disablePoller {
@@ -83,6 +98,16 @@ func runDaemon(args []string) {
 		opts.WeekTracker = weekTr
 		opts.WeeklyFn = weeklyFn
 		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — weekly fetch is slow
+
+		// Reuse the poller's signaler set for nudge dispatch.
+		signalers := signallayer.DefaultSignalers()
+		opts.NudgeFn = func(pid int, text string) error {
+			sig := signallayer.ResolveSignaler(signalers, pid)
+			if sig == nil {
+				return fmt.Errorf("no signaler for pid %d", pid)
+			}
+			return sig.Send(pid, text)
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

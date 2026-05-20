@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/block"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/caffeinate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/poller"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/week"
@@ -117,6 +118,14 @@ type RunOptions struct {
 	Poller       *poller.Poller
 	BlockTracker *block.Tracker
 	WeekTracker  *week.Tracker
+	// Caffeinate, when non-nil, has its Tick advanced each main tick
+	// with the current any-working signal derived from the snapshot.
+	Caffeinate *caffeinate.Manager
+	// InitialCaffeinateOn applies the persisted user toggle at startup.
+	InitialCaffeinateOn bool
+	// RuntimePath is the runtime.json file path. Empty disables persistence
+	// of caffeinate toggle changes from Caffeinate RPC.
+	RuntimePath string
 	// WeeklyFn fetches the current week entry. Nil → never polled.
 	WeeklyFn func(ctx context.Context) (*ccusage.WeeklyEntry, error)
 	// PlanTier is forwarded as the `plan_tier` attribute on emitted
@@ -125,6 +134,9 @@ type RunOptions struct {
 	// WeeklyEvery controls how often WeeklyFn is invoked relative to
 	// the main tick. 0 means once per tick.
 	WeeklyEvery int
+	// NudgeFn dispatches a signal to the given pid. nil → Nudge RPC
+	// returns FailedPrecondition.
+	NudgeFn func(pid int, text string) error
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -143,7 +155,15 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	defer lis.Close()
 
 	state := newSharedState()
-	_, stop := serve(lis, state)
+	state.mu.Lock()
+	state.runtimePath = opts.RuntimePath
+	state.mu.Unlock()
+	state.setCaffeinateOn(opts.InitialCaffeinateOn)
+	if opts.Caffeinate != nil {
+		opts.Caffeinate.SetToggle(opts.InitialCaffeinateOn)
+	}
+
+	_, stop := serve(lis, state, opts.NudgeFn)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())
@@ -182,6 +202,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		case <-t.C:
 			tickCount++
 			if opts.Poller == nil {
+				// no poller — still advance the (toggle-driven) caffeinate
+				// tick to honour RPC-driven on/off requests
+				if opts.Caffeinate != nil {
+					// re-read user toggle from shared state in case Caffeinate RPC changed it
+					opts.Caffeinate.SetToggle(state.isCaffeinateOn())
+					opts.Caffeinate.Tick(false)
+				}
 				continue
 			}
 			tree, _, err := opts.Poller.Snapshot(ctx)
@@ -199,6 +226,36 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			}
 			if opts.WeekTracker != nil {
 				opts.WeekTracker.Update(tree.ActiveWeek)
+			}
+			anyWorking := false
+			for _, d := range tree.Dirs {
+				if d.WorkingN > 0 {
+					anyWorking = true
+					break
+				}
+			}
+			if opts.Caffeinate != nil {
+				opts.Caffeinate.SetToggle(state.isCaffeinateOn())
+				prevState := opts.Caffeinate.State()
+				opts.Caffeinate.Tick(anyWorking)
+				newState := opts.Caffeinate.State()
+				active := newState != caffeinate.StateOff
+				cause := ""
+				if active {
+					if state.isCaffeinateOn() {
+						cause = "manual"
+					}
+					if anyWorking {
+						cause = "agents_active"
+					}
+				}
+				state.setCaffeinateActive(active, cause)
+				if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
+					opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
+				}
+				if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !anyWorking {
+					opts.Emitter.RecordCaffeinateGraceExpired(nil)
+				}
 			}
 			updateGauges(opts.Emitter, tree, opts.PlanTier)
 			state.setTree(tree)

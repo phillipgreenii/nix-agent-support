@@ -35,9 +35,15 @@ var version = "dev"
 //     no current TUI flags collide with a subcommand name.
 func pickSubcommand(args []string) (cmd string, rest []string) {
 	known := map[string]bool{
-		"daemon":            true,
-		"status":            true,
-		"agents-busy-check": true,
+		"daemon":                     true,
+		"status":                     true,
+		"agents-busy-check":          true,
+		"wait-until-agents-finished": true,
+		"config":                     true,
+		"caffeinate":                 true,
+		"nudge":                      true,
+		"info":                       true,
+		"cmux-bridge":                true,
 	}
 	if len(args) < 2 {
 		return "tui", nil
@@ -57,12 +63,34 @@ func main() {
 		runStatus(rest)
 	case "agents-busy-check":
 		runAgentsBusyCheck(rest)
+	case "wait-until-agents-finished":
+		runWaitUntilAgentsFinished(rest)
+	case "config":
+		runConfigSubcommand(rest)
+	case "caffeinate":
+		runCaffeinate(rest)
+	case "nudge":
+		runNudge(rest)
+	case "info":
+		runInfo(rest)
+	case "cmux-bridge":
+		runCmuxBridge(rest)
 	case "tui":
 		runTUI(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
 		os.Exit(2)
 	}
+}
+
+// runConfigSubcommand dispatches `config show` (only "show" supported v1).
+func runConfigSubcommand(args []string) {
+	if len(args) == 0 || args[0] == "show" {
+		runConfigShow(args)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "config: unknown action %q (only 'show' supported)\n", args[0])
+	os.Exit(2)
 }
 
 func runTUI(args []string) {
