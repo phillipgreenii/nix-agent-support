@@ -202,8 +202,7 @@ func renderCommits(w io.Writer, commits []gitlocal.Commit) error {
 			}
 		}
 		if strings.TrimSpace(c.Body) != "" {
-			lines := strings.Split(strings.TrimSpace(c.Body), "\n")
-			for _, line := range lines {
+			for line := range strings.SplitSeq(strings.TrimSpace(c.Body), "\n") {
 				if _, err := fmt.Fprintf(w, "    %s\n", line); err != nil {
 					return err
 				}
