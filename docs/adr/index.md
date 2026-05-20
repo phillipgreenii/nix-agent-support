@@ -7,5 +7,9 @@
 | [0002](0002-claude-enable-as-master-gate.md)                     | claude.enable as Master Gate for All Claude Tooling           | Accepted | 2026-05-01 |
 | [0003](0003-single-pgii-local-plugins-marketplace.md)            | Single pgii-local-plugins Marketplace                         | Accepted | 2026-05-01 |
 | [0004](0004-ceta-configrules-xdg-config-for-consumer-rules.md)   | CETA configrules: XDG Config File for Consumer-Specific Rules | Accepted | 2026-05-01 |
-| [0005](0005-pg2-agent-generic-dispatcher.md)                     | pg2-agent: Generic Agent Dispatcher                            | Accepted | 2026-05-01 |
+| [0005](0005-pg2-agent-generic-dispatcher.md)                     | pg2-agent: Generic Agent Dispatcher                           | Accepted | 2026-05-01 |
 | [0006](0006-enabledbydefault-overrides-plugin-enable-control.md) | enabledByDefault + overrides for Per-Plugin Enable Control    | Accepted | 2026-05-01 |
+| [0007](0007-pg-pr-go-cli-consolidation.md)                       | pg-pr Go CLI consolidation                                    | Accepted | 2026-05-20 |
+| [0008](0008-pg-pr-extension-via-exec-scripts.md)                 | pg-pr extension via exec scripts                              | Accepted | 2026-05-20 |
+| [0009](0009-pg-pr-bead-schema.md)                                | pg-pr bead schema                                             | Accepted | 2026-05-20 |
+| [0010](0010-pg-pr-defer-forgejo-to-v2.md)                        | pg-pr: defer forgejo to v2                                    | Accepted | 2026-05-20 |
