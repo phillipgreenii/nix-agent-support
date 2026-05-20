@@ -79,6 +79,13 @@ func (s *stubBeads) FindFeedbackByFingerprint(_ context.Context, _, _ string) (*
 	return nil, nil
 }
 func (s *stubBeads) CloseFeedback(_ context.Context, _, _ string) error { return nil }
+func (s *stubBeads) ListFeedbackPendingReply(_ context.Context) ([]beads.Feedback, error) {
+	return nil, nil
+}
+func (s *stubBeads) SetResponseID(_ context.Context, _, _ string) error { return nil }
+func (s *stubBeads) FindMergeRequestForFeedback(_ context.Context, _ string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
 
 // ----------------------------------------------------------------------
 // Test helpers

@@ -28,6 +28,19 @@ type fakeVCS struct {
 	myErr    map[string]error
 	teamErr  map[string]error
 	viewsErr map[string]error
+
+	// Reply pipeline (B3) recording. nil => not enabled (the engine will
+	// type-assert to ThreadReplier; with replyCalls non-nil the assertion
+	// uses the wrapper below in newReplyFakeVCS).
+	replyCalls   []replyCall
+	replyResp    *api.Comment // canned response; nil = error
+	replyRespErr error
+}
+
+type replyCall struct {
+	Repo     string
+	ThreadID string
+	Body     string
 }
 
 func newFakeVCS() *fakeVCS {
@@ -65,6 +78,16 @@ func (f *fakeVCS) ListTeamPRs(_ context.Context, repo string, _ []string) ([]api
 		return nil, err
 	}
 	return f.team[repo], nil
+}
+
+// ReplyToThread satisfies the ThreadReplier interface. Calls are recorded
+// in f.replyCalls; the return value comes from f.replyResp / f.replyRespErr.
+func (f *fakeVCS) ReplyToThread(_ context.Context, repo, threadID, body string) (*api.Comment, error) {
+	f.replyCalls = append(f.replyCalls, replyCall{Repo: repo, ThreadID: threadID, Body: body})
+	if f.replyRespErr != nil {
+		return nil, f.replyRespErr
+	}
+	return f.replyResp, nil
 }
 
 func keyOf(repo string, n int) string { return repo + "#" + itoa(n) }
@@ -426,6 +449,13 @@ func (noopBeads) FindFeedbackByFingerprint(context.Context, string, string) (*be
 	return nil, nil
 }
 func (noopBeads) CloseFeedback(context.Context, string, string) error { return nil }
+func (noopBeads) ListFeedbackPendingReply(context.Context) ([]beads.Feedback, error) {
+	return nil, nil
+}
+func (noopBeads) SetResponseID(context.Context, string, string) error { return nil }
+func (noopBeads) FindMergeRequestForFeedback(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
 
 func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
 	// Exercise the state-save error path by pointing StateDir at a file
@@ -460,5 +490,228 @@ func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
 	// BeadsCreated should still reflect work done.
 	if sum.BeadsCreated != 1 {
 		t.Fatalf("BeadsCreated: %d", sum.BeadsCreated)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Reply pipeline (Phase 6 B3)
+// ----------------------------------------------------------------------
+
+// seedFeedback creates a (merge-request, processing-cycle, feedback) chain
+// directly in the bd workspace. Returns the feedback bead id. Used to
+// pre-populate state for reply-pipeline tests.
+func seedFeedback(t *testing.T, bd *beads.Client, repo string, pr int, kind beads.FeedbackKind, externalID string) string {
+	t.Helper()
+	ctx := context.Background()
+	prID, _, err := bd.EnsureMergeRequest(ctx, "", beads.MergeRequestFields{Repo: repo, PRNumber: pr})
+	if err != nil {
+		t.Fatalf("seed MR: %v", err)
+	}
+	cycleID, err := bd.CreateProcessingCycle(ctx, prID, repo+"#seed")
+	if err != nil {
+		t.Fatalf("seed cycle: %v", err)
+	}
+	fbID, err := bd.CreateFeedback(ctx, beads.CreateFeedbackInput{
+		ProcessingCycleID: cycleID,
+		Kind:              kind,
+		ExternalID:        externalID,
+		Fingerprint:       "fp-" + externalID,
+		Title:             "seeded",
+	})
+	if err != nil {
+		t.Fatalf("seed feedback: %v", err)
+	}
+	return fbID
+}
+
+func TestSync_PostsQueuedReplyAndStoresResponseID(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	// PR must be in the enumerate set so the repo is "healthy".
+	vcs.my["foo/bar"] = []api.PR{samplePR(42, "foo/bar", "feat/r")}
+	vcs.replyResp = &api.Comment{ID: "C_RESP_123", Author: "phillipg"}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Seed a feedback bead under foo/bar#42 with a queued reply.
+	fbID := seedFeedback(t, bd, "foo/bar", 42, beads.FeedbackKindCommentThread, "THREAD_ABC")
+	if err := bd.SetReplyDraft(ctx, fbID, "thanks, fixed in deadbee"); err != nil {
+		t.Fatalf("SetReplyDraft: %v", err)
+	}
+
+	// Sync: should post the reply and record response_id.
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v\nErrors: %+v", err, sum.Errors)
+	}
+	if sum.RepliesPosted != 1 {
+		t.Fatalf("RepliesPosted: got %d want 1 (errors: %+v)", sum.RepliesPosted, sum.Errors)
+	}
+	if len(vcs.replyCalls) != 1 {
+		t.Fatalf("expected 1 ReplyToThread call, got %d: %+v", len(vcs.replyCalls), vcs.replyCalls)
+	}
+	got := vcs.replyCalls[0]
+	if got.Repo != "foo/bar" || got.ThreadID != "THREAD_ABC" || got.Body != "thanks, fixed in deadbee" {
+		t.Fatalf("ReplyToThread args: got %+v", got)
+	}
+	respID, err := bd.GetResponseID(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetResponseID: %v", err)
+	}
+	if respID != "C_RESP_123" {
+		t.Fatalf("response_id: got %q want C_RESP_123", respID)
+	}
+
+	// Second sync: with response_id set, must NOT call ReplyToThread again.
+	if _, err := e.Sync(ctx); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if len(vcs.replyCalls) != 1 {
+		t.Fatalf("expected no further ReplyToThread calls; got %d total", len(vcs.replyCalls))
+	}
+}
+
+func TestSync_ReplyToThreadErrorLeavesResponseIDEmpty(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	vcs.my["foo/bar"] = []api.PR{samplePR(50, "foo/bar", "feat/r2")}
+	vcs.replyRespErr = errors.New("upstream is down")
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, _ := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+
+	fbID := seedFeedback(t, bd, "foo/bar", 50, beads.FeedbackKindReviewThread, "PRRT_err")
+	if err := bd.SetReplyDraft(ctx, fbID, "queued"); err != nil {
+		t.Fatalf("SetReplyDraft: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	// Sync returns an aggregate error since the reply pass recorded one,
+	// but the test cares about the per-bead behavior.
+	if err == nil {
+		t.Fatalf("expected aggregate error from VCS failure")
+	}
+	if sum.RepliesPosted != 0 {
+		t.Fatalf("RepliesPosted: got %d want 0", sum.RepliesPosted)
+	}
+	respID, err := bd.GetResponseID(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetResponseID: %v", err)
+	}
+	if respID != "" {
+		t.Fatalf("response_id should remain empty on VCS error, got %q", respID)
+	}
+	// Next sync (after fixing the VCS) would retry — confirm at least one
+	// reply call was attempted this round.
+	if len(vcs.replyCalls) != 1 {
+		t.Fatalf("expected 1 ReplyToThread attempt, got %d", len(vcs.replyCalls))
+	}
+}
+
+func TestSync_SkipsNonReplyableFeedbackKind(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	vcs.my["foo/bar"] = []api.PR{samplePR(60, "foo/bar", "feat/r3")}
+	vcs.replyResp = &api.Comment{ID: "should_not_be_used"}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, _ := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+
+	// ci-failure cannot be replied to.
+	fbID := seedFeedback(t, bd, "foo/bar", 60, beads.FeedbackKindCIFailure, "CI_RUN_99")
+	if err := bd.SetReplyDraft(ctx, fbID, "queued reply"); err != nil {
+		t.Fatalf("SetReplyDraft: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	// One per-bead skip is logged as a SummaryError — Sync returns aggregate error.
+	if err == nil {
+		t.Fatalf("expected aggregate error from skip")
+	}
+	if sum.RepliesPosted != 0 {
+		t.Fatalf("RepliesPosted: got %d want 0", sum.RepliesPosted)
+	}
+	if len(vcs.replyCalls) != 0 {
+		t.Fatalf("expected no ReplyToThread calls on non-reply-able kind, got %d", len(vcs.replyCalls))
+	}
+	respID, err := bd.GetResponseID(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetResponseID: %v", err)
+	}
+	if respID != "" {
+		t.Fatalf("response_id should never be set for ci-failure, got %q", respID)
+	}
+	// Verify the skip reason landed in Summary.Errors.
+	foundSkip := false
+	for _, e := range sum.Errors {
+		if strings.Contains(e.Message, "cannot reply to ci-failure") {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Fatalf("expected 'cannot reply to ci-failure' in errors, got %+v", sum.Errors)
+	}
+}
+
+func TestSync_SkipsReplyForFeedbackOfDifferentRepo(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	// The configured repo is foo/bar (per minimalCfg).
+	vcs.my["foo/bar"] = []api.PR{samplePR(70, "foo/bar", "feat/r4")}
+	vcs.replyResp = &api.Comment{ID: "should_not_be_used"}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, _ := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+
+	// Seed a feedback bead under a DIFFERENT repo (other/repo).
+	fbID := seedFeedback(t, bd, "other/repo", 7, beads.FeedbackKindCommentThread, "TH_OTHER")
+	if err := bd.SetReplyDraft(ctx, fbID, "should be skipped for foo/bar's sync"); err != nil {
+		t.Fatalf("SetReplyDraft: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v\nErrors: %+v", err, sum.Errors)
+	}
+	if sum.RepliesPosted != 0 {
+		t.Fatalf("RepliesPosted: got %d want 0", sum.RepliesPosted)
+	}
+	if len(vcs.replyCalls) != 0 {
+		t.Fatalf("expected no ReplyToThread calls for cross-repo feedback, got %d", len(vcs.replyCalls))
+	}
+	respID, err := bd.GetResponseID(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetResponseID: %v", err)
+	}
+	if respID != "" {
+		t.Fatalf("response_id should be untouched, got %q", respID)
 	}
 }

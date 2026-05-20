@@ -109,6 +109,9 @@ func renderSyncSummary(w io.Writer, s *sync.Summary) {
 		s.TotalPRs, len(s.Repos))
 	_, _ = fmt.Fprintf(w, "  created: %d  updated: %d  closed: %d\n",
 		s.BeadsCreated, s.BeadsUpdated, s.BeadsClosed)
+	if s.RepliesPosted > 0 {
+		_, _ = fmt.Fprintf(w, "  replies posted: %d\n", s.RepliesPosted)
+	}
 	for _, r := range s.Repos {
 		if r.Error != "" {
 			_, _ = fmt.Fprintf(w, "  ! %s: %s\n", r.Repo, r.Error)

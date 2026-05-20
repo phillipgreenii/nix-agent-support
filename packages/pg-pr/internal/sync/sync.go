@@ -64,6 +64,13 @@ type DraftToggler interface {
 	SetDraft(ctx context.Context, repo string, number int, draft bool) error
 }
 
+// ThreadReplier is the optional subset of VCSProvider used by the B3
+// reply-sync pass. A provider that implements ThreadReplier can post
+// queued reply_draft bodies back to upstream review/comment threads.
+type ThreadReplier interface {
+	ReplyToThread(ctx context.Context, repo string, threadID, body string) (*api.Comment, error)
+}
+
 // CICDProvider is the subset of pkg/provider/cicd.Provider the sync engine
 // uses to fetch CI runs.
 type CICDProvider interface {
@@ -88,6 +95,11 @@ type BeadClient interface {
 	ListFeedback(ctx context.Context, cycleID string, includeClosed bool) ([]beads.Feedback, error)
 	FindFeedbackByFingerprint(ctx context.Context, cycleID, fingerprint string) (*beads.Feedback, error)
 	CloseFeedback(ctx context.Context, id, reason string) error
+
+	// Reply pipeline (B3).
+	ListFeedbackPendingReply(ctx context.Context) ([]beads.Feedback, error)
+	SetResponseID(ctx context.Context, id, responseID string) error
+	FindMergeRequestForFeedback(ctx context.Context, feedbackID string) (*beads.MergeRequest, error)
 }
 
 // Deps bundles the engine's dependencies.
@@ -151,6 +163,7 @@ type Summary struct {
 	CyclesCreated   int            `json:"cycles_created,omitempty"`
 	DraftPromoted   int            `json:"draft_promoted,omitempty"`
 	Escalated       int            `json:"escalated,omitempty"`
+	RepliesPosted   int            `json:"replies_posted,omitempty"`
 	Errors          []SummaryError `json:"errors,omitempty"`
 }
 
@@ -257,6 +270,22 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    key.Repo,
 				Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
+			})
+		}
+	}
+
+	// Phase 6 B3: process queued replies (LLM stored reply_draft; we post +
+	// record response_id). Runs once per healthy repo — the helper filters
+	// feedback beads to only those whose merge-request belongs to that repo.
+	for repo := range healthyRepos {
+		rcfg, err := e.repoConfig(repo)
+		if err != nil {
+			continue
+		}
+		if err := e.processReplyDrafts(ctx, rcfg, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    repo,
+				Message: fmt.Sprintf("reply pipeline: %v", err),
 			})
 		}
 	}
@@ -390,6 +419,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 		if err := e.maybePromoteDraft(ctx, repo, *pr, prBeadID, summary); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+		}
+		// Phase 6 B3: post queued replies for feedback beads under this repo.
+		if err := e.processReplyDrafts(ctx, rcfg, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 	}
@@ -774,6 +807,106 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, 
 		State:    "open",
 	})
 	summary.DraftPromoted++
+	return nil
+}
+
+// processReplyDrafts iterates feedback beads whose LLM-authored reply_draft
+// is queued for posting and posts each via vcs.ReplyToThread. The returned
+// upstream comment id is stored back on the bead as response_id, which is
+// the idempotency marker — subsequent sync passes skip beads whose
+// response_id is set.
+//
+// Scope: only feedback beads whose enclosing merge-request belongs to rcfg
+// are processed by this call. Other repos handle their own beads in their
+// own loop iteration.
+//
+// Per-bead failures (VCS errors, walker errors, missing external_id) are
+// recorded into summary.Errors but do not abort the loop — next sync
+// retries because response_id is still empty.
+func (e *Engine) processReplyDrafts(ctx context.Context, rcfg config.RepoConfig, summary *Summary) error {
+	provider, err := e.providerFor(rcfg)
+	if err != nil {
+		return nil
+	}
+	replier, ok := provider.(ThreadReplier)
+	if !ok {
+		// No reply capability — skip silently (e.g., a Phase 0 stub provider).
+		return nil
+	}
+	pending, err := e.deps.Beads.ListFeedbackPendingReply(ctx)
+	if err != nil {
+		return fmt.Errorf("list pending replies: %w", err)
+	}
+	for _, fb := range pending {
+		// Walk up: feedback → processing-cycle → merge-request.
+		mr, err := e.deps.Beads.FindMergeRequestForFeedback(ctx, fb.ID)
+		if err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: find merge-request: %v", fb.ID, err),
+			})
+			continue
+		}
+		if mr == nil {
+			// Orphan feedback — no merge-request anchor. Skip silently;
+			// another component should clean this up.
+			continue
+		}
+		// Scope to current repo — other repos will handle their own beads.
+		if mr.Fields.Repo != rcfg.Remote {
+			continue
+		}
+
+		// Only comment- and review-thread feedback can be replied to.
+		switch fb.Fields.Kind {
+		case string(beads.FeedbackKindCommentThread), string(beads.FeedbackKindReviewThread):
+			// supported
+		default:
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: cannot reply to %s", fb.ID, fb.Fields.Kind),
+			})
+			continue
+		}
+
+		if fb.Fields.ExternalID == "" {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: missing external_id (thread id)", fb.ID),
+			})
+			continue
+		}
+
+		resp, err := replier.ReplyToThread(ctx, mr.Fields.Repo, fb.Fields.ExternalID, fb.Fields.ReplyDraft)
+		if err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: ReplyToThread: %v", fb.ID, err),
+			})
+			continue
+		}
+		var respID string
+		if resp != nil {
+			respID = resp.ID
+		}
+		if respID == "" {
+			// VCS returned nil/empty id — without an idempotency marker we
+			// would re-post next sync. Record an error and move on.
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: ReplyToThread returned empty response id", fb.ID),
+			})
+			continue
+		}
+		if err := e.deps.Beads.SetResponseID(ctx, fb.ID, respID); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    rcfg.Remote,
+				Message: fmt.Sprintf("reply %s: SetResponseID: %v", fb.ID, err),
+			})
+			continue
+		}
+		summary.RepliesPosted++
+	}
 	return nil
 }
 
