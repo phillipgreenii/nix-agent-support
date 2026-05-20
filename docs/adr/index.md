@@ -13,3 +13,4 @@
 | [0008](0008-pg-pr-extension-via-exec-scripts.md)                 | pg-pr extension via exec scripts                              | Accepted | 2026-05-20 |
 | [0009](0009-pg-pr-bead-schema.md)                                | pg-pr bead schema                                             | Accepted | 2026-05-20 |
 | [0010](0010-pg-pr-defer-forgejo-to-v2.md)                        | pg-pr: defer forgejo to v2                                    | Accepted | 2026-05-20 |
+| [0011](0011-pa-monitor-daemon-otel-split.md)                     | pa-monitor Daemon + OTel Split                                | Accepted | 2026-05-20 |
