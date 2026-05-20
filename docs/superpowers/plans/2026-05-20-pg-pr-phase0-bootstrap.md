@@ -52,10 +52,10 @@ packages/pg-pr/
   default.nix                           # nix buildGoModule package
   pg-pr.md                              # tldr page (mirrors my-code-review-support-cli.md)
 home/programs/pg-pr/default.nix         # home-manager module skeleton
-docs/adr/0001-pg-pr-go-cli-consolidation.md
-docs/adr/0002-pg-pr-extension-via-exec-scripts.md
-docs/adr/0003-pg-pr-bead-schema.md
-docs/adr/0004-pg-pr-defer-forgejo-to-v2.md
+docs/adr/0007-pg-pr-go-cli-consolidation.md
+docs/adr/0008-pg-pr-extension-via-exec-scripts.md
+docs/adr/0009-pg-pr-bead-schema.md
+docs/adr/0010-pg-pr-defer-forgejo-to-v2.md
 ```
 
 ### Modified
@@ -1181,10 +1181,10 @@ git commit -m "feat(pg-pr): wire gofmt + golangci-lint into pre-commit"
 
 **Files:**
 
-- Create: `docs/adr/0001-pg-pr-go-cli-consolidation.md`
-- Create: `docs/adr/0002-pg-pr-extension-via-exec-scripts.md`
-- Create: `docs/adr/0003-pg-pr-bead-schema.md`
-- Create: `docs/adr/0004-pg-pr-defer-forgejo-to-v2.md`
+- Create: `docs/adr/0007-pg-pr-go-cli-consolidation.md`
+- Create: `docs/adr/0008-pg-pr-extension-via-exec-scripts.md`
+- Create: `docs/adr/0009-pg-pr-bead-schema.md`
+- Create: `docs/adr/0010-pg-pr-defer-forgejo-to-v2.md`
 
 - [ ] **Step 1: Confirm numbering is free**
 
@@ -1194,7 +1194,7 @@ ls docs/adr/
 
 Expected: no files named `0001-*.md` through `0004-*.md`. If any exist, shift the new numbers up by the conflicting amount and update cross-references accordingly.
 
-- [ ] **Step 2: Write 0001-pg-pr-go-cli-consolidation.md**
+- [ ] **Step 2: Write 0007-pg-pr-go-cli-consolidation.md**
 
 Use the template from `CLAUDE.md` §"ADR Template". Concrete content:
 
@@ -1209,7 +1209,7 @@ Use the template from `CLAUDE.md` §"ADR Template". Concrete content:
 - **Alternatives Considered**: (a) Keep separate tools, paper over with bash glue — rejected because it doesn't solve the cross-actor consistency problem. (b) Build as a Bash CLI — rejected because the existing Go skeleton (`my-code-review-support-cli`) already exists and is more testable.
 - **Related Decisions**: See also `docs/superpowers/specs/2026-05-19-pg-pr-design.md`. Supersedes the implicit decisions in `packages/gh-prreview/`, `packages/my-code-review-support/`, and `packages/my-code-review-support-cli/`.
 
-- [ ] **Step 3: Write 0002-pg-pr-extension-via-exec-scripts.md**
+- [ ] **Step 3: Write 0008-pg-pr-extension-via-exec-scripts.md**
 
 - **Status**: Accepted
 - **Date**: 2026-05-20
@@ -1221,7 +1221,7 @@ Use the template from `CLAUDE.md` §"ADR Template". Concrete content:
 - **Alternatives Considered**: (a) Go compile-time plugin registration via the Go `plugin` package — rejected because Go plugins are fragile on Darwin and version-locked. (b) Library-link nix-ziprecruiter's binaries against the same `pg-pr` source — rejected because user wants extensions not to rebuild core.
 - **Related Decisions**: `docs/superpowers/specs/2026-05-19-pg-pr-design.md` §"Provider extension protocol".
 
-- [ ] **Step 4: Write 0003-pg-pr-bead-schema.md**
+- [ ] **Step 4: Write 0009-pg-pr-bead-schema.md**
 
 - **Status**: Accepted
 - **Date**: 2026-05-20
@@ -1233,7 +1233,7 @@ Use the template from `CLAUDE.md` §"ADR Template". Concrete content:
 - **Alternatives Considered**: (a) Labels for hierarchy + builtin types only — rejected because bd `parent-child` deps already work and produce nicer `bd show` output. (b) `message` type for feedback — rejected because `message` IDs get `wisp-` prefix and may be TTL-compacted, threatening referential integrity for action→feedback links. (c) Custom `action` type — rejected because builtin `task`/`bug` suffice and reduce type proliferation.
 - **Related Decisions**: `docs/superpowers/specs/2026-05-19-pg-pr-design.md` §"Bead schema".
 
-- [ ] **Step 5: Write 0004-pg-pr-defer-forgejo-to-v2.md**
+- [ ] **Step 5: Write 0010-pg-pr-defer-forgejo-to-v2.md**
 
 - **Status**: Accepted
 - **Date**: 2026-05-20
@@ -1248,10 +1248,10 @@ Use the template from `CLAUDE.md` §"ADR Template". Concrete content:
 - [ ] **Step 6: Commit ADRs**
 
 ```bash
-git add docs/adr/0001-pg-pr-go-cli-consolidation.md \
-        docs/adr/0002-pg-pr-extension-via-exec-scripts.md \
-        docs/adr/0003-pg-pr-bead-schema.md \
-        docs/adr/0004-pg-pr-defer-forgejo-to-v2.md
+git add docs/adr/0007-pg-pr-go-cli-consolidation.md \
+        docs/adr/0008-pg-pr-extension-via-exec-scripts.md \
+        docs/adr/0009-pg-pr-bead-schema.md \
+        docs/adr/0010-pg-pr-defer-forgejo-to-v2.md
 git commit -m "docs(adr): pg-pr 0001–0004 (consolidation, extension, schema, forgejo)"
 ```
 
@@ -1278,10 +1278,10 @@ If it exists, Read it first and add entries instead of overwriting.
 
 | ADR                                              | Title                            | Status   | Date       |
 | ------------------------------------------------ | -------------------------------- | -------- | ---------- |
-| [0001](0001-pg-pr-go-cli-consolidation.md)       | pg-pr Go CLI consolidation       | Accepted | 2026-05-20 |
-| [0002](0002-pg-pr-extension-via-exec-scripts.md) | pg-pr extension via exec scripts | Accepted | 2026-05-20 |
-| [0003](0003-pg-pr-bead-schema.md)                | pg-pr bead schema                | Accepted | 2026-05-20 |
-| [0004](0004-pg-pr-defer-forgejo-to-v2.md)        | pg-pr: defer forgejo to v2       | Accepted | 2026-05-20 |
+| [0001](0007-pg-pr-go-cli-consolidation.md)       | pg-pr Go CLI consolidation       | Accepted | 2026-05-20 |
+| [0002](0008-pg-pr-extension-via-exec-scripts.md) | pg-pr extension via exec scripts | Accepted | 2026-05-20 |
+| [0003](0009-pg-pr-bead-schema.md)                | pg-pr bead schema                | Accepted | 2026-05-20 |
+| [0004](0010-pg-pr-defer-forgejo-to-v2.md)        | pg-pr: defer forgejo to v2       | Accepted | 2026-05-20 |
 ```
 
 - [ ] **Step 3: Commit**

@@ -161,10 +161,10 @@ pg-pr-plugin/default.nix                # registers plugin into local marketplac
 ### `phillipgreenii-nix-agent-support/docs/adr/`
 
 ```text
-NNNN-pg-pr-go-cli-consolidation.md
-NNNN-pg-pr-extension-via-exec-scripts.md
-NNNN-pg-pr-bead-schema.md
-NNNN-pg-pr-defer-forgejo-to-v2.md
+0007-pg-pr-go-cli-consolidation.md
+0008-pg-pr-extension-via-exec-scripts.md
+0009-pg-pr-bead-schema.md
+0010-pg-pr-defer-forgejo-to-v2.md
 index.md                                # updated
 ```
 
@@ -708,10 +708,10 @@ Source attribution of content (for migration):
 
 `phillipgreenii-nix-agent-support/docs/adr/` gets new ADRs (numbered sequentially against the existing index):
 
-- `NNNN-pg-pr-consolidation-of-pr-tooling.md` — the decision recorded here.
-- `NNNN-pg-pr-extension-via-exec-protocol.md` — script-out protocol for provider extension.
-- `NNNN-pg-pr-bead-schema.md` — merge-request + task + feedback + (task|bug) + state-file design.
-- `NNNN-pg-pr-defer-forgejo-to-v2.md` — v1 GH-only.
+- `0007-pg-pr-go-cli-consolidation.md` — the decision recorded here.
+- `0008-pg-pr-extension-via-exec-scripts.md` — script-out protocol for provider extension.
+- `0009-pg-pr-bead-schema.md` — merge-request + task + feedback + (task|bug) + state-file design.
+- `0010-pg-pr-defer-forgejo-to-v2.md` — v1 GH-only.
 - Index `docs/adr/index.md` updated accordingly.
 
 Any existing ADR that this work supersedes (e.g., if there's an ADR covering `gh-prreview` or `my-code-review-support` packaging) gets its status set to `Superseded` with a link to the new ADR.
