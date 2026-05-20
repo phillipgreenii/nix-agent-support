@@ -200,3 +200,129 @@ func TestStubMethodsReturnErrStub(t *testing.T) {
 		t.Fatalf("SetDraft should return errStub")
 	}
 }
+
+// ----------------------------------------------------------------------
+// ListComments tests
+// ----------------------------------------------------------------------
+
+const sampleIssueComments = `[
+  {
+    "node_id": "IC_kwDO_top1",
+    "body": "Looks good overall.",
+    "user": {"login": "alice"},
+    "author_association": "MEMBER"
+  },
+  {
+    "node_id": "IC_kwDO_top2",
+    "body": "Please add tests.",
+    "user": {"login": "bob"},
+    "author_association": "COLLABORATOR"
+  }
+]`
+
+const sampleReviewComments = `[
+  {
+    "node_id": "RC_kwDO_a",
+    "body": "use ctx",
+    "user": {"login": "alice"},
+    "path": "main.go",
+    "line": 42,
+    "original_line": 42,
+    "author_association": "MEMBER"
+  },
+  {
+    "node_id": "RC_kwDO_b",
+    "body": "nit: rename",
+    "user": {"login": "alice"},
+    "path": "main.go",
+    "line": 0,
+    "original_line": 17,
+    "in_reply_to_id": 12345,
+    "author_association": "MEMBER"
+  }
+]`
+
+func TestListComments_CombinesTopLevelAndInline(t *testing.T) {
+	gh := newFakeGH()
+	// Keys are first two args: "api repos/...".
+	gh.responses["api repos/foo/bar/issues/42/comments"] = []byte(sampleIssueComments)
+	gh.responses["api repos/foo/bar/pulls/42/comments"] = []byte(sampleReviewComments)
+
+	// Use a custom key extractor: since our fakeGH joins first 2 args,
+	// adapt: we look at full path. Rebuild fakeGH to key on args[1] (the path).
+	// Simpler: switch fakeGH to look up via exact path match below.
+	p := NewWithRunner(&pathFakeGH{
+		responses: map[string][]byte{
+			"repos/foo/bar/issues/42/comments": []byte(sampleIssueComments),
+			"repos/foo/bar/pulls/42/comments":  []byte(sampleReviewComments),
+		},
+	})
+
+	cs, err := p.ListComments(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(cs) != 4 {
+		t.Fatalf("expected 4 comments, got %d: %+v", len(cs), cs)
+	}
+
+	// First two are top-level (no path/line).
+	if cs[0].Author != "alice" || cs[0].Path != "" || cs[0].Line != 0 {
+		t.Fatalf("top-level[0]: %+v", cs[0])
+	}
+	if cs[0].AuthorRole != "member" {
+		t.Fatalf("author_role lowercased: %q", cs[0].AuthorRole)
+	}
+	// Last two are inline with path/line/threadID.
+	if cs[2].Path != "main.go" || cs[2].Line != 42 || cs[2].ThreadID == "" {
+		t.Fatalf("inline[0]: %+v", cs[2])
+	}
+	// Line=0 falls back to original_line.
+	if cs[3].Line != 17 {
+		t.Fatalf("inline[1] should fall back to original_line=17, got %d", cs[3].Line)
+	}
+
+	// Silence unused linters on gh.
+	_ = gh
+}
+
+func TestListComments_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ListComments(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.ListComments(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestListComments_EmptyArrays(t *testing.T) {
+	p := NewWithRunner(&pathFakeGH{
+		responses: map[string][]byte{
+			"repos/foo/bar/issues/42/comments": []byte("[]"),
+			"repos/foo/bar/pulls/42/comments":  []byte("[]"),
+		},
+	})
+	cs, err := p.ListComments(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(cs) != 0 {
+		t.Fatalf("expected 0 comments, got %d", len(cs))
+	}
+}
+
+// pathFakeGH dispatches on the second arg (the path) — cleaner for `api`.
+type pathFakeGH struct {
+	responses map[string][]byte
+}
+
+func (f *pathFakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
+	if len(args) < 2 {
+		return []byte("[]"), nil
+	}
+	if r, ok := f.responses[args[1]]; ok {
+		return r, nil
+	}
+	return []byte("[]"), nil
+}

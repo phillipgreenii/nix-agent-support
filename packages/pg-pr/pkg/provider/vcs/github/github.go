@@ -210,8 +210,107 @@ func (p *Provider) SetDraft(context.Context, string, int, bool) error     { retu
 func (p *Provider) SetAutomerge(context.Context, string, int, bool) error { return errStub }
 func (p *Provider) Merge(context.Context, string, int) error              { return errStub }
 func (p *Provider) Close(context.Context, string, int) error              { return errStub }
-func (p *Provider) ListComments(context.Context, string, int) ([]api.Comment, error) {
-	return nil, errStub
+
+// ghIssueComment is the JSON shape returned by the issue-comments endpoint
+// (top-level PR comments).
+type ghIssueComment struct {
+	NodeID string `json:"node_id"`
+	Body   string `json:"body"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	AuthorAssociation string `json:"author_association"`
+}
+
+// ghReviewComment is the JSON shape returned by the pulls comments endpoint
+// (review-thread / inline file comments).
+type ghReviewComment struct {
+	NodeID string `json:"node_id"`
+	Body   string `json:"body"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Path                string `json:"path"`
+	Line                int    `json:"line"`
+	OriginalLine        int    `json:"original_line"`
+	PullRequestReviewID int64  `json:"pull_request_review_id"`
+	InReplyToID         int64  `json:"in_reply_to_id"`
+	AuthorAssociation   string `json:"author_association"`
+}
+
+// ListComments returns all PR comments (top-level + inline review-thread).
+// Top-level (issue) comments are tagged with empty Path/Line; inline
+// comments carry their Path / Line / ThreadID.
+func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+
+	out := make([]api.Comment, 0)
+
+	// 1. Top-level PR comments (the "issue" comment endpoint).
+	issueRaw, err := p.gh.Run(ctx,
+		"api",
+		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
+		"--paginate",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: list issue comments: %w", err)
+	}
+	if len(bytes.TrimSpace(issueRaw)) > 0 {
+		var ics []ghIssueComment
+		if err := json.Unmarshal(issueRaw, &ics); err != nil {
+			return nil, fmt.Errorf("github: parse issue-comments JSON: %w", err)
+		}
+		for _, c := range ics {
+			out = append(out, api.Comment{
+				ID:         c.NodeID,
+				Author:     c.User.Login,
+				AuthorRole: strings.ToLower(c.AuthorAssociation),
+				Body:       c.Body,
+			})
+		}
+	}
+
+	// 2. Inline / review-thread comments (the "pulls comments" endpoint).
+	reviewRaw, err := p.gh.Run(ctx,
+		"api",
+		fmt.Sprintf("repos/%s/pulls/%d/comments", repo, number),
+		"--paginate",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: list review comments: %w", err)
+	}
+	if len(bytes.TrimSpace(reviewRaw)) > 0 {
+		var rcs []ghReviewComment
+		if err := json.Unmarshal(reviewRaw, &rcs); err != nil {
+			return nil, fmt.Errorf("github: parse review-comments JSON: %w", err)
+		}
+		for _, c := range rcs {
+			line := c.Line
+			if line == 0 {
+				line = c.OriginalLine
+			}
+			// ThreadID: NodeID for the root comment of a thread; for replies,
+			// gh exposes only `in_reply_to_id` (numeric). We use the NodeID
+			// uniformly — Phase 3 will refine when resolveThread mutation
+			// requires the actual review_thread node id.
+			out = append(out, api.Comment{
+				ID:         c.NodeID,
+				Author:     c.User.Login,
+				AuthorRole: strings.ToLower(c.AuthorAssociation),
+				Body:       c.Body,
+				Path:       c.Path,
+				Line:       line,
+				ThreadID:   c.NodeID,
+			})
+		}
+	}
+
+	return out, nil
 }
 func (p *Provider) AddComment(context.Context, string, int, string) (*api.Comment, error) {
 	return nil, errStub
