@@ -14,7 +14,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
-	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 )
@@ -108,6 +107,12 @@ func (s *socketListener) Close() error {
 // is optional. Emitter, when non-nil, is shut down on Run return so any
 // batched metrics/logs flush before the process exits.
 //
+// PollerInterface is the contract the daemon needs from the poller. The
+// concrete *poller.Poller satisfies it; tests inject smaller fakes.
+type PollerInterface interface {
+	Snapshot(ctx context.Context) (*aggregate.Tree, bool, error)
+}
+
 // When Poller is non-nil, each tick calls Snapshot, folds the result
 // into the shared state visible to gRPC handlers, and feeds the block
 // and week trackers (if provided).
@@ -115,7 +120,7 @@ type RunOptions struct {
 	Paths        Paths
 	Emitter      *otel.Emitter
 	Tick         time.Duration
-	Poller       *poller.Poller
+	Poller       PollerInterface
 	BlockTracker *block.Tracker
 	WeekTracker  *week.Tracker
 	// Caffeinate, when non-nil, has its Tick advanced each main tick
