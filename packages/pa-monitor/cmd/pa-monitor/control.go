@@ -165,15 +165,6 @@ func runInfo(args []string) {
 	}
 }
 
-// runCmuxBridge implements `cmux-bridge` — runs inside a cmux pane,
-// streams daemon state, drives the cmux sidebar. v1 is a minimal
-// long-running process that polls and reports; full integration with
-// cmuxstatus.Reporter ships when cmuxstatus loses its TUI coupling.
-func runCmuxBridge(args []string) {
-	fmt.Fprintln(os.Stderr, "cmux-bridge: not yet wired (Plan 3 follow-up)")
-	os.Exit(2)
-}
-
 // parseSelector maps a CLI selector string into a proto Selector.
 //
 // Accepted forms:
