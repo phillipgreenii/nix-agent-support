@@ -101,18 +101,34 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 // CMUX_WORKSPACE_ID matches the bridge's workspace and rolls them up
 // into a cmuxstatus.Snapshot.
 //
-// Today's DaemonState doesn't carry per-session env on the wire, so the
-// bridge approximates by treating the daemon's global aggregate state
-// as the workspace's. Plan-3 follow-up: enrich the proto SessionView
-// with the per-session env-lookup result for the workspace key.
+// When no session in the daemon's state carries the bridge's workspace
+// id, the snapshot reflects the global aggregate so the sidebar still
+// shows something useful (e.g. caffeinate state).
 func snapshotForWorkspace(state *pb.DaemonState, ws string) cmuxstatus.Snapshot {
-	_ = ws
-
 	var working, idle, dormant int
+	matched := false
 	for _, d := range state.GetDirs() {
-		working += int(d.GetWorkingN())
-		idle += int(d.GetIdleN())
-		dormant += int(d.GetDormantN())
+		for _, sv := range d.GetSessions() {
+			if sv.GetCmuxWorkspaceId() != ws {
+				continue
+			}
+			matched = true
+			switch sv.GetStatus() {
+			case "working":
+				working++
+			case "idle":
+				idle++
+			default:
+				dormant++
+			}
+		}
+	}
+	if !matched {
+		for _, d := range state.GetDirs() {
+			working += int(d.GetWorkingN())
+			idle += int(d.GetIdleN())
+			dormant += int(d.GetDormantN())
+		}
 	}
 
 	out := cmuxstatus.Snapshot{

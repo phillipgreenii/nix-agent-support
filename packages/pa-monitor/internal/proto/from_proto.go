@@ -100,6 +100,26 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	out.TranscriptMTime = timeFromTS(sv.GetTranscriptMtime())
 	out.RateLimitResetsAt = timeFromTS(sv.GetRateLimitResetsAt())
 	out.Status = statusFromString(sv.GetStatus())
+	// Reconstruct env subset so clients can filter by workspace.
+	env := map[string]string{}
+	if v := sv.GetCmuxWorkspaceId(); v != "" {
+		env["CMUX_WORKSPACE_ID"] = v
+	}
+	if v := sv.GetTmuxSession(); v != "" {
+		env["TMUX"] = v
+	}
+	if v := sv.GetGcRig(); v != "" {
+		env["GC_RIG"] = v
+	}
+	if v := sv.GetGcAgent(); v != "" {
+		env["GC_AGENT"] = v
+	}
+	if v := sv.GetWorkspaceEnv(); v != "" {
+		env["WORKSPACE"] = v
+	}
+	if len(env) > 0 {
+		out.Session.Env = env
+	}
 	return out
 }
 

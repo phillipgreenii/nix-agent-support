@@ -95,6 +95,15 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 	if !sv.RateLimitResetsAt.IsZero() {
 		out.RateLimitResetsAt = timestamppb.New(sv.RateLimitResetsAt)
 	}
+	// Workspace tags from the session's env. Daemon-side privacy guard:
+	// only forward known keys; never wire-expose arbitrary env.
+	if sv.Env != nil {
+		out.CmuxWorkspaceId = sv.Env["CMUX_WORKSPACE_ID"]
+		out.TmuxSession = sv.Env["TMUX"]
+		out.GcRig = sv.Env["GC_RIG"]
+		out.GcAgent = sv.Env["GC_AGENT"]
+		out.WorkspaceEnv = sv.Env["WORKSPACE"]
+	}
 	return out
 }
 
