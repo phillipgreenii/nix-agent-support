@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -31,14 +32,17 @@ type Decorator struct {
 // decorators must come from reproducible nix-managed builds, not
 // arbitrary user paths.
 func NewDecorator(cfg DecoratorConfig) (*Decorator, error) {
-	if !strings.HasPrefix(cfg.Command, "/nix/store/") {
-		return nil, fmt.Errorf("decorator %q: command must be under /nix/store/", cfg.Name)
+	// Canonicalise to defeat traversal tricks like `/nix/store/../etc/passwd`.
+	// filepath.Clean collapses `..` segments and removes trailing slashes.
+	clean := filepath.Clean(cfg.Command)
+	if !filepath.IsAbs(clean) || !strings.HasPrefix(clean, "/nix/store/") {
+		return nil, fmt.Errorf("decorator %q: command must be an absolute path under /nix/store/", cfg.Name)
 	}
 	tm := cfg.TimeoutMS
 	if tm <= 0 {
 		tm = 2000
 	}
-	return &Decorator{name: cfg.Name, cmd: cfg.Command, timeoutMS: tm}, nil
+	return &Decorator{name: cfg.Name, cmd: clean, timeoutMS: tm}, nil
 }
 
 // newDecoratorRaw is the unsafe constructor used by tests. It bypasses

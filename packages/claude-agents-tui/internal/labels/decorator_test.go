@@ -16,6 +16,22 @@ func TestDecorator_RejectsNonNixStorePath(t *testing.T) {
 	}
 }
 
+func TestDecorator_RejectsTraversalThroughNixStorePrefix(t *testing.T) {
+	cases := []string{
+		"/nix/store/../etc/passwd",
+		"/nix/store/abc/../../../etc/passwd",
+		"./nix/store/x",
+		"nix/store/x",
+		"",
+	}
+	for _, c := range cases {
+		_, err := NewDecorator(DecoratorConfig{Name: "evil", Command: c})
+		if err == nil {
+			t.Errorf("expected rejection of %q", c)
+		}
+	}
+}
+
 func TestDecorator_AcceptsNixStorePath(t *testing.T) {
 	_, err := NewDecorator(DecoratorConfig{
 		Name:    "ok",
