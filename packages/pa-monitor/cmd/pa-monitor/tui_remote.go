@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
 )
@@ -68,6 +70,23 @@ func runTUIRemote() {
 		Reporter:             nil, // cmuxstatus driven by cmux-bridge, not the TUI
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,
+		OnCaffeinateToggle: func(on bool) {
+			action := "off"
+			if on {
+				action = "on"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			c, err := rpcclient.Dial(ctx)
+			if err != nil {
+				errLog.LogString(fmt.Sprintf("remote caffeinate dial: %v", err))
+				return
+			}
+			defer c.Close()
+			if _, err := c.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action}); err != nil {
+				errLog.LogString(fmt.Sprintf("remote caffeinate %s: %v", action, err))
+			}
+		},
 	})
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {

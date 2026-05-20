@@ -36,6 +36,11 @@ type Options struct {
 	Reporter             cmuxstatus.Reporter
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
+	// OnCaffeinateToggle, when non-nil, is called whenever the user
+	// toggles caffeinate via the C keybinding. Used by --remote mode to
+	// dispatch the Caffeinate RPC against the daemon instead of (or in
+	// addition to) the local Manager.
+	OnCaffeinateToggle func(on bool)
 }
 
 type Model struct {
@@ -76,6 +81,8 @@ type Model struct {
 	flatRows  []render.Row
 
 	errorLogger *ErrorLogger
+
+	onCaffeinateToggle func(bool)
 }
 
 func NewModel(o Options) *Model {
@@ -92,6 +99,7 @@ func NewModel(o Options) *Model {
 		autoResumeMessage:    o.AutoResumeMessage,
 		reporter:             o.Reporter,
 		sidebarIntervalTicks: o.SidebarIntervalTicks,
+		onCaffeinateToggle:   o.OnCaffeinateToggle,
 	}
 	if m.reporter == nil {
 		m.reporter = noopReporter{}
