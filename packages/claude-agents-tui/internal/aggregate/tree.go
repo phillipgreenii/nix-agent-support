@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 type SessionEnrichment struct {

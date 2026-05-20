@@ -16,7 +16,7 @@ func writeFile(path, body string) error {
 
 func TestDiscoverReadsFilesAndFiltersDeadPids(t *testing.T) {
 	d := &Discoverer{
-		SessionsDir: "../../tests/fixtures/sessions",
+		SessionsDir: "../../../tests/fixtures/sessions",
 		PidAlive:    fakePidAlive(map[int]bool{12345: true, 67890: false}),
 	}
 	got, err := d.Discover()

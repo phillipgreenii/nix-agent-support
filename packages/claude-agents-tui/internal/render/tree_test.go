@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 // tailRegex matches the optional " <count>🤖" / " <count>🐚" tails appended to

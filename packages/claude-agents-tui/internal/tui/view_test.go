@@ -13,7 +13,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 // TestViewLineWidthInvariant is the contract test for the View boundary clip:

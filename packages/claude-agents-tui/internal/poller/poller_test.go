@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 // makeRateLimitFixture writes a session file + transcript with a single

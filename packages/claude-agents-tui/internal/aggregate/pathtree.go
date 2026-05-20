@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 // PathNode is one node in the compressed path tree built from a flat []*Directory.

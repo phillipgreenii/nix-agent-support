@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 // Build groups sessions by Cwd and totals tokens/cost. The block argument may be nil.

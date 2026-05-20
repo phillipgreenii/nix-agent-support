@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 func TestDetailsShowsTerminalHost(t *testing.T) {

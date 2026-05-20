@@ -9,7 +9,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 )
 
 type Poller interface {

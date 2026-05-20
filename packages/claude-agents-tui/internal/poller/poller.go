@@ -7,7 +7,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/burnrate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
-	"github.com/phillipgreenii/claude-agents-tui/internal/session"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/subshell"
 	"github.com/phillipgreenii/claude-agents-tui/internal/transcript"
