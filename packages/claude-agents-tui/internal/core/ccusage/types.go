@@ -25,3 +25,18 @@ type Block struct {
 type BlocksResponse struct {
 	Blocks []Block `json:"blocks"`
 }
+
+// WeeklyEntry mirrors one row from `ccusage weekly --json --offline`.
+// Period is the Monday of the week in YYYY-MM-DD form, local time.
+type WeeklyEntry struct {
+	Period    string  `json:"period"`
+	TotalCost float64 `json:"totalCost"`
+	Agent     string  `json:"agent"`
+}
+
+type WeeklyResponse struct {
+	Weekly []WeeklyEntry `json:"weekly"`
+	Totals struct {
+		TotalCost float64 `json:"totalCost"`
+	} `json:"totals"`
+}

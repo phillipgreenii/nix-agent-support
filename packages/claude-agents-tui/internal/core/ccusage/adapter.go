@@ -41,3 +41,31 @@ func (r *Runner) ActiveBlock(ctx context.Context) (*Block, error) {
 	}
 	return ParseActiveBlock(out)
 }
+
+// ParseWeekly returns the most recent weekly entry from ccusage's weekly
+// output. ccusage emits entries in chronological order with Monday-anchor
+// periods; the last entry is the current week.
+func ParseWeekly(body []byte) (*WeeklyEntry, error) {
+	var r WeeklyResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, fmt.Errorf("ccusage: parse weekly: %w", err)
+	}
+	if len(r.Weekly) == 0 {
+		return nil, nil
+	}
+	return &r.Weekly[len(r.Weekly)-1], nil
+}
+
+// CurrentWeekly invokes `ccusage weekly --json --offline` and returns the
+// current week's entry, or nil if no rows were produced.
+func (r *Runner) CurrentWeekly(ctx context.Context) (*WeeklyEntry, error) {
+	run := r.RunCmd
+	if run == nil {
+		run = DefaultRun
+	}
+	out, err := run(ctx, "ccusage", "weekly", "--json", "--offline")
+	if err != nil {
+		return nil, fmt.Errorf("ccusage: exec weekly: %w", err)
+	}
+	return ParseWeekly(out)
+}

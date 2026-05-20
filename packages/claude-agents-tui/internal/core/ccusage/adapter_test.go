@@ -38,3 +38,37 @@ func TestParseActiveBlockNoActive(t *testing.T) {
 		t.Errorf("expected nil when no active block, got %+v", b)
 	}
 }
+
+func TestParseWeekly_LastEntryIsCurrent(t *testing.T) {
+	body := []byte(`{
+		"totals": {"totalCost": 100.0},
+		"weekly": [
+			{"period": "2026-05-11", "totalCost": 10.0, "agent": "all"},
+			{"period": "2026-05-18", "totalCost": 90.0, "agent": "all"}
+		]
+	}`)
+	got, err := ParseWeekly(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("nil")
+	}
+	if got.Period != "2026-05-18" {
+		t.Errorf("Period = %q", got.Period)
+	}
+	if got.TotalCost != 90.0 {
+		t.Errorf("TotalCost = %v", got.TotalCost)
+	}
+}
+
+func TestParseWeekly_EmptyReturnsNil(t *testing.T) {
+	body := []byte(`{"totals":{"totalCost":0.0},"weekly":[]}`)
+	got, err := ParseWeekly(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
