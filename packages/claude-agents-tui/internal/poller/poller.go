@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/burnrate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/burnrate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
