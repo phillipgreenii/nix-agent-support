@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -660,5 +661,368 @@ func TestPRCreate_PropagatesError(t *testing.T) {
 
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected error from CreatePR to surface")
+	}
+}
+
+// ----------------------------------------------------------------------
+// --generate-description tests
+// ----------------------------------------------------------------------
+
+// stubGenerateDescription replaces the package-level generateDescription
+// hook with one that records the resolved agentCLI + skillPath and
+// returns a canned body. Cleanup restores the prior fn.
+func stubGenerateDescription(t *testing.T, body string, err error) *recordedAgentCall {
+	t.Helper()
+	rec := &recordedAgentCall{}
+	prev := generateDescription
+	generateDescription = func(_ context.Context, agentCLI, skillPath string) (string, error) {
+		rec.agentCLI = agentCLI
+		rec.skillPath = skillPath
+		rec.called = true
+		return body, err
+	}
+	t.Cleanup(func() { generateDescription = prev })
+	return rec
+}
+
+type recordedAgentCall struct {
+	called    bool
+	agentCLI  string
+	skillPath string
+}
+
+// writeStubSkill writes a placeholder SKILL.md so resolveSkillPath's
+// existence check passes. Returns the path.
+func writeStubSkill(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(p, []byte("# stub skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPRCreate_GenerateDescription_HappyPath(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	skill := writeStubSkill(t)
+	rec := stubGenerateDescription(t, "generated body", nil)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "Gen Test",
+		"--head", "feat/g",
+		"--generate-description",
+		"--agent-cli", "/usr/bin/fake-agent",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if !rec.called {
+		t.Fatal("generateDescription was not invoked")
+	}
+	if rec.agentCLI != "/usr/bin/fake-agent" {
+		t.Errorf("agentCLI: got %q want /usr/bin/fake-agent", rec.agentCLI)
+	}
+	if rec.skillPath != skill {
+		t.Errorf("skillPath: got %q want %q", rec.skillPath, skill)
+	}
+	if len(fv.createCalls) != 1 || fv.createCalls[0].body != "generated body" {
+		t.Fatalf("body not propagated to CreatePR: %+v", fv.createCalls)
+	}
+}
+
+func TestPRUpdate_GenerateDescription_HappyPath(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	skill := writeStubSkill(t)
+	_ = stubGenerateDescription(t, "updated by agent", nil)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "update", "42",
+		"--repo", "foo/bar",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.updateCalls) != 1 || fv.updateCalls[0].body != "updated by agent" {
+		t.Fatalf("body not propagated to UpdatePR: %+v", fv.updateCalls)
+	}
+}
+
+func TestPRCreate_GenerateDescription_ConflictsWithBody(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	stubGenerateDescription(t, "x", nil) // shouldn't fire
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--body", "literal",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", skill,
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected mutual-exclusion error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error should mention mutual exclusion; got %v", err)
+	}
+}
+
+func TestPRUpdate_GenerateDescription_ConflictsWithBodyStdin(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	stubGenerateDescription(t, "x", nil)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetIn(strings.NewReader(""))
+	rootCmd.SetArgs([]string{
+		"pr", "update", "7",
+		"--repo", "foo/bar",
+		"--body-stdin",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected mutual-exclusion error")
+	}
+}
+
+func TestPRCreate_GenerateDescription_MissingAgentCLI(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	// Don't stub generateDescription; we should fail before invoking.
+
+	// Strip zr-agent from PATH so LookPath returns no match.
+	t.Setenv("PATH", "/nonexistent")
+	t.Setenv(agentCLIEnv, "")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--skill-path", skill,
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing-agent-CLI error")
+	}
+	if !strings.Contains(err.Error(), "PG_PR_AGENT_CLI") || !strings.Contains(err.Error(), "zr-agent") {
+		t.Errorf("error should suggest PG_PR_AGENT_CLI / zr-agent; got %v", err)
+	}
+	if !strings.Contains(err.Error(), skill) {
+		t.Errorf("error should include skill path %q; got %v", skill, err)
+	}
+}
+
+func TestPRCreate_GenerateDescription_MissingSkill(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+
+	missing := filepath.Join(t.TempDir(), "does-not-exist.md")
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", missing,
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected skill-missing error")
+	}
+	if !strings.Contains(err.Error(), "skill file not found") {
+		t.Errorf("error should mention skill file; got %v", err)
+	}
+}
+
+func TestPRCreate_GenerateDescription_AgentEmptyOutput(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	stubGenerateDescription(t, "   \n  ", nil) // whitespace-only, trims to ""
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected empty-body error")
+	}
+}
+
+func TestPRCreate_GenerateDescription_AgentEnvVarFallback(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+	skill := writeStubSkill(t)
+	rec := stubGenerateDescription(t, "body-from-env-agent", nil)
+
+	t.Setenv(agentCLIEnv, "/opt/env-agent")
+	t.Setenv("PATH", "/nonexistent") // ensure no zr-agent on PATH
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if rec.agentCLI != "/opt/env-agent" {
+		t.Errorf("env var fallback ignored; agentCLI=%q", rec.agentCLI)
+	}
+	if len(fv.createCalls) != 1 || fv.createCalls[0].body != "body-from-env-agent" {
+		t.Fatalf("body not propagated: %+v", fv.createCalls)
+	}
+}
+
+func TestPRCreate_GenerateDescription_SkillEnvVarFallback(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	rec := stubGenerateDescription(t, "ok", nil)
+
+	t.Setenv(skillPathEnv, skill)
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if rec.skillPath != skill {
+		t.Errorf("skill env var fallback ignored; skillPath=%q want %q", rec.skillPath, skill)
+	}
+}
+
+func TestPRCreate_GenerateDescription_AgentFailure(t *testing.T) {
+	resetPRWriteFlags()
+	_, _ = swapFakes(t)
+	skill := writeStubSkill(t)
+	stubGenerateDescription(t, "", errors.New("agent crashed"))
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "T",
+		"--head", "h",
+		"--generate-description",
+		"--agent-cli", "/bin/fake",
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected agent failure to propagate")
+	}
+}
+
+// TestGenerateDescription_SubprocessIntegration covers the real
+// exec.CommandContext path by pointing --agent-cli at /bin/cat, which
+// echoes the skill contents back to stdout. This proves the wiring end
+// to end without depending on the live zr-agent.
+func TestGenerateDescription_SubprocessIntegration(t *testing.T) {
+	resetPRWriteFlags()
+	fv, _ := swapFakes(t)
+
+	// Don't stub generateDescription — we want the real one.
+	skill := writeStubSkill(t)
+
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat not on PATH")
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{
+		"pr", "create",
+		"--repo", "foo/bar",
+		"--title", "Integ",
+		"--head", "h",
+		"--generate-description",
+		"--agent-cli", cat,
+		"--skill-path", skill,
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	if len(fv.createCalls) != 1 {
+		t.Fatalf("CreatePR not called: %+v", fv.createCalls)
+	}
+	if !strings.Contains(fv.createCalls[0].body, "stub skill") {
+		t.Errorf("body should contain skill text; got %q", fv.createCalls[0].body)
 	}
 }

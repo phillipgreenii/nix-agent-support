@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
@@ -35,6 +38,15 @@ type prWriteFlags struct {
 	body      string
 	bodyFile  string
 	bodyStdin bool
+
+	// LLM-driven description generation (shared by create + update).
+	// When generateDesc is true, the CLI shells out to an agent CLI
+	// (default: `zr-agent` on PATH) which loads the
+	// pg-pr-write-pr-description SKILL and emits the body on stdout.
+	// Mutually exclusive with --body / --body-file / --body-stdin.
+	generateDesc bool
+	agentCLI     string
+	skillPath    string
 }
 
 var prWF prWriteFlags
@@ -96,6 +108,123 @@ func resolveBody(cmd *cobra.Command, body, bodyFile string, bodyStdin bool) (str
 	return "", nil
 }
 
+// ----------------------------------------------------------------------
+// --generate-description plumbing
+// ----------------------------------------------------------------------
+
+// defaultSkillRelPath is the local-marketplace path where pg-pr-plugin
+// installs the SKILL.md (see home/programs/pg-pr-plugin/default.nix).
+const defaultSkillRelPath = ".local/share/pgii-local-plugins/pg-pr/skills/pg-pr-write-pr-description/SKILL.md"
+
+// agentCLIEnv is the env var that overrides the agent-CLI binary used
+// by --generate-description.
+const agentCLIEnv = "PG_PR_AGENT_CLI"
+
+// skillPathEnv lets callers point at an alternative SKILL.md (mostly
+// for tests and for non-standard plugin install locations).
+const skillPathEnv = "PG_PR_SKILL_PATH"
+
+// generateDescriptionConflictMsg is the error returned when
+// --generate-description is combined with any --body* flag. Kept as a
+// constant so tests can assert on it.
+const generateDescriptionConflictMsg = "--generate-description is mutually exclusive with --body, --body-file, and --body-stdin"
+
+// missingAgentCLIMsg is the error returned when no agent CLI can be
+// resolved. Kept as a constant so tests can assert on it.
+const missingAgentCLIMsg = "--generate-description requires an agent CLI: set --agent-cli <path>, the PG_PR_AGENT_CLI env var, or place 'zr-agent' on your PATH (the SKILL at %s can also be invoked directly from a claude session)"
+
+// generateDescription shells out to the configured agent CLI, passing
+// the SKILL.md path on stdin and capturing the body on stdout. Exposed
+// as a package-level var so tests can inject a fake.
+var generateDescription = func(ctx context.Context, agentCLI, skillPath string) (string, error) {
+	// Read the skill so it can be piped as stdin context; the SKILL
+	// itself instructs the agent to call back into `pg-pr` for diff
+	// context, so stdin only carries the prompt.
+	skillBytes, err := os.ReadFile(skillPath)
+	if err != nil {
+		return "", fmt.Errorf("read skill: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, agentCLI)
+	cmd.Stdin = bytes.NewReader(skillBytes)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("agent CLI %s failed: %w; stderr=%s",
+			agentCLI, err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// resolveAgentCLI returns the agent CLI binary path. Priority:
+//  1. --agent-cli flag.
+//  2. PG_PR_AGENT_CLI env var.
+//  3. `zr-agent` on PATH.
+//
+// Returns an empty string when none can be resolved; the caller turns
+// that into a user-facing error mentioning the SKILL path.
+func resolveAgentCLI(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	if v := os.Getenv(agentCLIEnv); v != "" {
+		return v
+	}
+	if p, err := exec.LookPath("zr-agent"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// resolveSkillPath returns the path to the pg-pr-write-pr-description
+// SKILL.md. Priority:
+//  1. --skill-path flag.
+//  2. PG_PR_SKILL_PATH env var.
+//  3. ~/.local/share/pgii-local-plugins/pg-pr/skills/.../SKILL.md.
+func resolveSkillPath(flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
+	}
+	if v := os.Getenv(skillPathEnv); v != "" {
+		return v, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, defaultSkillRelPath), nil
+}
+
+// runGenerateDescription is the single entry point for both `pr
+// create --generate-description` and `pr update --generate-description`.
+// It validates flag combos, resolves the agent + skill, executes, and
+// returns the captured body.
+func runGenerateDescription(ctx context.Context, f prWriteFlags) (string, error) {
+	if f.body != "" || f.bodyFile != "" || f.bodyStdin {
+		return "", errors.New(generateDescriptionConflictMsg)
+	}
+	skillPath, err := resolveSkillPath(f.skillPath)
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(skillPath); statErr != nil {
+		return "", fmt.Errorf("skill file not found at %s: %w", skillPath, statErr)
+	}
+	agentCLI := resolveAgentCLI(f.agentCLI)
+	if agentCLI == "" {
+		return "", fmt.Errorf(missingAgentCLIMsg, skillPath)
+	}
+	body, err := generateDescription(ctx, agentCLI, skillPath)
+	if err != nil {
+		return "", err
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", fmt.Errorf("agent CLI %s produced empty body", agentCLI)
+	}
+	return body, nil
+}
+
 // detectCurrentBranch returns the current branch name when cwd is inside a
 // git repository. Used by `pr create` when --head isn't passed.
 func detectCurrentBranch(ctx context.Context) (string, error) {
@@ -136,7 +265,9 @@ var prCreateCmd = &cobra.Command{
 
 The PR is created in DRAFT state by default. Pass --no-draft to open a
 ready-for-review PR directly. The PR body may be supplied via --body,
---body-file <path> (use - for stdin), or --body-stdin.
+--body-file <path> (use - for stdin), --body-stdin, or
+--generate-description (LLM-driven via the pg-pr-write-pr-description
+SKILL; shells out to an agent CLI such as zr-agent).
 
 On success, a corresponding merge-request bead is created via
 beads.EnsureMergeRequest so subsequent pg-pr sync runs treat the PR as
@@ -153,9 +284,18 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 	if strings.TrimSpace(prWF.title) == "" {
 		return errors.New("pr create: --title is required")
 	}
-	body, err := resolveBody(cmd, prWF.body, prWF.bodyFile, prWF.bodyStdin)
-	if err != nil {
-		return err
+	var body string
+	var err error
+	if prWF.generateDesc {
+		body, err = runGenerateDescription(ctx, prWF)
+		if err != nil {
+			return err
+		}
+	} else {
+		body, err = resolveBody(cmd, prWF.body, prWF.bodyFile, prWF.bodyStdin)
+		if err != nil {
+			return err
+		}
 	}
 
 	repo, err := resolveRepo(ctx, prWF.repo)
@@ -237,14 +377,22 @@ var prUpdateCmd = &cobra.Command{
 			return err
 		}
 		ctx := cmd.Context()
-		body, err := resolveBody(cmd, prWF.body, prWF.bodyFile, prWF.bodyStdin)
-		if err != nil {
-			return err
-		}
-		if body == "" {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
-				"pr update: no body source provided (--body / --body-file / --body-stdin); nothing to do")
-			return nil
+		var body string
+		if prWF.generateDesc {
+			body, err = runGenerateDescription(ctx, prWF)
+			if err != nil {
+				return err
+			}
+		} else {
+			body, err = resolveBody(cmd, prWF.body, prWF.bodyFile, prWF.bodyStdin)
+			if err != nil {
+				return err
+			}
+			if body == "" {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(),
+					"pr update: no body source provided (--body / --body-file / --body-stdin / --generate-description); nothing to do")
+				return nil
+			}
 		}
 		repo, err := resolveRepo(ctx, prWF.repo)
 		if err != nil {
@@ -492,6 +640,20 @@ func addBodyFlags(c *cobra.Command) {
 		"Read PR body from stdin until EOF")
 }
 
+// addGenerateDescriptionFlags attaches the --generate-description flag
+// (and its --agent-cli / --skill-path overrides) to a command.
+func addGenerateDescriptionFlags(c *cobra.Command) {
+	c.Flags().BoolVar(&prWF.generateDesc, "generate-description", false,
+		"Generate the PR body via the pg-pr-write-pr-description SKILL "+
+			"(shells out to an agent CLI; mutually exclusive with --body / --body-file / --body-stdin)")
+	c.Flags().StringVar(&prWF.agentCLI, "agent-cli", "",
+		"Override the agent CLI used by --generate-description "+
+			"(default: $PG_PR_AGENT_CLI, else 'zr-agent' on PATH)")
+	c.Flags().StringVar(&prWF.skillPath, "skill-path", "",
+		"Override the SKILL.md path used by --generate-description "+
+			"(default: $PG_PR_SKILL_PATH, else "+defaultSkillRelPath+" under $HOME)")
+}
+
 func init() {
 	// create
 	prCreateCmd.Flags().StringVar(&prWF.title, "title", "", "PR title (required)")
@@ -502,11 +664,13 @@ func init() {
 	prCreateCmd.Flags().BoolVar(&prWF.noDraft, "no-draft", false, "Open the PR ready-for-review instead of as a draft")
 	addRepoFlag(prCreateCmd)
 	addBodyFlags(prCreateCmd)
+	addGenerateDescriptionFlags(prCreateCmd)
 	addJSONFlag(prCreateCmd)
 
 	// update
 	addRepoFlag(prUpdateCmd)
 	addBodyFlags(prUpdateCmd)
+	addGenerateDescriptionFlags(prUpdateCmd)
 	addJSONFlag(prUpdateCmd)
 
 	// close / ready / draft / merge / automerge children
