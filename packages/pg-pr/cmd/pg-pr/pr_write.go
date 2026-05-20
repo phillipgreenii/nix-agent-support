@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
@@ -205,7 +206,7 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	if prWF.jsonOutput {
+	if output.Resolve(prWF.jsonOutput) {
 		return writeJSON(cmd.OutOrStdout(), map[string]any{
 			"pr":      pr,
 			"bead_id": beadID,

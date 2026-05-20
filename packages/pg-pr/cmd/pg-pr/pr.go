@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitlocal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
@@ -87,7 +88,7 @@ var prShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if prF.jsonOutput {
+		if output.Resolve(prF.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), pr)
 		}
 		return renderPR(cmd.OutOrStdout(), pr)
@@ -119,7 +120,7 @@ var prFilesCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if prF.jsonOutput {
+		if output.Resolve(prF.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), map[string]any{"files": files})
 		}
 		return renderFiles(cmd.OutOrStdout(), files)
@@ -139,7 +140,7 @@ var prCommitsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if prF.jsonOutput {
+		if output.Resolve(prF.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), map[string]any{"commits": commits})
 		}
 		return renderCommits(cmd.OutOrStdout(), commits)

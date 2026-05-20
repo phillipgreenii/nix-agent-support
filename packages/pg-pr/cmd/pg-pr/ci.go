@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd/ghactions"
@@ -138,7 +139,7 @@ var ciRunsCmd = &cobra.Command{
 			}
 			all = append(all, runs...)
 		}
-		if ciF.jsonOutput {
+		if output.Resolve(ciF.jsonOutput) {
 			payload := map[string]any{"runs": all}
 			if len(listErrs) > 0 {
 				payload["errors"] = listErrs

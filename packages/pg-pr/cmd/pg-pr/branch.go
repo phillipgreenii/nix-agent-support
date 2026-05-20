@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +43,7 @@ var branchDetectCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if brFlags.jsonOutput {
+		if output.Resolve(brFlags.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), info)
 		}
 		return renderBranchInfo(cmd.OutOrStdout(), info)

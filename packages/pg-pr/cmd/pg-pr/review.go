@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/spf13/cobra"
@@ -93,7 +94,7 @@ Re-runs replace any existing staged draft for the (repo, pr) pair.`,
 		if err != nil {
 			return fmt.Errorf("save draft: %w", err)
 		}
-		if rvF.json {
+		if output.Resolve(rvF.json) {
 			return writeJSON(cmd.OutOrStdout(), map[string]any{
 				"status":   "staged",
 				"path":     path,
@@ -171,7 +172,7 @@ VCS, and clear the staged file on success.`,
 			}
 			return err
 		}
-		if err := postStaged(ctx, draft, cmd.OutOrStdout(), rvF.json); err != nil {
+		if err := postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json)); err != nil {
 			return err
 		}
 		return reviewstage.Clear(reviewstage.DefaultDir(), repo, num)
@@ -201,7 +202,7 @@ post immediately. No state is persisted.`,
 		}
 		draft.Repo = repo
 		draft.PR = num
-		return postStaged(ctx, draft, cmd.OutOrStdout(), rvF.json)
+		return postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json))
 	},
 }
 
@@ -237,7 +238,7 @@ var commentAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if rvF.json {
+		if output.Resolve(rvF.json) {
 			return writeJSON(cmd.OutOrStdout(), c)
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Posted comment %s on PR #%d\n", c.ID, num)

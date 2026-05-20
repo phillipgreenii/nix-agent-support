@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/worktree"
 	"github.com/spf13/cobra"
 )
@@ -101,7 +102,7 @@ var worktreeAddCmd = &cobra.Command{
 			return err
 		}
 
-		if wtFlags.jsonOutput {
+		if output.Resolve(wtFlags.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), res)
 		}
 		w := cmd.OutOrStdout()
@@ -140,7 +141,7 @@ var worktreeRemoveCmd = &cobra.Command{
 			return err
 		}
 
-		if wtFlags.jsonOutput {
+		if output.Resolve(wtFlags.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), res)
 		}
 		w := cmd.OutOrStdout()
@@ -180,7 +181,7 @@ var worktreeListCmd = &cobra.Command{
 			return err
 		}
 
-		if wtFlags.jsonOutput {
+		if output.Resolve(wtFlags.jsonOutput) {
 			return writeJSON(cmd.OutOrStdout(), entries)
 		}
 		return renderWorktreeTable(cmd.OutOrStdout(), root, entries)

@@ -181,6 +181,33 @@ func TestSyncCommand_JSONOutput(t *testing.T) {
 	}
 }
 
+// TestSyncCommand_EnvJSON verifies PGPR_OUTPUT=json (no --json flag) emits
+// JSON output. Covers the A15 env-var fallback.
+func TestSyncCommand_EnvJSON(t *testing.T) {
+	vcs := &stubVCS{prs: map[string][]api.PR{"foo/bar": {samplePR(1)}}}
+	bd := &stubBeads{}
+	defer setStubsForSync(t, vcs, bd, minimalCLICfg())()
+	t.Setenv("PGPR_OUTPUT", "json")
+	// Defensive reset: prior tests may have toggled the flag.
+	syFlags.jsonOutput = false
+
+	var stdout bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetArgs([]string{"sync"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("sync (env=json): %v", err)
+	}
+	var s sync.Summary
+	if err := json.Unmarshal(stdout.Bytes(), &s); err != nil {
+		t.Fatalf("expected JSON from PGPR_OUTPUT=json, got %q\nerr: %v",
+			stdout.String(), err)
+	}
+	if s.TotalPRs != 1 {
+		t.Fatalf("TotalPRs: got %d want 1", s.TotalPRs)
+	}
+}
+
 func TestSyncCommand_SinglePRRequiresRepo(t *testing.T) {
 	defer setStubsForSync(t, &stubVCS{}, &stubBeads{}, minimalCLICfg())()
 

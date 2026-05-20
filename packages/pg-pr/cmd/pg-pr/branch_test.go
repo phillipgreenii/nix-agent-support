@@ -119,6 +119,61 @@ func TestBranchDetectJSON(t *testing.T) {
 	}
 }
 
+// TestBranchDetectEnvJSON verifies PGPR_OUTPUT=json (without --json flag)
+// selects JSON output. Covers the global env-var fallback (A15).
+func TestBranchDetectEnvJSON(t *testing.T) {
+	tmp := t.TempDir()
+	initRepoForCLI(t, tmp)
+	t.Chdir(tmp)
+	t.Setenv("PATH", filepath.Dir(mustLookPath(t, "git")))
+	t.Setenv("PGPR_OUTPUT", "json")
+	// Reset the flag in case a prior test left it true (cobra does not
+	// reset bool flags between Execute() calls on a shared rootCmd).
+	brFlags.jsonOutput = false
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"branch", "detect"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v\nstderr=%s", err, stderr.String())
+	}
+	var parsed struct {
+		Repo string `json:"repo"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
+		t.Fatalf("expected JSON from PGPR_OUTPUT=json, got: %q\nerr=%v",
+			stdout.String(), err)
+	}
+	if parsed.Repo != "owner/repo" {
+		t.Fatalf("repo: %q", parsed.Repo)
+	}
+}
+
+// TestBranchDetectFlagBeatsEnv verifies that --json wins over a contradictory
+// PGPR_OUTPUT value (defensive: confirms precedence rule).
+func TestBranchDetectFlagBeatsEnv(t *testing.T) {
+	tmp := t.TempDir()
+	initRepoForCLI(t, tmp)
+	t.Chdir(tmp)
+	t.Setenv("PATH", filepath.Dir(mustLookPath(t, "git")))
+	t.Setenv("PGPR_OUTPUT", "yaml") // not "json"
+	brFlags.jsonOutput = false
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"branch", "detect", "--json"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
+		t.Fatalf("expected JSON object from --json, got: %q", stdout.String())
+	}
+}
+
 // TestBranchDetectOutsideGitRepoFails verifies that running detect from a
 // non-git directory returns a clear error.
 func TestBranchDetectOutsideGitRepoFails(t *testing.T) {

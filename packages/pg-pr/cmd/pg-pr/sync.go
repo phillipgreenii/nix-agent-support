@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
@@ -75,7 +76,7 @@ configured repo.`,
 		}
 
 		// Even on err, render the summary so callers see partial progress.
-		if syFlags.jsonOutput {
+		if output.Resolve(syFlags.jsonOutput) {
 			_ = writeJSON(cmd.OutOrStdout(), summary)
 		} else {
 			renderSyncSummary(cmd.OutOrStdout(), summary)
