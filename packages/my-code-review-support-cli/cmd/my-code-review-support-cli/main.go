@@ -19,7 +19,30 @@ var (
 	baseRef string
 )
 
+// deprecationBanner is printed once per invocation on stderr unless the
+// MY_CODE_REVIEW_SUPPRESS_DEPRECATION environment variable is set. The
+// banner pushes users at the pg-pr CLI, which subsumes the surface of
+// this tool. Removal is scheduled for Phase 4.
+const deprecationBanner = `WARNING: my-code-review-support-cli is deprecated; use 'pg-pr' instead.
+  setup     -> pg-pr worktree add <pr>
+  files     -> pg-pr pr files
+  commits   -> pg-pr pr commits
+  pr-info   -> pg-pr pr info <pr>
+  post      -> pg-pr review draft|post|submit
+  cleanup   -> pg-pr worktree remove <pr>
+See docs/superpowers/specs/2026-05-19-pg-pr-design.md. Will be removed in Phase 4.
+Set MY_CODE_REVIEW_SUPPRESS_DEPRECATION=1 to mute this banner.`
+
+func emitDeprecationBanner() {
+	if os.Getenv("MY_CODE_REVIEW_SUPPRESS_DEPRECATION") != "" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, deprecationBanner)
+}
+
 func main() {
+	emitDeprecationBanner()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
