@@ -38,8 +38,14 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 	}
 
 	interval := time.Duration(req.GetHeartbeatIntervalMs()) * time.Millisecond
-	if interval < 50*time.Millisecond {
-		interval = 2 * time.Second // server default
+	switch {
+	case interval == 0:
+		// Client requested server default.
+		interval = 2 * time.Second
+	case interval < 50*time.Millisecond:
+		// Client requested too-fast; clamp to floor without falling back
+		// to the default.
+		interval = 50 * time.Millisecond
 	}
 
 	ticker := time.NewTicker(interval)

@@ -143,15 +143,15 @@ there.
 
 ## Storage Layout (XDG)
 
-| Purpose                                       | Path                                                                  |
-| --------------------------------------------- | --------------------------------------------------------------------- |
-| Config (nix-rendered)                         | `$XDG_CONFIG_HOME/pa-monitor/config.toml`                             |
-| Label rules (nix-rendered)                    | `$XDG_CONFIG_HOME/pa-monitor/labels.toml`                             |
-| Daemon log                                    | `$XDG_STATE_HOME/pa-monitor/daemon.log` (rotated by size, lumberjack) |
-| Unix socket                                   | `$XDG_STATE_HOME/pa-monitor/daemon.sock`                              |
-| PID lock                                      | `$XDG_STATE_HOME/pa-monitor/daemon.pid`                               |
-| Runtime state (caffeinate toggle persistence) | `$XDG_STATE_HOME/pa-monitor/runtime.json`                             |
-| Built-in data caches if needed                | `$XDG_DATA_HOME/pa-monitor/`                                          |
+| Purpose                                       | Path                                                                                                                                                            |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Config (nix-rendered)                         | `$XDG_CONFIG_HOME/pa-monitor/config.toml`                                                                                                                       |
+| Label rules (nix-rendered)                    | `$XDG_CONFIG_HOME/pa-monitor/labels.toml`                                                                                                                       |
+| Daemon log                                    | `$XDG_STATE_HOME/pa-monitor/daemon.log` (rotated by size, lumberjack)                                                                                           |
+| Unix socket                                   | `$XDG_RUNTIME_DIR/pa-monitor/daemon.sock` on Linux when set, else `$XDG_STATE_HOME/pa-monitor/daemon.sock` (and on macOS, which does not set `XDG_RUNTIME_DIR`) |
+| PID lock                                      | same directory as the Unix socket; file `daemon.pid`                                                                                                            |
+| Runtime state (caffeinate toggle persistence) | `$XDG_STATE_HOME/pa-monitor/runtime.json`                                                                                                                       |
+| Built-in data caches if needed                | `$XDG_DATA_HOME/pa-monitor/`                                                                                                                                    |
 
 When OTel is on, diagnostic warnings still write to `daemon.log`. Event-log
 records go only to OTel.
