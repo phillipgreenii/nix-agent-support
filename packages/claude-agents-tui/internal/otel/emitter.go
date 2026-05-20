@@ -7,6 +7,16 @@ package otel
 import (
 	"context"
 	"os"
+	"sync"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/metric"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 // Options configures the emitter.
@@ -15,31 +25,114 @@ type Options struct {
 	ServiceVersion string
 }
 
-// Emitter holds the OTel SDK handles. A nil *Emitter is a valid no-op
-// emitter; do not de-reference fields without nil checks.
-type Emitter struct {
-	// Real fields land in the metrics + log tasks. Kept empty here so the
-	// type exists and the nil-safe contract is testable.
+// stateObs is the per-state count observation, snapshotted by the
+// observable gauge callback.
+type stateObs struct {
+	state string
+	count int64
+	attrs []attribute.KeyValue
 }
 
-// New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set in the
-// environment, otherwise returns (nil, nil).
+// Emitter holds the OTel SDK handles. A nil *Emitter is a valid no-op
+// emitter.
+type Emitter struct {
+	metricsProvider *sdkmetric.MeterProvider
+	logProvider     *sdklog.LoggerProvider
+	logger          otellog.Logger
+
+	mu                  sync.Mutex
+	sessionsObs         []stateObs
+	caffeinateActiveVal int64
+	caffeinateAttrs     []attribute.KeyValue
+}
+
+// New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set,
+// otherwise returns (nil, nil).
 func New(ctx context.Context, opts Options) (*Emitter, error) {
-	_ = opts
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
 		return nil, nil
 	}
-	// Real SDK initialisation lands in Task 3.
-	return &Emitter{}, nil
+
+	res, err := buildResource(ctx, opts.ServiceName, opts.ServiceVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	metricExp, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
+		sdkmetric.WithResource(res),
+	)
+
+	logExp, err := otlploggrpc.New(ctx)
+	if err != nil {
+		_ = mp.Shutdown(ctx)
+		return nil, err
+	}
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+		sdklog.WithResource(res),
+	)
+
+	e := &Emitter{
+		metricsProvider: mp,
+		logProvider:     lp,
+		logger:          lp.Logger("pa-monitor"),
+	}
+	if err := e.registerMetrics(mp); err != nil {
+		_ = mp.Shutdown(ctx)
+		_ = lp.Shutdown(ctx)
+		return nil, err
+	}
+	return e, nil
+}
+
+func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
+	meter := mp.Meter("pa-monitor")
+
+	sessionsGauge, err := meter.Int64ObservableGauge("pa_monitor.sessions.count")
+	if err != nil {
+		return err
+	}
+	caffGauge, err := meter.Int64ObservableGauge("pa_monitor.caffeinate.active")
+	if err != nil {
+		return err
+	}
+	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		e.mu.Lock()
+		obs := e.sessionsObs
+		caffVal := e.caffeinateActiveVal
+		caffAttrs := e.caffeinateAttrs
+		e.mu.Unlock()
+		for _, s := range obs {
+			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
+		}
+		o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
+		return nil
+	}, sessionsGauge, caffGauge)
+	return err
 }
 
 // Shutdown flushes exporters. nil-safe.
 func (e *Emitter) Shutdown(ctx context.Context) error {
-	_ = ctx
 	if e == nil {
 		return nil
 	}
-	return nil
+	var firstErr error
+	if e.metricsProvider != nil {
+		if err := e.metricsProvider.Shutdown(ctx); err != nil {
+			firstErr = err
+		}
+	}
+	if e.logProvider != nil {
+		if err := e.logProvider.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // RecordSessionsCount sets per-state session gauges. nil-safe.
@@ -47,8 +140,14 @@ func (e *Emitter) RecordSessionsCount(byState map[string]int, baseAttrs map[stri
 	if e == nil {
 		return
 	}
-	_ = byState
-	_ = baseAttrs
+	obs := make([]stateObs, 0, len(byState))
+	for state, count := range byState {
+		attrs := mergeAttrs(baseAttrs, "state", state)
+		obs = append(obs, stateObs{state: state, count: int64(count), attrs: attrs})
+	}
+	e.mu.Lock()
+	e.sessionsObs = obs
+	e.mu.Unlock()
 }
 
 // RecordCaffeinateActive sets the caffeinate gauge. nil-safe.
@@ -56,15 +155,52 @@ func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	if e == nil {
 		return
 	}
-	_ = active
-	_ = attrs
+	v := int64(0)
+	if active {
+		v = 1
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.caffeinateActiveVal = v
+	e.caffeinateAttrs = kv
+	e.mu.Unlock()
 }
 
-// LogEvent emits one log record at info level. nil-safe.
+// LogEvent emits one log record at info level with the given attributes
+// and an event_name attribute set to name. nil-safe.
 func (e *Emitter) LogEvent(name string, attrs map[string]string) {
-	if e == nil {
+	if e == nil || e.logger == nil {
 		return
 	}
-	_ = name
-	_ = attrs
+	var rec otellog.Record
+	rec.SetTimestamp(time.Now())
+	rec.SetSeverity(otellog.SeverityInfo)
+	rec.SetBody(otellog.StringValue(name))
+	rec.AddAttributes(otellog.String("event_name", name))
+	for k, v := range attrs {
+		if v == "" {
+			continue
+		}
+		rec.AddAttributes(otellog.String(k, v))
+	}
+	e.logger.Emit(context.Background(), rec)
+}
+
+func attrsToKV(m map[string]string) []attribute.KeyValue {
+	out := make([]attribute.KeyValue, 0, len(m))
+	for k, v := range m {
+		if v == "" {
+			continue
+		}
+		out = append(out, attribute.String(k, v))
+	}
+	return out
+}
+
+func mergeAttrs(base map[string]string, extraKey, extraVal string) []attribute.KeyValue {
+	out := attrsToKV(base)
+	if extraVal != "" {
+		out = append(out, attribute.String(extraKey, extraVal))
+	}
+	return out
 }
