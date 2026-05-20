@@ -101,8 +101,8 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 
 func TestSnapshotProducesTree(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -118,8 +118,8 @@ func TestSnapshotProducesTree(t *testing.T) {
 
 func TestSnapshotEnrichmentFields(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -173,8 +173,8 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 
 func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -190,8 +190,8 @@ func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
 
 func TestSnapshotPopulatesTranscriptCache(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -207,8 +207,8 @@ func TestSnapshotPopulatesTranscriptCache(t *testing.T) {
 
 func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -231,8 +231,8 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 
 func TestSnapshotTranscriptCacheRetainsAcrossPolls(t *testing.T) {
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
@@ -261,8 +261,8 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	var calls []call
 
 	p := &Poller{
-		SessionsDir: "../../tests/fixtures/sessions",
-		ClaudeHome:  "../../tests/fixtures/claude-home",
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },

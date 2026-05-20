@@ -9,7 +9,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/ccusage"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
-	"github.com/phillipgreenii/claude-agents-tui/internal/subshell"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/subshell"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/transcript"
 )
 

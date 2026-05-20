@@ -17,7 +17,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/cmuxstatus"
 	"github.com/phillipgreenii/claude-agents-tui/internal/config"
 	"github.com/phillipgreenii/claude-agents-tui/internal/headless"
-	"github.com/phillipgreenii/claude-agents-tui/internal/poller"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/poller"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
 	"github.com/phillipgreenii/claude-agents-tui/internal/tui"

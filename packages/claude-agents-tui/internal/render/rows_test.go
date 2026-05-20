@@ -5,7 +5,7 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
-	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/treestate"
 )
 
 func TestFlattenRowsEmptyTree(t *testing.T) {

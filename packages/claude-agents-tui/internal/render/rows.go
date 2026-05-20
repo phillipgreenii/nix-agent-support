@@ -2,7 +2,7 @@ package render
 
 import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/treestate"
 )
 
 // RowKind identifies what kind of content a Row represents in the session list.

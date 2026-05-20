@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
-	"github.com/phillipgreenii/claude-agents-tui/internal/models"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/models"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/render/wrap"
 )

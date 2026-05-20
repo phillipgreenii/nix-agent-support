@@ -7,7 +7,7 @@ import (
 
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/aggregate"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
-	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/treestate"
 )
 
 // nSessions builds a tree with one dir "/p" containing n working sessions.

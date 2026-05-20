@@ -12,7 +12,7 @@ import (
 	"github.com/phillipgreenii/claude-agents-tui/internal/render"
 	"github.com/phillipgreenii/claude-agents-tui/internal/core/session"
 	"github.com/phillipgreenii/claude-agents-tui/internal/signal"
-	"github.com/phillipgreenii/claude-agents-tui/internal/treestate"
+	"github.com/phillipgreenii/claude-agents-tui/internal/core/treestate"
 )
 
 // ModalKind selects which full-screen modal is currently open.
