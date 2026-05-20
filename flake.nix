@@ -381,6 +381,22 @@
                 ul_finalize
               '';
             };
+
+            # pa-monitor-codegen wraps the gen-proto.sh script with
+            # protoc + plugins on PATH so `nix run .#pa-monitor-codegen`
+            # works without relying on the user's devbox.
+            pa-monitor-codegen = pkgs.writeShellApplication {
+              name = "pa-monitor-codegen";
+              runtimeInputs = [
+                pkgs.protobuf
+                pkgs.protoc-gen-go
+                pkgs.protoc-gen-go-grpc
+              ];
+              text = ''
+                cd "''${1:-packages/pa-monitor}"
+                exec ./scripts/gen-proto.sh
+              '';
+            };
           };
 
           devShells.default = phillipgreenii-nix-base.lib.mkDevShell {
