@@ -9,7 +9,7 @@ Two cooperating processes per OS user:
 - **`pa-monitor daemon`** — long-running, owns all state. Polls sessions, tracks 5h blocks and the weekly limit, manages caffeinate, dispatches nudges, emits OTel. Started by a LaunchAgent at login.
 - **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches.
 
-When OTel is disabled or the daemon is not running, the legacy local-poller path is still available via `pa-monitor tui` (no `--remote`).
+The TUI is always a gRPC client of the daemon — it never reads session state directly. When the daemon is down, the TUI shows an OFFLINE pill and reconnects automatically.
 
 ## Quick start
 
@@ -17,10 +17,7 @@ When OTel is disabled or the daemon is not running, the legacy local-poller path
 # Run the daemon (or let the LaunchAgent run it at login).
 pa-monitor daemon
 
-# Interactive TUI talking to the daemon
-pa-monitor tui --remote
-
-# Interactive TUI in legacy local-poller mode (no daemon needed)
+# Interactive TUI (always talks to the daemon)
 pa-monitor tui
 
 # Dump daemon state
@@ -52,18 +49,18 @@ pa-monitor config show
 
 ## Subcommands
 
-| Subcommand                                           | Purpose                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------------------- |
-| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).               |
-| `tui`                                                | Interactive TUI. Default uses local poller; `--remote` uses daemon. |
-| `status`                                             | One-shot dump of daemon state.                                      |
-| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                       |
-| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                                    |
-| `info <selector>`                                    | Print session or directory details.                                 |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy.                                       |
-| `wait-until-agents-finished`                         | Block until all agents idle.                                        |
-| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar.        |
-| `config show`                                        | Print loaded config (read-only).                                    |
+| Subcommand                                           | Purpose                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
+| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).        |
+| `tui`                                                | Interactive TUI. Always a gRPC client of the daemon.         |
+| `status`                                             | One-shot dump of daemon state.                               |
+| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
+| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
+| `info <selector>`                                    | Print session or directory details.                          |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy.                                |
+| `wait-until-agents-finished`                         | Block until all agents idle.                                 |
+| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
+| `config show`                                        | Print loaded config (read-only).                             |
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
 
