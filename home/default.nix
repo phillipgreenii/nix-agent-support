@@ -25,7 +25,6 @@
     ./programs/git-tools
     ./programs/pg-pr
     ./programs/pg-pr-plugin
-    ./programs/my-code-review-support
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena

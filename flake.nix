@@ -82,10 +82,6 @@
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           bash-scripting = final.callPackage ./packages/bash-scripting { };
-          my-code-review-support-cli = final.callPackage ./packages/my-code-review-support-cli {
-            inherit gitHash;
-          };
-          my-code-review-support = final.callPackage ./packages/my-code-review-support { };
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit gitHash;
           };
@@ -364,10 +360,6 @@
                 ul_run_step "nix-flake-update" \
                   "update-locks: update nix flake.lock" \
                   nix flake update
-
-                ul_run_step "update-deps-my-code-review-support-cli" \
-                  "update-locks: update my-code-review-support-cli Go deps" \
-                  bash -c 'cd packages/my-code-review-support-cli && go get -u ./... && go mod tidy'
 
                 ul_run_step "update-deps-claude-extended-tool-approver" \
                   "update-locks: update claude-extended-tool-approver Go deps" \
