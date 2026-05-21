@@ -22,7 +22,7 @@ removed_dir="$4"
 
 mkdir -p "$(dirname "$settings_path")"
 mkdir -p "$removed_dir"
-[ -f "$settings_path" ] || echo '{}' > "$settings_path"
+[ -f "$settings_path" ] || echo '{}' >"$settings_path"
 
 removed=$(jq -n \
   --slurpfile cur "$settings_path" \
@@ -44,12 +44,12 @@ if [ "$removed" != "{}" ]; then
   removed_file="$removed_dir/.claude-settings-removed-$ts-$$.json"
   echo "claude-settings: REMOVED on activation (saved to $removed_file):" >&2
   echo "$removed" | jq . >&2
-  echo "$removed" > "$removed_file"
+  echo "$removed" >"$removed_file"
 fi
 
 jq \
   --argjson newEnabled "$new_enabled_json" \
   --argjson newMkts "$new_mkts_json" \
   '.enabledPlugins = $newEnabled | .extraKnownMarketplaces = $newMkts' \
-  "$settings_path" > "$settings_path.tmp"
+  "$settings_path" >"$settings_path.tmp"
 mv -f "$settings_path.tmp" "$settings_path"

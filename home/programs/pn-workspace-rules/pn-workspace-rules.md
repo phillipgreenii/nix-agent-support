@@ -20,16 +20,16 @@ If `pn-workspace-build` fails, the task is not complete. Fix the failure (in thi
 
 ## Builds and Validation
 
-| Goal | Use | Don't use |
-|------|-----|-----------|
-| Build the system (current host) | `pn-workspace-build` | `darwin-rebuild build`, `nix build .#darwinConfigurations.<host>.system` |
-| Activate the system | the **user** runs `pn-workspace-apply` | NEVER invoke from agent context |
-| Run `nix flake check` on a project | `pn-ws-nix flake check` | `nix flake check` |
-| Run `nix flake check` across every project | `pn-workspace-flake-check` | per-repo `nix flake check` |
-| Build a single package | `pn-ws-nix build .#<pkg>` | `nix build .#<pkg>` |
-| Evaluate an attribute | `pn-ws-nix eval .#<attr>` | `nix eval .#<attr>` |
-| Pre-commit checks across all repos | `pn-workspace-pre-commit-check` | per-repo `pre-commit run --all-files` |
-| Update flake locks across all repos | `pn-workspace-update` | per-repo `nix flake update` |
+| Goal                                       | Use                                    | Don't use                                                                |
+| ------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------ |
+| Build the system (current host)            | `pn-workspace-build`                   | `darwin-rebuild build`, `nix build .#darwinConfigurations.<host>.system` |
+| Activate the system                        | the **user** runs `pn-workspace-apply` | NEVER invoke from agent context                                          |
+| Run `nix flake check` on a project         | `pn-ws-nix flake check`                | `nix flake check`                                                        |
+| Run `nix flake check` across every project | `pn-workspace-flake-check`             | per-repo `nix flake check`                                               |
+| Build a single package                     | `pn-ws-nix build .#<pkg>`              | `nix build .#<pkg>`                                                      |
+| Evaluate an attribute                      | `pn-ws-nix eval .#<attr>`              | `nix eval .#<attr>`                                                      |
+| Pre-commit checks across all repos         | `pn-workspace-pre-commit-check`        | per-repo `pre-commit run --all-files`                                    |
+| Update flake locks across all repos        | `pn-workspace-update`                  | per-repo `nix flake update`                                              |
 
 ## When to Push
 

@@ -47,4 +47,3 @@ func TestMonorepo_Name(t *testing.T) {
 		t.Errorf("Name() = %q, want monorepo", got)
 	}
 }
-
