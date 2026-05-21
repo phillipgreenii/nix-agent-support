@@ -16,14 +16,14 @@ Implements `docs/superpowers/specs/2026-05-08-tui-selection-panel-design.md`.
 
 ## File structure
 
-| File | Status | Responsibility |
-|------|--------|----------------|
-| `packages/claude-agents-tui/internal/render/footer.go` | modify | Signature change + new `FooterLeftWidth` |
+| File                                                        | Status | Responsibility                                                  |
+| ----------------------------------------------------------- | ------ | --------------------------------------------------------------- |
+| `packages/claude-agents-tui/internal/render/footer.go`      | modify | Signature change + new `FooterLeftWidth`                        |
 | `packages/claude-agents-tui/internal/render/footer_test.go` | modify | Update existing tests to new signature; add status-column tests |
-| `packages/claude-agents-tui/internal/render/tree.go` | modify | Drop per-row prompt continuation in `renderSession` |
-| `packages/claude-agents-tui/internal/render/tree_test.go` | modify | Add omits-continuation test |
-| `packages/claude-agents-tui/internal/tui/view.go` | modify | Build status string from cursor + pass to Footer |
-| `packages/claude-agents-tui/internal/tui/view_test.go` | modify | Add footer-shows-prompt test |
+| `packages/claude-agents-tui/internal/render/tree.go`        | modify | Drop per-row prompt continuation in `renderSession`             |
+| `packages/claude-agents-tui/internal/render/tree_test.go`   | modify | Add omits-continuation test                                     |
+| `packages/claude-agents-tui/internal/tui/view.go`           | modify | Build status string from cursor + pass to Footer                |
+| `packages/claude-agents-tui/internal/tui/view_test.go`      | modify | Add footer-shows-prompt test                                    |
 
 ---
 
@@ -32,6 +32,7 @@ Implements `docs/superpowers/specs/2026-05-08-tui-selection-panel-design.md`.
 ### Task 1: Update `Footer` to accept a status string + add `FooterLeftWidth`
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/footer.go`
 - Modify: `packages/claude-agents-tui/internal/render/footer_test.go`
 
@@ -105,6 +106,7 @@ func Footer(width int, status string, updatedAt time.Time) string {
 ```
 
 Key changes vs today:
+
 - Function signature: `Footer(width, status, updatedAt)` (was `Footer(width, updatedAt)`).
 - No more call to `Legend(...)` — status is whatever the caller supplies.
 - New exported `FooterLeftWidth(width int) int` helper.
@@ -121,6 +123,7 @@ Expected: `view.go:39: not enough arguments in call to render.Footer`. That's ex
 - [ ] **Step 3: Update existing footer tests for the new signature**
 
 Read `internal/render/footer_test.go` first. Current tests:
+
 - `TestFooterUpdatedRightAligned` — calls `Footer(140, updated)`.
 - `TestFooterShortUpdatedAtNarrow` — calls `Footer(100, updated)`.
 - `TestFooterDropsUpdatedAtTiny` — calls `Footer(60, updated)`.
@@ -323,6 +326,7 @@ EOF
 ### Task 2: Build the status string from the cursor in `view.go`
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view.go`
 
 - [ ] **Step 1: Replace the footer assembly block**
@@ -390,6 +394,7 @@ Expected: PASS (existing tests). The new behavior isn't asserted yet — Task 4 
 ### Task 3: Drop the per-row first-prompt continuation in `tree.go`
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree.go`
 
 - [ ] **Step 1: Locate `renderSession` (around lines 185–225)**
@@ -445,13 +450,14 @@ go test ./internal/render/... -count=1
 
 Expected: most PASS. If a test asserted the `↳` continuation appears, it now fails — that's caught by Task 4's added test which asserts the opposite. Look for any tests whose intent was to verify the continuation; either adjust them or delete if their only purpose was the continuation.
 
-Common candidate: any test using a fixture with `FirstPrompt` set and asserting substring `↳` or the prompt text on a separate line. Update by removing the assertion or rewriting to assert the prompt is *absent* from the body.
+Common candidate: any test using a fixture with `FirstPrompt` set and asserting substring `↳` or the prompt text on a separate line. Update by removing the assertion or rewriting to assert the prompt is _absent_ from the body.
 
 ---
 
 ### Task 4: Add tests covering the new behavior
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree_test.go`
 - Modify: `packages/claude-agents-tui/internal/tui/view_test.go`
 
@@ -579,6 +585,7 @@ go vet ./...
 Expected: all packages PASS, vet silent.
 
 If any existing test fails, triage:
+
 - **Test asserts `↳` continuation appears**: legitimate failure of a now-removed feature. Update the test to assert absence (or delete if the test's only purpose was the continuation).
 - **Test asserts a specific footer line containing legend symbols**: legitimate failure since legend is gone. Delete or update.
 - **Other**: investigate.

@@ -58,6 +58,7 @@ internal/headless/headless.go -- swaps render.Header() for explicit Controls()
 ### Renderer contracts
 
 **Controls** — `func Controls(opts ControlsOpts) string`
+
 - Single row, no trailing newline.
 - `ControlsOpts`: `CaffeinateOn`, `GraceRemaining` (caffeinate countdown if any), `ShowAll`, `CostMode`, `ForceID`, `AutoResume`, `Theme`, `Width`.
 - `[?]` literal placed just before `[q]` at every tier.
@@ -68,9 +69,10 @@ internal/headless/headless.go -- swaps render.Header() for explicit Controls()
 - Caffeinate grace countdown shown after `●` at WIDE+NARROW (e.g., `[C] ● on 55s`); dropped at TINY.
 
 **BlockRow** — `func BlockRow(tree *aggregate.Tree, opts BlockRowOpts) string`
+
 - Single row, no trailing newline.
 - `BlockRowOpts`: `Now time.Time`, `Width int`.
-- Pre-active states (independent of tier): `5h loading…` / `5h unavailable — \`ccusage\` not on PATH` / `5h no active block` / `5h $X.XX  resets HH:MM  (plan cap unknown)` (unknown plan cap fallback).
+- Pre-active states (independent of tier): `5h loading…` / `5h unavailable — \`ccusage\` not on PATH`/`5h no active block`/`5h $X.XX resets HH:MM (plan cap unknown)` (unknown plan cap fallback).
 - Active-block tier shape (drop in this priority order: burn → bar → cost → exhaust → reset):
   - **WIDE**: `5h ████████░░░░░░░░░░ 35%  $30.10  1.2M/m  resets 01:00  ex 22:21 ⚠` (⚠ when projected exhaust before window end)
   - **NARROW**: `5h ████████░░░░░░░░░░ 35%  $30.10  resets 01:00  ex 22:21 ⚠`
@@ -78,6 +80,7 @@ internal/headless/headless.go -- swaps render.Header() for explicit Controls()
 - Bar width: 18 cols at WIDE and NARROW; bar dropped entirely at TINY. (Today's bar is 30 cols inside `progressBar(pct, 30)`; theme B reduces to 18 to fit the single-row budget.)
 
 **Alerts** — `func Alerts(tree *aggregate.Tree, opts AlertsOpts) string`
+
 - Returns `""` when no alert active. Otherwise single row, no trailing newline.
 - `AlertsOpts`: `Now time.Time`, `Width int`, `AutoResume bool`, `WindowResetsAt time.Time`, `AutoResumeDelay time.Duration`, `TopupPoolUSD float64`, `TopupConsumed float64`.
 - Active alerts (in priority order, pipe-joined when multiple):
@@ -89,6 +92,7 @@ internal/headless/headless.go -- swaps render.Header() for explicit Controls()
 Effective alerts in commit B1: just `⏸ resuming in N:NN` and `Top-up …`. `⚠ rate-limit` slot is documented but not wired (today's code doesn't wire it either; carry the gap forward).
 
 **Footer** — `func Footer(width int, updatedAt time.Time) string`
+
 - Single row, no trailing newline. Two columns: legend (left) and Updated clock (right).
 - Width budget:
   - **WIDE** (≥120): right column is `Updated 21:05:43` = 16 cols. `legendWidth = width - 16 - 2 (gap)`.

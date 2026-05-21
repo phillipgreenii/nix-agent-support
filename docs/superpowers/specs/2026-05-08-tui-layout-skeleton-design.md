@@ -11,7 +11,7 @@ The TUI's `View()` currently composes header + body + legend with `strings.Join`
 - The top body row is cut off and reappears as the user drags the window edge by single rows. (Reported by user 2026-05-08.)
 - The footer is intermittently absent when the body uses one too many rows.
 
-Cursor navigation (`j` / `Down`) advances past the last *selectable* row because `clampCursor` clamps against `len(m.flatRows)`, which includes blank separator rows the cursor should skip. (Reported by user 2026-05-08.)
+Cursor navigation (`j` / `Down`) advances past the last _selectable_ row because `clampCursor` clamps against `len(m.flatRows)`, which includes blank separator rows the cursor should skip. (Reported by user 2026-05-08.)
 
 This design replaces the ad-hoc layout math with an explicit zone-based skeleton: each zone has a known natural height, the body fills the remainder, and the terminal-too-short case degrades by a defined drop priority.
 
@@ -34,13 +34,13 @@ Width invariant is already enforced by `wrap.Block` in `view.go:67`. Height inva
 
 Five zones, top-to-bottom:
 
-| Zone | Natural height | Drop priority (1 = drops first) |
-|------|----------------|---------------------------------|
-| Controls | 1 row | 1 |
-| 5h Block | 1 row | 2 |
-| Alert | 0 rows when no alert active; 1 row when ≥ 1 alert active | 3 |
-| Body (sessions) | fills remainder | — (never drops) |
-| Status (footer) | 1 row | 4 |
+| Zone            | Natural height                                           | Drop priority (1 = drops first) |
+| --------------- | -------------------------------------------------------- | ------------------------------- |
+| Controls        | 1 row                                                    | 1                               |
+| 5h Block        | 1 row                                                    | 2                               |
+| Alert           | 0 rows when no alert active; 1 row when ≥ 1 alert active | 3                               |
+| Body (sessions) | fills remainder                                          | — (never drops)                 |
+| Status (footer) | 1 row                                                    | 4                               |
 
 "Alert" is a single composed line that pipe-joins all currently active alert segments (`⏸ resuming…`, `⚠ rate-limit…`, `Top-up …`). Composition lives behind a tier-aware function in theme A's scope only insofar as the row exists; the actual content shape is current behavior copied as-is and is reworked in later themes if needed.
 
@@ -59,23 +59,23 @@ bodyHeight := h - sum(z.height for z in nonBody), clamped >= 0
 
 Examples (no alert active):
 
-| `m.height` | Zones rendered | Body height |
-|------------|----------------|-------------|
-| ≥ 4 | Controls, 5hBlock, Body, Status | h − 3 |
-| 3 | 5hBlock, Body, Status | 1 |
-| 2 | Body, Status | 1 |
-| 1 | Body | 1 |
-| 0 | none (test/headless mode — no body cap) | n/a |
+| `m.height` | Zones rendered                          | Body height |
+| ---------- | --------------------------------------- | ----------- |
+| ≥ 4        | Controls, 5hBlock, Body, Status         | h − 3       |
+| 3          | 5hBlock, Body, Status                   | 1           |
+| 2          | Body, Status                            | 1           |
+| 1          | Body                                    | 1           |
+| 0          | none (test/headless mode — no body cap) | n/a         |
 
 Examples (alert active):
 
-| `m.height` | Zones rendered | Body height |
-|------------|----------------|-------------|
-| ≥ 5 | Controls, 5hBlock, Alert, Body, Status | h − 4 |
-| 4 | 5hBlock, Alert, Body, Status | 1 |
-| 3 | Alert, Body, Status | 1 |
-| 2 | Body, Status | 1 |
-| 1 | Body | 1 |
+| `m.height` | Zones rendered                         | Body height |
+| ---------- | -------------------------------------- | ----------- |
+| ≥ 5        | Controls, 5hBlock, Alert, Body, Status | h − 4       |
+| 4          | 5hBlock, Alert, Body, Status           | 1           |
+| 3          | Alert, Body, Status                    | 1           |
+| 2          | Body, Status                           | 1           |
+| 1          | Body                                   | 1           |
 
 The "Body never drops" invariant means at `h = 1` the user sees only the session list (truncated to one row). At `h = 0` the View defers to test/headless behavior (no row cap).
 

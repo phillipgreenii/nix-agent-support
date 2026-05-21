@@ -32,11 +32,11 @@ After theme D: `Footer(width int, status string, updatedAt time.Time) string`.
 
 ### Width budget (unchanged from theme B)
 
-| Tier | Right column | Left column |
-|------|--------------|-------------|
-| WIDE ≥120 | `Updated 21:05:43` (16 cols) | `width − 16 − 2 (gap)` |
-| NARROW 80–119 | `21:05:43` (8 cols) | `width − 8 − 2 (gap)` |
-| TINY <80 | empty | `width` |
+| Tier          | Right column                 | Left column            |
+| ------------- | ---------------------------- | ---------------------- |
+| WIDE ≥120     | `Updated 21:05:43` (16 cols) | `width − 16 − 2 (gap)` |
+| NARROW 80–119 | `21:05:43` (8 cols)          | `width − 8 − 2 (gap)`  |
+| TINY <80      | empty                        | `width`                |
 
 When `status == ""`, the left column is rendered as a blank styled span of the appropriate width (so the right column still hugs the right edge).
 

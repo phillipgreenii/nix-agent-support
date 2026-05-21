@@ -16,16 +16,16 @@ Implements `docs/superpowers/specs/2026-05-08-tui-modals-design.md`.
 
 ## File structure
 
-| File | Status | Responsibility |
-|------|--------|----------------|
-| `packages/claude-agents-tui/internal/tui/keybindings.go` | new | `Binding` type + `Bindings` list + per-binding `handleXxx` functions |
-| `packages/claude-agents-tui/internal/tui/keybindings_test.go` | new | Drift safeguard + dispatch sanity |
-| `packages/claude-agents-tui/internal/tui/update.go` | modify | Switch replaced by `Bindings` iteration |
-| `packages/claude-agents-tui/internal/tui/model.go` | modify | Add `activeModal ModalKind` + `modalScrollOffset int` fields |
-| `packages/claude-agents-tui/internal/tui/view.go` | modify | Dispatch to `m.renderModal()` when active; bindingsToHelpRows helper |
-| `packages/claude-agents-tui/internal/tui/view_test.go` | modify | Modal open/close/scroll integration tests |
-| `packages/claude-agents-tui/internal/render/modals.go` | new | `Modal`, `HelpModal`, `LegendModal`, `ModalRow`, `HelpRow`, `legendRows` |
-| `packages/claude-agents-tui/internal/render/modals_test.go` | new | Modal title/content/scroll/dimension tests |
+| File                                                          | Status | Responsibility                                                           |
+| ------------------------------------------------------------- | ------ | ------------------------------------------------------------------------ |
+| `packages/claude-agents-tui/internal/tui/keybindings.go`      | new    | `Binding` type + `Bindings` list + per-binding `handleXxx` functions     |
+| `packages/claude-agents-tui/internal/tui/keybindings_test.go` | new    | Drift safeguard + dispatch sanity                                        |
+| `packages/claude-agents-tui/internal/tui/update.go`           | modify | Switch replaced by `Bindings` iteration                                  |
+| `packages/claude-agents-tui/internal/tui/model.go`            | modify | Add `activeModal ModalKind` + `modalScrollOffset int` fields             |
+| `packages/claude-agents-tui/internal/tui/view.go`             | modify | Dispatch to `m.renderModal()` when active; bindingsToHelpRows helper     |
+| `packages/claude-agents-tui/internal/tui/view_test.go`        | modify | Modal open/close/scroll integration tests                                |
+| `packages/claude-agents-tui/internal/render/modals.go`        | new    | `Modal`, `HelpModal`, `LegendModal`, `ModalRow`, `HelpRow`, `legendRows` |
+| `packages/claude-agents-tui/internal/render/modals_test.go`   | new    | Modal title/content/scroll/dimension tests                               |
 
 ---
 
@@ -34,6 +34,7 @@ Implements `docs/superpowers/specs/2026-05-08-tui-modals-design.md`.
 ### Task 1: Create `keybindings.go` with `Binding` + handlers
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/tui/keybindings.go`
 
 - [ ] **Step 1: Write `keybindings.go`**
@@ -207,6 +208,7 @@ Expected: success. The new file co-exists with the existing `update.go` switch â
 ### Task 2: Replace `update.go`'s key switch with `Bindings` iteration
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/update.go`
 
 - [ ] **Step 1: Replace the `tea.KeyMsg` case body**
@@ -259,6 +261,7 @@ If a test fails, common cause: the `tea.KeyMsg` for keys like `?`, `space`, `ent
 ### Task 3: Drift safeguard + dispatch sanity tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/tui/keybindings_test.go`
 
 - [ ] **Step 1: Write tests**
@@ -367,6 +370,7 @@ EOF
 ### Task 4: Create `render/modals.go` + tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/render/modals.go`
 - Create: `packages/claude-agents-tui/internal/render/modals_test.go`
 
@@ -655,6 +659,7 @@ If `TestModalScrollOffsetSkipsRows` fails because content rows don't fit at heig
 ### Task 5: Add `Model.activeModal` + `ModalKind` enum
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/model.go`
 
 - [ ] **Step 1: Add `ModalKind` enum and Model fields**
@@ -697,6 +702,7 @@ Expected: clean build (the new fields are unused; that's OK at this step).
 ### Task 6: Wire modal handlers â€” open/close + scroll
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/keybindings.go`
 
 - [ ] **Step 1: Replace stub `handleOpenHelp` and `handleOpenLegend`**
@@ -787,6 +793,7 @@ Expected: clean build.
 ### Task 7: View() dispatches to the modal renderer
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view.go`
 
 - [ ] **Step 1: Add modal short-circuit + helper**
@@ -842,6 +849,7 @@ Expected: clean build.
 ### Task 8: Integration tests for modal open/close/scroll
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view_test.go`
 
 - [ ] **Step 1: Add tests at the end of `view_test.go`**

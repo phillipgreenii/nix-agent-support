@@ -16,21 +16,21 @@ Implements `docs/superpowers/specs/2026-05-08-tui-header-redesign-design.md`.
 
 ## File structure
 
-| File | Status | Responsibility |
-|------|--------|----------------|
-| `packages/claude-agents-tui/internal/render/controls.go` | new | `Controls(opts) string` — 1 row, tier-aware controls + auto-resume + `[?]` + `[q]` |
-| `packages/claude-agents-tui/internal/render/controls_test.go` | new | Three-tier content tests + 1-line + width-fits tests |
-| `packages/claude-agents-tui/internal/render/block_row.go` | new | `BlockRow(tree, opts) string` — 1 row, tier-aware 5h block + bar + % + cost + burn + resets + exhaust |
-| `packages/claude-agents-tui/internal/render/block_row_test.go` | new | Tier × block-state matrix |
-| `packages/claude-agents-tui/internal/render/alerts.go` | new | `Alerts(tree, opts) string` — `""` or pipe-joined active alerts |
-| `packages/claude-agents-tui/internal/render/alerts_test.go` | new | Empty / single / multi-alert composition + tier compaction |
-| `packages/claude-agents-tui/internal/render/footer.go` | new | `Footer(width, updatedAt) string` — left=Legend, right=Updated, tier-aware |
-| `packages/claude-agents-tui/internal/render/footer_test.go` | new | Updated placement + tier dropping |
-| `packages/claude-agents-tui/internal/render/header.go` | DELETED in commit 2 | Old multi-line renderer |
-| `packages/claude-agents-tui/internal/render/header_test.go` | DELETED in commit 2 | Old tests |
-| `packages/claude-agents-tui/internal/render/header_tier_test.go` | DELETED in commit 2 | Old tests |
-| `packages/claude-agents-tui/internal/tui/view.go` | modify | Zones list expands to 5; consumes the four new renderers |
-| `packages/claude-agents-tui/internal/headless/headless.go` | modify | Calls new renderers in sequence instead of `render.Header` |
+| File                                                             | Status              | Responsibility                                                                                        |
+| ---------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `packages/claude-agents-tui/internal/render/controls.go`         | new                 | `Controls(opts) string` — 1 row, tier-aware controls + auto-resume + `[?]` + `[q]`                    |
+| `packages/claude-agents-tui/internal/render/controls_test.go`    | new                 | Three-tier content tests + 1-line + width-fits tests                                                  |
+| `packages/claude-agents-tui/internal/render/block_row.go`        | new                 | `BlockRow(tree, opts) string` — 1 row, tier-aware 5h block + bar + % + cost + burn + resets + exhaust |
+| `packages/claude-agents-tui/internal/render/block_row_test.go`   | new                 | Tier × block-state matrix                                                                             |
+| `packages/claude-agents-tui/internal/render/alerts.go`           | new                 | `Alerts(tree, opts) string` — `""` or pipe-joined active alerts                                       |
+| `packages/claude-agents-tui/internal/render/alerts_test.go`      | new                 | Empty / single / multi-alert composition + tier compaction                                            |
+| `packages/claude-agents-tui/internal/render/footer.go`           | new                 | `Footer(width, updatedAt) string` — left=Legend, right=Updated, tier-aware                            |
+| `packages/claude-agents-tui/internal/render/footer_test.go`      | new                 | Updated placement + tier dropping                                                                     |
+| `packages/claude-agents-tui/internal/render/header.go`           | DELETED in commit 2 | Old multi-line renderer                                                                               |
+| `packages/claude-agents-tui/internal/render/header_test.go`      | DELETED in commit 2 | Old tests                                                                                             |
+| `packages/claude-agents-tui/internal/render/header_tier_test.go` | DELETED in commit 2 | Old tests                                                                                             |
+| `packages/claude-agents-tui/internal/tui/view.go`                | modify              | Zones list expands to 5; consumes the four new renderers                                              |
+| `packages/claude-agents-tui/internal/headless/headless.go`       | modify              | Calls new renderers in sequence instead of `render.Header`                                            |
 
 ---
 
@@ -39,6 +39,7 @@ Implements `docs/superpowers/specs/2026-05-08-tui-header-redesign-design.md`.
 ### Task 1: `Controls` renderer + tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/render/controls.go`
 - Create: `packages/claude-agents-tui/internal/render/controls_test.go`
 
@@ -125,9 +126,11 @@ func TestControlsCaffeineGraceCountdown(t *testing.T) {
 - [ ] **Step 2: Run test to verify failure**
 
 Run from `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/packages/claude-agents-tui`:
+
 ```bash
 go test ./internal/render/... -run "TestControls" -v
 ```
+
 Expected: FAIL with `Controls undefined`.
 
 - [ ] **Step 3: Write `controls.go`**
@@ -253,6 +256,7 @@ func Controls(opts ControlsOpts) string {
 ```bash
 go test ./internal/render/... -run "TestControls" -v
 ```
+
 Expected: PASS for all three tier subtests + `TestControlsFitsAtTierFloor` + `TestControlsCaffeineGraceCountdown`.
 
 If `TestControlsFitsAtTierFloor` fails because the WIDE line exceeds 120, **shorten it before continuing** by removing the trailing space before `[q]` or using single-space separators between tokens/cost groups. Re-measure: `lipgloss.Width(out) <= w`.
@@ -264,6 +268,7 @@ If `TestControlsFitsAtTierFloor` fails because the WIDE line exceeds 120, **shor
 ### Task 2: `BlockRow` renderer + tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/render/block_row.go`
 - Create: `packages/claude-agents-tui/internal/render/block_row_test.go`
 
@@ -391,6 +396,7 @@ func TestBlockRowFitsAtTierFloor(t *testing.T) {
 ```bash
 go test ./internal/render/... -run "TestBlockRow" -v
 ```
+
 Expected: FAIL with `BlockRow undefined`.
 
 - [ ] **Step 3: Write `block_row.go`**
@@ -500,6 +506,7 @@ func fmtM(tokensPerMinute float64) string {
 ```bash
 go test ./internal/render/... -run "TestBlockRow" -v
 ```
+
 Expected: PASS for all subtests.
 
 If `TestBlockRowFitsAtTierFloor` fails at any width, reduce the bar width (`blockRowBarWidth = 16` instead of 18) or shorten labels (`"resets HH:MM"` → `"r HH:MM"` at NARROW). Re-run.
@@ -513,6 +520,7 @@ If `TestBlockRowActiveBlockTiers/tiny` fails because `5h $X` accidentally appear
 ### Task 3: `Alerts` renderer + tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/render/alerts.go`
 - Create: `packages/claude-agents-tui/internal/render/alerts_test.go`
 
@@ -615,6 +623,7 @@ func TestAlertsSingleLineNoTrailingNewline(t *testing.T) {
 ```bash
 go test ./internal/render/... -run "TestAlerts" -v
 ```
+
 Expected: FAIL with `Alerts undefined`.
 
 - [ ] **Step 3: Write `alerts.go`**
@@ -698,6 +707,7 @@ func Alerts(tree *aggregate.Tree, opts AlertsOpts) string {
 ```bash
 go test ./internal/render/... -run "TestAlerts" -v
 ```
+
 Expected: PASS.
 
 - [ ] **Step 5: No commit yet**
@@ -707,6 +717,7 @@ Expected: PASS.
 ### Task 4: `Footer` renderer + tests
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/render/footer.go`
 - Create: `packages/claude-agents-tui/internal/render/footer_test.go`
 
@@ -783,6 +794,7 @@ func TestFooterSingleLine(t *testing.T) {
 ```bash
 go test ./internal/render/... -run "TestFooter" -v
 ```
+
 Expected: FAIL with `Footer undefined`.
 
 - [ ] **Step 3: Write `footer.go`**
@@ -837,6 +849,7 @@ func Footer(width int, updatedAt time.Time) string {
 ```bash
 go test ./internal/render/... -run "TestFooter" -v
 ```
+
 Expected: PASS.
 
 If `TestFooterUpdatedRightAligned` fails because `lipgloss.Width(out) != 140`, the issue is the `lipgloss.NewStyle().Width(legendWidth)` may pad with trailing spaces past the legend's natural width, then the gap spaces, then the right side — total should be exactly `legendWidth + gap + rightWidth = width`. Confirm via `fmt.Println(lipgloss.Width(leftStyled), lipgloss.Width(rightStyled))`.
@@ -898,6 +911,7 @@ EOF
 ### Task 6: Rewire `View()` to consume new renderers
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view.go`
 
 - [ ] **Step 1: Read the current `view.go`**
@@ -999,6 +1013,7 @@ func (m *Model) renderBody(height int) string {
 ```
 
 Key changes vs theme A's version:
+
 - New imports: `"time"`. Removed: `"strings"` is no longer needed (TrimRight on Header/Legend gone).
 - `render.Header(...)` and `render.Legend(...)` calls removed.
 - Four new renderer calls: `Controls`, `BlockRow`, `Alerts`, `Footer`.
@@ -1027,6 +1042,7 @@ If `TestViewNoPhantomBlankRowsBetweenZones` fails: a new renderer is leaking a t
 ### Task 7: Rewire headless mode
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/headless/headless.go`
 
 - [ ] **Step 1: Replace the `render.Header` call**
@@ -1077,6 +1093,7 @@ Expected: PASS. Existing headless tests don't check substrings that disappeared 
 ### Task 8: Delete old `Header`
 
 **Files:**
+
 - Delete: `packages/claude-agents-tui/internal/render/header.go`
 - Delete: `packages/claude-agents-tui/internal/render/header_test.go`
 - Delete: `packages/claude-agents-tui/internal/render/header_tier_test.go`

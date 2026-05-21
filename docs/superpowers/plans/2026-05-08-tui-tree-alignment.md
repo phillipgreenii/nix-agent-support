@@ -16,13 +16,13 @@ Implements `docs/superpowers/specs/2026-05-08-tui-tree-alignment-design.md`.
 
 ## File structure
 
-| File | Status | Responsibility |
-|------|--------|----------------|
-| `packages/claude-agents-tui/internal/aggregate/tree.go` | modify | Add `BurnRateSum float64` to `Directory` |
-| `packages/claude-agents-tui/internal/aggregate/aggregate.go` | modify | Populate `d.BurnRateSum` in `Build` |
-| `packages/claude-agents-tui/internal/aggregate/aggregate_test.go` | modify | Test for new sum |
-| `packages/claude-agents-tui/internal/render/tree.go` | modify | New column constants + helper + rewritten row renderers |
-| `packages/claude-agents-tui/internal/render/tree_test.go` | modify | Column-alignment, indent-glyph, tokens-column tests |
+| File                                                              | Status | Responsibility                                          |
+| ----------------------------------------------------------------- | ------ | ------------------------------------------------------- |
+| `packages/claude-agents-tui/internal/aggregate/tree.go`           | modify | Add `BurnRateSum float64` to `Directory`                |
+| `packages/claude-agents-tui/internal/aggregate/aggregate.go`      | modify | Populate `d.BurnRateSum` in `Build`                     |
+| `packages/claude-agents-tui/internal/aggregate/aggregate_test.go` | modify | Test for new sum                                        |
+| `packages/claude-agents-tui/internal/render/tree.go`              | modify | New column constants + helper + rewritten row renderers |
+| `packages/claude-agents-tui/internal/render/tree_test.go`         | modify | Column-alignment, indent-glyph, tokens-column tests     |
 
 ---
 
@@ -31,6 +31,7 @@ Implements `docs/superpowers/specs/2026-05-08-tui-tree-alignment-design.md`.
 ### Task 1: Add field + populate + test
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/aggregate/tree.go`
 - Modify: `packages/claude-agents-tui/internal/aggregate/aggregate.go`
 - Modify: `packages/claude-agents-tui/internal/aggregate/aggregate_test.go`
@@ -153,6 +154,7 @@ EOF
 ### Task 2: Add column constants + `renderStatsBlock` helper
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree.go`
 
 - [ ] **Step 1: Replace today's per-column styles with the new five-column set**
@@ -242,6 +244,7 @@ Expected: errors mentioning `styleModel undefined` or `styleAmount undefined` fr
 ### Task 3: Rewrite `renderSession` to use the new helper + tokens-or-cost column
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree.go`
 
 - [ ] **Step 1: Replace `renderSession`**
@@ -296,6 +299,7 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix, cont string,
 ```
 
 Key behavioral changes vs today:
+
 - Tokens-or-cost column always populated (`FmtTok(SessionTokens)` when not in cost mode).
 - All five stat columns flow through `renderStatsBlock`.
 - Format string after the label collapsed: `"  %s%s\n"` → stats block + tail + newline. The single `"  "` before `%s` keeps the two-space gap between the label and the stats block (today the format string had a single space before model + four single spaces between columns; the new helper handles inter-column spacing internally).
@@ -313,6 +317,7 @@ Expected: still compile errors from `renderDirRow` and `RenderPathNode` (they re
 ### Task 4: Rewrite `dirRollup` + `renderDirRow` for the unified grid
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree.go`
 
 - [ ] **Step 1: Replace `dirRollup`**
@@ -400,6 +405,7 @@ Expected: still errors for `RenderPathNode` and `nodeRollup`. Task 5 fixes those
 ### Task 5: Rewrite `nodeRollup` + `RenderPathNode` (with indented glyph)
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree.go`
 
 - [ ] **Step 1: Replace `RenderPathNode`**
@@ -489,6 +495,7 @@ If a test breaks because of a real regression (column missing, alignment wrong),
 ### Task 6: Add column-alignment + indent + tokens-column tests
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/render/tree_test.go`
 
 - [ ] **Step 1: Append three new tests**

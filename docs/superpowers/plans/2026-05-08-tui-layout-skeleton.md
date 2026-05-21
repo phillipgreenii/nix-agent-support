@@ -18,15 +18,15 @@ The spec describes 5 zones (controls / 5h-block / alert / body / status). Theme 
 
 ## File structure
 
-| File | Status | Responsibility |
-|------|--------|----------------|
-| `packages/claude-agents-tui/internal/tui/layout.go` | new | `zoneSpec` type + `layoutZones` helper |
-| `packages/claude-agents-tui/internal/tui/layout_test.go` | new | Unit tests: height invariant, drop priority, padding/truncation |
-| `packages/claude-agents-tui/internal/tui/view.go` | modify | Replace `strings.Join` + `visualLineCount` with `layoutZones` call |
-| `packages/claude-agents-tui/internal/tui/view_test.go` | modify | Extend `TestViewLineWidthInvariant` to assert line count == height |
-| `packages/claude-agents-tui/internal/tui/model.go` | modify | Add `selectable` + `nextSelectable` helpers; update `clampCursor` |
-| `packages/claude-agents-tui/internal/tui/update.go` | modify | `down`/`j`/`up`/`k` use `nextSelectable` |
-| `packages/claude-agents-tui/internal/tui/model_test.go` | modify | Cursor-overrun + skip-blank-rows tests |
+| File                                                     | Status | Responsibility                                                     |
+| -------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
+| `packages/claude-agents-tui/internal/tui/layout.go`      | new    | `zoneSpec` type + `layoutZones` helper                             |
+| `packages/claude-agents-tui/internal/tui/layout_test.go` | new    | Unit tests: height invariant, drop priority, padding/truncation    |
+| `packages/claude-agents-tui/internal/tui/view.go`        | modify | Replace `strings.Join` + `visualLineCount` with `layoutZones` call |
+| `packages/claude-agents-tui/internal/tui/view_test.go`   | modify | Extend `TestViewLineWidthInvariant` to assert line count == height |
+| `packages/claude-agents-tui/internal/tui/model.go`       | modify | Add `selectable` + `nextSelectable` helpers; update `clampCursor`  |
+| `packages/claude-agents-tui/internal/tui/update.go`      | modify | `down`/`j`/`up`/`k` use `nextSelectable`                           |
+| `packages/claude-agents-tui/internal/tui/model_test.go`  | modify | Cursor-overrun + skip-blank-rows tests                             |
 
 ---
 
@@ -35,6 +35,7 @@ The spec describes 5 zones (controls / 5h-block / alert / body / status). Theme 
 ### Task 1: Create the `zoneSpec` type and `layoutZones` helper
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/tui/layout.go`
 
 - [ ] **Step 1: Write `layout.go`**
@@ -183,6 +184,7 @@ Expected: no output (success).
 ### Task 2: Unit tests for `layoutZones`
 
 **Files:**
+
 - Create: `packages/claude-agents-tui/internal/tui/layout_test.go`
 
 - [ ] **Step 1: Write the failing tests**
@@ -349,6 +351,7 @@ Re-run after the fix.
 ### Task 3: Rewrite `View()` to use `layoutZones`
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view.go`
 
 - [ ] **Step 1: Replace `View()` body and remove `visualLineCount`**
@@ -441,6 +444,7 @@ If the compiler complains about an unused `lipgloss` or `strings` import, remove
 ### Task 4: Extend `view_test.go` to assert exact line count
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/view_test.go`
 
 - [ ] **Step 1: Add a height parameter + line-count check to `TestViewLineWidthInvariant`**
@@ -526,10 +530,12 @@ status := strings.TrimRight(render.Legend(m.width), "\n")
 - [ ] **Step 1: Full test sweep**
 
 Run from `packages/claude-agents-tui`:
+
 ```bash
 go test ./... -count=1
 go vet ./...
 ```
+
 Expected: all packages PASS, vet silent.
 
 - [ ] **Step 2: Commit**
@@ -567,6 +573,7 @@ EOF
 ### Task 6: Add `selectable` and `nextSelectable` helpers
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/model.go`
 
 - [ ] **Step 1: Add helpers near `clampCursor`**
@@ -637,6 +644,7 @@ Expected: no errors.
 ### Task 7: Update `down`/`j` and `up`/`k` to skip blank rows
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/update.go`
 
 - [ ] **Step 1: Replace the `down`/`j` and `up`/`k` cases**
@@ -686,6 +694,7 @@ Expected: no errors.
 ### Task 8: Tests for cursor-overrun + skip-blank
 
 **Files:**
+
 - Modify: `packages/claude-agents-tui/internal/tui/model_test.go`
 
 - [ ] **Step 1: Add the regression tests near the existing cursor tests**
@@ -792,10 +801,12 @@ If any fail, print the flatRows kinds (`fmt.Printf("%v\n", r.Kind)`) at the top 
 - [ ] **Step 1: Full test sweep**
 
 Run from `packages/claude-agents-tui`:
+
 ```bash
 go test ./... -count=1
 go vet ./...
 ```
+
 Expected: all PASS, vet silent.
 
 - [ ] **Step 2: Commit**
