@@ -92,7 +92,6 @@
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           pa-monitor = final.callPackage ./packages/pa-monitor { };
-          gh-prreview = final.callPackage ./packages/gh-prreview { inherit gitHash; };
           claude-activity =
             let
               result = import ./packages/claude-activity {

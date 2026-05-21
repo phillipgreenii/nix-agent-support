@@ -7,7 +7,7 @@
 {
   # Create a Python package with automatic dependency resolution from pyproject.toml
   # Usage: mkPythonPackage {
-  #   name = "gh-prreview";
+  #   name = "my-package";
   #   gitHash = "abc1234";
   #   src = ./.;
   #   customDeps = {
@@ -18,7 +18,7 @@
   #   };
   #   runtimeDeps = [ pkgs.gh pkgs.git ];
   #   versionPlaceholder = "2.0.0";  # Version string in pyproject.toml to replace
-  #   versionInitFile = "src/gh_prreview/__init__.py";  # Optional __init__.py with __version__
+  #   versionInitFile = "src/my_package/__init__.py";  # Optional __init__.py with __version__
   #   hasCompletions = true;
   #   hasTldr = true;
   # }

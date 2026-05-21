@@ -22,7 +22,6 @@
     ./programs/claude-activity
     ./programs/pa-monitor
     ./programs/claude-extended-tool-approver
-    ./programs/gh-prreview
     ./programs/git-tools
     ./programs/pg-pr
     ./programs/pg-pr-plugin
