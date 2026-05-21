@@ -28,7 +28,22 @@ type CLIRunner struct {
 }
 
 // NewCLIRunner returns a CLIRunner using the process env and cwd.
+//
+// The empty Dir means bd discovers its workspace from the process's current
+// working directory. When pg-pr operates on PRs that belong to a specific
+// monorepo, prefer NewCLIRunnerForRepo so bd discovers the monorepo's own
+// `.beads/` workspace (and any associated dolt server config) regardless of
+// where pg-pr was invoked from.
 func NewCLIRunner() *CLIRunner { return &CLIRunner{} }
+
+// NewCLIRunnerForRepo returns a CLIRunner whose Dir is set to the given
+// absolute monorepo root. bd will then resolve its workspace (and dolt server
+// configuration) relative to that directory rather than the process cwd.
+//
+// Pass the absolute filesystem path of the monorepo whose `.beads/` workspace
+// should hold the merge-request beads for PRs in that repo. Passing an empty
+// string is equivalent to NewCLIRunner() (workspace discovered from cwd).
+func NewCLIRunnerForRepo(dir string) *CLIRunner { return &CLIRunner{Dir: dir} }
 
 // Run shells out to `bd`.
 func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {

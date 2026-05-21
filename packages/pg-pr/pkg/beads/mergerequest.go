@@ -64,8 +64,27 @@ type Client struct {
 }
 
 // NewClient returns a Client backed by the default CLIRunner.
+//
+// The default Client invokes bd from the process's current working directory,
+// so bd discovers its workspace from cwd. For pg-pr operations on PRs from a
+// specific monorepo, prefer NewClientForRepo so bd hits that monorepo's
+// `.beads/` workspace regardless of where pg-pr was invoked from.
 func NewClient() *Client {
 	return &Client{Runner: NewCLIRunner()}
+}
+
+// NewClientForRepo returns a Client whose underlying CLIRunner.Dir is set to
+// the given absolute monorepo root. bd shells out with that path as cwd, so
+// it discovers the monorepo's `.beads/` workspace (and any associated dolt
+// server configuration) automatically.
+//
+// Use this when pg-pr is performing a write/read for a PR that belongs to a
+// known monorepo: pass the absolute path from `config.RepoConfig.Path` (or
+// `branch.Detect`'s WorktreeRoot) so the operation lands in the right
+// workspace. Passing an empty dir is equivalent to NewClient() and uses the
+// process cwd's workspace.
+func NewClientForRepo(dir string) *Client {
+	return NewClientWithRunner(NewCLIRunnerForRepo(dir))
 }
 
 // NewClientWithRunner returns a Client backed by an injected Runner — used in

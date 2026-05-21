@@ -386,3 +386,87 @@ func TestFindMergeRequestForFeedback_Validates(t *testing.T) {
 		t.Fatalf("expected error on empty id")
 	}
 }
+
+// TestNewClientForRepo_SetsRunnerDir verifies the constructed Client's inner
+// CLIRunner has the requested Dir, so bd will be invoked with that path as
+// cwd and pick up the monorepo's `.beads/` workspace.
+func TestNewClientForRepo_SetsRunnerDir(t *testing.T) {
+	dir := "/tmp/some-monorepo-root"
+	c := NewClientForRepo(dir)
+	if c == nil {
+		t.Fatalf("expected non-nil Client")
+	}
+	cli, ok := c.Runner.(*CLIRunner)
+	if !ok {
+		t.Fatalf("expected runner to be *CLIRunner, got %T", c.Runner)
+	}
+	if cli.Dir != dir {
+		t.Fatalf("Dir: got %q want %q", cli.Dir, dir)
+	}
+}
+
+// TestNewClientForRepo_EmptyDirMatchesNewClient documents that passing "" is
+// equivalent to NewClient() — both yield a Client whose runner has no Dir
+// and therefore inherits the process cwd.
+func TestNewClientForRepo_EmptyDirMatchesNewClient(t *testing.T) {
+	c := NewClientForRepo("")
+	cli, ok := c.Runner.(*CLIRunner)
+	if !ok {
+		t.Fatalf("expected runner to be *CLIRunner, got %T", c.Runner)
+	}
+	if cli.Dir != "" {
+		t.Fatalf("Dir: got %q want empty (cwd-discovered)", cli.Dir)
+	}
+}
+
+// TestNewClientForRepo_HitsRepoWorkspace creates two real bd workspaces in
+// distinct temp dirs and verifies that NewClientForRepo(dirA) writes to
+// workspace A only — beads created on the A-scoped client are not visible
+// from the B-scoped client.
+func TestNewClientForRepo_HitsRepoWorkspace(t *testing.T) {
+	ctx := context.Background()
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not on PATH")
+	}
+
+	// Boot two independent workspaces using the same helper used elsewhere in
+	// the package; we then construct fresh Clients via NewClientForRepo to
+	// confirm that the public constructor actually targets the right dir.
+	clientA, runnerA := newBDWorkspace(t)
+	clientB, runnerB := newBDWorkspace(t)
+	_ = clientA
+	_ = clientB
+
+	// Build new clients via NewClientForRepo and reuse the prepared env so
+	// BEADS_DIR/WORKSPACE_ROOT leakage is excluded. We pierce into the inner
+	// runner to set Env without changing the API surface.
+	pubA := NewClientForRepo(runnerA.Dir)
+	pubA.Runner.(*CLIRunner).Env = runnerA.Env
+	pubB := NewClientForRepo(runnerB.Dir)
+	pubB.Runner.(*CLIRunner).Env = runnerB.Env
+
+	idA, _, err := pubA.EnsureMergeRequest(ctx, "in A", MergeRequestFields{
+		Repo: "monoA/mod", PRNumber: 1,
+	})
+	if err != nil {
+		t.Fatalf("EnsureMergeRequest in A: %v", err)
+	}
+
+	// Workspace B must NOT see the bead created in A.
+	gotB, err := pubB.GetMergeRequest(ctx, idA)
+	if err != nil {
+		t.Fatalf("lookup in B: %v", err)
+	}
+	if gotB != nil {
+		t.Fatalf("bead %s leaked from workspace A into workspace B", idA)
+	}
+
+	// And A must still see its own bead.
+	gotA, err := pubA.GetMergeRequest(ctx, idA)
+	if err != nil {
+		t.Fatalf("lookup in A: %v", err)
+	}
+	if gotA == nil {
+		t.Fatalf("bead %s not visible from its own workspace", idA)
+	}
+}
