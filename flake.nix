@@ -332,6 +332,15 @@
           };
 
           packages = {
+            # Re-export overlay-defined Go packages so `nix-update -F` (used in
+            # update-deps.sh) can resolve them via flake.packages.<system>.
+            # Without this, nix-update 1.14+ reports `pkg = null` (surfaced as
+            # "expected a set but found null").
+            inherit (pkgs)
+              claude-extended-tool-approver
+              pa-monitor
+              pg-pr
+              ;
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}
             '';
