@@ -1925,7 +1925,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\tIsAnyBusy\x12\x1f.pa_monitor.v1.IsAnyBusyRequest\x1a .pa_monitor.v1.IsAnyBusyResponse\x12T\n" +
 	"\x0eGetSessionInfo\x12$.pa_monitor.v1.GetSessionInfoRequest\x1a\x1c.pa_monitor.v1.SessionDetail\x12K\n" +
 	"\vGetPathInfo\x12!.pa_monitor.v1.GetPathInfoRequest\x1a\x19.pa_monitor.v1.PathRollup\x12B\n" +
-	"\x05Drain\x12\x1b.pa_monitor.v1.DrainRequest\x1a\x1c.pa_monitor.v1.DrainResponseBBZ@github.com/phillipgreenii/claude-agents-tui/internal/proto;protob\x06proto3"
+	"\x05Drain\x12\x1b.pa_monitor.v1.DrainRequest\x1a\x1c.pa_monitor.v1.DrainResponseB;Z9github.com/phillipgreenii/pa-monitor/internal/proto;protob\x06proto3"
 
 var (
 	file_internal_proto_pa_monitor_proto_rawDescOnce sync.Once

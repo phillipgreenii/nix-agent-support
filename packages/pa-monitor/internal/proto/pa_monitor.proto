@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package pa_monitor.v1;
 
-option go_package = "github.com/phillipgreenii/claude-agents-tui/internal/proto;proto";
+option go_package = "github.com/phillipgreenii/pa-monitor/internal/proto;proto";
 
 import "google/protobuf/timestamp.proto";
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for wait-for-agents-to-finish thin wrapper around claude-agents-tui
+# Tests for wait-for-agents-to-finish thin wrapper around pa-monitor
 
 setup() {
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
@@ -26,27 +26,27 @@ run_wait_for_agents() {
   run bash "$WFA_SCRIPT" "$@"
 }
 
-# Helper: Create a stub claude-agents-tui that records its arguments and exits
+# Helper: Create a stub pa-monitor that records its arguments and exits
 # with the given exit code.
 create_stub_tui() {
   local exit_code="${1:-0}"
   local args_log="$TEST_DIR/tui-args"
 
-  cat >"$STUB_DIR/claude-agents-tui" <<EOF
+  cat >"$STUB_DIR/pa-monitor" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "$args_log"
 exit $exit_code
 EOF
-  chmod +x "$STUB_DIR/claude-agents-tui"
+  chmod +x "$STUB_DIR/pa-monitor"
 }
 
-@test "exits 0 when claude-agents-tui exits 0" {
+@test "exits 0 when pa-monitor exits 0" {
   create_stub_tui 0
   run_wait_for_agents --maximum-wait 5
   [ "$status" -eq 0 ]
 }
 
-@test "exits 1 when claude-agents-tui exits 1" {
+@test "exits 1 when pa-monitor exits 1" {
   create_stub_tui 1
   run_wait_for_agents --maximum-wait 5
   [ "$status" -eq 1 ]
@@ -70,20 +70,20 @@ EOF
   [[ "$output" =~ "Usage: wait-for-agents-to-finish" ]]
 }
 
-@test "--version delegates to claude-agents-tui --version" {
-  cat >"$STUB_DIR/claude-agents-tui" <<'EOF'
+@test "--version delegates to pa-monitor --version" {
+  cat >"$STUB_DIR/pa-monitor" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "--version" ]]; then
-  echo "claude-agents-tui 1.2.3"
+  echo "pa-monitor 1.2.3"
   exit 0
 fi
 exit 99
 EOF
-  chmod +x "$STUB_DIR/claude-agents-tui"
+  chmod +x "$STUB_DIR/pa-monitor"
 
   run_wait_for_agents --version
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "claude-agents-tui 1.2.3" ]]
+  [[ "$output" =~ "pa-monitor 1.2.3" ]]
 }
 
 @test "forwards --wait-until-idle by default" {
@@ -93,7 +93,7 @@ EOF
   grep -q -- "--wait-until-idle" "$TEST_DIR/tui-args"
 }
 
-@test "forwards --maximum-wait to claude-agents-tui" {
+@test "forwards --maximum-wait to pa-monitor" {
   create_stub_tui 0
   run_wait_for_agents --maximum-wait 42
   [ "$status" -eq 0 ]
@@ -101,7 +101,7 @@ EOF
   grep -q -- "^42$" "$TEST_DIR/tui-args"
 }
 
-@test "forwards --time-between-checks to claude-agents-tui" {
+@test "forwards --time-between-checks to pa-monitor" {
   create_stub_tui 0
   run_wait_for_agents --time-between-checks 7
   [ "$status" -eq 0 ]
@@ -109,7 +109,7 @@ EOF
   grep -q -- "^7$" "$TEST_DIR/tui-args"
 }
 
-@test "forwards --consecutive-idle-checks to claude-agents-tui" {
+@test "forwards --consecutive-idle-checks to pa-monitor" {
   create_stub_tui 0
   run_wait_for_agents --consecutive-idle-checks 4
   [ "$status" -eq 0 ]
@@ -117,7 +117,7 @@ EOF
   grep -q -- "^4$" "$TEST_DIR/tui-args"
 }
 
-@test "forwards --caffeinate to claude-agents-tui" {
+@test "forwards --caffeinate to pa-monitor" {
   create_stub_tui 0
   run_wait_for_agents --caffeinate
   [ "$status" -eq 0 ]

@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLAKE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-PKG_NAME="claude-agents-tui"
+PKG_NAME="pa-monitor"
 
 # Devbox may export GOEXPERIMENT from its Go; clear so Nix-managed Go isn't confused.
 unset GOEXPERIMENT

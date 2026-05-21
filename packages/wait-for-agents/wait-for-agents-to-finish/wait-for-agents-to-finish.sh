@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# wait-for-agents-to-finish - thin wrapper delegating to claude-agents-tui.
+# wait-for-agents-to-finish - thin wrapper delegating to pa-monitor.
 
 set -euo pipefail
 
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     cat <<EOF
 Usage: wait-for-agents-to-finish [OPTIONS]
 
-Thin wrapper around claude-agents-tui --wait-until-idle. Options:
+Thin wrapper around pa-monitor --wait-until-idle. Options:
   --maximum-wait SECONDS
   --time-between-checks SECS
   --consecutive-idle-checks N
@@ -50,7 +50,7 @@ EOF
     exit 0
     ;;
   -v | --version)
-    exec claude-agents-tui --version
+    exec pa-monitor --version
     ;;
   *)
     echo "Error: Unknown option: $1" >&2
@@ -59,4 +59,4 @@ EOF
   esac
 done
 
-exec claude-agents-tui "${args[@]}"
+exec pa-monitor "${args[@]}"
