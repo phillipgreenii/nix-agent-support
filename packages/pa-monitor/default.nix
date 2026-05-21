@@ -14,10 +14,7 @@ buildGoModule {
 
   subPackages = [ "cmd/pa-monitor" ];
 
-  # Go modules — vendorHash changes whenever go.sum changes. The OTel +
-  # gRPC additions in Plans 2+3 need a fresh value; recompute after first
-  # `nix build` failure (nix reports the expected hash).
-  vendorHash = lib.fakeHash;
+  vendorHash = "sha256-CU2d10kL5XDKMe+7/LWgxrp/HorUFLwh1wbOYluJNoQ=";
 
   nativeBuildInputs = [ makeWrapper ];
 
