@@ -88,6 +88,8 @@
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           pa-monitor = final.callPackage ./packages/pa-monitor { };
+          goccc = final.callPackage ./packages/goccc { };
+          toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
             let
               result = import ./packages/claude-activity {
@@ -340,6 +342,8 @@
               claude-extended-tool-approver
               pa-monitor
               pg-pr
+              goccc
+              toktrack
               ;
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}
@@ -382,6 +386,14 @@
                 ul_run_step "update-deps-pa-monitor" \
                   "update-locks: update pa-monitor Go deps + vendorHash" \
                   bash -c 'cd packages/pa-monitor && go get -u ./... && ./update-deps.sh'
+
+                ul_run_step "update-goccc" \
+                  "update-locks: bump goccc rev + src hash" \
+                  nix run nixpkgs#nix-update -- -F goccc
+
+                ul_run_step "update-toktrack" \
+                  "update-locks: bump toktrack rev + src hash + cargoHash" \
+                  nix run nixpkgs#nix-update -- -F toktrack
 
                 ul_finalize
               '';
