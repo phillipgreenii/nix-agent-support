@@ -19,6 +19,8 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon"
+	"github.com/phillipgreenii/pa-monitor/internal/labels"
+	"github.com/phillipgreenii/pa-monitor/internal/labels/detectors"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 )
@@ -89,6 +91,14 @@ func runDaemon(args []string) {
 		Caffeinate:          caffMgr,
 		InitialCaffeinateOn: rs.CaffeinateOn,
 		RuntimePath:         runtimePath,
+		Detectors: []labels.Detector{
+			detectors.Terminal{},
+			detectors.Gascity{},
+			detectors.Repo{},
+			detectors.Project{},
+			detectors.Agent{},
+		},
+		// Decorators are added per-host via config; none built-in here.
 	}
 
 	if !*disablePoller {

@@ -164,7 +164,46 @@ func (e *Emitter) Shutdown(ctx context.Context) error {
 	return firstErr
 }
 
-// RecordSessionsCount sets per-state session gauges. nil-safe.
+// SessionGroup is one observation row for the sessions gauge: a count
+// with its full label set. RecordSessionGroups emits one Observe call
+// per group, allowing per-(state, workspace.*, agent.*) cardinalities
+// in a single metric.
+type SessionGroup struct {
+	Count  int
+	Labels map[string]string
+}
+
+// RecordSessionGroups replaces the latest sessions-by-* observation
+// with the supplied groups. Each group becomes one Observe call when
+// the meter callback next fires. baseAttrs are merged into every group's
+// attrs (group labels win on conflict). nil-safe.
+func (e *Emitter) RecordSessionGroups(groups []SessionGroup, baseAttrs map[string]string) {
+	if e == nil {
+		return
+	}
+	obs := make([]stateObs, 0, len(groups))
+	for _, g := range groups {
+		merged := map[string]string{}
+		for k, v := range baseAttrs {
+			merged[k] = v
+		}
+		for k, v := range g.Labels {
+			merged[k] = v
+		}
+		obs = append(obs, stateObs{
+			state: merged["state"],
+			count: int64(g.Count),
+			attrs: attrsToKV(merged),
+		})
+	}
+	e.mu.Lock()
+	e.sessionsObs = obs
+	e.mu.Unlock()
+}
+
+// RecordSessionsCount sets per-state session gauges. nil-safe. Kept for
+// back-compat; prefer RecordSessionGroups when per-workspace labels are
+// available.
 func (e *Emitter) RecordSessionsCount(byState map[string]int, baseAttrs map[string]string) {
 	if e == nil {
 		return

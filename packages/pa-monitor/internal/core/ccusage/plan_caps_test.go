@@ -20,9 +20,9 @@ func TestPlanCapUSD(t *testing.T) {
 
 func TestWeekCapUSD(t *testing.T) {
 	cases := map[string]float64{
-		"pro":     50,
-		"max_5x":  200,
-		"max_20x": 800,
+		"pro":     300,
+		"max_5x":  2000,
+		"max_20x": 4000,
 	}
 	for tier, want := range cases {
 		if got := WeekCapUSD(tier); got != want {

@@ -14,7 +14,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
+	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 )
 
@@ -142,6 +144,17 @@ type RunOptions struct {
 	// NudgeFn dispatches a signal to the given pid. nil → Nudge RPC
 	// returns FailedPrecondition.
 	NudgeFn func(pid int, text string) error
+	// Detectors run against each session at tick time to derive labels
+	// for emitted metrics. Built-in detectors live in
+	// internal/labels/detectors. Empty → only the {state, plan_tier}
+	// label set is emitted on sessions.count.
+	Detectors []labels.Detector
+	// Decorators are shell-out label producers. Run alongside Detectors;
+	// their output wins on conflicting keys.
+	Decorators []*labels.Decorator
+	// LabelCap caps the number of distinct values for any one label key.
+	// Past the cap, additional values bucket as "other". 0 → 50.
+	LabelCap int
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -198,6 +211,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 	t := time.NewTicker(tick)
 	defer t.Stop()
+
+	capLimit := opts.LabelCap
+	if capLimit <= 0 {
+		capLimit = 50
+	}
+	labelCap := labels.NewCardinalityCap(capLimit)
+	labelCache := map[string]labels.Set{}
 
 	tickCount := 0
 	for {
@@ -262,25 +282,149 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					opts.Emitter.RecordCaffeinateGraceExpired(nil)
 				}
 			}
-			updateGauges(opts.Emitter, tree, opts.PlanTier)
+			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
+			// Drop stale label cache entries for sessions that vanished.
+			pruneLabelCache(labelCache, tree)
 			state.setTree(tree)
 		}
 	}
 }
 
-// updateGauges pushes per-state session counts into the emitter gauges.
+// updateGauges pushes session counts grouped by (state + per-workspace +
+// per-agent labels) into the emitter gauges. When no detectors are
+// configured, falls back to a per-state-only emission (back-compat).
 // nil-safe on emitter.
-func updateGauges(e *otel.Emitter, tree *aggregate.Tree, planTier string) {
+func updateGauges(
+	e *otel.Emitter,
+	tree *aggregate.Tree,
+	planTier string,
+	detectors []labels.Detector,
+	decorators []*labels.Decorator,
+	cap *labels.CardinalityCap,
+	labelCache map[string]labels.Set,
+) {
 	if e == nil || tree == nil {
 		return
 	}
-	byState := map[string]int{}
-	for _, d := range tree.Dirs {
-		byState["working"] += d.WorkingN
-		byState["idle"] += d.IdleN
-		byState["dormant"] += d.DormantN
+	if len(detectors) == 0 && len(decorators) == 0 {
+		byState := map[string]int{}
+		for _, d := range tree.Dirs {
+			byState["working"] += d.WorkingN
+			byState["idle"] += d.IdleN
+			byState["dormant"] += d.DormantN
+		}
+		e.RecordSessionsCount(byState, map[string]string{"plan_tier": planTier})
+		return
 	}
-	e.RecordSessionsCount(byState, map[string]string{"plan_tier": planTier})
+
+	type groupKey string
+	counts := map[groupKey]int{}
+	groupLabels := map[groupKey]labels.Set{}
+
+	for _, sv := range tree.Sessions() {
+		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
+		ls["state"] = session.Status(sv.Status).String()
+		key := groupKey(canonicalKey(ls))
+		counts[key]++
+		if _, ok := groupLabels[key]; !ok {
+			groupLabels[key] = ls
+		}
+	}
+
+	groups := make([]otel.SessionGroup, 0, len(counts))
+	for k, c := range counts {
+		groups = append(groups, otel.SessionGroup{
+			Count:  c,
+			Labels: groupLabels[k],
+		})
+	}
+	e.RecordSessionGroups(groups, map[string]string{"plan_tier": planTier})
+}
+
+// labelsForSession runs detectors + decorators against the session,
+// caches the result by session.id (labels are static for the session's
+// lifetime), and applies the cardinality cap to every value.
+func labelsForSession(
+	sv *aggregate.SessionView,
+	detectors []labels.Detector,
+	decorators []*labels.Decorator,
+	cap *labels.CardinalityCap,
+	cache map[string]labels.Set,
+) labels.Set {
+	if sv == nil || sv.Session == nil {
+		return labels.Set{}
+	}
+	if cached, ok := cache[sv.SessionID]; ok {
+		return cached
+	}
+	s := labels.Session{
+		ID:    sv.SessionID,
+		PID:   sv.PID,
+		CWD:   sv.Cwd,
+		Env:   sv.Env,
+		Model: sv.Model,
+	}
+	out := labels.Set{}
+	for _, d := range detectors {
+		out = out.Merge(d.Detect(s))
+	}
+	for _, dec := range decorators {
+		out = out.Merge(dec.Detect(s))
+	}
+	if cap != nil {
+		for k, v := range out {
+			out[k] = cap.Cap(k, v)
+		}
+	}
+	cache[sv.SessionID] = out
+	return out
+}
+
+// pruneLabelCache drops cache entries for sessions no longer in the
+// tree, freeing memory across long-running daemons.
+func pruneLabelCache(cache map[string]labels.Set, tree *aggregate.Tree) {
+	if cache == nil || tree == nil {
+		return
+	}
+	live := map[string]struct{}{}
+	for _, sv := range tree.Sessions() {
+		if sv != nil && sv.Session != nil {
+			live[sv.SessionID] = struct{}{}
+		}
+	}
+	for id := range cache {
+		if _, ok := live[id]; !ok {
+			delete(cache, id)
+		}
+	}
+}
+
+// canonicalKey returns a stable string representing the label set so we
+// can group identical sets in a map.
+func canonicalKey(ls labels.Set) string {
+	keys := make([]string, 0, len(ls))
+	for k := range ls {
+		if ls[k] == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	// sort for stability
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
+			keys[j-1], keys[j] = keys[j], keys[j-1]
+		}
+	}
+	var b []byte
+	for i, k := range keys {
+		if i > 0 {
+			b = append(b, '|')
+		}
+		b = append(b, k...)
+		b = append(b, '=')
+		b = append(b, ls[k]...)
+	}
+	return string(b)
 }
 
 // Run is a thin compat wrapper preserving the original signature used by
