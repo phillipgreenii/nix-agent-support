@@ -134,12 +134,15 @@ type Engine struct {
 }
 
 // New constructs an Engine. Returns an error if required deps are missing.
+//
+// When d.Beads is non-nil it acts as a test override: every per-repo bd
+// operation routes through that single client (useful for tests that share
+// an in-memory bd). When d.Beads is nil, the engine constructs a per-repo
+// Client via beads.NewClientForRepo(rcfg.Path) before each repo's
+// operations, so writes land in the monorepo's own .beads/ workspace.
 func New(d Deps) (*Engine, error) {
 	if d.Cfg == nil {
 		return nil, errors.New("sync: cfg required")
-	}
-	if d.Beads == nil {
-		return nil, errors.New("sync: beads client required")
 	}
 	if len(d.VCS) == 0 {
 		return nil, errors.New("sync: at least one VCS provider required")
@@ -148,6 +151,24 @@ func New(d Deps) (*Engine, error) {
 		d.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Engine{deps: d}, nil
+}
+
+// bdClientFor returns the BeadClient the engine should use for operations
+// against the given repo's workspace.
+//
+//   - If Deps.Beads is set (test injection or callers that want a shared
+//     client), it is returned unchanged.
+//   - Otherwise a fresh beads.Client is constructed via NewClientForRepo,
+//     using rcfg.Path as the bd cwd so bd discovers that monorepo's
+//     `.beads/` workspace.
+//
+// Construction is cheap (no I/O until a bd command is issued), so it's
+// safe to call per repo iteration.
+func (e *Engine) bdClientFor(rcfg config.RepoConfig) BeadClient {
+	if e.deps.Beads != nil {
+		return e.deps.Beads
+	}
+	return beads.NewClientForRepo(rcfg.Path)
 }
 
 // Summary is the result of a Sync call. Suitable for `--json` output.
@@ -204,6 +225,19 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// Repos for which we got a fully successful enumeration; only these
 	// participate in upstream-not-watched closure.
 	healthyRepos := map[string]bool{}
+	// Cache per-repo bd clients so we construct one per monorepo workspace
+	// and reuse it across the PR-upsert + close loops. Each Client wraps a
+	// CLIRunner with Dir=rcfg.Path, so bd discovers that monorepo's own
+	// .beads/ workspace.
+	repoClients := map[string]BeadClient{}
+	// Per-repo (repo, pr_number) index of pre-existing open merge-request
+	// beads — used to distinguish creates vs updates per-repo so the
+	// summary counters stay accurate even when each workspace holds its
+	// own beads.
+	repoPreExisting := map[string]map[prKey]beads.MergeRequest{}
+	// Per-repo config lookup, populated alongside repoClients so downstream
+	// passes (replies + close-stale) don't have to re-look-up.
+	repoCfgs := map[string]config.RepoConfig{}
 
 	for _, rcfg := range e.deps.Cfg.Repos {
 		func() {
@@ -231,12 +265,21 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			summary.TotalPRs += len(prs)
 			healthyRepos[rcfg.Remote] = true
 			repoStates[rcfg.Remote] = state
+			// Build the per-repo bd client now that we know this repo will
+			// participate in the rest of the pipeline.
+			bdc := e.bdClientFor(rcfg)
+			repoClients[rcfg.Remote] = bdc
+			repoCfgs[rcfg.Remote] = rcfg
+			// Pre-index existing open beads for this repo so the
+			// create-vs-update counters reflect this workspace only.
+			if pre, perr := e.listExistingByKey(repoCtx, bdc); perr == nil {
+				repoPreExisting[rcfg.Remote] = pre
+			}
 		}()
 	}
 
-	// Upsert beads for each observed PR. Track whether the call was a
-	// create or an update by comparing pre/post existence.
-	preExisting, _ := e.listExistingByKey(ctx)
+	// Upsert beads for each observed PR. Each PR is dispatched against its
+	// own monorepo's bd client.
 	for key, pr := range observed {
 		func() {
 			prCtx, prSpan := startPRSpan(ctx, key.Repo, pr.Number, pr.Author)
@@ -247,6 +290,13 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					WithLabelValues(key.Repo).
 					Observe(e.deps.Now().Sub(startedAt).Seconds())
 			}()
+
+			bdc := repoClients[key.Repo]
+			if bdc == nil {
+				// Defensive: a repo can only land in `observed` after its
+				// client was registered, but guard anyway.
+				return
+			}
 
 			fields := beads.MergeRequestFields{
 				Repo:         key.Repo,
@@ -260,7 +310,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				Draft:        pr.Draft,
 			}
 			bdCtx, bdSpan := startBeadsSpan(prCtx, "EnsureMergeRequest", key.Repo, pr.Number)
-			prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(bdCtx, pr.URL, fields)
+			prBeadID, alreadyClosed, err := bdc.EnsureMergeRequest(bdCtx, pr.URL, fields)
 			recordSpanErr(bdSpan, err)
 			bdSpan.End()
 			if err != nil {
@@ -275,14 +325,14 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			if alreadyClosed {
 				return
 			}
-			if _, was := preExisting[key]; was {
+			if _, was := repoPreExisting[key.Repo][key]; was {
 				summary.BeadsUpdated++
 			} else {
 				summary.BeadsCreated++
 			}
 
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
-			if err := e.processFeedback(prCtx, key.Repo, pr, prBeadID, summary); err != nil {
+			if err := e.processFeedback(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -290,7 +340,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					Message: fmt.Sprintf("PR #%d feedback: %v", pr.Number, err),
 				})
 			}
-			if err := e.maybePromoteDraft(prCtx, key.Repo, pr, prBeadID, summary); err != nil {
+			if err := e.maybePromoteDraft(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -305,11 +355,15 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// record response_id). Runs once per healthy repo — the helper filters
 	// feedback beads to only those whose merge-request belongs to that repo.
 	for repo := range healthyRepos {
-		rcfg, err := e.repoConfig(repo)
-		if err != nil {
+		rcfg, ok := repoCfgs[repo]
+		if !ok {
 			continue
 		}
-		if err := e.processReplyDrafts(ctx, rcfg, summary); err != nil {
+		bdc := repoClients[repo]
+		if bdc == nil {
+			continue
+		}
+		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    repo,
 				Message: fmt.Sprintf("reply pipeline: %v", err),
@@ -320,22 +374,35 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// Close beads whose PR is no longer in the observed set, but only
 	// among repos that synced successfully. This prevents us from closing
 	// beads in a repo whose sync failed (we'd have no authoritative view).
-	all, err := e.deps.Beads.ListMergeRequests(ctx, false /* open only */)
-	if err != nil {
-		summary.Errors = append(summary.Errors, SummaryError{
-			Repo:    "(bd)",
-			Message: fmt.Sprintf("list open beads: %v", err),
-		})
-	} else {
+	//
+	// Each repo's bd workspace is queried independently via its own
+	// per-repo client — otherwise we'd miss beads that live in a sibling
+	// monorepo's workspace.
+	for repo := range healthyRepos {
+		bdc := repoClients[repo]
+		if bdc == nil {
+			continue
+		}
+		all, err := bdc.ListMergeRequests(ctx, false /* open only */)
+		if err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{
+				Repo:    repo,
+				Message: fmt.Sprintf("list open beads: %v", err),
+			})
+			continue
+		}
 		for _, mr := range all {
-			if !healthyRepos[mr.Fields.Repo] {
+			// Defensive: a repo's workspace should only hold beads tagged
+			// with its own remote, but old data may leak. Skip beads that
+			// don't match this repo.
+			if mr.Fields.Repo != repo {
 				continue
 			}
 			k := prKey{Repo: mr.Fields.Repo, Number: mr.Fields.PRNumber}
 			if _, watched := observed[k]; watched {
 				continue
 			}
-			if err := e.deps.Beads.CloseMergeRequest(ctx, mr.ID, "upstream-not-watched"); err != nil {
+			if err := bdc.CloseMergeRequest(ctx, mr.ID, "upstream-not-watched"); err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{
 					Repo:    mr.Fields.Repo,
 					Message: fmt.Sprintf("close stale bead %s: %v", mr.ID, err),
@@ -345,7 +412,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			summary.BeadsClosed++
 			// Cascade: close all descendants (processing-cycles, feedback,
 			// actions) with reason pr-closed.
-			e.cascadeClose(ctx, mr.ID, "pr-closed", summary)
+			e.cascadeClose(ctx, bdc, mr.ID, "pr-closed", summary)
 		}
 	}
 
@@ -378,6 +445,10 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 
 // SyncPR refreshes a single PR. The repo identifier MUST be in the configured
 // list (the engine can only sync repos with VCS provider config).
+//
+// The bd client used here is scoped to the repo's monorepo path so writes
+// land in that workspace's `.beads/` — regardless of where pg-pr was invoked
+// from. Tests that inject Deps.Beads continue to route through that client.
 func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary, error) {
 	if repo == "" || number <= 0 {
 		return nil, errors.New("sync: repo and PR number required")
@@ -390,6 +461,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	if err != nil {
 		return nil, err
 	}
+	bdc := e.bdClientFor(rcfg)
 
 	summary := &Summary{StartedAt: e.deps.Now()}
 	getCtx, getSpan := startVCSSpan(ctx, "GetPR", repo, number)
@@ -419,7 +491,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	// If upstream is closed/merged, close the bead instead of upserting an
 	// open one and cascade-close its descendants.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
-		existing, err := e.findBeadByPR(ctx, repo, pr.Number)
+		existing, err := e.findBeadByPR(ctx, bdc, repo, pr.Number)
 		if err != nil {
 			return summary, err
 		}
@@ -428,13 +500,13 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 			if pr.Merged {
 				reason = "upstream-merged"
 			}
-			if err := e.deps.Beads.CloseMergeRequest(ctx, existing.ID, reason); err != nil {
+			if err := bdc.CloseMergeRequest(ctx, existing.ID, reason); err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 				summary.FinishedAt = e.deps.Now()
 				return summary, err
 			}
 			summary.BeadsClosed = 1
-			e.cascadeClose(ctx, existing.ID, "pr-closed", summary)
+			e.cascadeClose(ctx, bdc, existing.ID, "pr-closed", summary)
 		}
 		summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 		summary.TotalPRs = 1
@@ -442,7 +514,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, nil
 	}
 
-	prBeadID, alreadyClosed, err := e.deps.Beads.EnsureMergeRequest(ctx, pr.URL, fields)
+	prBeadID, alreadyClosed, err := bdc.EnsureMergeRequest(ctx, pr.URL, fields)
 	if err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		summary.FinishedAt = e.deps.Now()
@@ -451,14 +523,14 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	if !alreadyClosed {
 		summary.BeadsUpdated = 1
 		// Phase 3: feedback + draft pipelines.
-		if err := e.processFeedback(ctx, repo, *pr, prBeadID, summary); err != nil {
+		if err := e.processFeedback(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
-		if err := e.maybePromoteDraft(ctx, repo, *pr, prBeadID, summary); err != nil {
+		if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 		// Phase 6 B3: post queued replies for feedback beads under this repo.
-		if err := e.processReplyDrafts(ctx, rcfg, summary); err != nil {
+		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 	}
@@ -535,9 +607,11 @@ func (e *Engine) repoConfig(remote string) (config.RepoConfig, error) {
 	return config.RepoConfig{}, fmt.Errorf("sync: repo %q not in config", remote)
 }
 
-// listExistingByKey indexes all open merge-request beads by (repo, pr_number).
-func (e *Engine) listExistingByKey(ctx context.Context) (map[prKey]beads.MergeRequest, error) {
-	all, err := e.deps.Beads.ListMergeRequests(ctx, false)
+// listExistingByKey indexes all open merge-request beads from the given
+// per-repo bd client by (repo, pr_number). Caller-scoped: callers pass the
+// bd client whose workspace they want indexed.
+func (e *Engine) listExistingByKey(ctx context.Context, bdc BeadClient) (map[prKey]beads.MergeRequest, error) {
+	all, err := bdc.ListMergeRequests(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -549,9 +623,10 @@ func (e *Engine) listExistingByKey(ctx context.Context) (map[prKey]beads.MergeRe
 }
 
 // findBeadByPR returns the open or closed merge-request bead for a given
-// (repo, pr_number) or nil if not found.
-func (e *Engine) findBeadByPR(ctx context.Context, repo string, pr int) (*beads.MergeRequest, error) {
-	all, err := e.deps.Beads.ListMergeRequests(ctx, true)
+// (repo, pr_number) or nil if not found. Caller passes the bd client whose
+// workspace should be searched.
+func (e *Engine) findBeadByPR(ctx context.Context, bdc BeadClient, repo string, pr int) (*beads.MergeRequest, error) {
+	all, err := bdc.ListMergeRequests(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -665,7 +740,10 @@ func saveState(path string, sf stateFile) error {
 //     success close the matching feedback with reason resolved-upstream.
 //
 // Returns the first error encountered after best-effort processing.
-func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+//
+// bdc is the per-repo bd client used for all feedback / processing-cycle
+// operations — bound to the monorepo's bd workspace by the caller.
+func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if prBeadID == "" {
 		return nil
 	}
@@ -714,7 +792,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 	}
 
 	// Find or create the active processing-cycle for new feedback.
-	cycleID, found, err := e.deps.Beads.FindOpenProcessingCycle(ctx, prBeadID)
+	cycleID, found, err := bdc.FindOpenProcessingCycle(ctx, prBeadID)
 	if err != nil {
 		return fmt.Errorf("find processing-cycle: %w", err)
 	}
@@ -722,7 +800,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 	// First pass: handle CI events whose conclusion is success and close
 	// any matching prior ci-failure feedback (resolved-upstream).
 	if found {
-		open, err := e.deps.Beads.ListFeedback(ctx, cycleID, false)
+		open, err := bdc.ListFeedback(ctx, cycleID, false)
 		if err == nil {
 			closedSet := map[string]bool{}
 			for _, ev := range events {
@@ -736,7 +814,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 					// Match by the CI run's "name" carried as external_id
 					// or by fingerprint stem.
 					if fb.Fields.ExternalID != "" && fb.Fields.ExternalID == ev.externalID {
-						_ = e.deps.Beads.MarkFeedbackResolvedUpstream(ctx, fb.ID)
+						_ = bdc.MarkFeedbackResolvedUpstream(ctx, fb.ID)
 						summary.FeedbackClosed++
 						closedSet[fb.ID] = true
 					}
@@ -753,7 +831,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 		}
 		// Dedup: if a feedback with this fingerprint already exists under
 		// any cycle for this PR, skip.
-		existing, err := e.findFeedbackForPR(ctx, prBeadID, ev.fingerprint)
+		existing, err := e.findFeedbackForPR(ctx, bdc, prBeadID, ev.fingerprint)
 		if err != nil {
 			continue
 		}
@@ -763,7 +841,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 
 		if !found {
 			// Lazily create a processing-cycle on first new feedback.
-			id, err := e.deps.Beads.CreateProcessingCycle(ctx, prBeadID, fmt.Sprintf("%s#%d", repo, pr.Number))
+			id, err := bdc.CreateProcessingCycle(ctx, prBeadID, fmt.Sprintf("%s#%d", repo, pr.Number))
 			if err != nil {
 				return fmt.Errorf("create processing-cycle: %w", err)
 			}
@@ -773,7 +851,7 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 		}
 
 		bdCtx, bdSpan := startBeadsSpan(ctx, "CreateFeedback", repo, pr.Number)
-		_, err = e.deps.Beads.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
+		_, err = bdc.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
 			ProcessingCycleID: cycleID,
 			Kind:              ev.kind,
 			ExternalID:        ev.externalID,
@@ -795,20 +873,21 @@ func (e *Engine) processFeedback(ctx context.Context, repo string, pr api.PR, pr
 
 // findFeedbackForPR searches every processing-cycle under prBeadID for a
 // feedback bead with the given fingerprint. Returns nil when fingerprint
-// is empty or no match is found.
-func (e *Engine) findFeedbackForPR(ctx context.Context, prBeadID, fingerprint string) (*beads.Feedback, error) {
+// is empty or no match is found. Uses the supplied bd client so the search
+// targets the right monorepo workspace.
+func (e *Engine) findFeedbackForPR(ctx context.Context, bdc BeadClient, prBeadID, fingerprint string) (*beads.Feedback, error) {
 	if fingerprint == "" {
 		return nil, nil
 	}
 	// We don't currently index cycles per PR cheaply; brute-force list
 	// feedback under any cycle linked from prBeadID. ListChildrenOfPR
 	// returns processing-cycles + action beads — we check each.
-	children, err := e.deps.Beads.ListChildrenOfPR(ctx, prBeadID)
+	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
 	if err != nil {
 		return nil, err
 	}
 	for _, childID := range children {
-		fb, err := e.deps.Beads.FindFeedbackByFingerprint(ctx, childID, fingerprint)
+		fb, err := bdc.FindFeedbackByFingerprint(ctx, childID, fingerprint)
 		if err != nil {
 			continue
 		}
@@ -820,8 +899,9 @@ func (e *Engine) findFeedbackForPR(ctx context.Context, prBeadID, fingerprint st
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
-// are green, promotes the PR to ready.
-func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+// are green, promotes the PR to ready. bdc is the per-repo bd client whose
+// workspace holds the merge-request bead being updated.
+func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if !pr.Draft {
 		return nil
 	}
@@ -857,7 +937,7 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, 
 		return fmt.Errorf("set-draft=false: %w", err)
 	}
 	// Persist the new state on the merge-request bead.
-	_ = e.deps.Beads.UpdateMergeRequest(ctx, prBeadID, beads.MergeRequestFields{
+	_ = bdc.UpdateMergeRequest(ctx, prBeadID, beads.MergeRequestFields{
 		Repo:     repo,
 		PRNumber: pr.Number,
 		State:    "open",
@@ -879,7 +959,11 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, repo string, pr api.PR, 
 // Per-bead failures (VCS errors, walker errors, missing external_id) are
 // recorded into summary.Errors but do not abort the loop — next sync
 // retries because response_id is still empty.
-func (e *Engine) processReplyDrafts(ctx context.Context, rcfg config.RepoConfig, summary *Summary) error {
+//
+// bdc is the per-repo bd client whose workspace is queried for pending
+// replies. Beads belonging to other repos are filtered out (defensive
+// guard in case clients share a workspace).
+func (e *Engine) processReplyDrafts(ctx context.Context, bdc BeadClient, rcfg config.RepoConfig, summary *Summary) error {
 	provider, err := e.providerFor(rcfg)
 	if err != nil {
 		return nil
@@ -889,13 +973,13 @@ func (e *Engine) processReplyDrafts(ctx context.Context, rcfg config.RepoConfig,
 		// No reply capability — skip silently (e.g., a Phase 0 stub provider).
 		return nil
 	}
-	pending, err := e.deps.Beads.ListFeedbackPendingReply(ctx)
+	pending, err := bdc.ListFeedbackPendingReply(ctx)
 	if err != nil {
 		return fmt.Errorf("list pending replies: %w", err)
 	}
 	for _, fb := range pending {
 		// Walk up: feedback → processing-cycle → merge-request.
-		mr, err := e.deps.Beads.FindMergeRequestForFeedback(ctx, fb.ID)
+		mr, err := bdc.FindMergeRequestForFeedback(ctx, fb.ID)
 		if err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    rcfg.Remote,
@@ -954,7 +1038,7 @@ func (e *Engine) processReplyDrafts(ctx context.Context, rcfg config.RepoConfig,
 			})
 			continue
 		}
-		if err := e.deps.Beads.SetResponseID(ctx, fb.ID, respID); err != nil {
+		if err := bdc.SetResponseID(ctx, fb.ID, respID); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    rcfg.Remote,
 				Message: fmt.Sprintf("reply %s: SetResponseID: %v", fb.ID, err),
@@ -985,8 +1069,9 @@ func allRunsSuccessful(runs []api.CIRun) bool {
 
 // cascadeClose closes all descendants of prBeadID with the given reason.
 // Errors are absorbed into summary.Errors; the cascade is best-effort.
-func (e *Engine) cascadeClose(ctx context.Context, prBeadID, reason string, summary *Summary) {
-	children, err := e.deps.Beads.ListChildrenOfPR(ctx, prBeadID)
+// bdc is the per-repo bd client whose workspace holds the descendants.
+func (e *Engine) cascadeClose(ctx context.Context, bdc BeadClient, prBeadID, reason string, summary *Summary) {
+	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
 	if err != nil {
 		return
 	}
@@ -994,8 +1079,8 @@ func (e *Engine) cascadeClose(ctx context.Context, prBeadID, reason string, summ
 		// Close as a feedback bead first (works for feedback bd type) — if
 		// that fails because the bead is a task or action, fall back to a
 		// generic close via the same wrapper.
-		_ = e.deps.Beads.CloseFeedback(ctx, childID, reason)
-		_ = e.deps.Beads.CloseProcessingCycle(ctx, childID, reason)
+		_ = bdc.CloseFeedback(ctx, childID, reason)
+		_ = bdc.CloseProcessingCycle(ctx, childID, reason)
 		summary.BeadsClosed++
 	}
 }

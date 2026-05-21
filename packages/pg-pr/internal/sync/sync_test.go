@@ -120,6 +120,16 @@ var bdCounter int64
 
 func newRealBDClient(t *testing.T) *beads.Client {
 	t.Helper()
+	dir, env := newRealBDWorkspaceDir(t)
+	runner := &beads.CLIRunner{Dir: dir, Env: env}
+	return beads.NewClientWithRunner(runner)
+}
+
+// newRealBDWorkspaceDir boots a fresh bd workspace under t.TempDir() and
+// returns (dir, cleanEnv). Used by tests that need to construct per-repo
+// bd clients via beads.NewClientForRepo against a real workspace.
+func newRealBDWorkspaceDir(t *testing.T) (string, []string) {
+	t.Helper()
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not on PATH")
 	}
@@ -143,8 +153,7 @@ func newRealBDClient(t *testing.T) *beads.Client {
 	if out, err := cfgSet.CombinedOutput(); err != nil {
 		t.Fatalf("bd config set: %v\n%s", err, out)
 	}
-	runner := &beads.CLIRunner{Dir: dir, Env: env}
-	return beads.NewClientWithRunner(runner)
+	return dir, env
 }
 
 func cleanEnv() []string {
@@ -385,6 +394,89 @@ func TestSyncPR_ClosesWhenUpstreamMerged(t *testing.T) {
 	}
 }
 
+// TestSync_PerRepoWorkspaceIsolation verifies that when the engine's
+// Deps.Beads is unset (production wiring), each repo's bd operations land
+// in its own .beads/ workspace. Two repos point at two distinct temp
+// workspaces; after Sync, each workspace must hold only the beads for its
+// own PRs.
+func TestSync_PerRepoWorkspaceIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	// Strip BEADS_DIR/WORKSPACE_ROOT for the test process so the bd
+	// invocations the engine spawns inherit a clean env. beads.NewClientForRepo
+	// only sets Dir, so it relies on the process env being clean of these
+	// overrides.
+	t.Setenv("BEADS_DIR", "")
+	t.Setenv("WORKSPACE_ROOT", "")
+	t.Setenv("ZR_MACHINE_SUPPORT_WORKSPACE_ROOT", "")
+	if err := os.Unsetenv("BEADS_DIR"); err != nil {
+		t.Fatalf("unset BEADS_DIR: %v", err)
+	}
+	if err := os.Unsetenv("WORKSPACE_ROOT"); err != nil {
+		t.Fatalf("unset WORKSPACE_ROOT: %v", err)
+	}
+	if err := os.Unsetenv("ZR_MACHINE_SUPPORT_WORKSPACE_ROOT"); err != nil {
+		t.Fatalf("unset ZR_MACHINE_SUPPORT_WORKSPACE_ROOT: %v", err)
+	}
+
+	dirA, _ := newRealBDWorkspaceDir(t)
+	dirB, _ := newRealBDWorkspaceDir(t)
+
+	vcs := newFakeVCS()
+	vcs.my["mono/a"] = []api.PR{samplePR(1, "mono/a", "feat/a1")}
+	vcs.my["mono/b"] = []api.PR{samplePR(2, "mono/b", "feat/b2")}
+
+	cfg := &config.Config{
+		SelfLogin:    "phillipg",
+		WorktreeRoot: "/tmp/wr",
+		Repos: []config.RepoConfig{
+			{Remote: "mono/a", VCS: "github", Path: dirA},
+			{Remote: "mono/b", VCS: "github", Path: dirB},
+		},
+	}
+
+	// Deps.Beads intentionally nil so the engine constructs a fresh
+	// per-repo Client via beads.NewClientForRepo(rcfg.Path) for each repo.
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Inspect each workspace directly via a fresh per-repo Client.
+	clientA := beads.NewClientForRepo(dirA)
+	clientB := beads.NewClientForRepo(dirB)
+
+	listA, err := clientA.ListMergeRequests(ctx, true)
+	if err != nil {
+		t.Fatalf("list A: %v", err)
+	}
+	listB, err := clientB.ListMergeRequests(ctx, true)
+	if err != nil {
+		t.Fatalf("list B: %v", err)
+	}
+
+	if len(listA) != 1 {
+		t.Fatalf("workspace A: got %d beads, want 1 (%+v)", len(listA), listA)
+	}
+	if listA[0].Fields.Repo != "mono/a" || listA[0].Fields.PRNumber != 1 {
+		t.Fatalf("workspace A bead: got %+v want mono/a#1", listA[0].Fields)
+	}
+	if len(listB) != 1 {
+		t.Fatalf("workspace B: got %d beads, want 1 (%+v)", len(listB), listB)
+	}
+	if listB[0].Fields.Repo != "mono/b" || listB[0].Fields.PRNumber != 2 {
+		t.Fatalf("workspace B bead: got %+v want mono/b#2", listB[0].Fields)
+	}
+}
+
 func TestSyncPR_RejectsUnknownRepo(t *testing.T) {
 	ctx := context.Background()
 	e := makeEngine(t, newFakeVCS())
@@ -402,13 +494,18 @@ func TestNew_ValidatesRequiredDeps(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for missing cfg")
 	}
+	// Deps.Beads is now optional: when unset, the engine constructs a
+	// per-repo Client via beads.NewClientForRepo. Only cfg + at least one
+	// VCS provider remain required.
 	_, err = New(Deps{Cfg: minimalCfg()})
 	if err == nil {
-		t.Fatalf("expected error for missing beads client")
-	}
-	_, err = New(Deps{Cfg: minimalCfg(), Beads: &noopBeads{}})
-	if err == nil {
 		t.Fatalf("expected error for missing VCS")
+	}
+	if _, err := New(Deps{Cfg: minimalCfg(), VCS: map[string]VCSProvider{"github": newFakeVCS()}}); err != nil {
+		t.Fatalf("expected New to succeed without Beads (per-repo client mode): %v", err)
+	}
+	if _, err := New(Deps{Cfg: minimalCfg(), VCS: map[string]VCSProvider{"github": newFakeVCS()}, Beads: &noopBeads{}}); err != nil {
+		t.Fatalf("expected New to succeed with injected Beads: %v", err)
 	}
 }
 
