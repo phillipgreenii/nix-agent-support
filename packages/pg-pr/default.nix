@@ -20,6 +20,8 @@ pkgs.buildGoModule {
 
   nativeBuildInputs = [ pkgs.help2man ];
 
+  nativeCheckInputs = [ pkgs.git ];
+
   postInstall = ''
     # Generate man page
     mkdir -p $out/share/man/man1
