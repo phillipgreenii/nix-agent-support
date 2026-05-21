@@ -23,8 +23,17 @@ type changesFlags struct {
 
 var chFlags changesFlags
 
-// newChangesRunner is overridable for tests; production uses a real CLIRunner.
+// newChangesRunner returns a Runner targeting bd's auto-discovered workspace
+// (cwd-rooted). Tests override this; production fans out per-repo via
+// newChangesRunnerForRepo below.
 var newChangesRunner = func() beads.Runner { return beads.NewCLIRunner() }
+
+// newChangesRunnerForRepo returns a Runner whose Dir is the given monorepo
+// path so bd discovers that monorepo's `.beads/` workspace. Exposed as a
+// var for tests.
+var newChangesRunnerForRepo = func(dir string) beads.Runner {
+	return beads.NewCLIRunnerForRepo(dir)
+}
 
 var changesCmd = &cobra.Command{
 	Use:   "changes",
@@ -35,6 +44,11 @@ recorded in the state file.
 
 Used by integrations (gascity polling, the pg-pr skill) to drive
 incremental updates without re-scanning the whole bd workspace.
+
+When pg-pr is configured with multiple repos (potentially across multiple
+monorepos with distinct bd workspaces), this command fans out one bd query
+per repo and merges the results. If no config is loadable, it falls back
+to a single cwd-rooted bd query.
 
 Example:
 
@@ -52,16 +66,76 @@ Example:
 		if stateFile == "" {
 			stateFile = changes.DefaultStateFile()
 		}
-		runner := newChangesRunner()
-		cs, err := changes.Since(cmd.Context(), since, runner, stateFile)
-		if err != nil {
-			return err
+
+		// Try to load config so we can fan out per repo. A missing config
+		// is not fatal — fall back to the single-runner behavior so
+		// ad-hoc invocations from inside a repo still work.
+		cfg, _ := loadConfigForCLI(cmd.Context())
+		var paths []string
+		if cfg != nil {
+			seen := map[string]bool{}
+			for _, r := range cfg.Repos {
+				if r.Path == "" || seen[r.Path] {
+					continue
+				}
+				seen[r.Path] = true
+				paths = append(paths, r.Path)
+			}
 		}
+
+		var merged *changes.ChangeSet
+		if len(paths) == 0 {
+			runner := newChangesRunner()
+			merged, err = changes.Since(cmd.Context(), since, runner, stateFile)
+			if err != nil {
+				return err
+			}
+		} else {
+			merged = &changes.ChangeSet{Since: since.UTC()}
+			for _, p := range paths {
+				runner := newChangesRunnerForRepo(p)
+				cs, qerr := changes.Since(cmd.Context(), since, runner, stateFile)
+				if qerr != nil {
+					return qerr
+				}
+				if cs == nil {
+					continue
+				}
+				merged.Created = append(merged.Created, cs.Created...)
+				merged.Updated = append(merged.Updated, cs.Updated...)
+				merged.Closed = append(merged.Closed, cs.Closed...)
+				merged.Errors = append(merged.Errors, cs.Errors...)
+			}
+			// Each fan-out iteration re-reads the shared state file, so the
+			// merged Errors slice contains N copies of every repo error.
+			// Dedup back down to one entry per (repo, code, message).
+			merged.Errors = dedupRepoErrors(merged.Errors)
+		}
+
 		if output.Resolve(chFlags.jsonOutput) {
-			return writeJSON(cmd.OutOrStdout(), cs)
+			return writeJSON(cmd.OutOrStdout(), merged)
 		}
-		return renderChanges(cmd.OutOrStdout(), cs)
+		return renderChanges(cmd.OutOrStdout(), merged)
 	},
+}
+
+// dedupRepoErrors removes duplicate (repo, code, message) tuples that arise
+// when multiple per-repo runs each read the same shared state file. Stable
+// order is preserved.
+func dedupRepoErrors(in []changes.RepoError) []changes.RepoError {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[changes.RepoError]bool{}
+	out := make([]changes.RepoError, 0, len(in))
+	for _, e := range in {
+		if seen[e] {
+			continue
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
+	return out
 }
 
 // renderChanges prints the human-readable view of a ChangeSet.

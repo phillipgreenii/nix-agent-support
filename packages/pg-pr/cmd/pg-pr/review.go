@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
@@ -17,8 +18,13 @@ import (
 )
 
 // beadsClientForComment is overridable so tests can swap an in-memory client.
-var beadsClientForComment = func() beadsFeedbackClient {
-	return beads.NewClient()
+//
+// The factory takes the absolute monorepo root the bd Client should target
+// so bd discovers the right .beads/ workspace. Production callers resolve
+// the path via resolveRepoPath (using the --repo flag or branch.Detect);
+// tests typically ignore the argument and return a shared in-memory fake.
+var beadsClientForComment = func(dir string) beadsFeedbackClient {
+	return beads.NewClientForRepo(dir)
 }
 
 // beadsFeedbackClient narrows beads.Client to the methods comment respond
@@ -283,7 +289,18 @@ func runCommentRespond(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	bdc := beadsClientForComment()
+	// The bd workspace holding the feedback bead is repo-scoped, so we
+	// need a repo identifier before issuing any bd op. Priority:
+	//   1. --repo flag.
+	//   2. branch.Detect against cwd.
+	// If neither resolves we error: writing to the wrong workspace would
+	// silently corrupt state, so failing loud is the safer default.
+	bdWorkspace, err := resolveCommentBdWorkspace(ctx, rvF.repo)
+	if err != nil {
+		return fmt.Errorf("comment respond: %w", err)
+	}
+
+	bdc := beadsClientForComment(bdWorkspace)
 	if bdc == nil {
 		return errors.New("comment respond: beads client not available")
 	}
@@ -352,6 +369,42 @@ var commentResolveCmd = &cobra.Command{
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Resolved thread %s\n", args[0])
 		return err
 	},
+}
+
+// resolveCommentBdWorkspace returns the absolute monorepo path whose bd
+// workspace holds the feedback bead under modification. Because a feedback
+// id alone doesn't tell us which repo owns it (multiple monorepos may use
+// distinct bd workspaces), we require either an explicit --repo flag or
+// the user to be standing inside the right git tree.
+//
+// Resolution order:
+//  1. --repo flag → look up config to get RepoConfig.Path. If the repo is
+//     not in config, an empty path is returned with nil error and the
+//     caller proceeds with bd's cwd-discovered workspace — the explicit
+//     --repo flag is the user's affirmation that they know which workspace
+//     they want, so we trust them.
+//  2. No --repo: branch.Detect(cwd) → use the detected worktree root.
+//
+// Exposed as a var so tests can swap in a fake that returns a fixed path
+// without spawning git or loading config.
+var resolveCommentBdWorkspace = func(ctx context.Context, repoFlag string) (string, error) {
+	if repoFlag != "" {
+		// Best-effort: look up the configured path; an empty result is OK
+		// because the user explicitly opted into this repo via --repo.
+		return resolveRepoPath(ctx, repoFlag), nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get cwd: %w", err)
+	}
+	info, err := branch.Detect(ctx, cwd, branch.Options{})
+	if err != nil {
+		return "", fmt.Errorf("auto-detect repo: %w; pass --repo owner/name or run from inside the repo's git tree", err)
+	}
+	if info.WorktreeRoot == "" {
+		return "", errors.New("could not determine bd workspace: pass --repo owner/name or run from inside the repo's git tree")
+	}
+	return info.WorktreeRoot, nil
 }
 
 // loadCommentBody resolves the comment body from the most-specific source.

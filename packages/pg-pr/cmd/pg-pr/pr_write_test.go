@@ -152,7 +152,7 @@ func swapFakes(t *testing.T) (*writeFakeVCS, *fakeBeadsClient) {
 	prevV := vcsProviderFor
 	prevB := beadsClientForPR
 	vcsProviderFor = func(string) vcs.Provider { return fv }
-	beadsClientForPR = func() beadsMergeRequestClient { return fb }
+	beadsClientForPR = func(string) beadsMergeRequestClient { return fb }
 	t.Cleanup(func() {
 		vcsProviderFor = prevV
 		beadsClientForPR = prevB

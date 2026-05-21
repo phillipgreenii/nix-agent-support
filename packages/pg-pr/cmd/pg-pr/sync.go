@@ -10,7 +10,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
 )
@@ -35,11 +34,15 @@ var loadConfigForCLI = func(ctx context.Context) (*config.Config, error) {
 
 // newSyncEngineForCLI builds the engine from loaded config. Production
 // callers use this; tests can substitute by reassigning.
+//
+// Deps.Beads is intentionally left nil so the engine constructs a per-repo
+// bd Client (via beads.NewClientForRepo(rcfg.Path)) for each repo it
+// processes. That way every bd command lands in the correct monorepo's
+// .beads/ workspace regardless of where the pg-pr binary was invoked from.
 var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
 	return sync.New(sync.Deps{
-		Cfg:   cfg,
-		VCS:   map[string]sync.VCSProvider{"github": github.New()},
-		Beads: beads.NewClient(),
+		Cfg: cfg,
+		VCS: map[string]sync.VCSProvider{"github": github.New()},
 	})
 }
 

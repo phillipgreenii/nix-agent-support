@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitlocal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -53,6 +54,53 @@ func resolveRepo(ctx context.Context, flag string) (string, error) {
 		return "", fmt.Errorf("auto-detect repo: no GitHub remote found; pass --repo owner/name")
 	}
 	return info.Repo, nil
+}
+
+// loadConfigForRepoPath is overridable so tests can supply a synthetic
+// config without writing a YAML file. Production wires it to config.Load.
+var loadConfigForRepoPath = func(ctx context.Context) (*config.Config, error) {
+	return config.Load(ctx)
+}
+
+// resolveRepoPath returns the absolute monorepo root path for the given
+// owner/name repo identifier so callers can target the matching bd
+// workspace. Resolution strategy:
+//
+//  1. Look up the repo in the loaded pg-pr config; use RepoConfig.Path
+//     when set.
+//  2. Otherwise, fall back to branch.Detect(cwd) — if cwd is inside any
+//     git worktree, use its root.
+//  3. If neither succeeds, return an empty path with no error. Callers
+//     that require a valid bd workspace should treat empty as "use the
+//     process cwd"; commands that must be deterministic should error.
+//
+// Errors from config loading are non-fatal: pg-pr is usable without a
+// config file (e.g., one-shot `pr show` on a foreign repo).
+func resolveRepoPath(ctx context.Context, repo string) string {
+	if repo == "" {
+		return ""
+	}
+	if cfg, err := loadConfigForRepoPath(ctx); err == nil && cfg != nil {
+		for _, r := range cfg.Repos {
+			if r.Remote == repo && r.Path != "" {
+				return r.Path
+			}
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	info, err := branch.Detect(ctx, cwd, branch.Options{})
+	if err != nil {
+		return ""
+	}
+	// Only trust the detected worktree when it actually corresponds to the
+	// repo we're operating on — otherwise we'd write to the wrong workspace.
+	if info.Repo == repo && info.WorktreeRoot != "" {
+		return info.WorktreeRoot
+	}
+	return ""
 }
 
 // ----------------------------------------------------------------------

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
@@ -24,15 +25,24 @@ func (s *stubChangesRunner) Run(_ context.Context, args ...string) (string, erro
 
 // withStubRunner swaps newChangesRunner for the duration of the test and
 // resets the package-level flags so prior tests don't leak --json.
+//
+// It also stubs loadConfigForCLI to return ErrNoConfig so the changes
+// command takes its single-runner fallback path (the per-repo fan-out
+// requires a populated config which these unit tests don't supply).
 func withStubRunner(t *testing.T, stub beads.Runner) func() {
 	t.Helper()
 	prev := newChangesRunner
 	newChangesRunner = func() beads.Runner { return stub }
 	prevFlags := chFlags
 	chFlags = changesFlags{}
+	prevCfg := loadConfigForCLI
+	loadConfigForCLI = func(_ context.Context) (*config.Config, error) {
+		return nil, config.ErrNoConfig
+	}
 	return func() {
 		newChangesRunner = prev
 		chFlags = prevFlags
+		loadConfigForCLI = prevCfg
 	}
 }
 
@@ -132,6 +142,101 @@ func TestChangesCommand_HumanOutput(t *testing.T) {
 	if !strings.Contains(got, "updated") {
 		t.Fatalf("expected 'updated' state label in row: %q", got)
 	}
+}
+
+// TestChangesCommand_FansOutPerRepo verifies that when config defines
+// multiple repos with distinct paths, the changes command issues one bd
+// query per repo (each via newChangesRunnerForRepo with the matching dir)
+// and merges the results.
+func TestChangesCommand_FansOutPerRepo(t *testing.T) {
+	// Reset flags between invocations.
+	prevFlags := chFlags
+	chFlags = changesFlags{}
+	defer func() { chFlags = prevFlags }()
+
+	prevCfg := loadConfigForCLI
+	defer func() { loadConfigForCLI = prevCfg }()
+	loadConfigForCLI = func(_ context.Context) (*config.Config, error) {
+		return &config.Config{
+			Repos: []config.RepoConfig{
+				{Remote: "mono/a", Path: "/repos/mono/a"},
+				{Remote: "mono/b", Path: "/repos/mono/b"},
+			},
+		}, nil
+	}
+
+	// Record which dir each runner was constructed for, and supply a
+	// distinct canned bd output per repo.
+	prevFactory := newChangesRunnerForRepo
+	defer func() { newChangesRunnerForRepo = prevFactory }()
+	calls := map[string]*stubChangesRunner{}
+	newChangesRunnerForRepo = func(dir string) beads.Runner {
+		stub := &stubChangesRunner{}
+		switch dir {
+		case "/repos/mono/a":
+			stub.stdout = `[{
+                "id": "a-1",
+                "issue_type": "merge-request",
+                "title": "PR A",
+                "status": "open",
+                "created_at": "2026-05-20T12:00:00Z",
+                "updated_at": "2026-05-20T12:00:00Z"
+            }]`
+		case "/repos/mono/b":
+			stub.stdout = `[{
+                "id": "b-1",
+                "issue_type": "feedback",
+                "title": "PR B feedback",
+                "status": "open",
+                "created_at": "2026-05-20T13:00:00Z",
+                "updated_at": "2026-05-20T13:00:00Z"
+            }]`
+		default:
+			stub.stdout = "[]"
+		}
+		calls[dir] = stub
+		return stub
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"changes", "--since", "2026-05-20T00:00:00Z", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v (stderr=%s)", err, stderr.String())
+	}
+
+	// Both repos must have been queried.
+	if _, ok := calls["/repos/mono/a"]; !ok {
+		t.Fatalf("expected bd query against /repos/mono/a, got %v", keysOf(calls))
+	}
+	if _, ok := calls["/repos/mono/b"]; !ok {
+		t.Fatalf("expected bd query against /repos/mono/b, got %v", keysOf(calls))
+	}
+
+	var out struct {
+		Created []struct {
+			ID string `json:"id"`
+		} `json:"created"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("parse output: %v\nraw: %s", err, stdout.String())
+	}
+	gotIDs := map[string]bool{}
+	for _, b := range out.Created {
+		gotIDs[b.ID] = true
+	}
+	if !gotIDs["a-1"] || !gotIDs["b-1"] {
+		t.Fatalf("expected merged Created set {a-1, b-1}, got %v (raw=%s)", gotIDs, stdout.String())
+	}
+}
+
+func keysOf(m map[string]*stubChangesRunner) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestChangesCommand_PGPROutputEnv(t *testing.T) {

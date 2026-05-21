@@ -225,7 +225,7 @@ func (f *fakeFeedbackBeads) FindMergeRequestForFeedback(_ context.Context, feedb
 func swapBeadsForComment(t *testing.T, fb *fakeFeedbackBeads) {
 	t.Helper()
 	prev := beadsClientForComment
-	beadsClientForComment = func() beadsFeedbackClient { return fb }
+	beadsClientForComment = func(string) beadsFeedbackClient { return fb }
 	t.Cleanup(func() { beadsClientForComment = prev })
 }
 
@@ -264,7 +264,7 @@ func TestCommentRespond_CommentThread_Replies(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"comment", "respond", "fb-1", "--body", "ack"})
+	rootCmd.SetArgs([]string{"comment", "respond", "fb-1", "--repo", "foo/bar", "--body", "ack"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}
@@ -311,7 +311,7 @@ func TestCommentRespond_ReviewThread_Replies(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"comment", "respond", "fb-2", "--body", "ok"})
+	rootCmd.SetArgs([]string{"comment", "respond", "fb-2", "--repo", "x/y", "--body", "ok"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}
@@ -341,7 +341,7 @@ func TestCommentRespond_RejectsNonRespondableKinds(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			rootCmd.SetOut(&stdout)
 			rootCmd.SetErr(&stderr)
-			rootCmd.SetArgs([]string{"comment", "respond", "fb-x", "--body", "x"})
+			rootCmd.SetArgs([]string{"comment", "respond", "fb-x", "--repo", "a/b", "--body", "x"})
 			err := rootCmd.Execute()
 			if err == nil {
 				t.Fatalf("expected error for kind=%s", kind)
@@ -363,7 +363,7 @@ func TestCommentRespond_FeedbackNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"comment", "respond", "nope", "--body", "x"})
+	rootCmd.SetArgs([]string{"comment", "respond", "nope", "--repo", "a/b", "--body", "x"})
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when feedback not found")
@@ -391,7 +391,7 @@ func TestCommentRespond_MissingMergeRequest(t *testing.T) {
 
 	rootCmd.SetOut(io_discard)
 	rootCmd.SetErr(io_discard)
-	rootCmd.SetArgs([]string{"comment", "respond", "fb-orphan", "--body", "x"})
+	rootCmd.SetArgs([]string{"comment", "respond", "fb-orphan", "--repo", "a/b", "--body", "x"})
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected error when merge-request bead missing")
 	}
@@ -414,7 +414,7 @@ func TestCommentRespond_MissingExternalID(t *testing.T) {
 
 	rootCmd.SetOut(io_discard)
 	rootCmd.SetErr(io_discard)
-	rootCmd.SetArgs([]string{"comment", "respond", "fb-z", "--body", "x"})
+	rootCmd.SetArgs([]string{"comment", "respond", "fb-z", "--repo", "a/b", "--body", "x"})
 	err := rootCmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "external_id") {
 		t.Fatalf("expected error about missing external_id, got %v", err)
@@ -441,7 +441,7 @@ func TestCommentRespond_JSONOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"comment", "respond", "fb-j", "--body", "ack", "--json"})
+	rootCmd.SetArgs([]string{"comment", "respond", "fb-j", "--repo", "a/b", "--body", "ack", "--json"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}

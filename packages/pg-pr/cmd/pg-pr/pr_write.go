@@ -52,8 +52,13 @@ type prWriteFlags struct {
 var prWF prWriteFlags
 
 // beadsClientForPR is a var so tests can swap in an in-memory client.
-var beadsClientForPR = func() beadsMergeRequestClient {
-	return beads.NewClient()
+//
+// The factory takes the absolute monorepo root the bd Client should target
+// (so bd discovers the right .beads/ workspace). Production callers resolve
+// the path via resolveRepoPath; tests typically ignore the argument and
+// return a shared in-memory fake.
+var beadsClientForPR = func(dir string) beadsMergeRequestClient {
+	return beads.NewClientForRepo(dir)
 }
 
 // beadsMergeRequestClient narrows the beads.Client API to the methods used
@@ -328,8 +333,12 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 
 	// Best-effort: record the merge-request bead. Failure here doesn't
 	// fail the command since the PR is already created upstream.
+	//
+	// The bd Client is scoped to the resolved repo's monorepo root so the
+	// bead lands in that monorepo's .beads/ workspace — not whichever
+	// workspace happens to match the process cwd.
 	beadID := ""
-	bdc := beadsClientForPR()
+	bdc := beadsClientForPR(resolveRepoPath(ctx, repo))
 	if bdc != nil {
 		id, _, berr := bdc.EnsureMergeRequest(ctx, prWF.title, beads.MergeRequestFields{
 			Repo:     repo,
@@ -432,8 +441,11 @@ var prCloseCmd = &cobra.Command{
 		// cascade rule on close also closes children (processing-cycle /
 		// feedback / action) under that bead. If no bead is found, we
 		// silently skip — the next sync will reconcile.
+		//
+		// The bd Client is scoped to the repo's monorepo root so the
+		// lookup + close hit the correct .beads/ workspace.
 		beadID := ""
-		bdc := beadsClientForPR()
+		bdc := beadsClientForPR(resolveRepoPath(ctx, repo))
 		if bdc != nil {
 			mr, ferr := bdc.FindByRepoAndNumber(ctx, repo, num)
 			if ferr != nil {
