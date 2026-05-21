@@ -345,6 +345,7 @@
                 pkgs.nix
                 pkgs.git
                 pkgs.coreutils
+                pkgs.go
               ];
               text = ''
                 # shellcheck source=/dev/null
@@ -362,12 +363,16 @@
                   nix flake update
 
                 ul_run_step "update-deps-claude-extended-tool-approver" \
-                  "update-locks: update claude-extended-tool-approver Go deps" \
-                  bash -c 'cd packages/claude-extended-tool-approver && go get -u ./... && go mod tidy'
+                  "update-locks: update claude-extended-tool-approver Go deps + vendorHash" \
+                  bash -c 'cd packages/claude-extended-tool-approver && go get -u ./... && ./update-deps.sh'
 
                 ul_run_step "update-deps-pg-pr" \
-                  "update-locks: update pg-pr Go deps" \
-                  bash -c 'cd packages/pg-pr && go get -u ./... && go mod tidy'
+                  "update-locks: update pg-pr Go deps + vendorHash" \
+                  bash -c 'cd packages/pg-pr && go get -u ./... && ./update-deps.sh'
+
+                ul_run_step "update-deps-pa-monitor" \
+                  "update-locks: update pa-monitor Go deps + vendorHash" \
+                  bash -c 'cd packages/pa-monitor && go get -u ./... && ./update-deps.sh'
 
                 ul_finalize
               '';
