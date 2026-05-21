@@ -323,6 +323,7 @@ func updateGauges(
 
 	for _, sv := range tree.Sessions() {
 		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
+		// labelsForSession returns a fresh copy — safe to mutate.
 		ls["state"] = session.Status(sv.Status).String()
 		key := groupKey(canonicalKey(ls))
 		counts[key]++
@@ -344,6 +345,10 @@ func updateGauges(
 // labelsForSession runs detectors + decorators against the session,
 // caches the result by session.id (labels are static for the session's
 // lifetime), and applies the cardinality cap to every value.
+//
+// The returned Set is a fresh copy of the cache entry. Callers may mutate
+// it freely (e.g. to attach transient labels like `state` per tick)
+// without polluting future cache hits.
 func labelsForSession(
 	sv *aggregate.SessionView,
 	detectors []labels.Detector,
@@ -354,29 +359,35 @@ func labelsForSession(
 	if sv == nil || sv.Session == nil {
 		return labels.Set{}
 	}
-	if cached, ok := cache[sv.SessionID]; ok {
-		return cached
-	}
-	s := labels.Session{
-		ID:    sv.SessionID,
-		PID:   sv.PID,
-		CWD:   sv.Cwd,
-		Env:   sv.Env,
-		Model: sv.Model,
-	}
-	out := labels.Set{}
-	for _, d := range detectors {
-		out = out.Merge(d.Detect(s))
-	}
-	for _, dec := range decorators {
-		out = out.Merge(dec.Detect(s))
-	}
-	if cap != nil {
-		for k, v := range out {
-			out[k] = cap.Cap(k, v)
+	cached, ok := cache[sv.SessionID]
+	if !ok {
+		s := labels.Session{
+			ID:    sv.SessionID,
+			PID:   sv.PID,
+			CWD:   sv.Cwd,
+			Env:   sv.Env,
+			Model: sv.Model,
 		}
+		cached = labels.Set{}
+		for _, d := range detectors {
+			cached = cached.Merge(d.Detect(s))
+		}
+		for _, dec := range decorators {
+			cached = cached.Merge(dec.Detect(s))
+		}
+		if cap != nil {
+			for k, v := range cached {
+				cached[k] = cap.Cap(k, v)
+			}
+		}
+		cache[sv.SessionID] = cached
 	}
-	cache[sv.SessionID] = out
+	// Defensive copy: callers must be free to mutate without affecting
+	// the cache. Cheap — label sets are small.
+	out := make(labels.Set, len(cached))
+	for k, v := range cached {
+		out[k] = v
+	}
 	return out
 }
 

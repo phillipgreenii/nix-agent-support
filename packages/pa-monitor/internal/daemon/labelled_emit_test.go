@@ -41,6 +41,35 @@ func TestLabelsForSession_CachesPerSession(t *testing.T) {
 	}
 }
 
+// TestLabelsForSession_CacheNotMutatedByCaller confirms that callers
+// cannot pollute the cache by mutating the returned Set. The grouping
+// loop in updateGauges adds a `state` key per tick — if the cache stored
+// the same map reference, stale `state` values would survive across
+// ticks. Defends against that.
+func TestLabelsForSession_CacheNotMutatedByCaller(t *testing.T) {
+	d := fakeDetector{key: "workspace.scope", fn: func(s labels.Session) string { return "gascity" }}
+	cap := labels.NewCardinalityCap(10)
+	cache := map[string]labels.Set{}
+
+	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1"}}
+	first := labelsForSession(sv, []labels.Detector{d}, nil, cap, cache)
+	// Caller pollutes the returned set (simulating updateGauges adding `state`).
+	first["state"] = "working"
+	first["bogus"] = "should-not-leak"
+
+	// Re-fetch — the cache copy must not include the caller's additions.
+	again := labelsForSession(sv, []labels.Detector{d}, nil, cap, cache)
+	if _, ok := again["state"]; ok {
+		t.Errorf("cache leaked caller's `state` key: %+v", again)
+	}
+	if _, ok := again["bogus"]; ok {
+		t.Errorf("cache leaked caller's `bogus` key: %+v", again)
+	}
+	if again["workspace.scope"] != "gascity" {
+		t.Errorf("cache lost legitimate value: %+v", again)
+	}
+}
+
 func TestCanonicalKey_StableOrdering(t *testing.T) {
 	a := labels.Set{"workspace.scope": "gascity", "state": "working"}
 	b := labels.Set{"state": "working", "workspace.scope": "gascity"}
