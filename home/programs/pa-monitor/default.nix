@@ -1,5 +1,6 @@
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -7,7 +8,8 @@
 
 let
   cfg = config.phillipgreenii.programs.pa-monitor;
-  obs = config.phillipgreenii.observability or null;
+  hasObs = options.phillipgreenii ? observability;
+  obs = if hasObs then config.phillipgreenii.observability else null;
 
   # Wrapper script so macOS Background Activity shows `pa-monitor-daemon`
   # instead of the bare hash-prefixed nix-store path.
@@ -37,30 +39,35 @@ in
     '';
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
-    home.packages = [ cfg.package ];
+  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) (
+    lib.mkMerge [
+      {
+        home.packages = [ cfg.package ];
 
-    # LaunchAgent only when explicitly enabled and only on darwin.
-    launchd.agents.pa-monitor-daemon = lib.mkIf (cfg.daemon.enable && pkgs.stdenv.isDarwin) {
-      enable = true;
-      config = {
-        Label = "com.phillipg.pa-monitor-daemon";
-        ProgramArguments = [ "${daemonWrapper}/bin/pa-monitor-daemon" ];
-        RunAtLoad = true;
-        KeepAlive = true;
-        StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
-        StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
-        EnvironmentVariables = emitterEnv;
-      };
-    };
-
-    # Register the generic dashboard with the workspace observability
-    # provider when present. Safe to assign even when observability is
-    # disabled — the provider list is consumed by services.grafana when
-    # phillipgreenii.observability.enable is true; ignored otherwise.
-    phillipgreenii.observability.dashboardProviders.pa-monitor = lib.mkIf (obs != null) {
-      folder = "Claude Agents";
-      dashboards = [ "${cfg.package.src}/grafana/pa-monitor-overview.json" ];
-    };
-  };
+        # LaunchAgent only when explicitly enabled and only on darwin.
+        launchd.agents.pa-monitor-daemon = lib.mkIf (cfg.daemon.enable && pkgs.stdenv.isDarwin) {
+          enable = true;
+          config = {
+            Label = "com.phillipg.pa-monitor-daemon";
+            ProgramArguments = [ "${daemonWrapper}/bin/pa-monitor-daemon" ];
+            RunAtLoad = true;
+            KeepAlive = true;
+            StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
+            StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
+            EnvironmentVariables = emitterEnv;
+          };
+        };
+      }
+      # Register the generic dashboard with the workspace observability
+      # provider only when that option is declared by the consuming flake.
+      # Defining the path unconditionally fails with "option does not exist"
+      # in machine configs that don't import the observability module.
+      (lib.optionalAttrs hasObs {
+        phillipgreenii.observability.dashboardProviders.pa-monitor = {
+          folder = "Claude Agents";
+          dashboards = [ "${cfg.package.src}/grafana/pa-monitor-overview.json" ];
+        };
+      })
+    ]
+  );
 }
