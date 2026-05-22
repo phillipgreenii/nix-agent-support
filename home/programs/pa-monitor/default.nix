@@ -8,6 +8,9 @@
 
 let
   cfg = config.phillipgreenii.programs.pa-monitor;
+  # `phillipgreenii.observability` is only declared at darwin/system scope.
+  # In HM scope the option doesn't exist; gate emitterEnv resolution on
+  # whether the option declaration is visible in this module's evaluation.
   hasObs = options.phillipgreenii ? observability;
   obs = if hasObs then config.phillipgreenii.observability else null;
 
@@ -39,35 +42,24 @@ in
     '';
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) (
-    lib.mkMerge [
-      {
-        home.packages = [ cfg.package ];
+  # Grafana dashboard registration is handled by the parallel darwin module
+  # (darwin/modules/pa-monitor) because phillipgreenii.observability
+  # .dashboardProviders is declared at darwin scope, not HM scope.
+  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
+    home.packages = [ cfg.package ];
 
-        # LaunchAgent only when explicitly enabled and only on darwin.
-        launchd.agents.pa-monitor-daemon = lib.mkIf (cfg.daemon.enable && pkgs.stdenv.isDarwin) {
-          enable = true;
-          config = {
-            Label = "com.phillipg.pa-monitor-daemon";
-            ProgramArguments = [ "${daemonWrapper}/bin/pa-monitor-daemon" ];
-            RunAtLoad = true;
-            KeepAlive = true;
-            StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
-            StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
-            EnvironmentVariables = emitterEnv;
-          };
-        };
-      }
-      # Register the generic dashboard with the workspace observability
-      # provider only when that option is declared by the consuming flake.
-      # Defining the path unconditionally fails with "option does not exist"
-      # in machine configs that don't import the observability module.
-      (lib.optionalAttrs hasObs {
-        phillipgreenii.observability.dashboardProviders.pa-monitor = {
-          folder = "Claude Agents";
-          dashboards = [ "${cfg.package.src}/grafana/pa-monitor-overview.json" ];
-        };
-      })
-    ]
-  );
+    # LaunchAgent only when explicitly enabled and only on darwin.
+    launchd.agents.pa-monitor-daemon = lib.mkIf (cfg.daemon.enable && pkgs.stdenv.isDarwin) {
+      enable = true;
+      config = {
+        Label = "com.phillipg.pa-monitor-daemon";
+        ProgramArguments = [ "${daemonWrapper}/bin/pa-monitor-daemon" ];
+        RunAtLoad = true;
+        KeepAlive = true;
+        StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
+        StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
+        EnvironmentVariables = emitterEnv;
+      };
+    };
+  };
 }
