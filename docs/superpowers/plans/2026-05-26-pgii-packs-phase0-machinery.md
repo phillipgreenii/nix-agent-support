@@ -1212,7 +1212,7 @@ load test_helper
 
 @test "multi-city: two cities both get the block set" {
   local city_a; city_a=$(mkCity city-a)
-  local city_b; city_b=$(mkCity city-b "[workspace]\nprovider = \"claude\"")
+  local city_b; city_b=$(mkCity city-b $'[workspace]\nprovider = "claude"')
   local cities; cities=$(citiesJson "$city_a" "$city_b")
   local packs;  packs=$(packsJson "pgii-pack-foo" "/nix/store/foo")
 
