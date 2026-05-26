@@ -22,7 +22,6 @@ set -euo pipefail
 
 CITIES_JSON=""
 PACKS_JSON=""
-# shellcheck disable=SC2034
 RELOAD=0
 
 usage() {
@@ -53,7 +52,6 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --reload)
-    # shellcheck disable=SC2034
     RELOAD=1
     shift
     ;;
@@ -221,5 +219,28 @@ process_city() {
 for city in "${CITIES[@]}"; do
   process_city "$city"
 done
+
+maybe_reload_city() {
+  local city="$1"
+  local sock="$city/.gc/controller.sock"
+
+  if [ ! -S "$sock" ] && [ ! -f "$sock" ]; then
+    return 0
+  fi
+  if ! command -v gc >/dev/null 2>&1; then
+    echo "pgii-packs: WARN: $city has controller.sock but \`gc\` not on PATH; skipping reload" >&2
+    return 0
+  fi
+
+  if ! gc --city "$city" supervisor reload; then
+    echo "pgii-packs: WARN: \`gc --city $city supervisor reload\` failed; the next manual reload will pick up the changes" >&2
+  fi
+}
+
+if [ "$RELOAD" -eq 1 ]; then
+  for city in "${CITIES[@]}"; do
+    maybe_reload_city "$city"
+  done
+fi
 
 exit 0
