@@ -1,6 +1,6 @@
 {
   config,
-  options,
+  osConfig ? null,
   lib,
   pkgs,
   ...
@@ -9,10 +9,15 @@
 let
   cfg = config.phillipgreenii.programs.pa-monitor;
   # `phillipgreenii.observability` is only declared at darwin/system scope.
-  # In HM scope the option doesn't exist; gate emitterEnv resolution on
-  # whether the option declaration is visible in this module's evaluation.
-  hasObs = options.phillipgreenii ? observability;
-  obs = if hasObs then config.phillipgreenii.observability else null;
+  # nix-darwin passes the system config to HM modules as `osConfig`, so we
+  # read the observability surface from there. When the HM module evaluates
+  # outside of nix-darwin (e.g. standalone home-manager), `osConfig` is
+  # null and emitterEnv falls back to `{}`.
+  obs =
+    if osConfig != null && (osConfig.phillipgreenii.observability or null) != null then
+      osConfig.phillipgreenii.observability
+    else
+      null;
 
   # Wrapper script so macOS Background Activity shows `pa-monitor-daemon`
   # instead of the bare hash-prefixed nix-store path.
