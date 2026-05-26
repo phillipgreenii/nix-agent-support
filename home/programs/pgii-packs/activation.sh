@@ -105,6 +105,47 @@ path = "$path"
 EOF
 }
 
+# Return 0 if city.toml is already in the desired state for our pack set.
+no_op_needed() {
+  local city_toml="$1"
+
+  # Names of pgii-pack:* blocks currently in the file.
+  local -a current_names=()
+  while IFS= read -r line; do
+    current_names+=("$line")
+  done < <(grep -oE '^# BEGIN pgii-pack:[^ ]+ \(managed\)$' "$city_toml" |
+    sed -E 's/^# BEGIN pgii-pack:(.+) \(managed\)$/\1/' | sort -u)
+
+  # Names of packs we want present.
+  local -a desired_names=()
+  while IFS= read -r line; do desired_names+=("$line"); done < <(printf '%s\n' "${PACK_NAMES[@]}" | sort -u)
+
+  # Set equality check.
+  [ "${#current_names[@]}" -eq "${#desired_names[@]}" ] || return 1
+  local i
+  for i in "${!current_names[@]}"; do
+    [ "${current_names[$i]}" = "${desired_names[$i]}" ] || return 1
+  done
+
+  # Per-pack path check.
+  for name in "${PACK_NAMES[@]}"; do
+    local got want
+    got=$(awk '
+      BEGIN {
+        begin = "# BEGIN pgii-pack:'"$name"' (managed)"
+        end = "# END pgii-pack:'"$name"' (managed)"
+      }
+      $0 == begin { in_block = 1; next }
+      $0 == end   { in_block = 0; next }
+      in_block && /^path = / { gsub(/(^path = "|"$)/, ""); print; exit }
+    ' "$city_toml")
+    want="${PACKS[$name]}"
+    [ "$got" = "$want" ] || return 1
+  done
+
+  return 0
+}
+
 # Process a single city.toml in-place.
 process_city() {
   local city="$1"
@@ -113,6 +154,14 @@ process_city() {
   mkdir -p "$(dirname "$city_toml")"
   if [ ! -f "$city_toml" ]; then
     : >"$city_toml"
+  fi
+
+  # Fast path: if every pack we'd write is already present with the same
+  # path, and the set of currently-managed pgii blocks equals our target
+  # set, do nothing. This keeps `home-manager switch` from rewriting
+  # city.toml on every no-op rebuild.
+  if no_op_needed "$city_toml"; then
+    return 0
   fi
 
   local tmp
