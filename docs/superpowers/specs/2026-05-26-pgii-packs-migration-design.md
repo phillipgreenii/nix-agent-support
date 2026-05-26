@@ -187,9 +187,10 @@ pkgs.runCommand "${name}-${version}"
 ### Template substitution
 
 - Files ending `.template` are processed; `.template` is stripped from output name.
-- Marker syntax: `@KEY@` (chosen to NOT collide with gascity's runtime `{{.Foo}}` go-template syntax or shell `${VAR}`).
-- Substituted via `envsubst -i`; only declared variables are replaced.
-- `@SCRIPTS_DIR@` is always defined (= `$out/scripts`). Additional vars come from each pack's `substitutions` arg.
+- Marker syntax: `${KEY}` (envsubst's native form).
+- Substituted via plain `envsubst`. Only names that mkPgiiPack exports get substituted; unexported `${...}` patterns inside template files pass through unchanged. Gascity's runtime `{{.Foo}}` go-template syntax is unaffected.
+- `${SCRIPTS_DIR}` is always exported (= `$out/scripts`). Additional vars come from each pack's `substitutions` arg.
+- Known gotcha: if a pack ships a shell script as `*.sh.template` and the script uses `${SCRIPTS_DIR}` or any other exported var as a normal shell expansion, envsubst will eat it. When that bites (likely in Phase 5's pgii-bead-importer if its shell needs `${HOME}` or similar), switch mkPgiiPack to envsubst's variable-list arg `'$SCRIPTS_DIR $X $Y'` so only declared names are replaced.
 
 ### Per-pack `default.nix` shape
 

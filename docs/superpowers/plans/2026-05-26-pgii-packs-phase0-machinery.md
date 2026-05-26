@@ -23,7 +23,7 @@
 | `lib/mkPgiiPack.nix`                                                 | Generic pack builder function. Copies `pack-src/`, runs `@KEY@` substitution, enforces layout, sets script perms. |
 | `packages/pgii-pack-test-fixture/default.nix`                        | callPackage entry for the validation pack.                                                                        |
 | `packages/pgii-pack-test-fixture/pack-src/pack.toml`                 | Trivial pack manifest declaring `name = "pgii-pack-test-fixture"`.                                                |
-| `packages/pgii-pack-test-fixture/pack-src/orders/noop.toml.template` | One disabled no-op order using `@SCRIPTS_DIR@` so substitution is exercised.                                      |
+| `packages/pgii-pack-test-fixture/pack-src/orders/noop.toml.template` | One disabled no-op order using `${SCRIPTS_DIR}` so substitution is exercised.                                     |
 | `packages/pgii-pack-test-fixture/pack-src/scripts/noop.sh`           | The no-op script invoked by the order.                                                                            |
 | `home/programs/pgii-packs/default.nix`                               | HM module: options, assertions, home.file rooting, home.activation.                                               |
 | `home/programs/pgii-packs/activation.sh`                             | Bash script: idempotent block insertion + removal + optional reload.                                              |
@@ -88,7 +88,7 @@ File: `packages/pgii-pack-test-fixture/pack-src/orders/noop.toml.template`
 description = "pgii-pack-test-fixture: validates mkPgiiPack substitution + activation pipeline."
 trigger     = "cooldown"
 interval    = "1h"
-exec        = "@SCRIPTS_DIR@/noop.sh"
+exec        = "${SCRIPTS_DIR}/noop.sh"
 timeout     = "10s"
 enabled     = false
 ```
@@ -126,8 +126,10 @@ This task gets a `nix build` working end-to-end with a minimal inline builder. `
 File: `packages/pgii-pack-test-fixture/default.nix`
 
 ```nix
-{ lib, pkgs }:
+{ pkgs }:
 # Phase-0 stub. Will be rewritten in Task 3 to call mkPgiiPack.
+# `lib` deliberately not in args — deadnix will flag it as unused here.
+# Task 3 reintroduces lib when wiring mkPgiiPack.
 pkgs.runCommand "pgii-pack-test-fixture-0.1.0"
   { nativeBuildInputs = [ pkgs.envsubst ]; }
   ''
@@ -178,7 +180,7 @@ test -d "$out/scripts"            && echo "ok: scripts/"
 test -f "$out/orders/noop.toml"   && echo "ok: order substituted"
 ! test -f "$out/orders/noop.toml.template" && echo "ok: template removed"
 grep -q "/nix/store/.*-pgii-pack-test-fixture-0.1.0/scripts/noop.sh" "$out/orders/noop.toml" \
-  && echo "ok: @SCRIPTS_DIR@ substituted"
+  && echo "ok: \${SCRIPTS_DIR} substituted"
 test -x "$out/scripts/noop.sh"    && echo "ok: noop.sh executable"
 ```
 
@@ -214,9 +216,12 @@ File: `lib/mkPgiiPack.nix`
 # formulas/ + doctor/ (any of which may be empty).
 #
 # Template substitution: files ending `.template` are processed by envsubst
-# with `@KEY@` markers. `@SCRIPTS_DIR@` is always available and resolves to
-# the pack's scripts/ subdir inside the nix store. Additional substitutions
-# come from the `substitutions` argument (an attrset of NAME=value pairs).
+# using `${KEY}` markers. Only declared variables are substituted (we pass
+# envsubst an explicit variable list); other `${...}` patterns in template
+# files (e.g. shell expansions inside *.sh.template) are preserved verbatim.
+# `${SCRIPTS_DIR}` is always available and resolves to the pack's scripts/
+# subdir inside the nix store. Additional substitutions come from the
+# `substitutions` argument (an attrset of NAME=value pairs).
 #
 # Usage:
 #
@@ -246,12 +251,20 @@ pkgs.runCommand "${name}-${version}"
     cp -R ${src}/. $out/
     chmod -R u+w $out
 
-    # @SCRIPTS_DIR@ always points at this pack's scripts/ subdir.
+    # ${SCRIPTS_DIR} always points at this pack's scripts/ subdir.
     export SCRIPTS_DIR="$out/scripts"
     ${lib.concatStringsSep "\n" (
       lib.mapAttrsToList (k: v: ''export ${k}=${lib.escapeShellArg (toString v)}'') substitutions
     )}
 
+    # Substitute. envsubst replaces every ${VAR} in the input file with
+    # the corresponding environment-variable value, IF the variable is
+    # exported. Unexported names pass through unchanged, so accidental
+    # collisions with shell ${...} inside *.sh.template files are limited
+    # to names a pack author also chose to declare in `substitutions`.
+    # If a pack ever needs envsubst to ignore certain names, refactor
+    # this to use envsubst's variable-list arg (passed as a single
+    # argument like '$SCRIPTS_DIR $REPOS') at that time.
     while IFS= read -r -d "" f; do
       envsubst < "$f" > "''${f%.template}"
       rm "$f"
