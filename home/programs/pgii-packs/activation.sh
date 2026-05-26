@@ -164,6 +164,33 @@ process_city() {
     return 0
   fi
 
+  # Pre-flight: for each pack we want to write, refuse if [packs.<name>]
+  # exists in the file but is NOT bracketed by our managed sentinels.
+  for name in "${PACK_NAMES[@]}"; do
+    # Does the file declare [packs.<name>] anywhere?
+    if grep -Eq "^\[packs\.$name\]\$" "$city_toml"; then
+      # Is that declaration inside a managed block? Walk the file.
+      local inside_managed
+      inside_managed=$(awk -v name="$name" '
+        BEGIN { in_block = 0; found = 0 }
+        $0 == "# BEGIN pgii-pack:" name " (managed)" { in_block = 1; next }
+        $0 == "# END pgii-pack:" name " (managed)"   { in_block = 0; next }
+        $0 == "[packs." name "]" {
+          if (in_block) { found = 1 }
+          else { found = -1; exit }
+        }
+        END { print found }
+      ' "$city_toml")
+
+      if [ "$inside_managed" = "-1" ]; then
+        echo "pgii-packs: ERROR: Hand-written [packs.$name] exists in $city_toml" >&2
+        echo "  Either rename or delete the hand-written block, or remove" >&2
+        echo "  phillipgreenii.programs.pgii.packs.$name from your config." >&2
+        exit 3
+      fi
+    fi
+  done
+
   local tmp
   tmp="$(mktemp "$city_toml.XXXXXX")"
 
