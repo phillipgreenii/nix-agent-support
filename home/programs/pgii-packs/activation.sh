@@ -91,9 +91,42 @@ done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$PACKS_JSON")
 
 PACK_NAMES=("${!PACKS[@]}")
 
-# Per-city processing. Real implementation added in subsequent tasks.
+# Emit one managed block to stdout for a given pack.
+emit_block() {
+  local name="$1" path="$2"
+  cat <<EOF
+
+# BEGIN pgii-pack:$name (managed)
+[packs.$name]
+path = "$path"
+# END pgii-pack:$name (managed)
+EOF
+}
+
+# Process a single city.toml in-place.
+process_city() {
+  local city="$1"
+  local city_toml="$city/city.toml"
+
+  mkdir -p "$(dirname "$city_toml")"
+  if [ ! -f "$city_toml" ]; then
+    : >"$city_toml"
+  fi
+
+  local tmp
+  tmp="$(mktemp "$city_toml.XXXXXX")"
+  cp "$city_toml" "$tmp"
+
+  for name in "${PACK_NAMES[@]}"; do
+    local path="${PACKS[$name]}"
+    emit_block "$name" "$path" >>"$tmp"
+  done
+
+  mv "$tmp" "$city_toml"
+}
+
 for city in "${CITIES[@]}"; do
-  echo "pgii-packs: would process city=$city packs=${PACK_NAMES[*]:-<none>} reload=$RELOAD"
+  process_city "$city"
 done
 
 exit 0
