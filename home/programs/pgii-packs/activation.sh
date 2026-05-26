@@ -22,6 +22,7 @@ set -euo pipefail
 
 CITIES_JSON=""
 PACKS_JSON=""
+# shellcheck disable=SC2034
 RELOAD=0
 
 usage() {
@@ -52,6 +53,7 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --reload)
+    # shellcheck disable=SC2034
     RELOAD=1
     shift
     ;;
@@ -115,7 +117,7 @@ process_city() {
 
   local tmp
   tmp="$(mktemp "$city_toml.XXXXXX")"
-  cp "$city_toml" "$tmp"
+  cp -p "$city_toml" "$tmp"
 
   for name in "${PACK_NAMES[@]}"; do
     local path="${PACKS[$name]}"

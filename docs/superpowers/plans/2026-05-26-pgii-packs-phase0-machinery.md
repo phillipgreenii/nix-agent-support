@@ -393,6 +393,7 @@ set -euo pipefail
 
 CITIES_JSON=""
 PACKS_JSON=""
+# shellcheck disable=SC2034
 RELOAD=0
 
 usage() {
@@ -416,7 +417,7 @@ while [ $# -gt 0 ]; do
       [ -n "$PACKS_JSON" ] || { echo "--packs requires a value" >&2; usage; }
       shift
       ;;
-    --reload) RELOAD=1; shift ;;
+    --reload) RELOAD=1; shift ;;  # shellcheck disable=SC2034 (Task 12)
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -633,7 +634,7 @@ process_city() {
 
   local tmp
   tmp="$(mktemp "$city_toml.XXXXXX")"
-  cp "$city_toml" "$tmp"
+  cp -p "$city_toml" "$tmp"
 
   for name in "${PACK_NAMES[@]}"; do
     local path="${PACKS[$name]}"
