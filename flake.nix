@@ -88,6 +88,7 @@
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           pa-monitor = final.callPackage ./packages/pa-monitor { };
+          pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -341,6 +342,7 @@
             inherit (pkgs)
               claude-extended-tool-approver
               pa-monitor
+              pgii-pack-test-fixture
               pg-pr
               goccc
               toktrack
