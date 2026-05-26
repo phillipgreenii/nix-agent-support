@@ -34,12 +34,22 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
   --cities)
-    CITIES_JSON="${2:-}"
-    shift 2
+    shift
+    CITIES_JSON="${1:-}"
+    [ -n "$CITIES_JSON" ] || {
+      echo "--cities requires a value" >&2
+      usage
+    }
+    shift
     ;;
   --packs)
-    PACKS_JSON="${2:-}"
-    shift 2
+    shift
+    PACKS_JSON="${1:-}"
+    [ -n "$PACKS_JSON" ] || {
+      echo "--packs requires a value" >&2
+      usage
+    }
+    shift
     ;;
   --reload)
     RELOAD=1
