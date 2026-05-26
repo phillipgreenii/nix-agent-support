@@ -1,0 +1,10 @@
+# pgii-pack-test-fixture
+#
+# Trivial pack used by home/programs/pgii-packs/tests/ and the first
+# end-to-end activation run on a real city. Contains one disabled no-op
+# order that exercises @SCRIPTS_DIR@ template substitution. No agents,
+# no doctor checks. Safe to enable in any city.
+
+[pack]
+name = "pgii-pack-test-fixture"
+schema = 2
