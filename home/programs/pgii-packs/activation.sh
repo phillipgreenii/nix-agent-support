@@ -167,22 +167,12 @@ process_city() {
   local tmp
   tmp="$(mktemp "$city_toml.XXXXXX")"
 
-  # Strip all managed blocks belonging to packs we're about to write.
-  # awk reads the file once, suppressing lines between BEGIN and END markers
-  # for any pack in $PACK_NAMES. Other managed blocks (for packs we're not
-  # currently managing) pass through untouched.
-  local pack_pattern
-  pack_pattern="$(printf '%s|' "${PACK_NAMES[@]}")"
-  pack_pattern="${pack_pattern%|}"
-
-  awk -v pack_pattern="$pack_pattern" '
-    BEGIN {
-      pattern = "^# BEGIN pgii-pack:(" pack_pattern ") \\(managed\\)$"
-      end_pattern = "^# END pgii-pack:(" pack_pattern ") \\(managed\\)$"
-    }
-    $0 ~ pattern     { in_block = 1; next }
-    in_block && $0 ~ end_pattern { in_block = 0; next }
-    !in_block        { print }
+  # Strip all managed pgii-pack:* blocks. We re-emit only the ones we
+  # want below, which gives us removal-on-disable for free.
+  awk '
+    /^# BEGIN pgii-pack:.* \(managed\)$/ { in_block = 1; next }
+    in_block && /^# END pgii-pack:.* \(managed\)$/ { in_block = 0; next }
+    !in_block { print }
   ' "$city_toml" >"$tmp"
 
   # Trim trailing blank lines so we do not accumulate them on each rewrite.
