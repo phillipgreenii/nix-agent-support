@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd/ghactions"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
 )
@@ -42,9 +43,14 @@ var loadConfigForCLI = func(ctx context.Context) (*config.Config, error) {
 // processes. That way every bd command lands in the correct monorepo's
 // .beads/ workspace regardless of where the pg-pr binary was invoked from.
 var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
+	gha := ghactions.New()
+	// githubPRResolver lives in ci.go; same package. The github-actions
+	// provider needs it to map PR # → head branch when listing runs.
+	gha.SetPRResolver(githubPRResolver{})
 	return sync.New(sync.Deps{
-		Cfg: cfg,
-		VCS: map[string]sync.VCSProvider{"github": github.New()},
+		Cfg:  cfg,
+		VCS:  map[string]sync.VCSProvider{"github": github.New()},
+		CICD: map[string]sync.CICDProvider{ghactions.ProviderName: gha},
 	})
 }
 
