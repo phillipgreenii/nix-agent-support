@@ -1295,7 +1295,7 @@ EOF
                 --reload
   [ "$status" -eq 0 ]
 
-  grep -Fxq "--city $city supervisor reload" "$TMP/gc-calls.log"
+  grep -Fxq -- "--city $city supervisor reload" "$TMP/gc-calls.log"
 }
 
 @test "reload: skipped when socket missing" {
@@ -1308,7 +1308,7 @@ EOF
                 --reload
   [ "$status" -eq 0 ]
 
-  [ ! -f "$TMP/gc-calls.log" ] || ! grep -Fxq "--city $city supervisor reload" "$TMP/gc-calls.log"
+  [ ! -f "$TMP/gc-calls.log" ] || ! grep -Fxq -- "--city $city supervisor reload" "$TMP/gc-calls.log"
 }
 
 @test "reload: gc failure warns but does not fail activation" {
