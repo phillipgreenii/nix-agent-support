@@ -10,7 +10,7 @@ pkgs.buildGoModule {
   version = "0.0.0";
   src = ./.;
 
-  vendorHash = "sha256-eqNpBatxE+PiAh9zCmLDIrQmLa3EseffGcj//vmUbKE=";
+  vendorHash = "sha256-0E9JzUnmYRqCF/Q29Q9U0VolQ/NFTOCZjY2JYfs/3Lg=";
 
   subPackages = [ "cmd/pg-pr" ];
 
