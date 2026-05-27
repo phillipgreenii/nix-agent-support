@@ -64,6 +64,11 @@ var (
 		},
 		[]string{"repo"},
 	)
+
+	SnapshotPresent = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "pg_pr_snapshot_present",
+		Help: "1 once the dashboard snapshot has been populated for the first time this process; otherwise 0.",
+	})
 )
 
 func init() {
@@ -73,6 +78,7 @@ func init() {
 		FeedbackCreatedTotal,
 		CIOnlyAttempts,
 		LastSyncSuccessTimestamp,
+		SnapshotPresent,
 	)
 }
 

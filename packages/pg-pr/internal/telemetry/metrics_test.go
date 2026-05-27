@@ -57,3 +57,24 @@ func TestDefaultRegistry_NotNil(t *testing.T) {
 		t.Fatal("DefaultRegistry returned nil")
 	}
 }
+
+func TestSnapshotPresentMetric(t *testing.T) {
+	SnapshotPresent.Set(1)
+	srv := httptest.NewServer(MetricsHandler())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), "pg_pr_snapshot_present 1") {
+		t.Errorf("expected 'pg_pr_snapshot_present 1' in body, got:\n%s", body)
+	}
+}
