@@ -1,0 +1,13 @@
+scope = "city"
+nudge = "Triage open feedback on PRs into action beads."
+idle_timeout = "30m"
+min_active_sessions = 0
+max_active_sessions = 1
+# Open process-feedback cycle beads. Triage runs on both mine and team PRs;
+# differentiation happens inside the agent prompt.
+work_query = """
+bd list --json --limit 0 --type=task \
+  | jq -r 'if type == "array" then \
+      .[] | select(.status == "open" and (.title | startswith("process-feedback:"))) | .id \
+    else empty end'
+"""

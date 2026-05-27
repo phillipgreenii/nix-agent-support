@@ -1,0 +1,18 @@
+scope = "city"
+nudge = "Process open feedback on team PRs and draft reviews via pg-pr review draft."
+idle_timeout = "30m"
+min_active_sessions = 0
+max_active_sessions = 1
+# Open process-feedback cycles on team PRs (role != "mine").
+work_query = """
+bd list --json --limit 0 --type=task \
+  | jq -r 'if type == "array" then \
+      .[] | select(.status == "open" and (.title | startswith("process-feedback:"))) | .id \
+    else empty end' \
+  | while read cid; do \
+      pid=$(bd show "$cid" --json | jq -r '.parent // empty'); \
+      [ -z "$pid" ] && continue; \
+      role=$(bd show "$pid" --json | jq -r '.metadata.role // ""'); \
+      [ "$role" != "mine" ] && [ -n "$role" ] && echo "$cid"; \
+    done
+"""
