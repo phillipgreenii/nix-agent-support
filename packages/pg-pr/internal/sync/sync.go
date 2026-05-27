@@ -698,8 +698,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		if err := e.processFeedback(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
-		if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+		if e.isSelfAuthored(pr.Author) {
+			if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
+				summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+			}
 		}
 		// Phase 6 B3: post queued replies for feedback beads under this repo.
 		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {

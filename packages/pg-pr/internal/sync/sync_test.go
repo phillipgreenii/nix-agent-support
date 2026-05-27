@@ -133,21 +133,21 @@ func itoa(n int) string {
 // fakeCICD is a minimal CICDProvider for tests. runs is keyed by
 // "repo#prNumber"; missing keys return an empty slice (treated by
 // allRunsSuccessful as "no runs" → not promotable).
-type fakeCICD struct { //nolint:unused
+type fakeCICD struct {
 	runs map[string][]api.CIRun
 }
 
-func newFakeCICD() *fakeCICD { //nolint:unused
+func newFakeCICD() *fakeCICD {
 	return &fakeCICD{runs: map[string][]api.CIRun{}}
 }
 
-func (c *fakeCICD) ListRuns(_ context.Context, repo string, n int) ([]api.CIRun, error) { //nolint:unused
+func (c *fakeCICD) ListRuns(_ context.Context, repo string, n int) ([]api.CIRun, error) {
 	return c.runs[keyOf(repo, n)], nil
 }
 
 // successRun returns a single completed+successful CI run, the shape
 // allRunsSuccessful requires for draft promotion to fire.
-func successRun() api.CIRun { //nolint:unused
+func successRun() api.CIRun {
 	return api.CIRun{Status: "completed", Conclusion: "success"}
 }
 
@@ -278,7 +278,7 @@ func samplePR(n int, repo, branch string) api.PR {
 // teammatePR returns a draft PR authored by someone other than the
 // configured SelfLogin ("phillipg"). Used by tests asserting the
 // ownership guards.
-func teammatePR(n int, repo, branch string) api.PR { //nolint:unused
+func teammatePR(n int, repo, branch string) api.PR {
 	pr := samplePR(n, repo, branch)
 	pr.Author = "coworker"
 	pr.Draft = true
@@ -294,7 +294,7 @@ func selfDraftPR(n int, repo, branch string) api.PR { //nolint:unused
 
 // cfgWithCICD returns a config that wires a single CICD provider name
 // ("ci") on the foo/bar repo so maybePromoteDraft can fire in tests.
-func cfgWithCICD() *config.Config { //nolint:unused
+func cfgWithCICD() *config.Config {
 	return &config.Config{
 		SelfLogin:    "phillipg",
 		WorktreeRoot: "/tmp/wr",
@@ -938,6 +938,47 @@ func TestSync_PopulatesSnapshot(t *testing.T) {
 	}
 	if len(snap.Team) != 0 {
 		t.Errorf("Team: got %d row(s) want 0", len(snap.Team))
+	}
+}
+
+func TestSyncPR_SkipsDraftPromoteForTeammate(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Team-mate's PR — draft, CI green. Without the guard, sync would
+	// SetDraft(false).
+	pr := teammatePR(99, "foo/bar", "feat/coworker")
+	vcs.views[keyOf("foo/bar", 99)] = pr
+	ci.runs[keyOf("foo/bar", 99)] = []api.CIRun{successRun()}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      cfgWithCICD(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sum, err := e.SyncPR(ctx, "foo/bar", 99)
+	if err != nil {
+		t.Fatalf("SyncPR: %v (errors=%+v)", err, sum.Errors)
+	}
+	if len(vcs.setDraftCalls) != 0 {
+		t.Fatalf("expected no SetDraft calls for team-mate PR; got %+v", vcs.setDraftCalls)
+	}
+	// Bead is still upserted with Author=coworker.
+	if sum.BeadsCreated+sum.BeadsUpdated != 1 {
+		t.Fatalf("expected 1 bead upserted; got created=%d updated=%d",
+			sum.BeadsCreated, sum.BeadsUpdated)
+	}
+	if sum.DraftPromoted != 0 {
+		t.Fatalf("DraftPromoted: got %d want 0", sum.DraftPromoted)
 	}
 }
 
