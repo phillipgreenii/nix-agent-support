@@ -6,7 +6,7 @@
 # the gascity agents.
 #
 # This is the pg-pr-driven replacement for the legacy
-# /Users/phillipg/gc/assets/imports/zr/scripts/pr-watcher.sh, which did all
+# ~/gc/assets/imports/zr/scripts/pr-watcher.sh, which did all
 # the GraphQL + bead upsert work itself. Now that lives inside `pg-pr sync`
 # in agent-support.
 #
