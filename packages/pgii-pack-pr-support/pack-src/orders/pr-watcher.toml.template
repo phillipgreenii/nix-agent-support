@@ -1,0 +1,9 @@
+[order]
+description = "pg-pr-zr PR-watcher: run pg-pr sync, then report changes via pg-pr changes --since."
+trigger     = "cooldown"
+interval    = "10m"
+# ${SCRIPTS_DIR} is substituted by mkPgiiPack (envsubst) with the pack's
+# scripts/ directory inside the nix store.
+exec        = "${SCRIPTS_DIR}/pr-watcher.sh"
+timeout     = "600s"
+enabled     = true
