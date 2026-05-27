@@ -7,8 +7,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
@@ -77,10 +79,21 @@ configured repo.`,
 			if syFlags.logJSON {
 				logger = sync.NewJSONLogger()
 			}
+			// Construct the dashboard store + agent registry and wire them
+			// onto the engine. The registry is required for snapshot
+			// approval classification; a config with no agents yields an
+			// empty registry that treats every approver as human.
+			reg, err := agentregistry.New(cfg.Agents)
+			if err != nil {
+				return fmt.Errorf("agent registry: %w", err)
+			}
+			store := snapshot.NewStore()
+			engine.SetAgentRegistry(reg)
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
 				Logger:      logger,
 				MetricsAddr: syFlags.metricsAddr,
+				Dashboard:   store,
 			})
 		}
 

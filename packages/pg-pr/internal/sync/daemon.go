@@ -108,6 +108,12 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 	if err := os.MkdirAll(opts.LockDir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create lock dir %s: %w", opts.LockDir, err)
 	}
+	// Wire the snapshot store + interval onto the engine so each Sync
+	// iteration populates the dashboard. When Dashboard is nil this is a
+	// no-op (the engine's snapshot-building branch checks for nil).
+	if opts.Dashboard != nil {
+		e.SetDashboardStore(opts.Dashboard, opts.Interval)
+	}
 	lockPath := filepath.Join(opts.LockDir, "daemon.lock")
 	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {

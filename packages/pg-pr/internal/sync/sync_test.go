@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -810,5 +812,65 @@ func TestSync_SkipsReplyForFeedbackOfDifferentRepo(t *testing.T) {
 	}
 	if respID != "" {
 		t.Fatalf("response_id should be untouched, got %q", respID)
+	}
+}
+
+// TestSync_PopulatesSnapshot verifies that when Deps.Snapshot is set, the
+// sync loop writes a non-nil snapshot containing the observed PRs and
+// classifies them by author. The test uses an in-process noopBeads so the
+// bd-workspace integration hang is avoided; the BeadsDeps walk requires
+// *beads.Client and is therefore skipped (empty BeadsDeps → WaitingOnMe is
+// false, per builder spec).
+func TestSync_PopulatesSnapshot(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	// One PR authored by the configured self (phillipg) → routed to Mine.
+	vcs.my["foo/bar"] = []api.PR{samplePR(42, "foo/bar", "feat/dash")}
+
+	store := snapshot.NewStore()
+	reg, err := agentregistry.New(nil)
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:           minimalCfg(),
+		VCS:           map[string]VCSProvider{"github": vcs},
+		Beads:         &noopBeads{},
+		StateDir:      stateDir,
+		Snapshot:      store,
+		AgentRegistry: reg,
+		SyncInterval:  10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := e.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	snap, ok := store.Get()
+	if !ok || snap == nil {
+		t.Fatal("expected snapshot to be present after Sync")
+	}
+	if snap.SyncIntervalSeconds != int((10 * time.Minute).Seconds()) {
+		t.Errorf("SyncIntervalSeconds: got %d want %d", snap.SyncIntervalSeconds, int((10 * time.Minute).Seconds()))
+	}
+	if len(snap.Mine) != 1 {
+		t.Fatalf("Mine: got %d row(s) want 1; snap=%+v", len(snap.Mine), snap)
+	}
+	row := snap.Mine[0]
+	if row.Number != 42 {
+		t.Errorf("Mine[0].Number: got %d want 42", row.Number)
+	}
+	if row.Repo != "foo/bar" {
+		t.Errorf("Mine[0].Repo: got %q want foo/bar", row.Repo)
+	}
+	if row.WaitingOnMe {
+		t.Errorf("Mine[0].WaitingOnMe: empty BeadsDeps must be false")
+	}
+	if len(snap.Team) != 0 {
+		t.Errorf("Team: got %d row(s) want 0", len(snap.Team))
 	}
 }

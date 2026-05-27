@@ -36,7 +36,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -57,6 +59,14 @@ type VCSProvider interface {
 // comment-based events.
 type CommentReader interface {
 	ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error)
+}
+
+// ReviewLister is the optional subset of VCSProvider the dashboard snapshot
+// builder uses. A VCSProvider that also implements ReviewLister is queried
+// for reviews; otherwise the snapshot's approval classification proceeds
+// with an empty review set.
+type ReviewLister interface {
+	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
 
 // DraftToggler is the optional subset of VCSProvider needed for the draft
@@ -126,6 +136,20 @@ type Deps struct {
 
 	// Now is the clock. Defaults to time.Now (UTC) when nil.
 	Now func() time.Time
+
+	// Snapshot, when non-nil, populates a dashboard snapshot at the end of
+	// each successful Sync iteration. Nil disables snapshot building.
+	Snapshot *snapshot.Store
+
+	// AgentRegistry classifies reviewers/comment authors. Required when
+	// Snapshot is non-nil; ignored otherwise.
+	AgentRegistry *agentregistry.Registry
+
+	// SyncInterval is the daemon's tick interval, exposed verbatim on the
+	// snapshot so the dashboard can compute staleness. Zero when not in
+	// daemon mode (snapshot may still be written, with sync_interval_seconds
+	// reading 0).
+	SyncInterval time.Duration
 }
 
 // Engine carries the configured dependencies for a series of sync calls.
@@ -437,10 +461,133 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	for repo := range healthyRepos {
 		telemetry.ObserveSyncSuccess(repo, summary.FinishedAt)
 	}
+	// Dashboard snapshot: gather per-PR extras (reviews, comments, CI runs,
+	// bd dep tree) and store. Best-effort — errors during gathering are
+	// absorbed so a partial snapshot still lands.
+	if e.deps.Snapshot != nil {
+		e.buildAndStoreSnapshot(ctx, observed, repoClients)
+	}
 	if len(summary.Errors) > 0 {
 		return summary, fmt.Errorf("sync: %d error(s) (see Summary.Errors)", len(summary.Errors))
 	}
 	return summary, nil
+}
+
+// buildAndStoreSnapshot gathers per-PR extras (reviews, comments, CI runs,
+// bd dep tree) and stores a snapshot. Errors during gathering are absorbed
+// so partial snapshots are acceptable. When no PRs were observed the
+// previous snapshot is preserved (no overwrite).
+func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]api.PR, repoClients map[string]BeadClient) {
+	if len(observed) == 0 {
+		return
+	}
+	inputs := make([]snapshot.PRInput, 0, len(observed))
+	for key, pr := range observed {
+		// Ensure pr.Repo carries the configured remote — VCS providers may
+		// omit it on the returned api.PR (the watched-set key holds the
+		// authoritative repo identifier).
+		if pr.Repo == "" {
+			pr.Repo = key.Repo
+		}
+		in := snapshot.PRInput{PR: pr}
+		rcfg, rerr := e.repoConfig(key.Repo)
+		if rerr == nil {
+			if vp, err := e.providerFor(rcfg); err == nil {
+				if rl, ok := vp.(ReviewLister); ok {
+					if reviews, rrErr := rl.ListReviews(ctx, key.Repo, pr.Number); rrErr == nil {
+						in.Reviews = reviews
+					}
+				}
+				if reader, ok := vp.(CommentReader); ok {
+					if comments, cerr := reader.ListComments(ctx, key.Repo, pr.Number); cerr == nil {
+						in.Comments = comments
+					}
+				}
+			}
+			if cp := e.firstCICDFor(rcfg); cp != nil {
+				if runs, cerr := cp.ListRuns(ctx, key.Repo, pr.Number); cerr == nil {
+					in.CIRuns = runs
+				}
+			}
+		}
+		// bd dep tree via per-repo client. The lookup is best-effort and
+		// requires the concrete *beads.Client (test fakes don't implement
+		// DepTreeUp); when the assertion fails we just skip deps for this
+		// PR.
+		bdc := repoClients[key.Repo]
+		if bdc == nil {
+			bdc = e.bdClientFor(rcfg)
+		}
+		if c, ok := bdc.(*beads.Client); ok {
+			if mr, ferr := c.FindByRepoAndNumber(ctx, key.Repo, pr.Number); ferr == nil && mr != nil {
+				if deps, derr := c.DepTreeUp(ctx, mr.ID); derr == nil {
+					in.BeadsDeps = deps
+				}
+			}
+		}
+		// JIRA — left empty for v1; downstream task wires this from
+		// feedback beads.
+		inputs = append(inputs, in)
+	}
+
+	snap := snapshot.Build(snapshot.BuilderInput{
+		GeneratedAt:         e.deps.Now(),
+		SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
+		Self:                e.deps.Cfg.SelfLogin,
+		TeamMembers:         e.allTeamMembers(),
+		Registry:            e.deps.AgentRegistry,
+		PRs:                 inputs,
+	})
+	e.deps.Snapshot.Set(snap)
+	telemetry.SnapshotPresent.Set(1)
+}
+
+// allTeamMembers returns the de-duplicated union of TeamMembers across all
+// configured repos. The configured self login is included so a PR authored
+// by self is still classified into the mine row (the builder treats self
+// and team separately, but having self in the team set is harmless because
+// the builder's switch checks self first).
+func (e *Engine) allTeamMembers() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, r := range e.deps.Cfg.Repos {
+		for _, m := range r.TeamMembers {
+			if _, ok := seen[m]; ok {
+				continue
+			}
+			seen[m] = struct{}{}
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// firstCICDFor returns the first CICD provider configured for rcfg, or nil
+// when none is configured or registered. Matches the lookup pattern used
+// by processFeedback.
+func (e *Engine) firstCICDFor(rcfg config.RepoConfig) CICDProvider {
+	for _, name := range rcfg.CICD {
+		if cp, ok := e.deps.CICD[name]; ok {
+			return cp
+		}
+	}
+	return nil
+}
+
+// SetDashboardStore wires a snapshot Store and the daemon's sync interval
+// into the engine. Called by Daemon at startup so snapshot building is
+// active for the loop's lifetime. Safe to call only before Sync goroutines
+// are active (i.e. once, before the loop starts).
+func (e *Engine) SetDashboardStore(store *snapshot.Store, interval time.Duration) {
+	e.deps.Snapshot = store
+	e.deps.SyncInterval = interval
+}
+
+// SetAgentRegistry wires the agent registry onto the engine. Called by CLI
+// daemon-mode setup so the snapshot builder can classify approvals. Safe
+// to call only before Sync goroutines are active.
+func (e *Engine) SetAgentRegistry(reg *agentregistry.Registry) {
+	e.deps.AgentRegistry = reg
 }
 
 // SyncPR refreshes a single PR. The repo identifier MUST be in the configured
