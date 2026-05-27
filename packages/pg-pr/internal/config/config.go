@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 )
 
 // ErrNoConfig is returned by Load when no config file is found.
@@ -36,11 +38,12 @@ type Config struct {
 	// Path is the absolute path the config was loaded from. Populated by Load.
 	Path string `yaml:"-" json:"path,omitempty"`
 
-	SelfLogin               string       `yaml:"self_login" json:"self_login"`
-	WorktreeRoot            string       `yaml:"worktree_root" json:"worktree_root"`
-	Repos                   []RepoConfig `yaml:"repos" json:"repos"`
-	DaemonInterval          string       `yaml:"daemon_interval,omitempty" json:"daemon_interval,omitempty"`
-	CIOnlyAttemptsThreshold int          `yaml:"ci_only_attempts_threshold,omitempty" json:"ci_only_attempts_threshold,omitempty"`
+	SelfLogin               string                `yaml:"self_login" json:"self_login"`
+	WorktreeRoot            string                `yaml:"worktree_root" json:"worktree_root"`
+	Repos                   []RepoConfig          `yaml:"repos" json:"repos"`
+	DaemonInterval          string                `yaml:"daemon_interval,omitempty" json:"daemon_interval,omitempty"`
+	CIOnlyAttemptsThreshold int                   `yaml:"ci_only_attempts_threshold,omitempty" json:"ci_only_attempts_threshold,omitempty"`
+	Agents                  []agentregistry.Entry `yaml:"agents,omitempty" json:"agents,omitempty"`
 }
 
 // RepoConfig is a single repo's configuration.

@@ -10,6 +10,33 @@ import (
 	"testing"
 )
 
+func TestLoadFile_AgentsBlock(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: phillipg
+worktree_root: /tmp/wr
+repos:
+  - remote: owner/name
+agents:
+  - login: claude[bot]
+    approval_regex: '(?im)^verdict:\s*approve'
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(cfg.Agents))
+	}
+	a := cfg.Agents[0]
+	if a.Login != "claude[bot]" {
+		t.Errorf("login: got %q want %q", a.Login, "claude[bot]")
+	}
+	if a.ApprovalRegex != `(?im)^verdict:\s*approve` {
+		t.Errorf("approval_regex: got %q", a.ApprovalRegex)
+	}
+}
+
 // fakeEnv injects fixed env-var + home-dir values into Load.
 type fakeEnv struct {
 	vars map[string]string
