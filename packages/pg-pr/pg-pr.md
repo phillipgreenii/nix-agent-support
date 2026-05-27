@@ -22,3 +22,7 @@
 - Detect the branch and PR context for the current directory:
 
 `pg-pr branch detect`
+
+- Daemon dashboard snapshot (JSON):
+
+`curl http://127.0.0.1:9818/api/v1/dashboard`
