@@ -1,0 +1,1 @@
+description = "Alert when PR-pipeline beads don't match any agent's work_query — routing gap, wastes LLM time"

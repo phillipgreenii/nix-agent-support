@@ -1,0 +1,1 @@
+description = "Alert if pr-watcher's recent run history shows consecutive failures"
