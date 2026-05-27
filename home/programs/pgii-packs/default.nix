@@ -22,10 +22,15 @@ let
   # Build the table of pack name → drv for enabled packs.
   # Each entry is { name; drv; } so we can use it for both home.file rooting
   # and the --packs JSON arg passed to activation.sh.
-  enabledPacks = lib.optional cfg.packs.test-fixture.enable {
-    name = "pgii-pack-test-fixture";
-    drv = pkgs.pgii-pack-test-fixture;
-  };
+  enabledPacks =
+    lib.optional cfg.packs.test-fixture.enable {
+      name = "pgii-pack-test-fixture";
+      drv = pkgs.pgii-pack-test-fixture;
+    }
+    ++ lib.optional cfg.packs.pr-support.enable {
+      name = "pgii-pr-support";
+      drv = pkgs.pgii-pack-pr-support;
+    };
 
   anyPackEnabled = enabledPacks != [ ];
 
@@ -68,8 +73,13 @@ in
       test-fixture.enable = lib.mkEnableOption ''
         pgii-pack-test-fixture (validation pack for the pgii-packs pipeline).
       '';
-      # Real packs (pr-support, dolt-hacks, workers, gastown, bead-importer)
-      # are added in their respective phase plans.
+      pr-support.enable = lib.mkEnableOption ''
+        pgii-pack-pr-support (PR review / triage / self-fix agents + pr-watcher
+        and wake-on-work orders + PR-related doctor checks). Pack scripts depend
+        on `pg-pr` in PATH — enable via `phillipgreenii.programs.pg-pr.enable`.
+      '';
+      # Real packs (dolt-hacks, workers, gastown, bead-importer) are added in
+      # their respective phase plans.
     };
   };
 
@@ -117,6 +127,14 @@ in
     # without configuring a city see the error at eval time.
     {
       assertions = [
+        {
+          assertion = !cfg.packs.pr-support.enable || (config.phillipgreenii.programs.pg-pr.enable or false);
+          message = ''
+            phillipgreenii.programs.pgii.packs.pr-support.enable requires
+            phillipgreenii.programs.pg-pr.enable = true (pack scripts call
+            pg-pr).
+          '';
+        }
         {
           assertion = !anyPackEnabled || cfg.gascity.cities != [ ];
           message = ''
