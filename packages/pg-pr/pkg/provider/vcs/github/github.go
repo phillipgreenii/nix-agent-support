@@ -82,7 +82,7 @@ func (cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) (
 var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,baseRefName,url,author,isDraft,state,mergedAt,closedAt"
+var prListFields = "number,title,headRefName,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -95,23 +95,30 @@ type ghPR struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
-	IsDraft  bool   `json:"isDraft"`
-	State    string `json:"state"`
-	MergedAt string `json:"mergedAt"`
-	ClosedAt string `json:"closedAt"`
+	IsDraft      bool   `json:"isDraft"`
+	State        string `json:"state"`
+	MergedAt     string `json:"mergedAt"`
+	ClosedAt     string `json:"closedAt"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	ChangedFiles int    `json:"changedFiles"`
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
 	return api.PR{
-		Repo:   repo,
-		Number: p.Number,
-		State:  strings.ToLower(p.State),
-		Branch: p.HeadRefName,
-		Base:   p.BaseRefName,
-		Author: p.Author.Login,
-		URL:    p.URL,
-		Draft:  p.IsDraft,
-		Merged: p.MergedAt != "",
+		Repo:         repo,
+		Number:       p.Number,
+		Title:        p.Title,
+		State:        strings.ToLower(p.State),
+		Branch:       p.HeadRefName,
+		Base:         p.BaseRefName,
+		Author:       p.Author.Login,
+		URL:          p.URL,
+		Draft:        p.IsDraft,
+		Merged:       p.MergedAt != "",
+		Additions:    p.Additions,
+		Deletions:    p.Deletions,
+		ChangedFiles: p.ChangedFiles,
 	}
 }
 

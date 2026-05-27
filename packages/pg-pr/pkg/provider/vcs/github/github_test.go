@@ -718,6 +718,104 @@ func TestListReviews_EmptyReviewsArray(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// Title + diff-stats population tests (Task 3)
+// ----------------------------------------------------------------------
+
+func TestGetPRPopulatesTitleAndDiffStats(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number":7,"state":"OPEN","title":"Fix bar",
+		"headRefName":"f","baseRefName":"main",
+		"author":{"login":"me"},"url":"u",
+		"isDraft":false,"mergedAt":"","closedAt":"",
+		"additions":10,"deletions":3,"changedFiles":2
+	}`)
+	p := NewWithRunner(gh)
+	got, err := p.GetPR(context.Background(), "owner/repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got.Title != "Fix bar" {
+		t.Fatalf("Title: got %q want %q", got.Title, "Fix bar")
+	}
+	if got.Additions != 10 {
+		t.Fatalf("Additions: got %d want 10", got.Additions)
+	}
+	if got.Deletions != 3 {
+		t.Fatalf("Deletions: got %d want 3", got.Deletions)
+	}
+	if got.ChangedFiles != 2 {
+		t.Fatalf("ChangedFiles: got %d want 2", got.ChangedFiles)
+	}
+	// Verify that the --json field list includes the new fields.
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	for _, field := range []string{"additions", "deletions", "changedFiles", "title"} {
+		if !strings.Contains(joined, field) {
+			t.Fatalf("expected %q in gh args: %v", field, last)
+		}
+	}
+}
+
+func TestListMyPRsPopulatesTitle(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":11,"title":"Add feature","headRefName":"feat/add",
+		"baseRefName":"main","url":"https://github.com/foo/bar/pull/11",
+		"author":{"login":"alice"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":5,"deletions":1,"changedFiles":1
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Title != "Add feature" {
+		t.Fatalf("Title: got %q want %q", prs[0].Title, "Add feature")
+	}
+	if prs[0].Additions != 5 {
+		t.Fatalf("Additions: got %d want 5", prs[0].Additions)
+	}
+	if prs[0].Deletions != 1 {
+		t.Fatalf("Deletions: got %d want 1", prs[0].Deletions)
+	}
+	if prs[0].ChangedFiles != 1 {
+		t.Fatalf("ChangedFiles: got %d want 1", prs[0].ChangedFiles)
+	}
+}
+
+func TestListTeamPRsPopulatesTitle(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":99,"title":"Team PR","headRefName":"team/feat",
+		"baseRefName":"main","url":"https://github.com/foo/bar/pull/99",
+		"author":{"login":"bob"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":20,"deletions":4,"changedFiles":3
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListTeamPRs(context.Background(), "foo/bar", []string{"bob"})
+	if err != nil {
+		t.Fatalf("ListTeamPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Title != "Team PR" {
+		t.Fatalf("Title: got %q want %q", prs[0].Title, "Team PR")
+	}
+	if prs[0].Additions != 20 {
+		t.Fatalf("Additions: got %d want 20", prs[0].Additions)
+	}
+}
+
 // pathFakeGH dispatches on the second arg (the path) — cleaner for `api`.
 type pathFakeGH struct {
 	responses map[string][]byte
