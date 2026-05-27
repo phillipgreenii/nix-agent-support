@@ -4,7 +4,7 @@
 
 **Goal:** Stop `pg-pr sync` from modifying team-mate PRs. The engine currently undrafts any draft+CI-green PR regardless of author (which triggers GitHub-side label-on-ready and reviewer-request cascades) and will post live replies to team-mate threads if a `ReplyDraft` is staged. After this plan: sync only writes upstream for PRs whose `Author == cfg.SelfLogin`; any uncertainty defaults to read-only.
 
-**Architecture:** Three guard sites in `internal/sync/sync.go`. (1) `Sync()` partitions the observed pool into `mine`/`team` by author at the enumerate boundary — only `mine` runs `maybePromoteDraft`. (2) `SyncPR()` adds an inline ownership check before its `maybePromoteDraft` call. (3) `processReplyDrafts()` walks to the parent merge-request and skips any bead whose parent PR isn't self-authored, emitting a warning. A single helper `isSelfAuthoredLogin` centralizes the predicate and defaults to `false` on any uncertainty.
+**Architecture:** Three guard sites in `internal/sync/sync.go`. (1) `Sync()` partitions the observed pool into `mine`/`team` by author at the enumerate boundary — only `mine` runs `maybePromoteDraft`. (2) `SyncPR()` adds an inline ownership check before its `maybePromoteDraft` call. (3) `processReplyDrafts()` walks to the parent merge-request and skips any bead whose parent PR isn't self-authored, emitting a warning. A single helper `isSelfAuthored` centralizes the predicate and defaults to `false` on any uncertainty.
 
 **Tech Stack:** Go 1.22+, `internal/sync` package, `testing` stdlib. Tests use the existing `fakeVCS` and real `bd` workspace pattern.
 
@@ -22,7 +22,7 @@
 
 - `packages/pg-pr/internal/sync/sync.go`
   - Add `Warnings []SummaryError` field on `Summary` struct.
-  - Add unexported method `func (e *Engine) isSelfAuthoredLogin(author string) bool`.
+  - Add unexported method `func (e *Engine) isSelfAuthored(author string) bool`.
   - Refactor `Sync()` loop to partition the observed pool into `mine` and `team`; run upstream writes only over `mine`.
   - Add ownership guard before `maybePromoteDraft` in `SyncPR()`.
   - Add per-bead ownership guard inside `processReplyDrafts()` that emits a warning.
@@ -32,7 +32,7 @@
   - Add `fakeCICD` type satisfying `CICDProvider`.
   - Add `teammatePR(...)` helper (variant of `samplePR` with non-self author).
   - Add `cfgWithCICD(...)` helper (variant of `minimalCfg` with `CICD` providers wired).
-  - Add tests: `TestIsSelfAuthoredLogin`, `TestSyncPR_SkipsDraftPromoteForTeammate`, `TestSync_OnlyPromotesDraftForSelfAuthoredPRs`, `TestSummary_WarningsJSONRoundTrip`, `TestSync_SkipsAndWarnsOnTeammateReplyDraft`, `TestSync_TreatsEmptySelfLoginAsTeammate`.
+  - Add tests: `TestIsSelfAuthored`, `TestSyncPR_SkipsDraftPromoteForTeammate`, `TestSync_OnlyPromotesDraftForSelfAuthoredPRs`, `TestSummary_WarningsJSONRoundTrip`, `TestSync_SkipsAndWarnsOnTeammateReplyDraft`, `TestSync_TreatsEmptySelfLoginAsTeammate`.
 
 No new files.
 
@@ -48,19 +48,19 @@ No new files.
 
 ---
 
-## Task 1: Add `isSelfAuthoredLogin` helper
+## Task 1: Add `isSelfAuthored` helper
 
 **Files:**
 
 - Modify: `packages/pg-pr/internal/sync/sync.go` — add helper method
-- Test: `packages/pg-pr/internal/sync/sync_test.go` — add `TestIsSelfAuthoredLogin`
+- Test: `packages/pg-pr/internal/sync/sync_test.go` — add `TestIsSelfAuthored`
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `packages/pg-pr/internal/sync/sync_test.go`:
 
 ```go
-func TestIsSelfAuthoredLogin(t *testing.T) {
+func TestIsSelfAuthored(t *testing.T) {
 	cases := []struct {
 		name   string
 		self   string
@@ -76,9 +76,9 @@ func TestIsSelfAuthoredLogin(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &Engine{deps: Deps{Cfg: &config.Config{SelfLogin: tc.self}}}
-			got := e.isSelfAuthoredLogin(tc.author)
+			got := e.isSelfAuthored(tc.author)
 			if got != tc.want {
-				t.Fatalf("isSelfAuthoredLogin(%q) with self=%q: got %v want %v",
+				t.Fatalf("isSelfAuthored(%q) with self=%q: got %v want %v",
 					tc.author, tc.self, got, tc.want)
 			}
 		})
@@ -91,21 +91,21 @@ func TestIsSelfAuthoredLogin(t *testing.T) {
 Run from `packages/pg-pr/`:
 
 ```bash
-go test ./internal/sync/... -run TestIsSelfAuthoredLogin -v
+go test ./internal/sync/... -run TestIsSelfAuthored -v
 ```
 
-Expected: build error `e.isSelfAuthoredLogin undefined`.
+Expected: build error `e.isSelfAuthored undefined`.
 
 - [ ] **Step 3: Implement the helper**
 
 Add this method to `packages/pg-pr/internal/sync/sync.go`. Place it directly after `allTeamMembers` (around line 580) so related self/team helpers cluster together:
 
 ```go
-// isSelfAuthoredLogin reports whether the given GitHub login matches the
+// isSelfAuthored reports whether the given GitHub login matches the
 // configured SelfLogin. Empty self or empty author → false (assume
 // team-mate; do not modify upstream). Centralizes the ownership
 // predicate used by sync's upstream-write guards.
-func (e *Engine) isSelfAuthoredLogin(author string) bool {
+func (e *Engine) isSelfAuthored(author string) bool {
 	self := e.deps.Cfg.SelfLogin
 	return self != "" && author != "" && author == self
 }
@@ -114,7 +114,7 @@ func (e *Engine) isSelfAuthoredLogin(author string) bool {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-go test ./internal/sync/... -run TestIsSelfAuthoredLogin -v
+go test ./internal/sync/... -run TestIsSelfAuthored -v
 ```
 
 Expected: PASS for all five sub-cases.
@@ -124,7 +124,7 @@ Expected: PASS for all five sub-cases.
 ```bash
 git add packages/pg-pr/internal/sync/sync.go packages/pg-pr/internal/sync/sync_test.go
 git commit -m "$(cat <<'EOF'
-feat(pg-pr): add isSelfAuthoredLogin ownership predicate
+feat(pg-pr): add isSelfAuthored ownership predicate
 
 beads_pg2-r3t0. Centralizes the self-vs-team predicate used by
 upstream-write guards. Defaults to false on any uncertainty (empty
@@ -335,14 +335,14 @@ In `packages/pg-pr/internal/sync/sync.go`, find the `maybePromoteDraft` call sit
 Replace it with:
 
 ```go
-		if e.isSelfAuthoredLogin(pr.Author) {
+		if e.isSelfAuthored(pr.Author) {
 			if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
 ```
 
 Then close the new `if` block after the existing block. The full replacement (showing context — keep the existing error-handling block intact, just nest it):
 
 ```go
-		if e.isSelfAuthoredLogin(pr.Author) {
+		if e.isSelfAuthored(pr.Author) {
 			if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{
 					Repo: repo, Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
@@ -377,7 +377,7 @@ git commit -m "$(cat <<'EOF'
 fix(pg-pr): guard SyncPR against draft-promoting team-mate PRs
 
 beads_pg2-r3t0. Single-PR sync path (used by pg-pr sync --pr and
-/check-my-pr) now consults isSelfAuthoredLogin before calling
+/check-my-pr) now consults isSelfAuthored before calling
 maybePromoteDraft. Team-mate PRs are still bead-upserted; only the
 upstream SetDraft(false) call is suppressed.
 EOF
@@ -469,7 +469,7 @@ In `packages/pg-pr/internal/sync/sync.go`, the `Sync()` method builds a single `
 	// mineSet — defense against the original bug class.
 	mineSet := make(map[prKey]bool, len(observed))
 	for key, pr := range observed {
-		if e.isSelfAuthoredLogin(pr.Author) {
+		if e.isSelfAuthored(pr.Author) {
 			mineSet[key] = true
 		}
 	}
@@ -530,7 +530,7 @@ git add packages/pg-pr/internal/sync/sync.go packages/pg-pr/internal/sync/sync_t
 git commit -m "$(cat <<'EOF'
 fix(pg-pr): only auto-promote draft for self-authored PRs in Sync loop
 
-beads_pg2-r3t0. The full Sync() loop now consults isSelfAuthoredLogin
+beads_pg2-r3t0. The full Sync() loop now consults isSelfAuthored
 before calling maybePromoteDraft. Team-mate PRs are still bead-upserted
 and feedback-ingested; only the upstream SetDraft(false) call is
 suppressed. Removes the GitHub-side cascade (label-on-ready,
@@ -786,7 +786,7 @@ Add the ownership guard immediately after:
 		// class — emit a warning so the user can investigate, but skip
 		// the post. The local ReplyDraft is left in place; the user can
 		// inspect / delete / retarget it via bd or pg-pr verbs.
-		if !e.isSelfAuthoredLogin(mr.Fields.Author) {
+		if !e.isSelfAuthored(mr.Fields.Author) {
 			summary.Warnings = append(summary.Warnings, SummaryError{
 				Repo: rcfg.Remote,
 				Message: fmt.Sprintf(
@@ -820,7 +820,7 @@ git add packages/pg-pr/internal/sync/sync.go packages/pg-pr/internal/sync/sync_t
 git commit -m "$(cat <<'EOF'
 fix(pg-pr): skip and warn on ReplyDraft for team-mate PRs
 
-beads_pg2-r3t0. processReplyDrafts now consults isSelfAuthoredLogin on
+beads_pg2-r3t0. processReplyDrafts now consults isSelfAuthored on
 the parent merge-request's Author before posting. A stray ReplyDraft on
 a team-mate PR's feedback bead would otherwise post a live, public
 reply via the GitHub addPullRequestReviewThreadReply mutation (no draft
@@ -838,7 +838,7 @@ EOF
 
 - Test only: `packages/pg-pr/internal/sync/sync_test.go` — add `TestSync_TreatsEmptySelfLoginAsTeammate`.
 
-This task adds an integration-level regression test for the conservative-default behavior. The unit-level coverage already exists in Task 1's `TestIsSelfAuthoredLogin`, but an end-to-end test confirms the predicate's wiring at the call sites.
+This task adds an integration-level regression test for the conservative-default behavior. The unit-level coverage already exists in Task 1's `TestIsSelfAuthored`, but an end-to-end test confirms the predicate's wiring at the call sites.
 
 - [ ] **Step 1: Write the test**
 
@@ -973,7 +973,7 @@ If shipping via PR rather than direct merge, use the project's PR creation flow.
 
 | Spec requirement                                                                      | Covered by                                                                                                   |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `isSelfAuthoredLogin` helper, defaults to false on uncertainty                        | Task 1                                                                                                       |
+| `isSelfAuthored` helper, defaults to false on uncertainty                             | Task 1                                                                                                       |
 | Empty self / empty author → false                                                     | Task 1 (unit), Task 7 (integration)                                                                          |
 | `Sync()` loop: only `mine` runs `maybePromoteDraft`                                   | Task 4                                                                                                       |
 | `SyncPR()`: ownership check before `maybePromoteDraft`                                | Task 3                                                                                                       |
