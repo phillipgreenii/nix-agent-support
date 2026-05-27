@@ -89,6 +89,7 @@
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
           pa-monitor = final.callPackage ./packages/pa-monitor { };
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
+          pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -366,6 +367,7 @@
               claude-extended-tool-approver
               pa-monitor
               pgii-pack-test-fixture
+              pgii-pack-pr-support
               pg-pr
               goccc
               toktrack

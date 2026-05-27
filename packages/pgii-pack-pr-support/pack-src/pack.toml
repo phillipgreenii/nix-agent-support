@@ -1,0 +1,23 @@
+# pgii-pr-support — PR review / triage / self-fix agents + pr-watcher /
+# wake-on-work orders + scripts + PR-related doctor checks.
+#
+# Migrated from phillipg-nix-ziprecruiter/modules/pg-pr-zr/pack-src/ (nix-built
+# half-migration) and ~/gc/assets/imports/zr/doctor/ (legacy hand-built pack).
+# All ZR-specific naming retired; functionality is repo/team-agnostic. Pack
+# scripts depend on `pg-pr` (in PATH via phillipgreenii-nix-agent-support).
+
+[pack]
+name = "pgii-pr-support"
+schema = 2
+
+[[named_session]]
+template = "pr-self-fixer"
+mode = "on_demand"
+
+[[named_session]]
+template = "pr-reviewer"
+mode = "on_demand"
+
+[[named_session]]
+template = "pr-triage"
+mode = "on_demand"
