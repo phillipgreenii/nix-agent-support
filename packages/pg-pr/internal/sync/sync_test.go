@@ -874,3 +874,28 @@ func TestSync_PopulatesSnapshot(t *testing.T) {
 		t.Errorf("Team: got %d row(s) want 0", len(snap.Team))
 	}
 }
+
+func TestIsSelfAuthored(t *testing.T) {
+	cases := []struct {
+		name   string
+		self   string
+		author string
+		want   bool
+	}{
+		{"matches", "phillipg", "phillipg", true},
+		{"different login", "phillipg", "coworker", false},
+		{"empty author", "phillipg", "", false},
+		{"empty self", "", "phillipg", false},
+		{"both empty", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Engine{deps: Deps{Cfg: &config.Config{SelfLogin: tc.self}}}
+			got := e.isSelfAuthored(tc.author)
+			if got != tc.want {
+				t.Fatalf("isSelfAuthored(%q) with self=%q: got %v want %v",
+					tc.author, tc.self, got, tc.want)
+			}
+		})
+	}
+}

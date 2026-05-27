@@ -578,6 +578,15 @@ func (e *Engine) allTeamMembers() []string {
 	return out
 }
 
+// isSelfAuthored reports whether the given GitHub login matches the
+// configured SelfLogin. Empty self or empty author → false (assume
+// team-mate; do not modify upstream). Centralizes the ownership
+// predicate used by sync's upstream-write guards.
+func (e *Engine) isSelfAuthored(author string) bool {
+	self := e.deps.Cfg.SelfLogin
+	return self != "" && author != "" && author == self
+}
+
 // firstCICDFor returns the first CICD provider configured for rcfg, or nil
 // when none is configured or registered. Matches the lookup pattern used
 // by processFeedback.
