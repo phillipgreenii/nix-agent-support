@@ -73,46 +73,58 @@ in
     };
   };
 
-  config = lib.mkIf anyPackEnabled {
+  config = lib.mkMerge [
 
-    home.file = lib.mkMerge (
-      map (p: {
-        ".local/share/pgii-packs/${p.name}".source = p.drv;
-      }) enabledPacks
-    );
+    # Pack derivations are symlinked into ~/.local/share/pgii-packs/<name>
+    # only when at least one pack is enabled.
+    (lib.mkIf anyPackEnabled {
+      home.file = lib.mkMerge (
+        map (p: {
+          ".local/share/pgii-packs/${p.name}".source = p.drv;
+        }) enabledPacks
+      );
+    })
 
-    home.activation.pgii-packs =
-      let
-        activationScript = pkgs.writeShellApplication {
-          name = "pgii-packs-activation";
-          runtimeInputs = [
-            pkgs.bash
-            pkgs.coreutils
-            pkgs.jq
-            pkgs.gnugrep
-            pkgs.gawk
-            pkgs.gnused
-          ];
-          text = builtins.readFile ./activation.sh;
-        };
-      in
-      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        run ${activationScript}/bin/pgii-packs-activation \
-          --cities ${lib.escapeShellArg (builtins.toJSON cfg.gascity.cities)} \
-          --packs  ${lib.escapeShellArg (builtins.toJSON packStorePathMap)} \
-          ${lib.optionalString cfg.gascity.reloadSupervisor "--reload"}
-      '';
-
-    assertions = [
-      {
-        assertion = !anyPackEnabled || cfg.gascity.cities != [ ];
-        message = ''
-          Enabling any pgii pack requires at least one city in
-          phillipgreenii.programs.pgii.gascity.cities.
+    # The activation script runs whenever a city is configured — even when
+    # no packs are enabled — so it can strip leftover managed blocks on the
+    # packs-enabled → none transition. activation.sh handles `--packs '{}'`
+    # by removing all managed pgii-pack:* blocks; see test_remove_on_disable.
+    (lib.mkIf (cfg.gascity.cities != [ ]) {
+      home.activation.pgii-packs =
+        let
+          activationScript = pkgs.writeShellApplication {
+            name = "pgii-packs-activation";
+            runtimeInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.gnugrep
+              pkgs.gawk
+              pkgs.gnused
+            ];
+            text = builtins.readFile ./activation.sh;
+          };
+        in
+        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${activationScript}/bin/pgii-packs-activation \
+            --cities ${lib.escapeShellArg (builtins.toJSON cfg.gascity.cities)} \
+            --packs  ${lib.escapeShellArg (builtins.toJSON packStorePathMap)} \
+            ${lib.optionalString cfg.gascity.reloadSupervisor "--reload"}
         '';
-      }
-    ];
+    })
 
-    # home.activation.pgii-packs wiring is added in Task 14.
-  };
+    # Assertions are evaluated unconditionally so users who enable a pack
+    # without configuring a city see the error at eval time.
+    {
+      assertions = [
+        {
+          assertion = !anyPackEnabled || cfg.gascity.cities != [ ];
+          message = ''
+            Enabling any pgii pack requires at least one city in
+            phillipgreenii.programs.pgii.gascity.cities.
+          '';
+        }
+      ];
+    }
+  ];
 }
