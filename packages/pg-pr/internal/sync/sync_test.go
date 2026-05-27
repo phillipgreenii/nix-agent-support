@@ -37,12 +37,28 @@ type fakeVCS struct {
 	replyCalls   []replyCall
 	replyResp    *api.Comment // canned response; nil = error
 	replyRespErr error
+
+	// SetDraft recording. The engine type-asserts to DraftToggler; with
+	// setDraftCalls non-nil, the assertion succeeds via the method below.
+	setDraftCalls []setDraftCall
+	setDraftErr   error
 }
 
 type replyCall struct {
 	Repo     string
 	ThreadID string
 	Body     string
+}
+
+type setDraftCall struct {
+	Repo   string
+	Number int
+	Draft  bool
+}
+
+func (f *fakeVCS) SetDraft(_ context.Context, repo string, n int, draft bool) error {
+	f.setDraftCalls = append(f.setDraftCalls, setDraftCall{Repo: repo, Number: n, Draft: draft})
+	return f.setDraftErr
 }
 
 func newFakeVCS() *fakeVCS {
@@ -112,6 +128,27 @@ func itoa(n int) string {
 		out = "-" + out
 	}
 	return out
+}
+
+// fakeCICD is a minimal CICDProvider for tests. runs is keyed by
+// "repo#prNumber"; missing keys return an empty slice (treated by
+// allRunsSuccessful as "no runs" → not promotable).
+type fakeCICD struct { //nolint:unused
+	runs map[string][]api.CIRun
+}
+
+func newFakeCICD() *fakeCICD { //nolint:unused
+	return &fakeCICD{runs: map[string][]api.CIRun{}}
+}
+
+func (c *fakeCICD) ListRuns(_ context.Context, repo string, n int) ([]api.CIRun, error) { //nolint:unused
+	return c.runs[keyOf(repo, n)], nil
+}
+
+// successRun returns a single completed+successful CI run, the shape
+// allRunsSuccessful requires for draft promotion to fire.
+func successRun() api.CIRun { //nolint:unused
+	return api.CIRun{Status: "completed", Conclusion: "success"}
 }
 
 // ----------------------------------------------------------------------
@@ -235,6 +272,35 @@ func samplePR(n int, repo, branch string) api.PR {
 		Base:   "main",
 		Author: "phillipg",
 		URL:    "https://github.com/" + repo + "/pull/" + itoa(n),
+	}
+}
+
+// teammatePR returns a draft PR authored by someone other than the
+// configured SelfLogin ("phillipg"). Used by tests asserting the
+// ownership guards.
+func teammatePR(n int, repo, branch string) api.PR { //nolint:unused
+	pr := samplePR(n, repo, branch)
+	pr.Author = "coworker"
+	pr.Draft = true
+	return pr
+}
+
+// selfDraftPR returns a self-authored draft PR.
+func selfDraftPR(n int, repo, branch string) api.PR { //nolint:unused
+	pr := samplePR(n, repo, branch)
+	pr.Draft = true
+	return pr
+}
+
+// cfgWithCICD returns a config that wires a single CICD provider name
+// ("ci") on the foo/bar repo so maybePromoteDraft can fire in tests.
+func cfgWithCICD() *config.Config { //nolint:unused
+	return &config.Config{
+		SelfLogin:    "phillipg",
+		WorktreeRoot: "/tmp/wr",
+		Repos: []config.RepoConfig{
+			{Remote: "foo/bar", VCS: "github", CICD: []string{"ci"}, TeamMembers: []string{"coworker"}},
+		},
 	}
 }
 
