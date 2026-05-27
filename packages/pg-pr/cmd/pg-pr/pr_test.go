@@ -48,6 +48,9 @@ func (f *fakeVCS) ResolveThread(context.Context, string, string) error { return 
 func (f *fakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
+func (f *fakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
+	return nil, nil
+}
 
 // Compile check.
 var _ vcs.Provider = (*fakeVCS)(nil)

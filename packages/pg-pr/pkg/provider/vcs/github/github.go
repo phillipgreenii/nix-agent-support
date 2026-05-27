@@ -737,5 +737,52 @@ func (p *Provider) PostReview(ctx context.Context, repo string, number int, body
 	}, nil
 }
 
+// ghReviewEntry is the JSON shape of each element in the `reviews` array
+// returned by `gh pr view --json reviews`.
+type ghReviewEntry struct {
+	ID     int64 `json:"id"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	State string `json:"state"`
+	Body  string `json:"body"`
+}
+
+// ListReviews fetches the review summaries for a PR. State is one of
+// APPROVED, CHANGES_REQUESTED, COMMENTED. Body is the review-summary text;
+// Comments is left empty — inline comments are fetched via ListComments.
+func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	raw, err := p.gh.Run(ctx,
+		"pr", "view", fmt.Sprintf("%d", number),
+		"--repo", repo,
+		"--json", "reviews",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Reviews []ghReviewEntry `json:"reviews"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("github: parse gh pr view reviews JSON: %w", err)
+	}
+	out := make([]api.Review, 0, len(envelope.Reviews))
+	for _, r := range envelope.Reviews {
+		out = append(out, api.Review{
+			ID:     fmt.Sprintf("%d", r.ID),
+			Author: r.Author.Login,
+			State:  r.State,
+			Body:   r.Body,
+		})
+	}
+	return out, nil
+}
+
 // Compile-time check that Provider satisfies vcs.Provider.
 var _ vcs.Provider = (*Provider)(nil)

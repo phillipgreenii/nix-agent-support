@@ -207,3 +207,19 @@ func (e *execVCSProvider) PostReview(ctx context.Context, repo string, number in
 	}
 	return &out, nil
 }
+
+func (e *execVCSProvider) ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	args := struct {
+		Repo   string `json:"repo"`
+		Number int    `json:"number"`
+	}{Repo: repo, Number: number}
+	raw, err := invokeWithArgs(ctx, e.binary, OpListReviews, args)
+	if err != nil {
+		return nil, err
+	}
+	var out []api.Review
+	if err := unmarshalInto(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

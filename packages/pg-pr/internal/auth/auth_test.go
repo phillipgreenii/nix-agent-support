@@ -113,8 +113,7 @@ func TestCheckAll_JiraOK(t *testing.T) {
 	}
 	if jira == nil {
 		t.Fatalf("no jira status in %+v", got)
-	}
-	if jira.State != string(StateOK) {
+	} else if jira.State != string(StateOK) {
 		t.Fatalf("state = %s, want OK", jira.State)
 	}
 	if !strings.HasSuffix(seenURL, "/rest/api/3/myself") {

@@ -635,6 +635,89 @@ func TestListComments_EmptyArrays(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// ListReviews tests
+// ----------------------------------------------------------------------
+
+const sampleReviews = `{
+  "reviews": [
+    {
+      "id": 12345,
+      "author": {"login": "alice"},
+      "state": "APPROVED",
+      "body": ""
+    },
+    {
+      "id": 67890,
+      "author": {"login": "claude[bot]"},
+      "state": "COMMENTED",
+      "body": "Verdict: approve — looks good"
+    }
+  ]
+}`
+
+func TestListReviews_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(sampleReviews)
+	p := NewWithRunner(gh)
+
+	got, err := p.ListReviews(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListReviews: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 reviews, got %d", len(got))
+	}
+	if got[0].Author != "alice" {
+		t.Fatalf("got[0].Author: got %q want %q", got[0].Author, "alice")
+	}
+	if got[0].State != "APPROVED" {
+		t.Fatalf("got[0].State: got %q want %q", got[0].State, "APPROVED")
+	}
+	if got[1].Author != "claude[bot]" {
+		t.Fatalf("got[1].Author: got %q want %q", got[1].Author, "claude[bot]")
+	}
+	if !strings.Contains(got[1].Body, "Verdict: approve") {
+		t.Fatalf("got[1].Body should contain %q, got %q", "Verdict: approve", got[1].Body)
+	}
+	if got[0].ID != "12345" {
+		t.Fatalf("got[0].ID: got %q want %q (numeric id should be stringified)", got[0].ID, "12345")
+	}
+	// Verify the gh args included --json reviews.
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--json reviews") {
+		t.Fatalf("expected --json reviews in gh args: %v", last)
+	}
+}
+
+func TestListReviews_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ListReviews(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.ListReviews(context.Background(), "no-slash", 1); err == nil {
+		t.Fatalf("expected error for non-owner/name repo")
+	}
+	if _, err := p.ListReviews(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestListReviews_EmptyReviewsArray(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"reviews": []}`)
+	p := NewWithRunner(gh)
+
+	got, err := p.ListReviews(context.Background(), "foo/bar", 1)
+	if err != nil {
+		t.Fatalf("ListReviews: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 reviews, got %d", len(got))
+	}
+}
+
 // pathFakeGH dispatches on the second arg (the path) — cleaner for `api`.
 type pathFakeGH struct {
 	responses map[string][]byte

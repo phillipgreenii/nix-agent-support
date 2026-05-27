@@ -55,6 +55,7 @@ const (
 	OpReplyToThread = "reply_to_thread"
 	OpResolveThread = "resolve_thread"
 	OpPostReview    = "post_review"
+	OpListReviews   = "list_reviews"
 
 	// CICD ops.
 	OpListRuns    = "list_runs"
@@ -323,6 +324,15 @@ func dispatchVCS(ctx context.Context, p vcs.Provider, req *Request) (any, error)
 			return nil, err
 		}
 		return p.PostReview(ctx, a.Repo, a.Number, a.Body, a.Comments)
+	case OpListReviews:
+		var a struct {
+			Repo   string `json:"repo"`
+			Number int    `json:"number"`
+		}
+		if err := decodeArgs(req, &a); err != nil {
+			return nil, err
+		}
+		return p.ListReviews(ctx, a.Repo, a.Number)
 	default:
 		return nil, fmt.Errorf("scriptout: unknown VCS op %q", req.Op)
 	}

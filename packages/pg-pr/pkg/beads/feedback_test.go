@@ -161,11 +161,9 @@ func TestGetFeedback_ReturnsBead(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatalf("expected to find feedback %s", fbID)
-	}
-	if got.Fields.Kind != string(FeedbackKindCommentThread) {
+	} else if got.Fields.Kind != string(FeedbackKindCommentThread) {
 		t.Fatalf("kind: got %q", got.Fields.Kind)
-	}
-	if got.Fields.ExternalID != "PRRT_abc" {
+	} else if got.Fields.ExternalID != "PRRT_abc" {
 		t.Fatalf("external_id: got %q", got.Fields.ExternalID)
 	}
 }

@@ -66,6 +66,9 @@ func (f *reviewFakeVCS) PostReview(_ context.Context, _ string, _ int, body stri
 	f.postedComments = comments
 	return &api.Review{ID: "RV_x", State: "pending", Body: body}, nil
 }
+func (f *reviewFakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
+	return nil, nil
+}
 
 var _ vcs.Provider = (*reviewFakeVCS)(nil)
 

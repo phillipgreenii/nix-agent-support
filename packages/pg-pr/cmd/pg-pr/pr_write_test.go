@@ -112,6 +112,9 @@ func (f *writeFakeVCS) ResolveThread(context.Context, string, string) error { re
 func (f *writeFakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
+func (f *writeFakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
+	return nil, nil
+}
 
 var _ vcs.Provider = (*writeFakeVCS)(nil)
 

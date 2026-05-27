@@ -158,20 +158,15 @@ func TestEnsureMergeRequest_CreatesWhenAbsent(t *testing.T) {
 	}
 	if mr == nil {
 		t.Fatalf("bead not found after create")
-	}
-	if mr.Status != "open" {
+	} else if mr.Status != "open" {
 		t.Fatalf("status: got %q want open", mr.Status)
-	}
-	if mr.Type != "merge-request" {
+	} else if mr.Type != "merge-request" {
 		t.Fatalf("type: got %q want merge-request", mr.Type)
-	}
-	if mr.Fields.Repo != "foo/bar" || mr.Fields.PRNumber != 7 {
+	} else if mr.Fields.Repo != "foo/bar" || mr.Fields.PRNumber != 7 {
 		t.Fatalf("metadata: %+v", mr.Fields)
-	}
-	if mr.Fields.State != "open" {
+	} else if mr.Fields.State != "open" {
 		t.Fatalf("state metadata: got %q", mr.Fields.State)
-	}
-	if mr.Fields.LastSyncedAt == "" {
+	} else if mr.Fields.LastSyncedAt == "" {
 		t.Fatalf("expected last_synced_at to be populated")
 	}
 }
@@ -371,11 +366,9 @@ func TestFindMergeRequestForFeedback_WalksUp(t *testing.T) {
 	}
 	if mr == nil {
 		t.Fatalf("expected to find merge-request, got nil")
-	}
-	if mr.ID != prID {
+	} else if mr.ID != prID {
 		t.Fatalf("expected %s, got %s", prID, mr.ID)
-	}
-	if mr.Fields.Repo != "w/x" || mr.Fields.PRNumber != 11 {
+	} else if mr.Fields.Repo != "w/x" || mr.Fields.PRNumber != 11 {
 		t.Fatalf("metadata not populated: %+v", mr.Fields)
 	}
 }
@@ -395,12 +388,9 @@ func TestNewClientForRepo_SetsRunnerDir(t *testing.T) {
 	c := NewClientForRepo(dir)
 	if c == nil {
 		t.Fatalf("expected non-nil Client")
-	}
-	cli, ok := c.Runner.(*CLIRunner)
-	if !ok {
+	} else if cli, ok := c.Runner.(*CLIRunner); !ok {
 		t.Fatalf("expected runner to be *CLIRunner, got %T", c.Runner)
-	}
-	if cli.Dir != dir {
+	} else if cli.Dir != dir {
 		t.Fatalf("Dir: got %q want %q", cli.Dir, dir)
 	}
 }
