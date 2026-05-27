@@ -4,12 +4,14 @@ load test_helper
 @test "replace existing: store path changes, single block remains" {
   local seed
   seed=$(cat <<EOF
-[workspace]
-provider = "claude"
+[pack]
+name = "gc"
+schema = 2
 
 # BEGIN pgii-pack:pgii-pack-foo (managed)
-[packs.pgii-pack-foo]
-path = "/nix/store/OLD-pgii-pack-foo"
+[imports.pgii-pack-foo]
+source = "/nix/store/OLD-pgii-pack-foo"
+export = true
 # END pgii-pack:pgii-pack-foo (managed)
 EOF
 )
@@ -22,12 +24,12 @@ EOF
 
   # Exactly one managed block for this pack.
   local count
-  count=$(grep -cF "# BEGIN pgii-pack:pgii-pack-foo (managed)" "$city/city.toml")
+  count=$(grep -cF "# BEGIN pgii-pack:pgii-pack-foo (managed)" "$city/pack.toml")
   [ "$count" -eq 1 ]
 
-  # And it points at the new path.
-  [ "$(blockPath "$city/city.toml" "pgii-pack-foo")" = "/nix/store/NEW-pgii-pack-foo" ]
+  # And it points at the new source path.
+  [ "$(blockPath "$city/pack.toml" "pgii-pack-foo")" = "/nix/store/NEW-pgii-pack-foo" ]
 
-  # Pre-existing [workspace] block survives.
-  grep -q "^\[workspace\]" "$city/city.toml"
+  # Pre-existing [pack] block survives.
+  grep -q "^\[pack\]" "$city/pack.toml"
 }

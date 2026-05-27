@@ -4,17 +4,20 @@ load test_helper
 @test "remove on disable: managed block for non-arg pack is dropped" {
   local seed
   seed=$(cat <<EOF
-[workspace]
-provider = "claude"
+[pack]
+name = "gc"
+schema = 2
 
 # BEGIN pgii-pack:pgii-pack-foo (managed)
-[packs.pgii-pack-foo]
-path = "/nix/store/aaa-pgii-pack-foo"
+[imports.pgii-pack-foo]
+source = "/nix/store/aaa-pgii-pack-foo"
+export = true
 # END pgii-pack:pgii-pack-foo (managed)
 
 # BEGIN pgii-pack:pgii-pack-bar (managed)
-[packs.pgii-pack-bar]
-path = "/nix/store/bbb-pgii-pack-bar"
+[imports.pgii-pack-bar]
+source = "/nix/store/bbb-pgii-pack-bar"
+export = true
 # END pgii-pack:pgii-pack-bar (managed)
 EOF
 )
@@ -26,19 +29,20 @@ EOF
   run "$SCRIPT" --cities "$cities" --packs "$packs"
   [ "$status" -eq 0 ]
 
-  blockExists "$city/city.toml" "pgii-pack-foo"
-  run ! blockExists "$city/city.toml" "pgii-pack-bar"
+  blockExists "$city/pack.toml" "pgii-pack-foo"
+  run ! blockExists "$city/pack.toml" "pgii-pack-bar"
 
   # Hand-written content survives.
-  grep -q "^\[workspace\]" "$city/city.toml"
+  grep -q "^\[pack\]" "$city/pack.toml"
 }
 
 @test "remove on disable: empty --packs removes all managed blocks" {
   local seed
   seed=$(cat <<EOF
 # BEGIN pgii-pack:pgii-pack-foo (managed)
-[packs.pgii-pack-foo]
-path = "/nix/store/aaa"
+[imports.pgii-pack-foo]
+source = "/nix/store/aaa"
+export = true
 # END pgii-pack:pgii-pack-foo (managed)
 EOF
 )
@@ -46,5 +50,5 @@ EOF
 
   run "$SCRIPT" --cities "$(citiesJson "$city")" --packs '{}'
   [ "$status" -eq 0 ]
-  run ! blockExists "$city/city.toml" "pgii-pack-foo"
+  run ! blockExists "$city/pack.toml" "pgii-pack-foo"
 }

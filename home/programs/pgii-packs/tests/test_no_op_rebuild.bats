@@ -1,12 +1,13 @@
 #!/usr/bin/env bats
 load test_helper
 
-@test "no-op rebuild: file mtime unchanged when block path matches" {
+@test "no-op rebuild: file mtime unchanged when block source matches" {
   local seed
   seed=$(cat <<EOF
 # BEGIN pgii-pack:pgii-pack-foo (managed)
-[packs.pgii-pack-foo]
-path = "/nix/store/abc-pgii-pack-foo"
+[imports.pgii-pack-foo]
+source = "/nix/store/abc-pgii-pack-foo"
+export = true
 # END pgii-pack:pgii-pack-foo (managed)
 EOF
 )
@@ -15,12 +16,12 @@ EOF
   local packs;  packs=$(packsJson "pgii-pack-foo" "/nix/store/abc-pgii-pack-foo")
 
   # Freeze mtime to a known past time, then re-run.
-  touch -t 202001010000 "$city/city.toml"
-  local before; before=$(stat -c %Y "$city/city.toml" 2>/dev/null || stat -f%m "$city/city.toml")
+  touch -t 202001010000 "$city/pack.toml"
+  local before; before=$(stat -c %Y "$city/pack.toml" 2>/dev/null || stat -f%m "$city/pack.toml")
 
   run "$SCRIPT" --cities "$cities" --packs "$packs"
   [ "$status" -eq 0 ]
 
-  local after; after=$(stat -c %Y "$city/city.toml" 2>/dev/null || stat -f%m "$city/city.toml")
+  local after; after=$(stat -c %Y "$city/pack.toml" 2>/dev/null || stat -f%m "$city/pack.toml")
   [ "$before" -eq "$after" ]
 }

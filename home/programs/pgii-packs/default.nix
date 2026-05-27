@@ -1,8 +1,13 @@
 # pgii-packs home-manager module.
 #
 # Exposes per-pack toggles plus a list of cities to install into. The
-# activation script (./activation.sh) writes managed [packs.<name>] blocks
-# into each city's city.toml at home-manager activation time.
+# activation script (./activation.sh) writes managed [imports.<name>]
+# blocks into each city's pack.toml at home-manager activation time.
+#
+# Why pack.toml (not city.toml): gascity treats [packs.<name>] in city.toml
+# as a remote git source. Local file-system imports go through
+# [imports.<name>] in the city's top-level pack.toml. Verified empirically
+# against gascity 1.1.0.
 #
 # Spec: docs/superpowers/specs/2026-05-26-pgii-packs-migration-design.md
 {
@@ -40,11 +45,11 @@ in
         default = [ ];
         example = [ "/Users/phillipg/gc" ];
         description = ''
-          Absolute paths to gascity cities (directories containing city.toml)
-          that should receive managed [packs.<name>] blocks for any enabled
-          pgii pack below. The activation script writes/updates the blocks
-          on every home-manager rebuild; disabling a pack removes its block
-          on the next rebuild.
+          Absolute paths to gascity cities (directories containing pack.toml)
+          that should receive managed [imports.<name>] blocks for any
+          enabled pgii pack below. The activation script writes/updates the
+          blocks in <city>/pack.toml on every home-manager rebuild;
+          disabling a pack removes its block on the next rebuild.
         '';
       };
 
@@ -52,7 +57,7 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          After writing city.toml, run `gc --city <city> supervisor reload`
+          After writing pack.toml, run `gc --city <city> supervisor reload`
           for each city whose <city>/.gc/controller.sock exists and where
           `gc` is on PATH. Reload failures warn but do not fail activation.
         '';

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# activation.sh — write managed [packs.<name>] blocks into one or more
-# city.toml files. Called from home/programs/pgii-packs/default.nix during
-# home-manager activation.
+# activation.sh — write managed [imports.<name>] blocks into one or more
+# <city>/pack.toml files. Called from home/programs/pgii-packs/default.nix
+# during home-manager activation.
 #
 # Inputs:
 #   --cities '<JSON array of city paths>'
@@ -9,12 +9,18 @@
 #   --reload  (optional: run `gc supervisor reload` per city if its
 #              controller.sock exists and gc is on PATH)
 #
-# Marker format written/managed:
+# Marker format written/managed in <city>/pack.toml:
 #
 #   # BEGIN pgii-pack:<pack-name> (managed)
-#   [packs.<pack-name>]
-#   path = "/nix/store/..."
+#   [imports.<pack-name>]
+#   source = "/nix/store/..."
+#   export = true
 #   # END pgii-pack:<pack-name> (managed)
+#
+# Why pack.toml and not city.toml: gascity treats [packs.<name>] in city.toml
+# as a remote git source. Local file-system imports go through
+# [imports.<name>] in the city's top-level pack.toml. Verified empirically
+# against gascity 1.1.0.
 #
 # Idempotent. Re-running with the same args is a no-op.
 
@@ -72,7 +78,7 @@ done
   usage
 }
 
-# Validate JSON inputs early so a malformed arg never reaches city.toml.
+# Validate JSON inputs early so a malformed arg never reaches pack.toml.
 jq -e 'type == "array"' <<<"$CITIES_JSON" >/dev/null || {
   echo "--cities must be a JSON array" >&2
   exit 2
@@ -97,21 +103,22 @@ emit_block() {
   cat <<EOF
 
 # BEGIN pgii-pack:$name (managed)
-[packs.$name]
-path = "$path"
+[imports.$name]
+source = "$path"
+export = true
 # END pgii-pack:$name (managed)
 EOF
 }
 
-# Return 0 if city.toml is already in the desired state for our pack set.
+# Return 0 if pack.toml is already in the desired state for our pack set.
 no_op_needed() {
-  local city_toml="$1"
+  local target="$1"
 
   # Names of pgii-pack:* blocks currently in the file.
   local -a current_names=()
   while IFS= read -r line; do
     current_names+=("$line")
-  done < <(grep -oE '^# BEGIN pgii-pack:[^ ]+ \(managed\)$' "$city_toml" |
+  done < <(grep -oE '^# BEGIN pgii-pack:[^ ]+ \(managed\)$' "$target" |
     sed -E 's/^# BEGIN pgii-pack:(.+) \(managed\)$/\1/' | sort -u)
 
   # Names of packs we want present.
@@ -125,18 +132,14 @@ no_op_needed() {
     [ "${current_names[$i]}" = "${desired_names[$i]}" ] || return 1
   done
 
-  # Per-pack path check.
+  # Per-pack source check.
   for name in "${PACK_NAMES[@]}"; do
     local got want
-    got=$(awk '
-      BEGIN {
-        begin = "# BEGIN pgii-pack:'"$name"' (managed)"
-        end = "# END pgii-pack:'"$name"' (managed)"
-      }
+    got=$(awk -v begin="# BEGIN pgii-pack:$name (managed)" -v end="# END pgii-pack:$name (managed)" '
       $0 == begin { in_block = 1; next }
       $0 == end   { in_block = 0; next }
-      in_block && /^path = / { gsub(/(^path = "|"$)/, ""); print; exit }
-    ' "$city_toml")
+      in_block && /^source = / { gsub(/(^source = "|"$)/, ""); print; exit }
+    ' "$target")
     want="${PACKS[$name]}"
     [ "$got" = "$want" ] || return 1
   done
@@ -144,44 +147,44 @@ no_op_needed() {
   return 0
 }
 
-# Process a single city.toml in-place.
+# Process a single <city>/pack.toml in-place.
 process_city() {
   local city="$1"
-  local city_toml="$city/city.toml"
+  local pack_toml="$city/pack.toml"
 
-  mkdir -p "$(dirname "$city_toml")"
-  if [ ! -f "$city_toml" ]; then
-    : >"$city_toml"
+  mkdir -p "$(dirname "$pack_toml")"
+  if [ ! -f "$pack_toml" ]; then
+    : >"$pack_toml"
   fi
 
   # Fast path: if every pack we'd write is already present with the same
-  # path, and the set of currently-managed pgii blocks equals our target
-  # set, do nothing. This keeps `home-manager switch` from rewriting
-  # city.toml on every no-op rebuild.
-  if no_op_needed "$city_toml"; then
+  # source path, and the set of currently-managed pgii blocks equals our
+  # target set, do nothing. This keeps `home-manager switch` from rewriting
+  # pack.toml on every no-op rebuild.
+  if no_op_needed "$pack_toml"; then
     return 0
   fi
 
-  # Pre-flight: for each pack we want to write, refuse if [packs.<name>]
+  # Pre-flight: for each pack we want to write, refuse if [imports.<name>]
   # exists in the file but is NOT bracketed by our managed sentinels.
   for name in "${PACK_NAMES[@]}"; do
-    # Does the file declare [packs.<name>] anywhere?
-    if grep -Eq "^\[packs\.$name\]\$" "$city_toml"; then
+    # Does the file declare [imports.<name>] anywhere?
+    if grep -Eq "^\[imports\.$name\]\$" "$pack_toml"; then
       # Is that declaration inside a managed block? Walk the file.
       local inside_managed
       inside_managed=$(awk -v name="$name" '
         BEGIN { in_block = 0; found = 0 }
         $0 == "# BEGIN pgii-pack:" name " (managed)" { in_block = 1; next }
         $0 == "# END pgii-pack:" name " (managed)"   { in_block = 0; next }
-        $0 == "[packs." name "]" {
+        $0 == "[imports." name "]" {
           if (in_block) { found = 1 }
           else { found = -1; exit }
         }
         END { print found }
-      ' "$city_toml")
+      ' "$pack_toml")
 
       if [ "$inside_managed" = "-1" ]; then
-        echo "pgii-packs: ERROR: Hand-written [packs.$name] exists in $city_toml" >&2
+        echo "pgii-packs: ERROR: Hand-written [imports.$name] exists in $pack_toml" >&2
         echo "  Either rename or delete the hand-written block, or remove" >&2
         echo "  phillipgreenii.programs.pgii.packs.$name from your config." >&2
         exit 3
@@ -190,7 +193,7 @@ process_city() {
   done
 
   local tmp
-  tmp="$(mktemp "$city_toml.XXXXXX")"
+  tmp="$(mktemp "$pack_toml.XXXXXX")"
 
   # Strip all managed pgii-pack:* blocks. We re-emit only the ones we
   # want below, which gives us removal-on-disable for free.
@@ -198,7 +201,7 @@ process_city() {
     /^# BEGIN pgii-pack:.* \(managed\)$/ { in_block = 1; next }
     in_block && /^# END pgii-pack:.* \(managed\)$/ { in_block = 0; next }
     !in_block { print }
-  ' "$city_toml" >"$tmp"
+  ' "$pack_toml" >"$tmp"
 
   # Trim trailing blank lines so we do not accumulate them on each rewrite.
   awk '
@@ -213,7 +216,7 @@ process_city() {
     emit_block "$name" "$path" >>"$tmp"
   done
 
-  mv "$tmp" "$city_toml"
+  mv "$tmp" "$pack_toml"
 }
 
 for city in "${CITIES[@]}"; do

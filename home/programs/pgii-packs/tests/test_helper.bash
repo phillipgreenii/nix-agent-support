@@ -27,32 +27,32 @@ teardown() {
   [ -n "${TMP:-}" ] && rm -rf "$TMP"
 }
 
-# mkCity NAME → echoes the city's path; creates city.toml seeded with arg2 (if given).
+# mkCity NAME → echoes the city's path; creates pack.toml seeded with arg2 (if given).
 mkCity() {
   local name="$1"
   local seed="${2:-}"
   local dir="$TMP/$name"
   mkdir -p "$dir/.gc"
   if [ -n "$seed" ]; then
-    printf '%s\n' "$seed" >"$dir/city.toml"
+    printf '%s\n' "$seed" >"$dir/pack.toml"
   else
-    : >"$dir/city.toml"
+    : >"$dir/pack.toml"
   fi
   echo "$dir"
 }
 
-# blockExists CITY_TOML PACK_NAME → exit 0 if managed block for PACK_NAME exists.
+# blockExists PACK_TOML PACK_NAME → exit 0 if managed block for PACK_NAME exists.
 blockExists() {
   grep -Fq "# BEGIN pgii-pack:$2 (managed)" "$1"
 }
 
-# blockPath CITY_TOML PACK_NAME → prints the store path inside the named block.
+# blockPath PACK_TOML PACK_NAME → prints the source path inside the named block.
 blockPath() {
   awk -v begin="# BEGIN pgii-pack:$2 (managed)" \
     -v end="# END pgii-pack:$2 (managed)" '
     $0 == begin { in_block = 1; next }
     $0 == end   { in_block = 0; next }
-    in_block && /^path = / { gsub(/(^path = "|"$)/, ""); print; exit }
+    in_block && /^source = / { gsub(/(^source = "|"$)/, ""); print; exit }
   ' "$1"
 }
 

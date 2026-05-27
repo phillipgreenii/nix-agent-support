@@ -1,14 +1,15 @@
 #!/usr/bin/env bats
 load test_helper
 
-@test "hand-written collision: errors when [packs.X] exists without sentinel" {
+@test "hand-written collision: errors when [imports.X] exists without sentinel" {
   local seed
   seed=$(cat <<EOF
-[workspace]
-provider = "claude"
+[pack]
+name = "gc"
+schema = 2
 
-[packs.pgii-pack-foo]
-path = "/Users/phillipg/somewhere-by-hand"
+[imports.pgii-pack-foo]
+source = "/Users/phillipg/somewhere-by-hand"
 EOF
 )
   local city; city=$(mkCity gc "$seed")
@@ -17,18 +18,19 @@ EOF
 
   run "$SCRIPT" --cities "$cities" --packs "$packs"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "Hand-written [packs.pgii-pack-foo] exists" ]]
+  [[ "$output" =~ "Hand-written [imports.pgii-pack-foo] exists" ]]
 
   # File untouched.
-  grep -q "somewhere-by-hand" "$city/city.toml"
+  grep -q "somewhere-by-hand" "$city/pack.toml"
 }
 
 @test "hand-written collision: managed block does NOT trigger collision" {
   local seed
   seed=$(cat <<EOF
 # BEGIN pgii-pack:pgii-pack-foo (managed)
-[packs.pgii-pack-foo]
-path = "/nix/store/OLD"
+[imports.pgii-pack-foo]
+source = "/nix/store/OLD"
+export = true
 # END pgii-pack:pgii-pack-foo (managed)
 EOF
 )
@@ -37,5 +39,5 @@ EOF
   run "$SCRIPT" --cities "$(citiesJson "$city")" \
                 --packs  "$(packsJson "pgii-pack-foo" "/nix/store/NEW")"
   [ "$status" -eq 0 ]
-  [ "$(blockPath "$city/city.toml" "pgii-pack-foo")" = "/nix/store/NEW" ]
+  [ "$(blockPath "$city/pack.toml" "pgii-pack-foo")" = "/nix/store/NEW" ]
 }
