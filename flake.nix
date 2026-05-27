@@ -261,6 +261,29 @@
               ];
             };
 
+            test-pgii-packs-activation = checks-lib.testBashScripts {
+              package = pkgs.writeShellApplication {
+                name = "pgii-packs-activation";
+                runtimeInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.jq
+                  pkgs.gnugrep
+                  pkgs.gawk
+                  pkgs.gnused
+                ];
+                text = builtins.readFile ./home/programs/pgii-packs/activation.sh;
+              };
+              tests = ./home/programs/pgii-packs/tests;
+              extraInputs = [
+                pkgs.jq
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.gawk
+                pkgs.gnused
+              ];
+            };
+
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.

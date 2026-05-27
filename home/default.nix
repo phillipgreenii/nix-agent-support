@@ -7,6 +7,7 @@
     ./programs/claude-theme
     ./programs/pgii-local-plugins
     ./programs/pgii-claude-plugins
+    ./programs/pgii-packs
     ./programs/agent-rules
     ./programs/pn-workspace-rules
     ./programs/bash-scripting

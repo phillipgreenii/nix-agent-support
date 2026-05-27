@@ -10,7 +10,12 @@ bats_require_minimum_version 1.5.0
 setup() {
   TMP="$(mktemp -d)"
   export TMP
-  SCRIPT="${BATS_TEST_DIRNAME}/../activation.sh"
+  # Resolve the script: prefer the packaged binary on PATH (Nix build sandbox
+  # via testBashScripts), fall back to the sibling source script for dev runs.
+  SCRIPT="$(command -v pgii-packs-activation || true)"
+  if [ -z "$SCRIPT" ]; then
+    SCRIPT="${BATS_TEST_DIRNAME}/../activation.sh"
+  fi
   export SCRIPT
   test -x "$SCRIPT" || {
     echo "activation.sh not executable: $SCRIPT" >&2
