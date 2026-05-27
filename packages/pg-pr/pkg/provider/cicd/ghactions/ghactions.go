@@ -114,7 +114,9 @@ const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha"
 // ListRuns enumerates workflow runs for the PR's head branch.
 //
 // gh's `run list` does not natively filter by PR, so we resolve PR # →
-// head branch via the PRResolver and pass `--branch <head>`.
+// head branch via the PRResolver and delegate to ListRunsByBranch.
+// Callers that already know the head branch should call ListRunsByBranch
+// directly to avoid the extra `gh pr view` round-trip.
 func (p *Provider) ListRuns(ctx context.Context, repo string, prNumber int) ([]api.CIRun, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, err
@@ -131,6 +133,20 @@ func (p *Provider) ListRuns(ctx context.Context, repo string, prNumber int) ([]a
 	}
 	if branch == "" {
 		return nil, fmt.Errorf("github-actions: empty head branch for %s#%d", repo, prNumber)
+	}
+	return p.ListRunsByBranch(ctx, repo, branch)
+}
+
+// ListRunsByBranch enumerates workflow runs for a known head branch.
+// Skips the PRResolver hop entirely; callers (e.g. the sync daemon, which
+// has the head branch from `gh pr list --json headRefName`) should prefer
+// this over ListRuns to halve their gh call count.
+func (p *Provider) ListRunsByBranch(ctx context.Context, repo, branch string) ([]api.CIRun, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(branch) == "" {
+		return nil, fmt.Errorf("github-actions: branch is required")
 	}
 	raw, err := p.gh.Run(ctx,
 		"run", "list",

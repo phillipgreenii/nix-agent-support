@@ -99,6 +99,36 @@ func TestListRuns_ResolvesBranchAndFilters(t *testing.T) {
 	}
 }
 
+func TestListRunsByBranch_SkipsPRResolver(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	// PRResolver intentionally nil: ListRunsByBranch must not consult it.
+	p := NewWithDeps(gh, nil)
+
+	runs, err := p.ListRunsByBranch(context.Background(), "foo/bar", "feat/x")
+	if err != nil {
+		t.Fatalf("ListRunsByBranch: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--branch feat/x") {
+		t.Fatalf("expected --branch feat/x: %v", last)
+	}
+}
+
+func TestListRunsByBranch_RequiresBranch(t *testing.T) {
+	p := NewWithDeps(newFakeGH(), nil)
+	if _, err := p.ListRunsByBranch(context.Background(), "foo/bar", ""); err == nil {
+		t.Fatalf("expected error for empty branch")
+	}
+	if _, err := p.ListRunsByBranch(context.Background(), "foo/bar", "   "); err == nil {
+		t.Fatalf("expected error for whitespace-only branch")
+	}
+}
+
 func TestListRuns_ValidatesInputs(t *testing.T) {
 	p := NewWithDeps(newFakeGH(), &fakePR{branch: "x"})
 	if _, err := p.ListRuns(context.Background(), "", 1); err == nil {

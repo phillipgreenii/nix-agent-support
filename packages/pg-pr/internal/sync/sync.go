@@ -88,6 +88,15 @@ type CICDProvider interface {
 	ListRuns(ctx context.Context, repo string, prNumber int) ([]api.CIRun, error)
 }
 
+// CICDBranchLister is an optional capability for CICD providers that can
+// list runs by an already-known head branch, skipping the PR → branch
+// resolution call. Implemented by ghactions.Provider. The sync engine
+// prefers this over ListRuns when the head branch is already populated
+// on api.PR (which it is for every github-listed PR).
+type CICDBranchLister interface {
+	ListRunsByBranch(ctx context.Context, repo, branch string) ([]api.CIRun, error)
+}
+
 // BeadClient is the subset of *pkg/beads.Client the sync engine uses.
 type BeadClient interface {
 	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (id string, alreadyClosed bool, err error)
@@ -505,7 +514,14 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 				}
 			}
 			if cp := e.firstCICDFor(rcfg); cp != nil {
-				if runs, cerr := cp.ListRuns(ctx, key.Repo, pr.Number); cerr == nil {
+				// Prefer the branch-known path (ghactions.Provider.ListRunsByBranch)
+				// when the provider supports it and api.PR carries the head branch —
+				// avoids one `gh pr view` per PR per tick.
+				if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
+					if runs, cerr := bl.ListRunsByBranch(ctx, key.Repo, pr.Branch); cerr == nil {
+						in.CIRuns = runs
+					}
+				} else if runs, cerr := cp.ListRuns(ctx, key.Repo, pr.Number); cerr == nil {
 					in.CIRuns = runs
 				}
 			}
