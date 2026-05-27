@@ -23,6 +23,13 @@ let
   };
 
   anyPackEnabled = enabledPacks != [ ];
+
+  packStorePathMap = lib.listToAttrs (
+    map (p: {
+      inherit (p) name;
+      value = "${p.drv}";
+    }) enabledPacks
+  );
 in
 {
   options.phillipgreenii.programs.pgii = {
@@ -68,6 +75,28 @@ in
         ".local/share/pgii-packs/${p.name}".source = p.drv;
       }) enabledPacks
     );
+
+    home.activation.pgii-packs =
+      let
+        activationScript = pkgs.writeShellApplication {
+          name = "pgii-packs-activation";
+          runtimeInputs = [
+            pkgs.bash
+            pkgs.coreutils
+            pkgs.jq
+            pkgs.gnugrep
+            pkgs.gawk
+            pkgs.gnused
+          ];
+          text = builtins.readFile ./activation.sh;
+        };
+      in
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run ${activationScript}/bin/pgii-packs-activation \
+          --cities ${lib.escapeShellArg (builtins.toJSON cfg.gascity.cities)} \
+          --packs  ${lib.escapeShellArg (builtins.toJSON packStorePathMap)} \
+          ${lib.optionalString cfg.gascity.reloadSupervisor "--reload"}
+      '';
 
     assertions = [
       {
