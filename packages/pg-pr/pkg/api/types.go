@@ -3,19 +3,6 @@
 // in Phases 1–4 as the surface lands.
 package api
 
-// PR is the JSON shape returned by `pg-pr pr show`.
-type PR struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	Branch string `json:"branch"`
-	Base   string `json:"base"`
-	Author string `json:"author"`
-	URL    string `json:"url"`
-	Draft  bool   `json:"draft"`
-	Merged bool   `json:"merged"`
-}
-
 // Comment is the JSON shape for a PR comment.
 type Comment struct {
 	ID         string `json:"id"`
