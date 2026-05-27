@@ -220,6 +220,7 @@ type Summary struct {
 	Escalated       int            `json:"escalated,omitempty"`
 	RepliesPosted   int            `json:"replies_posted,omitempty"`
 	Errors          []SummaryError `json:"errors,omitempty"`
+	Warnings        []SummaryError `json:"warnings,omitempty"`
 }
 
 // RepoSummary is the per-repo slice of Summary.

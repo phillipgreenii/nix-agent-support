@@ -1053,3 +1053,36 @@ func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
 		t.Fatalf("BeadsCreated: got %d want 2", sum.BeadsCreated)
 	}
 }
+
+func TestSummary_WarningsJSONRoundTrip(t *testing.T) {
+	s := Summary{
+		Warnings: []SummaryError{
+			{Repo: "foo/bar", Message: "example warning"},
+		},
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"warnings"`) {
+		t.Fatalf("expected warnings key in JSON; got %s", raw)
+	}
+
+	// Round-trip back.
+	var got Summary
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(got.Warnings) != 1 || got.Warnings[0].Message != "example warning" {
+		t.Fatalf("round-trip lost warnings: %+v", got.Warnings)
+	}
+
+	// Empty warnings should omit the key (omitempty semantics).
+	empty, err := json.Marshal(Summary{})
+	if err != nil {
+		t.Fatalf("Marshal empty: %v", err)
+	}
+	if strings.Contains(string(empty), `"warnings"`) {
+		t.Fatalf("empty Warnings should be omitted; got %s", empty)
+	}
+}
