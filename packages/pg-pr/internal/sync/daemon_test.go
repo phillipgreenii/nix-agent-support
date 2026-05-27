@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
 
@@ -332,5 +333,110 @@ func TestXdgRuntimeDir_FallsBackToTempDir(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "/custom/runtime")
 	if got := xdgRuntimeDir(); got != "/custom/runtime" {
 		t.Fatalf("xdgRuntimeDir with env: got %q", got)
+	}
+}
+
+func TestDaemonMountsDashboard(t *testing.T) {
+	t.Parallel()
+	e := makeDaemonEngine(t)
+	store := snapshot.NewStore()
+	store.Set(&snapshot.Snapshot{
+		GeneratedAt: time.Now().UTC(),
+		Mine:        []snapshot.MineRow{},
+		Team:        []snapshot.TeamRow{},
+	})
+
+	boundCh := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- e.Daemon(ctx, DaemonOpts{
+			Interval:        time.Hour, // never tick
+			LockDir:         t.TempDir(),
+			Logger:          discardLogger(),
+			Sighup:          make(chan os.Signal),
+			MetricsAddr:     "127.0.0.1:0",
+			MetricsListener: func(ln net.Listener) { boundCh <- ln.Addr().String() },
+			Dashboard:       store,
+		})
+	}()
+
+	var bound string
+	select {
+	case bound = <-boundCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listener never bound")
+	}
+
+	resp, err := http.Get("http://" + bound + "/api/v1/dashboard")
+	if err != nil {
+		t.Fatalf("GET /api/v1/dashboard: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("dashboard status: got %d want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// Confirm /metrics still serves.
+	mResp, err := http.Get("http://" + bound + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	if mResp.StatusCode != http.StatusOK {
+		t.Errorf("metrics status: got %d want 200", mResp.StatusCode)
+	}
+	_ = mResp.Body.Close()
+
+	cancel()
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not exit after cancel")
+	}
+}
+
+func TestDaemonNoDashboardWhenNil(t *testing.T) {
+	t.Parallel()
+	e := makeDaemonEngine(t)
+	boundCh := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- e.Daemon(ctx, DaemonOpts{
+			Interval:        time.Hour,
+			LockDir:         t.TempDir(),
+			Logger:          discardLogger(),
+			Sighup:          make(chan os.Signal),
+			MetricsAddr:     "127.0.0.1:0",
+			MetricsListener: func(ln net.Listener) { boundCh <- ln.Addr().String() },
+			Dashboard:       nil,
+		})
+	}()
+
+	var bound string
+	select {
+	case bound = <-boundCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listener never bound")
+	}
+
+	resp, err := http.Get("http://" + bound + "/api/v1/dashboard")
+	if err != nil {
+		t.Fatalf("GET /api/v1/dashboard: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("dashboard status: got %d want 404", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	cancel()
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not exit after cancel")
 	}
 }

@@ -31,6 +31,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/httpapi"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
 
@@ -80,6 +82,11 @@ type DaemonOpts struct {
 	// net.Listener after the metrics HTTP server starts. Tests use this
 	// to discover the random port assigned by "127.0.0.1:0".
 	MetricsListener func(net.Listener)
+
+	// Dashboard, when non-nil, mounts /api/v1/dashboard on the same listener
+	// as /metrics, serving snapshots from this Store. Nil disables the
+	// endpoint (back-compat for callers that don't enable the dashboard).
+	Dashboard *snapshot.Store
 }
 
 // Daemon runs the sync engine in a loop until ctx is cancelled. Returns nil
@@ -234,6 +241,9 @@ func startMetricsServer(_ context.Context, opts DaemonOpts) (func(), error) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", telemetry.MetricsHandler())
+	if opts.Dashboard != nil {
+		mux.Handle("/api/v1/dashboard", httpapi.DashboardHandler(opts.Dashboard))
+	}
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
