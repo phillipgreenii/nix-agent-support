@@ -311,6 +311,19 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		}()
 	}
 
+	// Partition by ownership BEFORE running per-PR phases. Local-bead
+	// phases (EnsureMergeRequest, processFeedback) run for both subsets;
+	// upstream-write phases (maybePromoteDraft) only run for mine.
+	// Empty Author / empty SelfLogin → treated as team (do not modify
+	// upstream). Future write-side phases must consciously consult
+	// mineSet — defense against the original bug class.
+	mineSet := make(map[prKey]bool, len(observed))
+	for key, pr := range observed {
+		if e.isSelfAuthored(pr.Author) {
+			mineSet[key] = true
+		}
+	}
+
 	// Upsert beads for each observed PR. Each PR is dispatched against its
 	// own monorepo's bd client.
 	for key, pr := range observed {
@@ -373,13 +386,17 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					Message: fmt.Sprintf("PR #%d feedback: %v", pr.Number, err),
 				})
 			}
-			if err := e.maybePromoteDraft(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
-				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
-				recordSpanErr(prSpan, err)
-				summary.Errors = append(summary.Errors, SummaryError{
-					Repo:    key.Repo,
-					Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
-				})
+			// Upstream-write phase: only for self-authored PRs.
+			// See partition above.
+			if mineSet[key] {
+				if err := e.maybePromoteDraft(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
+					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
+					recordSpanErr(prSpan, err)
+					summary.Errors = append(summary.Errors, SummaryError{
+						Repo:    key.Repo,
+						Message: fmt.Sprintf("PR #%d draft-promote: %v", pr.Number, err),
+					})
+				}
 			}
 		}()
 	}

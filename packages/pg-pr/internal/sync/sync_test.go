@@ -286,7 +286,7 @@ func teammatePR(n int, repo, branch string) api.PR {
 }
 
 // selfDraftPR returns a self-authored draft PR.
-func selfDraftPR(n int, repo, branch string) api.PR { //nolint:unused
+func selfDraftPR(n int, repo, branch string) api.PR {
 	pr := samplePR(n, repo, branch)
 	pr.Draft = true
 	return pr
@@ -1004,5 +1004,52 @@ func TestIsSelfAuthored(t *testing.T) {
 					tc.author, tc.self, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSync_OnlyPromotesDraftForSelfAuthoredPRs(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Mixed pool: one self draft+green, one team draft+green.
+	selfPR := selfDraftPR(10, "foo/bar", "feat/mine")
+	teamPR := teammatePR(20, "foo/bar", "feat/theirs")
+	vcs.my["foo/bar"] = []api.PR{selfPR}
+	vcs.team["foo/bar"] = []api.PR{teamPR}
+	ci.runs[keyOf("foo/bar", 10)] = []api.CIRun{successRun()}
+	ci.runs[keyOf("foo/bar", 20)] = []api.CIRun{successRun()}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      cfgWithCICD(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	// Exactly one SetDraft, and it must be for the self PR (#10).
+	if len(vcs.setDraftCalls) != 1 {
+		t.Fatalf("expected 1 SetDraft call; got %d: %+v",
+			len(vcs.setDraftCalls), vcs.setDraftCalls)
+	}
+	got := vcs.setDraftCalls[0]
+	if got.Number != 10 || got.Draft != false {
+		t.Fatalf("expected SetDraft(repo, 10, false); got %+v", got)
+	}
+
+	// Both beads must be upserted.
+	if sum.BeadsCreated != 2 {
+		t.Fatalf("BeadsCreated: got %d want 2", sum.BeadsCreated)
 	}
 }
