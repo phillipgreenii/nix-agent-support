@@ -285,6 +285,31 @@
               ];
             };
 
+            check-pgii-pack-pr-support-layout = pkgs.runCommand "check-pgii-pack-pr-support-layout" { } ''
+              pack=${pkgs.pgii-pack-pr-support}
+              test -f "$pack/pack.toml"                                   || { echo "missing pack.toml"; exit 1; }
+              test -f "$pack/.pack-meta.json"                             || { echo "missing .pack-meta.json"; exit 1; }
+              test -f "$pack/agents/pr-reviewer/agent.toml"               || { echo "missing pr-reviewer"; exit 1; }
+              test -f "$pack/agents/pr-self-fixer/agent.toml"             || { echo "missing pr-self-fixer"; exit 1; }
+              test -f "$pack/agents/pr-triage/agent.toml"                 || { echo "missing pr-triage"; exit 1; }
+              test -f "$pack/orders/pr-watcher.toml"                      || { echo "missing pr-watcher order"; exit 1; }
+              test -f "$pack/orders/wake-on-work.toml"                    || { echo "missing wake-on-work order"; exit 1; }
+              test -x "$pack/scripts/pr-watcher.sh"                       || { echo "pr-watcher.sh not exec"; exit 1; }
+              test -x "$pack/scripts/wake-on-work.sh"                     || { echo "wake-on-work.sh not exec"; exit 1; }
+              for d in check-pr-watcher-recent-runs \
+                       check-pr-agent-woke-no-progress \
+                       check-pr-feedback-backlog \
+                       check-pr-feedback-throughput \
+                       check-pr-orphan-beads \
+                       check-hack-1-still-needed; do
+                test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
+                test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
+              done
+              ! find "$pack" -name "*.template" | grep -q . || { echo "stale .template files in pack"; exit 1; }
+              ! grep -rnE 'zr\.pr-' "$pack/doctor" >/dev/null 2>&1 || { echo "stale zr.pr- refs in doctor/"; exit 1; }
+              touch $out
+            '';
+
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
