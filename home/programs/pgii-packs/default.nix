@@ -38,6 +38,10 @@ let
     ++ lib.optional cfg.packs.workers.enable {
       name = "pgii-workers";
       drv = pkgs.pgii-pack-workers;
+    }
+    ++ lib.optional cfg.packs.gastown.enable {
+      name = "pgii-gastown";
+      drv = pkgs.pgii-pack-gastown;
     };
 
   anyPackEnabled = enabledPacks != [ ];
@@ -97,7 +101,13 @@ in
         Auto-binds to every rig via [defaults.rig.imports.pgii-workers]; per-rig
         session concurrency is overridden via city.toml [[rigs.patches]].
       '';
-      # Real packs (gastown, bead-importer) are added in their respective
+      gastown.enable = lib.mkEnableOption ''
+        pgii-pack-gastown (mayor/deacon/operator/foreman city-scope agents
+        + mol-deacon-patrol formula + 3 doctor checks). Locally-customized
+        copies of gastown's defaults; replaces enabling the gastown system
+        pack outright (which would also try to manage other defaults).
+      '';
+      # Real packs (bead-importer) are added in their respective
       # phase plans.
     };
   };
