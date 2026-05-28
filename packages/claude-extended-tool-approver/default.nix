@@ -11,7 +11,7 @@ buildGoModule {
 
   subPackages = [ "cmd/claude-extended-tool-approver" ];
 
-  vendorHash = "sha256-ZUH7+cyemC0tWSzDxEiO8YC+LnoBRIEHAXLD8ZtMi7Y=";
+  vendorHash = "sha256-FuA/H29f1r8nCuTWIiqaBzG7d+Q0pmGR2I9bLpjqssU=";
 
   postInstall = ''
     mkdir -p $out/share/claude-extended-tool-approver/skills
