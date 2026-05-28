@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 )
 
 // sharedState holds the daemon's current view of the world. The tick
@@ -16,6 +17,8 @@ type sharedState struct {
 	caffeinateActive bool // distinct from "on": on=user wants caffeinate, active=process running
 	caffeinateCause  string
 	runtimePath      string // for persistence on toggle
+	nudger           *nudger.Nudger
+	watermarks       *WatermarkStore
 }
 
 func newSharedState() *sharedState {
@@ -57,4 +60,13 @@ func (s *sharedState) caffeinateView() (active bool, cause string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.caffeinateActive, s.caffeinateCause
+}
+
+// Nudger returns the daemon's Nudger instance. May be nil when nudger
+// signaling is not configured (NudgerSignalers empty / RuntimePath absent).
+// Used by gRPC handlers (Phase 6) to enqueue manual nudges.
+func (s *sharedState) Nudger() *nudger.Nudger {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nudger
 }

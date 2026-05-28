@@ -16,8 +16,10 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
+	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // PIDLock holds the pidfile flock for the lifetime of the daemon process.
@@ -144,6 +146,15 @@ type RunOptions struct {
 	// NudgeFn dispatches a signal to the given pid. nil → Nudge RPC
 	// returns FailedPrecondition.
 	NudgeFn func(pid int, text string) error
+	// Nudger config — passed to nudger.TickContext each tick. Defaults applied
+	// if zero.
+	AutoResumeMessage string
+	AutoResumeDelay   time.Duration
+	DisruptGrace      time.Duration
+	EscalationAfter   time.Duration
+	// NudgerSignalers — non-nil enables the daemon-side nudger. When nil,
+	// the existing NudgeFn path stays in effect (back-compat).
+	NudgerSignalers []signal.Signaler
 	// Detectors run against each session at tick time to derive labels
 	// for emitted metrics. Built-in detectors live in
 	// internal/labels/detectors. Empty → only the {state, plan_tier}
@@ -185,6 +196,21 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())
+
+	// Construct Nudger + WatermarkStore when configured.
+	if opts.RuntimePath != "" && len(opts.NudgerSignalers) > 0 {
+		watermarks, err := NewWatermarkStore(opts.RuntimePath)
+		if err != nil {
+			return fmt.Errorf("read runtime.json: %w", err)
+		}
+		sig := &SignalerAdapter{Signalers: opts.NudgerSignalers}
+		n := nudger.New(sig, watermarks)
+		n.LoadStore(watermarks.LoadIntents())
+		state.mu.Lock()
+		state.nudger = n
+		state.watermarks = watermarks
+		state.mu.Unlock()
+	}
 
 	// Wire tracker callbacks to emitter counters/events.
 	if opts.BlockTracker != nil && opts.Emitter != nil {
@@ -285,6 +311,70 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
 			pruneLabelCache(labelCache, tree)
+
+			// Run nudger tick after tree is built and before publishing to clients.
+			state.mu.RLock()
+			n := state.nudger
+			wm := state.watermarks
+			state.mu.RUnlock()
+			if n != nil {
+				msg := opts.AutoResumeMessage
+				if msg == "" {
+					msg = "continue"
+				}
+				n.Tick(nudger.TickContext{
+					Now:               time.Now(),
+					Tree:              tree,
+					AutoResumeEnabled: wm.AutoResumeEnabled(),
+					AutoResumeMessage: msg,
+					AutoResumeDelay:   opts.AutoResumeDelay,
+					DisruptGrace:      opts.DisruptGrace,
+					EscalationAfter:   opts.EscalationAfter,
+					Watermarks:        wm,
+				})
+				wm.SaveIntents(n.SnapshotStore())
+				// Latch: set WindowResetFiredFor whenever the tree carries a new window time.
+				// The WindowResetProducer is idempotent within one window, so advancing the
+				// latch after Tick prevents it from re-firing for the same window next tick.
+				if !tree.WindowResetsAt.IsZero() && !wm.WindowResetFiredFor().Equal(tree.WindowResetsAt) {
+					wm.SetWindowResetFiredFor(tree.WindowResetsAt)
+				}
+
+				// Annotate sessions with PendingNudge before publishing the tree.
+				for _, dir := range tree.Dirs {
+					for _, sv := range dir.Sessions {
+						sid := sv.SessionID
+						if !n.PendingFor(sid) {
+							continue
+						}
+						sources := n.SourcesFor(sid)
+						strs := make([]string, 0, len(sources))
+						for _, s := range sources {
+							strs = append(strs, string(s))
+						}
+						sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
+					}
+				}
+
+				// Escalation flip: surface IsRetryable=false on terminal errors
+				// for sessions whose watermark marks DisruptEscalated.
+				for _, dir := range tree.Dirs {
+					for _, sv := range dir.Sessions {
+						if sv.LastError == nil || !sv.LastError.IsTerminal {
+							continue
+						}
+						swm := wm.SessionWatermark(sv.SessionID)
+						if !swm.DisruptEscalated {
+							continue
+						}
+						// Copy to avoid mutating the snapshot's record.
+						le := *sv.LastError
+						le.IsRetryable = false
+						sv.LastError = &le
+					}
+				}
+			}
+
 			state.setTree(tree)
 		}
 	}
