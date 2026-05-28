@@ -1212,3 +1212,47 @@ func TestSync_SkipsAndWarnsOnTeammateReplyDraft(t *testing.T) {
 		t.Fatalf("warning Message should mention author %q; got %q", "coworker", w.Message)
 	}
 }
+
+func TestSync_TreatsEmptySelfLoginAsTeammate(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Both PRs draft+green. With empty SelfLogin, neither should be promoted.
+	pr1 := samplePR(1, "foo/bar", "feat/a")
+	pr1.Draft = true
+	pr2 := samplePR(2, "foo/bar", "feat/b")
+	pr2.Draft = true
+	vcs.my["foo/bar"] = []api.PR{pr1, pr2}
+	ci.runs[keyOf("foo/bar", 1)] = []api.CIRun{successRun()}
+	ci.runs[keyOf("foo/bar", 2)] = []api.CIRun{successRun()}
+
+	cfg := cfgWithCICD()
+	cfg.SelfLogin = "" // simulate misconfiguration
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+	if len(vcs.setDraftCalls) != 0 {
+		t.Fatalf("expected NO SetDraft calls when SelfLogin is empty; got %+v",
+			vcs.setDraftCalls)
+	}
+	// Beads still upserted.
+	if sum.BeadsCreated != 2 {
+		t.Fatalf("BeadsCreated: got %d want 2", sum.BeadsCreated)
+	}
+}
