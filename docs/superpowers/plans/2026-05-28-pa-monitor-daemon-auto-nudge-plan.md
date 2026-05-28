@@ -2865,3 +2865,1048 @@ git commit -m "feat(pa-monitor): wire Nudger into daemon tick loop"
 ```
 
 ---
+
+## Phase 7 — TUI rewrite
+
+### Task 7.1: Remove TUI-side auto-resume scheduler
+
+**Files:**
+
+- Modify: `packages/pa-monitor/internal/tui/update.go`
+- Modify: `packages/pa-monitor/internal/tui/model.go` (or wherever the TUI Model struct lives)
+- Modify: `packages/pa-monitor/internal/tui/view.go`
+- Modify: `packages/pa-monitor/internal/tui/keybindings.go`
+
+- [ ] **Step 1: Find every TUI symbol that owns auto-resume state**
+
+Run: `cd packages/pa-monitor && grep -rn "autoResume\|signalNonWorking\|autoResumeFire\|countdownTick" internal/tui/`
+
+Expect references in: `update.go` (state transitions), the Model definition (fields `autoResume`, `autoResumeFired`, `autoResumeDelay`, `autoResumeMessage`, `countdownTick`, `signalers`), `view.go` (`AutoResume*` fields in view options), and `keybindings.go` (`a` keybind body).
+
+- [ ] **Step 2: Remove the scheduler code in `update.go`**
+
+Delete:
+
+- The `autoResumeFired` reset block (lines around 64-66).
+- The `autoResume && !msg.tree.WindowResetsAt.IsZero() && !m.autoResumeFired` scheduling block (lines around 67-75).
+- The `countdownTickMsg` case (lines around 79-83).
+- The `autoResumeFireMsg` case (lines around 85-101).
+- The `signalNonWorking` and `signalNonWorkingAndCount` functions (after line 110).
+
+- [ ] **Step 3: Remove auto-resume fields from the Model**
+
+In the Model struct definition, remove:
+
+```go
+autoResume        bool
+autoResumeFired   bool
+autoResumeDelay   time.Duration
+autoResumeMessage string
+countdownTick     bool
+signalers         []signal.Signaler
+signalLog         func(string)
+```
+
+Add a read-only view-state field that the daemon snapshot populates:
+
+```go
+autoResumeEnabled  bool // mirrored from DaemonState.AutoResumeEnabled
+autoResumeDelay    time.Duration // mirrored from DaemonState.AutoResumeDelayS
+```
+
+- [ ] **Step 4: Update `view.go` to read from daemon-supplied state**
+
+Wherever the rendered controls referenced `m.autoResume`, change to `m.autoResumeEnabled`. Wherever the rendered countdown referenced `m.autoResumeDelay`, keep as-is (it's now daemon-supplied).
+
+The "fired" notification disappears entirely from the TUI — the daemon now owns it; if a status notification is desired, it should come via a future `WatchState` event (out of scope for this phase).
+
+- [ ] **Step 5: Update tick handler to populate from `TreeUpdatedMsg`**
+
+In `update.go`'s `TreeUpdatedMsg` case (around line 102-106), copy the new fields off the tree (or off whatever message carries DaemonState):
+
+```go
+case TreeUpdatedMsg:
+	m.tree = msg.Tree
+	m.autoResumeEnabled = msg.AutoResumeEnabled
+	m.autoResumeDelay   = msg.AutoResumeDelay
+	m.rebuildFlatRows()
+	m.clampCursor()
+	m.syncScroll()
+```
+
+The `Tree`/`AutoResumeEnabled`/`AutoResumeDelay` fields on `TreeUpdatedMsg` need to be added — check the message construction site (probably in `tui_remote.go` or the daemon-watcher); add the fields and populate from the proto `DaemonState`.
+
+- [ ] **Step 6: Build to verify removal compiles**
+
+Run: `cd packages/pa-monitor && go build ./...`
+Expected: success. Existing TUI tests that referenced removed fields will fail — that's OK; they get updated in subsequent tasks.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/pa-monitor/internal/tui/
+git commit -m "refactor(pa-monitor): remove TUI-side auto-resume scheduler (daemon owns it now)"
+```
+
+---
+
+### Task 7.2: TUI `a` keybind calls `SetAutoResume` RPC
+
+**Files:**
+
+- Modify: `packages/pa-monitor/internal/tui/keybindings.go`
+- Modify: `packages/pa-monitor/internal/tui/model.go` — add `daemonClient` field if not already present
+- Test: `packages/pa-monitor/internal/tui/keybindings_test.go` (existing? create if missing)
+
+- [ ] **Step 1: Read the existing `a` keybind**
+
+In `keybindings.go:160` the current body is `m.autoResume = !m.autoResume`. Replace.
+
+- [ ] **Step 2: Write the failing test**
+
+```go
+// packages/pa-monitor/internal/tui/keybindings_test.go
+package tui
+
+import (
+	"context"
+	"testing"
+
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+)
+
+type fakeDaemonClient struct {
+	setAutoResumeCalls []bool
+}
+
+func (f *fakeDaemonClient) SetAutoResume(ctx context.Context, req *pb.SetAutoResumeRequest, opts ...interface{}) (*pb.SetAutoResumeResponse, error) {
+	f.setAutoResumeCalls = append(f.setAutoResumeCalls, req.GetEnabled())
+	return &pb.SetAutoResumeResponse{Enabled: req.GetEnabled()}, nil
+}
+// (Implement the rest of the daemon client interface as no-op stubs.)
+
+func TestKeybindAToggleSendsRPC(t *testing.T) {
+	fake := &fakeDaemonClient{}
+	m := newTestModel(fake)
+	m.autoResumeEnabled = false
+	_ = m.handleKey("a")
+	if len(fake.setAutoResumeCalls) != 1 || fake.setAutoResumeCalls[0] != true {
+		t.Errorf("setAutoResumeCalls = %v, want [true]", fake.setAutoResumeCalls)
+	}
+}
+```
+
+- [ ] **Step 3: Run test to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./internal/tui/ -run TestKeybindAToggle`
+Expected: FAIL.
+
+- [ ] **Step 4: Implement the new `a` body**
+
+```go
+// internal/tui/keybindings.go (the case where the key is "a")
+case "a":
+	want := !m.autoResumeEnabled
+	go func(want bool) {
+		_, err := m.daemonClient.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: want})
+		if err != nil {
+			m.logErr(fmt.Sprintf("SetAutoResume: %v", err))
+		}
+	}(want)
+	// Optimistic update — next tick from daemon will confirm.
+	m.autoResumeEnabled = want
+```
+
+- [ ] **Step 5: Run test to verify pass**
+
+Run: `cd packages/pa-monitor && go test ./internal/tui/ -run TestKeybindAToggle -v`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/pa-monitor/internal/tui/keybindings.go \
+        packages/pa-monitor/internal/tui/keybindings_test.go \
+        packages/pa-monitor/internal/tui/model.go
+git commit -m "feat(pa-monitor): TUI a keybind toggles SetAutoResume RPC"
+```
+
+---
+
+### Task 7.3: TUI `N` keybind — scope-by-cursor manual nudge toggle
+
+**Files:**
+
+- Modify: `packages/pa-monitor/internal/tui/keybindings.go`
+- Test: `packages/pa-monitor/internal/tui/keybindings_test.go`
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestKeybindNOnLeafToggles(t *testing.T) {
+	fake := &fakeDaemonClient{}
+	m := newTestModelWithTree(fake, []sessionRow{
+		{sid: "sid-1", pendingManual: false},
+		{sid: "sid-2", pendingManual: false},
+	})
+	m.cursor = leafRow("sid-1")
+	_ = m.handleKey("N")
+	if len(fake.nudgeQueueCalls) != 1 ||
+		fake.nudgeQueueCalls[0].Selector != "session:sid-1" {
+		t.Errorf("nudgeQueueCalls = %+v, want [session:sid-1]", fake.nudgeQueueCalls)
+	}
+	if len(fake.nudgeCancelCalls) != 0 {
+		t.Error("unexpected NudgeCancel call")
+	}
+}
+
+func TestKeybindNOnLeafWhenAllPendingCancels(t *testing.T) {
+	fake := &fakeDaemonClient{}
+	m := newTestModelWithTree(fake, []sessionRow{
+		{sid: "sid-1", pendingManual: true},
+	})
+	m.cursor = leafRow("sid-1")
+	_ = m.handleKey("N")
+	if len(fake.nudgeCancelCalls) != 1 ||
+		fake.nudgeCancelCalls[0].Selector != "session:sid-1" {
+		t.Errorf("nudgeCancelCalls = %+v, want [session:sid-1]", fake.nudgeCancelCalls)
+	}
+}
+
+func TestKeybindNOnDirAllPendingClears(t *testing.T) {
+	fake := &fakeDaemonClient{}
+	m := newTestModelWithTree(fake, []sessionRow{
+		{sid: "sid-1", pendingManual: true, dir: "/tmp"},
+		{sid: "sid-2", pendingManual: true, dir: "/tmp"},
+	})
+	m.cursor = dirRow("/tmp")
+	_ = m.handleKey("N")
+	if len(fake.nudgeCancelCalls) != 1 ||
+		fake.nudgeCancelCalls[0].Selector != "path:/tmp" {
+		t.Errorf("cancel = %+v", fake.nudgeCancelCalls)
+	}
+}
+
+func TestKeybindNOnDirAnyMissingQueues(t *testing.T) {
+	fake := &fakeDaemonClient{}
+	m := newTestModelWithTree(fake, []sessionRow{
+		{sid: "sid-1", pendingManual: true, dir: "/tmp"},
+		{sid: "sid-2", pendingManual: false, dir: "/tmp"},
+	})
+	m.cursor = dirRow("/tmp")
+	_ = m.handleKey("N")
+	if len(fake.nudgeQueueCalls) != 1 ||
+		fake.nudgeQueueCalls[0].Selector != "path:/tmp" {
+		t.Errorf("queue = %+v", fake.nudgeQueueCalls)
+	}
+}
+```
+
+- [ ] **Step 2: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./internal/tui/ -run TestKeybindN`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement the `N` keybind**
+
+```go
+// keybindings.go — new case:
+case "N":
+	sids, selector := m.cursorScopeSelector() // helper: returns ([]string of sids, selector string for RPC)
+	allPending := len(sids) > 0
+	for _, sid := range sids {
+		if !m.sessionHasPendingManual(sid) {
+			allPending = false
+			break
+		}
+	}
+	if allPending {
+		go func() {
+			_, err := m.daemonClient.NudgeCancel(context.Background(), &pb.NudgeCancelRequest{Selector: selector})
+			if err != nil {
+				m.logErr(fmt.Sprintf("NudgeCancel: %v", err))
+			}
+		}()
+	} else {
+		go func() {
+			_, err := m.daemonClient.NudgeQueue(context.Background(), &pb.NudgeQueueRequest{Selector: selector})
+			if err != nil {
+				m.logErr(fmt.Sprintf("NudgeQueue: %v", err))
+			}
+		}()
+	}
+```
+
+Add the helpers `cursorScopeSelector()` and `sessionHasPendingManual(sid)` to the Model — exact implementation depends on the existing cursor representation. The selector must use the appropriate form (`session:<sid>`, `path:<dir>`, or empty for root → daemon expands to "all sessions" via a new selector token or a flag — choose whichever your existing `expandSelector` supports; if it doesn't support root, extend it to recognise `all` or empty).
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./internal/tui/ -run TestKeybindN -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/pa-monitor/internal/tui/keybindings.go \
+        packages/pa-monitor/internal/tui/keybindings_test.go \
+        packages/pa-monitor/internal/tui/model.go
+git commit -m "feat(pa-monitor): TUI N keybind scope-by-cursor manual nudge toggle"
+```
+
+---
+
+### Task 7.4: Session-row glyphs + details pane
+
+**Files:**
+
+- Modify: `packages/pa-monitor/internal/render/session_row.go` (or wherever per-row rendering lives)
+- Modify: `packages/pa-monitor/internal/render/details.go` (or equivalent)
+- Test: `packages/pa-monitor/internal/render/session_row_test.go`
+
+- [ ] **Step 1: Locate row-rendering function**
+
+Run: `cd packages/pa-monitor && grep -rn "Status.*Working\|sessionGlyph\|statusGlyph" internal/render/`
+
+Identify the function that maps `session.Status` → glyph; you'll add a pre-step that checks `LastError` and `PendingNudge`.
+
+- [ ] **Step 2: Write the failing test**
+
+```go
+// internal/render/session_row_test.go
+package render
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+)
+
+func TestSessionRowGlyphRetryableTerminal(t *testing.T) {
+	se := aggregate.SessionEntry{
+		Status: session.Idle,
+		LastError: &transcript.ErrorRecord{
+			Kind: transcript.ErrUnknown, IsTerminal: true, IsRetryable: true,
+			At: time.Now().Add(-1 * time.Minute),
+		},
+	}
+	glyph := RenderSessionGlyph(se)
+	if !strings.Contains(glyph, "⚠") {
+		t.Errorf("glyph = %q, want contains warning glyph for retryable terminal", glyph)
+	}
+}
+
+func TestSessionRowGlyphNonRetryableTerminal(t *testing.T) {
+	se := aggregate.SessionEntry{
+		Status: session.Idle,
+		LastError: &transcript.ErrorRecord{
+			Kind: transcript.ErrAuthFailed, IsTerminal: true, IsRetryable: false,
+			At: time.Now().Add(-1 * time.Minute),
+		},
+	}
+	glyph := RenderSessionGlyph(se)
+	if !strings.Contains(glyph, "✗") {
+		t.Errorf("glyph = %q, want contains failure glyph for non-retryable terminal", glyph)
+	}
+}
+
+func TestSessionRowGlyphLastErrorNotTerminalRevertsToIdle(t *testing.T) {
+	se := aggregate.SessionEntry{
+		Status: session.Idle,
+		LastError: &transcript.ErrorRecord{
+			Kind: transcript.ErrUnknown, IsTerminal: false, IsRetryable: true,
+		},
+	}
+	glyph := RenderSessionGlyph(se)
+	if strings.Contains(glyph, "⚠") || strings.Contains(glyph, "✗") {
+		t.Errorf("glyph = %q, want no error glyph (LastError not terminal)", glyph)
+	}
+}
+
+func TestSessionRowGlyphPendingNudgeMarker(t *testing.T) {
+	se := aggregate.SessionEntry{
+		Status:       session.Idle,
+		PendingNudge: &aggregate.PendingNudge{Sources: []string{"manual"}},
+	}
+	glyph := RenderSessionGlyph(se)
+	if !strings.Contains(glyph, "↪") {
+		t.Errorf("glyph = %q, want contains ↪ for pending nudge", glyph)
+	}
+}
+
+func TestSessionRowGlyphWorkingOverridesEverything(t *testing.T) {
+	se := aggregate.SessionEntry{
+		Status: session.Working,
+		LastError: &transcript.ErrorRecord{
+			Kind: transcript.ErrUnknown, IsTerminal: true, IsRetryable: true,
+		},
+		PendingNudge: &aggregate.PendingNudge{Sources: []string{"manual"}},
+	}
+	glyph := RenderSessionGlyph(se)
+	if strings.Contains(glyph, "⚠") || strings.Contains(glyph, "↪") {
+		t.Errorf("glyph = %q, want working glyph only", glyph)
+	}
+}
+```
+
+- [ ] **Step 3: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./internal/render/ -run TestSessionRowGlyph`
+Expected: FAIL — `undefined: RenderSessionGlyph` (or the existing function doesn't handle these cases).
+
+- [ ] **Step 4: Implement**
+
+In `internal/render/session_row.go`:
+
+```go
+const (
+	glyphRetryableErr    = "⚠"
+	glyphNonRetryableErr = "✗"
+	glyphPendingNudge    = "↪"
+)
+
+// RenderSessionGlyph returns the row glyph + decorations for se.
+// Precedence: Working > LastError.IsTerminal > Idle/Dormant baseline.
+// PendingNudge marker is appended unless the primary glyph is Working.
+func RenderSessionGlyph(se aggregate.SessionEntry) string {
+	if se.Status == session.Working {
+		return workingGlyph // existing constant
+	}
+	base := idleOrDormantGlyph(se.Status) // existing helper or inline
+	if se.LastError != nil && se.LastError.IsTerminal {
+		if se.LastError.IsRetryable {
+			base = glyphRetryableErr
+		} else {
+			base = glyphNonRetryableErr
+		}
+	}
+	if se.PendingNudge != nil && len(se.PendingNudge.Sources) > 0 {
+		return base + glyphPendingNudge
+	}
+	return base
+}
+```
+
+Replace the previous glyph-rendering code at call sites with this function.
+
+- [ ] **Step 5: Add details-pane rendering for LastError + PendingNudge**
+
+In the details rendering (probably `internal/render/details.go`):
+
+```go
+func RenderSessionDetails(se aggregate.SessionEntry) string {
+	var b strings.Builder
+	// ... existing detail fields ...
+	if se.LastError != nil && se.LastError.IsTerminal {
+		fmt.Fprintf(&b, "Last error:    %s%s\n", se.LastError.Kind, escalatedSuffix(se))
+		fmt.Fprintf(&b, "               %s\n", truncate(se.LastError.Text, 200))
+		fmt.Fprintf(&b, "               %s ago\n", humanizeAge(time.Since(se.LastError.At)))
+	}
+	if se.PendingNudge != nil && len(se.PendingNudge.Sources) > 0 {
+		fmt.Fprintf(&b, "Pending nudge: %v\n", se.PendingNudge.Sources)
+	}
+	return b.String()
+}
+
+func escalatedSuffix(se aggregate.SessionEntry) string {
+	// LastError.IsRetryable flips to false after escalation. We can't tell
+	// "escalated" from "originally non-retryable" purely from IsRetryable,
+	// so include the kind: if kind is in the retryable allowlist but
+	// IsRetryable is false, that's escalation.
+	if se.LastError != nil &&
+		(se.LastError.Kind == transcript.ErrUnknown || se.LastError.Kind == transcript.ErrServerError) &&
+		!se.LastError.IsRetryable {
+		return "  (escalated)"
+	}
+	return ""
+}
+```
+
+- [ ] **Step 6: Run all render tests**
+
+Run: `cd packages/pa-monitor && go test ./internal/render/ -v`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/pa-monitor/internal/render/
+git commit -m "feat(pa-monitor): TUI session-row glyphs + LastError/PendingNudge details"
+```
+
+---
+
+## Phase 8 — CLI
+
+### Task 8.1: `pa-monitor nudge <sel>` → NudgeQueue (replace synchronous Nudge)
+
+**Files:**
+
+- Modify: `packages/pa-monitor/cmd/pa-monitor/cli.go` or wherever the nudge subcommand is parsed
+- Modify: `packages/pa-monitor/cmd/pa-monitor/main.go`
+- Test: `packages/pa-monitor/cmd/pa-monitor/main_test.go` or `main_dispatch_test.go`
+
+- [ ] **Step 1: Locate existing nudge subcommand**
+
+Run: `cd packages/pa-monitor && grep -rn "nudge" cmd/pa-monitor/`
+
+Identify the dispatch site that calls the existing `Nudge` RPC.
+
+- [ ] **Step 2: Write the failing test**
+
+Append to `main_dispatch_test.go`:
+
+```go
+func TestCLINudgeUsesNudgeQueue(t *testing.T) {
+	fake := &fakeDaemon{} // existing test helper
+	rc := runCLI([]string{"nudge", "session:sid-1"}, fake)
+	if rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if len(fake.nudgeQueueCalls) != 1 {
+		t.Errorf("expected NudgeQueue call, got %d", len(fake.nudgeQueueCalls))
+	}
+	if len(fake.nudgeCalls) != 0 {
+		t.Error("did not expect old Nudge RPC to be invoked")
+	}
+}
+
+func TestCLINudgeCancelFlag(t *testing.T) {
+	fake := &fakeDaemon{}
+	rc := runCLI([]string{"nudge", "session:sid-1", "--cancel"}, fake)
+	if rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if len(fake.nudgeCancelCalls) != 1 {
+		t.Errorf("expected NudgeCancel call, got %d", len(fake.nudgeCancelCalls))
+	}
+}
+```
+
+- [ ] **Step 3: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLINudge`
+Expected: FAIL.
+
+- [ ] **Step 4: Implement**
+
+In `cli.go`, the nudge handler:
+
+```go
+case "nudge":
+	sel, text, cancel, err := parseNudgeFlags(args)
+	if err != nil {
+		return usageError(err)
+	}
+	client := dialDaemon()
+	if cancel {
+		_, err = client.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: sel})
+	} else {
+		_, err = client.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: sel, Text: text})
+	}
+	if err != nil {
+		return errorExit(err)
+	}
+	return 0
+```
+
+`parseNudgeFlags` should parse `--cancel` and `--text=<...>`.
+
+- [ ] **Step 5: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLINudge -v`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/pa-monitor/cmd/pa-monitor/
+git commit -m "feat(pa-monitor): CLI nudge uses NudgeQueue + --cancel flag"
+```
+
+---
+
+### Task 8.2: New `pa-monitor auto-resume on|off|toggle` subcommand
+
+**Files:**
+
+- Create: `packages/pa-monitor/cmd/pa-monitor/auto_resume.go`
+- Modify: `packages/pa-monitor/cmd/pa-monitor/main.go` (subcommand dispatch table)
+- Test: `packages/pa-monitor/cmd/pa-monitor/main_dispatch_test.go`
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestCLIAutoResumeOn(t *testing.T) {
+	fake := &fakeDaemon{}
+	rc := runCLI([]string{"auto-resume", "on"}, fake)
+	if rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if len(fake.setAutoResumeCalls) != 1 || !fake.setAutoResumeCalls[0] {
+		t.Errorf("calls = %v, want [true]", fake.setAutoResumeCalls)
+	}
+}
+
+func TestCLIAutoResumeToggle(t *testing.T) {
+	fake := &fakeDaemon{autoResumeReturn: true}
+	rc := runCLI([]string{"auto-resume", "toggle"}, fake)
+	if rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	// Toggle reads current state via GetState, then flips.
+	if len(fake.setAutoResumeCalls) != 1 {
+		t.Errorf("setAutoResumeCalls = %v, want 1", fake.setAutoResumeCalls)
+	}
+}
+```
+
+- [ ] **Step 2: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIAutoResume`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+```go
+// cmd/pa-monitor/auto_resume.go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+)
+
+func runAutoResume(ctx context.Context, args []string, client pb.PaMonitorClient) error {
+	if len(args) < 1 {
+		return fmt.Errorf("auto-resume requires on|off|toggle")
+	}
+	var want bool
+	switch args[0] {
+	case "on":
+		want = true
+	case "off":
+		want = false
+	case "toggle":
+		st, err := client.GetState(ctx, &pb.GetStateRequest{})
+		if err != nil {
+			return err
+		}
+		want = !st.GetAutoResumeEnabled()
+	default:
+		return fmt.Errorf("auto-resume: unknown arg %q", args[0])
+	}
+	_, err := client.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: want})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("auto-resume %s\n", boolOnOff(want))
+	return nil
+}
+
+func boolOnOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+```
+
+Add to subcommand dispatch in `main.go`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIAutoResume -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/pa-monitor/cmd/pa-monitor/
+git commit -m "feat(pa-monitor): pa-monitor auto-resume on|off|toggle subcommand"
+```
+
+---
+
+### Task 8.3: `pa-monitor status` shows LastError + Pending nudge
+
+**Files:**
+
+- Modify: `packages/pa-monitor/cmd/pa-monitor/cli.go` (the status subcommand)
+- Modify: `packages/pa-monitor/cmd/pa-monitor/control.go` (or wherever rendering lives)
+- Test: existing status tests (extend) or new one.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestCLIStatusShowsLastErrorWhenTerminal(t *testing.T) {
+	fake := &fakeDaemon{
+		state: stateWithSession("sid-1", session.Idle,
+			&transcript.ErrorRecord{Kind: transcript.ErrUnknown, IsTerminal: true, IsRetryable: true,
+				Text: "API Error: socket closed", At: time.Now().Add(-1 * time.Minute)},
+			nil),
+	}
+	out := captureStdout(t, func() { runCLI([]string{"status"}, fake) })
+	if !strings.Contains(out, "unknown") || !strings.Contains(out, "socket closed") {
+		t.Errorf("status output missing LastError info; got: %s", out)
+	}
+}
+
+func TestCLIStatusOmitsLastErrorWhenNotTerminal(t *testing.T) {
+	fake := &fakeDaemon{
+		state: stateWithSession("sid-1", session.Working,
+			&transcript.ErrorRecord{Kind: transcript.ErrUnknown, IsTerminal: false, IsRetryable: true,
+				Text: "API Error: socket closed"},
+			nil),
+	}
+	out := captureStdout(t, func() { runCLI([]string{"status"}, fake) })
+	if strings.Contains(out, "socket closed") {
+		t.Errorf("status output includes stale error text; got: %s", out)
+	}
+}
+
+func TestCLIStatusShowsPendingNudge(t *testing.T) {
+	fake := &fakeDaemon{
+		state: stateWithSession("sid-1", session.Idle, nil,
+			&aggregate.PendingNudge{Sources: []string{"manual"}}),
+	}
+	out := captureStdout(t, func() { runCLI([]string{"status"}, fake) })
+	if !strings.Contains(out, "nudge") {
+		t.Errorf("status output missing nudge indicator; got: %s", out)
+	}
+}
+```
+
+- [ ] **Step 2: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIStatus`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement status enrichment**
+
+In the status renderer, after the existing per-session row formatting, add a column for ERROR (gated on `LastError != nil && LastError.IsTerminal`) and a NUDGE marker for pending intents. The exact format depends on existing output — keep table layout consistent.
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIStatus -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/pa-monitor/cmd/pa-monitor/
+git commit -m "feat(pa-monitor): CLI status shows LastError + pending nudge"
+```
+
+---
+
+### Task 8.4: `pa-monitor info <sel>` shows LastError + Pending nudge
+
+**Files:**
+
+- Modify: `packages/pa-monitor/cmd/pa-monitor/cli.go` or wherever `info` subcommand renders
+- Test: extend the existing info test or add a new one.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestCLIInfoIncludesLastErrorSection(t *testing.T) {
+	fake := &fakeDaemon{
+		sessionDetail: detailWithError("sid-1",
+			&transcript.ErrorRecord{Kind: transcript.ErrServerError, IsTerminal: true, IsRetryable: true,
+				Text: "API Error: 529 Overloaded.", At: time.Now().Add(-2 * time.Minute)}),
+	}
+	out := captureStdout(t, func() { runCLI([]string{"info", "session:sid-1"}, fake) })
+	if !strings.Contains(out, "Last error") || !strings.Contains(out, "server_error") {
+		t.Errorf("info output missing Last error section; got: %s", out)
+	}
+}
+
+func TestCLIInfoIncludesPendingNudge(t *testing.T) {
+	fake := &fakeDaemon{
+		sessionDetail: detailWithPending("sid-1",
+			&aggregate.PendingNudge{Sources: []string{"disrupted", "manual"}}),
+	}
+	out := captureStdout(t, func() { runCLI([]string{"info", "session:sid-1"}, fake) })
+	if !strings.Contains(out, "Pending nudge") {
+		t.Errorf("info output missing Pending nudge section; got: %s", out)
+	}
+}
+```
+
+- [ ] **Step 2: Run to verify fail**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIInfo`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+In the info renderer, after the existing fields, append:
+
+```go
+if se.LastError != nil && se.LastError.IsTerminal {
+	fmt.Fprintf(out, "Last error:    %s\n", se.LastError.Kind)
+	fmt.Fprintf(out, "               %s\n", se.LastError.Text)
+	fmt.Fprintf(out, "               %s ago\n", humanizeAge(time.Since(se.LastError.At)))
+}
+if se.PendingNudge != nil && len(se.PendingNudge.Sources) > 0 {
+	fmt.Fprintf(out, "Pending nudge: %v\n", se.PendingNudge.Sources)
+}
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./cmd/pa-monitor/ -run TestCLIInfo -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/pa-monitor/cmd/pa-monitor/
+git commit -m "feat(pa-monitor): CLI info shows Last error + Pending nudge sections"
+```
+
+---
+
+## Phase 9 — OTel additions
+
+### Task 9.1: New counters + gauge + log events
+
+**Files:**
+
+- Modify: `packages/pa-monitor/internal/otel/` (find the instrument-registration file)
+- Modify: `packages/pa-monitor/internal/daemon/nudger_runtime.go` (the Recorder impl from Task 5.2 — actually emit events here)
+- Modify: `packages/pa-monitor/internal/daemon/lifecycle.go` (emit api_error.observed when snapshot first sees a new LastError; emit sessions.errored gauge from the tick)
+- Test: `packages/pa-monitor/internal/otel/` tests (existing) — extend.
+
+- [ ] **Step 1: Add new instruments**
+
+In the OTel meter-init file (search for `pa.nudge.sent` or `Meter().Int64Counter`):
+
+```go
+// new instruments
+sessionsErrored, _ = meter.Int64ObservableGauge("pa.sessions.errored")
+apiErrorObserved, _ = meter.Int64Counter("pa.session.api_error.observed")
+nudgeQueued, _      = meter.Int64Counter("pa.nudge.queued")
+nudgeSuppressed, _  = meter.Int64Counter("pa.nudge.suppressed")
+// extend existing nudge.sent: callers now pass {sources, error_kind, escalated} attributes
+```
+
+Register the observable-gauge callback that walks the current tree and emits per-kind counts of sessions whose `LastError.IsTerminal == true`.
+
+- [ ] **Step 2: Wire `Recorder` emit paths in `nudger_runtime.go`**
+
+Replace the stub bodies of `RecordSuppressed` and `RecordSent` in `WatermarkStore`:
+
+```go
+func (w *WatermarkStore) RecordSuppressed(sid string, sources []nudger.Source, cause string) {
+	srcList := joinSources(sources)
+	w.otel.NudgeSuppressed.Add(context.Background(), 1,
+		metric.WithAttributes(
+			attribute.String("cause", cause),
+			attribute.String("sources", srcList),
+		))
+	// Log event
+	w.otel.Logger.Info("nudge.suppressed",
+		"session_id", sid, "sources", srcList, "cause", cause)
+}
+
+func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKind string, escalated bool) {
+	srcList := joinSources(sources)
+	w.otel.NudgeSent.Add(context.Background(), 1,
+		metric.WithAttributes(
+			attribute.String("sources", srcList),
+			attribute.String("error_kind", errorKind),
+			attribute.Bool("escalated", escalated),
+		))
+	w.otel.Logger.Info("nudge.sent",
+		"session_id", sid, "sources", srcList, "error_kind", errorKind, "escalated", escalated)
+}
+```
+
+`w.otel` is a new field that holds the meter/counter/logger refs; thread it through `NewWatermarkStore`. `joinSources` returns sources sorted + comma-joined for stable label values.
+
+- [ ] **Step 3: Emit `api_error.observed` when snapshot first sees a new LastError**
+
+In the daemon tick (lifecycle.go), after building the tree:
+
+```go
+// Diff against state.previousErrors: for each session whose LastError.At
+// is newer than what we last saw, increment the counter.
+for sid, se := range currentSessions(state.Tree) {
+	if se.LastError == nil {
+		continue
+	}
+	if !se.LastError.At.After(state.previousErrors[sid]) {
+		continue
+	}
+	state.previousErrors[sid] = se.LastError.At
+	apiErrorObserved.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("kind", string(se.LastError.Kind)),
+	))
+	// Log event
+	logger.Info("session.api_error.observed",
+		"session_id", sid,
+		"kind", string(se.LastError.Kind),
+		"text", truncate(se.LastError.Text, 256),
+		"at", se.LastError.At,
+		"is_terminal", se.LastError.IsTerminal,
+	)
+}
+```
+
+- [ ] **Step 4: Add tests for emission paths**
+
+Use the existing OTel test infrastructure (look for `labelled_emit_test.go`'s pattern) to assert the new counters fire on a fake/in-memory exporter:
+
+```go
+func TestRecordSentEmitsCounter(t *testing.T) {
+	exp := newInMemoryExporter()
+	w, _ := newWatermarkStoreWithExporter(t, exp)
+	w.RecordSent("sid-1", []nudger.Source{nudger.SourceManual}, "unknown", true)
+	got := exp.CounterValue("pa.nudge.sent", map[string]string{
+		"sources": "manual", "error_kind": "unknown", "escalated": "true",
+	})
+	if got != 1 {
+		t.Errorf("counter = %d, want 1", got)
+	}
+}
+```
+
+- [ ] **Step 5: Run tests**
+
+Run: `cd packages/pa-monitor && go test ./internal/otel/ ./internal/daemon/ -v`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/pa-monitor/internal/otel/ \
+        packages/pa-monitor/internal/daemon/nudger_runtime.go \
+        packages/pa-monitor/internal/daemon/lifecycle.go
+git commit -m "feat(pa-monitor): OTel api_error.observed + nudge.queued/suppressed counters"
+```
+
+---
+
+## Phase 10 — Grafana dashboard
+
+### Task 10.1: New "API Errors & Nudges" row
+
+**Files:**
+
+- Modify: `packages/pa-monitor/grafana/pa-monitor-overview.json`
+
+- [ ] **Step 1: Add new dashboard row**
+
+Edit the JSON. Add a new row after the existing nudges row:
+
+```json
+{
+  "title": "API Errors & Nudges",
+  "type": "row",
+  "panels": [
+    {
+      "title": "API errors observed",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(pa_session_api_error_observed_total[5m]))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "stacking": { "mode": "normal" }
+    },
+    {
+      "title": "Sessions currently errored (terminal)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (kind) (pa_sessions_errored{is_terminal=\"true\"})",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "title": "Stuck on retryable error",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(pa_sessions_errored{kind=~\"unknown|server_error\",is_terminal=\"true\"})"
+        }
+      ]
+    },
+    {
+      "title": "Nudges suppressed (1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(pa_nudge_suppressed_total[1h]))"
+        }
+      ]
+    },
+    {
+      "title": "Nudges sent by source",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (sources) (rate(pa_nudge_sent_total[5m]))",
+          "legendFormat": "{{sources}}"
+        }
+      ],
+      "stacking": { "mode": "normal" }
+    }
+  ]
+}
+```
+
+(Slot the row into the existing `panels` array at a sensible position; pick unused `id` values; respect the existing grid layout.)
+
+- [ ] **Step 2: Validate JSON**
+
+Run: `cd packages/pa-monitor && python3 -m json.tool grafana/pa-monitor-overview.json > /dev/null`
+Expected: no error (file parses as JSON).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/pa-monitor/grafana/pa-monitor-overview.json
+git commit -m "feat(pa-monitor): Grafana API Errors & Nudges row"
+```
+
+---
+
+## End-to-end smoke (manual)
+
+After all phases land, exercise live:
+
+1. `pa-monitor daemon` running.
+2. Start a Claude Code session in a tmux pane.
+3. Disable network (e.g., `sudo ifconfig en0 down`) mid-request, wait for transcript to record a synthetic isApiErrorMessage with error=unknown.
+4. Re-enable network (`sudo ifconfig en0 up`).
+5. Wait `disrupt_grace_s + auto_resume_delay_s`. Confirm:
+   - `pa-monitor status` shows `unknown` error + `nudge queued`.
+   - The daemon log records `nudge.sent {sources=disrupted}`.
+   - The Claude Code session receives the nudge text.
+6. Same flow with 5h limit:
+   - Force a rate-limit (or wait for organic). Verify `pa-monitor status` shows the window countdown; after reset, daemon nudges all idle sessions.
+7. Manual flow:
+   - `pa-monitor nudge session:<sid>` queues; verify `pa-monitor info session:<sid>` shows `Pending nudge: [manual]` until the daemon fires.
+   - `pa-monitor nudge session:<sid> --cancel` cancels before fire.
+8. Grafana dashboard: confirm the new row populates after the above events.
+
+---
+
+## Self-review notes (post-write)
+
+- Spec coverage: producers/dispatcher/store/persistence/RPC/TUI/CLI/OTel/Grafana — each spec section has a task (or task cluster).
+- Type consistency: `ErrorKind`/`ErrorRecord`/`IntentKey`/`NudgeIntent`/`Source` names match across Phase 1-4 tasks. `PendingNudge` matches between aggregate.go (Task 1.5), proto (Task 6.1), and translate (Task 6.3).
+- Placeholders: none — every code step has the actual code.
+- Big-ticket risks:
+  - Phase 7 (TUI) touches many existing files; the engineer must read the current Model definition first. The tasks describe shape but not byte-for-byte deletions; this is intentional because the existing file is large.
+  - Phase 9 OTel wiring assumes the existing meter is reachable; refactor of how `WatermarkStore` receives the meter may be needed depending on current factoring.
