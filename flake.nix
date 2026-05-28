@@ -343,6 +343,23 @@
               touch $out
             '';
 
+            check-pgii-pack-workers-layout =
+              pkgs.runCommand "check-pgii-pack-workers-layout" { nativeBuildInputs = [ pkgs.jq ]; }
+                ''
+                  pack=${pkgs.pgii-pack-workers}
+                  test -f "$pack/pack.toml"                                    || { echo "missing pack.toml"; exit 1; }
+                  test -f "$pack/.pack-meta.json"                              || { echo "missing .pack-meta.json"; exit 1; }
+                  test "$(jq -r .scope "$pack/.pack-meta.json")" = "rig"       || { echo ".pack-meta.json scope != rig"; exit 1; }
+                  test -f "$pack/agents/worker/agent.toml"                     || { echo "missing agent.toml"; exit 1; }
+                  test -f "$pack/agents/worker/prompt.template.md"             || { echo "missing prompt.template.md"; exit 1; }
+                  test -x "$pack/agents/worker/scripts/bash-env.sh"            || { echo "bash-env.sh not exec"; exit 1; }
+                  grep -qE '\{\{[[:space:]]*\.Rig(Name|Root|)[[:space:]]*\}\}' "$pack/agents/worker/prompt.template.md" || { echo "go-template markers stripped"; exit 1; }
+                  grep -qE 'BASH_ENV = "/nix/store/[^/]+-pgii-workers-' "$pack/agents/worker/agent.toml" || { echo "PACK_ROOT not substituted in agent.toml"; exit 1; }
+                  ! find "$pack" -name "*.template" -not -name "prompt.template.md" | grep -q . || { echo "stale envsubst .template files"; exit 1; }
+                  ! grep -rnE '/Users/phillipg/gc/assets/imports' "$pack" >/dev/null 2>&1 || { echo "stale legacy assets paths"; exit 1; }
+                  touch $out
+                '';
+
             test-pgii-pack-dolt-hacks-bats =
               pkgs.runCommand "test-pgii-pack-dolt-hacks-bats"
                 {
