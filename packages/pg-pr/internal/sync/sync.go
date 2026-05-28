@@ -328,6 +328,19 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		}
 	}
 
+	// Bulk-fetch per-repo lookup tables (TickCache) before the per-PR
+	// loop. Each cache replaces several bd calls per PR (open processing
+	// cycles, feedback-by-cycle, human labels). Test-injected bd clients
+	// don't implement *beads.Client, so cacheByRepo only gets entries
+	// for real clients — the per-PR helpers fall back to live calls when
+	// no cache is present.
+	cachesByRepo := make(map[string]*beads.TickCache, len(repoClients))
+	for repo, bdc := range repoClients {
+		if c, ok := bdc.(*beads.Client); ok {
+			cachesByRepo[repo] = c.LoadTickCache(ctx)
+		}
+	}
+
 	// Upsert beads for each observed PR. Each PR is dispatched against its
 	// own monorepo's bd client.
 	for key, pr := range observed {
@@ -382,7 +395,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			}
 
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
-			if err := e.processFeedback(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
+			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], key.Repo, pr, prBeadID, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -495,7 +508,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// bd dep tree) and store. Best-effort — errors during gathering are
 	// absorbed so a partial snapshot still lands.
 	if e.deps.Snapshot != nil {
-		e.buildAndStoreSnapshot(ctx, observed, repoClients)
+		e.buildAndStoreSnapshot(ctx, observed, repoClients, cachesByRepo)
 	}
 	if len(summary.Errors) > 0 {
 		return summary, fmt.Errorf("sync: %d error(s) (see Summary.Errors)", len(summary.Errors))
@@ -507,21 +520,13 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 // bd dep tree) and stores a snapshot. Errors during gathering are absorbed
 // so partial snapshots are acceptable. When no PRs were observed the
 // previous snapshot is preserved (no overwrite).
-func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]api.PR, repoClients map[string]BeadClient) {
+//
+// cachesByRepo supplies pre-fetched bd lookup tables (human labels,
+// merge-request index). Repos without a cache (test injections) fall
+// back to per-PR live calls.
+func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]api.PR, repoClients map[string]BeadClient, cachesByRepo map[string]*beads.TickCache) {
 	if len(observed) == 0 {
 		return
-	}
-	// One human-label set per workspace (each repo's bd client may target
-	// a different .beads/ workspace). Pre-fetch once so per-PR DepTreeUp
-	// results can be overlaid without a per-dep `bd label list` call —
-	// previously ~4-5 bd calls per PR per tick.
-	humanByRepo := make(map[string]map[string]bool, len(repoClients))
-	for repo, bdc := range repoClients {
-		if c, ok := bdc.(*beads.Client); ok {
-			if set, err := c.HumanLabeledBeads(ctx); err == nil {
-				humanByRepo[repo] = set
-			}
-		}
 	}
 	inputs := make([]snapshot.PRInput, 0, len(observed))
 	for key, pr := range observed {
@@ -568,9 +573,20 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 			bdc = e.bdClientFor(rcfg)
 		}
 		if c, ok := bdc.(*beads.Client); ok {
-			if mr, ferr := c.FindByRepoAndNumber(ctx, key.Repo, pr.Number); ferr == nil && mr != nil {
-				if deps, derr := c.DepTreeUp(ctx, mr.ID); derr == nil {
-					beads.ApplyHumanLabels(deps, humanByRepo[key.Repo])
+			cache := cachesByRepo[key.Repo]
+			var mrID string
+			if mr, found := cache.FindMergeRequest(key.Repo, pr.Number); found {
+				mrID = mr.ID
+			} else {
+				if mr, ferr := c.FindByRepoAndNumber(ctx, key.Repo, pr.Number); ferr == nil && mr != nil {
+					mrID = mr.ID
+				}
+			}
+			if mrID != "" {
+				if deps, derr := c.DepTreeUp(ctx, mrID); derr == nil {
+					if cache != nil {
+						beads.ApplyHumanLabels(deps, cache.HumanLabeled)
+					}
 					in.BeadsDeps = deps
 				}
 			}
@@ -728,8 +744,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	}
 	if !alreadyClosed {
 		summary.BeadsUpdated = 1
-		// Phase 3: feedback + draft pipelines.
-		if err := e.processFeedback(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
+		// Phase 3: feedback + draft pipelines. SyncPR is the single-PR
+		// ad-hoc path; building a TickCache for one PR is wasteful, so
+		// pass nil and let processFeedback fall back to live bd calls.
+		if err := e.processFeedback(ctx, bdc, nil, repo, *pr, prBeadID, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 		if e.isSelfAuthored(pr.Author) {
@@ -951,7 +969,13 @@ func saveState(path string, sf stateFile) error {
 //
 // bdc is the per-repo bd client used for all feedback / processing-cycle
 // operations — bound to the monorepo's bd workspace by the caller.
-func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+//
+// cache, when non-nil, answers the workspace-wide lookups (open processing
+// cycles, feedback under each cycle, fingerprint dedup) from a single
+// per-tick bulk fetch — typically replacing ~5-8 bd calls per PR with
+// in-memory map lookups. When nil, the original per-PR live-call path is
+// used, which is the path tests with mocked BeadClients exercise.
+func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *beads.TickCache, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if prBeadID == "" {
 		return nil
 	}
@@ -999,17 +1023,41 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo strin
 		return nil
 	}
 
-	// Find or create the active processing-cycle for new feedback.
-	cycleID, found, err := bdc.FindOpenProcessingCycle(ctx, prBeadID)
-	if err != nil {
-		return fmt.Errorf("find processing-cycle: %w", err)
+	// Find or create the active processing-cycle for new feedback. The
+	// cache is authoritative when present — it listed every open cycle
+	// in the workspace, so a cache miss means no open cycle exists.
+	var cycleID string
+	var found bool
+	if cache != nil {
+		cycleID, found = cache.OpenCycleFor(prBeadID)
+	} else {
+		var err error
+		cycleID, found, err = bdc.FindOpenProcessingCycle(ctx, prBeadID)
+		if err != nil {
+			return fmt.Errorf("find processing-cycle: %w", err)
+		}
 	}
 
 	// First pass: handle CI events whose conclusion is success and close
 	// any matching prior ci-failure feedback (resolved-upstream).
 	if found {
-		open, err := bdc.ListFeedback(ctx, cycleID, false)
-		if err == nil {
+		var open []beads.Feedback
+		if cache != nil {
+			// FeedbackUnder returns open + closed; the ci-failure
+			// resolver only wants currently-open beads.
+			for _, fb := range cache.FeedbackUnder(cycleID) {
+				if fb.Status != "closed" {
+					open = append(open, fb)
+				}
+			}
+		} else {
+			var err error
+			open, err = bdc.ListFeedback(ctx, cycleID, false)
+			if err != nil {
+				open = nil
+			}
+		}
+		{
 			closedSet := map[string]bool{}
 			for _, ev := range events {
 				if ev.kind != beads.FeedbackKindCIFailure || ev.ciConclusion != "success" {
@@ -1039,12 +1087,18 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo strin
 		}
 		// Dedup: if a feedback with this fingerprint already exists under
 		// any cycle for this PR, skip.
-		existing, err := e.findFeedbackForPR(ctx, bdc, prBeadID, ev.fingerprint)
-		if err != nil {
-			continue
-		}
-		if existing != nil {
-			continue
+		if cache != nil {
+			if _, ok := cache.FindFeedbackForPR(prBeadID, ev.fingerprint); ok {
+				continue
+			}
+		} else {
+			existing, err := e.findFeedbackForPR(ctx, bdc, prBeadID, ev.fingerprint)
+			if err != nil {
+				continue
+			}
+			if existing != nil {
+				continue
+			}
 		}
 
 		if !found {
@@ -1056,10 +1110,13 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo strin
 			cycleID = id
 			found = true
 			summary.CyclesCreated++
+			if cache != nil {
+				cache.OpenProcessingByPR[prBeadID] = cycleID
+			}
 		}
 
 		bdCtx, bdSpan := startBeadsSpan(ctx, "CreateFeedback", repo, pr.Number)
-		_, err = bdc.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
+		newID, err := bdc.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
 			ProcessingCycleID: cycleID,
 			Kind:              ev.kind,
 			ExternalID:        ev.externalID,
@@ -1075,6 +1132,21 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, repo strin
 		}
 		summary.FeedbackCreated++
 		telemetry.FeedbackCreatedTotal.WithLabelValues(repo, string(ev.kind)).Inc()
+		// Augment the cache so same-tick events with duplicate
+		// fingerprints dedup against this newly-created feedback rather
+		// than triggering another bd CreateFeedback.
+		if cache != nil {
+			cache.FeedbackByCycle[cycleID] = append(cache.FeedbackByCycle[cycleID], beads.Feedback{
+				ID:     newID,
+				Status: "hooked",
+				Fields: beads.FeedbackFields{
+					Kind:        string(ev.kind),
+					ExternalID:  ev.externalID,
+					Fingerprint: ev.fingerprint,
+					AuthorRole:  string(ev.authorRole),
+				},
+			})
+		}
 	}
 	return nil
 }
