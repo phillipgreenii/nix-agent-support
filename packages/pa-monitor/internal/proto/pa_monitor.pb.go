@@ -338,6 +338,8 @@ type DaemonState struct {
 	WeekCapUsd          float64                `protobuf:"fixed64,11,opt,name=week_cap_usd,json=weekCapUsd,proto3" json:"week_cap_usd,omitempty"`
 	CcusageProbed       bool                   `protobuf:"varint,12,opt,name=ccusage_probed,json=ccusageProbed,proto3" json:"ccusage_probed,omitempty"`
 	CcusageError        string                 `protobuf:"bytes,13,opt,name=ccusage_error,json=ccusageError,proto3" json:"ccusage_error,omitempty"`
+	AutoResumeEnabled   bool                   `protobuf:"varint,14,opt,name=auto_resume_enabled,json=autoResumeEnabled,proto3" json:"auto_resume_enabled,omitempty"`
+	AutoResumeDelayS    uint32                 `protobuf:"varint,15,opt,name=auto_resume_delay_s,json=autoResumeDelayS,proto3" json:"auto_resume_delay_s,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -461,6 +463,20 @@ func (x *DaemonState) GetCcusageError() string {
 		return x.CcusageError
 	}
 	return ""
+}
+
+func (x *DaemonState) GetAutoResumeEnabled() bool {
+	if x != nil {
+		return x.AutoResumeEnabled
+	}
+	return false
+}
+
+func (x *DaemonState) GetAutoResumeDelayS() uint32 {
+	if x != nil {
+		return x.AutoResumeDelayS
+	}
+	return 0
 }
 
 type Directory struct {
@@ -1404,6 +1420,406 @@ func (x *NudgeResponse) GetPostWindow() bool {
 	return false
 }
 
+type NudgeQueueRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Selector      string                 `protobuf:"bytes,1,opt,name=selector,proto3" json:"selector,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NudgeQueueRequest) Reset() {
+	*x = NudgeQueueRequest{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NudgeQueueRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NudgeQueueRequest) ProtoMessage() {}
+
+func (x *NudgeQueueRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NudgeQueueRequest.ProtoReflect.Descriptor instead.
+func (*NudgeQueueRequest) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *NudgeQueueRequest) GetSelector() string {
+	if x != nil {
+		return x.Selector
+	}
+	return ""
+}
+
+func (x *NudgeQueueRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type NudgeQueueResponse struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	QueuedSessionIds        []string               `protobuf:"bytes,1,rep,name=queued_session_ids,json=queuedSessionIds,proto3" json:"queued_session_ids,omitempty"`
+	AlreadyQueuedSessionIds []string               `protobuf:"bytes,2,rep,name=already_queued_session_ids,json=alreadyQueuedSessionIds,proto3" json:"already_queued_session_ids,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *NudgeQueueResponse) Reset() {
+	*x = NudgeQueueResponse{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NudgeQueueResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NudgeQueueResponse) ProtoMessage() {}
+
+func (x *NudgeQueueResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NudgeQueueResponse.ProtoReflect.Descriptor instead.
+func (*NudgeQueueResponse) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *NudgeQueueResponse) GetQueuedSessionIds() []string {
+	if x != nil {
+		return x.QueuedSessionIds
+	}
+	return nil
+}
+
+func (x *NudgeQueueResponse) GetAlreadyQueuedSessionIds() []string {
+	if x != nil {
+		return x.AlreadyQueuedSessionIds
+	}
+	return nil
+}
+
+type NudgeCancelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Selector      string                 `protobuf:"bytes,1,opt,name=selector,proto3" json:"selector,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NudgeCancelRequest) Reset() {
+	*x = NudgeCancelRequest{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NudgeCancelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NudgeCancelRequest) ProtoMessage() {}
+
+func (x *NudgeCancelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NudgeCancelRequest.ProtoReflect.Descriptor instead.
+func (*NudgeCancelRequest) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *NudgeCancelRequest) GetSelector() string {
+	if x != nil {
+		return x.Selector
+	}
+	return ""
+}
+
+type NudgeCancelResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	CancelledSessionIds []string               `protobuf:"bytes,1,rep,name=cancelled_session_ids,json=cancelledSessionIds,proto3" json:"cancelled_session_ids,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *NudgeCancelResponse) Reset() {
+	*x = NudgeCancelResponse{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NudgeCancelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NudgeCancelResponse) ProtoMessage() {}
+
+func (x *NudgeCancelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NudgeCancelResponse.ProtoReflect.Descriptor instead.
+func (*NudgeCancelResponse) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *NudgeCancelResponse) GetCancelledSessionIds() []string {
+	if x != nil {
+		return x.CancelledSessionIds
+	}
+	return nil
+}
+
+type SetAutoResumeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAutoResumeRequest) Reset() {
+	*x = SetAutoResumeRequest{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAutoResumeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAutoResumeRequest) ProtoMessage() {}
+
+func (x *SetAutoResumeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAutoResumeRequest.ProtoReflect.Descriptor instead.
+func (*SetAutoResumeRequest) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SetAutoResumeRequest) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+type SetAutoResumeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAutoResumeResponse) Reset() {
+	*x = SetAutoResumeResponse{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAutoResumeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAutoResumeResponse) ProtoMessage() {}
+
+func (x *SetAutoResumeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAutoResumeResponse.ProtoReflect.Descriptor instead.
+func (*SetAutoResumeResponse) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SetAutoResumeResponse) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+type ApiError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	At            *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=at,proto3" json:"at,omitempty"`
+	IsTerminal    bool                   `protobuf:"varint,4,opt,name=is_terminal,json=isTerminal,proto3" json:"is_terminal,omitempty"`
+	IsRetryable   bool                   `protobuf:"varint,5,opt,name=is_retryable,json=isRetryable,proto3" json:"is_retryable,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApiError) Reset() {
+	*x = ApiError{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApiError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApiError) ProtoMessage() {}
+
+func (x *ApiError) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApiError.ProtoReflect.Descriptor instead.
+func (*ApiError) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ApiError) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ApiError) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *ApiError) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *ApiError) GetIsTerminal() bool {
+	if x != nil {
+		return x.IsTerminal
+	}
+	return false
+}
+
+func (x *ApiError) GetIsRetryable() bool {
+	if x != nil {
+		return x.IsRetryable
+	}
+	return false
+}
+
+type PendingNudge struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sources       []string               `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PendingNudge) Reset() {
+	*x = PendingNudge{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PendingNudge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PendingNudge) ProtoMessage() {}
+
+func (x *PendingNudge) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PendingNudge.ProtoReflect.Descriptor instead.
+func (*PendingNudge) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *PendingNudge) GetSources() []string {
+	if x != nil {
+		return x.Sources
+	}
+	return nil
+}
+
 type IsAnyBusyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1412,7 +1828,7 @@ type IsAnyBusyRequest struct {
 
 func (x *IsAnyBusyRequest) Reset() {
 	*x = IsAnyBusyRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[17]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1424,7 +1840,7 @@ func (x *IsAnyBusyRequest) String() string {
 func (*IsAnyBusyRequest) ProtoMessage() {}
 
 func (x *IsAnyBusyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[17]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1437,7 +1853,7 @@ func (x *IsAnyBusyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IsAnyBusyRequest.ProtoReflect.Descriptor instead.
 func (*IsAnyBusyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{17}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{25}
 }
 
 type IsAnyBusyResponse struct {
@@ -1450,7 +1866,7 @@ type IsAnyBusyResponse struct {
 
 func (x *IsAnyBusyResponse) Reset() {
 	*x = IsAnyBusyResponse{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[18]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1462,7 +1878,7 @@ func (x *IsAnyBusyResponse) String() string {
 func (*IsAnyBusyResponse) ProtoMessage() {}
 
 func (x *IsAnyBusyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[18]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1475,7 +1891,7 @@ func (x *IsAnyBusyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IsAnyBusyResponse.ProtoReflect.Descriptor instead.
 func (*IsAnyBusyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{18}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *IsAnyBusyResponse) GetAnyBusy() bool {
@@ -1501,7 +1917,7 @@ type GetSessionInfoRequest struct {
 
 func (x *GetSessionInfoRequest) Reset() {
 	*x = GetSessionInfoRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[19]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1929,7 @@ func (x *GetSessionInfoRequest) String() string {
 func (*GetSessionInfoRequest) ProtoMessage() {}
 
 func (x *GetSessionInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[19]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1942,7 @@ func (x *GetSessionInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionInfoRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{19}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetSessionInfoRequest) GetSelector() *Selector {
@@ -1539,14 +1955,16 @@ func (x *GetSessionInfoRequest) GetSelector() *Selector {
 type SessionDetail struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	View          *SessionView           `protobuf:"bytes,1,opt,name=view,proto3" json:"view,omitempty"`
-	LabelPairs    []string               `protobuf:"bytes,2,rep,name=label_pairs,json=labelPairs,proto3" json:"label_pairs,omitempty"` // "key=value" entries from labels
+	LabelPairs    []string               `protobuf:"bytes,2,rep,name=label_pairs,json=labelPairs,proto3" json:"label_pairs,omitempty"`       // "key=value" entries from labels
+	LastError     *ApiError              `protobuf:"bytes,3,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`          // most recent API error, if any
+	PendingNudge  *PendingNudge          `protobuf:"bytes,4,opt,name=pending_nudge,json=pendingNudge,proto3" json:"pending_nudge,omitempty"` // queued nudge waiting for idle, if any
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SessionDetail) Reset() {
 	*x = SessionDetail{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[20]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1558,7 +1976,7 @@ func (x *SessionDetail) String() string {
 func (*SessionDetail) ProtoMessage() {}
 
 func (x *SessionDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[20]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1571,7 +1989,7 @@ func (x *SessionDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDetail.ProtoReflect.Descriptor instead.
 func (*SessionDetail) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{20}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SessionDetail) GetView() *SessionView {
@@ -1588,6 +2006,20 @@ func (x *SessionDetail) GetLabelPairs() []string {
 	return nil
 }
 
+func (x *SessionDetail) GetLastError() *ApiError {
+	if x != nil {
+		return x.LastError
+	}
+	return nil
+}
+
+func (x *SessionDetail) GetPendingNudge() *PendingNudge {
+	if x != nil {
+		return x.PendingNudge
+	}
+	return nil
+}
+
 type GetPathInfoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -1597,7 +2029,7 @@ type GetPathInfoRequest struct {
 
 func (x *GetPathInfoRequest) Reset() {
 	*x = GetPathInfoRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1609,7 +2041,7 @@ func (x *GetPathInfoRequest) String() string {
 func (*GetPathInfoRequest) ProtoMessage() {}
 
 func (x *GetPathInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1622,7 +2054,7 @@ func (x *GetPathInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPathInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetPathInfoRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{21}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GetPathInfoRequest) GetPath() string {
@@ -1641,7 +2073,7 @@ type PathRollup struct {
 
 func (x *PathRollup) Reset() {
 	*x = PathRollup{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1653,7 +2085,7 @@ func (x *PathRollup) String() string {
 func (*PathRollup) ProtoMessage() {}
 
 func (x *PathRollup) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1666,7 +2098,7 @@ func (x *PathRollup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathRollup.ProtoReflect.Descriptor instead.
 func (*PathRollup) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{22}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *PathRollup) GetDirectory() *Directory {
@@ -1686,7 +2118,7 @@ type DrainRequest struct {
 
 func (x *DrainRequest) Reset() {
 	*x = DrainRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1698,7 +2130,7 @@ func (x *DrainRequest) String() string {
 func (*DrainRequest) ProtoMessage() {}
 
 func (x *DrainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1711,7 +2143,7 @@ func (x *DrainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainRequest.ProtoReflect.Descriptor instead.
 func (*DrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{23}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DrainRequest) GetTimeoutMs() uint32 {
@@ -1730,7 +2162,7 @@ type DrainResponse struct {
 
 func (x *DrainResponse) Reset() {
 	*x = DrainResponse{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1742,7 +2174,7 @@ func (x *DrainResponse) String() string {
 func (*DrainResponse) ProtoMessage() {}
 
 func (x *DrainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1755,7 +2187,7 @@ func (x *DrainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainResponse.ProtoReflect.Descriptor instead.
 func (*DrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{24}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DrainResponse) GetClean() bool {
@@ -1782,7 +2214,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x15daemon_uptime_seconds\x18\x02 \x01(\x04R\x13daemonUptimeSeconds\"\r\n" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12*\n" +
-	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xd3\x04\n" +
+	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xb2\x05\n" +
 	"\vDaemonState\x12,\n" +
 	"\x03now\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x03now\x122\n" +
 	"\x15daemon_uptime_seconds\x18\x02 \x01(\x04R\x13daemonUptimeSeconds\x12%\n" +
@@ -1800,7 +2232,9 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\fweek_cap_usd\x18\v \x01(\x01R\n" +
 	"weekCapUsd\x12%\n" +
 	"\x0eccusage_probed\x18\f \x01(\bR\rccusageProbed\x12#\n" +
-	"\rccusage_error\x18\r \x01(\tR\fccusageError\"\xdd\x02\n" +
+	"\rccusage_error\x18\r \x01(\tR\fccusageError\x12.\n" +
+	"\x13auto_resume_enabled\x18\x0e \x01(\bR\x11autoResumeEnabled\x12-\n" +
+	"\x13auto_resume_delay_s\x18\x0f \x01(\rR\x10autoResumeDelayS\"\xdd\x02\n" +
 	"\tDirectory\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12.\n" +
@@ -1892,18 +2326,44 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\verror_count\x18\x02 \x01(\rR\n" +
 	"errorCount\x12\x1f\n" +
 	"\vpost_window\x18\x03 \x01(\bR\n" +
-	"postWindow\"\x12\n" +
+	"postWindow\"C\n" +
+	"\x11NudgeQueueRequest\x12\x1a\n" +
+	"\bselector\x18\x01 \x01(\tR\bselector\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"\x7f\n" +
+	"\x12NudgeQueueResponse\x12,\n" +
+	"\x12queued_session_ids\x18\x01 \x03(\tR\x10queuedSessionIds\x12;\n" +
+	"\x1aalready_queued_session_ids\x18\x02 \x03(\tR\x17alreadyQueuedSessionIds\"0\n" +
+	"\x12NudgeCancelRequest\x12\x1a\n" +
+	"\bselector\x18\x01 \x01(\tR\bselector\"I\n" +
+	"\x13NudgeCancelResponse\x122\n" +
+	"\x15cancelled_session_ids\x18\x01 \x03(\tR\x13cancelledSessionIds\"0\n" +
+	"\x14SetAutoResumeRequest\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"1\n" +
+	"\x15SetAutoResumeResponse\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"\xa2\x01\n" +
+	"\bApiError\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12*\n" +
+	"\x02at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x1f\n" +
+	"\vis_terminal\x18\x04 \x01(\bR\n" +
+	"isTerminal\x12!\n" +
+	"\fis_retryable\x18\x05 \x01(\bR\visRetryable\"(\n" +
+	"\fPendingNudge\x12\x18\n" +
+	"\asources\x18\x01 \x03(\tR\asources\"\x12\n" +
 	"\x10IsAnyBusyRequest\"M\n" +
 	"\x11IsAnyBusyResponse\x12\x19\n" +
 	"\bany_busy\x18\x01 \x01(\bR\aanyBusy\x12\x1d\n" +
 	"\n" +
 	"busy_count\x18\x02 \x01(\rR\tbusyCount\"L\n" +
 	"\x15GetSessionInfoRequest\x123\n" +
-	"\bselector\x18\x01 \x01(\v2\x17.pa_monitor.v1.SelectorR\bselector\"`\n" +
+	"\bselector\x18\x01 \x01(\v2\x17.pa_monitor.v1.SelectorR\bselector\"\xda\x01\n" +
 	"\rSessionDetail\x12.\n" +
 	"\x04view\x18\x01 \x01(\v2\x1a.pa_monitor.v1.SessionViewR\x04view\x12\x1f\n" +
 	"\vlabel_pairs\x18\x02 \x03(\tR\n" +
-	"labelPairs\"(\n" +
+	"labelPairs\x126\n" +
+	"\n" +
+	"last_error\x18\x03 \x01(\v2\x17.pa_monitor.v1.ApiErrorR\tlastError\x12@\n" +
+	"\rpending_nudge\x18\x04 \x01(\v2\x1b.pa_monitor.v1.PendingNudgeR\fpendingNudge\"(\n" +
 	"\x12GetPathInfoRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"D\n" +
 	"\n" +
@@ -1913,7 +2373,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\n" +
 	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs\"%\n" +
 	"\rDrainResponse\x12\x14\n" +
-	"\x05clean\x18\x01 \x01(\bR\x05clean2\xb4\x05\n" +
+	"\x05clean\x18\x01 \x01(\bR\x05clean2\xb9\a\n" +
 	"\tPaMonitor\x12F\n" +
 	"\bGetState\x12\x1e.pa_monitor.v1.GetStateRequest\x1a\x1a.pa_monitor.v1.DaemonState\x12P\n" +
 	"\n" +
@@ -1925,7 +2385,11 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\tIsAnyBusy\x12\x1f.pa_monitor.v1.IsAnyBusyRequest\x1a .pa_monitor.v1.IsAnyBusyResponse\x12T\n" +
 	"\x0eGetSessionInfo\x12$.pa_monitor.v1.GetSessionInfoRequest\x1a\x1c.pa_monitor.v1.SessionDetail\x12K\n" +
 	"\vGetPathInfo\x12!.pa_monitor.v1.GetPathInfoRequest\x1a\x19.pa_monitor.v1.PathRollup\x12B\n" +
-	"\x05Drain\x12\x1b.pa_monitor.v1.DrainRequest\x1a\x1c.pa_monitor.v1.DrainResponseB;Z9github.com/phillipgreenii/pa-monitor/internal/proto;protob\x06proto3"
+	"\x05Drain\x12\x1b.pa_monitor.v1.DrainRequest\x1a\x1c.pa_monitor.v1.DrainResponse\x12Q\n" +
+	"\n" +
+	"NudgeQueue\x12 .pa_monitor.v1.NudgeQueueRequest\x1a!.pa_monitor.v1.NudgeQueueResponse\x12T\n" +
+	"\vNudgeCancel\x12!.pa_monitor.v1.NudgeCancelRequest\x1a\".pa_monitor.v1.NudgeCancelResponse\x12Z\n" +
+	"\rSetAutoResume\x12#.pa_monitor.v1.SetAutoResumeRequest\x1a$.pa_monitor.v1.SetAutoResumeResponseB;Z9github.com/phillipgreenii/pa-monitor/internal/proto;protob\x06proto3"
 
 var (
 	file_internal_proto_pa_monitor_proto_rawDescOnce sync.Once
@@ -1939,7 +2403,7 @@ func file_internal_proto_pa_monitor_proto_rawDescGZIP() []byte {
 	return file_internal_proto_pa_monitor_proto_rawDescData
 }
 
-var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*GetStateRequest)(nil),       // 0: pa_monitor.v1.GetStateRequest
 	(*WatchStateRequest)(nil),     // 1: pa_monitor.v1.WatchStateRequest
@@ -1958,61 +2422,78 @@ var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*Selector)(nil),              // 14: pa_monitor.v1.Selector
 	(*NudgeRequest)(nil),          // 15: pa_monitor.v1.NudgeRequest
 	(*NudgeResponse)(nil),         // 16: pa_monitor.v1.NudgeResponse
-	(*IsAnyBusyRequest)(nil),      // 17: pa_monitor.v1.IsAnyBusyRequest
-	(*IsAnyBusyResponse)(nil),     // 18: pa_monitor.v1.IsAnyBusyResponse
-	(*GetSessionInfoRequest)(nil), // 19: pa_monitor.v1.GetSessionInfoRequest
-	(*SessionDetail)(nil),         // 20: pa_monitor.v1.SessionDetail
-	(*GetPathInfoRequest)(nil),    // 21: pa_monitor.v1.GetPathInfoRequest
-	(*PathRollup)(nil),            // 22: pa_monitor.v1.PathRollup
-	(*DrainRequest)(nil),          // 23: pa_monitor.v1.DrainRequest
-	(*DrainResponse)(nil),         // 24: pa_monitor.v1.DrainResponse
-	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
+	(*NudgeQueueRequest)(nil),     // 17: pa_monitor.v1.NudgeQueueRequest
+	(*NudgeQueueResponse)(nil),    // 18: pa_monitor.v1.NudgeQueueResponse
+	(*NudgeCancelRequest)(nil),    // 19: pa_monitor.v1.NudgeCancelRequest
+	(*NudgeCancelResponse)(nil),   // 20: pa_monitor.v1.NudgeCancelResponse
+	(*SetAutoResumeRequest)(nil),  // 21: pa_monitor.v1.SetAutoResumeRequest
+	(*SetAutoResumeResponse)(nil), // 22: pa_monitor.v1.SetAutoResumeResponse
+	(*ApiError)(nil),              // 23: pa_monitor.v1.ApiError
+	(*PendingNudge)(nil),          // 24: pa_monitor.v1.PendingNudge
+	(*IsAnyBusyRequest)(nil),      // 25: pa_monitor.v1.IsAnyBusyRequest
+	(*IsAnyBusyResponse)(nil),     // 26: pa_monitor.v1.IsAnyBusyResponse
+	(*GetSessionInfoRequest)(nil), // 27: pa_monitor.v1.GetSessionInfoRequest
+	(*SessionDetail)(nil),         // 28: pa_monitor.v1.SessionDetail
+	(*GetPathInfoRequest)(nil),    // 29: pa_monitor.v1.GetPathInfoRequest
+	(*PathRollup)(nil),            // 30: pa_monitor.v1.PathRollup
+	(*DrainRequest)(nil),          // 31: pa_monitor.v1.DrainRequest
+	(*DrainResponse)(nil),         // 32: pa_monitor.v1.DrainResponse
+	(*timestamppb.Timestamp)(nil), // 33: google.protobuf.Timestamp
 }
 var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
 	6,  // 0: pa_monitor.v1.WatchStateEvent.state:type_name -> pa_monitor.v1.DaemonState
 	3,  // 1: pa_monitor.v1.WatchStateEvent.heartbeat:type_name -> pa_monitor.v1.Heartbeat
-	25, // 2: pa_monitor.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
-	25, // 3: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
-	25, // 4: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
+	33, // 2: pa_monitor.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
+	33, // 3: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
+	33, // 4: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
 	7,  // 5: pa_monitor.v1.DaemonState.dirs:type_name -> pa_monitor.v1.Directory
 	10, // 6: pa_monitor.v1.DaemonState.active_block:type_name -> pa_monitor.v1.Block
 	11, // 7: pa_monitor.v1.DaemonState.active_week:type_name -> pa_monitor.v1.Week
-	25, // 8: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
+	33, // 8: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
 	8,  // 9: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
 	9,  // 10: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
-	25, // 11: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	25, // 12: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
-	25, // 13: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
-	25, // 14: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
-	25, // 15: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	25, // 16: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	33, // 11: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	33, // 12: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
+	33, // 13: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
+	33, // 14: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
+	33, // 15: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
+	33, // 16: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
 	14, // 17: pa_monitor.v1.NudgeRequest.selector:type_name -> pa_monitor.v1.Selector
-	14, // 18: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
-	9,  // 19: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
-	7,  // 20: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
-	0,  // 21: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
-	1,  // 22: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
-	4,  // 23: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
-	12, // 24: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
-	15, // 25: pa_monitor.v1.PaMonitor.Nudge:input_type -> pa_monitor.v1.NudgeRequest
-	17, // 26: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
-	19, // 27: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
-	21, // 28: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	23, // 29: pa_monitor.v1.PaMonitor.Drain:input_type -> pa_monitor.v1.DrainRequest
-	6,  // 30: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	2,  // 31: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.WatchStateEvent
-	5,  // 32: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	13, // 33: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	16, // 34: pa_monitor.v1.PaMonitor.Nudge:output_type -> pa_monitor.v1.NudgeResponse
-	18, // 35: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	20, // 36: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	22, // 37: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	24, // 38: pa_monitor.v1.PaMonitor.Drain:output_type -> pa_monitor.v1.DrainResponse
-	30, // [30:39] is the sub-list for method output_type
-	21, // [21:30] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	33, // 18: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	14, // 19: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
+	9,  // 20: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
+	23, // 21: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
+	24, // 22: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
+	7,  // 23: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
+	0,  // 24: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
+	1,  // 25: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
+	4,  // 26: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
+	12, // 27: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
+	15, // 28: pa_monitor.v1.PaMonitor.Nudge:input_type -> pa_monitor.v1.NudgeRequest
+	25, // 29: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
+	27, // 30: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
+	29, // 31: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
+	31, // 32: pa_monitor.v1.PaMonitor.Drain:input_type -> pa_monitor.v1.DrainRequest
+	17, // 33: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	19, // 34: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	21, // 35: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	6,  // 36: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	2,  // 37: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.WatchStateEvent
+	5,  // 38: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	13, // 39: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	16, // 40: pa_monitor.v1.PaMonitor.Nudge:output_type -> pa_monitor.v1.NudgeResponse
+	26, // 41: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	28, // 42: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	30, // 43: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	32, // 44: pa_monitor.v1.PaMonitor.Drain:output_type -> pa_monitor.v1.DrainResponse
+	18, // 45: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	20, // 46: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	22, // 47: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	36, // [36:48] is the sub-list for method output_type
+	24, // [24:36] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_pa_monitor_proto_init() }
@@ -2035,7 +2516,7 @@ func file_internal_proto_pa_monitor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_pa_monitor_proto_rawDesc), len(file_internal_proto_pa_monitor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

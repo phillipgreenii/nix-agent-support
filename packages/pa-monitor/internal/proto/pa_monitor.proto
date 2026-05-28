@@ -42,6 +42,15 @@ service PaMonitor {
   // Drain asks the daemon to flush pending telemetry and shut down
   // cleanly. Used for orderly host shutdown.
   rpc Drain(DrainRequest) returns (DrainResponse);
+
+  // NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
+  rpc NudgeQueue(NudgeQueueRequest) returns (NudgeQueueResponse);
+
+  // NudgeCancel cancels a previously queued nudge.
+  rpc NudgeCancel(NudgeCancelRequest) returns (NudgeCancelResponse);
+
+  // SetAutoResume toggles the auto-resume feature daemon-wide.
+  rpc SetAutoResume(SetAutoResumeRequest) returns (SetAutoResumeResponse);
 }
 
 message GetStateRequest {}
@@ -90,6 +99,8 @@ message DaemonState {
   double week_cap_usd = 11;
   bool ccusage_probed = 12;
   string ccusage_error = 13;
+  bool auto_resume_enabled = 14;
+  uint32 auto_resume_delay_s = 15;
 }
 
 message Directory {
@@ -205,6 +216,46 @@ message NudgeResponse {
   bool post_window = 3; // true when the nudge fired after a 5h block reset
 }
 
+message NudgeQueueRequest {
+  string selector = 1;
+  string text = 2;
+}
+
+message NudgeQueueResponse {
+  repeated string queued_session_ids = 1;
+  repeated string already_queued_session_ids = 2;
+}
+
+message NudgeCancelRequest {
+  string selector = 1;
+}
+
+message NudgeCancelResponse {
+  repeated string cancelled_session_ids = 1;
+}
+
+message SetAutoResumeRequest {
+  bool enabled = 1;
+}
+
+message SetAutoResumeResponse {
+  bool enabled = 1;
+}
+
+// --- ApiError / PendingNudge --- //
+
+message ApiError {
+  string kind = 1;
+  string text = 2;
+  google.protobuf.Timestamp at = 3;
+  bool is_terminal = 4;
+  bool is_retryable = 5;
+}
+
+message PendingNudge {
+  repeated string sources = 1;
+}
+
 // --- IsAnyBusy --- //
 
 message IsAnyBusyRequest {}
@@ -223,6 +274,8 @@ message GetSessionInfoRequest {
 message SessionDetail {
   SessionView view = 1;
   repeated string label_pairs = 2; // "key=value" entries from labels
+  ApiError last_error = 3;         // most recent API error, if any
+  PendingNudge pending_nudge = 4;  // queued nudge waiting for idle, if any
 }
 
 message GetPathInfoRequest {

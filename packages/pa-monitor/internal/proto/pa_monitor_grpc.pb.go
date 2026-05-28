@@ -28,6 +28,9 @@ const (
 	PaMonitor_GetSessionInfo_FullMethodName = "/pa_monitor.v1.PaMonitor/GetSessionInfo"
 	PaMonitor_GetPathInfo_FullMethodName    = "/pa_monitor.v1.PaMonitor/GetPathInfo"
 	PaMonitor_Drain_FullMethodName          = "/pa_monitor.v1.PaMonitor/Drain"
+	PaMonitor_NudgeQueue_FullMethodName     = "/pa_monitor.v1.PaMonitor/NudgeQueue"
+	PaMonitor_NudgeCancel_FullMethodName    = "/pa_monitor.v1.PaMonitor/NudgeCancel"
+	PaMonitor_SetAutoResume_FullMethodName  = "/pa_monitor.v1.PaMonitor/SetAutoResume"
 )
 
 // PaMonitorClient is the client API for PaMonitor service.
@@ -62,6 +65,12 @@ type PaMonitorClient interface {
 	// Drain asks the daemon to flush pending telemetry and shut down
 	// cleanly. Used for orderly host shutdown.
 	Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error)
+	// NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
+	NudgeQueue(ctx context.Context, in *NudgeQueueRequest, opts ...grpc.CallOption) (*NudgeQueueResponse, error)
+	// NudgeCancel cancels a previously queued nudge.
+	NudgeCancel(ctx context.Context, in *NudgeCancelRequest, opts ...grpc.CallOption) (*NudgeCancelResponse, error)
+	// SetAutoResume toggles the auto-resume feature daemon-wide.
+	SetAutoResume(ctx context.Context, in *SetAutoResumeRequest, opts ...grpc.CallOption) (*SetAutoResumeResponse, error)
 }
 
 type paMonitorClient struct {
@@ -171,6 +180,36 @@ func (c *paMonitorClient) Drain(ctx context.Context, in *DrainRequest, opts ...g
 	return out, nil
 }
 
+func (c *paMonitorClient) NudgeQueue(ctx context.Context, in *NudgeQueueRequest, opts ...grpc.CallOption) (*NudgeQueueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NudgeQueueResponse)
+	err := c.cc.Invoke(ctx, PaMonitor_NudgeQueue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) NudgeCancel(ctx context.Context, in *NudgeCancelRequest, opts ...grpc.CallOption) (*NudgeCancelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NudgeCancelResponse)
+	err := c.cc.Invoke(ctx, PaMonitor_NudgeCancel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paMonitorClient) SetAutoResume(ctx context.Context, in *SetAutoResumeRequest, opts ...grpc.CallOption) (*SetAutoResumeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAutoResumeResponse)
+	err := c.cc.Invoke(ctx, PaMonitor_SetAutoResume_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PaMonitorServer is the server API for PaMonitor service.
 // All implementations must embed UnimplementedPaMonitorServer
 // for forward compatibility.
@@ -203,6 +242,12 @@ type PaMonitorServer interface {
 	// Drain asks the daemon to flush pending telemetry and shut down
 	// cleanly. Used for orderly host shutdown.
 	Drain(context.Context, *DrainRequest) (*DrainResponse, error)
+	// NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
+	NudgeQueue(context.Context, *NudgeQueueRequest) (*NudgeQueueResponse, error)
+	// NudgeCancel cancels a previously queued nudge.
+	NudgeCancel(context.Context, *NudgeCancelRequest) (*NudgeCancelResponse, error)
+	// SetAutoResume toggles the auto-resume feature daemon-wide.
+	SetAutoResume(context.Context, *SetAutoResumeRequest) (*SetAutoResumeResponse, error)
 	mustEmbedUnimplementedPaMonitorServer()
 }
 
@@ -239,6 +284,15 @@ func (UnimplementedPaMonitorServer) GetPathInfo(context.Context, *GetPathInfoReq
 }
 func (UnimplementedPaMonitorServer) Drain(context.Context, *DrainRequest) (*DrainResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Drain not implemented")
+}
+func (UnimplementedPaMonitorServer) NudgeQueue(context.Context, *NudgeQueueRequest) (*NudgeQueueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NudgeQueue not implemented")
+}
+func (UnimplementedPaMonitorServer) NudgeCancel(context.Context, *NudgeCancelRequest) (*NudgeCancelResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NudgeCancel not implemented")
+}
+func (UnimplementedPaMonitorServer) SetAutoResume(context.Context, *SetAutoResumeRequest) (*SetAutoResumeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetAutoResume not implemented")
 }
 func (UnimplementedPaMonitorServer) mustEmbedUnimplementedPaMonitorServer() {}
 func (UnimplementedPaMonitorServer) testEmbeddedByValue()                   {}
@@ -416,6 +470,60 @@ func _PaMonitor_Drain_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PaMonitor_NudgeQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NudgeQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).NudgeQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaMonitor_NudgeQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).NudgeQueue(ctx, req.(*NudgeQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_NudgeCancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NudgeCancelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).NudgeCancel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaMonitor_NudgeCancel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).NudgeCancel(ctx, req.(*NudgeCancelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaMonitor_SetAutoResume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAutoResumeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).SetAutoResume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaMonitor_SetAutoResume_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).SetAutoResume(ctx, req.(*SetAutoResumeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PaMonitor_ServiceDesc is the grpc.ServiceDesc for PaMonitor service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -454,6 +562,18 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Drain",
 			Handler:    _PaMonitor_Drain_Handler,
+		},
+		{
+			MethodName: "NudgeQueue",
+			Handler:    _PaMonitor_NudgeQueue_Handler,
+		},
+		{
+			MethodName: "NudgeCancel",
+			Handler:    _PaMonitor_NudgeCancel_Handler,
+		},
+		{
+			MethodName: "SetAutoResume",
+			Handler:    _PaMonitor_SetAutoResume_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
