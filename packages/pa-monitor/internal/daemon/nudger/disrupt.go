@@ -73,8 +73,10 @@ func (p *DisruptProducer) reconcileSession(ctx TickContext, store *PendingStore,
 	isNewError := s.LastError.At.After(wm.LastDisruptNudgeFor)
 
 	if isNewError {
-		// Cancel any stale intent.
+		// Cancel any stale intent and clear the escalation flag so the new
+		// error can go through the full nudge → escalate cycle again.
 		store.Cancel(key)
+		ctx.Watermarks.SetDisruptEscalated(s.SessionID, false) // re-arm
 		existing, ok := p.firstSeen[s.SessionID]
 		// If firstSeen is absent or predates this error's timestamp, it belongs to
 		// a previous error cycle; reset the grace clock to now and wait.
@@ -89,6 +91,7 @@ func (p *DisruptProducer) reconcileSession(ctx TickContext, store *PendingStore,
 		if !wm.DisruptEscalated &&
 			!wm.LastDisruptNudgeAt.IsZero() &&
 			ctx.Now.Sub(wm.LastDisruptNudgeAt) >= ctx.EscalationAfter {
+			ctx.Watermarks.SetDisruptEscalated(s.SessionID, true)
 			cancel()
 			return
 		}

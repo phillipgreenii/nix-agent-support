@@ -70,6 +70,19 @@ func (s *PendingStore) SourcesFor(sid string) []Source {
 	return out
 }
 
+// RemoveKeys atomically deletes the specifically-observed keys from the
+// store. Unlike ClearSession (which removes all keys for a sid including
+// any added after the initial List snapshot), RemoveKeys only removes the
+// exact keys that were seen before Dispatch began, so concurrently-added
+// intents (e.g. a manual NudgeQueue RPC racing with Dispatch) survive.
+func (s *PendingStore) RemoveKeys(keys []IntentKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range keys {
+		delete(s.intents, k)
+	}
+}
+
 // List returns a snapshot of all pending intents. Order is unspecified;
 // callers that need stable ordering must sort.
 func (s *PendingStore) List() []NudgeIntent {

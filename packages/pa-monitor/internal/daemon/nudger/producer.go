@@ -28,11 +28,17 @@ type TickContext struct {
 	Watermarks WatermarkView
 }
 
-// WatermarkView is the read-only slice of nudger state visible to
-// producers. The dispatcher owns writes.
+// WatermarkView is the nudger state visible to producers. Producers may
+// call SetDisruptEscalated to persist escalation transitions; all other
+// watermark writes remain owned by the dispatcher.
 type WatermarkView interface {
 	WindowResetFiredFor() time.Time
 	SessionWatermark(sid string) SessionWatermark
+	// SetDisruptEscalated persists the escalation flag for sid. Called by
+	// DisruptProducer when it detects the session has been stuck past
+	// EscalationAfter. Also used to clear the flag (escalated=false) when a
+	// fresh error arrives.
+	SetDisruptEscalated(sid string, escalated bool)
 }
 
 type SessionWatermark struct {

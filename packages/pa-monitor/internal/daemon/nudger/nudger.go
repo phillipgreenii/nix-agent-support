@@ -23,14 +23,32 @@ func New(signaler Signaler, recorder Recorder) *Nudger {
 	}
 }
 
+// snapshotKeySet captures the current set of intent keys in the store.
+func snapshotKeySet(s *PendingStore) map[IntentKey]struct{} {
+	intents := s.List()
+	out := make(map[IntentKey]struct{}, len(intents))
+	for _, in := range intents {
+		out[in.Key] = struct{}{}
+	}
+	return out
+}
+
 // Reconcile runs all producers (window_reset, disrupted, manual) but does
 // NOT dispatch. Use this to inspect the pending store between reconcile
 // and fire.
 func (n *Nudger) Reconcile(ctx TickContext) {
+	pre := snapshotKeySet(n.store)
 	n.windowProd.Reconcile(ctx, n.store)
 	n.disruptProd.Reconcile(ctx, n.store)
 	// Manual is RPC-driven; Reconcile is a no-op but called for symmetry.
 	n.manualProd.Reconcile(ctx, n.store)
+	// Emit queued_total counter for each newly-added intent.
+	post := snapshotKeySet(n.store)
+	for k := range post {
+		if _, was := pre[k]; !was {
+			n.dispatcher.Recorder.RecordQueued(k.SessionID, k.Source)
+		}
+	}
 }
 
 // Dispatch runs the dispatcher against the current pending store.

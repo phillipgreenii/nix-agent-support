@@ -25,6 +25,10 @@ type Recorder interface {
 	// WindowResetsAt=at fired this tick. Called by the dispatcher exactly
 	// once per tick when any session with SourceWindowReset is dispatched.
 	AdvanceWindowResetFiredFor(at time.Time)
+	// RecordQueued increments pa_monitor.nudge.queued_total once for each
+	// newly-added intent. Called by Nudger.Reconcile after diffing the
+	// pre/post pending-store key sets.
+	RecordQueued(sid string, source Source)
 }
 
 // Dispatcher fires nudges based on the pending store, performs the
@@ -42,8 +46,13 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		return
 	}
 	bySession := map[string][]NudgeIntent{}
+	// keysBySession tracks the exact keys observed at List() time so
+	// RemoveKeys can target only those keys, avoiding a TOCTOU race where a
+	// concurrent NudgeQueue adds an intent between List and removal.
+	keysBySession := map[string][]IntentKey{}
 	for _, in := range intents {
 		bySession[in.Key.SessionID] = append(bySession[in.Key.SessionID], in)
+		keysBySession[in.Key.SessionID] = append(keysBySession[in.Key.SessionID], in.Key)
 	}
 	sids := make([]string, 0, len(bySession))
 	for sid := range bySession {
@@ -55,6 +64,7 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 	windowResetDispatched := false
 	for _, sid := range sids {
 		group := bySession[sid]
+		observedKeys := keysBySession[sid]
 		sources := make([]Source, 0, len(group))
 		for _, in := range group {
 			sources = append(sources, in.Key.Source)
@@ -62,12 +72,12 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 
 		view, ok := sessionsByID[sid]
 		if !ok {
-			store.ClearSession(sid)
+			store.RemoveKeys(observedKeys)
 			continue
 		}
 		if view.Status == session.Working {
 			d.Recorder.RecordSuppressed(sid, sources, "session_active")
-			store.ClearSession(sid)
+			store.RemoveKeys(observedKeys)
 			continue
 		}
 		text := resolveText(group)
@@ -88,7 +98,7 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		escalated := wm.DisruptEscalated
 		d.Recorder.RecordSent(sid, sources, kind, escalated)
 		d.Recorder.UpdateWatermarks(sid, ctx.Now, cause, escalated)
-		store.ClearSession(sid)
+		store.RemoveKeys(observedKeys)
 		for _, in := range group {
 			if in.Key.Source == SourceWindowReset {
 				windowResetDispatched = true

@@ -72,3 +72,62 @@ func TestNudgerCancelManual(t *testing.T) {
 		t.Error("expected no pending after CancelManual")
 	}
 }
+
+// TestNudgerReconcileEmitsQueuedCounter verifies that Reconcile calls
+// RecordQueued exactly once for each newly-added intent (the
+// pa_monitor.nudge.queued_total counter path).
+func TestNudgerReconcileEmitsQueuedCounter(t *testing.T) {
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	// Session with a retryable terminal error; grace=0 so the intent is
+	// added on tick 2 (tick 1 only primes firstSeen).
+	tree := treeWith(time.Time{}, sessionWithError(
+		"sid-q", transcript.ErrUnknown, now.Add(-31*time.Second), true,
+	))
+	tree.Dirs[0].Sessions[0].PID = 5555
+	tree.Dirs[0].Sessions[0].Status = session.Idle
+
+	rec := &fakeRecorder{}
+	n := New(&fakeSignaler{}, rec)
+
+	// Tick 1: primes firstSeen — no intent added yet.
+	n.Reconcile(TickContext{
+		Now: now.Add(-31 * time.Second), AutoResumeEnabled: true,
+		AutoResumeMessage: "continue", DisruptGrace: 30 * time.Second,
+		EscalationAfter: 60 * time.Second, Tree: tree, Watermarks: wmStub{},
+	})
+	rec.mu.Lock()
+	queuedAfterTick1 := len(rec.queuedOps)
+	rec.mu.Unlock()
+	if queuedAfterTick1 != 0 {
+		t.Errorf("tick 1: RecordQueued called %d times, want 0 (grace not elapsed)", queuedAfterTick1)
+	}
+
+	// Tick 2: grace elapsed; intent added — RecordQueued should fire once.
+	n.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true,
+		AutoResumeMessage: "continue", DisruptGrace: 30 * time.Second,
+		EscalationAfter: 60 * time.Second, Tree: tree, Watermarks: wmStub{},
+	})
+	rec.mu.Lock()
+	queuedAfterTick2 := len(rec.queuedOps)
+	rec.mu.Unlock()
+	if queuedAfterTick2 != 1 {
+		t.Errorf("tick 2: RecordQueued called %d times, want 1", queuedAfterTick2)
+	}
+	if rec.queuedOps[0] != "sid-q:disrupted" {
+		t.Errorf("RecordQueued arg = %q, want sid-q:disrupted", rec.queuedOps[0])
+	}
+
+	// Tick 3: same intent already in store — RecordQueued must NOT fire again.
+	n.Reconcile(TickContext{
+		Now: now.Add(1 * time.Second), AutoResumeEnabled: true,
+		AutoResumeMessage: "continue", DisruptGrace: 30 * time.Second,
+		EscalationAfter: 60 * time.Second, Tree: tree, Watermarks: wmStub{},
+	})
+	rec.mu.Lock()
+	queuedAfterTick3 := len(rec.queuedOps)
+	rec.mu.Unlock()
+	if queuedAfterTick3 != 1 {
+		t.Errorf("tick 3: RecordQueued called %d times (total), want 1 (idempotent)", queuedAfterTick3)
+	}
+}

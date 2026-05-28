@@ -73,6 +73,16 @@ func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
 
 // --- nudger.Recorder ---
 
+func (w *WatermarkStore) RecordQueued(sid string, source nudger.Source) {
+	if w.emitter == nil {
+		return
+	}
+	w.emitter.RecordNudgeQueued(map[string]string{
+		"session_id": sid,
+		"source":     string(source),
+	})
+}
+
 func (w *WatermarkStore) RecordSuppressed(sid string, sources []nudger.Source, cause string) {
 	if w.emitter == nil {
 		return
@@ -112,6 +122,20 @@ func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, cause *tran
 	wm.DisruptEscalated = escalated
 	w.state.Nudger.Sessions[sid] = wm
 	_ = WriteRuntimeState(w.path, w.state) // best-effort
+}
+
+// SetDisruptEscalated implements nudger.WatermarkView. It persists the
+// escalation flag for sid into runtime.json (best-effort).
+func (w *WatermarkStore) SetDisruptEscalated(sid string, escalated bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state.Nudger.Sessions == nil {
+		w.state.Nudger.Sessions = map[string]NudgerSessionWatermarks{}
+	}
+	wm := w.state.Nudger.Sessions[sid]
+	wm.DisruptEscalated = escalated
+	w.state.Nudger.Sessions[sid] = wm
+	_ = WriteRuntimeState(w.path, w.state)
 }
 
 // --- additional store API used by daemon ---

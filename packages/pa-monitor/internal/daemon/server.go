@@ -110,12 +110,14 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 		return nil, status.Errorf(codes.InvalidArgument, "Caffeinate: action must be on|off|toggle, got %q", req.GetAction())
 	}
 	s.state.setCaffeinateOn(target)
-	// Persist to runtime.json (best-effort).
+	// Persist to runtime.json via read-modify-write so other fields are preserved.
 	s.state.mu.RLock()
 	path := s.state.runtimePath
 	s.state.mu.RUnlock()
 	if path != "" {
-		_ = WriteRuntimeState(path, RuntimeState{CaffeinateOn: target})
+		state, _ := ReadRuntimeState(path) // best-effort; missing file → empty
+		state.CaffeinateOn = target
+		_ = WriteRuntimeState(path, state)
 	}
 	active, cause := s.state.caffeinateView()
 	return &pb.CaffeinateResponse{Active: active, Cause: cause}, nil

@@ -9,13 +9,19 @@ import (
 )
 
 type wmStub struct {
-	wr  time.Time
-	per map[string]SessionWatermark
+	wr        time.Time
+	per       map[string]SessionWatermark
+	escalated map[string]bool // tracks SetDisruptEscalated calls (for assertions)
 }
 
 func (w wmStub) WindowResetFiredFor() time.Time { return w.wr }
 func (w wmStub) SessionWatermark(sid string) SessionWatermark {
 	return w.per[sid]
+}
+func (w wmStub) SetDisruptEscalated(sid string, escalated bool) {
+	if w.escalated != nil {
+		w.escalated[sid] = escalated
+	}
 }
 
 func treeWith(windowResetsAt time.Time, sessions ...*aggregate.SessionView) *aggregate.Tree {

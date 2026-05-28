@@ -119,6 +119,88 @@ func TestDisruptProducerEscalatesAfterNudgedAndStillStuck(t *testing.T) {
 	}
 }
 
+// wmTrackingStub is a wmStub variant that records SetDisruptEscalated calls
+// so tests can assert that the flag was set.
+type wmTrackingStub struct {
+	wmStub
+	escalateCalls []struct {
+		sid       string
+		escalated bool
+	}
+}
+
+func newTrackingStub(per map[string]SessionWatermark) *wmTrackingStub {
+	return &wmTrackingStub{wmStub: wmStub{per: per}}
+}
+
+func (w *wmTrackingStub) SetDisruptEscalated(sid string, escalated bool) {
+	w.escalateCalls = append(w.escalateCalls, struct {
+		sid       string
+		escalated bool
+	}{sid, escalated})
+}
+
+func TestDisruptProducerSetsEscalatedFlagWhenStuck(t *testing.T) {
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	errAt := now.Add(-2 * time.Minute)
+	nudgedAt := now.Add(-65 * time.Second) // > escalation_after_s (60s)
+	p := NewDisruptProducer()
+	store := NewPendingStore()
+	tree := treeWith(time.Time{}, sessionWithError("sid-1", transcript.ErrUnknown, errAt, true))
+	wm := newTrackingStub(map[string]SessionWatermark{
+		"sid-1": {
+			LastDisruptNudgeAt:  nudgedAt,
+			LastDisruptNudgeFor: errAt, // same error, already nudged
+		},
+	})
+	p.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true,
+		DisruptGrace: 30 * time.Second, EscalationAfter: 60 * time.Second,
+		AutoResumeMessage: "continue", Tree: tree, Watermarks: wm,
+	}, store)
+
+	if store.HasAny("sid-1") {
+		t.Error("intent queued for escalated session (should be cancelled)")
+	}
+	if len(wm.escalateCalls) == 0 {
+		t.Fatal("SetDisruptEscalated was never called — escalation flag not persisted")
+	}
+	call := wm.escalateCalls[len(wm.escalateCalls)-1]
+	if call.sid != "sid-1" || !call.escalated {
+		t.Errorf("SetDisruptEscalated(%q, %v), want (sid-1, true)", call.sid, call.escalated)
+	}
+}
+
+func TestDisruptProducerClearsEscalatedFlagOnNewError(t *testing.T) {
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	oldErrAt := now.Add(-3 * time.Minute)
+	newErrAt := now.Add(-10 * time.Second)
+	nudgedAt := now.Add(-2 * time.Minute)
+	p := NewDisruptProducer()
+	store := NewPendingStore()
+	tree := treeWith(time.Time{}, sessionWithError("sid-1", transcript.ErrUnknown, newErrAt, true))
+	wm := newTrackingStub(map[string]SessionWatermark{
+		"sid-1": {
+			LastDisruptNudgeAt:  nudgedAt,
+			LastDisruptNudgeFor: oldErrAt,
+			DisruptEscalated:    true, // was escalated on old error
+		},
+	})
+	p.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true,
+		DisruptGrace: 30 * time.Second, EscalationAfter: 60 * time.Second,
+		AutoResumeMessage: "continue", Tree: tree, Watermarks: wm,
+	}, store)
+
+	if len(wm.escalateCalls) == 0 {
+		t.Fatal("SetDisruptEscalated was never called — re-arm on new error broken")
+	}
+	call := wm.escalateCalls[len(wm.escalateCalls)-1]
+	if call.sid != "sid-1" || call.escalated {
+		t.Errorf("SetDisruptEscalated(%q, %v), want (sid-1, false) to re-arm", call.sid, call.escalated)
+	}
+}
+
 func TestDisruptProducerNewErrorReArms(t *testing.T) {
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	oldErrAt := now.Add(-3 * time.Minute)
