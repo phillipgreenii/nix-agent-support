@@ -30,6 +30,10 @@ let
     ++ lib.optional cfg.packs.pr-support.enable {
       name = "pgii-pr-support";
       drv = pkgs.pgii-pack-pr-support;
+    }
+    ++ lib.optional cfg.packs.dolt-hacks.enable {
+      name = "pgii-dolt-hacks";
+      drv = pkgs.pgii-pack-dolt-hacks;
     };
 
   anyPackEnabled = enabledPacks != [ ];
@@ -78,8 +82,13 @@ in
         and wake-on-work orders + PR-related doctor checks). Pack scripts depend
         on `pg-pr` in PATH — enable via `phillipgreenii.programs.pg-pr.enable`.
       '';
-      # Real packs (dolt-hacks, workers, gastown, bead-importer) are added in
-      # their respective phase plans.
+      dolt-hacks.enable = lib.mkEnableOption ''
+        pgii-pack-dolt-hacks (HACK orders + scripts for dolt storage/lifecycle
+        issues and gascity 1.1.0 supervisor regressions: HACK 2, 10, 11, 12, 14,
+        15 and hack-daily-summary).
+      '';
+      # Real packs (workers, gastown, bead-importer) are added in their
+      # respective phase plans.
     };
   };
 
