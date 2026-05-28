@@ -52,6 +52,103 @@ func TestCreateFeedback_CreatesAndLinks(t *testing.T) {
 	}
 }
 
+func TestCreateFeedback_TruncatesLongTitleButPreservesBody(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	prID, _, err := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "foo/bar", PRNumber: 9})
+	if err != nil {
+		t.Fatalf("ensure MR: %v", err)
+	}
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#9")
+	if err != nil {
+		t.Fatalf("CreateProcessingCycle: %v", err)
+	}
+
+	// 575-char title (mirrors the actual probe-sync failure on PR #87397).
+	longTitle := ""
+	for range 575 {
+		longTitle += "x"
+	}
+	// Body is independent — must round-trip in full.
+	body := longTitle + "\nfollowed by a second line with actually useful detail"
+
+	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
+		ProcessingCycleID: cycleID,
+		Kind:              FeedbackKindCommentThread,
+		ExternalID:        "long-title",
+		Fingerprint:       "long-title-fp",
+		Title:             longTitle,
+		Body:              body,
+	})
+	if err != nil {
+		t.Fatalf("CreateFeedback returned error on long title: %v", err)
+	}
+	if fbID == "" {
+		t.Fatalf("expected non-empty feedback ID")
+	}
+
+	// The stored title must satisfy bd's 500-char ceiling.
+	got, err := c.GetFeedback(ctx, fbID)
+	if err != nil {
+		t.Fatalf("GetFeedback: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("GetFeedback returned nil")
+	}
+	if runeLen := len([]rune(got.Title)); runeLen > maxBdTitleLen {
+		t.Errorf("stored title is %d runes, want ≤%d", runeLen, maxBdTitleLen)
+	}
+
+	// The full body must survive (bd show is the source of truth — list
+	// JSON doesn't include body, so use bd show).
+	c2, _ := c.Runner.Run(ctx, "show", fbID)
+	if !contains(c2, "followed by a second line with actually useful detail") {
+		t.Errorf("bd show output missing tail of body: %s", c2)
+	}
+}
+
+func TestTruncateTitle(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     string
+		maxLen int
+		want   string
+	}{
+		{"short stays unchanged", "hello", 500, "hello"},
+		{"exact maxLen stays unchanged", "abcde", 5, "abcde"},
+		// "…" is 3 bytes; budget = 5 - 3 = 2, so we keep "ab" + "…" = 5 bytes.
+		{"longer than maxLen ends in ellipsis", "abcdef", 5, "ab…"},
+		// 🎯 is 4 bytes; budget = 20 - 3 = 17 → four 🎯 (16 bytes) fit, fifth doesn't.
+		{"unicode title respects byte budget", "🎯🎯🎯🎯🎯🎯", 20, "🎯🎯🎯🎯…"},
+		// Snap to rune boundary when the byte cutoff splits a multi-byte rune.
+		{"snaps to rune boundary", "a🎯b", 5, "a…"},
+		{"empty title stays empty", "", 500, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateTitle(tc.in, tc.maxLen)
+			if got != tc.want {
+				t.Errorf("truncateTitle(%q, %d) = %q, want %q", tc.in, tc.maxLen, got, tc.want)
+			}
+			if len(got) > tc.maxLen {
+				t.Errorf("truncateTitle(%q, %d) returned %d bytes, exceeding limit", tc.in, tc.maxLen, len(got))
+			}
+		})
+	}
+}
+
+// contains is a tiny strings.Contains stand-in to avoid pulling strings
+// into the package's existing test imports.
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFindFeedbackByFingerprint_DedupAcrossRuns(t *testing.T) {
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)

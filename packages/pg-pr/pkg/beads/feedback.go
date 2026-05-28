@@ -13,7 +13,42 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
+
+// maxBdTitleLen mirrors bd's enforced limit (`title must be 500
+// characters or less`). Feedback bodies routinely exceed it (CodeRabbit
+// auto-summaries, long review-thread first lines); truncating the
+// derived title keeps creates succeeding while the body retains the
+// full upstream content.
+const maxBdTitleLen = 500
+
+// truncateTitle returns title shortened to at most maxLen bytes, ending
+// in a horizontal ellipsis when truncation happens. bd's title check is
+// byte-counted, so a naive rune-based cap can still overflow once the
+// suffix's UTF-8 weight is added.
+//
+// The full upstream content must still be supplied to bd via the body
+// argument — only the display title is shortened.
+func truncateTitle(title string, maxLen int) string {
+	if len(title) <= maxLen {
+		return title
+	}
+	const ellipsis = "…" // 3 bytes
+	if maxLen < len(ellipsis) {
+		return title[:maxLen]
+	}
+	budget := maxLen - len(ellipsis)
+	end := 0
+	for i, r := range title {
+		next := i + utf8.RuneLen(r)
+		if next > budget {
+			break
+		}
+		end = next
+	}
+	return title[:end] + ellipsis
+}
 
 // CreateFeedbackInput is the typed input for creating a feedback bead.
 type CreateFeedbackInput struct {
@@ -75,10 +110,16 @@ func (c *Client) CreateFeedback(ctx context.Context, in CreateFeedbackInput) (st
 	if strings.TrimSpace(body) == "" {
 		body = in.Title
 	}
+	// bd validates `title must be 500 characters or less`. Derived titles
+	// (first line of an upstream comment) can blow past that on CodeRabbit
+	// summaries and long review-thread bodies. Truncate to keep the bead
+	// create succeeding; the body argument below retains the full content
+	// so nothing is lost.
+	title := truncateTitle(in.Title, maxBdTitleLen)
 	out, err := c.Runner.Run(ctx,
 		"create",
 		"--type=feedback",
-		"--title", in.Title,
+		"--title", title,
 		"-d", body,
 		"--metadata", metaJSON,
 		"--silent",
