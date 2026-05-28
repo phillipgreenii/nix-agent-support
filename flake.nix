@@ -92,6 +92,7 @@
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
           pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };
           pgii-pack-workers = final.callPackage ./packages/pgii-pack-workers { };
+          pgii-pack-gastown = final.callPackage ./packages/pgii-pack-gastown { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -460,6 +461,7 @@
               pgii-pack-pr-support
               pgii-pack-dolt-hacks
               pgii-pack-workers
+              pgii-pack-gastown
               pg-pr
               goccc
               toktrack

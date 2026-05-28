@@ -1,0 +1,52 @@
+# pgii-gastown — local gastown-derived agents + formulas.
+#
+# Pack contents:
+#   agents/mayor/          — city's customized 53-line mayor prompt
+#                            (gastown's stock mayor is 237 lines; this
+#                            city keeps its own). No agent.toml —
+#                            gascity uses internal defaults when absent.
+#   agents/deacon/         — gastown's deacon (verbatim) scaffolded
+#                            here because the gastown system pack is
+#                            not enabled (would also try to manage mayor
+#                            and other defaults).
+#   agents/operator/       — user-pairing agent. Keeps the mayor
+#                            unblocked for coordination by absorbing
+#                            long user sessions.
+#   agents/foreman/        — tier-2 triage between worker pools and mayor.
+#                            Fills missing acceptance_criteria, resolves
+#                            worker escalations, mails mayor when human
+#                            input is required. On-demand, city scope,
+#                            opus model.
+#   formulas/mol-deacon-patrol.toml — gastown's patrol formula, copied
+#                            here so deacon can pour its next-iteration
+#                            wisp without enabling the gastown pack.
+#   doctor/check-gastown-divergence/ — alerts when this pack's agent
+#                            configs drift from the gastown system pack.
+#   doctor/check-misplaced-beads/    — bd-hygiene check (deacon-owned).
+#   doctor/check-stale-beads/        — bd-hygiene check (deacon-owned).
+#
+# Migrated from ~/gc/assets/imports/pgii-gastown/ + the two bd-hygiene
+# checks from ~/gc/assets/imports/zr/doctor/ (deacon-owned, per spec).
+#
+# Retirement: when the gastown system pack is enabled and converges
+# with what's in this pack.
+
+[pack]
+name = "pgii-gastown"
+schema = 2
+
+[[named_session]]
+template = "mayor"
+mode = "always"
+
+[[named_session]]
+template = "deacon"
+mode = "always"
+
+[[named_session]]
+template = "operator"
+mode = "always"
+
+[[named_session]]
+template = "foreman"
+mode = "on_demand"
