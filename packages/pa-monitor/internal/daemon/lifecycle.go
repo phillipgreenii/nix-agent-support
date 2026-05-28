@@ -205,7 +205,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 	// Construct Nudger + WatermarkStore when configured.
 	if opts.RuntimePath != "" && len(opts.NudgerSignalers) > 0 {
-		watermarks, err := NewWatermarkStore(opts.RuntimePath)
+		watermarks, err := NewWatermarkStore(opts.RuntimePath, opts.Emitter)
 		if err != nil {
 			return fmt.Errorf("read runtime.json: %w", err)
 		}
@@ -250,6 +250,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 	labelCap := labels.NewCardinalityCap(capLimit)
 	labelCache := map[string]labels.Set{}
+
+	// previousErrors tracks the last-seen LastError.At per session so we
+	// can detect newly advanced errors and fire the api_error.observed counter.
+	previousErrors := map[string]time.Time{}
 
 	tickCount := 0
 	for {
@@ -317,6 +321,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
 			pruneLabelCache(labelCache, tree)
+
+			// Emit api_error.observed for each newly-seen error, and
+			// snapshot sessions.errored gauge per kind.
+			emitErrorMetrics(opts.Emitter, tree, previousErrors)
 
 			// Run nudger tick after tree is built and before publishing to clients.
 			state.mu.RLock()
@@ -530,6 +538,39 @@ func canonicalKey(ls labels.Set) string {
 		b = append(b, ls[k]...)
 	}
 	return string(b)
+}
+
+// emitErrorMetrics fires api_error.observed counters for newly-advanced
+// session errors and updates the sessions.errored observable gauge. It
+// mutates previousErrors in place.
+func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[string]time.Time) {
+	if tree == nil {
+		return
+	}
+	erroredCounts := map[string]int{}
+	for _, dir := range tree.Dirs {
+		for _, sv := range dir.Sessions {
+			le := sv.LastError
+			if le == nil {
+				continue
+			}
+			kind := string(le.Kind)
+			erroredCounts[kind]++
+			if le.At.After(previousErrors[sv.SessionID]) {
+				previousErrors[sv.SessionID] = le.At
+				isTerminalStr := "false"
+				if le.IsTerminal {
+					isTerminalStr = "true"
+				}
+				e.RecordApiErrorObserved(map[string]string{
+					"session_id":  sv.SessionID,
+					"kind":        kind,
+					"is_terminal": isTerminalStr,
+				})
+			}
+		}
+	}
+	e.RecordSessionsErrored(erroredCounts)
 }
 
 // Run is a thin compat wrapper preserving the original signature used by

@@ -47,9 +47,13 @@ type Emitter struct {
 	caffeinateGrace   metric.Int64Counter
 	contextLimitHits  metric.Int64Counter
 	nudgesSent        metric.Int64Counter
+	nudgeSuppressed   metric.Int64Counter
+	nudgeQueued       metric.Int64Counter
+	apiErrorObserved  metric.Int64Counter
 
 	mu                  sync.Mutex
 	sessionsObs         []stateObs
+	sessionsErroredObs  map[string]int64 // kind -> count; replaced per tick
 	caffeinateActiveVal int64
 	caffeinateAttrs     []attribute.KeyValue
 }
@@ -109,6 +113,10 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	sessionsErroredGauge, err := meter.Int64ObservableGauge("pa_monitor.sessions.errored")
+	if err != nil {
+		return err
+	}
 
 	// Synchronous counters for transition events.
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
@@ -129,10 +137,20 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if e.nudgesSent, err = meter.Int64Counter("pa_monitor.signal.sends_total"); err != nil {
 		return err
 	}
+	if e.nudgeSuppressed, err = meter.Int64Counter("pa_monitor.nudge.suppressed_total"); err != nil {
+		return err
+	}
+	if e.nudgeQueued, err = meter.Int64Counter("pa_monitor.nudge.queued_total"); err != nil {
+		return err
+	}
+	if e.apiErrorObserved, err = meter.Int64Counter("pa_monitor.session.api_error.observed_total"); err != nil {
+		return err
+	}
 
 	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
 		e.mu.Lock()
 		obs := e.sessionsObs
+		erroredObs := e.sessionsErroredObs
 		caffVal := e.caffeinateActiveVal
 		caffAttrs := e.caffeinateAttrs
 		e.mu.Unlock()
@@ -140,8 +158,12 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
 		}
 		o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
+		for kind, count := range erroredObs {
+			o.ObserveInt64(sessionsErroredGauge, count,
+				metric.WithAttributes(attribute.String("kind", kind)))
+		}
 		return nil
-	}, sessionsGauge, caffGauge)
+	}, sessionsGauge, caffGauge, sessionsErroredGauge)
 	return err
 }
 
@@ -304,6 +326,57 @@ func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
 		e.nudgesSent.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("nudge.sent", attrs)
+}
+
+// RecordNudgeSuppressed increments pa_monitor.nudge.suppressed_total and
+// emits the nudge.suppressed log event. nil-safe.
+func (e *Emitter) RecordNudgeSuppressed(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.nudgeSuppressed != nil {
+		e.nudgeSuppressed.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("nudge.suppressed", attrs)
+}
+
+// RecordNudgeQueued increments pa_monitor.nudge.queued_total and emits
+// the nudge.queued log event. nil-safe.
+func (e *Emitter) RecordNudgeQueued(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.nudgeQueued != nil {
+		e.nudgeQueued.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("nudge.queued", attrs)
+}
+
+// RecordApiErrorObserved increments pa_monitor.session.api_error.observed_total
+// and emits the session.api_error.observed log event. nil-safe.
+func (e *Emitter) RecordApiErrorObserved(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.apiErrorObserved != nil {
+		e.apiErrorObserved.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("session.api_error.observed", attrs)
+}
+
+// RecordSessionsErrored replaces the latest sessions-errored observation.
+// counts maps error kind → session count. Called each tick. nil-safe.
+func (e *Emitter) RecordSessionsErrored(counts map[string]int) {
+	if e == nil {
+		return
+	}
+	obs := make(map[string]int64, len(counts))
+	for k, v := range counts {
+		obs[k] = int64(v)
+	}
+	e.mu.Lock()
+	e.sessionsErroredObs = obs
+	e.mu.Unlock()
 }
 
 // LogEvent emits one log record at info level with the given attributes

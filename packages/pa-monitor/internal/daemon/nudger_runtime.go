@@ -1,27 +1,30 @@
 package daemon
 
 import (
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
+	"github.com/phillipgreenii/pa-monitor/internal/otel"
 )
 
 // WatermarkStore persists nudger watermarks + pending intents inside
 // runtime.json. Implements nudger.WatermarkView and nudger.Recorder so
 // the nudger package stays free of daemon-specific persistence types.
 type WatermarkStore struct {
-	mu    sync.Mutex
-	path  string
-	state RuntimeState
+	mu      sync.Mutex
+	path    string
+	state   RuntimeState
+	emitter *otel.Emitter
 }
 
 // Compile-time interface checks.
 var _ nudger.WatermarkView = (*WatermarkStore)(nil)
 var _ nudger.Recorder = (*WatermarkStore)(nil)
 
-func NewWatermarkStore(path string) (*WatermarkStore, error) {
+func NewWatermarkStore(path string, emitter *otel.Emitter) (*WatermarkStore, error) {
 	s, err := ReadRuntimeState(path)
 	if err != nil {
 		return nil, err
@@ -29,7 +32,23 @@ func NewWatermarkStore(path string) (*WatermarkStore, error) {
 	if s.Nudger.Sessions == nil {
 		s.Nudger.Sessions = map[string]NudgerSessionWatermarks{}
 	}
-	return &WatermarkStore{path: path, state: s}, nil
+	return &WatermarkStore{path: path, state: s, emitter: emitter}, nil
+}
+
+// joinSources returns a comma-joined string of source names, sorted for
+// label stability.
+func joinSources(sources []nudger.Source) string {
+	strs := make([]string, len(sources))
+	for i, s := range sources {
+		strs[i] = string(s)
+	}
+	// Sort for label stability (simple insertion sort — sources are tiny).
+	for i := 1; i < len(strs); i++ {
+		for j := i; j > 0 && strs[j-1] > strs[j]; j-- {
+			strs[j-1], strs[j] = strs[j], strs[j-1]
+		}
+	}
+	return strings.Join(strs, ",")
 }
 
 // --- nudger.WatermarkView ---
@@ -55,12 +74,30 @@ func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
 // --- nudger.Recorder ---
 
 func (w *WatermarkStore) RecordSuppressed(sid string, sources []nudger.Source, cause string) {
-	// Observability hook; persistence-wise this is a no-op.
-	// OTel emission is wired in Phase 9.
+	if w.emitter == nil {
+		return
+	}
+	w.emitter.RecordNudgeSuppressed(map[string]string{
+		"session_id": sid,
+		"sources":    joinSources(sources),
+		"cause":      cause,
+	})
 }
 
 func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKind string, escalated bool) {
-	// Observability hook; UpdateWatermarks is the persistence path.
+	if w.emitter == nil {
+		return
+	}
+	escalatedStr := "false"
+	if escalated {
+		escalatedStr = "true"
+	}
+	w.emitter.RecordNudgeSent(map[string]string{
+		"session_id":  sid,
+		"sources":     joinSources(sources),
+		"error_kind":  errorKind,
+		"escalated":   escalatedStr,
+	})
 }
 
 func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, cause *transcript.ErrorRecord, escalated bool) {

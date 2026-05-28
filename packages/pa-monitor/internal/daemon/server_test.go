@@ -183,7 +183,7 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	dir := t.TempDir()
 	runtimePath := filepath.Join(dir, "runtime.json")
 
-	wm, err := NewWatermarkStore(runtimePath)
+	wm, err := NewWatermarkStore(runtimePath, nil)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore: %v", err)
 	}
