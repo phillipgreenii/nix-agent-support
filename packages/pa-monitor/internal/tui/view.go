@@ -118,10 +118,15 @@ func (m *Model) selectionStatus() string {
 func (m *Model) renderModal() string {
 	switch m.activeModal {
 	case ModalHelp:
-		extra := ""
-		if m.cacheDir != "" {
-			extra = "Signal errors logged to: " + filepath.Join(m.cacheDir, "signal-errors.log")
+		dv := m.daemonVersion
+		if dv == "" {
+			dv = "(disconnected)"
 		}
+		lines := []string{fmt.Sprintf("pa-monitor %s (TUI) ⇄ %s (daemon)", m.clientVersion, dv)}
+		if m.cacheDir != "" {
+			lines = append(lines, "Signal errors logged to: "+filepath.Join(m.cacheDir, "signal-errors.log"))
+		}
+		extra := strings.Join(lines, "\n")
 		return render.HelpModal(bindingsToHelpRows(), extra, m.width, m.height, m.modalScrollOffset)
 	case ModalLegend:
 		return render.LegendModal(m.width, m.height, m.modalScrollOffset)

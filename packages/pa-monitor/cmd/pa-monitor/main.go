@@ -183,6 +183,7 @@ func runTUI(args []string) {
 		Reporter:             reporter,
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,
+		Version:              version,
 	})
 	prog := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {

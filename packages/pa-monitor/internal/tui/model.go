@@ -46,6 +46,9 @@ type Options struct {
 	// "path:/some/dir"). cancel is true when the nudge should be cancelled
 	// (all selected sessions already have a manual intent pending).
 	OnManualNudge func(selector string, cancel bool)
+	// Version is the TUI binary's build identifier. Displayed in the [?] modal
+	// alongside the daemon's reported version. Empty string falls back to "dev".
+	Version string
 }
 
 type Model struct {
@@ -70,9 +73,15 @@ type Model struct {
 	polling    bool
 
 	// autoResumeEnabled and autoResumeDelay are populated from DaemonState
-	// via TreeUpdatedMsg. The daemon owns the scheduler; these are view-only.
+	// via pollResultMsg.meta. The daemon owns the scheduler; these are view-only.
 	autoResumeEnabled bool
 	autoResumeDelay   time.Duration
+
+	// clientVersion is this TUI binary's build identifier (set by NewModel from
+	// Options.Version). daemonVersion is the connected daemon's version,
+	// populated from DaemonState via pollResultMsg.meta. Both shown in [?].
+	clientVersion string
+	daemonVersion string
 
 	reporter             cmuxstatus.Reporter
 	sidebarIntervalTicks int
@@ -104,6 +113,10 @@ func NewModel(o Options) *Model {
 		onCaffeinateToggle:   o.OnCaffeinateToggle,
 		onToggleAutoResume:   o.OnToggleAutoResume,
 		onManualNudge:        o.OnManualNudge,
+		clientVersion:        o.Version,
+	}
+	if m.clientVersion == "" {
+		m.clientVersion = "dev"
 	}
 	if m.reporter == nil {
 		m.reporter = noopReporter{}

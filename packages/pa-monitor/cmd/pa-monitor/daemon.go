@@ -91,6 +91,7 @@ func runDaemon(args []string) {
 		Caffeinate:          caffMgr,
 		InitialCaffeinateOn: rs.CaffeinateOn,
 		RuntimePath:         runtimePath,
+		Version:             version,
 		Detectors: []labels.Detector{
 			detectors.Terminal{},
 			detectors.Gascity{},

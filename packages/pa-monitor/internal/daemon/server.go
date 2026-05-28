@@ -16,12 +16,12 @@ import (
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
-const daemonVersion = "0.0.0-dev"
-
 type server struct {
 	pb.UnimplementedPaMonitorServer
 	started time.Time
 	state   *sharedState
+	// version is the build identifier reported on DaemonState. Set by serve().
+	version string
 	// nudgeFn is the signal-layer dispatcher. Plumbed by RunWith when
 	// signalers are configured. nil → Nudge RPC returns FailedPrecondition.
 	nudgeFn func(pid int, text string) error
@@ -369,7 +369,7 @@ func (s *server) buildState() *pb.DaemonState {
 	state := pb.FromTree(s.state.snapshot())
 	state.Now = timestamppb.Now()
 	state.DaemonUptimeSeconds = uint64(time.Since(s.started).Seconds())
-	state.DaemonVersion = daemonVersion
+	state.DaemonVersion = s.version
 	active, _ := s.state.caffeinateView()
 	state.CaffeinateActive = active
 	s.state.mu.RLock()
@@ -387,10 +387,11 @@ func (s *server) buildState() *pb.DaemonState {
 
 // serve runs the gRPC server on the given listener. Caller owns the
 // returned stop func.
-func serve(lis net.Listener, state *sharedState, nudgeFn func(int, string) error) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, nudgeFn func(int, string) error, version string) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.nudgeFn = nudgeFn
+	srv.version = version
 	pb.RegisterPaMonitorServer(gs, srv)
 
 	go func() {

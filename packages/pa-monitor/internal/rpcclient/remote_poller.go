@@ -20,6 +20,13 @@ type RemotePoller struct {
 	lastFreshAt  time.Time
 	backoff      time.Duration
 	backoffUntil time.Time
+
+	// lastMeta fields capture view-state from DaemonState that doesn't live
+	// on the aggregate.Tree. Populated on every successful Snapshot; exposed
+	// via Last* accessors so the TUI can read alongside the tree.
+	lastAutoResumeEnabled bool
+	lastAutoResumeDelay   time.Duration
+	lastDaemonVersion     string
 }
 
 // NewRemotePoller constructs a poller. The first Snapshot call performs
@@ -80,7 +87,34 @@ func (r *RemotePoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, err
 	tree := pb.ToTree(state)
 	r.lastTree = tree
 	r.lastFreshAt = time.Now()
+	r.lastAutoResumeEnabled = state.GetAutoResumeEnabled()
+	r.lastAutoResumeDelay = time.Duration(state.GetAutoResumeDelayS()) * time.Second
+	r.lastDaemonVersion = state.GetDaemonVersion()
 	return tree, anyWorking(tree), nil
+}
+
+// LastAutoResumeEnabled returns the auto-resume flag from the most recent
+// successful GetState. Zero value (false) means "not yet known".
+func (r *RemotePoller) LastAutoResumeEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastAutoResumeEnabled
+}
+
+// LastAutoResumeDelay returns the auto-resume delay from the most recent
+// successful GetState. Zero value means "not yet known".
+func (r *RemotePoller) LastAutoResumeDelay() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastAutoResumeDelay
+}
+
+// LastDaemonVersion returns the daemon's reported version from the most
+// recent successful GetState. Empty string means "not yet known".
+func (r *RemotePoller) LastDaemonVersion() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastDaemonVersion
 }
 
 // IsOffline reports whether the most recent Snapshot returned an error.

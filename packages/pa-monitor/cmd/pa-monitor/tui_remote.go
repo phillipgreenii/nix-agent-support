@@ -67,6 +67,7 @@ func runTUIRemote() {
 		Reporter:             nil, // cmuxstatus driven by cmux-bridge, not the TUI
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,
+		Version:              version,
 		OnCaffeinateToggle: func(on bool) {
 			action := "off"
 			if on {

@@ -35,6 +35,8 @@ func runCmuxBridge(args []string) {
 	defer cancel()
 	defer reporter.Clear()
 
+	logBridgeVersions(ctx)
+
 	for {
 		if err := streamOnce(ctx, ws, reporter); err != nil {
 			if ctx.Err() != nil {
@@ -47,6 +49,27 @@ func runCmuxBridge(args []string) {
 		}
 		return
 	}
+}
+
+// logBridgeVersions does a best-effort one-shot GetState to learn the daemon
+// version, then prints both the bridge's own version and the daemon's. Stays
+// silent if the daemon is unreachable — the main watch loop already handles
+// reconnect/backoff with its own diagnostics.
+func logBridgeVersions(ctx context.Context) {
+	dialCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	client, err := rpcclient.Dial(dialCtx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s (daemon unreachable)\n", version)
+		return
+	}
+	defer client.Close()
+	state, err := client.C.GetState(dialCtx, &pb.GetStateRequest{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s (daemon GetState: %v)\n", version, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s daemon=%s\n", version, state.GetDaemonVersion())
 }
 
 func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) error {

@@ -146,6 +146,8 @@ type RunOptions struct {
 	// NudgeFn dispatches a signal to the given pid. nil → Nudge RPC
 	// returns FailedPrecondition.
 	NudgeFn func(pid int, text string) error
+	// Version is the build identifier reported on DaemonState. Defaults to "dev".
+	Version string
 	// Nudger config — passed to nudger.TickContext each tick. Defaults applied
 	// if zero.
 	AutoResumeMessage string
@@ -198,7 +200,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		opts.Caffeinate.SetToggle(opts.InitialCaffeinateOn)
 	}
 
-	_, stop := serve(lis, state, opts.NudgeFn)
+	version := opts.Version
+	if version == "" {
+		version = "dev"
+	}
+	_, stop := serve(lis, state, opts.NudgeFn, version)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())

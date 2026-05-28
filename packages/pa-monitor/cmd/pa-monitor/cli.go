@@ -35,6 +35,8 @@ func runStatus(args []string) {
 		idle += int(d.GetIdleN())
 		dormant += int(d.GetDormantN())
 	}
+	fmt.Printf("client:        pa-monitor %s\n", version)
+	fmt.Printf("daemon:        pa-monitor %s\n", state.GetDaemonVersion())
 	fmt.Printf("uptime:        %ds\n", state.GetDaemonUptimeSeconds())
 	fmt.Printf("plan_tier:     %s\n", state.GetPlanTier())
 	fmt.Printf("sessions:      %d working, %d idle, %d dormant\n", working, idle, dormant)

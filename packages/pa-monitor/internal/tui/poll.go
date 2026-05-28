@@ -13,6 +13,23 @@ type Poller interface {
 	Snapshot(ctx context.Context) (*aggregate.Tree, bool /*anyWorking*/, error)
 }
 
+// MetaPoller is an optional extension: pollers that have access to richer
+// daemon-state (e.g. RemotePoller) implement this trio so the TUI can read
+// view-state that doesn't live on the aggregate.Tree.
+type MetaPoller interface {
+	LastAutoResumeEnabled() bool
+	LastAutoResumeDelay() time.Duration
+	LastDaemonVersion() string
+}
+
+// DaemonMeta carries the values pulled off a MetaPoller and threaded through
+// to the Model via pollResultMsg. Zero value means "unknown / not daemon-backed".
+type DaemonMeta struct {
+	AutoResumeEnabled bool
+	AutoResumeDelay   time.Duration
+	DaemonVersion     string
+}
+
 type pollTickMsg struct{}
 
 func tickCmd(d time.Duration) tea.Cmd {
@@ -33,13 +50,22 @@ func (m *Model) pollNow() tea.Cmd {
 		if err != nil {
 			return pollErrMsg{err: err}
 		}
-		return pollResultMsg{tree: tree, anyWorking: working}
+		var meta DaemonMeta
+		if mp, ok := m.poller.(MetaPoller); ok {
+			meta = DaemonMeta{
+				AutoResumeEnabled: mp.LastAutoResumeEnabled(),
+				AutoResumeDelay:   mp.LastAutoResumeDelay(),
+				DaemonVersion:     mp.LastDaemonVersion(),
+			}
+		}
+		return pollResultMsg{tree: tree, anyWorking: working, meta: meta}
 	}
 }
 
 type pollResultMsg struct {
 	tree       *aggregate.Tree
 	anyWorking bool
+	meta       DaemonMeta
 }
 type pollErrMsg struct{ err error }
 

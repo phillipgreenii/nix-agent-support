@@ -49,6 +49,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.polling = false
 		m.tree = msg.tree
 		m.anyWorking = msg.anyWorking
+		m.autoResumeEnabled = msg.meta.AutoResumeEnabled
+		m.autoResumeDelay = msg.meta.AutoResumeDelay
+		m.daemonVersion = msg.meta.DaemonVersion
 		if m.caffeinate != nil {
 			m.caffeinate.SetToggle(m.caffeinateOn)
 			m.caffeinate.Tick(msg.anyWorking)
