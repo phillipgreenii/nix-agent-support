@@ -1086,3 +1086,129 @@ func TestSummary_WarningsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("empty Warnings should be omitted; got %s", empty)
 	}
 }
+
+func TestSync_SkipsAndWarnsOnTeammateReplyDraft(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	// Both PRs need to be in the enumerate set so the repo is healthy.
+	vcs.my["foo/bar"] = []api.PR{samplePR(42, "foo/bar", "feat/mine")}
+	vcs.team["foo/bar"] = []api.PR{teammatePR(99, "foo/bar", "feat/theirs")}
+	vcs.replyResp = &api.Comment{ID: "C_SELF_RESP", Author: "phillipg"}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Seed two MR beads with explicit Author fields and a queued reply
+	// on each. EnsureMergeRequest is idempotent on URL — by the time
+	// Sync runs, it'll find these existing beads and update the upstream
+	// fields onto them.
+	selfMRID, _, err := bd.EnsureMergeRequest(ctx,
+		"https://github.com/foo/bar/pull/42",
+		beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 42, Author: "phillipg"})
+	if err != nil {
+		t.Fatalf("seed self MR: %v", err)
+	}
+	teamMRID, _, err := bd.EnsureMergeRequest(ctx,
+		"https://github.com/foo/bar/pull/99",
+		beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 99, Author: "coworker"})
+	if err != nil {
+		t.Fatalf("seed team MR: %v", err)
+	}
+
+	selfCycle, err := bd.CreateProcessingCycle(ctx, selfMRID, "foo/bar#self-seed")
+	if err != nil {
+		t.Fatalf("self cycle: %v", err)
+	}
+	teamCycle, err := bd.CreateProcessingCycle(ctx, teamMRID, "foo/bar#team-seed")
+	if err != nil {
+		t.Fatalf("team cycle: %v", err)
+	}
+
+	selfFB, err := bd.CreateFeedback(ctx, beads.CreateFeedbackInput{
+		ProcessingCycleID: selfCycle, Kind: beads.FeedbackKindCommentThread,
+		ExternalID: "TH_SELF", Fingerprint: "fp-self", Title: "self",
+	})
+	if err != nil {
+		t.Fatalf("self feedback: %v", err)
+	}
+	teamFB, err := bd.CreateFeedback(ctx, beads.CreateFeedbackInput{
+		ProcessingCycleID: teamCycle, Kind: beads.FeedbackKindCommentThread,
+		ExternalID: "TH_TEAM", Fingerprint: "fp-team", Title: "team",
+	})
+	if err != nil {
+		t.Fatalf("team feedback: %v", err)
+	}
+
+	if err := bd.SetReplyDraft(ctx, selfFB, "self reply"); err != nil {
+		t.Fatalf("SetReplyDraft self: %v", err)
+	}
+	if err := bd.SetReplyDraft(ctx, teamFB, "team reply — should NOT post"); err != nil {
+		t.Fatalf("SetReplyDraft team: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	// Exactly one ReplyToThread call — the self one.
+	if len(vcs.replyCalls) != 1 {
+		t.Fatalf("expected 1 ReplyToThread call; got %d: %+v",
+			len(vcs.replyCalls), vcs.replyCalls)
+	}
+	if vcs.replyCalls[0].ThreadID != "TH_SELF" {
+		t.Fatalf("expected reply to TH_SELF; got %+v", vcs.replyCalls[0])
+	}
+	if sum.RepliesPosted != 1 {
+		t.Fatalf("RepliesPosted: got %d want 1 (errors=%+v)", sum.RepliesPosted, sum.Errors)
+	}
+
+	// Self bead got its response_id.
+	selfRespID, err := bd.GetResponseID(ctx, selfFB)
+	if err != nil {
+		t.Fatalf("GetResponseID self: %v", err)
+	}
+	if selfRespID != "C_SELF_RESP" {
+		t.Fatalf("self response_id: got %q want C_SELF_RESP", selfRespID)
+	}
+
+	// Team bead untouched: ReplyDraft unchanged, response_id empty.
+	teamRespID, err := bd.GetResponseID(ctx, teamFB)
+	if err != nil {
+		t.Fatalf("GetResponseID team: %v", err)
+	}
+	if teamRespID != "" {
+		t.Fatalf("team response_id should be empty; got %q", teamRespID)
+	}
+	teamDraft, err := bd.GetReplyDraft(ctx, teamFB)
+	if err != nil {
+		t.Fatalf("GetReplyDraft team: %v", err)
+	}
+	if teamDraft != "team reply — should NOT post" {
+		t.Fatalf("team ReplyDraft should be preserved; got %q", teamDraft)
+	}
+
+	// Exactly one warning, referencing the team feedback bead.
+	if len(sum.Warnings) != 1 {
+		t.Fatalf("expected 1 Warning; got %d: %+v", len(sum.Warnings), sum.Warnings)
+	}
+	w := sum.Warnings[0]
+	if w.Repo != "foo/bar" {
+		t.Fatalf("warning Repo: %q", w.Repo)
+	}
+	if !strings.Contains(w.Message, teamFB) {
+		t.Fatalf("warning Message should reference team feedback id %q; got %q", teamFB, w.Message)
+	}
+	if !strings.Contains(w.Message, "coworker") {
+		t.Fatalf("warning Message should mention author %q; got %q", "coworker", w.Message)
+	}
+}

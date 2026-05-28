@@ -220,7 +220,10 @@ type Summary struct {
 	Escalated       int            `json:"escalated,omitempty"`
 	RepliesPosted   int            `json:"replies_posted,omitempty"`
 	Errors          []SummaryError `json:"errors,omitempty"`
-	Warnings        []SummaryError `json:"warnings,omitempty"`
+	// Warnings are advisory diagnostics about local state that shouldn't
+	// exist (e.g. ReplyDraft staged on a team-mate's PR). Unlike Errors,
+	// Warnings do not affect SyncErrorsTotal telemetry or repoStates[].LastError.
+	Warnings []SummaryError `json:"warnings,omitempty"`
 }
 
 // RepoSummary is the per-repo slice of Summary.
@@ -1186,6 +1189,21 @@ func (e *Engine) processReplyDrafts(ctx context.Context, bdc BeadClient, rcfg co
 		}
 		// Scope to current repo — other repos will handle their own beads.
 		if mr.Fields.Repo != rcfg.Remote {
+			continue
+		}
+
+		// Ownership guard: never post replies to threads on PRs we don't
+		// own. ReplyDraft staged on a team-mate's feedback bead is a bug
+		// class — emit a warning so the user can investigate, but skip
+		// the post. The local ReplyDraft is left in place; the user can
+		// inspect / delete / retarget it via bd or pg-pr verbs.
+		if !e.isSelfAuthored(mr.Fields.Author) {
+			summary.Warnings = append(summary.Warnings, SummaryError{
+				Repo: rcfg.Remote,
+				Message: fmt.Sprintf(
+					"reply %s skipped: parent PR #%d authored by %q (not self) — ReplyDraft should not have been staged",
+					fb.ID, mr.Fields.PRNumber, mr.Fields.Author),
+			})
 			continue
 		}
 
