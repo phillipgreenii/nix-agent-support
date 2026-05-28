@@ -21,11 +21,11 @@ type DepNode struct {
 // Implementation: `bd dep tree <rootID> --direction=up --json` produces a
 // flat JSON array. The first entry is the root; subsequent entries are
 // dependents at increasing depth (parent_id and edge_from_parent describe
-// the edge to the parent). The dep-tree JSON does carry a "labels" field
-// when present on a bead, but we still fetch labels via
-// `bd label list <id> --json` for each bead so the surface stays explicit
-// and tolerant of beads where the inline field is omitted (e.g. closed
-// beads in older bd revisions).
+// the edge to the parent).
+//
+// Labels are not populated here — production callers fetch the workspace's
+// human-labeled set once via HumanLabeledBeads and overlay it on the
+// returned nodes. Tests that need labels do the same.
 func (c *Client) DepTreeUp(ctx context.Context, rootID string) ([]DepNode, error) {
 	if strings.TrimSpace(rootID) == "" {
 		return nil, fmt.Errorf("dep tree: root id required")
@@ -51,39 +51,73 @@ func (c *Client) DepTreeUp(ctx context.Context, rootID string) ([]DepNode, error
 		if r.ID == rootID {
 			continue
 		}
-		labels, err := c.fetchLabels(ctx, r.ID)
-		if err != nil {
-			return nil, fmt.Errorf("fetch labels for %s: %w", r.ID, err)
-		}
 		nodes = append(nodes, DepNode{
 			ID:     r.ID,
 			Title:  r.Title,
 			Status: r.Status,
-			Labels: labels,
 		})
 	}
 	return nodes, nil
 }
 
-// fetchLabels returns the labels for a single bead. Empty slice when bd
-// returns no labels.
+// HumanLabeledBeads returns the set of bead IDs in this workspace that carry
+// the `human` label. Used by the sync engine to overlay `human` onto
+// DepTreeUp results without per-bead label lookups — replaces one
+// `bd label list <id>` call per dep with a single `bd query` per workspace.
 //
-// `bd label list <id> --json` returns a flat JSON array of strings, e.g.
-// `["human","needs-triage"]`, or `[]` when the bead has no labels.
-func (c *Client) fetchLabels(ctx context.Context, id string) ([]string, error) {
-	out, err := c.Runner.Run(ctx, "label", "list", id, "--json")
+// `bd query "label=human" --json` returns a JSON array of issue objects;
+// only the id field is consulted here.
+func (c *Client) HumanLabeledBeads(ctx context.Context) (map[string]bool, error) {
+	out, err := c.Runner.Run(ctx, "query", "label=human", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("bd label list %s --json: %w", id, err)
+		return nil, fmt.Errorf("bd query label=human --json: %w", err)
 	}
 	trimmed := strings.TrimSpace(out)
-	if trimmed == "" {
-		return nil, nil
+	if trimmed == "" || trimmed == "[]" {
+		return map[string]bool{}, nil
 	}
-	var labels []string
-	if err := json.Unmarshal([]byte(trimmed), &labels); err != nil {
-		return nil, fmt.Errorf("decode labels for %s: %w", id, err)
+	// bd query may surface errors as a JSON object {"error":"..."} on stdout
+	// with exit code 0. Detect by checking the first non-space byte.
+	if trimmed[0] == '{' {
+		var errObj struct {
+			Error string `json:"error"`
+		}
+		if jerr := json.Unmarshal([]byte(trimmed), &errObj); jerr == nil && errObj.Error != "" {
+			return nil, fmt.Errorf("bd query label=human: %s", errObj.Error)
+		}
+		return nil, fmt.Errorf("bd query label=human: unexpected JSON object: %s", trimmed)
 	}
-	return labels, nil
+	var raw []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		return nil, fmt.Errorf("decode bd query json: %w", err)
+	}
+	set := make(map[string]bool, len(raw))
+	for _, r := range raw {
+		if r.ID != "" {
+			set[r.ID] = true
+		}
+	}
+	return set, nil
+}
+
+// ApplyHumanLabels overlays the `human` label onto deps whose ID is in set.
+// Modifies deps in place to keep the call cheap. Existing labels on each
+// node are preserved; the function only ensures `human` is present when
+// the set says it should be.
+func ApplyHumanLabels(deps []DepNode, set map[string]bool) {
+	if len(deps) == 0 || len(set) == 0 {
+		return
+	}
+	for i := range deps {
+		if !set[deps[i].ID] {
+			continue
+		}
+		if !hasLabel(deps[i].Labels, "human") {
+			deps[i].Labels = append(deps[i].Labels, "human")
+		}
+	}
 }
 
 // AllNonClosedHumanLabeled reports whether every non-closed dep carries the

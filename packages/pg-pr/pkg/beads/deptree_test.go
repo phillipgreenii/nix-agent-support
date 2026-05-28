@@ -35,7 +35,11 @@ func addLabel(t *testing.T, runner *CLIRunner, id, label string) {
 
 func closeBead(t *testing.T, runner *CLIRunner, id string) {
 	t.Helper()
-	if _, err := runner.Run(context.Background(), "close", id); err != nil {
+	// --force bypasses bd's "blocked by open issues" guard, which would
+	// otherwise refuse to close a bead whose parent (the merge-request) is
+	// still open. The guard is fine for production but gets in the way of
+	// these isolated unit tests, which only care about the status flip.
+	if _, err := runner.Run(context.Background(), "close", id, "--force"); err != nil {
 		t.Fatalf("bd close: %v", err)
 	}
 }
@@ -77,6 +81,15 @@ func TestDepTreeUp_WithChildren(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("len: got %d want 3 — %+v", len(got), got)
 	}
+
+	// DepTreeUp no longer populates labels; overlay them via the workspace's
+	// human-labeled set the same way production does.
+	set, err := c.HumanLabeledBeads(ctx)
+	if err != nil {
+		t.Fatalf("HumanLabeledBeads: %v", err)
+	}
+	ApplyHumanLabels(got, set)
+
 	byID := map[string]DepNode{}
 	for _, n := range got {
 		byID[n.ID] = n
@@ -85,7 +98,7 @@ func TestDepTreeUp_WithChildren(t *testing.T) {
 		t.Errorf("A should be open, got %+v", byID[a])
 	}
 	if !hasLabel(byID[b].Labels, "human") {
-		t.Errorf("B should have human label, got %+v", byID[b].Labels)
+		t.Errorf("B should have human label after overlay, got %+v", byID[b].Labels)
 	}
 	if byID[cc].Status != "closed" {
 		t.Errorf("C should be closed, got %q", byID[cc].Status)
@@ -107,8 +120,97 @@ func TestDepTreeUp_WithChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	set2, err := c.HumanLabeledBeads(ctx)
+	if err != nil {
+		t.Fatalf("HumanLabeledBeads: %v", err)
+	}
+	ApplyHumanLabels(got2, set2)
 	if !AllNonClosedHumanLabeled(got2) {
 		t.Errorf("expected true after labeling A; got deps=%+v", got2)
+	}
+}
+
+func TestHumanLabeledBeads_EmptyWorkspace(t *testing.T) {
+	c, _ := newBDWorkspace(t)
+	set, err := c.HumanLabeledBeads(context.Background())
+	if err != nil {
+		t.Fatalf("HumanLabeledBeads: %v", err)
+	}
+	if len(set) != 0 {
+		t.Errorf("want empty set, got %+v", set)
+	}
+}
+
+func TestHumanLabeledBeads_OnlyHumanLabeled(t *testing.T) {
+	c, runner := newBDWorkspace(t)
+	ctx := context.Background()
+
+	// Anchor: a merge-request bead lets us reuse createChildBead so each
+	// child has a real parent edge (bd dep add requires both ids).
+	mr, _, err := c.EnsureMergeRequest(ctx, "MR-anchor", MergeRequestFields{Repo: "x/y", PRNumber: 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two human-labeled beads + one with a different label + one unlabeled.
+	a := createChildBead(t, runner, mr, "A")
+	b := createChildBead(t, runner, mr, "B")
+	cc := createChildBead(t, runner, mr, "C")
+	d := createChildBead(t, runner, mr, "D")
+	addLabel(t, runner, a, "human")
+	addLabel(t, runner, b, "human")
+	addLabel(t, runner, cc, "needs-triage")
+
+	set, err := c.HumanLabeledBeads(ctx)
+	if err != nil {
+		t.Fatalf("HumanLabeledBeads: %v", err)
+	}
+	if !set[a] {
+		t.Errorf("expected %s in set", a)
+	}
+	if !set[b] {
+		t.Errorf("expected %s in set", b)
+	}
+	if set[cc] {
+		t.Errorf("did not expect %s in set (different label)", cc)
+	}
+	if set[d] {
+		t.Errorf("did not expect %s in set (unlabeled)", d)
+	}
+}
+
+func TestApplyHumanLabels(t *testing.T) {
+	deps := []DepNode{
+		{ID: "x-1", Status: "open"},
+		{ID: "x-2", Status: "open", Labels: []string{"other"}},
+		{ID: "x-3", Status: "closed"},
+	}
+	ApplyHumanLabels(deps, map[string]bool{"x-1": true, "x-2": true})
+	if !hasLabel(deps[0].Labels, "human") {
+		t.Errorf("x-1 should have human label, got %+v", deps[0].Labels)
+	}
+	if !hasLabel(deps[1].Labels, "human") {
+		t.Errorf("x-2 should have human label, got %+v", deps[1].Labels)
+	}
+	if !hasLabel(deps[1].Labels, "other") {
+		t.Errorf("x-2 should preserve existing label, got %+v", deps[1].Labels)
+	}
+	if hasLabel(deps[2].Labels, "human") {
+		t.Errorf("x-3 not in set; should not have human label, got %+v", deps[2].Labels)
+	}
+}
+
+func TestApplyHumanLabels_Idempotent(t *testing.T) {
+	deps := []DepNode{{ID: "x-1", Status: "open", Labels: []string{"human"}}}
+	ApplyHumanLabels(deps, map[string]bool{"x-1": true})
+	count := 0
+	for _, l := range deps[0].Labels {
+		if l == "human" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("want exactly one human label, got %d (labels=%+v)", count, deps[0].Labels)
 	}
 }
 

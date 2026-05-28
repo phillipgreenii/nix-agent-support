@@ -511,6 +511,18 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	if len(observed) == 0 {
 		return
 	}
+	// One human-label set per workspace (each repo's bd client may target
+	// a different .beads/ workspace). Pre-fetch once so per-PR DepTreeUp
+	// results can be overlaid without a per-dep `bd label list` call —
+	// previously ~4-5 bd calls per PR per tick.
+	humanByRepo := make(map[string]map[string]bool, len(repoClients))
+	for repo, bdc := range repoClients {
+		if c, ok := bdc.(*beads.Client); ok {
+			if set, err := c.HumanLabeledBeads(ctx); err == nil {
+				humanByRepo[repo] = set
+			}
+		}
+	}
 	inputs := make([]snapshot.PRInput, 0, len(observed))
 	for key, pr := range observed {
 		// Ensure pr.Repo carries the configured remote — VCS providers may
@@ -558,6 +570,7 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		if c, ok := bdc.(*beads.Client); ok {
 			if mr, ferr := c.FindByRepoAndNumber(ctx, key.Repo, pr.Number); ferr == nil && mr != nil {
 				if deps, derr := c.DepTreeUp(ctx, mr.ID); derr == nil {
+					beads.ApplyHumanLabels(deps, humanByRepo[key.Repo])
 					in.BeadsDeps = deps
 				}
 			}
