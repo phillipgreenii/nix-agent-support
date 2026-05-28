@@ -104,6 +104,55 @@ func TestTickCache_NilSafe(t *testing.T) {
 	}
 }
 
+func TestLoadTickCache_DepsUpByPR(t *testing.T) {
+	c, runner := newBDWorkspace(t)
+	ctx := context.Background()
+
+	// A merge-request with three descendants: a direct child task (open),
+	// a direct child task (closed), and a grandchild task two hops up.
+	prID, _, err := c.EnsureMergeRequest(ctx, "deps PR", MergeRequestFields{Repo: "x/y", PRNumber: 11})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := createChildBead(t, runner, prID, "direct-open")
+	b := createChildBead(t, runner, prID, "direct-closed")
+	closeBead(t, runner, b)
+	g := createChildBead(t, runner, a, "grandchild")
+
+	cache := c.LoadTickCache(ctx)
+	deps, ok := cache.DepsUpFor(prID)
+	if !ok {
+		t.Fatalf("DepsUpFor(%s) ok=false; cache built for known PR should always return ok=true", prID)
+	}
+	byID := map[string]DepNode{}
+	for _, d := range deps {
+		byID[d.ID] = d
+	}
+	if _, has := byID[a]; !has {
+		t.Errorf("DepsUpByPR missing direct child %s; got %+v", a, deps)
+	}
+	if _, has := byID[b]; !has {
+		t.Errorf("DepsUpByPR missing closed direct child %s; got %+v", b, deps)
+	}
+	if byID[b].Status != "closed" {
+		t.Errorf("DepsUpByPR child %s should carry status=closed; got %+v", b, byID[b])
+	}
+	if _, has := byID[g]; !has {
+		t.Errorf("DepsUpByPR missing transitive grandchild %s; got %+v", g, deps)
+	}
+	// Root must not be included in its own dep list.
+	if _, has := byID[prID]; has {
+		t.Errorf("DepsUpByPR should not include the root %s", prID)
+	}
+}
+
+func TestTickCache_DepsUpFor_NilCache(t *testing.T) {
+	var cache *TickCache
+	if _, ok := cache.DepsUpFor("anything"); ok {
+		t.Error("DepsUpFor on nil cache should return ok=false")
+	}
+}
+
 func TestTickCache_OpenProcessingByPR_IgnoresClosedCycles(t *testing.T) {
 	c, runner := newBDWorkspace(t)
 	ctx := context.Background()

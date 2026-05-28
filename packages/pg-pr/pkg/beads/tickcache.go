@@ -53,6 +53,17 @@ type TickCache struct {
 	// processing-cycles and PR beads the cache walks, so a miss here
 	// just means the caller should hit bd directly.
 	ChildrenByID map[string][]string
+
+	// DepsUpByPR holds the recursive dep tree (in the `up` direction)
+	// for every merge-request bead. Pre-computed by BFS over a
+	// workspace-wide edge map fetched in one `bd list --json --limit=0
+	// --all` call, replacing the previous one-`bd dep tree`-per-PR loop
+	// (~21 calls per tick on the zr workspace) with a single bulk read.
+	//
+	// DepNode.Labels is empty here — overlay `human` labels via
+	// ApplyHumanLabels(deps, cache.HumanLabeled) before consulting
+	// AllNonClosedHumanLabeled.
+	DepsUpByPR map[string][]DepNode
 }
 
 // LoadTickCache builds the workspace-wide cache used by the sync engine
@@ -66,52 +77,137 @@ func (c *Client) LoadTickCache(ctx context.Context) *TickCache {
 		OpenProcessingByPR: map[string]string{},
 		FeedbackByCycle:    map[string][]Feedback{},
 		ChildrenByID:       map[string][]string{},
+		DepsUpByPR:         map[string][]DepNode{},
 	}
 
 	if set, err := c.HumanLabeledBeads(ctx); err == nil {
 		cache.HumanLabeled = set
 	}
 
-	mrs, _ := c.ListMergeRequests(ctx, true /* includeClosed */)
-	for _, mr := range mrs {
-		cache.MergeRequestsByID[mr.ID] = mr
+	// One workspace-wide list with embedded dep edges. The same payload
+	// feeds MergeRequestsByID, FeedbackByCycle, OpenProcessingByPR, and
+	// DepsUpByPR — previously four separate bd calls plus per-cycle dep
+	// list calls. Closed beads are included so dep edges remain visible
+	// after a feedback or PR is closed.
+	issues, err := c.listAllWithDeps(ctx)
+	if err != nil {
+		// On bulk-fetch failure, the cache is still safe to consult —
+		// every helper short-circuits on a nil/empty map and the caller
+		// falls back to its live bd call path.
+		return cache
 	}
 
-	feedback, _ := c.ListFeedback(ctx, "" /* all cycles */, true /* includeClosed */)
-	feedbackByID := make(map[string]Feedback, len(feedback))
-	for _, fb := range feedback {
-		feedbackByID[fb.ID] = fb
+	feedbackByID := map[string]Feedback{}
+	cycles := make([]processingCycleCandidate, 0)
+	// childrenOf reverses each `depends_on_id → issue_id` edge so a BFS
+	// in the up direction is a simple map lookup.
+	childrenOf := map[string][]string{}
+	titleOf := map[string]string{}
+	statusOf := map[string]string{}
+
+	for _, iss := range issues {
+		titleOf[iss.ID] = iss.Title
+		statusOf[iss.ID] = iss.Status
+		for _, dep := range iss.Dependencies {
+			childrenOf[dep.DependsOnID] = append(childrenOf[dep.DependsOnID], dep.IssueID)
+		}
+		switch iss.Type {
+		case TypeMergeRequest:
+			cache.MergeRequestsByID[iss.ID] = bdIssueToMergeRequest(iss)
+		case TypeFeedback:
+			fb := Feedback{
+				ID:     iss.ID,
+				Title:  iss.Title,
+				Status: iss.Status,
+				Fields: feedbackFieldsFromMetadata(iss.Metadata),
+			}
+			feedbackByID[iss.ID] = fb
+		case "task":
+			if iss.Status != "closed" && strings.HasPrefix(iss.Title, processingCycleTitlePrefix) {
+				cycles = append(cycles, processingCycleCandidate{ID: iss.ID, Title: iss.Title})
+			}
+		}
 	}
 
-	cycles, _ := c.listOpenProcessingCycles(ctx)
+	// Map each open processing-cycle to its merge-request parent and its
+	// feedback children via the workspace-wide edge map.
 	for _, cycle := range cycles {
-		// Walk this cycle's parents to find its merge-request anchor.
-		parentOut, err := c.Runner.Run(ctx, "dep", "list", cycle.ID, "--json")
-		if err == nil {
-			for _, parentID := range extractIDs(parentOut) {
-				if _, isMR := cache.MergeRequestsByID[parentID]; isMR {
-					cache.OpenProcessingByPR[parentID] = cycle.ID
+		// Children: anything depending on the cycle. Feedback beads are
+		// the only kind the engine cares about under a cycle.
+		children := childrenOf[cycle.ID]
+		cache.ChildrenByID[cycle.ID] = children
+		for _, childID := range children {
+			if fb, ok := feedbackByID[childID]; ok {
+				cache.FeedbackByCycle[cycle.ID] = append(cache.FeedbackByCycle[cycle.ID], fb)
+			}
+		}
+		// Parents: walk the cycle's dependencies (depends_on_id) to find
+		// the merge-request anchor. We don't have a built parentsOf map
+		// for cycles, so re-derive from the original dependencies list.
+		for _, iss := range issues {
+			if iss.ID != cycle.ID {
+				continue
+			}
+			for _, dep := range iss.Dependencies {
+				if _, isMR := cache.MergeRequestsByID[dep.DependsOnID]; isMR {
+					cache.OpenProcessingByPR[dep.DependsOnID] = cycle.ID
 					break
 				}
 			}
-		}
-
-		// Walk this cycle's children to group feedback under it. The
-		// children list also feeds ChildrenByID so the dedup walker in
-		// findFeedbackForPR doesn't need its own bd call.
-		childOut, err := c.Runner.Run(ctx, "dep", "list", cycle.ID, "--direction=up", "--json")
-		if err == nil {
-			children := extractIDs(childOut)
-			cache.ChildrenByID[cycle.ID] = children
-			for _, childID := range children {
-				if fb, ok := feedbackByID[childID]; ok {
-					cache.FeedbackByCycle[cycle.ID] = append(cache.FeedbackByCycle[cycle.ID], fb)
-				}
-			}
+			break
 		}
 	}
 
+	// Pre-compute the recursive dep tree (up direction) for every
+	// merge-request bead via BFS over childrenOf. Replaces N per-PR
+	// `bd dep tree` calls with one workspace-wide list + in-memory walk.
+	for prID := range cache.MergeRequestsByID {
+		cache.DepsUpByPR[prID] = bfsDescendants(prID, childrenOf, titleOf, statusOf)
+	}
+
 	return cache
+}
+
+// bfsDescendants returns every bead transitively depending on rootID in
+// the up direction, excluding rootID itself. The returned DepNode.Labels
+// is empty; callers overlay labels via ApplyHumanLabels.
+func bfsDescendants(rootID string, childrenOf map[string][]string, titleOf, statusOf map[string]string) []DepNode {
+	if rootID == "" {
+		return nil
+	}
+	seen := map[string]bool{rootID: true}
+	var out []DepNode
+	queue := []string{rootID}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenOf[cur] {
+			if seen[child] {
+				continue
+			}
+			seen[child] = true
+			out = append(out, DepNode{
+				ID:     child,
+				Title:  titleOf[child],
+				Status: statusOf[child],
+			})
+			queue = append(queue, child)
+		}
+	}
+	return out
+}
+
+// listAllWithDeps returns every bead in the workspace (open + closed)
+// with its embedded dependency edges. Replaces the previous trio of
+// `bd list --type=merge-request`, `bd list --type=feedback`, and
+// `bd list --type=task --status=open` calls plus the per-cycle dep
+// list/dep tree calls in the snapshot loop.
+func (c *Client) listAllWithDeps(ctx context.Context) ([]bdIssue, error) {
+	out, err := c.Runner.Run(ctx, "list", "--json", "--limit=0", "--all")
+	if err != nil {
+		return nil, err
+	}
+	return parseBDList(out)
 }
 
 // processingCycleCandidate is a parsed subset of bd's task-list JSON
@@ -119,32 +215,6 @@ func (c *Client) LoadTickCache(ctx context.Context) *TickCache {
 type processingCycleCandidate struct {
 	ID    string
 	Title string
-}
-
-// listOpenProcessingCycles returns the open task beads whose title carries
-// the canonical processing-cycle prefix.
-func (c *Client) listOpenProcessingCycles(ctx context.Context) ([]processingCycleCandidate, error) {
-	out, err := c.Runner.Run(ctx,
-		"list",
-		"--type=task",
-		"--status=open",
-		"--json",
-		"--limit=0",
-	)
-	if err != nil {
-		return nil, err
-	}
-	issues, err := parseBDList(out)
-	if err != nil {
-		return nil, err
-	}
-	cycles := make([]processingCycleCandidate, 0, len(issues))
-	for _, iss := range issues {
-		if strings.HasPrefix(iss.Title, processingCycleTitlePrefix) {
-			cycles = append(cycles, processingCycleCandidate{ID: iss.ID, Title: iss.Title})
-		}
-	}
-	return cycles, nil
 }
 
 // OpenCycleFor returns the cycle ID cached for the given PR bead, plus
@@ -166,6 +236,20 @@ func (cache *TickCache) FeedbackUnder(cycleID string) []Feedback {
 		return nil
 	}
 	return cache.FeedbackByCycle[cycleID]
+}
+
+// DepsUpFor returns the cached recursive dep tree for the given PR bead.
+// ok=true means the cache has authoritative data; the empty []DepNode +
+// ok=true case still means "PR exists in the cache but has no
+// dependents" and the caller should NOT fall back to a live call. ok=false
+// indicates either nil cache or a missing/failed bulk fetch — caller
+// should run DepTreeUp.
+func (cache *TickCache) DepsUpFor(prBeadID string) ([]DepNode, bool) {
+	if cache == nil {
+		return nil, false
+	}
+	deps, ok := cache.DepsUpByPR[prBeadID]
+	return deps, ok
 }
 
 // FindMergeRequest returns the cached merge-request bead matching

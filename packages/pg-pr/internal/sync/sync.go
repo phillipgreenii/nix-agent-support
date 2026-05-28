@@ -583,12 +583,18 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 				}
 			}
 			if mrID != "" {
-				if deps, derr := c.DepTreeUp(ctx, mrID); derr == nil {
-					if cache != nil {
-						beads.ApplyHumanLabels(deps, cache.HumanLabeled)
-					}
-					in.BeadsDeps = deps
+				// Cached dep tree first; live DepTreeUp only when the
+				// workspace-wide bulk fetch wasn't available for this PR.
+				var deps []beads.DepNode
+				if cached, ok := cache.DepsUpFor(mrID); ok {
+					deps = cached
+				} else if liveDeps, derr := c.DepTreeUp(ctx, mrID); derr == nil {
+					deps = liveDeps
 				}
+				if cache != nil {
+					beads.ApplyHumanLabels(deps, cache.HumanLabeled)
+				}
+				in.BeadsDeps = deps
 			}
 		}
 		// JIRA — left empty for v1; downstream task wires this from

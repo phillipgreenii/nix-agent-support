@@ -51,11 +51,21 @@ type MergeRequest struct {
 // values are strings or numbers depending on what was set, so we decode
 // into a generic map and convert as needed.
 type bdIssue struct {
-	ID       string         `json:"id"`
-	Title    string         `json:"title"`
-	Status   string         `json:"status"`
-	Type     string         `json:"issue_type"`
-	Metadata map[string]any `json:"metadata"`
+	ID           string         `json:"id"`
+	Title        string         `json:"title"`
+	Status       string         `json:"status"`
+	Type         string         `json:"issue_type"`
+	Metadata     map[string]any `json:"metadata"`
+	Dependencies []bdDependency `json:"dependencies,omitempty"`
+}
+
+// bdDependency mirrors one entry of bd's `dependencies` field in
+// `bd list --json`. issue_id is the dependent (the issue carrying the
+// edge); depends_on_id is the bead the edge points at.
+type bdDependency struct {
+	IssueID     string `json:"issue_id"`
+	DependsOnID string `json:"depends_on_id"`
+	Type        string `json:"type"`
 }
 
 // Client is a stateful wrapper holding a Runner. Use NewClient to construct.
