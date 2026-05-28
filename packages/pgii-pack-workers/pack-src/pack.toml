@@ -1,0 +1,18 @@
+# pgii-workers — rig-scoped worker pool.
+#
+# One agent template, `worker`, with scope = "rig". Every rig that
+# imports this pack gets its own worker materialization. Workers claim
+# open beads with acceptance_criteria set; ambiguous work gets labeled
+# `needs-foreman`. Per-rig session concurrency is overridden via
+# [[rigs.patches]] in city.toml (default 0/1; ziprecruiter wants 0/3).
+#
+# Migrated from ~/gc/assets/imports/pgii-workers/ (hand-built pack).
+
+[pack]
+name = "pgii-workers"
+schema = 2
+
+[[named_session]]
+template = "worker"
+scope = "rig"
+mode = "on_demand"

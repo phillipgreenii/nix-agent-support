@@ -91,6 +91,7 @@
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
           pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };
+          pgii-pack-workers = final.callPackage ./packages/pgii-pack-workers { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -441,6 +442,7 @@
               pgii-pack-test-fixture
               pgii-pack-pr-support
               pgii-pack-dolt-hacks
+              pgii-pack-workers
               pg-pr
               goccc
               toktrack
