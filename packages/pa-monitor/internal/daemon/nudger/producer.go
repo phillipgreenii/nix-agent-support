@@ -50,5 +50,3 @@ type DisruptProducer struct {
 	firstSeen map[string]time.Time // sid -> when this disrupt was first observed
 }
 type ManualProducer struct{}
-
-func (*ManualProducer) Reconcile(TickContext, *PendingStore) {}
