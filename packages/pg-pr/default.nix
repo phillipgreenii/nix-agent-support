@@ -1,13 +1,13 @@
 {
   pkgs,
   lib,
-  gitHash,
+  version ? "dev",
   ...
 }:
 
 pkgs.buildGoModule {
   pname = "pg-pr";
-  version = "0.0.0";
+  inherit version;
   src = ./.;
 
   vendorHash = "sha256-rL+SaAbAj6rv9Dc2HixmhKrMXoVSCeDbNIJf25qerQ4=";
@@ -15,7 +15,7 @@ pkgs.buildGoModule {
   subPackages = [ "cmd/pg-pr" ];
 
   ldflags = [
-    "-X main.Version=${gitHash}"
+    "-X main.Version=${version}"
   ];
 
   nativeBuildInputs = [ pkgs.help2man ];

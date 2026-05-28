@@ -1,17 +1,22 @@
 {
   lib,
   buildGoModule,
+  version ? "dev",
 }:
 
 buildGoModule {
   pname = "claude-extended-tool-approver";
-  version = "0.1.0";
+  inherit version;
 
   src = lib.cleanSource ./.;
 
   subPackages = [ "cmd/claude-extended-tool-approver" ];
 
   vendorHash = "sha256-FuA/H29f1r8nCuTWIiqaBzG7d+Q0pmGR2I9bLpjqssU=";
+
+  ldflags = [
+    "-X main.Version=${version}"
+  ];
 
   postInstall = ''
     mkdir -p $out/share/claude-extended-tool-approver/skills

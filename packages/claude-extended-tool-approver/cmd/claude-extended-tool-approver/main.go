@@ -58,6 +58,7 @@ var knownSubcommands = map[string]bool{
 	"report":               true,
 	"set-correct-decision": true,
 	"show":                 true,
+	"version":              true,
 	"completion":           true, // cobra builtin
 	"help":                 true, // cobra builtin
 	"-h":                   true,
@@ -87,7 +88,22 @@ and analyzing the decision log.`,
 	root.AddCommand(newReportCmd())
 	root.AddCommand(newSetCorrectDecisionCmd())
 	root.AddCommand(newShowCmd())
+	root.AddCommand(newVersionCmd())
 	return root
+}
+
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "claude-extended-tool-approver %s\n", Version)
+			return err
+		},
+	}
 }
 
 func main() {

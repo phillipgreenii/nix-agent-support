@@ -75,7 +75,6 @@
             inherit (final) lib;
             inherit self;
           };
-          gitHash = phillipgreenii-nix-base.lib.mkGitHash (self.rev or self.dirtyRev or null);
         in
         {
           # packages added in later tasks
@@ -83,10 +82,12 @@
           inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           bash-scripting = final.callPackage ./packages/bash-scripting { };
           pg-pr = final.callPackage ./packages/pg-pr {
-            inherit gitHash;
+            version = phillipgreenii-nix-base.lib.mkVersion self;
           };
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
-          claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
+          claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
+            version = phillipgreenii-nix-base.lib.mkVersion self;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             version = phillipgreenii-nix-base.lib.mkVersion self;
           };
