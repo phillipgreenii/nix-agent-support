@@ -90,6 +90,38 @@ func TestConfigDefaultsCmuxSidebar(t *testing.T) {
 	}
 }
 
+func TestConfigDefaultsNudge(t *testing.T) {
+	cfg := defaults()
+	if cfg.DisruptGrace != 30*time.Second {
+		t.Errorf("DisruptGrace default = %v, want 30s", cfg.DisruptGrace)
+	}
+	if cfg.EscalationAfter != 60*time.Second {
+		t.Errorf("EscalationAfter default = %v, want 60s", cfg.EscalationAfter)
+	}
+}
+
+func TestConfigOverridesNudge(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+disrupt_grace_s = 45
+escalation_after_s = 90
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DisruptGrace != 45*time.Second {
+		t.Errorf("DisruptGrace = %v, want 45s", cfg.DisruptGrace)
+	}
+	if cfg.EscalationAfter != 90*time.Second {
+		t.Errorf("EscalationAfter = %v, want 90s", cfg.EscalationAfter)
+	}
+}
+
 func TestPartialOverridePreservesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

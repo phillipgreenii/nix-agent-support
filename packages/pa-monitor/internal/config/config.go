@@ -25,6 +25,8 @@ type Config struct {
 	MaximumWait           time.Duration
 	AutoResumeDelay       time.Duration
 	AutoResumeMessage     string
+	DisruptGrace          time.Duration
+	EscalationAfter       time.Duration
 	CmuxSidebarEnable        bool
 	CmuxSidebarIntervalTicks int
 }
@@ -44,6 +46,8 @@ type tomlConfig struct {
 	MaximumWaitS          *int     `toml:"maximum_wait_s"`
 	AutoResumeDelayS      *int     `toml:"auto_resume_delay_s"`
 	AutoResumeMessage     *string  `toml:"auto_resume_message"`
+	DisruptGraceS         *int     `toml:"disrupt_grace_s"`
+	EscalationAfterS      *int     `toml:"escalation_after_s"`
 	CmuxSidebarEnable        *bool `toml:"cmux_sidebar_enable"`
 	CmuxSidebarIntervalTicks *int  `toml:"cmux_sidebar_interval_ticks"`
 }
@@ -64,6 +68,8 @@ func defaults() Config {
 		MaximumWait:           2 * time.Hour,
 		AutoResumeDelay:       45 * time.Second,
 		AutoResumeMessage:     "continue",
+		DisruptGrace:          30 * time.Second,
+		EscalationAfter:       60 * time.Second,
 		CmuxSidebarEnable:        true,
 		CmuxSidebarIntervalTicks: 5,
 	}
@@ -130,6 +136,12 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.AutoResumeMessage != nil {
 		cfg.AutoResumeMessage = *raw.AutoResumeMessage
+	}
+	if raw.DisruptGraceS != nil {
+		cfg.DisruptGrace = time.Duration(*raw.DisruptGraceS) * time.Second
+	}
+	if raw.EscalationAfterS != nil {
+		cfg.EscalationAfter = time.Duration(*raw.EscalationAfterS) * time.Second
 	}
 	if raw.CmuxSidebarEnable != nil {
 		cfg.CmuxSidebarEnable = *raw.CmuxSidebarEnable
