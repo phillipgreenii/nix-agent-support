@@ -14,7 +14,7 @@ buildGoModule {
 
   subPackages = [ "cmd/pa-monitor" ];
 
-  vendorHash = "sha256-pOswx1JK3d+pzI9HVtAimOGFcNPtpLyLXP2rVSthyAk=";
+  vendorHash = "sha256-vEIAZr0QxngOWCE0lZC80mB8gbnY+ZwzaqogJqPexxI=";
 
   nativeBuildInputs = [ makeWrapper ];
 
