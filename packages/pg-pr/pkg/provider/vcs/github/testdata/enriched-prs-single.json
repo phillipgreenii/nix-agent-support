@@ -1,0 +1,665 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 53,
+      "remaining": 4652,
+      "resetAt": "2026-05-28T20:05:07Z"
+    },
+    "search": {
+      "issueCount": 1,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      },
+      "nodes": [
+        {
+          "number": 91071,
+          "title": "feat(findev-9345): add usage_pricing_token_dry_run table",
+          "url": "https://github.com/ZR-Private/ziprecruiter/pull/91071",
+          "author": {
+            "login": "csziprecruiter"
+          },
+          "baseRefName": "main",
+          "headRefName": "constantin.segarceanu.FINDEV-9345.add-dry-run-table",
+          "isDraft": false,
+          "state": "OPEN",
+          "merged": false,
+          "additions": 173,
+          "deletions": 0,
+          "changedFiles": 6,
+          "repository": {
+            "nameWithOwner": "ZR-Private/ziprecruiter"
+          },
+          "reviews": {
+            "totalCount": 1,
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRR_kwDOKtdWE88AAAABBUeC3Q",
+                "state": "COMMENTED",
+                "author": {
+                  "login": "coderabbitai"
+                },
+                "body": "**Actionable comments posted: 1**\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nInline comments:\nIn\n`@sqitch/starterview/deploy/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`:\n- Line 5: The CREATE TABLE statement for usage_pricing_token_dry_run currently\nuses \"IF NOT EXISTS\", which can mask schema drift and make rollbacks unsafe;\nremove the \"IF NOT EXISTS\" clause from the CREATE TABLE statement for\nusage_pricing_token_dry_run so the deployment will fail if a same-named table\nalready exists with a different schema, ensuring drift is surfaced and revert\n(DROP TABLE usage_pricing_token_dry_run) remains safe.\n```\n\n</details>\n\n<details>\n<summary>🪄 Autofix (Beta)</summary>\n\nFix all unresolved CodeRabbit comments on this PR:\n\n- [ ] <!-- {\"checkboxId\": \"4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9\"} --> Push a commit to this branch (recommended)\n- [ ] <!-- {\"checkboxId\": \"ff5b1114-7d8c-49e6-8ac1-43f82af23a33\"} --> Create a new PR with the fixes\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Repository UI\n\n**Review profile**: CHILL\n\n**Plan**: Enterprise\n\n**Run ID**: `25654052-77c5-4adb-a6cf-27d8f2ecd62d`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between 426dca17358f304e916670e6ec26d2094aa1c2bf and 99de4fbfd2a645ddcd71a2063955b9c9cecf5acf.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (6)</summary>\n\n* `db/skeema/ec2-reporting/starterview/usage_pricing_token_dry_run.sql`\n* `etc/loaded-schema/starterview/usage_pricing_token_dry_run.yml`\n* `sqitch/starterview/deploy/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`\n* `sqitch/starterview/revert/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`\n* `sqitch/starterview/sqitch.plan`\n* `sqitch/starterview/verify/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+                "submittedAt": "2026-05-28T18:12:55Z"
+              }
+            ]
+          },
+          "comments": {
+            "totalCount": 1,
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "IC_kwDOKtdWE88AAAABEDYqbg",
+                "author": {
+                  "login": "coderabbitai"
+                },
+                "authorAssociation": "NONE",
+                "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/ZR-Private/ziprecruiter/pull/91071?utm_source=github_walkthrough&utm_medium=github&utm_campaign=change_stack)\n\n<!-- review_stack_entry_end -->\n<!-- walkthrough_start -->\n\n<details>\n<summary>📝 Walkthrough</summary>\n\n## Walkthrough\n\nThis PR adds a new database table `usage_pricing_token_dry_run` to support tracking dry-run token pricing decisions. The change includes the table schema definition, Sqitch migration infrastructure (deploy, revert, verify), and plan registration to enable safe deployment and rollback.\n\n## Changes\n\n**Usage Pricing Token Dry Run Table**\n\n| Layer / File(s) | Summary |\n|---|---|\n| **Table Schema Definition** <br> `db/skeema/ec2-reporting/starterview/usage_pricing_token_dry_run.sql`, `etc/loaded-schema/starterview/usage_pricing_token_dry_run.yml` | Defines the `usage_pricing_token_dry_run` table with auto-incrementing `id` primary key, required `run_id`/`org_id`/`billing_date` linking fields, an `action` enum (EXPIRE_TOKEN, CLOSE_QUIZ_TOKEN, ISSUE_PPP, SKIP_ORG), nullable references (quiz_id, token_id, charge_id), timing/expiration fields, and pricing columns; includes indexes on `run_id` and `(org_id, billing_date)`. |\n| **Sqitch Migration Infrastructure** <br> `sqitch/starterview/deploy/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`, `sqitch/starterview/revert/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`, `sqitch/starterview/verify/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`, `sqitch/starterview/sqitch.plan` | Sqitch deploy script creates table if not exists with InnoDB and utf8mb4 charset; revert script drops the table; verify script confirms table is absent before deployment; plan entry (2617) registers the migration step. |\n\n## Estimated code review effort\n\n🎯 2 (Simple) | ⏱️ ~12 minutes\n\n## Poem\n\n> 🐰 A table springs to life, so neat and clean,\n> With action states and tokens unseen,\n> Indexed quick on org and date,\n> Sqitch deploys without debate,\n> Dry runs pricing, tokens agree!\n\n</details>\n\n<!-- walkthrough_end -->\n<!-- pre_merge_checks_walkthrough_start -->\n\n<details>\n<summary>🚥 Pre-merge checks | ✅ 5</summary>\n\n<details>\n<summary>✅ Passed checks (5 passed)</summary>\n\n|         Check name         | Status   | Explanation                                                                                                                                                                                           |\n| :------------------------: | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n|         Title check        | ✅ Passed | The pull request title 'feat(findev-9345): add usage_pricing_token_dry_run table' clearly and specifically summarizes the main change: adding a new database table for dry-run usage pricing tokens.  |\n|      Description check     | ✅ Passed | The description is well-organized and directly relevant to the changeset, providing clear motivation, detailed column specifications, and testing information that corresponds to the files modified. |\n|     Docstring Coverage     | ✅ Passed | No functions found in the changed files to evaluate docstring coverage. Skipping docstring coverage check.                                                                                            |\n|     Linked Issues check    | ✅ Passed | Check skipped because no linked issues were found for this pull request.                                                                                                                              |\n| Out of Scope Changes check | ✅ Passed | Check skipped because no linked issues were found for this pull request.                                                                                                                              |\n\n</details>\n\n<sub>✏️ Tip: You can configure your own custom pre-merge checks in the settings.</sub>\n\n</details>\n\n<!-- pre_merge_checks_walkthrough_end -->\n<!-- finishing_touch_checkbox_start -->\n\n<details>\n<summary>✨ Finishing Touches</summary>\n\n<details>\n<summary>🧪 Generate unit tests (beta)</summary>\n\n- [ ] <!-- {\"checkboxId\": \"f47ac10b-58cc-4372-a567-0e02b2c3d479\", \"radioGroupId\": \"utg-output-choice-group-unknown_comment_id\"} -->   Create PR with unit tests\n- [ ] <!-- {\"checkboxId\": \"6ba7b810-9dad-11d1-80b4-00c04fd430c8\", \"radioGroupId\": \"utg-output-choice-group-unknown_comment_id\"} -->   Commit unit tests in branch `constantin.segarceanu.FINDEV-9345.add-dry-run-table`\n\n</details>\n\n</details>\n\n<!-- finishing_touch_checkbox_end -->\n<!-- This is an auto-generated comment: resource warnings by coderabbit.ai -->\n\n> [!WARNING]\n> ## Review ran into problems\n> \n> <details>\n> <summary>🔥 Problems</summary>\n> \n> Git: Failed to clone repository. Please run the `@coderabbitai full review` command to re-trigger a full review. If the issue persists, set `path_filters` to include or exclude specific files.\n> \n> </details>\n\n<!-- end of auto-generated comment: resource warnings by coderabbit.ai -->\n<!-- tips_start -->\n\n---\n\n\n\n\n<sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>\n\n<!-- tips_end -->\n<!-- internal state start -->\n\n\n<!-- DwQgtGAEAqAWCWBnSTIEMB26CuAXA9mAOYCmGJATmriQCaQDG+Ats2bgFyQAOFk+AIwBWJBrngA3EsgEBPRvlqU0AgfFwA6NPEgQAfACgjoCEYDEZyAAUASpETZWaCrKPR1AGxJcAZiWoAFD7wGEoSYACcAMwALACsAJRcaLT02IhopAD6vPAMIURZBADWZFm0LlkU2Fi4Kl6QkAYAco4ClFwRAIwADADsXY0GAKo2ADJcsLi43IgcAPTzROqw2AIaTMzzAFo2YFYUktQk8wBe8Lyi1eqU89zYHh7z3f2DTcOIHYyI55cM1zQ+E0AMr4bAUBgkSACKgYBiwLhMDCIOoYcQYDSfIjOSGYbAaABiAElmgARACiADVIrE4lpUmAKrIwNUMGA6gIGoAkwhgzlIuGhsPhXGY2iwILquHSXHw3DIkEAKASQGwkCTwEgAd0oc3sQnwsGRBAwABpIFr4BRaKjSGjTUIMPgJGhimBfnb8IhYL8ohF+vFFZAxioSB4dTQ0FtgqFVQGAMIUfw0ejULgAJh6qYAbGAenEwKmABzQLoFjg9TMcVN9bZGUnSf4XcT4DAcAxQABSFrQXGJZKpNPiGms4O4HqhqAI9mw3FHFAFuFgUKslA8kB57bQTsg6UyUNy+QwREgzHgRCoTawAV7FOp3TifQS0PkCaYloKkCZLJqH9ESHgzeQRB8EgDct0/Vl+Dwe4BQYTBoShTZuGcOhIEnZcKFXXhFGwMR/ywDVDhoRANDbSAAEFUmQNBIHIDVUPqKEUWcQE1U1DQd2yfcCiKfBSgwcpKggycUXwBMf3yRA8OQHwKBYVDePlEgAA9uAteRMHoJAHEwSF7BoWZIGU0Q8BQkIPxcL8sGYRQSBIqBoAYhQPEcZFIHmewSFFNE8jmAxGigVksngWguA8EJimQWSNWQLDaBwlC5HQewCgaWwAHlY3JYFgSyYZgTIgBxcksmgNKAGlyWaYFINwAR8CUwypDRQylOMi8/N0dBcObLhKuGABZM0VkgJ1nOkSAAG9yQADSsIkbGK0qKuaU1YzGNLgWKgBFYYiW2Erysq1b1s2rIxiJYFoBJAqDuW00LuBYZiqsF77uyp6slJC7oBsIkACFhiutKVsgNaNuKy6yLGYrzsu67TWBMqiSsLIdr2hGkZRtKbAKgBfDqoHJFS1JZENjnoYIQ1oMMFP44LTXhPkSCC2hTWU1SE1oLJm3KY42dCIp4DYBmAMcOgeL4lmCcgIlEG0uESFJjxycgSmPGp5InXgZXOWZ2g+e3T4sjkXmaFNfXtdkHJDkhc2kFwQ4BDwPCsi8KQPFNMKUW44LpaJaNWuQZtIEC4L0FCfhL1Ewp6ehbWwsPU2SASUiCW18aUiUWh5kZw86Fbfz7AAR3UeFj1Pc88O3aM+EQEvcHheYmLnShWLo/5E3fBcoQ5LxpdoAQm9KTy0HmURU1J2d0SIJu6hbig2/mDjma4xOSjKJkqhqTEi9XAJgWH0VIFJUkxhTwuSAb+YPHwFI6DARB4RH2fmNb9UNSXjJOJt7j1/4zfWQaFkMwPeN8760Afk/I+ABNMi/Uz6kWgNIaeXAlDcBvrIFCN9YKPHUhHKQhxKb0G7vRXWKBkAdxVmgQCcp8hEJIm2MAhgDAmCgGQeg+AfA4AIMQMgygkwKFYOwLgvB+DCFEOIKQMh5BMCUFQVQ6gtA6H0Cw8A9kEDIFQHBNAeBCA2n4ShTYbA0RcCoHRBwTgXBPgUHIlQahNDaF0EwowqjTAGAHkPEgz9x6T1EtPF+89F7L2tnkX+tMBJW0AXXDwrYABE8SDAWHIkSXh5BzwoQsaKKxnDGCwEwKQRARh4yJgzjRTUMsMAOlJH9UhDQAAGwTV6FD/hEreGA6lDQXOHbhhAQgd2MdPHghwsnyFKHg+gDgZx+PfCEJQgdI6QDqaHWgHSNKQACHU6OLM6mmjqWoR43F9Y0DqQkIccBGJQOon05yShIokCLtgC0hj8DOWYK5HwolIAJ2KO+aiTIQ7fknHBaO4d6D7ITkeI5JBTRwTqWgbq7TDIYEcIwNA3ApSHEPMeB44h0E91pvMB58BTjX3tu+MKfgGCyAYA0JiRFTSygvGgVcCY/AJgVsgScCZlYCPYOodUyAAi2SIBoXZRLTjbN2S04KOzFmMwoNkGVCRTTiBPIeMexNK7BzVtTU0TT1l1Ith4K2+4SAnJhRHJioRnDJmwLQdQqEhbIIjNwOVCZyZZGoHUhh5hLBkQ8ICagUl5KoUXOJZWWrXI5PZn4lCnz7icjyEi8Q4hpBGCgM0cpRyVDUJ7o5TO+dFmNJ/mvcJACagdLMoaweiBD6jx8QmKeBQAksXfp/XcISDzNLLYJbe0S6lGDGCEcaudSAhUgAAalTDEeYOYjDkm9qKARsioQJjboZHwHy5xcH6nQeAjgDDxNiemtxl8GDX1vlnSBi5RQtrfpqdt39QmlsluWjEwCYmHoSUksiKT9HpImY4EZ/AuGjrTQYOAqBggNCUFGcaJC6nN1bWxYtz7u2vt7Yi3uFyb3US3UlcC35l5DLQ/JPiH5qC5s0DLAUiBaHwEplRLAcKEUdLICioVGgRW7JmnNBat1KqyrqWDU6aN9pLUE7sh6H0XpWCE4jZGWRsYFXNUlT4Aocm4FkHKegTBXmuQCFCxA5tjiqukCqp1TFmCzFNGoZYzVgp8sphQYzI0cR5L4BgCM0hr6qhDK5pQ+RRShlVvGktRBlU0QeDrbW6hnwPHMxRmgZmeDOEkli9oeS1SfI2VCszWQaiwaCj4IKGBRpKotcQsNdTKFJk9bgDpsGdEBvQMgGr4J2W4EFmwKz3BvU0fQKGYCgWI3wbDbkYDYzWuLJlaCjyuA2s1HgA85mSIURUBCAtjpQKsCeXRfIUU3Azlhug+OZAWTSjJmQP+qhlrYBgnVjRfAAp2iGXtQIry2BmXGp9Ykv1Ab+HBsnCQkbzgg0ARAy1Keca+AJrCgwZN/LwMZubFCAIsD4H2EuardOABuJ7UPY3Zzh0mldiPU2IFOYO4dFC8l53HRO30s6ejzsXSrMna734bq3ZwQM+ANRfuPYwsARg66l1gHeheba0EYMfSvcLEsN6YbANefs0R4hgFq8zbDGhTgUDid+v1f6+EAanJY+QOSwOFIgxoyAwJ65lxl/geQp30CUSSsCLaYwfzoOd3pEgrqFzUEYO6oi6yGMoAFLQfA0gMCAEwCAUzL3W0HkMpe2j4EOoa7Yr/+mHtsMWO3msh1y7UZywDonhfSEwDPfBN5woySDyA2RVlAShvLOekp8pZNRtlzc2QqyVSU9nx0OccWVsL4UXg6X1QaGphokK9gIv+hLHkksX78hFrm1nUXU5D5FjxHI6sAtOJtGXnuwCh12C8c2tJfYVobBCubBXCtFYs6VKzdnysVR/xZ7Mnlcx5ihSE3YW6zNV2U3G0B1i8CTiE3SGZhNiAL1XC3mHtXW3gCdgvFJW9ixSP1OQG2ZSAh/Dgzay1y5i9U6Qvz+RIB8Gaw0y4WE1GAWmaGgBKiJH6iymgDgTkzm0zk0QDnGmDm7zphWTm2DgQwCC2VjnBVHxoASA6SQgtFNHSHfH9iqRqTny6QaVwB8ALGYAEBiA6XlXU0LxxwaFQAIjRR0xQHL0WQAG1okABdDpTkfABgYoG/OEG5UpB0GgUNYPEhT4BFSOY1HgSgE8BbO3L3QRAZQVHwxZMwE5X7H9AHSNTlYCEHUQCNcHKNLhGNFuDhWHNYeHcnAVdNSAZoVHdZT3b3R+XDH3DBAZLHQ4dFYI2QKnAwIdcgWnfJQtCdGIHoZnVnVVdnGyEOVULnagnnLgAACVPFgEFxPRFwMDFwbglyQ3vQ/jXUoFwDl07TCQw0iRqBVxJBvAHDzC1yKALz1wN2PR/WNzSRVkyXr0hytyMAompg9wdwvy2LnCaMbBom83oAaS/nlzQxz1aVZGOL7FvFpE11D21wYm2zyQFCMgYBMiokiO9zqXsN3icOhGwXcKRDqBCHfDqVJBsDSisBgDIj+mhhlgJEgBmm+mqiz32KV0OMRUIJIWw3ITGOsikHoA1EXCwB+MGRITAyHCJETyG2sJpVLwxKMXYCezFOq37Q8iCLlAoHCOQGqOiPYCDgwB+xcT+3IhSOyLSNDShFB1SMhzyIEXjSKKTT5QpyMAqPIGpy6NyR6IZziEGIMAXWGOXVGM53KUmL8S4DGH5wWOF1Fy+Ml0XhWPhA0HQUwBuJNN/VSQMUA3NxeLpwKSMEQzjPWKlwfUTNgGTOVkRQdDohL1uW6Uzn5WbGZWLnF390D2Ai10tKLRBL2JfXZLaXzzISCE+UI1qFpnEj/GDkQmcCQGbEiz+DoASnUjKTomRTYBth4ErOPGcFKD4A2SzC6D6ESONOSMDQvAtIyJpTB3PNtJUiJ34EKMTQR2dNKNImaGBnJA9JHTzN6NTD9IDKFhGKUDGPXTDO3UgF3XtQPSPUWNjPF3jLbQIQY1kF2KaXBLfShNOPV3OPhMuN1l131wWLuMzNNyeOyVAx/Ot0g2knTjdw+Oont1bKdxQqQuCFgmvxRADz+JaKD1ozngiOogdkwAyCCLWTgLazLI2EXDcPUG22AmoU+F+N4q7J5MQ34o2PYh7LQpaTfUaxj2QDiLTxRElIFBW0OHGjqRCC3SXRdlqJHg0Gw0QA6Xw2oiim3NWK7jDTstvR5K8zYHxwj2UknxCMqLcqMoWxVTDSfjcNVkgK3wjgjwdHIBantlc3FOkvcKQjlmkBMMfmaOlI1DQFkEiheRCwEHhXcO5NhBEuvzQB8EBFCIoGss8oQgyqSP+zPKB3SLDWtPNNvOhwKJ4EdOfO8hdJaA/ONJNP6kwAY2QUgDTgaDIi82NVOEoC/O6Ppy4AnS6D/LnX9LZyDOApDLojAt50jIFxgsYWYVYSRQ4S4Qrz0RNxGKERMRDjQHMSA2eMShXXkXsSUScUMBuuot5O0V0RIueoGVQUvkgOeWApcJirIufB6OkRsWUAUQcWUWcQMFsImliVhFICJFoFiQ4Dxp6KyD6AzD6ALBiAYB6ALB8DiBIFiWNFiSQgXGJtiQ8VrS8VvQbQD2mXVWLKCS0oVx0swx3g8GZtiSQ06KZo4C6BZvYVluJunRZsRo5veIxJ8Gi0WVjAWjImgHJGpNpPJEa2oJJOv3w2BI7W0p7Q5NlVrJapI0m0b3ANYyRRRVgwtrwhFn03m3WQTCJU5i+XCnfCP03PSGxQDQuAaH3ygKhC3RIFPDZFZUoDIEhHmFVWbX1VwMq2sLmQEOY2WVWQjg2UkI/2HwOUTiANOSlpXT+gJNjBYDxSUjiw5pvg1FiVxmNFxvxpIEJo5r7qyDiAYCiD6D6AHgiFoB8EPKlrZtgA5rPQvXAWvWfiFrbVZL7Nzw5KARASlpluHWJoVtiSVsPo4F9DVs+pcA1vdxIW1seEgBuwEQxxqOxytvXpQxFrBLFvttNEdqxT0xciIO9ohwCC0zlFc0klWtczjpUFiy00ixq3hLIIayINoLdqnw9uYDczGniuIQYjADdhDGdueLGSXgwGW2wAQgAiEs22IjrpsgbtcOKCbusy8Fbq0w5rYCguYC7p7tJrzgHpJqHqiEzHvELEzB2shALDnuoAXpJrLIQofWYtQtFrtraUwrV1hIuJ1z133v4uVvlsVtCEMZiEvvNxvo+IyN92ASVLA0gEXDvj4G32VIQgjWQs8v8OqxxI8DxMCOv01O1MxL1LRFiOe3iNUxkgjCdocAEE+BW2ahPm93w2sYwTbI0AYaUCYbcNYZbrbpJo7r4d7p6KEYEeyDiAiDiB8FTFTAiALDqpiCiFkfZoUaLPUpLI/hUc3vQ37MhNVxhI1x0auIoH0eYkMbiGMdoFMZ6HMZGQ5v9gdmwkhAxOE31sNuNrpKJAZPfOgEZOmmZI6SSdCz4GtqfWzx/oHPNnNooaxRITrysTGVNEDseWDsc3b3VBczm2kKxShQtUWUnzwmn2aAGlNFgbIT/0jXmFvx0kVm5RGP0y3zdRKRQe20szqGszQZxTzsmVPyPFmSMgNMWWLr7wkIHykJH2ruODkNNA0Iv1UPwGqXmC0J0L0IMNqUYkvmnnoZZvrsbubvYfydiW4f3V4e7uKcEaJuEbJqUH6L6AiFTDQC6AiDQCaZZvno5sUY/s2L8znFUe/vUb6ZOK0cGdwt0ZGbVoMbPuPtPvIGJomelqvtkA5uKWOE5TDVFNMOobRCVJSeq26fQuV36bOLhJKTwq8EMJ/L/s8LtXfDYDqGzRCYEojgYqiPhsquRPMllDdahFOdBPOYNYrXZZQC4QdXCu5diV5eYdyYFc4YKf5yKbKf7slcbayBIB2pIGpoLFoBiDQALAiGafkelradfg6abi+IrMwFGbnEMYPL6EmZnckYLFmfr0sZQmolok3Lggu0oANVnZOR4JXPqOd0aPYCsXw1qydtzd7J6e3oHKLa8ahHYUhwCK+M3YxEyZIGyZYf5bT1rdiUKbFcbdKaHqpszAEDiEzEzBiEzDqYEAHY1eHcCUQsoGQr1fzYOI0aDewpDeODDdsj0YtbGatfnatdTGXevpJoWdkjimWc+NbNYryGyO4vnAzfaHswxKEuRABebAZgyraystEhsp5m8rQAcoYicpDSRGCC1MWS1c0ptrUYw9ZErSojifYDzu7hFNKpkAqoyZ5cYb5bYd/adbrc7txgcOMDUVushwevBqDJet5yUGJK8F01GLTbN2Az7pRp+rsUUUcRURuqMXUBZkQCqHGM1HFiQwBss4gEgAiCnpIBiB8AEB8FoAVag7iFSAYFoAGDQHTEzB9DiDiAEAiAYFK9EAZvhS4RUVcSgCC662ClC+OvFifYC6s8uCyHXOyGioiiyCi5q4mg6liSQFsC/boFYYGSsA9CTGJtitDGhSG6QDSgIUOFSDIFm5oPm+NCG+jwYDQMPCboIV3AWcoGWuBElDlsmm7qG5XRsF89wAAHVZIaADh3BcAvANuCCFvGhpb7sHhaAv3bBPutudvgobAahSRXDzvMUiBEBYwMrZuHYqHtufv7VaBweMA3uvB4fRBihEfqhvvIBOaweIf6x8q8Ice3D8fkehvvk6BZYHBpBofZv4kUeiflYURKfigVQHAA1EBZvbCOpGhBvGhReieevmhvMWesfWrcfmahfRfpbJR0hqfCexeT6VJKzsjpfxsdbnm5qU0GgAByPwQIKMMIM4pIOiw2BT/VpTwFBiI3xgLwZwEItZOjX8Ni77eQMi4lMbKEUUMyMDZIVIX5Q97Ncqz4It/DUcm30gEjLtMjMgblhXn76yJQFnwqigG5ogeXsXn7l8ZsYIIgcES7zbz4Nn9X0SU8EIZlLnyXtgFnw3pmhX67sXkX/PitjKhvy72JOsPKxsKuHrvPzvulFXrgJHtXxX9mLXi8HXq0snwf4OcwkMDwMAaOGa1a5MCOe1F8d758EMVUTAecbq1q5Gy+JAx0YKd8GlfwPgaySRbIq55z55P2j3uhRj88jT5BGZDAaypj5Sq+ATB0ZmwVjU/p63OyKAGM6oWgHp1T5E90+vfLPjnxH7q9C+f/U8KX2B4V94BsSavvZjr7d8peXATmov3RR4Rj0YvNvqLw77q8JexAonpDz24Ox3wh3ZQKQFQGK8x+/PCfgT0r7T9NemAbXiQIqKqwagm+ULIVmsJdkwMFMdOBaSP7ORjgH4VwvtyPBMAjupAIcAfAuCqQfmqglgQA0dDsDZebhOAfnyJ7ACXkzsZsCzye43AVBzAmHp3j4B31xBN5E8HLBarYNhIQaRAD4HkDiljBVAePguGAH3Z1Y5gzvogMz7OAUB/An7vgNr4eB6+DAzmgYOcGUDRe1A4XrgPoGN8SBnRS7DLDlhUNaccvBIUT24Gq9KhGvFMl5jn4kCue9gH5DOASiiAdEUfB0CHQwDFDb840LUGJA+RSDfWqAe4A/X17GVOBafGyLEOz4FBphRPJIctVSEFD2e4UenqUOkBkRsqcsAZFkMaA5DJoeQogWsNiRpQ8AkOYEEwDlCgxKKuSCobgOqG8CaeFguobPwoFNCMqLQ3Qe0NghwECcdPTSFsOQCDCE6YICOKMJih697kZQzQIsKFazCSByAhYbUOWGEDcePfFnmCFwBpQfA1w2UCQHh7I0dhnwPYewAOGQB8YjQBwmz3/bUJcAtgfvg2HIG2CSBvoAsAWDiA9AogdNNAAMEzA9B9YYjBgDoQYAQd9CkIaICQEzAFgogDAGIBEBiBds4gXQAQAwFTBRACwPQaDnKNTA+B+iOhSplEBoKqtaeDI2wDLxZ6qB9YnIzLqmFoCciIggovoD20Zp9sogWYWgFU30LlUSA49AQFEG9F9ABABYB0TUzA4FgZRfQBgDGNqYkB1RMQWgBEDg4GB8YtXIZMzC66rY+OrbCOG11i4PUcgnQ5mHSlLH8VouBgXGhz0ZEljaAZEXACqDbjjcWA4RJujUFwDE0eg6Ym6kWKQhwE+uF3PMfQH0BAA=== -->\n\n<!-- internal state end -->",
+                "createdAt": "2026-05-28T18:12:50Z"
+              }
+            ]
+          },
+          "reviewThreads": {
+            "totalCount": 1,
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "id": "PRRT_kwDOKtdWE86FfAsQ",
+                "isResolved": false,
+                "comments": {
+                  "totalCount": 1,
+                  "pageInfo": {
+                    "hasNextPage": false
+                  },
+                  "nodes": [
+                    {
+                      "id": "PRRC_kwDOKtdWE87F4G0k",
+                      "author": {
+                        "login": "coderabbitai"
+                      },
+                      "authorAssociation": "NONE",
+                      "body": "_⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_\n\n**Remove `IF NOT EXISTS` to avoid masked drift and unsafe rollback.**\n\n`CREATE TABLE IF NOT EXISTS` can silently pass when a same-named table already exists with a different schema, while this PR’s revert still drops that table. Let deploy fail fast on conflicts.\n\n\n\n\n<details>\n<summary>Suggested change</summary>\n\n```diff\n-CREATE TABLE IF NOT EXISTS `usage_pricing_token_dry_run` (\n+CREATE TABLE `usage_pricing_token_dry_run` (\n```\n</details>\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\nCREATE TABLE `usage_pricing_token_dry_run` (\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn\n`@sqitch/starterview/deploy/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr`\nat line 5, The CREATE TABLE statement for usage_pricing_token_dry_run currently\nuses \"IF NOT EXISTS\", which can mask schema drift and make rollbacks unsafe;\nremove the \"IF NOT EXISTS\" clause from the CREATE TABLE statement for\nusage_pricing_token_dry_run so the deployment will fail if a same-named table\nalready exists with a different schema, ensuring drift is surfaced and revert\n(DROP TABLE usage_pricing_token_dry_run) remains safe.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:poseidon:hawk -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->",
+                      "path": "sqitch/starterview/deploy/usage_pricing_token_dry_run-FINDEV-9345-create_table.zr",
+                      "originalLine": 5,
+                      "line": 5,
+                      "createdAt": "2026-05-28T18:12:54Z"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "99de4fbfd2a645ddcd71a2063955b9c9cecf5acf",
+                  "statusCheckRollup": {
+                    "state": "FAILURE",
+                    "contexts": {
+                      "totalCount": 68,
+                      "pageInfo": {
+                        "hasNextPage": false
+                      },
+                      "nodes": [
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPml_Hw",
+                          "name": "claude-pr-review",
+                          "status": "COMPLETED",
+                          "conclusion": "CANCELLED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021944/job/78356512543"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPntQkA",
+                          "name": "claude",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593349242/job/78357680272"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmnVaA",
+                          "name": "claude-pr-review",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593023779/job/78356534632"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmCbQ",
+                          "name": "run-yarn",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021950/job/78356513389"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPml_Lg",
+                          "name": "pr-preview",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021906/job/78356512558"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmmAw",
+                          "name": "pr-preview",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593023775/job/78356522499"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPml_lw",
+                          "name": "auto-approve",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021909/job/78356512663"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmmew",
+                          "name": "reviewer-assignment",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593023831/job/78356522619"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmAfw",
+                          "name": "backstage-sync-check",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021948/job/78356512895"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmEdg",
+                          "name": "get-changed-apps",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022280/job/78356513910"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmGUQ",
+                          "name": "Detect which files changed",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514385"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPml-TA",
+                          "name": "labeler",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022006/job/78356512332"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmHtg",
+                          "name": "trigger-workloads-kustomize-manifests-adhoc",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022280/job/78356514742"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmCBw",
+                          "name": "run-uv-lock",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593021950/job/78356513287"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmG_w",
+                          "name": "check-commit-message",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514559"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPnAzDw",
+                          "name": "trigger-workloads-kustomize-manifests-workflow",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022280/job/78356951823"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmGaw",
+                          "name": "check-no-merges",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514411"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmGww",
+                          "name": "check-file-size",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514499"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmGwQ",
+                          "name": "check-format",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514497"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmGhQ",
+                          "name": "check-backstage-catalog",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514437"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmHBw",
+                          "name": "check-application-ownership",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514567"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmmHGQ",
+                          "name": "build-test-validate",
+                          "status": "COMPLETED",
+                          "conclusion": "FAILURE",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356514585"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmop2A",
+                          "name": "check-codeowners",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556248"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopPg",
+                          "name": "check-generate-deps",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556094"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopUw",
+                          "name": "check-cube",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556115"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmop0Q",
+                          "name": "check-databricks-terraform",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556241"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoo4g",
+                          "name": "check-floodgate-config",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556002"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopOA",
+                          "name": "check-datahub-glossary-terms",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556088"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmop_w",
+                          "name": "check-dbt",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556287"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoq1w",
+                          "name": "check-druid",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556503"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoohw",
+                          "name": "check-fdk",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356555911"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosuQ",
+                          "name": "check-fdk-blueprints",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556985"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoptg",
+                          "name": "check-gateway",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556214"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoqOA",
+                          "name": "check-gateway-local",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556344"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoqDQ",
+                          "name": "check-model-catalog-yaml",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556301"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosiA",
+                          "name": "check-zds",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556936"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopvw",
+                          "name": "check-zds-a11y",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556223"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopxg",
+                          "name": "detect-visual-workspaces",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556230"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopyQ",
+                          "name": "check-node",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556233"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosfw",
+                          "name": "check-node-lint / check-node-lint",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556927"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmor_Q",
+                          "name": "check-node-test / check-node-test",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556797"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosZg",
+                          "name": "check-node-proto / check-node-proto",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556902"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosDQ",
+                          "name": "check-node-build / check-node-build",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556813"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmorKg",
+                          "name": "check-go / check-go",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556586"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmop9w",
+                          "name": "check-go-config",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556279"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmorQw",
+                          "name": "check-devbox-plugins",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556611"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoscQ",
+                          "name": "check-install-devbox",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556913"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoplQ",
+                          "name": "check-py / check-py",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556181"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmotHQ",
+                          "name": "check-py-zipmachina / discover",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356557085"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoyqQ",
+                          "name": "check-py-zipmachina / check",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356558505"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoz1A",
+                          "name": "check-py-zipmachina / summarize",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356558804"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmotjw",
+                          "name": "check-gradle-jdk17 / check-gradle-jdk17",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356557199"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmonzg",
+                          "name": "check-sqitch",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356555726"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmopWA",
+                          "name": "check-protobuf",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556120"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosZQ",
+                          "name": "check-epoxy",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556901"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmorkw",
+                          "name": "check-terraform",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556691"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmorzQ",
+                          "name": "check-gnosis / check-gnosis",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556749"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmosXA",
+                          "name": "check-ai-tools / fix-ai-tools",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556892"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmot3g",
+                          "name": "check-ai-tools / validate-skill-standards",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356557278"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoxWw",
+                          "name": "check-ai-tools / check-ai-tools",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356558171"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmox-Q",
+                          "name": "check-ai-tools / post-validation-comment",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356558329"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoszQ",
+                          "name": "check-finance-jobs",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356557005"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmortg",
+                          "name": "Detect Pending Application Removals",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356556726"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmottQ",
+                          "name": "run-visual-tests",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356557237"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmxQcw",
+                          "name": "Push Coverage Metrics",
+                          "status": "COMPLETED",
+                          "conclusion": "SUCCESS",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356697203"
+                        },
+                        {
+                          "__typename": "CheckRun",
+                          "id": "CR_kwDOKtdWE88AAAASPmoyOQ",
+                          "name": "check-visual-tests",
+                          "status": "COMPLETED",
+                          "conclusion": "SKIPPED",
+                          "detailsUrl": "https://github.com/ZR-Private/ziprecruiter/actions/runs/26593022307/job/78356558393"
+                        },
+                        {
+                          "__typename": "StatusContext",
+                          "id": "SC_kwDOKtdWE88AAAALMnBiRA",
+                          "context": "policy-bot: approval required (click for details): main",
+                          "state": "FAILURE",
+                          "targetUrl": "https://policy-bot.b1-build-uw2.zipaws.com/details/ZR-Private/ziprecruiter/91071"
+                        },
+                        {
+                          "__typename": "StatusContext",
+                          "id": "SC_kwDOKtdWE88AAAALMnZFVw",
+                          "context": "CodeRabbit",
+                          "state": "SUCCESS",
+                          "targetUrl": null
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

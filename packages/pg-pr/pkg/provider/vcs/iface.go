@@ -35,3 +35,32 @@ type Provider interface {
 	// comments are fetched via ListComments separately.
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
+
+// EnrichedPR bundles a PR with everything the sync snapshot loop reads
+// per-PR. Providers that can fetch this data in one round-trip (e.g.
+// GitHub via a single GraphQL search) implement EnrichedPRsProvider;
+// the sync engine uses it to collapse per-PR REST fan-out into one
+// per-repo call.
+type EnrichedPR struct {
+	PR       api.PR
+	Reviews  []api.Review
+	Comments []api.Comment
+	CIRuns   []api.CIRun
+
+	// Truncated reports the embedded connections whose pagination cap was
+	// hit during the bulk fetch (so the caller can decide whether to fall
+	// back to per-PR REST methods for full data). Empty when nothing was
+	// truncated.
+	Truncated []string
+}
+
+// EnrichedPRsProvider is an optional capability for VCS providers that
+// can bulk-fetch enriched PR data in one round-trip. Sync uses this when
+// available to replace ListMyPRs+ListTeamPRs+per-PR ListReviews/
+// ListComments/ListRuns with a single per-repo query.
+//
+// searchQuery is a provider-native query string (for GitHub: the search
+// syntax, e.g. `is:pr is:open repo:owner/name author:a author:b`).
+type EnrichedPRsProvider interface {
+	EnrichedPRs(ctx context.Context, repo string, searchQuery string) ([]EnrichedPR, error)
+}

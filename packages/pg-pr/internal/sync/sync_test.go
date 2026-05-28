@@ -1256,3 +1256,57 @@ func TestSync_TreatsEmptySelfLoginAsTeammate(t *testing.T) {
 		t.Fatalf("BeadsCreated: got %d want 2", sum.BeadsCreated)
 	}
 }
+
+func TestBuildEnrichedSearchQuery(t *testing.T) {
+	cases := []struct {
+		name string
+		repo string
+		self string
+		team []string
+		want string
+	}{
+		{
+			name: "self only",
+			repo: "owner/repo",
+			self: "alice",
+			team: nil,
+			want: "is:pr is:open repo:owner/repo author:alice",
+		},
+		{
+			name: "self plus team",
+			repo: "x/y",
+			self: "alice",
+			team: []string{"bob", "carol"},
+			want: "is:pr is:open repo:x/y author:alice author:bob author:carol",
+		},
+		{
+			name: "team only (empty self)",
+			repo: "x/y",
+			self: "",
+			team: []string{"bob"},
+			want: "is:pr is:open repo:x/y author:bob",
+		},
+		{
+			name: "dedup self in team list",
+			repo: "x/y",
+			self: "alice",
+			team: []string{"alice", "bob"},
+			want: "is:pr is:open repo:x/y author:alice author:bob",
+		},
+		{
+			name: "blank entries ignored",
+			repo: "x/y",
+			self: "  ",
+			team: []string{"", "bob", "  "},
+			want: "is:pr is:open repo:x/y author:bob",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildEnrichedSearchQuery(tc.repo, tc.self, tc.team)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

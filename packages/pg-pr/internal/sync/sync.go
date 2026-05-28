@@ -42,6 +42,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // VCSProvider is the subset of pkg/provider/vcs.Provider the sync engine
@@ -275,6 +276,11 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// Per-repo config lookup, populated alongside repoClients so downstream
 	// passes (replies + close-stale) don't have to re-look-up.
 	repoCfgs := map[string]config.RepoConfig{}
+	// Per-repo per-PR bulk-fetched enrichment (reviews, comments, CI
+	// runs). Populated only when the VCS provider supports
+	// EnrichedPRsProvider; downstream readers fall through to per-PR REST
+	// calls when an entry is missing.
+	enrichByRepo := map[string]map[int]vcs.EnrichedPR{}
 
 	for _, rcfg := range e.deps.Cfg.Repos {
 		func() {
@@ -284,7 +290,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			rs := RepoSummary{Repo: rcfg.Remote}
 			state := repoState{LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339)}
 
-			prs, err := e.enumerate(repoCtx, rcfg)
+			prs, enriched, err := e.enumerate(repoCtx, rcfg)
 			if err != nil {
 				recordSpanErr(repoSpan, err)
 				rs.Error = err.Error()
@@ -307,6 +313,9 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			bdc := e.bdClientFor(rcfg)
 			repoClients[rcfg.Remote] = bdc
 			repoCfgs[rcfg.Remote] = rcfg
+			if enriched != nil {
+				enrichByRepo[rcfg.Remote] = enriched
+			}
 			// Pre-index existing open beads for this repo so the
 			// create-vs-update counters reflect this workspace only.
 			if pre, perr := e.listExistingByKey(repoCtx, bdc); perr == nil {
@@ -394,8 +403,17 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				summary.BeadsCreated++
 			}
 
+			// Pluck this PR's bulk-fetched VCS data (reviews/comments/CI
+			// runs) if the EnrichedPRs path populated the cache; nil means
+			// downstream helpers fall back to per-PR REST calls.
+			var prEnriched *vcs.EnrichedPR
+			if byNum := enrichByRepo[key.Repo]; byNum != nil {
+				if ep, ok := byNum[pr.Number]; ok {
+					prEnriched = &ep
+				}
+			}
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
-			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], key.Repo, pr, prBeadID, summary); err != nil {
+			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], prEnriched, key.Repo, pr, prBeadID, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -406,7 +424,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			// Upstream-write phase: only for self-authored PRs.
 			// See partition above.
 			if mineSet[key] {
-				if err := e.maybePromoteDraft(prCtx, bdc, key.Repo, pr, prBeadID, summary); err != nil {
+				if err := e.maybePromoteDraft(prCtx, bdc, prEnriched, key.Repo, pr, prBeadID, summary); err != nil {
 					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 					recordSpanErr(prSpan, err)
 					summary.Errors = append(summary.Errors, SummaryError{
@@ -508,7 +526,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// bd dep tree) and store. Best-effort — errors during gathering are
 	// absorbed so a partial snapshot still lands.
 	if e.deps.Snapshot != nil {
-		e.buildAndStoreSnapshot(ctx, observed, repoClients, cachesByRepo)
+		e.buildAndStoreSnapshot(ctx, observed, repoClients, cachesByRepo, enrichByRepo)
 	}
 	if len(summary.Errors) > 0 {
 		return summary, fmt.Errorf("sync: %d error(s) (see Summary.Errors)", len(summary.Errors))
@@ -522,9 +540,12 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 // previous snapshot is preserved (no overwrite).
 //
 // cachesByRepo supplies pre-fetched bd lookup tables (human labels,
-// merge-request index). Repos without a cache (test injections) fall
-// back to per-PR live calls.
-func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]api.PR, repoClients map[string]BeadClient, cachesByRepo map[string]*beads.TickCache) {
+// merge-request index). enrichByRepo supplies bulk-fetched VCS data
+// (reviews, comments, CI runs) when the provider supports GraphQL
+// EnrichedPRs. Repos without a cache or enrichment (test injections,
+// providers without the capability, GraphQL failures) fall back to
+// per-PR live calls.
+func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]api.PR, repoClients map[string]BeadClient, cachesByRepo map[string]*beads.TickCache, enrichByRepo map[string]map[int]vcs.EnrichedPR) {
 	if len(observed) == 0 {
 		return
 	}
@@ -537,8 +558,22 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 			pr.Repo = key.Repo
 		}
 		in := snapshot.PRInput{PR: pr}
+		// Snapshot enrichment: prefer the bulk-fetched data populated by
+		// EnrichedPRsProvider; only fall back to per-PR REST calls when
+		// the bulk fetch wasn't available (test fakes, GraphQL error,
+		// provider without the capability).
+		var enriched *vcs.EnrichedPR
+		if byNum := enrichByRepo[key.Repo]; byNum != nil {
+			if ep, ok := byNum[pr.Number]; ok {
+				enriched = &ep
+			}
+		}
 		rcfg, rerr := e.repoConfig(key.Repo)
-		if rerr == nil {
+		if enriched != nil {
+			in.Reviews = enriched.Reviews
+			in.Comments = enriched.Comments
+			in.CIRuns = enriched.CIRuns
+		} else if rerr == nil {
 			if vp, err := e.providerFor(rcfg); err == nil {
 				if rl, ok := vp.(ReviewLister); ok {
 					if reviews, rrErr := rl.ListReviews(ctx, key.Repo, pr.Number); rrErr == nil {
@@ -751,13 +786,14 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	if !alreadyClosed {
 		summary.BeadsUpdated = 1
 		// Phase 3: feedback + draft pipelines. SyncPR is the single-PR
-		// ad-hoc path; building a TickCache for one PR is wasteful, so
-		// pass nil and let processFeedback fall back to live bd calls.
-		if err := e.processFeedback(ctx, bdc, nil, repo, *pr, prBeadID, summary); err != nil {
+		// ad-hoc path; building a TickCache or running a GraphQL bulk
+		// fetch for one PR is wasteful, so pass nils and let the
+		// helpers fall back to live REST/bd calls.
+		if err := e.processFeedback(ctx, bdc, nil, nil, repo, *pr, prBeadID, summary); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 		}
 		if e.isSelfAuthored(pr.Author) {
-			if err := e.maybePromoteDraft(ctx, bdc, repo, *pr, prBeadID, summary); err != nil {
+			if err := e.maybePromoteDraft(ctx, bdc, nil, repo, *pr, prBeadID, summary); err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 			}
 		}
@@ -775,10 +811,21 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 // enumerate lists watched PRs for a single repo. Phase 1: self + team
 // members. (watch_labels is not yet honored — design notes it but Phase 1
 // only needs author-based selection to be useful.)
-func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.PR, error) {
+//
+// When the configured VCS provider implements EnrichedPRsProvider AND the
+// repo has at least one configured author (self or team), enumerate
+// short-circuits to one GraphQL search that yields both the PR list and
+// the snapshot's enrichment payload (reviews, comments, CI runs). The
+// returned map is keyed by PR number and is non-nil only when the bulk
+// fetch succeeded; callers that miss the cache fall back to per-PR
+// ListReviews/ListComments/ListRuns the same way they always did.
+func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.PR, map[int]vcs.EnrichedPR, error) {
 	provider, err := e.providerFor(rcfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if enriched, ok := e.tryEnumerateEnriched(ctx, provider, rcfg); ok {
+		return enriched.prs, enriched.byNumber, nil
 	}
 	seen := map[int]struct{}{}
 	out := make([]api.PR, 0)
@@ -788,7 +835,7 @@ func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.P
 	recordSpanErr(mySpan, err)
 	mySpan.End()
 	if err != nil {
-		return nil, fmt.Errorf("list my PRs: %w", err)
+		return nil, nil, fmt.Errorf("list my PRs: %w", err)
 	}
 	for _, pr := range myPRs {
 		if _, dup := seen[pr.Number]; !dup {
@@ -803,7 +850,7 @@ func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.P
 		recordSpanErr(teamSpan, err)
 		teamSpan.End()
 		if err != nil {
-			return nil, fmt.Errorf("list team PRs: %w", err)
+			return nil, nil, fmt.Errorf("list team PRs: %w", err)
 		}
 		for _, pr := range teamPRs {
 			if _, dup := seen[pr.Number]; !dup {
@@ -812,7 +859,72 @@ func (e *Engine) enumerate(ctx context.Context, rcfg config.RepoConfig) ([]api.P
 			}
 		}
 	}
-	return out, nil
+	return out, nil, nil
+}
+
+// enumeratedEnrichment is the per-repo bulk-fetch result threaded through
+// the sync engine when the VCS provider supports EnrichedPRsProvider.
+type enumeratedEnrichment struct {
+	prs      []api.PR
+	byNumber map[int]vcs.EnrichedPR
+}
+
+// tryEnumerateEnriched returns the bulk-fetched PRs + enrichment when the
+// provider supports EnrichedPRsProvider AND the repo has at least one
+// configured author. Returns (nil, false) on any failure so the caller
+// falls back to the REST path (ListMyPRs + ListTeamPRs).
+func (e *Engine) tryEnumerateEnriched(ctx context.Context, provider VCSProvider, rcfg config.RepoConfig) (*enumeratedEnrichment, bool) {
+	enricher, ok := provider.(vcs.EnrichedPRsProvider)
+	if !ok {
+		return nil, false
+	}
+	self := e.deps.Cfg.SelfLogin
+	if self == "" && len(rcfg.TeamMembers) == 0 {
+		// No authors to constrain the search — fall back rather than
+		// fetching every open PR in the repo.
+		return nil, false
+	}
+	query := buildEnrichedSearchQuery(rcfg.Remote, self, rcfg.TeamMembers)
+	enrichCtx, enrichSpan := startVCSSpan(ctx, "EnrichedPRs", rcfg.Remote, 0)
+	enriched, err := enricher.EnrichedPRs(enrichCtx, rcfg.Remote, query)
+	recordSpanErr(enrichSpan, err)
+	enrichSpan.End()
+	if err != nil {
+		return nil, false
+	}
+	prs := make([]api.PR, 0, len(enriched))
+	byNumber := make(map[int]vcs.EnrichedPR, len(enriched))
+	for _, ep := range enriched {
+		// Defensive: providers may omit Repo on the inner PR; the configured
+		// remote is the authority.
+		if ep.PR.Repo == "" {
+			ep.PR.Repo = rcfg.Remote
+		}
+		prs = append(prs, ep.PR)
+		byNumber[ep.PR.Number] = ep
+	}
+	return &enumeratedEnrichment{prs: prs, byNumber: byNumber}, true
+}
+
+// buildEnrichedSearchQuery composes a GitHub-style search string covering
+// the repo's open PRs authored by self or any team member. Multiple
+// author: clauses act as implicit OR in GitHub's search syntax.
+func buildEnrichedSearchQuery(repo, self string, team []string) string {
+	parts := []string{"is:pr", "is:open", "repo:" + repo}
+	seen := map[string]bool{}
+	add := func(login string) {
+		login = strings.TrimSpace(login)
+		if login == "" || seen[login] {
+			return
+		}
+		seen[login] = true
+		parts = append(parts, "author:"+login)
+	}
+	add(self)
+	for _, m := range team {
+		add(m)
+	}
+	return strings.Join(parts, " ")
 }
 
 // providerFor returns the configured VCS provider for a repo. Defaults to
@@ -981,7 +1093,12 @@ func saveState(path string, sf stateFile) error {
 // per-tick bulk fetch — typically replacing ~5-8 bd calls per PR with
 // in-memory map lookups. When nil, the original per-PR live-call path is
 // used, which is the path tests with mocked BeadClients exercise.
-func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *beads.TickCache, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+//
+// enriched, when non-nil, supplies the PR's comments and CI runs from the
+// per-repo GraphQL bulk fetch — replaces per-PR ListComments + ListRuns
+// REST calls. When nil, the helper falls back to the original per-PR
+// gh-CLI calls; tests with mocked providers continue to work.
+func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *beads.TickCache, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if prBeadID == "" {
 		return nil
 	}
@@ -993,35 +1110,44 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 
 	// Gather events.
 	var events []feedbackEvent
-	provider, _ := e.providerFor(rcfg)
-	if reader, ok := provider.(CommentReader); ok {
-		commCtx, commSpan := startVCSSpan(ctx, "ListComments", repo, pr.Number)
-		comments, err := reader.ListComments(commCtx, repo, pr.Number)
-		recordSpanErr(commSpan, err)
-		commSpan.End()
-		if err != nil {
-			return fmt.Errorf("list comments: %w", err)
-		}
-		for _, c := range comments {
+	if enriched != nil {
+		for _, c := range enriched.Comments {
 			events = append(events, commentEvent(c))
 		}
-	}
-	for _, cicdName := range rcfg.CICD {
-		cp, ok := e.deps.CICD[cicdName]
-		if !ok {
-			continue
-		}
-		ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
-		runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
-		recordSpanErr(ciSpan, err)
-		ciSpan.End()
-		if err != nil {
-			// CI errors are non-fatal — the rest of the cycle should still
-			// progress.
-			continue
-		}
-		for _, r := range runs {
+		for _, r := range enriched.CIRuns {
 			events = append(events, ciRunEvent(r))
+		}
+	} else {
+		provider, _ := e.providerFor(rcfg)
+		if reader, ok := provider.(CommentReader); ok {
+			commCtx, commSpan := startVCSSpan(ctx, "ListComments", repo, pr.Number)
+			comments, err := reader.ListComments(commCtx, repo, pr.Number)
+			recordSpanErr(commSpan, err)
+			commSpan.End()
+			if err != nil {
+				return fmt.Errorf("list comments: %w", err)
+			}
+			for _, c := range comments {
+				events = append(events, commentEvent(c))
+			}
+		}
+		for _, cicdName := range rcfg.CICD {
+			cp, ok := e.deps.CICD[cicdName]
+			if !ok {
+				continue
+			}
+			ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
+			runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
+			recordSpanErr(ciSpan, err)
+			ciSpan.End()
+			if err != nil {
+				// CI errors are non-fatal — the rest of the cycle should still
+				// progress.
+				continue
+			}
+			for _, r := range runs {
+				events = append(events, ciRunEvent(r))
+			}
 		}
 	}
 
@@ -1187,7 +1313,11 @@ func (e *Engine) findFeedbackForPR(ctx context.Context, bdc BeadClient, prBeadID
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
 // are green, promotes the PR to ready. bdc is the per-repo bd client whose
 // workspace holds the merge-request bead being updated.
-func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+//
+// enriched, when non-nil, supplies the PR's CI runs from the GraphQL
+// bulk fetch — replaces per-PR ListRuns. When nil, the helper falls
+// back to per-CICD-provider ListRuns calls.
+func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if !pr.Draft {
 		return nil
 	}
@@ -1195,23 +1325,31 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, repo str
 	if err != nil {
 		return nil
 	}
-	if len(rcfg.CICD) == 0 {
-		return nil
-	}
-	for _, cicdName := range rcfg.CICD {
-		cp, ok := e.deps.CICD[cicdName]
-		if !ok {
-			continue
-		}
-		ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
-		runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
-		recordSpanErr(ciSpan, err)
-		ciSpan.End()
-		if err != nil {
+	if enriched != nil {
+		// Bulk-fetched CI runs cover every check; the rollup is over the
+		// PR's last commit so it's authoritative for "all green".
+		if !allRunsSuccessful(enriched.CIRuns) {
 			return nil
 		}
-		if !allRunsSuccessful(runs) {
+	} else {
+		if len(rcfg.CICD) == 0 {
 			return nil
+		}
+		for _, cicdName := range rcfg.CICD {
+			cp, ok := e.deps.CICD[cicdName]
+			if !ok {
+				continue
+			}
+			ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
+			runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
+			recordSpanErr(ciSpan, err)
+			ciSpan.End()
+			if err != nil {
+				return nil
+			}
+			if !allRunsSuccessful(runs) {
+				return nil
+			}
 		}
 	}
 	provider, _ := e.providerFor(rcfg)
