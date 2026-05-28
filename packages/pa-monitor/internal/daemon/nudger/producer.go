@@ -51,6 +51,5 @@ type DisruptProducer struct {
 }
 type ManualProducer struct{}
 
-func (*WindowResetProducer) Reconcile(TickContext, *PendingStore) {}
-func (*DisruptProducer) Reconcile(TickContext, *PendingStore)     {}
-func (*ManualProducer) Reconcile(TickContext, *PendingStore)      {}
+func (*DisruptProducer) Reconcile(TickContext, *PendingStore) {}
+func (*ManualProducer) Reconcile(TickContext, *PendingStore)  {}
