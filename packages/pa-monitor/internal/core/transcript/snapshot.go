@@ -17,7 +17,7 @@ type Snapshot struct {
 	SubagentCount     int
 	AwaitingInput     bool
 	RateLimitResetsAt time.Time
-	LastError         *ErrorRecord // most recent isApiErrorMessage; nil if none
+	LastError         *ErrorRecord // most recent isApiErrorMessage event in the transcript; nil if no such event seen
 }
 
 // Scan reads path once and returns all enrichment data. It replaces calling
@@ -86,10 +86,10 @@ func Scan(path string) (Snapshot, error) {
 	}
 
 	// LastError tracking: index and fields of the most recent api-error event.
-	lastApiErrIdx := -1
-	var lastApiErrTime time.Time
-	var lastApiErrKind ErrorKind
-	var lastApiErrText string
+	lastErrIdx := -1
+	var lastErrEventTime time.Time
+	var lastErrKind ErrorKind
+	var lastErrText string
 
 	for i, line := range lines {
 		var ev scanEv
@@ -155,10 +155,10 @@ func Scan(path string) (Snapshot, error) {
 							break
 						}
 					}
-					lastApiErrIdx = i
-					lastApiErrTime = ev.Timestamp
-					lastApiErrKind = k
-					lastApiErrText = text
+					lastErrIdx = i
+					lastErrEventTime = ev.Timestamp
+					lastErrKind = k
+					lastErrText = text
 				}
 			}
 			if !aux.IsApiErrorMessage {
@@ -211,9 +211,9 @@ func Scan(path string) (Snapshot, error) {
 	}
 
 	// Build LastError with IsTerminal detection via tail-walk (mirrors LastAPIError).
-	if lastApiErrIdx >= 0 {
+	if lastErrIdx >= 0 {
 		terminal := true
-		for _, line := range lines[lastApiErrIdx+1:] {
+		for _, line := range lines[lastErrIdx+1:] {
 			var tail struct {
 				Type              string `json:"type"`
 				IsApiErrorMessage bool   `json:"isApiErrorMessage"`
@@ -231,11 +231,11 @@ func Scan(path string) (Snapshot, error) {
 			break
 		}
 		snap.LastError = &ErrorRecord{
-			Kind:        lastApiErrKind,
-			Text:        lastApiErrText,
-			At:          lastApiErrTime,
+			Kind:        lastErrKind,
+			Text:        lastErrText,
+			At:          lastErrEventTime,
 			IsTerminal:  terminal,
-			IsRetryable: lastApiErrKind.IsRetryable(),
+			IsRetryable: lastErrKind.IsRetryable(),
 		}
 	}
 
