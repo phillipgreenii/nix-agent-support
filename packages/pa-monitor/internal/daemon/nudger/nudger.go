@@ -23,14 +23,25 @@ func New(signaler Signaler, recorder Recorder) *Nudger {
 	}
 }
 
-// Tick reconciles producers, then dispatches. Cancel-then-add ordering is
-// enforced inside each producer's Reconcile.
-func (n *Nudger) Tick(ctx TickContext) {
+// Reconcile runs all producers (window_reset, disrupted, manual) but does
+// NOT dispatch. Use this to inspect the pending store between reconcile
+// and fire.
+func (n *Nudger) Reconcile(ctx TickContext) {
 	n.windowProd.Reconcile(ctx, n.store)
 	n.disruptProd.Reconcile(ctx, n.store)
 	// Manual is RPC-driven; Reconcile is a no-op but called for symmetry.
 	n.manualProd.Reconcile(ctx, n.store)
+}
+
+// Dispatch runs the dispatcher against the current pending store.
+func (n *Nudger) Dispatch(ctx TickContext) {
 	n.dispatcher.Dispatch(ctx, n.store)
+}
+
+// Tick is a convenience: Reconcile then Dispatch. Existing tests use Tick.
+func (n *Nudger) Tick(ctx TickContext) {
+	n.Reconcile(ctx)
+	n.Dispatch(ctx)
 }
 
 // QueueManual enqueues manual nudges for the given session IDs.

@@ -86,6 +86,13 @@ func (w *WatermarkStore) SetWindowResetFiredFor(at time.Time) {
 	_ = WriteRuntimeState(w.path, w.state)
 }
 
+// AdvanceWindowResetFiredFor implements nudger.Recorder. It delegates to
+// SetWindowResetFiredFor so the latch advances only when the dispatcher
+// actually fires a SourceWindowReset nudge.
+func (w *WatermarkStore) AdvanceWindowResetFiredFor(at time.Time) {
+	w.SetWindowResetFiredFor(at)
+}
+
 func (w *WatermarkStore) AutoResumeEnabled() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()

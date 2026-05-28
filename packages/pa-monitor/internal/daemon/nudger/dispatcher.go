@@ -21,6 +21,10 @@ type Recorder interface {
 	RecordSuppressed(sid string, sources []Source, cause string)
 	RecordSent(sid string, sources []Source, errorKind string, escalated bool)
 	UpdateWatermarks(sid string, now time.Time, cause *transcript.ErrorRecord, escalated bool)
+	// AdvanceWindowResetFiredFor records that the window-reset nudge for
+	// WindowResetsAt=at fired this tick. Called by the dispatcher exactly
+	// once per tick when any session with SourceWindowReset is dispatched.
+	AdvanceWindowResetFiredFor(at time.Time)
 }
 
 // Dispatcher fires nudges based on the pending store, performs the
@@ -48,6 +52,7 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 	sort.Strings(sids)
 
 	sessionsByID := indexSessions(ctx.Tree)
+	windowResetDispatched := false
 	for _, sid := range sids {
 		group := bySession[sid]
 		sources := make([]Source, 0, len(group))
@@ -84,6 +89,16 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		d.Recorder.RecordSent(sid, sources, kind, escalated)
 		d.Recorder.UpdateWatermarks(sid, ctx.Now, cause, escalated)
 		store.ClearSession(sid)
+		for _, in := range group {
+			if in.Key.Source == SourceWindowReset {
+				windowResetDispatched = true
+				break
+			}
+		}
+	}
+	// Advance the window-reset latch only when a SourceWindowReset actually fired.
+	if windowResetDispatched && !ctx.Tree.WindowResetsAt.IsZero() {
+		d.Recorder.AdvanceWindowResetFiredFor(ctx.Tree.WindowResetsAt)
 	}
 }
 

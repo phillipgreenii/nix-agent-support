@@ -43,105 +43,6 @@ func (c *captureSignaler) Len() int {
 // Ensure captureSignaler satisfies signal.Signaler at compile time.
 var _ signal.Signaler = (*captureSignaler)(nil)
 
-// TestRunWith_NudgerFiresDisruptedSession verifies that when RunWith is
-// configured with NudgerSignalers and a session has a retryable terminal
-// error that is older than DisruptGrace, the nudger fires at least once.
-//
-// Strategy: use a stubPoller returning a tree with one Idle session whose
-// LastError is 31 seconds in the past (past the 30s DisruptGrace). Set
-// AutoResumeEnabled = true via the WatermarkStore by pre-writing
-// runtime.json, or simply rely on two ticks (first tick primes firstSeen,
-// second tick fires). Run for 300ms with a 50ms tick — should see at
-// least one nudge.
-func TestRunWith_NudgerFiresDisruptedSession(t *testing.T) {
-	dir := shortTempDir(t)
-	paths := Paths{
-		Dir:     dir,
-		PIDFile: filepath.Join(dir, "daemon.pid"),
-		Socket:  filepath.Join(dir, "daemon.sock"),
-	}
-	runtimePath := filepath.Join(dir, "runtime.json")
-
-	// Pre-write runtime.json with auto_resume_enabled=true so the
-	// WatermarkStore picks it up immediately on startup.
-	if err := WriteRuntimeState(runtimePath, RuntimeState{AutoResumeEnabled: true}); err != nil {
-		t.Fatalf("WriteRuntimeState: %v", err)
-	}
-
-	now := time.Now()
-	errorAt := now.Add(-31 * time.Second) // 31s ago — past DisruptGrace (30s)
-
-	tree := &aggregate.Tree{
-		Dirs: []*aggregate.Directory{
-			{
-				Path:  "/p1",
-				IdleN: 1,
-				Sessions: []*aggregate.SessionView{
-					{
-						Session: &session.Session{
-							SessionID: "nudge-test-sid",
-							PID:       99999, // won't be a real process
-							Status:    session.Idle,
-						},
-						SessionEnrichment: aggregate.SessionEnrichment{
-							LastError: &transcript.ErrorRecord{
-								Kind:        transcript.ErrUnknown,
-								Text:        "API Error",
-								At:          errorAt,
-								IsTerminal:  true,
-								IsRetryable: true,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	cap := &captureSignaler{}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- RunWith(ctx, RunOptions{
-			Paths:       paths,
-			Tick:        50 * time.Millisecond,
-			RuntimePath: runtimePath,
-			Poller: &stubPoller{
-				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
-					return tree, true, nil
-				},
-			},
-			NudgerSignalers: []signal.Signaler{cap},
-			DisruptGrace:    30 * time.Second,
-			EscalationAfter: 60 * time.Second,
-			AutoResumeMessage: "continue",
-		})
-	}()
-
-	waitForFile(t, paths.Socket)
-
-	// Give the tick loop enough time to fire multiple ticks.
-	// Tick 1: DisruptProducer sees the error for the first time; primes firstSeen=now (not now-31s).
-	// Tick 2 (50ms later): now-firstSeen >= DisruptGrace NOT yet (only 50ms elapsed).
-	//
-	// The issue is firstSeen is set to the tick's `now`, not to the error's `At`.
-	// DisruptProducer primes firstSeen on the FIRST tick seeing a new error and fires
-	// when ctx.Now - firstSeen >= DisruptGrace.
-	//
-	// Since DisruptGrace=30s, we'd need to wait 30 seconds for the grace to expire
-	// if using real time. That's too slow for a test.
-	//
-	// Instead, we set DisruptGrace=0 so the first sighting fires immediately on tick 2.
-	t.Log("NOTE: grace=0 variant; see alternative test below")
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("RunWith did not return after cancel")
-	}
-}
-
 // TestRunWith_NudgerFiresWithZeroGrace verifies end-to-end that RunWith
 // wires the nudger correctly: with DisruptGrace=0, the disrupt producer
 // fires on the second tick after the error is first seen.
@@ -242,20 +143,10 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 	}
 }
 
-// TestRunWith_NudgerAnnotatesPendingNudge verifies that after the nudger
-// enqueues an intent, the tree published to clients has PendingNudge set
-// on the session. We use DisruptGrace=0 + tick=30ms.
-//
-// Note: PendingNudge is set BEFORE dispatch clears intents, so it's visible
-// only in the tick where the intent exists but hasn't fired yet. With
-// grace=0, the first tick primes firstSeen and the second tick fires;
-// PendingNudge would be set on the second tick's pre-dispatch snapshot.
-// After dispatch clears, PendingNudge is nil on subsequent ticks.
-//
-// This test just verifies the signaler fires (same as above) as a proxy
-// for the annotation code running — the annotation logic is unit-testable
-// independently. This test is kept simple: it's the RunWith integration
-// proof that the code path executes without panicking.
+// TestRunWith_NudgerNoOpWhenNotConfigured verifies that when RunWith is
+// started without NudgerSignalers (and without RuntimePath), the daemon
+// still processes ticks correctly and returns no error on cancellation.
+// The nudger is nil in this configuration, so no nudges are sent.
 func TestRunWith_NudgerNoOpWhenNotConfigured(t *testing.T) {
 	dir := shortTempDir(t)
 	paths := Paths{
@@ -306,5 +197,123 @@ func TestRunWith_NudgerNoOpWhenNotConfigured(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunWith did not return after cancel")
+	}
+}
+
+// TestRunWith_NudgerAnnotatesPendingNudge verifies that the tree published
+// to clients has PendingNudge set on a session whose nudge intent was
+// reconciled in the same tick. With DisruptGrace=0 the intent is added to
+// the store on tick 2 (tick 1 primes firstSeen). Annotation runs between
+// Reconcile and Dispatch, so the TreeObserver receives the tree with
+// PendingNudge set before (and on) the firing tick. This proves the
+// Reconcile → annotate → Dispatch split works correctly.
+func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+	runtimePath := filepath.Join(dir, "runtime.json")
+
+	if err := WriteRuntimeState(runtimePath, RuntimeState{AutoResumeEnabled: true}); err != nil {
+		t.Fatalf("WriteRuntimeState: %v", err)
+	}
+
+	errorAt := time.Now().Add(-1 * time.Second)
+	tree := &aggregate.Tree{
+		Dirs: []*aggregate.Directory{
+			{
+				Path:  "/p1",
+				IdleN: 1,
+				Sessions: []*aggregate.SessionView{
+					{
+						Session: &session.Session{
+							SessionID: "annotate-sid",
+							PID:       77777,
+							Status:    session.Idle,
+						},
+						SessionEnrichment: aggregate.SessionEnrichment{
+							LastError: &transcript.ErrorRecord{
+								Kind:        transcript.ErrUnknown,
+								Text:        "API Error",
+								At:          errorAt,
+								IsTerminal:  true,
+								IsRetryable: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// treesCh receives annotated tree snapshots from the TreeObserver.
+	treesCh := make(chan *aggregate.Tree, 32)
+
+	cap := &captureSignaler{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:       paths,
+			Tick:        30 * time.Millisecond,
+			RuntimePath: runtimePath,
+			Poller: &stubPoller{
+				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					return tree, true, nil
+				},
+			},
+			NudgerSignalers: []signal.Signaler{cap},
+			// DisruptGrace=0: tick 1 primes firstSeen, tick 2 adds intent +
+			// annotation runs before dispatch, so TreeObserver sees PendingNudge.
+			DisruptGrace:      0,
+			EscalationAfter:   60 * time.Second,
+			AutoResumeMessage: "continue",
+			TreeObserver: func(t *aggregate.Tree) {
+				select {
+				case treesCh <- t:
+				default:
+				}
+			},
+		})
+	}()
+
+	waitForFile(t, paths.Socket)
+
+	// Wait up to 500ms for a tree where the session has PendingNudge set.
+	// Tick 2 adds the intent, annotates, then dispatches. The TreeObserver
+	// sees the annotated tree (PendingNudge is set on the sv struct; dispatch
+	// only clears the store, not the struct field).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var foundPendingNudge bool
+	for time.Now().Before(deadline) && !foundPendingNudge {
+		select {
+		case published := <-treesCh:
+			for _, d := range published.Dirs {
+				for _, sv := range d.Sessions {
+					if sv.SessionID == "annotate-sid" && sv.PendingNudge != nil {
+						for _, src := range sv.PendingNudge.Sources {
+							if src == "disrupted" {
+								foundPendingNudge = true
+							}
+						}
+					}
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+			// no tree yet — keep polling
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWith did not return after cancel")
+	}
+
+	if !foundPendingNudge {
+		t.Error("PendingNudge with source=disrupted was never set on the published tree (annotation before dispatch is broken)")
 	}
 }

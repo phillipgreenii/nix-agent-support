@@ -166,6 +166,11 @@ type RunOptions struct {
 	// LabelCap caps the number of distinct values for any one label key.
 	// Past the cap, additional values bucket as "other". 0 → 50.
 	LabelCap int
+	// TreeObserver, if non-nil, is called with the fully-annotated tree
+	// just before it is published to gRPC clients. Used in tests to
+	// inspect the tree (including PendingNudge annotations) without going
+	// through the gRPC layer.
+	TreeObserver func(*aggregate.Tree)
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -322,7 +327,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				if msg == "" {
 					msg = "continue"
 				}
-				n.Tick(nudger.TickContext{
+				tctx := nudger.TickContext{
 					Now:               time.Now(),
 					Tree:              tree,
 					AutoResumeEnabled: wm.AutoResumeEnabled(),
@@ -331,16 +336,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					DisruptGrace:      opts.DisruptGrace,
 					EscalationAfter:   opts.EscalationAfter,
 					Watermarks:        wm,
-				})
-				wm.SaveIntents(n.SnapshotStore())
-				// Latch: set WindowResetFiredFor whenever the tree carries a new window time.
-				// The WindowResetProducer is idempotent within one window, so advancing the
-				// latch after Tick prevents it from re-firing for the same window next tick.
-				if !tree.WindowResetsAt.IsZero() && !wm.WindowResetFiredFor().Equal(tree.WindowResetsAt) {
-					wm.SetWindowResetFiredFor(tree.WindowResetsAt)
 				}
-
-				// Annotate sessions with PendingNudge before publishing the tree.
+				n.Reconcile(tctx)
+				// Annotate sessions BEFORE dispatch so clients see what's queued.
 				for _, dir := range tree.Dirs {
 					for _, sv := range dir.Sessions {
 						sid := sv.SessionID
@@ -355,6 +353,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 						sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
 					}
 				}
+				n.Dispatch(tctx)
+				wm.SaveIntents(n.SnapshotStore())
 
 				// Escalation flip: surface IsRetryable=false on terminal errors
 				// for sessions whose watermark marks DisruptEscalated.
@@ -375,6 +375,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				}
 			}
 
+			if opts.TreeObserver != nil {
+				opts.TreeObserver(tree)
+			}
 			state.setTree(tree)
 		}
 	}

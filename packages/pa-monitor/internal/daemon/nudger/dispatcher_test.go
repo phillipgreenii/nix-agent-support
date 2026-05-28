@@ -33,10 +33,11 @@ func (f *fakeSignaler) Send(pid int, text string) error {
 }
 
 type fakeRecorder struct {
-	mu           sync.Mutex
-	suppressed   []string
-	sent         []string
-	watermarkOps []string
+	mu               sync.Mutex
+	suppressed       []string
+	sent             []string
+	watermarkOps     []string
+	windowLatchOps   []time.Time
 }
 
 func (r *fakeRecorder) RecordSuppressed(sid string, sources []Source, cause string) {
@@ -53,6 +54,11 @@ func (r *fakeRecorder) UpdateWatermarks(sid string, now time.Time, cause *transc
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.watermarkOps = append(r.watermarkOps, sid)
+}
+func (r *fakeRecorder) AdvanceWindowResetFiredFor(at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.windowLatchOps = append(r.windowLatchOps, at)
 }
 
 func TestDispatcherFiresOnceAndClears(t *testing.T) {
@@ -144,4 +150,64 @@ func TestDispatcherTextPrecedenceManualWins(t *testing.T) {
 	if len(sig.sent) != 1 || sig.sent[0].Text != "manual-override" {
 		t.Errorf("sent = %+v, want manual text override", sig.sent)
 	}
+}
+
+// TestDispatcherWindowLatchAdvancesOnWindowResetDispatch verifies that
+// AdvanceWindowResetFiredFor is called exactly once when a SourceWindowReset
+// intent is dispatched, and NOT called when only SourceDisrupted or
+// SourceManual intents are dispatched.
+func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
+	resetsAt := time.Date(2026, 5, 28, 20, 0, 0, 0, time.UTC)
+	now := resetsAt.Add(-5 * time.Minute)
+
+	t.Run("window_reset dispatched advances latch", func(t *testing.T) {
+		store := NewPendingStore()
+		store.Add(NudgeIntent{Key: IntentKey{"sid-wr", SourceWindowReset}, Text: "continue", EmittedAt: now})
+		tree := treeWith(resetsAt, newSV("sid-wr", 1111, session.Idle))
+		sig := &fakeSignaler{}
+		rec := &fakeRecorder{}
+		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		rec.mu.Lock()
+		ops := rec.windowLatchOps
+		rec.mu.Unlock()
+		if len(ops) != 1 {
+			t.Fatalf("windowLatchOps = %d, want 1", len(ops))
+		}
+		if !ops[0].Equal(resetsAt) {
+			t.Errorf("windowLatchOps[0] = %v, want %v", ops[0], resetsAt)
+		}
+	})
+
+	t.Run("only disrupted dispatched does NOT advance latch", func(t *testing.T) {
+		store := NewPendingStore()
+		store.Add(NudgeIntent{Key: IntentKey{"sid-d", SourceDisrupted}, Text: "continue", EmittedAt: now})
+		tree := treeWith(resetsAt, newSV("sid-d", 2222, session.Idle))
+		sig := &fakeSignaler{}
+		rec := &fakeRecorder{}
+		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		rec.mu.Lock()
+		ops := rec.windowLatchOps
+		rec.mu.Unlock()
+		if len(ops) != 0 {
+			t.Errorf("windowLatchOps = %d, want 0 (no window_reset dispatched)", len(ops))
+		}
+	})
+
+	t.Run("only manual dispatched does NOT advance latch", func(t *testing.T) {
+		store := NewPendingStore()
+		store.Add(NudgeIntent{Key: IntentKey{"sid-m", SourceManual}, Text: "hey", EmittedAt: now})
+		tree := treeWith(resetsAt, newSV("sid-m", 3333, session.Idle))
+		sig := &fakeSignaler{}
+		rec := &fakeRecorder{}
+		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		rec.mu.Lock()
+		ops := rec.windowLatchOps
+		rec.mu.Unlock()
+		if len(ops) != 0 {
+			t.Errorf("windowLatchOps = %d, want 0 (no window_reset dispatched)", len(ops))
+		}
+	})
 }
