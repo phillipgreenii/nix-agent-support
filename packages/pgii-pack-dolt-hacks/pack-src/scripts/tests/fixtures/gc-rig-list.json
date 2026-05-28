@@ -1,0 +1,22 @@
+{
+  "city_path": "/x/gc",
+  "city_name": "gc",
+  "rigs": [
+    {
+      "name": "gc",
+      "path": "/x/gc",
+      "prefix": "gc",
+      "hq": true,
+      "suspended": false,
+      "beads": "initialized"
+    },
+    {
+      "name": "zr-monorepo",
+      "path": "/x/zr-mono",
+      "prefix": "zr",
+      "hq": false,
+      "suspended": false,
+      "beads": "initialized"
+    }
+  ]
+}
