@@ -1,0 +1,15 @@
+# pgii-dolt-hacks
+#
+# Workarounds for dolt-related storage / lifecycle issues and a handful
+# of gascity 1.1.0 supervisor regressions that the system packs do not
+# cover. Every order corresponds to a HACK # in /HACKS.md with the
+# upstream problem and retirement criterion.
+#
+# Migrated from ~/gc/assets/imports/pgii-dolt-hacks/ (hand-built pack).
+#
+# Retire individual orders as their HACK retirement criteria are met
+# upstream; retire the whole pack when zero orders remain enabled.
+
+[pack]
+name = "pgii-dolt-hacks"
+schema = 2

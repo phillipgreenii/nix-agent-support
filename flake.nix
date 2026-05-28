@@ -90,6 +90,7 @@
           pa-monitor = final.callPackage ./packages/pa-monitor { };
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
+          pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -393,6 +394,7 @@
               pa-monitor
               pgii-pack-test-fixture
               pgii-pack-pr-support
+              pgii-pack-dolt-hacks
               pg-pr
               goccc
               toktrack
