@@ -107,8 +107,6 @@ in
         copies of gastown's defaults; replaces enabling the gastown system
         pack outright (which would also try to manage other defaults).
       '';
-      # Real packs (bead-importer) are added in their respective
-      # phase plans.
     };
   };
 

@@ -8,8 +8,8 @@
 # pr-watcher legitimately uses `rig:auto` to mark PR beads it owns at
 # city scope; that label is excluded from this check. Anything else
 # (`rig:ziprecruiter`, `rig:nix_overlay`, etc.) in the city bd indicates
-# a routing miss — either an old import predating the bead-importer fix,
-# or some new producer that needs the same `--rig=` treatment.
+# a routing miss — typically an old import or some new producer that
+# needs `--rig=` treatment.
 #
 # Detection only; no auto-migration. The migration pattern is recorded
 # in beads gc-77nlh (closed) — use `gc bd --rig=<name> create` to mint
@@ -64,5 +64,4 @@ if [ "$COUNT" -gt 5 ]; then
 fi
 echo "Fix: for each, create a copy in the target rig bd via 'gc bd --rig=<name> create ...',"
 echo "     then close the city-bd original with --reason='migrated to <new-id>'."
-echo "     New imports won't hit this — bead-importer.sh now passes --rig=\$target_rig."
 exit 2

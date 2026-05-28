@@ -5,17 +5,29 @@
 - **Owner:** phillipg
 - **Companion repos:** `phillipgreenii-nix-agent-support` (target), `~/gc` (source of legacy packs), `phillipg-nix-ziprecruiter` (source of `pg-pr-zr`)
 
+> **Update 2026-05-28 — Phase 5 (`pgii-bead-importer`) dropped.** The legacy
+> `bead-importer` was an early experiment; the user confirmed it has been
+> unused since and the legacy helpers it depended on (`source-<name>.sh`,
+> `bead-upsert.sh`) were already missing from disk. Phase 5 sections, the
+> `bead-importer` HM submodule, the `sources` override pattern, and the
+> per-pack rollout entry have been removed from the body. The
+> `substitutions` machinery in `mkPgiiPack` is retained for future packs.
+> Legacy `bead-importer.sh` + `bead-importer.toml` deleted from
+> `~/gc/assets/imports/zr/` (Phase 1 cutover no longer gated on Phase 5).
+> If a bead-importer is ever needed again, it should land via a fresh
+> design rather than a revival of Phase 5.
+
 ## Motivation
 
 Gas City currently loads five custom packs from `~/gc/assets/imports/`:
 
-| Pack                            | What it contains                                                                                          |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `pgii-dolt-hacks`               | HACK 2, 10, 12 workarounds (autoclose, archive+compact, override watchdog)                                |
-| `pgii-gastown`                  | mayor / deacon / operator / foreman agents + `mol-deacon-patrol` formula                                  |
-| `pgii-workers`                  | rig-scoped generic `worker` agent                                                                         |
-| `zr`                            | PR review / triage / self-fix agents, pr-watcher order, wake-on-work HACK 1, bead-importer, doctor checks |
-| (the partial migration of `zr`) | `phillipg-nix-ziprecruiter/modules/pg-pr-zr/` — nix-built, parallel-running                               |
+| Pack                            | What it contains                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `pgii-dolt-hacks`               | HACK 2, 10, 12 workarounds (autoclose, archive+compact, override watchdog)                 |
+| `pgii-gastown`                  | mayor / deacon / operator / foreman agents + `mol-deacon-patrol` formula                   |
+| `pgii-workers`                  | rig-scoped generic `worker` agent                                                          |
+| `zr`                            | PR review / triage / self-fix agents, pr-watcher order, wake-on-work HACK 1, doctor checks |
+| (the partial migration of `zr`) | `phillipg-nix-ziprecruiter/modules/pg-pr-zr/` — nix-built, parallel-running                |
 
 These packs share five problems:
 
@@ -33,7 +45,7 @@ This design migrates all custom packs to `phillipgreenii-nix-agent-support`, ren
 
 - New nix library function `lib/mkPgiiPack.nix` for building pack derivations.
 - New home-manager module `home/programs/pgii-packs/` that takes per-pack toggles + a city list and writes managed `[packs.<name>]` blocks into each city's `city.toml`.
-- Six packs in `packages/pgii-pack-<name>/`: `pr-support`, `dolt-hacks`, `workers`, `gastown`, `bead-importer`, plus a `test-fixture` pack used by tests.
+- Five packs in `packages/pgii-pack-<name>/`: `pr-support`, `dolt-hacks`, `workers`, `gastown`, plus a `test-fixture` pack used by tests.
 - Activation behavior: idempotent block insertion, removal-on-disable, hand-written-block protection, optional `gc supervisor reload`.
 - Migration plan that retires `~/gc/assets/imports/{zr,pgii-*}` and the `pg-pr-zr/pack-src/` after each phase.
 
@@ -78,12 +90,6 @@ packages/
       agents/{mayor,deacon,operator,foreman}/{agent.toml,prompt.md}
       formulas/mol-deacon-patrol.toml
       doctor/{check-misplaced-beads,check-stale-beads}/
-  pgii-pack-bead-importer/
-    default.nix
-    pack-src/
-      pack.toml
-      orders/bead-importer.toml.template
-      scripts/bead-importer.sh.template
   pgii-pack-test-fixture/
     default.nix
     pack-src/
@@ -111,18 +117,16 @@ home/programs/
 ```
 phillipgreenii.programs.pgii.packs.<pack>.enable = true
 phillipgreenii.programs.pgii.gascity.cities      = ["/Users/phillipg/gc"]
-phillipgreenii.programs.pgii.packs.bead-importer.sources = [ { … } ]
                               │
                               ▼
 HM module evaluates options, instantiates pack derivations:
   pkgs.pgii-pack-pr-support
-  pkgs.pgii-pack-bead-importer.override { sources = […]; }
+  pkgs.pgii-pack-gastown
   …
                               │
                               ▼
 Pack derivations realize:
   /nix/store/<hash>-pgii-pack-pr-support/{pack.toml,agents/,orders/,scripts/,doctor/}
-  /nix/store/<hash>-pgii-pack-bead-importer/…  (with sources baked in)
                               │
                               ▼
 home.activation runs activation.sh with --cities + --packs JSON args
@@ -190,7 +194,7 @@ pkgs.runCommand "${name}-${version}"
 - Marker syntax: `${KEY}` (envsubst's native form).
 - Substituted via plain `envsubst`. Only names that mkPgiiPack exports get substituted; unexported `${...}` patterns inside template files pass through unchanged. Gascity's runtime `{{.Foo}}` go-template syntax is unaffected.
 - `${SCRIPTS_DIR}` is always exported (= `$out/scripts`). Additional vars come from each pack's `substitutions` arg.
-- Known gotcha: if a pack ships a shell script as `*.sh.template` and the script uses `${SCRIPTS_DIR}` or any other exported var as a normal shell expansion, envsubst will eat it. When that bites (likely in Phase 5's pgii-bead-importer if its shell needs `${HOME}` or similar), switch mkPgiiPack to envsubst's variable-list arg `'$SCRIPTS_DIR $X $Y'` so only declared names are replaced.
+- Known gotcha: if a pack ships a shell script as `*.sh.template` and the script uses `${SCRIPTS_DIR}` or any other exported var as a normal shell expansion, envsubst will eat it. If a future pack hits this (e.g. it needs `${HOME}` or similar at runtime), switch mkPgiiPack to envsubst's variable-list arg `'$SCRIPTS_DIR $X $Y'` so only declared names are replaced.
 
 ### Per-pack `default.nix` shape
 
@@ -204,16 +208,16 @@ mkPgiiPack {
 }
 ```
 
-For `bead-importer` (sources baked in at build time):
+For a hypothetical pack that needs build-time substitutions (no current pack uses this; kept as a forward-looking example of the `substitutions` arg):
 
 ```nix
 { lib, mkPgiiPack }:
-{ sources ? [ ] }:
+{ extraValue ? "" }:
 mkPgiiPack {
-  name = "pgii-bead-importer";
+  name = "pgii-pack-example";
   src = ./pack-src;
   substitutions = {
-    SOURCES_JSON = builtins.toJSON sources;
+    EXTRA_VALUE = extraValue;
   };
 }
 ```
@@ -258,39 +262,6 @@ phillipgreenii.programs.pgii = {
     dolt-hacks.enable    = mkEnableOption "pgii-dolt-hacks pack (HACK 2, 10, 12 workarounds)";
     workers.enable       = mkEnableOption "pgii-workers pack (rig-scoped worker pool)";
     gastown.enable       = mkEnableOption "pgii-gastown pack (mayor/deacon/operator/foreman)";
-
-    bead-importer = {
-      enable = mkEnableOption "pgii-bead-importer pack";
-      sources = mkOption {
-        default = [ ];
-        type = listOf (submodule {
-          options = {
-            name = mkOption {
-              type = str;
-              description = "Source label (used in logs and as a default bead label).";
-            };
-            doltHost = mkOption { type = str; example = "127.0.0.1"; };
-            doltPort = mkOption { type = port; };
-            doltDatabase = mkOption { type = str; example = "beads_workspace"; };
-            query = mkOption {
-              type = str;
-              description = "bd query identifying importable beads.";
-              example = "--status=open --unassigned";
-            };
-            labels = mkOption {
-              type = listOf str;
-              description = "Labels to apply to imported beads in the destination.";
-              default = [ ];
-            };
-            targetRig = mkOption {
-              type = nullOr str;
-              default = null;
-              description = "Destination rig prefix; null = city-level import.";
-            };
-          };
-        });
-      };
-    };
   };
 };
 ```
@@ -322,10 +293,6 @@ config = lib.mkIf anyPackEnabled {
       assertion = !anyPackEnabled || cfg.gascity.cities != [ ];
       message = "Enabling pgii packs requires at least one city in phillipgreenii.programs.pgii.gascity.cities.";
     }
-    {
-      assertion = !cfg.packs.bead-importer.enable || cfg.packs.bead-importer.sources != [ ];
-      message = "pgii.packs.bead-importer.enable requires at least one entry in .sources.";
-    }
   ];
 };
 ```
@@ -334,7 +301,6 @@ config = lib.mkIf anyPackEnabled {
 
 - **pr-support depends on pg-pr**: assertion failure at eval time. Pack scripts call `pg-pr`; broken without it.
 - **No cities = no install**: assertion failure. Cheaper than building packs and noticing later nothing references them.
-- **bead-importer enabled with no sources**: assertion failure. Empty importer is meaningless.
 - **No per-pack options unless needed**: each pack starts with only `.enable`. Add options later if real friction surfaces.
 
 ## Activation script
@@ -414,7 +380,7 @@ Renamed from `pg-pr-zr`; supersedes legacy `zr`.
 | pack.toml.template header            | "ZipRecruiter PR monitoring"                                 | Scrub ZR refs in comment                                                                                                                                                                                                                                                                                      |
 | Jira wrapper binary                  | `pg-pr-zr/default.nix` builds `pg-pr-issues-jira-zr`         | Stays in `phillipg-nix-ziprecruiter` — Jira creds and tenant URL are host-specific. Wrapper renames to `pg-pr-issues-jira`.                                                                                                                                                                                   |
 | doctor checks (carry from legacy zr) | `~/gc/assets/imports/zr/doctor/`                             | Carry these into pgii-pr-support's `doctor/` and rewrite agent-prefix matchers from `zr.pr-*` to `pgii-pr-support.pr-*`: `check-pr-watcher-recent-runs`, `check-pr-agent-woke-no-progress`, `check-pr-feedback-backlog`, `check-pr-feedback-throughput`, `check-pr-orphan-beads`, `check-hack-1-still-needed` |
-| legacy bead-importer                 | `~/gc/assets/imports/zr/scripts/bead-importer.{sh,toml}`     | Moves to its own pack (Phase 5). Drop from pgii-pr-support.                                                                                                                                                                                                                                                   |
+| legacy bead-importer                 | `~/gc/assets/imports/zr/scripts/bead-importer.{sh,toml}`     | Dropped 2026-05-28 (Phase 5 cancelled — unused, helpers already missing). Files deleted from legacy; no replacement pack. See header note.                                                                                                                                                                    |
 | legacy notify-terminal-notifier.sh   | `~/gc/assets/imports/zr/scripts/notify-terminal-notifier.sh` | Drop — pgii-pr-support's prompts route through pg-pr, never through this script                                                                                                                                                                                                                               |
 | Parallel-run                         | already established in pg-pr-zr MIGRATION.md                 | Carry over: one-week parallel-run between legacy `zr` pack and new `pgii-pr-support` pack                                                                                                                                                                                                                     |
 | Cutover                              |                                                              | Delete `~/gc/assets/imports/zr/`; delete `phillipg-nix-ziprecruiter/modules/pg-pr-zr/{pack-src/,activation.sh}`; keep Jira wrapper renamed to `pg-pr-issues-jira`                                                                                                                                             |
@@ -448,18 +414,10 @@ Renamed from `pg-pr-zr`; supersedes legacy `zr`.
 | ZR refs in mayor/deacon/operator/foreman prompts | unknown                                                                    | Audit during migration; rewrite if found (none expected, but verify)                                                                                                                         |
 | Cutover                                          |                                                                            | Delete `~/gc/assets/imports/pgii-gastown/`                                                                                                                                                   |
 
-### Phase 5 — `pgii-bead-importer`
+### Phase 5 — `pgii-bead-importer` (cancelled 2026-05-28)
 
-New pack split out of legacy `zr` and turned into a configurable, multi-source importer.
-
-| What                   | Source                                                                          | Action                                                                                                                                                                                                                                                                 |
-| ---------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pack body              | `~/gc/assets/imports/zr/scripts/bead-importer.sh` + `orders/bead-importer.toml` | Rewrite as a template-driven pack: `scripts/bead-importer.sh.template` reads `@SOURCES_JSON@` (baked in at build time), iterates over each source, runs the configured query against the configured dolt endpoint, imports matching beads, applies the source's labels |
-| dolt endpoint          | currently derived from `bd dolt show` on a source path                          | Replaced by explicit `doltHost`/`doltPort`/`doltDatabase` per source                                                                                                                                                                                                   |
-| self-import protection | endpoint-comparison check in legacy script                                      | Keep — compare each source's endpoint against the destination city's endpoint and refuse to self-import                                                                                                                                                                |
-| QUOTA_PAUSED sentinel  | `$GC_ROOT/QUOTA_PAUSED`                                                         | Keep — same gating semantics                                                                                                                                                                                                                                           |
-| Order TOML             | `orders/bead-importer.toml.template`                                            | `exec = "@SCRIPTS_DIR@/bead-importer.sh"`, `interval = "10m"`, `enabled = true` (currently disabled in legacy due to the self-import bug; the new endpoint-comparison check fixes that)                                                                                |
-| Cutover                |                                                                                 | Already handled when `zr/` is deleted at end of Phase 1                                                                                                                                                                                                                |
+Dropped per header note. Legacy `bead-importer.sh` + `bead-importer.toml`
+were removed from `~/gc/assets/imports/zr/`; no replacement pack ships.
 
 ## Phased rollout
 
@@ -470,12 +428,8 @@ Phase 0 (machinery)
 Phase 1 (pgii-pr-support build)  ─── parallel-run with legacy zr, 1 week
    │
    ▼
-Phase 5 (pgii-bead-importer)     ─── built before Phase 1 cutover so the
-   │                                  legacy bead-importer.sh source can be
-   │                                  referenced during port, then dropped
-   ▼
 Phase 1 cutover                  ─── delete ~/gc/assets/imports/zr/
-   │                                  (gated on Phase 5 being ready)
+   │
    ▼
 Phase 2 (pgii-dolt-hacks)
    │
@@ -486,15 +440,14 @@ Phase 3 (pgii-workers)
 Phase 4 (pgii-gastown)
 ```
 
-Each phase: own bead epic, own design spec or plan, own PR, own validation. Phase 0 is the heavy lift; phases 1-5 are mechanical once the machinery exists.
+Each phase: own bead epic, own design spec or plan, own PR, own validation. Phase 0 is the heavy lift; phases 1-4 are mechanical once the machinery exists. (Phase 5 was cancelled 2026-05-28 — see header note.)
 
-**Sequencing dependency:** Phase 1 splits into two sub-phases: a build sub-phase (port pack body, doctor checks, run parallel-run alongside legacy `zr`) and a cutover sub-phase (delete legacy `zr/`). Phase 5 (pgii-bead-importer) must complete before Phase 1's cutover, because legacy `zr/scripts/bead-importer.sh` is the reference source for Phase 5's rewrite. Once Phase 5 is in place, Phase 1's cutover can delete the entire `~/gc/assets/imports/zr/` tree.
+**Sequencing dependency:** Phase 1 splits into two sub-phases: a build sub-phase (port pack body, doctor checks, run parallel-run alongside legacy `zr`) and a cutover sub-phase (delete legacy `zr/`). With Phase 5 cancelled, Phase 1's cutover is no longer blocked on it — the legacy `bead-importer.sh` is dropped outright in Phase 1's cutover.
 
 ## Open items deferred to their phases
 
 1. **Phase 3 — rig-scope registration.** Determine experimentally whether `[packs.<name>]` is enough for rig-scoped agents or whether `[rigs.imports.<name>]` is the required shape. Will affect whether activation needs a per-pack scope mode.
 2. **Phase 4 — audit prompts for ZR refs.** None expected in mayor/deacon/operator/foreman; verify during migration.
-3. **Phase 5 — first source list.** What machines + dolt servers should be added as sources at cutover time? Out of design scope — set in machine config when wiring.
 
 ## Renaming rules (applies everywhere)
 
