@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# activation.sh — write managed [imports.<name>] blocks into one or more
+# activation.sh — write managed import blocks into one or more
 # <city>/pack.toml files. Called from home/programs/pgii-packs/default.nix
 # during home-manager activation.
 #
@@ -11,8 +11,16 @@
 #
 # Marker format written/managed in <city>/pack.toml:
 #
+#   City-scope pack:
 #   # BEGIN pgii-pack:<pack-name> (managed)
 #   [imports.<pack-name>]
+#   source = "/nix/store/..."
+#   export = true
+#   # END pgii-pack:<pack-name> (managed)
+#
+#   Rig-scope pack:
+#   # BEGIN pgii-pack:<pack-name> (managed)
+#   [defaults.rig.imports.<pack-name>]
 #   source = "/nix/store/..."
 #   export = true
 #   # END pgii-pack:<pack-name> (managed)
@@ -97,13 +105,39 @@ done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$PACKS_JSON")
 
 PACK_NAMES=("${!PACKS[@]}")
 
+# pack_scope <store-path>
+# Echoes "city" (default) or "rig" based on the pack's .pack-meta.json.
+# Falls back to "city" if the meta file is absent (older packs built
+# before mkPgiiPack started embedding scope; defensive default keeps
+# behavior unchanged for them).
+pack_scope() {
+  local store_path="$1"
+  local meta="$store_path/.pack-meta.json"
+  if [ -f "$meta" ]; then
+    jq -r '.scope // "city"' "$meta"
+  else
+    echo "city"
+  fi
+}
+
 # Emit one managed block to stdout for a given pack.
 emit_block() {
   local name="$1" path="$2"
+  local scope
+  scope="$(pack_scope "$path")"
+  local header
+  case "$scope" in
+  rig) header="[defaults.rig.imports.$name]" ;;
+  city) header="[imports.$name]" ;;
+  *)
+    echo "pgii-packs: ERROR: pack '$name' has unsupported scope '$scope' (expected city|rig)" >&2
+    exit 4
+    ;;
+  esac
   cat <<EOF
 
 # BEGIN pgii-pack:$name (managed)
-[imports.$name]
+$header
 source = "$path"
 export = true
 # END pgii-pack:$name (managed)
@@ -132,16 +166,29 @@ no_op_needed() {
     [ "${current_names[$i]}" = "${desired_names[$i]}" ] || return 1
   done
 
-  # Per-pack source check.
+  # Per-pack source and scope check.
   for name in "${PACK_NAMES[@]}"; do
-    local got want
-    got=$(awk -v begin="# BEGIN pgii-pack:$name (managed)" -v end="# END pgii-pack:$name (managed)" '
+    local got_source want_source got_header want_header scope
+    got_source=$(awk -v begin="# BEGIN pgii-pack:$name (managed)" -v end="# END pgii-pack:$name (managed)" '
       $0 == begin { in_block = 1; next }
       $0 == end   { in_block = 0; next }
       in_block && /^source = / { gsub(/(^source = "|"$)/, ""); print; exit }
     ' "$target")
-    want="${PACKS[$name]}"
-    [ "$got" = "$want" ] || return 1
+    want_source="${PACKS[$name]}"
+    [ "$got_source" = "$want_source" ] || return 1
+
+    # Also verify the header type matches the pack's current scope.
+    scope="$(pack_scope "${PACKS[$name]}")"
+    case "$scope" in
+    rig) want_header="[defaults.rig.imports.$name]" ;;
+    *) want_header="[imports.$name]" ;;
+    esac
+    got_header=$(awk -v begin="# BEGIN pgii-pack:$name (managed)" -v end="# END pgii-pack:$name (managed)" '
+      $0 == begin { in_block = 1; next }
+      $0 == end   { in_block = 0; next }
+      in_block && /^\[/ { print; exit }
+    ' "$target")
+    [ "$got_header" = "$want_header" ] || return 1
   done
 
   return 0
@@ -165,18 +212,34 @@ process_city() {
     return 0
   fi
 
-  # Pre-flight: for each pack we want to write, refuse if [imports.<name>]
-  # exists in the file but is NOT bracketed by our managed sentinels.
+  # Pre-flight: for each pack we want to write, refuse if the relevant
+  # import key exists in the file but is NOT bracketed by our managed sentinels.
+  # City-scope packs use [imports.<name>]; rig-scope packs use
+  # [defaults.rig.imports.<name>].
   for name in "${PACK_NAMES[@]}"; do
-    # Does the file declare [imports.<name>] anywhere?
-    if grep -Eq "^\[imports\.$name\]\$" "$pack_toml"; then
+    local store_path scope toml_key toml_key_re
+    store_path="${PACKS[$name]}"
+    scope="$(pack_scope "$store_path")"
+    case "$scope" in
+    rig) toml_key="defaults.rig.imports.$name" ;;
+    city) toml_key="imports.$name" ;;
+    *)
+      echo "pgii-packs: ERROR: pack '$name' has unsupported scope '$scope'" >&2
+      exit 4
+      ;;
+    esac
+    # Escape dots for regex matching.
+    toml_key_re="${toml_key//./\\.}"
+
+    # Does the file declare [<toml_key>] anywhere?
+    if grep -Eq "^\[${toml_key_re}\]\$" "$pack_toml"; then
       # Is that declaration inside a managed block? Walk the file.
       local inside_managed
-      inside_managed=$(awk -v name="$name" '
+      inside_managed=$(awk -v name="$name" -v key="$toml_key" '
         BEGIN { in_block = 0; found = 0 }
         $0 == "# BEGIN pgii-pack:" name " (managed)" { in_block = 1; next }
         $0 == "# END pgii-pack:" name " (managed)"   { in_block = 0; next }
-        $0 == "[imports." name "]" {
+        $0 == "[" key "]" {
           if (in_block) { found = 1 }
           else { found = -1; exit }
         }
@@ -184,7 +247,7 @@ process_city() {
       ' "$pack_toml")
 
       if [ "$inside_managed" = "-1" ]; then
-        echo "pgii-packs: ERROR: Hand-written [imports.$name] exists in $pack_toml" >&2
+        echo "pgii-packs: ERROR: Hand-written [$toml_key] exists in $pack_toml" >&2
         echo "  Either rename or delete the hand-written block, or remove" >&2
         echo "  phillipgreenii.programs.pgii.packs.$name from your config." >&2
         exit 3
