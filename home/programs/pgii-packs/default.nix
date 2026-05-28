@@ -34,6 +34,10 @@ let
     ++ lib.optional cfg.packs.dolt-hacks.enable {
       name = "pgii-dolt-hacks";
       drv = pkgs.pgii-pack-dolt-hacks;
+    }
+    ++ lib.optional cfg.packs.workers.enable {
+      name = "pgii-workers";
+      drv = pkgs.pgii-pack-workers;
     };
 
   anyPackEnabled = enabledPacks != [ ];
@@ -87,8 +91,14 @@ in
         issues and gascity 1.1.0 supervisor regressions: HACK 2, 10, 11, 12, 14,
         15 and hack-daily-summary).
       '';
-      # Real packs (workers, gastown, bead-importer) are added in their
-      # respective phase plans.
+      workers.enable = lib.mkEnableOption ''
+        pgii-pack-workers (rig-scoped generic worker pool — claims open beads
+        with acceptance_criteria set; ambiguous work labeled `needs-foreman`).
+        Auto-binds to every rig via [defaults.rig.imports.pgii-workers]; per-rig
+        session concurrency is overridden via city.toml [[rigs.patches]].
+      '';
+      # Real packs (gastown, bead-importer) are added in their respective
+      # phase plans.
     };
   };
 
