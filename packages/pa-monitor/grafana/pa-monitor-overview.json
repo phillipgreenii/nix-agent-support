@@ -136,6 +136,87 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 8,
+      "title": "API Errors & Nudges",
+      "type": "row",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 9,
+      "title": "API errors observed",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(pa_monitor_session_api_error_observed_total[5m]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Sessions currently errored (terminal)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (kind) (pa_monitor_sessions_errored)",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Stuck on retryable error",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(pa_monitor_sessions_errored{kind=~\"unknown|server_error\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Nudges suppressed (1h)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(increase(pa_monitor_nudge_suppressed_total[1h]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Nudges sent by source",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (sources) (rate(pa_monitor_signal_sends_total[5m]))",
+          "legendFormat": "{{sources}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+      }
     }
   ]
 }
