@@ -87,7 +87,9 @@
           };
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver { };
-          pa-monitor = final.callPackage ./packages/pa-monitor { };
+          pa-monitor = final.callPackage ./packages/pa-monitor {
+            version = phillipgreenii-nix-base.lib.mkVersion self;
+          };
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
           pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };

@@ -4,17 +4,22 @@
   makeWrapper,
   ccusage,
   gh,
+  version ? "dev",
 }:
 
 buildGoModule {
   pname = "pa-monitor";
-  version = "0.1.0";
+  inherit version;
 
   src = lib.cleanSource ./.;
 
   subPackages = [ "cmd/pa-monitor" ];
 
   vendorHash = "sha256-vEIAZr0QxngOWCE0lZC80mB8gbnY+ZwzaqogJqPexxI=";
+
+  ldflags = [
+    "-X main.version=${version}"
+  ];
 
   nativeBuildInputs = [ makeWrapper ];
 
