@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 )
 
 // runStatus implements the `status` subcommand — one-shot dump of
@@ -47,6 +47,28 @@ func runStatus(args []string) {
 			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
 	}
 	fmt.Printf("caffeinate:    %v\n", state.GetCaffeinateActive())
+
+	// Collect per-session details (LastError + PendingNudge) and print
+	// annotations only when at least one session has something noteworthy.
+	var details []*pb.SessionDetail
+	for _, d := range state.GetDirs() {
+		for _, sv := range d.GetSessions() {
+			sid := sv.GetSessionId()
+			if sid == "" {
+				continue
+			}
+			sel := &pb.Selector{Target: &pb.Selector_SessionId{SessionId: sid}}
+			sd, err := client.C.GetSessionInfo(ctx, &pb.GetSessionInfoRequest{Selector: sel})
+			if err != nil {
+				// Skip sessions we can't query; don't abort the whole status.
+				continue
+			}
+			details = append(details, sd)
+		}
+	}
+	if annotation := formatStatusSessions(details); annotation != "" {
+		fmt.Print(annotation)
+	}
 }
 
 // runAgentsBusyCheck implements the `agents-busy-check` subcommand.

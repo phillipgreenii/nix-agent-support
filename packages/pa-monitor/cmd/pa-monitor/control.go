@@ -207,6 +207,9 @@ func runInfo(args []string) {
 			fmt.Printf("  %s\n", kv)
 		}
 	}
+	if extra := formatSessionInfo(resp); extra != "" {
+		fmt.Print(extra)
+	}
 }
 
 // parseSelector maps a CLI selector string into a proto Selector.
