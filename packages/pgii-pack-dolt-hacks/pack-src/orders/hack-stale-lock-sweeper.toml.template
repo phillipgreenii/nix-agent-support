@@ -1,0 +1,10 @@
+# HACK 15: scan the city + registered rigs for stale .git/index.lock
+# files left behind by killed git operations and remove them. See
+# HACKS.md HACK 15.
+[order]
+description = "HACK 15: sweep stale .git/index.lock files across city + rigs"
+trigger     = "cooldown"
+interval    = "5m"
+exec        = "${SCRIPTS_DIR}/hack-stale-lock-sweeper.sh"
+timeout     = "120s"
+enabled     = true

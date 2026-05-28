@@ -1,0 +1,35 @@
+# hack-archive-and-compact — daily lifecycle workaround for dolt commit-graph
+# bloat under high-churn bd workloads.
+#
+# Each run:
+#   1. Exports closed regular beads to one JSONL file per closed-at date
+#      under `archive/beads/<YYYY-MM-DD>.jsonl` (tracked in this city's git).
+#   2. Prunes ALL closed regular beads from dolt.
+#   3. `bd flatten --force` → `CALL DOLT_GC('--full')` → `CALL DOLT_STATS_PURGE()`
+#      to reclaim noms + stats journal space.
+#   4. `git add archive/ && git commit` so the archive grows in-repo with the
+#      bd export as the durable history.
+#
+# Why this exists:
+#   bd 1.0.4 + dolt produces ~6 commits/min under the city's normal write
+#   throughput. Each commit captures full row state in noms storage; per-commit
+#   overhead is ~30 KB. After 5 days the hq DB was 2.7 GB despite only ~10 MB
+#   of live data. dolt is over-engineered for a single-machine, no-remote,
+#   high-churn workload; we don't need branches / merges / time travel here.
+#   See sandbox verification (2026-05-18): the four-step compact sequence
+#   takes hq from 2.7 GB → ~14 MB with zero bead-level data loss.
+#
+# See assets/imports/pgii-dolt-hacks/scripts/hack-archive-and-compact.sh for the
+# full backstory and retirement criteria.
+#
+# Enabled 2026-05-18 after the first manual run verified the archive
+# layout (archive/beads/<YYYY-MM-DD>.jsonl). mol-dog-compactor would
+# otherwise own this lifecycle, but it's design-only in gascity 1.1.0
+# (no daemon ships). See HACKS.md HACK 10 for full rationale.
+[order]
+description = "HACK: daily archive closed beads to JSONL in archive/, prune from dolt, flatten + GC + stats_purge."
+trigger     = "cooldown"
+interval    = "24h"
+exec        = "${SCRIPTS_DIR}/hack-archive-and-compact.sh"
+timeout     = "10m"
+enabled     = true

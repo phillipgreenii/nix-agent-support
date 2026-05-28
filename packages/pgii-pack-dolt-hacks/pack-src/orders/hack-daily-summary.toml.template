@@ -1,0 +1,27 @@
+# hack-daily-summary — daily situational-awareness digest for the operator.
+#
+# Fires once every 24h via a cooldown trigger. Originally a `0 7 * * *`
+# cron, but switched to cooldown because this machine is not always on
+# during the 07:00 cron window — gc 1.1.0's cron is minute-precise and
+# doesn't retry missed fires, so a laptop asleep at 07:00 lost the
+# whole day's summary. Cooldown fires as soon as the dispatcher next
+# ticks after 24h since the last run, so summaries are never skipped
+# (they may drift slightly later if a run is delayed).
+#
+# Gathers four categories of activity since the last successful run,
+# polishes via Claude Haiku, and delivers the result as mail to the
+# `operator` agent.
+#
+# See docs/superpowers/specs/2026-05-21-hack-daily-summary-design.md
+# for full design.
+#
+# Why a hack: gc 1.1.0 ships no native daily digest. Retire this when
+# upstream ships one with equivalent coverage, or when the operator no
+# longer wants this cadence.
+[order]
+description = "HACK: daily situational-awareness digest mailed to operator (24h cooldown)."
+trigger     = "cooldown"
+interval    = "24h"
+exec        = "${SCRIPTS_DIR}/hack-daily-summary.sh"
+timeout     = "10m"
+enabled     = true

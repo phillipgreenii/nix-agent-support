@@ -1,0 +1,11 @@
+# HACK 14: re-assign open [message] beads from bare aliases to their
+# canonical bound sessions, so escalations to bare names don't get
+# lost in undeliverable inboxes. Companion to HACK 13. See HACKS.md
+# HACK 14.
+[order]
+description = "HACK 14: forward bare-alias [message] beads to canonical bound sessions (e.g. mayor → pgii-gastown.mayor)"
+trigger     = "cooldown"
+interval    = "5m"
+exec        = "${SCRIPTS_DIR}/hack-message-forwarder.sh"
+timeout     = "60s"
+enabled     = true
