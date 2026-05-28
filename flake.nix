@@ -311,6 +311,52 @@
               touch $out
             '';
 
+            check-pgii-pack-dolt-hacks-layout = pkgs.runCommand "check-pgii-pack-dolt-hacks-layout" { } ''
+              pack=${pkgs.pgii-pack-dolt-hacks}
+              test -f "$pack/pack.toml"                                   || { echo "missing pack.toml"; exit 1; }
+              test -f "$pack/.pack-meta.json"                             || { echo "missing .pack-meta.json"; exit 1; }
+              test -d "$pack/formulas"                                    || { echo "missing formulas/"; exit 1; }
+              for o in hack-archive-and-compact \
+                       hack-autoclose-completed-mols \
+                       hack-daily-summary \
+                       hack-message-forwarder \
+                       hack-mol-dog-jsonl \
+                       hack-order-override-watchdog \
+                       hack-stale-lock-sweeper; do
+                test -f "$pack/orders/$o.toml" || { echo "missing orders/$o.toml"; exit 1; }
+                test -x "$pack/scripts/$o.sh"  || { echo "scripts/$o.sh not exec"; exit 1; }
+                grep -q "$pack/scripts/$o.sh" "$pack/orders/$o.toml" || { echo "orders/$o.toml exec line not substituted"; exit 1; }
+              done
+              test -f "$pack/scripts/hack-archive-and-compact.RUNBOOK.md" || { echo "missing RUNBOOK"; exit 1; }
+              for d in check-formulas-dir \
+                       check-hack-2-still-needed \
+                       check-hack-10-still-needed \
+                       check-hack-11-still-needed; do
+                test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
+                test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
+              done
+              test -f "$pack/scripts/tests/hack-daily-summary.bats" || { echo "missing bats"; exit 1; }
+              test -d "$pack/scripts/tests/fixtures"                || { echo "missing fixtures/"; exit 1; }
+              ! find "$pack" -name "*.template" | grep -q . || { echo "stale .template files in pack"; exit 1; }
+              ! grep -rnE '/Users/phillipg/gc/assets/imports' "$pack" >/dev/null 2>&1 || { echo "stale legacy assets paths in pack"; exit 1; }
+              touch $out
+            '';
+
+            test-pgii-pack-dolt-hacks-bats =
+              pkgs.runCommand "test-pgii-pack-dolt-hacks-bats"
+                {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.bash
+                    pkgs.jq
+                  ];
+                }
+                ''
+                  pack=${pkgs.pgii-pack-dolt-hacks}
+                  bats "$pack/scripts/tests/hack-daily-summary.bats"
+                  touch $out
+                '';
+
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
