@@ -30,7 +30,7 @@ func (m *Model) View() string {
 		ShowAll:      m.showAll,
 		CostMode:     m.costMode,
 		ForceID:      m.forceID,
-		AutoResume:   m.autoResume,
+		AutoResume:   m.autoResumeEnabled,
 		Theme:        m.theme,
 		Width:        m.width,
 	})
@@ -38,7 +38,7 @@ func (m *Model) View() string {
 	alerts := render.Alerts(m.tree, render.AlertsOpts{
 		Now:             now,
 		Width:           m.width,
-		AutoResume:      m.autoResume,
+		AutoResume:      m.autoResumeEnabled,
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
 	})

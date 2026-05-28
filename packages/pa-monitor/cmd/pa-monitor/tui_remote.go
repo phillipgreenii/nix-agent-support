@@ -64,9 +64,6 @@ func runTUIRemote() {
 		Interval:             cfg.RefreshInterval,
 		Caffeinate:           mgr,
 		CacheDir:             cacheDir,
-		Signalers:            nil, // daemon dispatches nudges
-		AutoResumeDelay:      cfg.AutoResumeDelay,
-		AutoResumeMessage:    cfg.AutoResumeMessage,
 		Reporter:             nil, // cmuxstatus driven by cmux-bridge, not the TUI
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,

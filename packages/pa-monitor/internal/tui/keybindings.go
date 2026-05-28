@@ -157,21 +157,14 @@ func handleToggleCaffeinate(m *Model) tea.Cmd {
 }
 
 func handleToggleAutoResume(m *Model) tea.Cmd {
-	m.autoResume = !m.autoResume
-	m.reporter.Push(m.buildSidebarSnapshot())
-	if m.autoResume && m.tree != nil && !m.tree.WindowResetsAt.IsZero() && !m.autoResumeFired {
-		fireAt := m.tree.WindowResetsAt.Add(m.autoResumeDelay)
-		cmds := []tea.Cmd{autoResumeFireCmd(fireAt)}
-		if !m.countdownTick {
-			m.countdownTick = true
-			cmds = append(cmds, countdownTickCmd())
-		}
-		return tea.Batch(cmds...)
-	}
+	// TODO(Task 7.2): replace with gRPC SetAutoResume call once daemon client is wired in.
+	// Old behavior (m.autoResume = !m.autoResume + local scheduler) is removed because
+	// the daemon now owns the toggle and nudge dispatch.
 	return nil
 }
 
 func handleManualResume(m *Model) tea.Cmd {
-	m.signalNonWorking("manual-resume")
+	// TODO(Task 7.2): replace with gRPC ManualResume call once daemon client is wired in.
+	// Old behavior (m.signalNonWorking) is removed because the daemon now owns nudge dispatch.
 	return nil
 }

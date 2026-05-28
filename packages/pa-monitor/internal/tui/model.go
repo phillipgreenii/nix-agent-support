@@ -11,7 +11,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/core/treestate"
 )
 
@@ -30,9 +29,6 @@ type Options struct {
 	Interval   time.Duration
 	Caffeinate *caffeinate.Manager
 	CacheDir   string // used to load/save tree collapse state
-	Signalers         []signal.Signaler
-	AutoResumeDelay   time.Duration
-	AutoResumeMessage string
 	Reporter             cmuxstatus.Reporter
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
@@ -64,12 +60,10 @@ type Model struct {
 	anyWorking bool
 	polling    bool
 
-	autoResume        bool
-	autoResumeFired   bool
-	countdownTick     bool
-	signalers         []signal.Signaler
+	// autoResumeEnabled and autoResumeDelay are populated from DaemonState
+	// via TreeUpdatedMsg. The daemon owns the scheduler; these are view-only.
+	autoResumeEnabled bool
 	autoResumeDelay   time.Duration
-	autoResumeMessage string
 
 	reporter             cmuxstatus.Reporter
 	sidebarIntervalTicks int
@@ -94,9 +88,6 @@ func NewModel(o Options) *Model {
 		theme:                render.NewTheme(render.DetectColors()),
 		cacheDir:             o.CacheDir,
 		treeState:            treestate.Load(o.CacheDir),
-		signalers:            o.Signalers,
-		autoResumeDelay:      o.AutoResumeDelay,
-		autoResumeMessage:    o.AutoResumeMessage,
 		reporter:             o.Reporter,
 		sidebarIntervalTicks: o.SidebarIntervalTicks,
 		onCaffeinateToggle:   o.OnCaffeinateToggle,
@@ -241,7 +232,7 @@ func (m *Model) buildSidebarSnapshot() cmuxstatus.Snapshot {
 	prog, label, ok := windowProgress(m.tree, time.Now())
 	return cmuxstatus.Snapshot{
 		CaffeinateOn:  m.caffeinateOn,
-		NudgeOn:       m.autoResume,
+		NudgeOn:       m.autoResumeEnabled,
 		State:         state,
 		PausedResetAt: resetAt,
 		Progress:      prog,

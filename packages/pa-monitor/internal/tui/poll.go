@@ -43,20 +43,3 @@ type pollResultMsg struct {
 }
 type pollErrMsg struct{ err error }
 
-// countdownTickMsg fires every second while autoResume is on and a window reset is pending.
-type countdownTickMsg struct{}
-
-// autoResumeFireMsg fires when the effective resume time (WindowResetsAt + delay) is reached.
-type autoResumeFireMsg struct{}
-
-func countdownTickCmd() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg { return countdownTickMsg{} })
-}
-
-func autoResumeFireCmd(fireAt time.Time) tea.Cmd {
-	d := time.Until(fireAt)
-	if d < 0 {
-		d = 0
-	}
-	return tea.Tick(d, func(time.Time) tea.Msg { return autoResumeFireMsg{} })
-}

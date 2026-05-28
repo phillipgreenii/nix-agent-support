@@ -14,15 +14,6 @@ func PollResultForTest(tree *aggregate.Tree, anyWorking bool) tea.Msg {
 	return pollResultMsg{tree: tree, anyWorking: anyWorking}
 }
 
-// SetTreeAndAutoResumeForTest is a whitebox hook to set Model.tree and Model.autoResume.
-func (m *Model) SetTreeAndAutoResumeForTest(tree *aggregate.Tree, autoResume bool) {
-	m.tree = tree
-	m.autoResume = autoResume
-}
-
-// AutoResumeFireForTest constructs the unexported autoResumeFireMsg.
-func AutoResumeFireForTest() tea.Msg { return autoResumeFireMsg{} }
-
 // SetActiveModalForTest forces the modal selection for whitebox view tests.
 func (m *Model) SetActiveModalForTest(kind ModalKind) { m.activeModal = kind }
 
