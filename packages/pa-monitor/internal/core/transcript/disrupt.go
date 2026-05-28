@@ -1,6 +1,11 @@
 package transcript
 
-import "time"
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"time"
+)
 
 // ErrorKind enumerates the `error` field values seen on synthetic
 // isApiErrorMessage events emitted by Claude Code. Kept as a closed
@@ -31,4 +36,97 @@ type ErrorRecord struct {
 	At          time.Time
 	IsTerminal  bool
 	IsRetryable bool
+}
+
+// LastAPIError returns the most recent isApiErrorMessage event in the
+// transcript regardless of kind. IsTerminal is true iff no subsequent
+// (non-synthetic) user/assistant event follows. Returns zero ErrorRecord
+// if no api-error event is present (Kind == "").
+func LastAPIError(path string) (ErrorRecord, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return ErrorRecord{}, err
+	}
+	defer f.Close()
+
+	type apiErrorScan struct {
+		Type              string    `json:"type"`
+		Timestamp         time.Time `json:"timestamp"`
+		Error             string    `json:"error"`
+		IsApiErrorMessage bool      `json:"isApiErrorMessage"`
+		Message           struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	type typeOnly struct {
+		Type              string `json:"type"`
+		IsApiErrorMessage bool   `json:"isApiErrorMessage"`
+		Error             string `json:"error"`
+	}
+
+	var lines [][]byte
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		b := make([]byte, len(sc.Bytes()))
+		copy(b, sc.Bytes())
+		lines = append(lines, b)
+	}
+	if sc.Err() != nil {
+		return ErrorRecord{}, sc.Err()
+	}
+
+	lastIdx := -1
+	var rec ErrorRecord
+	for i, line := range lines {
+		var ev apiErrorScan
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type != "assistant" || !ev.IsApiErrorMessage {
+			continue
+		}
+		kind := ErrorKind(ev.Error)
+		switch kind {
+		case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed:
+		default:
+			continue
+		}
+		var text string
+		for _, c := range ev.Message.Content {
+			if c.Type == "text" {
+				text = c.Text
+				break
+			}
+		}
+		lastIdx = i
+		rec = ErrorRecord{
+			Kind:        kind,
+			Text:        text,
+			At:          ev.Timestamp,
+			IsTerminal:  true,
+			IsRetryable: kind.IsRetryable(),
+		}
+	}
+	if lastIdx < 0 {
+		return ErrorRecord{}, nil
+	}
+	for _, line := range lines[lastIdx+1:] {
+		var ev typeOnly
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type != "user" && ev.Type != "assistant" {
+			continue
+		}
+		if ev.Type == "assistant" && ev.IsApiErrorMessage {
+			continue
+		}
+		rec.IsTerminal = false
+		break
+	}
+	return rec, nil
 }
