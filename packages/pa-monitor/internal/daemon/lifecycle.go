@@ -191,6 +191,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	state := newSharedState()
 	state.mu.Lock()
 	state.runtimePath = opts.RuntimePath
+	state.autoResumeDelay = opts.AutoResumeDelay
 	state.mu.Unlock()
 	state.setCaffeinateOn(opts.InitialCaffeinateOn)
 	if opts.Caffeinate != nil {

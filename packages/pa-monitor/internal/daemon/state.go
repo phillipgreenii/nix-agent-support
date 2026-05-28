@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"sync"
+	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
@@ -19,6 +20,7 @@ type sharedState struct {
 	runtimePath      string // for persistence on toggle
 	nudger           *nudger.Nudger
 	watermarks       *WatermarkStore
+	autoResumeDelay  time.Duration // static config: how long to wait before auto-nudging
 }
 
 func newSharedState() *sharedState {

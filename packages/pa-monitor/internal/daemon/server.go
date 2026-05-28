@@ -177,7 +177,10 @@ func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoReque
 	}
 	for _, sv := range t.Sessions() {
 		if matchesSelector(sv, sel) {
-			out := &pb.SessionDetail{View: sessionViewToWire(sv)}
+			out := pb.SessionDetailFromView(sv)
+			if out == nil {
+				out = &pb.SessionDetail{}
+			}
 			if sv.Env != nil {
 				for k, v := range sv.Env {
 					if v != "" {
@@ -367,6 +370,16 @@ func (s *server) buildState() *pb.DaemonState {
 	state.DaemonVersion = daemonVersion
 	active, _ := s.state.caffeinateView()
 	state.CaffeinateActive = active
+	s.state.mu.RLock()
+	delay := s.state.autoResumeDelay
+	wm := s.state.watermarks
+	s.state.mu.RUnlock()
+	if wm != nil {
+		state.AutoResumeEnabled = wm.AutoResumeEnabled()
+	}
+	if delay > 0 {
+		state.AutoResumeDelayS = uint32(delay.Seconds())
+	}
 	return state
 }
 

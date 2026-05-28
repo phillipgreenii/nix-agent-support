@@ -6,6 +6,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 // FromTree converts an aggregate.Tree (the daemon's internal state) into
@@ -149,4 +150,42 @@ func weekToProto(w *ccusage.WeeklyEntry, capUSD float64) *Week {
 		pw.WindowPct = w.TotalCost / capUSD
 	}
 	return pw
+}
+
+// SessionDetailFromView converts an aggregate.SessionView into a
+// SessionDetail proto, populating LastError and PendingNudge from
+// the view's enrichment fields.
+//
+// The caller is responsible for setting LabelPairs and any other
+// detail-level fields that are not derived from the session view.
+func SessionDetailFromView(sv *aggregate.SessionView) *SessionDetail {
+	if sv == nil {
+		return nil
+	}
+	out := &SessionDetail{
+		View: sessionViewToProto(sv),
+	}
+	if sv.LastError != nil {
+		out.LastError = apiErrorToProto(sv.LastError)
+	}
+	if sv.PendingNudge != nil {
+		out.PendingNudge = &PendingNudge{Sources: sv.PendingNudge.Sources}
+	}
+	return out
+}
+
+func apiErrorToProto(e *transcript.ErrorRecord) *ApiError {
+	if e == nil {
+		return nil
+	}
+	out := &ApiError{
+		Kind:        string(e.Kind),
+		Text:        e.Text,
+		IsTerminal:  e.IsTerminal,
+		IsRetryable: e.IsRetryable,
+	}
+	if !e.At.IsZero() {
+		out.At = timestamppb.New(e.At)
+	}
+	return out
 }

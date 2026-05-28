@@ -7,6 +7,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 // ToTree is the inverse of FromTree: reconstruct an aggregate.Tree from
@@ -171,4 +172,38 @@ func timeFromTS(ts interface{ AsTime() time.Time }) time.Time {
 		return time.Time{}
 	}
 	return ts.AsTime()
+}
+
+// SessionDetailToView converts a SessionDetail proto back to an
+// aggregate.SessionView, populating LastError and PendingNudge from
+// the detail-level fields. The base session fields are derived from
+// the embedded SessionView.
+func SessionDetailToView(sd *SessionDetail) *aggregate.SessionView {
+	if sd == nil {
+		return nil
+	}
+	sv := sessionViewFromProto(sd.GetView())
+	if sv == nil {
+		sv = &aggregate.SessionView{Session: &session.Session{}}
+	}
+	if e := sd.GetLastError(); e != nil {
+		sv.LastError = apiErrorFromProto(e)
+	}
+	if pn := sd.GetPendingNudge(); pn != nil {
+		sv.PendingNudge = &aggregate.PendingNudge{Sources: pn.GetSources()}
+	}
+	return sv
+}
+
+func apiErrorFromProto(e *ApiError) *transcript.ErrorRecord {
+	if e == nil {
+		return nil
+	}
+	return &transcript.ErrorRecord{
+		Kind:        transcript.ErrorKind(e.GetKind()),
+		Text:        e.GetText(),
+		At:          timeFromTS(e.GetAt()),
+		IsTerminal:  e.GetIsTerminal(),
+		IsRetryable: e.GetIsRetryable(),
+	}
 }
