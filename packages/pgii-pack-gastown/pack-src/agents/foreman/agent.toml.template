@@ -1,0 +1,21 @@
+# foreman — tier-2 triage between workers and mayor.
+#
+# Picks up beads that workers can't (or shouldn't) — beads missing
+# acceptance_criteria, beads explicitly tagged needs-foreman, beads
+# that workers escalated. Fills gaps where possible; escalates via
+# mayor mail when the human needs to weigh in.
+#
+# Runs on opus (judgment-heavy, low-volume work).
+scope = "city"
+wake_mode = "fresh"
+idle_timeout = "1h"
+model = "claude-opus-4-7"
+nudge = "Run gc hook for routed work, then bd ready to find beads missing acceptance criteria."
+
+# Beads needing foreman attention (across city + all rigs):
+#   - explicitly tagged "needs-foreman" (a worker raised it from any rig)
+#   - bug/task/feature/triage with missing acceptance_criteria
+# In both cases, must not already be escalated (gc:escalation label).
+# Sidecar script iterates over all rigs since foreman is scope=city but
+# the worker pools live in rig bds — see work_query.sh for details.
+work_query = "${PACK_ROOT}/agents/foreman/work_query.sh"
