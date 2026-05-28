@@ -23,31 +23,50 @@ import (
 // full upstream content.
 const maxBdTitleLen = 500
 
-// truncateTitle returns title shortened to at most maxLen bytes, ending
-// in a horizontal ellipsis when truncation happens. bd's title check is
-// byte-counted, so a naive rune-based cap can still overflow once the
-// suffix's UTF-8 weight is added.
-//
-// The full upstream content must still be supplied to bd via the body
-// argument — only the display title is shortened.
-func truncateTitle(title string, maxLen int) string {
-	if len(title) <= maxLen {
-		return title
+// maxBdDescriptionLen is bd's `description TEXT NOT NULL` column cap
+// (MySQL TEXT == 65,535 bytes). Bodies above this throw a `too large
+// for column 'description'` error from dolt; truncate before passing
+// the body to bd. Callers should strip known no-information blobs
+// (e.g. CodeRabbit's internal-state base64) upstream so the cap is
+// almost never hit; this is the defensive last line of defense.
+const maxBdDescriptionLen = 65_535
+
+// truncateBytes returns s shortened to at most maxLen bytes, suffixed
+// with a fixed marker when truncation happens. Used for both bd's
+// title and description column caps; the byte cap is what dolt
+// enforces, so a rune-aware cap that still exceeds it would overflow.
+// truncateBytes snaps to a valid UTF-8 rune boundary so the result is
+// still a well-formed string.
+func truncateBytes(s, marker string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
-	const ellipsis = "…" // 3 bytes
-	if maxLen < len(ellipsis) {
-		return title[:maxLen]
+	if maxLen < len(marker) {
+		return s[:maxLen]
 	}
-	budget := maxLen - len(ellipsis)
+	budget := maxLen - len(marker)
 	end := 0
-	for i, r := range title {
+	for i, r := range s {
 		next := i + utf8.RuneLen(r)
 		if next > budget {
 			break
 		}
 		end = next
 	}
-	return title[:end] + ellipsis
+	return s[:end] + marker
+}
+
+// truncateTitle is the title-specific wrapper around truncateBytes,
+// using a horizontal ellipsis as the truncation marker.
+func truncateTitle(title string, maxLen int) string {
+	return truncateBytes(title, "…", maxLen)
+}
+
+// truncateDescription caps a feedback body at bd's TEXT column limit.
+// The marker is verbose so the bead reader can tell the content was
+// shortened (vs the upstream simply being terse).
+func truncateDescription(body string, maxLen int) string {
+	return truncateBytes(body, "\n\n[truncated to fit bd description column]", maxLen)
 }
 
 // CreateFeedbackInput is the typed input for creating a feedback bead.
@@ -114,8 +133,12 @@ func (c *Client) CreateFeedback(ctx context.Context, in CreateFeedbackInput) (st
 	// (first line of an upstream comment) can blow past that on CodeRabbit
 	// summaries and long review-thread bodies. Truncate to keep the bead
 	// create succeeding; the body argument below retains the full content
-	// so nothing is lost.
+	// (modulo description-column truncation immediately below).
 	title := truncateTitle(in.Title, maxBdTitleLen)
+	// bd's description column is TEXT (~64KB). Upstream callers should
+	// strip known no-information blobs first (CodeRabbit internal-state,
+	// etc.); this defensive cap catches anything that still overflows.
+	body = truncateDescription(body, maxBdDescriptionLen)
 	out, err := c.Runner.Run(ctx,
 		"create",
 		"--type=feedback",

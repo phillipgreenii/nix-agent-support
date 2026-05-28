@@ -1542,14 +1542,23 @@ type feedbackEvent struct {
 // commentEvent converts an api.Comment into a feedbackEvent. The fingerprint
 // covers the (author, path, line, body) tuple so the same comment posted on
 // different lines still dedups per-line.
+//
+// CodeRabbit walkthrough summaries embed a base64-encoded internal-state
+// block that is 98% of the comment body (~127KB of ~129KB observed on
+// the zr workspace). bd's description column is TEXT (64KB), so the
+// block must be stripped before assignment. The fingerprint also uses
+// the stripped body — since CodeRabbit comments never previously fit in
+// bd, there are no existing feedback beads with full-body fingerprints
+// to dedup against.
 func commentEvent(c api.Comment) feedbackEvent {
+	body := stripCodeRabbitInternalState(c.Body)
 	kind := beads.FeedbackKindCommentThread
 	if c.Path != "" || c.Line > 0 || c.ThreadID != "" {
 		kind = beads.FeedbackKindReviewThread
 	}
-	fingerprint := fingerprintOf("comment", c.Author, c.Path, fmt.Sprintf("%d", c.Line), c.Body)
+	fingerprint := fingerprintOf("comment", c.Author, c.Path, fmt.Sprintf("%d", c.Line), body)
 	role := commentAuthorRole(c)
-	title := strings.TrimSpace(strings.SplitN(c.Body, "\n", 2)[0])
+	title := strings.TrimSpace(strings.SplitN(body, "\n", 2)[0])
 	if title == "" {
 		title = "comment from " + c.Author
 	}
@@ -1559,8 +1568,31 @@ func commentEvent(c api.Comment) feedbackEvent {
 		fingerprint: fingerprint,
 		authorRole:  role,
 		title:       title,
-		body:        c.Body,
+		body:        body,
 	}
+}
+
+// stripCodeRabbitInternalState removes the `<!-- internal state start
+// --> ... <!-- internal state end -->` block CodeRabbit embeds in
+// walkthrough summary comments. The block is a base64-encoded bot
+// state blob (no human-readable content) that runs ~120KB and exceeds
+// bd's description column limit. Comments without the marker are
+// returned unchanged.
+func stripCodeRabbitInternalState(body string) string {
+	const startMarker = "<!-- internal state start -->"
+	const endMarker = "<!-- internal state end -->"
+	start := strings.Index(body, startMarker)
+	if start < 0 {
+		return body
+	}
+	rel := strings.Index(body[start:], endMarker)
+	if rel < 0 {
+		// Unmatched start — leave the body alone so we don't drop
+		// the rest of the comment on a malformed marker.
+		return body
+	}
+	end := start + rel + len(endMarker)
+	return body[:start] + "[CodeRabbit internal state elided]" + body[end:]
 }
 
 // commentAuthorRole maps GitHub's author_association string to our

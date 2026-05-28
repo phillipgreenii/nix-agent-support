@@ -1310,3 +1310,62 @@ func TestBuildEnrichedSearchQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestStripCodeRabbitInternalState(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no markers leaves body unchanged",
+			in:   "regular review comment",
+			want: "regular review comment",
+		},
+		{
+			name: "wraps the internal-state block with elision marker",
+			in:   "## Walkthrough\nstuff\n<!-- internal state start -->\nLOTS\nOF\nBASE64\n<!-- internal state end -->\nafter",
+			want: "## Walkthrough\nstuff\n[CodeRabbit internal state elided]\nafter",
+		},
+		{
+			name: "unmatched start marker leaves body untouched",
+			in:   "before <!-- internal state start --> still has start no end",
+			want: "before <!-- internal state start --> still has start no end",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripCodeRabbitInternalState(tc.in)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommentEvent_StripsInternalStateBeforeStorage(t *testing.T) {
+	// CodeRabbit walkthrough comments embed a ~120KB base64 internal-
+	// state block that overflows bd's description column. commentEvent
+	// must strip it so the bead's body fits and so the title (first
+	// line of body) is a human-readable summary line.
+	c := api.Comment{
+		Author: "coderabbitai[bot]",
+		Body:   "## Walkthrough\nThe human summary.\n<!-- internal state start -->\n" + strings.Repeat("x", 200_000) + "\n<!-- internal state end -->\nafter",
+	}
+	ev := commentEvent(c)
+	if strings.Contains(ev.body, "internal state start") {
+		t.Errorf("event body still contains the internal-state marker — strip missed")
+	}
+	if !strings.Contains(ev.body, "## Walkthrough") {
+		t.Errorf("event body lost the human-readable preamble: %q", ev.body[0:200])
+	}
+	if !strings.Contains(ev.body, "[CodeRabbit internal state elided]") {
+		t.Errorf("event body missing the elision marker")
+	}
+	if len(ev.body) > 65_535 {
+		t.Errorf("event body still exceeds bd's TEXT column cap (%d bytes)", len(ev.body))
+	}
+	if !strings.HasPrefix(ev.title, "## Walkthrough") {
+		t.Errorf("title should be derived from human-readable first line; got %q", ev.title)
+	}
+}

@@ -108,6 +108,26 @@ func TestCreateFeedback_TruncatesLongTitleButPreservesBody(t *testing.T) {
 	}
 }
 
+func TestTruncateDescription(t *testing.T) {
+	// At 64KB cap, a 70KB blob gets shortened to fit; the marker carries
+	// a hint so the bead reader can tell content was dropped.
+	bigBody := make([]byte, 70_000)
+	for i := range bigBody {
+		bigBody[i] = 'x'
+	}
+	got := truncateDescription(string(bigBody), maxBdDescriptionLen)
+	if len(got) > maxBdDescriptionLen {
+		t.Errorf("truncateDescription returned %d bytes, exceeding %d", len(got), maxBdDescriptionLen)
+	}
+	if !contains(got, "[truncated to fit bd description column]") {
+		t.Errorf("truncated description missing marker tail: %q", got[len(got)-80:])
+	}
+	// Short bodies are left untouched.
+	if got := truncateDescription("hello", maxBdDescriptionLen); got != "hello" {
+		t.Errorf("short body modified: %q", got)
+	}
+}
+
 func TestTruncateTitle(t *testing.T) {
 	cases := []struct {
 		name   string
