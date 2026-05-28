@@ -185,7 +185,7 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selec
 	if selected {
 		cursorMark = opts.Theme.Cursor.Render(">") + " "
 	}
-	sym := symbol(s.Status, s.SessionEnrichment.AwaitingInput, !s.SessionEnrichment.RateLimitResetsAt.IsZero(), opts.Theme)
+	sym := sessionGlyph(s, opts.Theme)
 	var label string
 	if !s.SessionEnrichment.RateLimitResetsAt.IsZero() {
 		resetStr := s.SessionEnrichment.RateLimitResetsAt.Local().Format("15:04")
@@ -237,6 +237,43 @@ func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) str
 	default:
 		return theme.Dormant.Render("✕")
 	}
+}
+
+// sessionGlyph returns the status glyph for a session row, incorporating error
+// and nudge-queued indicators. Precedence:
+//  1. Working → existing working glyph (overrides everything).
+//  2. LastError terminal+retryable → ⚠ (retryable error).
+//  3. LastError terminal+non-retryable → ✗ (non-retryable / escalated error).
+//  4. Otherwise → normal idle/dormant glyph.
+//
+// When PendingNudge has sources AND the primary glyph is NOT Working, a "↪"
+// marker is appended.
+func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
+	rateLimited := !s.SessionEnrichment.RateLimitResetsAt.IsZero()
+	primary := symbol(s.Status, s.SessionEnrichment.AwaitingInput, rateLimited, theme)
+
+	// Working (and rate-limited pause which also short-circuits symbol) takes
+	// precedence: no error or nudge marker.
+	if s.Status == session.Working || rateLimited {
+		return primary
+	}
+
+	// Apply error glyph when terminal.
+	le := s.SessionEnrichment.LastError
+	if le != nil && le.IsTerminal {
+		if le.IsRetryable {
+			primary = "⚠"
+		} else {
+			primary = "✗"
+		}
+	}
+
+	// Append nudge-queued marker when sources are pending.
+	if s.SessionEnrichment.PendingNudge != nil && len(s.SessionEnrichment.PendingNudge.Sources) > 0 {
+		primary += "↪"
+	}
+
+	return primary
 }
 
 func shortModel(m string) string {

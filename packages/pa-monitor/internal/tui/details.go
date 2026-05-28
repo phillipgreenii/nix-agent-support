@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/models"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
 )
@@ -42,8 +44,61 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 		sb.WriteString(wrap.Line(line, ew))
 		sb.WriteString("\n")
 	}
+
+	// Last error section: only shown when the error is terminal.
+	le := sv.SessionEnrichment.LastError
+	if le != nil && le.IsTerminal {
+		kindStr := string(le.Kind)
+		if isEscalated(le) {
+			kindStr += "  (escalated)"
+		}
+		sb.WriteString(fmt.Sprintf("\nLast error:  %s\n", kindStr))
+		errText := le.Text
+		if len(errText) > 200 {
+			errText = errText[:200] + "…"
+		}
+		if errText != "" {
+			sb.WriteString(fmt.Sprintf("             %s\n", wrap.Line(errText, valBudget)))
+		}
+		sb.WriteString(fmt.Sprintf("             %s\n", humanizeAge(time.Since(le.At))))
+	}
+
+	// Pending nudge section.
+	if sv.SessionEnrichment.PendingNudge != nil && len(sv.SessionEnrichment.PendingNudge.Sources) > 0 {
+		sb.WriteString(fmt.Sprintf("Pending nudge: [%s]\n", strings.Join(sv.SessionEnrichment.PendingNudge.Sources, ", ")))
+	}
+
 	sb.WriteString("\n[esc] close")
 	return sb.String()
+}
+
+// isEscalated reports whether the error record was escalated: the kind is
+// inherently retryable by spec (unknown or server_error) but IsRetryable has
+// been flipped to false by the daemon's escalation logic.
+func isEscalated(le *transcript.ErrorRecord) bool {
+	return le.Kind.IsRetryable() && !le.IsRetryable
+}
+
+// humanizeAge formats a duration as a human-readable age string like
+// "just now", "30 seconds ago", "2 minutes ago", "1 hour ago".
+func humanizeAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < 10*time.Second:
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconds ago", int(d.Seconds()))
+	case d < 2*time.Minute:
+		return "1 minute ago"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(d.Minutes()))
+	case d < 2*time.Hour:
+		return "1 hour ago"
+	default:
+		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+	}
 }
 
 // detailsRuleLine renders a width-exact rule like "── Session Details ──...──".
