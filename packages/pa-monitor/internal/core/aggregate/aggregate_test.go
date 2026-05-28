@@ -6,6 +6,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 func TestBuildGroupsByCwdAndTotalsTokens(t *testing.T) {
@@ -127,6 +128,31 @@ func TestBuildSetsPRInfo(t *testing.T) {
 	}
 	if byPath["/p2"].PRInfo != nil {
 		t.Error("/p2 should have nil PRInfo (not in prByDir)")
+	}
+}
+
+func TestAggregateCarriesLastError(t *testing.T) {
+	now := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
+	rec := &transcript.ErrorRecord{
+		Kind: transcript.ErrUnknown, Text: "socket closed",
+		At: now, IsTerminal: true, IsRetryable: true,
+	}
+	sessions := []*session.Session{
+		{SessionID: "sid-1", Cwd: "/tmp/work"},
+	}
+	enriched := map[string]SessionEnrichment{
+		"sid-1": {LastError: rec},
+	}
+	tree := Build(sessions, enriched, nil, nil, "")
+	if len(tree.Dirs) == 0 || len(tree.Dirs[0].Sessions) == 0 {
+		t.Fatal("expected one session in tree")
+	}
+	got := tree.Dirs[0].Sessions[0].LastError
+	if got == nil {
+		t.Fatal("LastError = nil, want pointer to rec")
+	}
+	if got.Kind != transcript.ErrUnknown || !got.IsRetryable {
+		t.Errorf("LastError = %+v, want unknown+retryable", got)
 	}
 }
 

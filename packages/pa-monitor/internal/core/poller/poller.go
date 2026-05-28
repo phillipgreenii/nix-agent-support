@@ -148,6 +148,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			RateLimitResetsAt: rlReset,
 			BurnRateShort:     p.burnShort[s.SessionID].Rate(now),
 			BurnRateLong:      p.burnLong[s.SessionID].Rate(now),
+			LastError:         snap.LastError,
 		}
 	}
 

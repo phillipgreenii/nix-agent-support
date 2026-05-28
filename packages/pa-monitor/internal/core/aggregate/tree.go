@@ -5,6 +5,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 type SessionEnrichment struct {
@@ -19,6 +20,15 @@ type SessionEnrichment struct {
 	CostUSD       float64 // estimated share, filled by Build
 	AwaitingInput     bool      // true when last assistant turn contains unresolved AskUserQuestion
 	RateLimitResetsAt time.Time // non-zero: session paused; window resets at this time
+	LastError         *transcript.ErrorRecord // most recent api error from snapshot; nil if none
+	PendingNudge      *PendingNudge           // set by daemon nudger; nil when no intents pending
+}
+
+// PendingNudge surfaces which nudge sources are currently queued for this
+// session. Populated by the daemon's nudger before serialization to
+// clients; producers/dispatcher are the source of truth.
+type PendingNudge struct {
+	Sources []string // subset of {"window_reset","disrupted","manual"}
 }
 
 type Directory struct {
