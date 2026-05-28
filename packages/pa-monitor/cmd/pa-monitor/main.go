@@ -43,6 +43,7 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 		"nudge":                      true,
 		"info":                       true,
 		"cmux-bridge":                true,
+		"auto-resume":                true,
 	}
 	if len(args) < 2 {
 		return "tui", nil
@@ -74,6 +75,8 @@ func main() {
 		runInfo(rest)
 	case "cmux-bridge":
 		runCmuxBridge(rest)
+	case "auto-resume":
+		runAutoResume(rest)
 	case "tui":
 		runTUI(rest)
 	default:
