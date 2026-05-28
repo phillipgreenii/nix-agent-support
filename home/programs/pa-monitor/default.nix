@@ -19,11 +19,22 @@ let
     else
       null;
 
-  # Wrapper script so macOS Background Activity shows `pa-monitor-daemon`
-  # instead of the bare hash-prefixed nix-store path.
-  daemonWrapper = pkgs.writeShellScriptBin "pa-monitor-daemon" ''
-    exec ${cfg.package}/bin/pa-monitor daemon "$@"
-  '';
+  # Stable launchd shim. Lives at ~/.local/bin/pa-monitor-daemon-launcher (a
+  # path that NEVER changes across pa-monitor rebuilds) and exec's the current
+  # binary via the user nix profile (which home-manager updates atomically).
+  #
+  # Why this matters: the previous design put the wrapper in /nix/store/<hash>
+  # and pointed the LaunchAgent plist directly there. Every pa-monitor rebuild
+  # changed the hash → changed the plist → required launchd bootout+bootstrap
+  # on every darwin-rebuild. When that sequence stumbled the daemon stayed
+  # down and code "didn't deploy."
+  #
+  # With this design the plist's ProgramArguments is the same string on every
+  # rebuild, so launchd never sees a "different plist" and never needs the
+  # bootout dance. A `launchctl kickstart -k gui/$UID/com.phillipg.pa-monitor-daemon`
+  # is the canonical way to pick up new code after a rebuild.
+  daemonLauncherRel = ".local/bin/pa-monitor-daemon-launcher";
+  daemonLauncherAbs = "${config.home.homeDirectory}/${daemonLauncherRel}";
 
   # Resolve emitter env vars when the observability module is present;
   # otherwise an empty attrset so the LaunchAgent runs without OTel.
@@ -53,12 +64,28 @@ in
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
     home.packages = [ cfg.package ];
 
+    # Stable launcher at ~/.local/bin/pa-monitor-daemon-launcher. See the let
+    # block above for the rationale.
+    home.file.${daemonLauncherRel} = lib.mkIf cfg.daemon.enable {
+      text = ''
+        #!/bin/sh
+        # pa-monitor LaunchAgent shim. Path is stable across pa-monitor
+        # rebuilds; exec's the user nix profile binary which IS updated
+        # atomically on home-manager activation.
+        #
+        # Run `launchctl kickstart -k gui/$UID/com.phillipg.pa-monitor-daemon`
+        # after a rebuild to pick up new code.
+        exec "$HOME/.nix-profile/bin/pa-monitor" daemon "$@"
+      '';
+      executable = true;
+    };
+
     # LaunchAgent only when explicitly enabled and only on darwin.
     launchd.agents.pa-monitor-daemon = lib.mkIf (cfg.daemon.enable && pkgs.stdenv.isDarwin) {
       enable = true;
       config = {
         Label = "com.phillipg.pa-monitor-daemon";
-        ProgramArguments = [ "${daemonWrapper}/bin/pa-monitor-daemon" ];
+        ProgramArguments = [ daemonLauncherAbs ];
         RunAtLoad = true;
         KeepAlive = true;
         StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
