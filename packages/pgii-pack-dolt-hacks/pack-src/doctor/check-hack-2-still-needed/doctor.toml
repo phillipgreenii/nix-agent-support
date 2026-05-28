@@ -1,0 +1,1 @@
+description = "HACK 2: check whether gc bd close still bypasses on_close hook (retirement signal)"
