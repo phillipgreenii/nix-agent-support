@@ -136,3 +136,43 @@ func TestScanSyntheticRateLimitClearedByLaterUser(t *testing.T) {
 		t.Errorf("RateLimitResetsAt = %v, want zero (user resumed)", snap.RateLimitResetsAt)
 	}
 }
+
+func TestSnapshotPopulatesLastErrorForRetryable(t *testing.T) {
+	ts := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
+	path := t.TempDir() + "/t.jsonl"
+	body := apiErrorEvent(ts, ErrUnknown, "API Error: socket closed") + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan err = %v", err)
+	}
+	if snap.LastError == nil {
+		t.Fatal("LastError = nil, want non-nil")
+	}
+	if snap.LastError.Kind != ErrUnknown {
+		t.Errorf("LastError.Kind = %q, want %q", snap.LastError.Kind, ErrUnknown)
+	}
+	if !snap.LastError.IsTerminal {
+		t.Error("LastError.IsTerminal = false, want true")
+	}
+	if !snap.LastError.IsRetryable {
+		t.Error("LastError.IsRetryable = false, want true")
+	}
+}
+
+func TestSnapshotLastErrorNilWhenNoApiError(t *testing.T) {
+	path := t.TempDir() + "/t.jsonl"
+	body := `{"type":"user","message":{"role":"user","content":"hi"}}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan err = %v", err)
+	}
+	if snap.LastError != nil {
+		t.Errorf("LastError = %+v, want nil", snap.LastError)
+	}
+}

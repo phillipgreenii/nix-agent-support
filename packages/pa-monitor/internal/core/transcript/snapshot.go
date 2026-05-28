@@ -17,6 +17,7 @@ type Snapshot struct {
 	SubagentCount     int
 	AwaitingInput     bool
 	RateLimitResetsAt time.Time
+	LastError         *ErrorRecord // most recent isApiErrorMessage; nil if none
 }
 
 // Scan reads path once and returns all enrichment data. It replaces calling
@@ -70,11 +71,29 @@ func Scan(path string) (Snapshot, error) {
 	hasAPIErr := false
 	resumedAfterAPIErr := false
 
+	// Collect all lines into a slice so we can do the IsTerminal tail-walk
+	// for LastError without a second file scan.
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	var lines [][]byte
 	for sc.Scan() {
+		b := make([]byte, len(sc.Bytes()))
+		copy(b, sc.Bytes())
+		lines = append(lines, b)
+	}
+	if err := sc.Err(); err != nil {
+		return Snapshot{}, err
+	}
+
+	// LastError tracking: index and fields of the most recent api-error event.
+	lastApiErrIdx := -1
+	var lastApiErrTime time.Time
+	var lastApiErrKind ErrorKind
+	var lastApiErrText string
+
+	for i, line := range lines {
 		var ev scanEv
-		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
+		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
 		for _, b := range ev.Message.Content {
@@ -90,7 +109,7 @@ func Scan(path string) (Snapshot, error) {
 			Error             string `json:"error"`
 			IsApiErrorMessage bool   `json:"isApiErrorMessage"`
 		}
-		_ = json.Unmarshal(sc.Bytes(), &aux)
+		_ = json.Unmarshal(line, &aux)
 		isSyntheticRateLimit := ev.Type == "assistant" && aux.Error == "rate_limit" && aux.IsApiErrorMessage
 
 		switch ev.Type {
@@ -123,28 +142,47 @@ func Scan(path string) (Snapshot, error) {
 					hasAPIErr = true
 					resumedAfterAPIErr = false
 				}
-				break
 			}
-			u := ev.Message.Usage
-			ctx := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-			if ctx > 0 {
-				lastCtxTotal = ctx
-				lastCtxModel = ev.Message.Model
-			}
-			totalOut += u.OutputTokens
-			pendingAUQ = make(map[string]bool)
-			for _, b := range ev.Message.Content {
-				if b.Type == "tool_use" && b.ID != "" {
-					switch b.Name {
-					case "Task":
-						openTasks[b.ID] = true
-					case "AskUserQuestion":
-						pendingAUQ[b.ID] = true
+			// Track any isApiErrorMessage event (including non-rate-limit kinds) for LastError.
+			if aux.IsApiErrorMessage {
+				k := ErrorKind(aux.Error)
+				switch k {
+				case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed:
+					var text string
+					for _, c := range ev.Message.Content {
+						if c.Type == "text" {
+							text = c.Text
+							break
+						}
 					}
+					lastApiErrIdx = i
+					lastApiErrTime = ev.Timestamp
+					lastApiErrKind = k
+					lastApiErrText = text
 				}
 			}
-			if hasAPIErr {
-				resumedAfterAPIErr = true
+			if !aux.IsApiErrorMessage {
+				u := ev.Message.Usage
+				ctx := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+				if ctx > 0 {
+					lastCtxTotal = ctx
+					lastCtxModel = ev.Message.Model
+				}
+				totalOut += u.OutputTokens
+				pendingAUQ = make(map[string]bool)
+				for _, b := range ev.Message.Content {
+					if b.Type == "tool_use" && b.ID != "" {
+						switch b.Name {
+						case "Task":
+							openTasks[b.ID] = true
+						case "AskUserQuestion":
+							pendingAUQ[b.ID] = true
+						}
+					}
+				}
+				if hasAPIErr {
+					resumedAfterAPIErr = true
+				}
 			}
 
 		case "system":
@@ -156,9 +194,6 @@ func Scan(path string) (Snapshot, error) {
 				resumedAfterAPIErr = false
 			}
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return Snapshot{}, err
 	}
 
 	snap.Model = lastCtxModel
@@ -174,5 +209,35 @@ func Scan(path string) (Snapshot, error) {
 			snap.RateLimitResetsAt = lastAPIErrTime.Add(time.Duration(lastAPIErrRetry) * time.Millisecond)
 		}
 	}
+
+	// Build LastError with IsTerminal detection via tail-walk (mirrors LastAPIError).
+	if lastApiErrIdx >= 0 {
+		terminal := true
+		for _, line := range lines[lastApiErrIdx+1:] {
+			var tail struct {
+				Type              string `json:"type"`
+				IsApiErrorMessage bool   `json:"isApiErrorMessage"`
+			}
+			if err := json.Unmarshal(line, &tail); err != nil {
+				continue
+			}
+			if tail.Type != "user" && tail.Type != "assistant" {
+				continue
+			}
+			if tail.Type == "assistant" && tail.IsApiErrorMessage {
+				continue
+			}
+			terminal = false
+			break
+		}
+		snap.LastError = &ErrorRecord{
+			Kind:        lastApiErrKind,
+			Text:        lastApiErrText,
+			At:          lastApiErrTime,
+			IsTerminal:  terminal,
+			IsRetryable: lastApiErrKind.IsRetryable(),
+		}
+	}
+
 	return snap, nil
 }
