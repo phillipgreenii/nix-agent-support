@@ -3,6 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
 
@@ -157,14 +158,100 @@ func handleToggleCaffeinate(m *Model) tea.Cmd {
 }
 
 func handleToggleAutoResume(m *Model) tea.Cmd {
-	// TODO(Task 7.2): replace with gRPC SetAutoResume call once daemon client is wired in.
-	// Old behavior (m.autoResume = !m.autoResume + local scheduler) is removed because
-	// the daemon now owns the toggle and nudge dispatch.
+	want := !m.autoResumeEnabled
+	// Optimistic update; daemon confirmation arrives on the next TreeUpdatedMsg.
+	m.autoResumeEnabled = want
+	if m.onToggleAutoResume != nil {
+		m.onToggleAutoResume(want)
+	}
 	return nil
 }
 
+// cursorScopeSelector returns the nudge selector and the set of session IDs
+// in scope based on the current cursor position.
+//
+//   - Cursor on a SessionKind row → "session:<id>", [sid]
+//   - Cursor on a PathNodeKind row → "path:<dir>", all sid's under that node
+//   - No recognisable row / empty list → "", nil
+func (m *Model) cursorScopeSelector() (sids []string, selector string) {
+	row, ok := m.rowAt(m.cursor)
+	if !ok {
+		return nil, ""
+	}
+	switch row.Kind {
+	case render.SessionKind:
+		if row.Session == nil || row.Session.Session == nil {
+			return nil, ""
+		}
+		sid := row.Session.SessionID
+		return []string{sid}, "session:" + sid
+	case render.PathNodeKind:
+		if row.Node == nil {
+			return nil, ""
+		}
+		sids = allSessionIDsUnderNode(row.Node)
+		if len(sids) == 0 {
+			return nil, ""
+		}
+		return sids, "path:" + row.Node.FullPath
+	}
+	return nil, ""
+}
+
+// allSessionIDsUnderNode collects SessionIDs from a PathNode and all its
+// descendants recursively.
+func allSessionIDsUnderNode(n *aggregate.PathNode) []string {
+	var out []string
+	for _, sv := range n.DirectSessions {
+		if sv != nil && sv.Session != nil {
+			out = append(out, sv.SessionID)
+		}
+	}
+	for _, child := range n.Children {
+		out = append(out, allSessionIDsUnderNode(child)...)
+	}
+	return out
+}
+
+// sessionHasPendingManual returns true when the session identified by sid has
+// a "manual" source in its PendingNudge.
+func (m *Model) sessionHasPendingManual(sid string) bool {
+	if m.tree == nil {
+		return false
+	}
+	for _, d := range m.tree.Dirs {
+		for _, sv := range d.Sessions {
+			if sv.Session == nil || sv.SessionID != sid {
+				continue
+			}
+			if sv.SessionEnrichment.PendingNudge == nil {
+				return false
+			}
+			for _, src := range sv.SessionEnrichment.PendingNudge.Sources {
+				if src == "manual" {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
 func handleManualResume(m *Model) tea.Cmd {
-	// TODO(Task 7.2): replace with gRPC ManualResume call once daemon client is wired in.
-	// Old behavior (m.signalNonWorking) is removed because the daemon now owns nudge dispatch.
+	sids, selector := m.cursorScopeSelector()
+	if len(sids) == 0 || m.onManualNudge == nil {
+		return nil
+	}
+	// Toggle semantics: if ALL selected sessions already have a manual nudge
+	// pending, cancel; otherwise queue.
+	allPending := true
+	for _, sid := range sids {
+		if !m.sessionHasPendingManual(sid) {
+			allPending = false
+			break
+		}
+	}
+	m.onManualNudge(selector, allPending)
 	return nil
 }

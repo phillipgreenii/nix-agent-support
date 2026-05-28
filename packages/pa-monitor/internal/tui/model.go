@@ -37,6 +37,15 @@ type Options struct {
 	// dispatch the Caffeinate RPC against the daemon instead of (or in
 	// addition to) the local Manager.
 	OnCaffeinateToggle func(on bool)
+	// OnToggleAutoResume, when non-nil, is called whenever the user presses R.
+	// The argument is the new desired state (true = enable). Used by --remote
+	// mode to dispatch the SetAutoResume RPC against the daemon.
+	OnToggleAutoResume func(enable bool)
+	// OnManualNudge, when non-nil, is called whenever the user presses M.
+	// selector is a gRPC-style nudge selector (e.g. "session:<id>" or
+	// "path:/some/dir"). cancel is true when the nudge should be cancelled
+	// (all selected sessions already have a manual intent pending).
+	OnManualNudge func(selector string, cancel bool)
 }
 
 type Model struct {
@@ -77,6 +86,8 @@ type Model struct {
 	errorLogger *ErrorLogger
 
 	onCaffeinateToggle func(bool)
+	onToggleAutoResume func(bool)
+	onManualNudge      func(selector string, cancel bool)
 }
 
 func NewModel(o Options) *Model {
@@ -91,6 +102,8 @@ func NewModel(o Options) *Model {
 		reporter:             o.Reporter,
 		sidebarIntervalTicks: o.SidebarIntervalTicks,
 		onCaffeinateToggle:   o.OnCaffeinateToggle,
+		onToggleAutoResume:   o.OnToggleAutoResume,
+		onManualNudge:        o.OnManualNudge,
 	}
 	if m.reporter == nil {
 		m.reporter = noopReporter{}
