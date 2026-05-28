@@ -30,6 +30,25 @@
   substitutions ? { },
   meta ? { },
 }:
+let
+  # Infer pack scope from pack.toml's first [[named_session]] entry. This is
+  # the same field gascity reads to decide where to bind the session
+  # template. Packs with no [[named_session]] block default to "city" — they
+  # contribute orders, scripts, or doctor checks, not session templates.
+  packToml = builtins.fromTOML (builtins.readFile (src + "/pack.toml"));
+  sessions =
+    if packToml ? named_session then
+      (
+        if builtins.isList packToml.named_session then
+          packToml.named_session
+        else
+          [ packToml.named_session ]
+      )
+    else
+      [ ];
+  firstScoped = lib.findFirst (s: s ? scope) null sessions;
+  scope = if firstScoped == null then "city" else firstScoped.scope;
+in
 pkgs.runCommand "${name}-${version}"
   {
     passthru = { inherit name; };
@@ -73,6 +92,6 @@ pkgs.runCommand "${name}-${version}"
     fi
 
     cat > $out/.pack-meta.json <<EOF
-    { "name": "${name}", "version": "${version}" }
+    { "name": "${name}", "version": "${version}", "scope": "${scope}" }
     EOF
   ''
