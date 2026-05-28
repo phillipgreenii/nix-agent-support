@@ -79,15 +79,11 @@ pr_url=$(jq -r '.metadata.pr_url' <<<"$parent_json")
    `pg-pr review draft` marks the resulting bead with `labels=human` so the
    draft surfaces in `bd ready` for a human reviewer to post.
 
-6. **Notify** the human that a review draft awaits:
-
-   ```bash
-   bd show <draft-bead-id> --json | ~/gc/assets/imports/zr/scripts/notify-terminal-notifier.sh
-   ```
-
-   (We continue to call the legacy `notify-terminal-notifier.sh` during the
-   parallel-run period; once the old pack retires, this script is moved /
-   replaced with a pg-pr-native hook.)
+6. **Surface the draft for the human reviewer.** The bead carries
+   `labels=human` (set by `pg-pr review draft` in step 5) and surfaces in
+   `bd ready` / the dashboard — humans pull from there. No proactive
+   notification (the legacy `notify-terminal-notifier.sh` was retired
+   with the rest of the zr pack).
 
 7. Close the processing-cycle bead:
 

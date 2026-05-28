@@ -52,10 +52,9 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bd show <processing-cycle-id> --json \
 <feedback-id>` if you need to post a reply — that goes through pg-pr so the
    feedback bead is closed in lockstep.
 5. **Never spend tokens diagnosing gascity infrastructure.** If the city / dolt
-   / bd / git / pg-pr misbehaves, escalate via
-   `~/gc/assets/imports/zr/scripts/notify-terminal-notifier.sh` (kept for
-   reuse during the migration) and close the processing-cycle bead with
-   `--reason="infra-block: <one-line>"`.
+   / bd / git / pg-pr misbehaves, close the processing-cycle bead with
+   `--reason="infra-block: <one-line>"`. Mayor's daily summary surfaces
+   these for human triage.
 6. **3-attempt cap per PR × file-cluster.** Before working a cycle, check the
    parent merge-request bead for `metadata.attempts_<sig>_count` where
    `<sig>` is a sha1-8 of the sorted `metadata.files_touched` csv. If `>= 3`,
