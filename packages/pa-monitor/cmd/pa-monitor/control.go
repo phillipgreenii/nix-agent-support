@@ -50,29 +50,54 @@ func runCaffeinate(args []string) {
 	fmt.Println()
 }
 
-// runNudge implements `nudge <selector> [--text=...]`.
+// nudgeFlags holds the parsed flags for the nudge subcommand.
+type nudgeFlags struct {
+	selector string
+	text     string
+	cancel   bool
+}
+
+// parseNudgeFlags parses the argument list for the nudge subcommand.
+// Returns an error if the selector is missing or invalid.
+func parseNudgeFlags(args []string) (nudgeFlags, error) {
+	if len(args) == 0 {
+		return nudgeFlags{}, fmt.Errorf("missing selector (session:<id> | path:<p> | cmux:<id>)")
+	}
+	f := nudgeFlags{selector: args[0]}
+	if _, err := parseSelector(f.selector); err != nil {
+		return nudgeFlags{}, err
+	}
+	for i := 1; i < len(args); i++ {
+		switch {
+		case strings.HasPrefix(args[i], "--text="):
+			f.text = strings.TrimPrefix(args[i], "--text=")
+		case args[i] == "--cancel":
+			f.cancel = true
+		}
+	}
+	return f, nil
+}
+
+// runNudge implements `nudge <selector> [--text=...] [--cancel]`.
 //
 // <selector> is one of:
 //
 //	session:<id>
 //	path:<workspace-path>
 //	cmux:<workspace-id>
+//
+// Without --cancel, enqueues a nudge via NudgeQueue (daemon dispatches on
+// next idle tick). With --cancel, cancels any pending queued nudge via
+// NudgeCancel.
 func runNudge(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "nudge: missing selector (session:<id> | path:<p> | cmux:<id>)")
-		os.Exit(3)
-	}
-	sel, err := parseSelector(args[0])
+	f, err := parseNudgeFlags(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
 		os.Exit(3)
 	}
-	text := ""
-	for i := 1; i < len(args); i++ {
-		if strings.HasPrefix(args[i], "--text=") {
-			text = strings.TrimPrefix(args[i], "--text=")
-		}
-	}
+	selRaw := f.selector
+	text := f.text
+	doCancel := f.cancel
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -84,16 +109,35 @@ func runNudge(args []string) {
 	}
 	defer client.Close()
 
-	resp, err := client.C.Nudge(ctx, &pb.NudgeRequest{Selector: sel, Text: text})
+	if doCancel {
+		resp, err := client.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selRaw})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
+			os.Exit(2)
+		}
+		if len(resp.GetCancelledSessionIds()) == 0 {
+			fmt.Println("nudge cancel: nothing queued")
+		} else {
+			fmt.Printf("nudge cancelled for: %s\n", strings.Join(resp.GetCancelledSessionIds(), ", "))
+		}
+		return
+	}
+
+	resp, err := client.C.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: selRaw, Text: text})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nudge: %v\n", err)
 		os.Exit(2)
 	}
-	fmt.Printf("nudge sent to %d session(s), %d errors", resp.GetSentCount(), resp.GetErrorCount())
-	if resp.GetPostWindow() {
-		fmt.Print(" (post-window)")
+	if len(resp.GetQueuedSessionIds()) == 0 && len(resp.GetAlreadyQueuedSessionIds()) == 0 {
+		fmt.Println("nudge: no sessions matched")
+		return
 	}
-	fmt.Println()
+	if len(resp.GetQueuedSessionIds()) > 0 {
+		fmt.Printf("queued nudge for: %s\n", strings.Join(resp.GetQueuedSessionIds(), ", "))
+	}
+	if len(resp.GetAlreadyQueuedSessionIds()) > 0 {
+		fmt.Printf("already queued for: %s\n", strings.Join(resp.GetAlreadyQueuedSessionIds(), ", "))
+	}
 }
 
 // runInfo implements `info <selector>` — prints session detail (when
