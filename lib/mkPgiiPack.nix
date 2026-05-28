@@ -59,7 +59,9 @@ pkgs.runCommand "${name}-${version}"
     cp -R ${src}/. $out/
     chmod -R u+w $out
 
+    # ''${PACK_ROOT} always points at this pack's root in the nix store.
     # ''${SCRIPTS_DIR} always points at this pack's scripts/ subdir.
+    export PACK_ROOT="$out"
     export SCRIPTS_DIR="$out/scripts"
     ${lib.concatStringsSep "\n" (
       lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg (toString v)}") substitutions
