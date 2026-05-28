@@ -59,6 +59,16 @@ func (n *Nudger) PendingFor(sid string) bool {
 	return n.store.HasAny(sid)
 }
 
+// PendingForSource reports whether an intent of the given source exists for sid.
+func (n *Nudger) PendingForSource(sid string, src Source) bool {
+	for _, s := range n.store.SourcesFor(sid) {
+		if s == src {
+			return true
+		}
+	}
+	return false
+}
+
 // SourcesFor returns the queued sources for sid.
 func (n *Nudger) SourcesFor(sid string) []Source {
 	return n.store.SourcesFor(sid)

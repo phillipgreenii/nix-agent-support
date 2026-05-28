@@ -70,3 +70,12 @@ func (s *sharedState) Nudger() *nudger.Nudger {
 	defer s.mu.RUnlock()
 	return s.nudger
 }
+
+// Watermarks returns the daemon's WatermarkStore instance. May be nil when
+// the nudger is not configured. Used by gRPC handlers to persist
+// auto-resume settings.
+func (s *sharedState) Watermarks() *WatermarkStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.watermarks
+}

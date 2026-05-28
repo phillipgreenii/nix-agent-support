@@ -10,7 +10,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 func TestServer_PingReturnsTimestamp(t *testing.T) {
@@ -162,3 +166,187 @@ func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 	}
 	return conn
 }
+
+// noopSignaler is a Signaler that does nothing. Satisfies signal.Signaler.
+type noopSignaler struct{}
+
+func (noopSignaler) Name() string         { return "noop" }
+func (noopSignaler) Detect(_ int) bool    { return true }
+func (noopSignaler) Send(_ int, _ string) error { return nil }
+
+var _ signal.Signaler = noopSignaler{}
+
+// newTestServerWithNudger builds a server backed by a real Nudger +
+// WatermarkStore and a tree containing one Idle session with ID sid.
+func newTestServerWithNudger(t *testing.T, sid string) *server {
+	t.Helper()
+	dir := t.TempDir()
+	runtimePath := filepath.Join(dir, "runtime.json")
+
+	wm, err := NewWatermarkStore(runtimePath)
+	if err != nil {
+		t.Fatalf("NewWatermarkStore: %v", err)
+	}
+	n := nudger.New(noopSignaler{}, wm)
+
+	state := newSharedState()
+	state.mu.Lock()
+	state.nudger = n
+	state.watermarks = wm
+	state.mu.Unlock()
+
+	// Publish a tree with one idle session so expandStringSelector can match.
+	tree := &aggregate.Tree{
+		Dirs: []*aggregate.Directory{
+			{
+				Path:  "/work",
+				IdleN: 1,
+				Sessions: []*aggregate.SessionView{
+					{
+						Session: &session.Session{
+							SessionID: sid,
+							PID:       12345,
+							Status:    session.Idle,
+						},
+					},
+				},
+			},
+		},
+	}
+	state.setTree(tree)
+
+	return newServer(state)
+}
+
+// TestServerNudgeQueueIdempotent verifies that the first NudgeQueue call
+// queues the session and the second returns it in AlreadyQueuedSessionIds.
+func TestServerNudgeQueueIdempotent(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-1")
+	ctx := context.Background()
+
+	// First call: should queue.
+	resp1, err := srv.NudgeQueue(ctx, &pb.NudgeQueueRequest{
+		Selector: "session:sid-1",
+		Text:     "continue",
+	})
+	if err != nil {
+		t.Fatalf("NudgeQueue first call: %v", err)
+	}
+	if len(resp1.GetQueuedSessionIds()) != 1 || resp1.GetQueuedSessionIds()[0] != "sid-1" {
+		t.Errorf("first call: QueuedSessionIds = %v, want [sid-1]", resp1.GetQueuedSessionIds())
+	}
+	if len(resp1.GetAlreadyQueuedSessionIds()) != 0 {
+		t.Errorf("first call: AlreadyQueuedSessionIds = %v, want []", resp1.GetAlreadyQueuedSessionIds())
+	}
+
+	// Second call: same selector — already queued.
+	resp2, err := srv.NudgeQueue(ctx, &pb.NudgeQueueRequest{
+		Selector: "session:sid-1",
+		Text:     "continue",
+	})
+	if err != nil {
+		t.Fatalf("NudgeQueue second call: %v", err)
+	}
+	if len(resp2.GetQueuedSessionIds()) != 0 {
+		t.Errorf("second call: QueuedSessionIds = %v, want []", resp2.GetQueuedSessionIds())
+	}
+	if len(resp2.GetAlreadyQueuedSessionIds()) != 1 || resp2.GetAlreadyQueuedSessionIds()[0] != "sid-1" {
+		t.Errorf("second call: AlreadyQueuedSessionIds = %v, want [sid-1]", resp2.GetAlreadyQueuedSessionIds())
+	}
+}
+
+// TestServerSetAutoResumePersists verifies that SetAutoResume toggles the
+// watermarks flag and it is readable immediately after each call.
+func TestServerSetAutoResumePersists(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-ar")
+	ctx := context.Background()
+
+	// Enable.
+	resp1, err := srv.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("SetAutoResume(true): %v", err)
+	}
+	if !resp1.GetEnabled() {
+		t.Error("SetAutoResume(true) response Enabled = false, want true")
+	}
+	if !srv.state.Watermarks().AutoResumeEnabled() {
+		t.Error("after SetAutoResume(true): watermarks.AutoResumeEnabled() = false, want true")
+	}
+
+	// Disable.
+	resp2, err := srv.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: false})
+	if err != nil {
+		t.Fatalf("SetAutoResume(false): %v", err)
+	}
+	if resp2.GetEnabled() {
+		t.Error("SetAutoResume(false) response Enabled = true, want false")
+	}
+	if srv.state.Watermarks().AutoResumeEnabled() {
+		t.Error("after SetAutoResume(false): watermarks.AutoResumeEnabled() = true, want false")
+	}
+}
+
+// TestServerNudgeCancelRemovesIntent verifies that NudgeCancel clears a
+// previously queued manual nudge for a session.
+func TestServerNudgeCancelRemovesIntent(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-c")
+	ctx := context.Background()
+
+	// Queue first.
+	if _, err := srv.NudgeQueue(ctx, &pb.NudgeQueueRequest{
+		Selector: "session:sid-c",
+		Text:     "please continue",
+	}); err != nil {
+		t.Fatalf("NudgeQueue: %v", err)
+	}
+	n := srv.state.Nudger()
+	if !n.PendingForSource("sid-c", nudger.SourceManual) {
+		t.Fatal("expected SourceManual pending after NudgeQueue")
+	}
+
+	// Now cancel.
+	cancelResp, err := srv.NudgeCancel(ctx, &pb.NudgeCancelRequest{
+		Selector: "session:sid-c",
+	})
+	if err != nil {
+		t.Fatalf("NudgeCancel: %v", err)
+	}
+	if len(cancelResp.GetCancelledSessionIds()) != 1 || cancelResp.GetCancelledSessionIds()[0] != "sid-c" {
+		t.Errorf("CancelledSessionIds = %v, want [sid-c]", cancelResp.GetCancelledSessionIds())
+	}
+	if n.PendingForSource("sid-c", nudger.SourceManual) {
+		t.Error("SourceManual still pending after NudgeCancel — cancel did not work")
+	}
+}
+
+// TestServerNudgeQueueEmptySelector verifies InvalidArgument is returned.
+func TestServerNudgeQueueEmptySelector(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-err")
+	_, err := srv.NudgeQueue(context.Background(), &pb.NudgeQueueRequest{})
+	if err == nil {
+		t.Fatal("expected error for empty selector, got nil")
+	}
+}
+
+// TestServerNudgeQueueNudgerNil verifies FailedPrecondition when nudger absent.
+func TestServerNudgeQueueNudgerNil(t *testing.T) {
+	state := newSharedState()
+	srv := newServer(state)
+	_, err := srv.NudgeQueue(context.Background(), &pb.NudgeQueueRequest{Selector: "session:x"})
+	if err == nil {
+		t.Fatal("expected error when nudger is nil, got nil")
+	}
+}
+
+// TestServerSetAutoResumeNudgerNil verifies FailedPrecondition when watermarks absent.
+func TestServerSetAutoResumeNudgerNil(t *testing.T) {
+	state := newSharedState()
+	srv := newServer(state)
+	_, err := srv.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true})
+	if err == nil {
+		t.Fatal("expected error when watermarks is nil, got nil")
+	}
+}
+
+// Ensure time is imported (used in newTestServerWithNudger via aggregate.Tree).
+var _ = time.Now

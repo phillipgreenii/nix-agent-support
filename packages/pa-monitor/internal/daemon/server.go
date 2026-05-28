@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
@@ -201,6 +203,105 @@ func (s *server) GetPathInfo(ctx context.Context, req *pb.GetPathInfoRequest) (*
 		}
 	}
 	return nil, status.Error(codes.NotFound, "path not found")
+}
+
+// expandStringSelector resolves a plain-text selector string to a slice of
+// session IDs present in the current tree snapshot. The selector format is:
+//
+//	session:<sid>   — exact session ID
+//	path:<dir>      — sessions whose cwd equals dir
+//	cmux:<id>       — sessions whose CMUX_WORKSPACE_ID equals id
+//	<bare-value>    — treated as a session ID
+//
+// Returns an error only when the tree is completely unavailable. An empty
+// result (no matching sessions) is not an error.
+func (s *server) expandStringSelector(sel string) ([]string, error) {
+	t := s.state.snapshot()
+	if t == nil {
+		return nil, status.Error(codes.FailedPrecondition, "no session data available")
+	}
+	var sids []string
+	for _, sv := range t.Sessions() {
+		if sv == nil || sv.Session == nil {
+			continue
+		}
+		var match bool
+		switch {
+		case strings.HasPrefix(sel, "session:"):
+			match = sv.SessionID == strings.TrimPrefix(sel, "session:")
+		case strings.HasPrefix(sel, "path:"):
+			match = sv.Cwd == strings.TrimPrefix(sel, "path:")
+		case strings.HasPrefix(sel, "cmux:"):
+			match = sv.Env != nil && sv.Env["CMUX_WORKSPACE_ID"] == strings.TrimPrefix(sel, "cmux:")
+		default:
+			match = sv.SessionID == sel
+		}
+		if match {
+			sids = append(sids, sv.SessionID)
+		}
+	}
+	return sids, nil
+}
+
+func (s *server) NudgeQueue(ctx context.Context, req *pb.NudgeQueueRequest) (*pb.NudgeQueueResponse, error) {
+	sel := req.GetSelector()
+	if sel == "" {
+		return nil, status.Error(codes.InvalidArgument, "NudgeQueue: selector required")
+	}
+	n := s.state.Nudger()
+	if n == nil {
+		return nil, status.Error(codes.FailedPrecondition, "NudgeQueue: nudger not configured")
+	}
+	sids, err := s.expandStringSelector(sel)
+	if err != nil {
+		return nil, err
+	}
+	text := req.GetText()
+	if text == "" {
+		// TODO: thread AutoResumeMessage from RunOptions into server so this
+		// can use the configured default instead of the literal fallback.
+		text = "continue"
+	}
+	now := time.Now()
+	var queued, already []string
+	for _, sid := range sids {
+		if n.PendingForSource(sid, nudger.SourceManual) {
+			already = append(already, sid)
+			continue
+		}
+		n.QueueManual([]string{sid}, text, now)
+		queued = append(queued, sid)
+	}
+	return &pb.NudgeQueueResponse{
+		QueuedSessionIds:        queued,
+		AlreadyQueuedSessionIds: already,
+	}, nil
+}
+
+func (s *server) NudgeCancel(ctx context.Context, req *pb.NudgeCancelRequest) (*pb.NudgeCancelResponse, error) {
+	sel := req.GetSelector()
+	if sel == "" {
+		return nil, status.Error(codes.InvalidArgument, "NudgeCancel: selector required")
+	}
+	n := s.state.Nudger()
+	if n == nil {
+		return nil, status.Error(codes.FailedPrecondition, "NudgeCancel: nudger not configured")
+	}
+	sids, err := s.expandStringSelector(sel)
+	if err != nil {
+		return nil, err
+	}
+	n.CancelManual(sids)
+	return &pb.NudgeCancelResponse{CancelledSessionIds: sids}, nil
+}
+
+func (s *server) SetAutoResume(ctx context.Context, req *pb.SetAutoResumeRequest) (*pb.SetAutoResumeResponse, error) {
+	w := s.state.Watermarks()
+	if w == nil {
+		return nil, status.Error(codes.FailedPrecondition, "SetAutoResume: nudger not configured")
+	}
+	w.SetAutoResumeEnabled(req.GetEnabled())
+	return &pb.SetAutoResumeResponse{Enabled: req.GetEnabled()}, nil
 }
 
 // matchesSelector reports whether sv satisfies sel.
