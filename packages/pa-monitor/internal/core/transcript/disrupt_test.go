@@ -76,3 +76,47 @@ func TestLastAPIErrorDetectsEachKind(t *testing.T) {
 		})
 	}
 }
+
+func TestLastAPIErrorIsTerminalFlipsOnResume(t *testing.T) {
+	ts := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
+	path := t.TempDir() + "/t.jsonl"
+	body := apiErrorEvent(ts, ErrUnknown, "API Error: socket closed") + "\n" +
+		`{"type":"user","message":{"role":"user","content":"continue"}}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LastAPIError(path)
+	if err != nil {
+		t.Fatalf("LastAPIError err = %v, want nil", err)
+	}
+	if got.Kind != ErrUnknown {
+		t.Errorf("Kind = %q, want %q", got.Kind, ErrUnknown)
+	}
+	if got.IsTerminal {
+		t.Error("IsTerminal = true, want false (user resumed after error)")
+	}
+}
+
+func TestLastAPIErrorIsTerminalSurvivesAnotherSyntheticError(t *testing.T) {
+	ts1 := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
+	ts2 := ts1.Add(30 * time.Second)
+	path := t.TempDir() + "/t.jsonl"
+	body := apiErrorEvent(ts1, ErrServerError, "529 Overloaded") + "\n" +
+		apiErrorEvent(ts2, ErrUnknown, "socket closed") + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LastAPIError(path)
+	if err != nil {
+		t.Fatalf("LastAPIError err = %v, want nil", err)
+	}
+	if got.Kind != ErrUnknown {
+		t.Errorf("Kind = %q, want %q (most recent wins)", got.Kind, ErrUnknown)
+	}
+	if !got.At.Equal(ts2) {
+		t.Errorf("At = %v, want %v", got.At, ts2)
+	}
+	if !got.IsTerminal {
+		t.Error("IsTerminal = false, want true (second synthetic error is not a resume)")
+	}
+}
