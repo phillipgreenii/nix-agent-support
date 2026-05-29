@@ -89,10 +89,17 @@ func RenderDetailsWindow(sv *aggregate.SessionView, width, height, scrollOffset 
 	}
 
 	// Clamp scrollOffset to valid range.
+	//
+	// Note +1: when scrolled past 0, the algorithm below reserves one row for
+	// the "↑ N more" header. Allowing scrollOffset up to len-height+1 lets the
+	// final content line end exactly at len, which suppresses the "↓ N more"
+	// footer and exposes every trailing line. Without the +1 the algorithm
+	// always thinks there's "more below" and steals another row for the
+	// indicator, hiding the bottom two lines.
 	if scrollOffset < 0 {
 		scrollOffset = 0
 	}
-	maxOffset := len(lines) - height
+	maxOffset := len(lines) - height + 1
 	if maxOffset < 0 {
 		maxOffset = 0
 	}

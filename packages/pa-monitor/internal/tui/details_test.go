@@ -304,6 +304,23 @@ func TestRenderDetailsWindowShowsAboveIndicator(t *testing.T) {
 	}
 }
 
+// TestRenderDetailsWindowMaxOffsetExposesBottom is the regression test for an
+// off-by-2 in the maxOffset clamp. Symptom: scrolling to the bottom hid the
+// last two content lines because the algorithm always reserved a "↓ N more"
+// footer row even at the literal end of the content. Verifies the trailing
+// "[esc] close" hint (last line emitted by RenderDetails) is visible at a
+// scroll offset far past the old clamp.
+func TestRenderDetailsWindowMaxOffsetExposesBottom(t *testing.T) {
+	sv := longPromptSV()
+	out := RenderDetailsWindow(sv, 80, 8, 10_000) // ask for far more than possible
+	if !strings.Contains(out, "[esc] close") {
+		t.Errorf("scrolling to max should expose the closing hint at the bottom:\n%s", out)
+	}
+	if strings.Contains(out, "↓") {
+		t.Errorf("at the bottom there should be no ↓ indicator (we're at the end):\n%s", out)
+	}
+}
+
 // TestDetailsClipsLongValues verifies that an oversized field value is
 // truncated with an ellipsis at narrow widths.
 func TestDetailsClipsLongValues(t *testing.T) {

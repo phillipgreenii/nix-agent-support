@@ -93,3 +93,52 @@ func TestDiffAndLogBothFlip(t *testing.T) {
 		t.Fatalf("expected 2 log lines for two simultaneous flips, got %d: %v", len(lines), lines)
 	}
 }
+
+// TestDiffSessionsInitialEmitsFullRoster: on the first observation we emit
+// a "+pid name" line for every session in the workspace so pane operators
+// get a roster at bridge startup.
+func TestDiffSessionsInitialEmitsFullRoster(t *testing.T) {
+	curr := bridgeSessions{initialized: true, byPID: map[int]string{
+		1234: "feature-x",
+		5678: "scratch",
+	}}
+	var lines []string
+	diffSessionsAndLog(bridgeSessions{}, curr, captureLog(&lines))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 initial-roster lines, got %d: %v", len(lines), lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "+1234 feature-x") {
+		t.Errorf("missing +1234 feature-x in:\n%s", joined)
+	}
+	if !strings.Contains(joined, "+5678 scratch") {
+		t.Errorf("missing +5678 scratch in:\n%s", joined)
+	}
+}
+
+// TestDiffSessionsLogsAdditionAndRemoval: + when a new pid appears, - when
+// a known pid disappears; identical sets emit nothing.
+func TestDiffSessionsLogsAdditionAndRemoval(t *testing.T) {
+	prev := bridgeSessions{initialized: true, byPID: map[int]string{1234: "old"}}
+	curr := bridgeSessions{initialized: true, byPID: map[int]string{5678: "new"}}
+	var lines []string
+	diffSessionsAndLog(prev, curr, captureLog(&lines))
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "+5678 new") {
+		t.Errorf("expected +5678 new in:\n%s", joined)
+	}
+	if !strings.Contains(joined, "-1234 old") {
+		t.Errorf("expected -1234 old in:\n%s", joined)
+	}
+}
+
+// TestDiffSessionsSilentWhenUnchanged: identical session sets across two
+// ticks emit no lines.
+func TestDiffSessionsSilentWhenUnchanged(t *testing.T) {
+	same := bridgeSessions{initialized: true, byPID: map[int]string{1234: "feature-x"}}
+	var lines []string
+	diffSessionsAndLog(same, same, captureLog(&lines))
+	if len(lines) != 0 {
+		t.Fatalf("expected no log lines for unchanged set, got %v", lines)
+	}
+}

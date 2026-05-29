@@ -62,6 +62,63 @@ func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
 	return curr
 }
 
+// bridgeSessions is the set of sessions visible in this bridge's cmux
+// workspace at one moment in time. Keyed by PID. Value is a display name
+// (the session's Name, falling back to SessionID when Name is empty).
+//
+// initialized matches the bridgeState convention: false → emit the full
+// list once; true → only emit add/remove deltas thereafter.
+type bridgeSessions struct {
+	initialized bool
+	byPID       map[int]string
+}
+
+// sessionsFromDaemon extracts the per-workspace session set from a
+// DaemonState message.
+func sessionsFromDaemon(s *pb.DaemonState, ws string) bridgeSessions {
+	out := bridgeSessions{initialized: true, byPID: map[int]string{}}
+	for _, d := range s.GetDirs() {
+		for _, sv := range d.GetSessions() {
+			if sv.GetCmuxWorkspaceId() != ws {
+				continue
+			}
+			name := sv.GetName()
+			if name == "" {
+				name = sv.GetSessionId()
+			}
+			out.byPID[int(sv.GetPid())] = name
+		}
+	}
+	return out
+}
+
+// diffSessionsAndLog emits "+pid name" for each new session and
+// "-pid name" for each session that closed since the last tick. On the
+// initial tick (prev.initialized == false) it emits a "+pid name" line
+// for every session it currently sees so pane operators get a full
+// roster on bridge startup.
+//
+// Returns curr so callers can `prev = diffSessionsAndLog(prev, curr, log)`.
+func diffSessionsAndLog(prev, curr bridgeSessions, log func(string)) bridgeSessions {
+	if !prev.initialized {
+		for pid, name := range curr.byPID {
+			log(fmt.Sprintf("+%d %s", pid, name))
+		}
+		return curr
+	}
+	for pid, name := range curr.byPID {
+		if _, ok := prev.byPID[pid]; !ok {
+			log(fmt.Sprintf("+%d %s", pid, name))
+		}
+	}
+	for pid, name := range prev.byPID {
+		if _, ok := curr.byPID[pid]; !ok {
+			log(fmt.Sprintf("-%d %s", pid, name))
+		}
+	}
+	return curr
+}
+
 // runCmuxBridge runs inside a cmux pane, streams DaemonState from the
 // daemon, and drives the cmux sidebar. The bridge filters daemon state
 // to the workspace identified by $CMUX_WORKSPACE_ID, then derives a
@@ -200,6 +257,7 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 	// which is desirable since pane operators care about state across
 	// reconnects.
 	var prev bridgeState
+	var prevSessions bridgeSessions
 	logChange := func(msg string) {
 		fmt.Fprintln(os.Stderr, "cmux-bridge:", msg)
 	}
@@ -219,6 +277,7 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 				continue
 			}
 			prev = diffAndLog(prev, stateFromDaemon(r.msg), logChange)
+			prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(r.msg, ws), logChange)
 			snap := snapshotForWorkspace(r.msg, ws)
 			reporter.Push(snap)
 		}
