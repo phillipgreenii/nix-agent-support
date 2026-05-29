@@ -149,8 +149,8 @@ func handleToggleID(m *Model) tea.Cmd {
 func handleToggleCaffeinate(m *Model) tea.Cmd {
 	m.caffeinateOn = !m.caffeinateOn
 	if m.onCaffeinateToggle != nil {
-		// In --remote mode this dispatches the Caffeinate RPC to the
-		// daemon so the *daemon's* caffeinate manager actually runs.
+		// Dispatches the Caffeinate RPC to the daemon so the *daemon's*
+		// caffeinate manager actually runs.
 		m.onCaffeinateToggle(m.caffeinateOn)
 	}
 	m.reporter.Push(m.buildSidebarSnapshot())

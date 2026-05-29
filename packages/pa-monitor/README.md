@@ -7,9 +7,7 @@ Per-user daemon + TUI for monitoring active Claude Code sessions. Renders contex
 Two cooperating processes per OS user:
 
 - **`pa-monitor daemon`** — long-running, owns all state. Polls sessions, tracks 5h blocks and the weekly limit, manages caffeinate, dispatches nudges, emits OTel. Started by a LaunchAgent at login.
-- **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches.
-
-When OTel is disabled or the daemon is not running, the legacy local-poller path is still available via `pa-monitor tui` (no `--remote`).
+- **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches. When the daemon is unreachable, clients show "daemon offline" rather than fabricating data from disk.
 
 ## Quick start
 
@@ -17,10 +15,7 @@ When OTel is disabled or the daemon is not running, the legacy local-poller path
 # Run the daemon (or let the LaunchAgent run it at login).
 pa-monitor daemon
 
-# Interactive TUI talking to the daemon
-pa-monitor tui --remote
-
-# Interactive TUI in legacy local-poller mode (no daemon needed)
+# Interactive TUI (always daemon-backed)
 pa-monitor tui
 
 # Dump daemon state
@@ -55,7 +50,7 @@ pa-monitor config show
 | Subcommand                                           | Purpose                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------- |
 | `daemon`                                             | Run the long-running daemon (RPC server + tick loop).               |
-| `tui`                                                | Interactive TUI. Default uses local poller; `--remote` uses daemon. |
+| `tui`                                                | Interactive TUI (always daemon-backed).                             |
 | `status`                                             | One-shot dump of daemon state.                                      |
 | `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                       |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                                    |

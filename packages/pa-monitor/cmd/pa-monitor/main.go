@@ -81,12 +81,6 @@ func runConfigSubcommand(args []string) {
 
 func runTUI(args []string) {
 	fs := flag.NewFlagSet("tui", flag.ExitOnError)
-	// --remote is kept as a no-op for backwards compatibility with users who
-	// have shell aliases or muscle memory pinned to the flag. The TUI is now
-	// always daemon-backed; the local-poller mode was removed because it
-	// bypassed the daemon (which owns all state per the spec) and left users
-	// looking at on-disk session data without knowing it.
-	_ = fs.Bool("remote", true, "DEPRECATED (no-op): TUI is always daemon-backed now")
 	showVersion := fs.Bool("version", false, "print version")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)

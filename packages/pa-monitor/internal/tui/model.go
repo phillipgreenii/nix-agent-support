@@ -33,13 +33,12 @@ type Options struct {
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
 	// OnCaffeinateToggle, when non-nil, is called whenever the user
-	// toggles caffeinate via the C keybinding. Used by --remote mode to
-	// dispatch the Caffeinate RPC against the daemon instead of (or in
-	// addition to) the local Manager.
+	// toggles caffeinate via the C keybinding. Dispatches the Caffeinate
+	// RPC against the daemon.
 	OnCaffeinateToggle func(on bool)
 	// OnToggleAutoResume, when non-nil, is called whenever the user presses R.
-	// The argument is the new desired state (true = enable). Used by --remote
-	// mode to dispatch the SetAutoResume RPC against the daemon.
+	// The argument is the new desired state (true = enable). Dispatches the
+	// SetAutoResume RPC against the daemon.
 	OnToggleAutoResume func(enable bool)
 	// OnManualNudge, when non-nil, is called whenever the user presses M.
 	// selector is a gRPC-style nudge selector (e.g. "session:<id>" or
