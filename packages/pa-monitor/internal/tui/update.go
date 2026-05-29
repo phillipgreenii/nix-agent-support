@@ -60,9 +60,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.meta.DaemonNow.IsZero() || msg.meta.DaemonNow.After(m.autoResumeUserAt) {
 			m.autoResumeEnabled = msg.meta.AutoResumeEnabled
 		}
-		if m.caffeinate != nil {
-			m.caffeinate.SetToggle(m.caffeinateOn)
-			m.caffeinate.Tick(msg.anyWorking)
+		if msg.meta.DaemonNow.IsZero() || msg.meta.DaemonNow.After(m.caffeinateUserAt) {
+			m.caffeinateOn = msg.meta.CaffeinateActive
 		}
 		m.rebuildFlatRows()
 		m.clampCursor()

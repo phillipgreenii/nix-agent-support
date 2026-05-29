@@ -11,7 +11,6 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
@@ -37,23 +36,6 @@ func runTUIRemote() {
 		os.Exit(2)
 	}
 
-	// Caffeinate manager is daemon-owned in remote mode; the local
-	// model still constructs one (the TUI's render path expects it),
-	// but its Spawn/Kill/IsAlive are no-ops because the user's
-	// `C` keybinding in remote mode should drive the daemon instead.
-	// Full remote-caffeinate wiring is a follow-up; for now the local
-	// stub keeps the render happy.
-	noop := func() error { return nil }
-	noopSpawn := func(int) error { return nil }
-	mgr := &caffeinate.Manager{
-		Grace:   cfg.CaffeinateGrace,
-		Spawn:   noopSpawn,
-		Kill:    noop,
-		IsAlive: func() bool { return false },
-		Now:     time.Now,
-		PID:     os.Getpid(),
-	}
-
 	home, _ := os.UserHomeDir()
 	cacheDir := filepath.Join(home, ".cache", "pa-monitor")
 	errLog := &tui.ErrorLogger{CacheDir: cacheDir}
@@ -62,7 +44,6 @@ func runTUIRemote() {
 		Tree:                 &aggregate.Tree{},
 		Poller:               rp,
 		Interval:             cfg.RefreshInterval,
-		Caffeinate:           mgr,
 		CacheDir:             cacheDir,
 		Reporter:             nil, // cmuxstatus driven by cmux-bridge, not the TUI
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,

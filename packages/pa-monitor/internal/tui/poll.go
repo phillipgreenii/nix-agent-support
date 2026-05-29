@@ -19,6 +19,7 @@ type Poller interface {
 type MetaPoller interface {
 	LastAutoResumeEnabled() bool
 	LastAutoResumeDelay() time.Duration
+	LastCaffeinateActive() bool
 	LastDaemonVersion() string
 	// LastDaemonNow returns the daemon-side wallclock observed on the most
 	// recent GetState. Used by the Model to break optimistic-update races:
@@ -33,6 +34,7 @@ type MetaPoller interface {
 type DaemonMeta struct {
 	AutoResumeEnabled bool
 	AutoResumeDelay   time.Duration
+	CaffeinateActive  bool
 	DaemonVersion     string
 	DaemonNow         time.Time
 }
@@ -62,6 +64,7 @@ func (m *Model) pollNow() tea.Cmd {
 			meta = DaemonMeta{
 				AutoResumeEnabled: mp.LastAutoResumeEnabled(),
 				AutoResumeDelay:   mp.LastAutoResumeDelay(),
+				CaffeinateActive:  mp.LastCaffeinateActive(),
 				DaemonVersion:     mp.LastDaemonVersion(),
 				DaemonNow:         mp.LastDaemonNow(),
 			}
@@ -76,4 +79,3 @@ type pollResultMsg struct {
 	meta       DaemonMeta
 }
 type pollErrMsg struct{ err error }
-

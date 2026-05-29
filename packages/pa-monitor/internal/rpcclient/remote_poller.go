@@ -26,6 +26,7 @@ type RemotePoller struct {
 	// via Last* accessors so the TUI can read alongside the tree.
 	lastAutoResumeEnabled bool
 	lastAutoResumeDelay   time.Duration
+	lastCaffeinateActive  bool
 	lastDaemonVersion     string
 	lastDaemonNow         time.Time
 }
@@ -90,6 +91,7 @@ func (r *RemotePoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, err
 	r.lastFreshAt = time.Now()
 	r.lastAutoResumeEnabled = state.GetAutoResumeEnabled()
 	r.lastAutoResumeDelay = time.Duration(state.GetAutoResumeDelayS()) * time.Second
+	r.lastCaffeinateActive = state.GetCaffeinateActive()
 	r.lastDaemonVersion = state.GetDaemonVersion()
 	if ts := state.GetNow(); ts != nil {
 		r.lastDaemonNow = ts.AsTime()
@@ -120,6 +122,14 @@ func (r *RemotePoller) LastAutoResumeDelay() time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.lastAutoResumeDelay
+}
+
+// LastCaffeinateActive returns the caffeinate flag from the most recent
+// successful GetState. Zero value (false) means "not yet known" or "off".
+func (r *RemotePoller) LastCaffeinateActive() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastCaffeinateActive
 }
 
 // LastDaemonVersion returns the daemon's reported version from the most

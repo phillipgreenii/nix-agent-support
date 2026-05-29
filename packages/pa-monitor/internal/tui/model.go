@@ -7,7 +7,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
@@ -24,11 +23,10 @@ const (
 )
 
 type Options struct {
-	Tree       *aggregate.Tree
-	Poller     Poller
-	Interval   time.Duration
-	Caffeinate *caffeinate.Manager
-	CacheDir   string // used to load/save tree collapse state
+	Tree     *aggregate.Tree
+	Poller   Poller
+	Interval time.Duration
+	CacheDir string // used to load/save tree collapse state
 	Reporter             cmuxstatus.Reporter
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
@@ -66,7 +64,6 @@ type Model struct {
 
 	poller     Poller
 	interval   time.Duration
-	caffeinate *caffeinate.Manager
 	lastErr    error
 	anyWorking bool
 	polling    bool
@@ -81,6 +78,11 @@ type Model struct {
 	// daemon-side timestamp is AFTER autoResumeUserAt, preventing an
 	// in-flight stale poll from undoing the optimistic flip.
 	autoResumeUserAt time.Time
+
+	// caffeinateUserAt mirrors autoResumeUserAt for the C keybinding.
+	// Protects caffeinateOn against stale snapshots arriving after the
+	// user's optimistic flip.
+	caffeinateUserAt time.Time
 
 	// clientVersion is this TUI binary's build identifier (set by NewModel from
 	// Options.Version). daemonVersion is the connected daemon's version,
@@ -109,7 +111,6 @@ func NewModel(o Options) *Model {
 		tree:                 o.Tree,
 		poller:               o.Poller,
 		interval:             o.Interval,
-		caffeinate:           o.Caffeinate,
 		theme:                render.NewTheme(render.DetectColors()),
 		cacheDir:             o.CacheDir,
 		treeState:            treestate.Load(o.CacheDir),

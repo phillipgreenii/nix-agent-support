@@ -150,6 +150,10 @@ func handleToggleID(m *Model) tea.Cmd {
 
 func handleToggleCaffeinate(m *Model) tea.Cmd {
 	m.caffeinateOn = !m.caffeinateOn
+	// Stamp caffeinateUserAt so any pollResultMsg whose underlying daemon
+	// snapshot pre-dates this action does NOT overwrite the flipped value
+	// with stale data. Mirrors handleToggleAutoResume.
+	m.caffeinateUserAt = time.Now()
 	if m.onCaffeinateToggle != nil {
 		// Dispatches the Caffeinate RPC to the daemon so the *daemon's*
 		// caffeinate manager actually runs.
