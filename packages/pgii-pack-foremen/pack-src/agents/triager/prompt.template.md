@@ -22,10 +22,17 @@ metadata, decide which category the work belongs to, and route it:
   close the triage bead with `--reason="routed to <id>"`.
 
 - **personal** (work in one of the 6 personal nix rigs):
-  do NOT pick a specific rig yourself. Open a `type=personal-triage`
-  bead in `hq` referencing this triage bead; personal-foreman's
-  work_query picks up open `type=personal-triage` beads.
-  Then close your triage bead with `--reason="personal — see <handoff-id>"`.
+  do NOT pick a specific rig yourself. Open a handoff bead in `hq`
+  with **label `category:personal`** referencing this triage bead;
+  personal-foreman's work_query picks up open beads in hq with that
+  label regardless of issue_type. Then close your triage bead with
+  `--reason="personal — see <handoff-id>"`.
+
+  For the handoff bead's `--type`, try `--type=triage` first; if bd
+  rejects it (the type registry is unstable in 1.0.4 — `triage`
+  flips with `personal-triage` between sessions due to auto-import),
+  fall back to `--type=personal-triage`. Either is fine because
+  personal-foreman discriminates on the **label**, not the type.
 
 If you cannot decide between categories, OR you've decided "this is
 not work that should be done at all" (out of scope, duplicate,
@@ -96,17 +103,20 @@ Action:
 ```bash
 gc bd update "$TRIAGE_ID" --claim
 gc bd create \
-  --title="personal-triage: claude-pack derivation rebuilds with personal-shell HM switches" \
+  --title="personal-handoff: claude-pack derivation rebuilds with personal-shell HM switches" \
   --description="…copied + your notes…" \
-  --type=personal-triage \
+  --type=triage \
+  --labels=category:personal \
   --priority=2 \
   --metadata='{"parent_triage":"'"$TRIAGE_ID"'"}'
 # Suppose the new bead's id is gc-def456.
 gc bd close "$TRIAGE_ID" --reason="personal — see gc-def456"
 ```
 
-(Note: `gc bd create` without `--rig` creates in hq. The
-`type=personal-triage` is personal-foreman's work_query target.)
+(Note: `gc bd create` without `--rig` creates in hq. The combination
+`type=triage` + `category:personal` label is personal-foreman's
+work_query target. The triager's own work_query excludes anything
+labeled `category:*` so it doesn't pick up its own handoffs.)
 
 ### Example 3: wontfix
 

@@ -21,4 +21,8 @@ nudge = "Wake check: open type=triage bead exists. Read description, classify ci
 # The work_query below is still useful: when the triager wakes (via
 # the order's mail), it uses this query to find the next bead ID to
 # process.
-work_query = "gc bd list --status=open --type=triage --json --limit 0 | jq -r 'if type == \"array\" then .[] | select(((.labels // []) | any(. == \"needs-clarification\")) | not) | .id else empty end'"
+# Excludes:
+#   - beads tagged needs-clarification (those need human input first)
+#   - beads tagged category:* (already-classified handoffs, e.g.
+#     category:personal — that's personal-foreman's work, not ours)
+work_query = "gc bd list --status=open --type=triage --json --limit 0 | jq -r 'if type == \"array\" then .[] | select(((.labels // []) | any(. == \"needs-clarification\")) | not) | select(((.labels // []) | any(startswith(\"category:\"))) | not) | .id else empty end'"

@@ -7,7 +7,7 @@
 #   - bug/task/feature with missing acceptance_criteria
 #
 # Excludes:
-#   - type=triage / type=personal-triage (triager's job, not foreman's)
+#   - type=triage (triager and personal-foreman handle these)
 #   - already escalated (gc:escalation label)
 #   - status != open
 #
@@ -22,7 +22,6 @@ gc bd list --status=open --json --limit 0 2>/dev/null |
       | select(
           .status == "open"
           and (.issue_type != "triage")
-          and (.issue_type != "personal-triage")
           and ((.labels // []) | any(. == "gc:escalation") | not)
           and (
             ((.labels // []) | any(startswith("foreman-triaged:")) | not)
