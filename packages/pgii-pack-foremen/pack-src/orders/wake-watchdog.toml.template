@@ -1,0 +1,21 @@
+# wake-watchdog — for each on_demand template we manage in this
+# city (triager, the 3 category foremen, city-worker, and the 3
+# pgii-pr-support agents), check if there's unread mail and no
+# live session, and spawn one if so.
+#
+# Compensates for gc 1.1.0's broken on_demand reconciler. See
+# scripts/wake-watchdog.sh for the rationale and a list of which
+# templates are managed.
+#
+# Cooldown 60s: aggressive enough that a fresh mail wakes its
+# recipient within at most a minute, lenient enough that a session
+# that just exited has a chance to be picked up by another order
+# (e.g. mol-triage-poll, which fires every 30s) before we re-spawn.
+
+[order]
+description = "Spawn on_demand sessions when they have unread mail and no live process."
+trigger     = "cooldown"
+interval    = "60s"
+timeout     = "60s"
+exec        = "${SCRIPTS_DIR}/wake-watchdog.sh"
+enabled     = true
