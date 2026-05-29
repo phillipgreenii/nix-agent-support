@@ -18,6 +18,9 @@ func (m *Model) View() string {
 		return wrap.Block(m.renderModal(), wrap.EffectiveWidth(m.width))
 	}
 	if m.tree == nil {
+		if m.lastErr != nil {
+			return daemonOfflineMessage(m.clientVersion, m.lastErr)
+		}
 		return "loading…"
 	}
 	if m.selected != nil {
@@ -132,6 +135,27 @@ func (m *Model) renderModal() string {
 		return render.LegendModal(m.width, m.height, m.modalScrollOffset)
 	}
 	return ""
+}
+
+// daemonOfflineMessage renders a clear offline-state screen for the TUI's
+// pre-first-tree state when polling against the daemon has failed. The TUI
+// has no local fallback — the daemon owns all session state — so an empty
+// tree + a pollErrMsg means "nothing to show, here's what to do about it."
+func daemonOfflineMessage(clientVersion string, err error) string {
+	return fmt.Sprintf(`Daemon offline.
+
+pa-monitor %s (TUI) cannot reach the daemon.
+
+Last error:
+  %v
+
+To start the daemon:
+  launchctl kickstart -k gui/$UID/com.phillipg.pa-monitor-daemon
+or run in the foreground:
+  pa-monitor daemon
+
+Press q to quit.
+`, clientVersion, err)
 }
 
 // bindingsToHelpRows converts Bindings into the (Keys, Description) pairs the
