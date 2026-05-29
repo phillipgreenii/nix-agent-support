@@ -47,6 +47,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.pollNow(), tickCmd(m.interval))
 	case pollResultMsg:
 		m.polling = false
+		m.daemonConnected = true
 		m.tree = msg.tree
 		m.anyWorking = msg.anyWorking
 		m.autoResumeDelay = msg.meta.AutoResumeDelay
@@ -76,6 +77,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pollErrMsg:
 		m.polling = false
+		m.daemonConnected = false
 		m.lastErr = msg.err
 	case TreeUpdatedMsg:
 		m.tree = msg.Tree

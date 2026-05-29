@@ -16,20 +16,39 @@ type ControlsOpts struct {
 	CostMode       bool
 	ForceID        bool
 	AutoResume     bool
-	Theme          Theme
-	Width          int
+	// DaemonConnected drives the upper-left daemon RPC connection indicator.
+	// true  -> filled green dot ("●") meaning the latest poll succeeded
+	// false -> hollow dim dot  ("○") meaning the latest poll failed or
+	//          no poll has happened yet
+	// Prepended to the controls row at all tiers so the user can see at a
+	// glance whether the daemon RPC is alive.
+	DaemonConnected bool
+	Theme           Theme
+	Width           int
 }
 
 // Controls returns a single-row, tier-aware controls line:
 //
-//	WIDE   ≥120  [C] ● on  [t] tokens · cost  [a] active · all  [n] name · id  [R] ● on  [N] nudge  [?]  [q]
-//	NARROW 80–119 [C]●  [t] tok · cost  [a] act · all  [n] nm · id  [R]●  [N]nudge  [?][q]
-//	TINY   <80   [C]●  [t]tok  [a]act  [n]nm  [R]●  [N]nudge  [?][q]
+//	WIDE   ≥120  ● [C] ● on  [t] tokens · cost  [a] active · all  [n] name · id  [R] ● on  [N] nudge  [?]  [q]
+//	NARROW 80–119 ● [C]●  [t] tok · cost  [a] act · all  [n] nm · id  [R]●  [N]nudge  [?][q]
+//	TINY   <80   ● [C]●  [t]tok  [a]act  [n]nm  [R]●  [N]nudge  [?][q]
 //
-// The active half of each toggle is highlighted via theme.ActiveToggle.
-// At TINY only the active half of each toggle is shown.
+// The leading glyph is the daemon RPC connection indicator: filled "●" when
+// the latest poll succeeded, hollow "○" when offline. The active half of
+// each toggle is highlighted via theme.ActiveToggle. At TINY only the active
+// half of each toggle is shown.
 func Controls(opts ControlsOpts) string {
 	th := opts.Theme
+
+	// Daemon connection indicator. Use theme.Working for "alive" so it picks
+	// up the green palette where colours are available; Dormant (faint) for
+	// "offline". In mono terminals these fall back to bold/faint via theme.
+	var daemonGlyph string
+	if opts.DaemonConnected {
+		daemonGlyph = th.Working.Render("●")
+	} else {
+		daemonGlyph = th.Dormant.Render("○")
+	}
 
 	caffWide := "○ off"
 	caffGlyph := "○"
@@ -50,6 +69,10 @@ func Controls(opts ControlsOpts) string {
 	}
 
 	var sb strings.Builder
+	// Prepend the daemon indicator at all tiers; it costs 2 cells (glyph +
+	// space) and must always be visible even at TierTiny.
+	sb.WriteString(daemonGlyph)
+	sb.WriteString(" ")
 	switch wrap.Tier(opts.Width) {
 	case wrap.TierWide:
 		tokLabel, costLabel := "tokens", "cost"

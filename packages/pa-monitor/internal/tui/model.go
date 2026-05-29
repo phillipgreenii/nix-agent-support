@@ -69,6 +69,12 @@ type Model struct {
 	anyWorking bool
 	polling    bool
 
+	// daemonConnected reflects whether the most recent poll succeeded.
+	// Defaults to false until the first successful pollResultMsg arrives.
+	// Drives the upper-left connection indicator in the controls row so the
+	// user can see at a glance when the daemon RPC dies mid-session.
+	daemonConnected bool
+
 	// autoResumeEnabled and autoResumeDelay are populated from DaemonState
 	// via pollResultMsg.meta. The daemon owns the scheduler; these are view-only.
 	autoResumeEnabled bool

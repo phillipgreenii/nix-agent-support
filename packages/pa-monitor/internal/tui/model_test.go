@@ -330,3 +330,67 @@ func TestModelPushesSidebarOnCaffeinateToggle(t *testing.T) {
 	}
 }
 
+// TestDaemonConnectedDefaultsFalse verifies the daemon-connected flag starts
+// false at construction (we haven't talked to the daemon yet).
+func TestDaemonConnectedDefaultsFalse(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	if m.daemonConnected {
+		t.Error("daemonConnected must default to false before any successful poll")
+	}
+}
+
+// TestDaemonConnectedSetTrueOnPollResult verifies that a successful poll
+// flips the daemon-connected flag true.
+func TestDaemonConnectedSetTrueOnPollResult(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Interval: time.Second})
+	m.Update(pollResultMsg{tree: &aggregate.Tree{}})
+	if !m.daemonConnected {
+		t.Error("daemonConnected must be true after pollResultMsg")
+	}
+}
+
+// TestDaemonConnectedSetFalseOnPollErr verifies that a poll error flips the
+// daemon-connected flag false even if a previous poll succeeded.
+func TestDaemonConnectedSetFalseOnPollErr(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Interval: time.Second})
+	// Establish a connected state first.
+	m.Update(pollResultMsg{tree: &aggregate.Tree{}})
+	if !m.daemonConnected {
+		t.Fatal("precondition: pollResultMsg must set daemonConnected=true")
+	}
+	// Now simulate the daemon dying mid-session.
+	m.Update(pollErrMsg{err: fmt.Errorf("rpc dial failed")})
+	if m.daemonConnected {
+		t.Error("daemonConnected must be false after pollErrMsg")
+	}
+}
+
+// TestDaemonConnectedReflectedInView verifies that the indicator glyph
+// rendered by the View reflects the current daemonConnected state. We don't
+// pin the exact glyph here — just that connected and disconnected views are
+// distinguishable.
+func TestDaemonConnectedReflectedInView(t *testing.T) {
+	d := &aggregate.Directory{
+		Path: "/p",
+		Sessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "s1", Status: session.Working}},
+		},
+		WorkingN: 1,
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+
+	mConn := NewModel(Options{Tree: tree})
+	mConn.SetSizeForTest(100, 24)
+	mConn.Update(pollResultMsg{tree: tree})
+	connectedView := mConn.View()
+
+	mOff := NewModel(Options{Tree: tree})
+	mOff.SetSizeForTest(100, 24)
+	mOff.Update(pollErrMsg{err: fmt.Errorf("offline")})
+	offlineView := mOff.View()
+
+	if connectedView == offlineView {
+		t.Errorf("connected and offline views must differ to signal daemon state, got identical:\n%s", connectedView)
+	}
+}
+
