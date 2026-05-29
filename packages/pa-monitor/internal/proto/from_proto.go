@@ -4,6 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
@@ -167,7 +169,20 @@ func statusFromString(s string) session.Status {
 
 // timeFromTS converts a timestamppb proto to time.Time, returning zero
 // when the input is nil.
-func timeFromTS(ts interface{ AsTime() time.Time }) time.Time {
+//
+// IMPORTANT: the parameter must be the concrete *timestamppb.Timestamp,
+// not an interface, to detect the unset case correctly. An unset proto
+// timestamp field arrives here as a typed-nil *timestamppb.Timestamp.
+// If we accepted an interface (interface{ AsTime() time.Time }), the
+// `ts == nil` check would be false for that typed nil (Go interfaces
+// only equal nil when BOTH the type and value are nil), and we'd then
+// call AsTime() on a nil pointer -- which timestamppb implements as a
+// non-zero "return the epoch (1970-01-01)" value. The downstream
+// IsZero() check then returns false, so EVERY unset timestamp was being
+// translated into a non-zero "1970" reading. This bit the rateLimited
+// branch in render/tree.go: every session showed up as paused even
+// when the daemon never set RateLimitResetsAt.
+func timeFromTS(ts *timestamppb.Timestamp) time.Time {
 	if ts == nil {
 		return time.Time{}
 	}
