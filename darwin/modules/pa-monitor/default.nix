@@ -11,9 +11,9 @@ let
   # registered once at system scope when any user opted in. The launchdServices
   # helper runs the agent under the primary user (gui/<primary-uid>/<label>).
   hmUsers = config.home-manager.users or { };
-  daemonEnabledByAnyUser = lib.any (
-    u: u.phillipgreenii.programs.pa-monitor.daemon.enable or false
-  ) (lib.attrValues hmUsers);
+  daemonEnabledByAnyUser = lib.any (u: u.phillipgreenii.programs.pa-monitor.daemon.enable or false) (
+    lib.attrValues hmUsers
+  );
 
   pkg = pkgs.pa-monitor;
 
@@ -32,8 +32,7 @@ let
   # XDG_STATE_HOME default for macOS user agents. The launchdServices helper
   # plist runs under the primary user, so resolve via system.primaryUser.
   primaryUser = config.system.primaryUser or null;
-  stateHome =
-    if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pa-monitor";
+  stateHome = if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pa-monitor";
 in
 {
   # Register pa-monitor's Grafana dashboard as a dashboardProvider on the
