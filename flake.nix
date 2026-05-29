@@ -532,53 +532,6 @@
               ${pre-commit.shellHook}
               echo "Pre-commit hooks installed successfully!"
             '';
-            update-locks = pkgs.writeShellApplication {
-              name = "update-locks";
-              runtimeInputs = [
-                pkgs.nix
-                pkgs.git
-                pkgs.coreutils
-                pkgs.go
-              ];
-              text = ''
-                # shellcheck source=/dev/null
-                source "${phillipgreenii-nix-base}/lib/scripts/update-locks-lib.bash"
-                ul_setup "phillipgreenii-nix-agent-support" "$PWD"
-
-                case "''${1:-}" in
-                --ci) export UL_CI_MODE=true ;;
-                "") ;;
-                *) echo "Unknown argument: $1" >&2; exit 1 ;;
-                esac
-
-                ul_run_step "nix-flake-update" \
-                  "update-locks: update nix flake.lock" \
-                  nix flake update
-
-                ul_run_step "update-deps-claude-extended-tool-approver" \
-                  "update-locks: update claude-extended-tool-approver Go deps + vendorHash" \
-                  bash -c 'cd packages/claude-extended-tool-approver && go get -u ./... && ./update-deps.sh'
-
-                ul_run_step "update-deps-pg-pr" \
-                  "update-locks: update pg-pr Go deps + vendorHash" \
-                  bash -c 'cd packages/pg-pr && go get -u ./... && ./update-deps.sh'
-
-                ul_run_step "update-deps-pa-monitor" \
-                  "update-locks: update pa-monitor Go deps + vendorHash" \
-                  bash -c 'cd packages/pa-monitor && go get -u ./... && ./update-deps.sh'
-
-                ul_run_step "update-goccc" \
-                  "update-locks: bump goccc rev + src hash" \
-                  nix run nixpkgs#nix-update -- -F goccc
-
-                ul_run_step "update-toktrack" \
-                  "update-locks: bump toktrack rev + src hash + cargoHash" \
-                  nix run nixpkgs#nix-update -- -F toktrack
-
-                ul_finalize
-              '';
-            };
-
             # pa-monitor-codegen wraps the gen-proto.sh script with
             # protoc + plugins on PATH so `nix run .#pa-monitor-codegen`
             # works without relying on the user's devbox.
@@ -599,6 +552,7 @@
           devShells.default = phillipgreenii-nix-base.lib.mkDevShell {
             inherit pkgs;
             pre-commit-shellHook = pre-commit.shellHook;
+            extraInputs = [ pkgs.go ];
           };
         }
       );
