@@ -1,0 +1,21 @@
+# city-foreman — enhances newly-arrived hq work beads.
+#
+# Absorbs pgii-gastown.foreman's AC-fill and needs-foreman handling,
+# scoped to hq only (the other categories get their own foremen).
+#
+# Reference: docs/superpowers/specs/2026-05-28-triage-extension-design.md
+
+scope = "city"
+wake_mode = "fresh"
+idle_timeout = "1h"
+min_active_sessions = 0
+max_active_sessions = 1
+model = "claude-opus-4-7"
+nudge = "Wake check: hq work beads needing enhancement or AC-fill."
+
+# Pick up hq beads that need foreman attention:
+#   - not yet foreman-triaged AND status=open, OR
+#   - labeled needs-foreman, OR
+#   - missing acceptance_criteria
+# In all cases excluding beads already escalated to mayor.
+work_query = "${PACK_ROOT}/agents/city-foreman/work_query.sh"

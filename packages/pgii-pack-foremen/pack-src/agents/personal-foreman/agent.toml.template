@@ -1,0 +1,22 @@
+# personal-foreman — enhances work beads across the six personal-rig
+# dbs (nix_overlay, nix_personal, nix_repo_base, nix_ziprecruiter,
+# nix_support_apps, nix_agent_support) and handles rig-picking +
+# multi-rig tracking for ambiguous personal work.
+#
+# Per the spec's verified outcomes (2026-05-29):
+#   - Topology: per-rig dbs (six dbs, one per rig). The work_query
+#     iterates them.
+#   - Tracking-bead primitive: type=coordination bead in hq, NOT
+#     gc convoy (which rejects cross-store inputs).
+#
+# Reference: docs/superpowers/specs/2026-05-28-triage-extension-design.md
+
+scope = "city"
+wake_mode = "fresh"
+idle_timeout = "1h"
+min_active_sessions = 0
+max_active_sessions = 1
+model = "claude-opus-4-7"
+nudge = "Wake check: personal work beads needing enhancement, rig-picking, or multi-rig tracking."
+
+work_query = "${PACK_ROOT}/agents/personal-foreman/work_query.sh"
