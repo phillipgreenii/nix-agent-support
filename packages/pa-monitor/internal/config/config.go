@@ -11,65 +11,71 @@ import (
 )
 
 type Config struct {
-	PlanTier              string
-	TopupPoolUSD          float64
-	TopupPurchaseDate     string
-	BurnWindowShort       time.Duration
-	BurnWindowLong        time.Duration
-	RefreshInterval       time.Duration
-	HeadlessInterval      time.Duration
-	CaffeinateGrace       time.Duration
-	WorkingThreshold      time.Duration
-	IdleThreshold         time.Duration
-	ConsecutiveIdleChecks int
-	MaximumWait           time.Duration
-	AutoResumeDelay       time.Duration
-	AutoResumeMessage     string
-	DisruptGrace          time.Duration
-	EscalationAfter       time.Duration
+	PlanTier                 string
+	TopupPoolUSD             float64
+	BurnWindowShort          time.Duration
+	BurnWindowLong           time.Duration
+	RefreshInterval          time.Duration
+	CaffeinateGrace          time.Duration
+	WorkingThreshold         time.Duration
+	IdleThreshold            time.Duration
+	AutoResumeDelay          time.Duration
+	AutoResumeMessage        string
+	DisruptGrace             time.Duration
+	EscalationAfter          time.Duration
 	CmuxSidebarEnable        bool
 	CmuxSidebarIntervalTicks int
+	Decorators               []DecoratorConfig
+}
+
+// DecoratorConfig is one [[decorator]] block parsed from config.toml. The
+// daemon turns each entry into a labels.Decorator that shells out to the
+// command on every session-label refresh. See ADR-0011 for why per-host
+// extension lives here and not in detector code.
+type DecoratorConfig struct {
+	Name      string
+	Command   string
+	TimeoutMS int
 }
 
 type tomlConfig struct {
-	PlanTier              *string  `toml:"plan_tier"`
-	TopupPoolUSD          *float64 `toml:"topup_pool_usd"`
-	TopupPurchaseDate     *string  `toml:"topup_purchase_date"`
-	BurnWindowShortS      *int     `toml:"burn_window_short_s"`
-	BurnWindowLongS       *int     `toml:"burn_window_long_s"`
-	RefreshIntervalMS     *int     `toml:"refresh_interval_ms"`
-	HeadlessIntervalS     *int     `toml:"headless_interval_s"`
-	CaffeinateGraceS      *int     `toml:"caffeinate_grace_s"`
-	WorkingThresholdS     *int     `toml:"working_threshold_s"`
-	IdleThresholdS        *int     `toml:"idle_threshold_s"`
-	ConsecutiveIdleChecks *int     `toml:"consecutive_idle_checks"`
-	MaximumWaitS          *int     `toml:"maximum_wait_s"`
-	AutoResumeDelayS      *int     `toml:"auto_resume_delay_s"`
-	AutoResumeMessage     *string  `toml:"auto_resume_message"`
-	DisruptGraceS         *int     `toml:"disrupt_grace_s"`
-	EscalationAfterS      *int     `toml:"escalation_after_s"`
-	CmuxSidebarEnable        *bool `toml:"cmux_sidebar_enable"`
-	CmuxSidebarIntervalTicks *int  `toml:"cmux_sidebar_interval_ticks"`
+	PlanTier                 *string             `toml:"plan_tier"`
+	TopupPoolUSD             *float64            `toml:"topup_pool_usd"`
+	BurnWindowShortS         *int                `toml:"burn_window_short_s"`
+	BurnWindowLongS          *int                `toml:"burn_window_long_s"`
+	RefreshIntervalMS        *int                `toml:"refresh_interval_ms"`
+	CaffeinateGraceS         *int                `toml:"caffeinate_grace_s"`
+	WorkingThresholdS        *int                `toml:"working_threshold_s"`
+	IdleThresholdS           *int                `toml:"idle_threshold_s"`
+	AutoResumeDelayS         *int                `toml:"auto_resume_delay_s"`
+	AutoResumeMessage        *string             `toml:"auto_resume_message"`
+	DisruptGraceS            *int                `toml:"disrupt_grace_s"`
+	EscalationAfterS         *int                `toml:"escalation_after_s"`
+	CmuxSidebarEnable        *bool               `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks *int                `toml:"cmux_sidebar_interval_ticks"`
+	Decorators               []tomlDecorator     `toml:"decorator"`
+}
+
+type tomlDecorator struct {
+	Name      string `toml:"name"`
+	Command   string `toml:"command"`
+	TimeoutMS *int   `toml:"timeout_ms"`
 }
 
 func defaults() Config {
 	return Config{
-		PlanTier:              "max_5x",
-		TopupPoolUSD:          0,
-		TopupPurchaseDate:     "",
-		BurnWindowShort:       60 * time.Second,
-		BurnWindowLong:        300 * time.Second,
-		RefreshInterval:       1 * time.Second,
-		HeadlessInterval:      5 * time.Second,
-		CaffeinateGrace:       60 * time.Second,
-		WorkingThreshold:      30 * time.Second,
-		IdleThreshold:         10 * time.Minute,
-		ConsecutiveIdleChecks: 3,
-		MaximumWait:           2 * time.Hour,
-		AutoResumeDelay:       45 * time.Second,
-		AutoResumeMessage:     "continue",
-		DisruptGrace:          30 * time.Second,
-		EscalationAfter:       60 * time.Second,
+		PlanTier:                 "max_5x",
+		TopupPoolUSD:             0,
+		BurnWindowShort:          60 * time.Second,
+		BurnWindowLong:           300 * time.Second,
+		RefreshInterval:          1 * time.Second,
+		CaffeinateGrace:          60 * time.Second,
+		WorkingThreshold:         30 * time.Second,
+		IdleThreshold:            10 * time.Minute,
+		AutoResumeDelay:          45 * time.Second,
+		AutoResumeMessage:        "continue",
+		DisruptGrace:             30 * time.Second,
+		EscalationAfter:          60 * time.Second,
 		CmuxSidebarEnable:        true,
 		CmuxSidebarIntervalTicks: 5,
 	}
@@ -101,9 +107,6 @@ func apply(cfg *Config, raw tomlConfig) {
 	if raw.TopupPoolUSD != nil {
 		cfg.TopupPoolUSD = *raw.TopupPoolUSD
 	}
-	if raw.TopupPurchaseDate != nil {
-		cfg.TopupPurchaseDate = *raw.TopupPurchaseDate
-	}
 	if raw.BurnWindowShortS != nil {
 		cfg.BurnWindowShort = time.Duration(*raw.BurnWindowShortS) * time.Second
 	}
@@ -113,9 +116,6 @@ func apply(cfg *Config, raw tomlConfig) {
 	if raw.RefreshIntervalMS != nil {
 		cfg.RefreshInterval = time.Duration(*raw.RefreshIntervalMS) * time.Millisecond
 	}
-	if raw.HeadlessIntervalS != nil {
-		cfg.HeadlessInterval = time.Duration(*raw.HeadlessIntervalS) * time.Second
-	}
 	if raw.CaffeinateGraceS != nil {
 		cfg.CaffeinateGrace = time.Duration(*raw.CaffeinateGraceS) * time.Second
 	}
@@ -124,12 +124,6 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.IdleThresholdS != nil {
 		cfg.IdleThreshold = time.Duration(*raw.IdleThresholdS) * time.Second
-	}
-	if raw.ConsecutiveIdleChecks != nil {
-		cfg.ConsecutiveIdleChecks = *raw.ConsecutiveIdleChecks
-	}
-	if raw.MaximumWaitS != nil {
-		cfg.MaximumWait = time.Duration(*raw.MaximumWaitS) * time.Second
 	}
 	if raw.AutoResumeDelayS != nil {
 		cfg.AutoResumeDelay = time.Duration(*raw.AutoResumeDelayS) * time.Second
@@ -148,6 +142,13 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.CmuxSidebarIntervalTicks != nil {
 		cfg.CmuxSidebarIntervalTicks = *raw.CmuxSidebarIntervalTicks
+	}
+	for _, d := range raw.Decorators {
+		dc := DecoratorConfig{Name: d.Name, Command: d.Command}
+		if d.TimeoutMS != nil {
+			dc.TimeoutMS = *d.TimeoutMS
+		}
+		cfg.Decorators = append(cfg.Decorators, dc)
 	}
 }
 

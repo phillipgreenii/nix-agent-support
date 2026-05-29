@@ -164,11 +164,11 @@ func runConfigShow(args []string) {
 	fmt.Printf("burn_window_short:         %s\n", cfg.BurnWindowShort)
 	fmt.Printf("burn_window_long:          %s\n", cfg.BurnWindowLong)
 	fmt.Printf("refresh_interval:          %s\n", cfg.RefreshInterval)
-	fmt.Printf("headless_interval:         %s\n", cfg.HeadlessInterval)
 	fmt.Printf("caffeinate_grace:          %s\n", cfg.CaffeinateGrace)
 	fmt.Printf("working_threshold:         %s\n", cfg.WorkingThreshold)
 	fmt.Printf("idle_threshold:            %s\n", cfg.IdleThreshold)
-	fmt.Printf("consecutive_idle_checks:   %d\n", cfg.ConsecutiveIdleChecks)
-	fmt.Printf("maximum_wait:              %s\n", cfg.MaximumWait)
 	fmt.Printf("cmux_sidebar_enable:       %v\n", cfg.CmuxSidebarEnable)
+	for _, d := range cfg.Decorators {
+		fmt.Printf("decorator:                 %s -> %s (timeout %dms)\n", d.Name, d.Command, d.TimeoutMS)
+	}
 }

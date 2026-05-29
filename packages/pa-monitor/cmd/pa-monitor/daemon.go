@@ -120,7 +120,7 @@ func runDaemon(args []string) {
 			detectors.Project{},
 			detectors.Agent{},
 		},
-		// Decorators are added per-host via config; none built-in here.
+		Decorators: buildDecorators(cfg.Decorators),
 	}
 
 	if !*disablePoller {
@@ -151,6 +151,28 @@ func runDaemon(args []string) {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// buildDecorators translates the user's [[decorator]] config blocks into
+// the labels.Decorator runners the lifecycle merges per-session. A bad
+// entry (e.g. a Command outside /nix/store/) logs and is skipped so a
+// typo in one decorator doesn't sink the daemon — same swallow-and-warn
+// posture the runner itself takes for runtime failures.
+func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
+	out := make([]*labels.Decorator, 0, len(cfgs))
+	for _, c := range cfgs {
+		dec, err := labels.NewDecorator(labels.DecoratorConfig{
+			Name:      c.Name,
+			Command:   c.Command,
+			TimeoutMS: c.TimeoutMS,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "daemon: skipping decorator %q: %v\n", c.Name, err)
+			continue
+		}
+		out = append(out, dec)
+	}
+	return out
 }
 
 // buildPoller wires the same poller the TUI uses, but for the daemon

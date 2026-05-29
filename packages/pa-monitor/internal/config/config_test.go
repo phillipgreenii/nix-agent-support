@@ -25,17 +25,8 @@ func TestDefaultsWhenFileMissing(t *testing.T) {
 	if cfg.RefreshInterval != 1*time.Second {
 		t.Errorf("RefreshInterval default: got %v, want 1s", cfg.RefreshInterval)
 	}
-	if cfg.HeadlessInterval != 5*time.Second {
-		t.Errorf("HeadlessInterval default: got %v, want 5s", cfg.HeadlessInterval)
-	}
 	if cfg.CaffeinateGrace != 60*time.Second {
 		t.Errorf("CaffeinateGrace default: got %v, want 60s", cfg.CaffeinateGrace)
-	}
-	if cfg.ConsecutiveIdleChecks != 3 {
-		t.Errorf("ConsecutiveIdleChecks default: got %d, want 3", cfg.ConsecutiveIdleChecks)
-	}
-	if cfg.MaximumWait != 2*time.Hour {
-		t.Errorf("MaximumWait default: got %v, want 2h", cfg.MaximumWait)
 	}
 }
 
@@ -45,7 +36,6 @@ func TestOverridesFromFile(t *testing.T) {
 	content := `
 plan_tier = "pro"
 topup_pool_usd = 50.0
-topup_purchase_date = "2026-04-01"
 working_threshold_s = 15
 idle_threshold_s = 300
 `
@@ -145,7 +135,38 @@ func TestPartialOverridePreservesDefaults(t *testing.T) {
 	if cfg.RefreshInterval != 1*time.Second {
 		t.Errorf("RefreshInterval should retain default, got %v", cfg.RefreshInterval)
 	}
-	if cfg.MaximumWait != 2*time.Hour {
-		t.Errorf("MaximumWait should retain default, got %v", cfg.MaximumWait)
+}
+
+// TestConfigDecoratorsRoundTrip verifies that [[decorator]] blocks parse into
+// cfg.Decorators with name/command/timeout_ms preserved. The decorator path is
+// the only sanctioned extension point for downstream-org labels (see ADR-0011).
+func TestConfigDecoratorsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[[decorator]]
+name = "zr-labels"
+command = "/nix/store/abc-pa-monitor-decorator-zr/bin/pa-monitor-decorator-zr"
+timeout_ms = 1500
+
+[[decorator]]
+name = "gc-labels"
+command = "/nix/store/def-pa-monitor-decorator-gc/bin/pa-monitor-decorator-gc"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Decorators) != 2 {
+		t.Fatalf("Decorators: got %d entries, want 2", len(cfg.Decorators))
+	}
+	if cfg.Decorators[0].Name != "zr-labels" || cfg.Decorators[0].TimeoutMS != 1500 {
+		t.Errorf("Decorators[0] = %+v", cfg.Decorators[0])
+	}
+	if cfg.Decorators[1].Name != "gc-labels" || cfg.Decorators[1].TimeoutMS != 0 {
+		t.Errorf("Decorators[1] = %+v (TimeoutMS 0 means use runner default)", cfg.Decorators[1])
 	}
 }
