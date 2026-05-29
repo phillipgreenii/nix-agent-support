@@ -11,6 +11,57 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 )
 
+// bridgeState captures the small slice of DaemonState whose flips the
+// bridge surfaces as log lines. It is the input to diffAndLog and is
+// updated once per successful daemon tick.
+//
+// initialized distinguishes the very first observed state (where we want
+// a single "initial state" summary line) from subsequent ticks (where we
+// only log on diff).
+type bridgeState struct {
+	initialized       bool
+	caffeinateActive  bool
+	autoResumeEnabled bool
+}
+
+// stateFromDaemon extracts a bridgeState from a DaemonState message and
+// marks it initialized.
+func stateFromDaemon(s *pb.DaemonState) bridgeState {
+	return bridgeState{
+		initialized:       true,
+		caffeinateActive:  s.GetCaffeinateActive(),
+		autoResumeEnabled: s.GetAutoResumeEnabled(),
+	}
+}
+
+// diffAndLog compares prev and curr and emits one log line per observable
+// state-change event. On the very first tick (prev.initialized == false)
+// it emits a single "initial state" summary line instead of synthesizing
+// flips against the zero value — this avoids spurious "caffeinate -> false"
+// noise at startup.
+//
+// Nudge dispatch is intentionally NOT diffed here: nudges are RPC-level
+// one-shot events (NudgeQueue/NudgeCancel) that the DaemonState message
+// does not expose as a counter or per-tick event list, so there is nothing
+// for the bridge to diff against. If a future proto change adds a
+// nudge-event signal to DaemonState, extend bridgeState + diffAndLog here.
+//
+// Returns curr so callers can `prev = diffAndLog(prev, curr, log)`.
+func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
+	if !prev.initialized {
+		log(fmt.Sprintf("initial state: caffeinate=%v auto_resume=%v",
+			curr.caffeinateActive, curr.autoResumeEnabled))
+		return curr
+	}
+	if prev.caffeinateActive != curr.caffeinateActive {
+		log(fmt.Sprintf("caffeinate -> %v", curr.caffeinateActive))
+	}
+	if prev.autoResumeEnabled != curr.autoResumeEnabled {
+		log(fmt.Sprintf("auto_resume -> %v", curr.autoResumeEnabled))
+	}
+	return curr
+}
+
 // runCmuxBridge runs inside a cmux pane, streams DaemonState from the
 // daemon, and drives the cmux sidebar. The bridge filters daemon state
 // to the workspace identified by $CMUX_WORKSPACE_ID, then derives a
@@ -99,6 +150,17 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 	}
 	next()
 
+	// Per-stream diff state: tracks observable toggles (caffeinate,
+	// auto_resume) across ticks so the bridge can emit human-readable
+	// change events on stderr instead of being a silent mirror. Reset
+	// per streamOnce call: a reconnect re-emits the "initial state" line,
+	// which is desirable since pane operators care about state across
+	// reconnects.
+	var prev bridgeState
+	logChange := func(msg string) {
+		fmt.Fprintln(os.Stderr, "cmux-bridge:", msg)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -113,6 +175,7 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 			if r.msg == nil {
 				continue
 			}
+			prev = diffAndLog(prev, stateFromDaemon(r.msg), logChange)
 			snap := snapshotForWorkspace(r.msg, ws)
 			reporter.Push(snap)
 		}
