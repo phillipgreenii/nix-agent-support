@@ -5,28 +5,43 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "10s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
         "name": "scope",
         "label": "scope",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(pa_monitor_sessions_count, workspace_scope)",
         "includeAll": true,
         "multi": true,
-        "current": { "value": "$__all", "text": "All" }
+        "current": {
+          "value": "$__all",
+          "text": "All"
+        }
       },
       {
         "name": "plan_tier",
         "label": "plan_tier",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(pa_monitor_sessions_count, plan_tier)",
         "includeAll": true,
         "multi": true,
-        "current": { "value": "$__all", "text": "All" }
+        "current": {
+          "value": "$__all",
+          "text": "All"
+        }
       }
     ]
   },
@@ -35,8 +50,16 @@
       "id": 1,
       "title": "Sessions by state",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "sum by (state) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
@@ -45,15 +68,29 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
       }
     },
     {
       "id": 2,
       "title": "5h block usage vs cap",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "pa_monitor_block_cost_usd{plan_tier=~\"$plan_tier\"}",
@@ -61,14 +98,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     },
     {
       "id": 3,
       "title": "Weekly usage vs cap",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "pa_monitor_week_cost_usd{plan_tier=~\"$plan_tier\"}",
@@ -76,14 +125,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     },
     {
       "id": 4,
       "title": "Block limit hits (1d)",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 7, "w": 4, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 7,
+        "w": 4,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(increase(pa_monitor_block_usage_limit_hits_total[1d]))",
@@ -95,8 +156,16 @@
       "id": 5,
       "title": "Week limit hits (7d)",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 16, "y": 7, "w": 4, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 7,
+        "w": 4,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(increase(pa_monitor_week_usage_limit_hits_total[7d]))",
@@ -108,8 +177,16 @@
       "id": 6,
       "title": "Caffeinate active",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 6
+      },
       "targets": [
         {
           "expr": "pa_monitor_caffeinate_active",
@@ -125,14 +202,22 @@
     },
     {
       "id": 7,
-      "title": "Nudges sent (split by post_window)",
+      "title": "Nudges sent by error_kind",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 6
+      },
       "targets": [
         {
-          "expr": "sum by (post_window) (increase(pa_monitor_signal_sends_total[5m]))",
-          "legendFormat": "post_window={{post_window}}",
+          "expr": "sum by (error_kind) (rate(pa_monitor_signal_sends_total[5m]))",
+          "legendFormat": "error_kind={{error_kind}}",
           "refId": "A"
         }
       ]
@@ -141,15 +226,28 @@
       "id": 8,
       "title": "API Errors & Nudges",
       "type": "row",
-      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 1 },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
       "collapsed": false
     },
     {
       "id": 9,
       "title": "API errors observed",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "sum by (kind) (rate(pa_monitor_session_api_error_observed_total[5m]))",
@@ -158,15 +256,29 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
       }
     },
     {
       "id": 10,
       "title": "Sessions currently errored (terminal)",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "sum by (kind) (pa_monitor_sessions_errored)",
@@ -179,8 +291,16 @@
       "id": 11,
       "title": "Stuck on retryable error",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 28, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(pa_monitor_sessions_errored{kind=~\"unknown|server_error\"})",
@@ -192,8 +312,16 @@
       "id": 12,
       "title": "Nudges suppressed (1h)",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 6, "y": 28, "w": 6, "h": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 28,
+        "w": 6,
+        "h": 4
+      },
       "targets": [
         {
           "expr": "sum(increase(pa_monitor_nudge_suppressed_total[1h]))",
@@ -205,8 +333,16 @@
       "id": 13,
       "title": "Nudges sent by source",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 7
+      },
       "targets": [
         {
           "expr": "sum by (sources) (rate(pa_monitor_signal_sends_total[5m]))",
@@ -215,7 +351,182 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "stacking": { "mode": "normal" } } }
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Caffeinate diagnostics",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 15,
+      "title": "Caffeinate grace expirations (1h)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(pa_monitor_caffeinate_grace_expirations_total[1h]))",
+          "legendFormat": "expirations",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Nudge funnel (5m rate)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 36,
+        "w": 18,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pa_monitor_nudge_queued_total[5m]))",
+          "legendFormat": "queued",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(pa_monitor_signal_sends_total[5m]))",
+          "legendFormat": "sent",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(pa_monitor_nudge_suppressed_total[5m]))",
+          "legendFormat": "suppressed",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Sessions breakdown",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 18,
+      "title": "Sessions by agent.kind",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (agent_kind) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{agent_kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 19,
+      "title": "Sessions by model",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 43,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "Sessions by workspace.scope",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 43,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (workspace_scope) (pa_monitor_sessions_count{plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{workspace_scope}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
       }
     }
   ]

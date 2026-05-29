@@ -47,18 +47,18 @@ pa-monitor config show
 
 ## Subcommands
 
-| Subcommand                                           | Purpose                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------------------- |
-| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).               |
-| `tui`                                                | Interactive TUI (always daemon-backed).                             |
-| `status`                                             | One-shot dump of daemon state.                                      |
-| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                       |
-| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                                    |
-| `info <selector>`                                    | Print session or directory details.                                 |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy.                                       |
-| `wait-until-agents-finished`                         | Block until all agents idle.                                        |
-| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar.        |
-| `config show`                                        | Print loaded config (read-only).                                    |
+| Subcommand                                           | Purpose                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
+| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).        |
+| `tui`                                                | Interactive TUI (always daemon-backed).                      |
+| `status`                                             | One-shot dump of daemon state.                               |
+| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
+| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
+| `info <selector>`                                    | Print session or directory details.                          |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy.                                |
+| `wait-until-agents-finished`                         | Block until all agents idle.                                 |
+| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
+| `config show`                                        | Print loaded config (read-only).                             |
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
 
@@ -66,8 +66,10 @@ pa-monitor config show
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set (typically by the workspace observability LaunchAgent env), the daemon emits:
 
-- **Metrics** — sessions-by-state gauge, caffeinate-active gauge, block + week cost gauges, transition counters (block/week limit hits, caffeinate rounds + grace, context limit hits, nudges sent).
-- **Logs** — structured event records for block start/end/limit-hit, week start/end/limit-hit, caffeinate start/stop/grace-expired, nudge.sent, session.state.changed.
+- **Metrics**
+  - Observable gauges: `pa_monitor.sessions.count` (by `state` + workspace/agent/model labels), `pa_monitor.sessions.errored` (by `kind`), `pa_monitor.caffeinate.active`, `pa_monitor.block.cost.usd`, `pa_monitor.week.cost.usd`.
+  - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`.
+- **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`.
 
 The disabled-state contract: when the env var is unset, the OTel SDK is never initialised and every emit is a nil-receiver no-op.
 

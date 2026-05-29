@@ -56,6 +56,17 @@ type Emitter struct {
 	sessionsErroredObs  map[string]int64 // kind -> count; replaced per tick
 	caffeinateActiveVal int64
 	caffeinateAttrs     []attribute.KeyValue
+	// blockCostUSD / weekCostUSD buffer the latest cost-in-USD for the active
+	// 5h block and the active week. Pushed by RecordBlockCost / RecordWeekCost
+	// (typically from the daemon's tick loop) and read by the gauge callback.
+	// blockCostKnown / weekCostKnown gate observation — we don't emit a zero
+	// reading just because the daemon hasn't completed its first tick yet.
+	blockCostUSD   float64
+	blockCostAttrs []attribute.KeyValue
+	blockCostKnown bool
+	weekCostUSD    float64
+	weekCostAttrs  []attribute.KeyValue
+	weekCostKnown  bool
 }
 
 // New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set,
@@ -117,6 +128,14 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	blockCostGauge, err := meter.Float64ObservableGauge("pa_monitor.block.cost.usd")
+	if err != nil {
+		return err
+	}
+	weekCostGauge, err := meter.Float64ObservableGauge("pa_monitor.week.cost.usd")
+	if err != nil {
+		return err
+	}
 
 	// Synchronous counters for transition events.
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
@@ -153,6 +172,8 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		erroredObs := e.sessionsErroredObs
 		caffVal := e.caffeinateActiveVal
 		caffAttrs := e.caffeinateAttrs
+		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
+		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
 		e.mu.Unlock()
 		for _, s := range obs {
 			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
@@ -162,8 +183,14 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(sessionsErroredGauge, count,
 				metric.WithAttributes(attribute.String("kind", kind)))
 		}
+		if blockKnown {
+			o.ObserveFloat64(blockCostGauge, blockCost, metric.WithAttributes(blockAttrs...))
+		}
+		if weekKnown {
+			o.ObserveFloat64(weekCostGauge, weekCost, metric.WithAttributes(weekAttrs...))
+		}
 		return nil
-	}, sessionsGauge, caffGauge, sessionsErroredGauge)
+	}, sessionsGauge, caffGauge, sessionsErroredGauge, blockCostGauge, weekCostGauge)
 	return err
 }
 
@@ -253,6 +280,35 @@ func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	e.mu.Lock()
 	e.caffeinateActiveVal = v
 	e.caffeinateAttrs = kv
+	e.mu.Unlock()
+}
+
+// RecordBlockCost sets the latest 5h-block cost-in-USD gauge value. The
+// daemon's tick loop pushes this each tick after Poller.Snapshot returns;
+// the OTel observable gauge then reports the buffered value when the SDK
+// next collects. nil-safe.
+func (e *Emitter) RecordBlockCost(usd float64, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.blockCostUSD = usd
+	e.blockCostAttrs = kv
+	e.blockCostKnown = true
+	e.mu.Unlock()
+}
+
+// RecordWeekCost is the weekly counterpart to RecordBlockCost. nil-safe.
+func (e *Emitter) RecordWeekCost(usd float64, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.weekCostUSD = usd
+	e.weekCostAttrs = kv
+	e.weekCostKnown = true
 	e.mu.Unlock()
 }
 

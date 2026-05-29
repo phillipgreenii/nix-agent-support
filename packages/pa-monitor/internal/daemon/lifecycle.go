@@ -324,12 +324,29 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					}
 				}
 				state.setCaffeinateActive(active, cause)
+				opts.Emitter.RecordCaffeinateActive(active, map[string]string{"plan_tier": opts.PlanTier})
 				if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
 					opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
 				}
 				if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !anyWorking {
 					opts.Emitter.RecordCaffeinateGraceExpired(nil)
 				}
+			}
+			if tree.ActiveBlock != nil {
+				opts.Emitter.RecordBlockCost(tree.ActiveBlock.CostUSD, map[string]string{
+					"plan_tier": opts.PlanTier,
+					"block.id":  tree.ActiveBlock.ID,
+				})
+			}
+			if tree.ActiveWeek != nil {
+				weekID := ""
+				if opts.WeekTracker != nil {
+					weekID = opts.WeekTracker.ID()
+				}
+				opts.Emitter.RecordWeekCost(tree.ActiveWeek.TotalCost, map[string]string{
+					"plan_tier": opts.PlanTier,
+					"week.id":   weekID,
+				})
 			}
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
