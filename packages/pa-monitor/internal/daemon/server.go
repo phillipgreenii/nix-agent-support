@@ -23,6 +23,9 @@ type server struct {
 	state   *sharedState
 	// version is the build identifier reported on DaemonState. Set by serve().
 	version string
+	// planTier is the configured plan tier (e.g. "max_5x"). Reported on
+	// DaemonState.PlanTier so CLI clients can show it without re-parsing config.
+	planTier string
 	// bridges tracks cmux-bridge registrations so RegisterBridge handlers
 	// can update last-seen and the poller can refine "cmux" terminal-host
 	// labels with bridge status.
@@ -368,6 +371,7 @@ func (s *server) buildState() *pb.DaemonState {
 	state.Now = timestamppb.Now()
 	state.DaemonUptimeSeconds = uint64(time.Since(s.started).Seconds())
 	state.DaemonVersion = s.version
+	state.PlanTier = s.planTier
 	active, _ := s.state.caffeinateView()
 	state.CaffeinateActive = active
 	s.state.mu.RLock()
@@ -389,10 +393,11 @@ func (s *server) buildState() *pb.DaemonState {
 // bridges + cmuxAncestor are both optional; when nil the RegisterBridge
 // handler becomes a no-op success and poller-side cmux refinement falls
 // back to a bare "cmux" label.
-func serve(lis net.Listener, state *sharedState, version string, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version, planTier string, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version
+	srv.planTier = planTier
 	srv.bridges = bridges
 	srv.cmuxAncestor = cmuxAncestor
 	pb.RegisterPaMonitorServer(gs, srv)

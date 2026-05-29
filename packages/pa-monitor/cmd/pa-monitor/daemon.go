@@ -113,6 +113,7 @@ func runDaemon(args []string) {
 		BridgeRegistry:      bridgeRegistry,
 		CmuxAncestor:        cmuxAncestor,
 		Detectors: []labels.Detector{
+			detectors.DefaultScope{}, // sets workspace.scope=personal; Gascity overrides for GC sessions
 			detectors.Terminal{},
 			detectors.Gascity{},
 			detectors.Repo{},

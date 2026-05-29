@@ -44,11 +44,17 @@ func TestFormatStatusSessionsTerminalErrorAnnotation(t *testing.T) {
 	if out == "" {
 		t.Fatal("expected non-empty output for session with terminal error, got empty")
 	}
-	if !strings.Contains(out, "error:unknown") {
-		t.Errorf("expected 'error:unknown' in output, got:\n%s", out)
+	if !strings.Contains(out, "unknown") {
+		t.Errorf("expected error kind 'unknown' in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "sid-1") {
-		t.Errorf("expected session id 'sid-1' in output, got:\n%s", out)
+		t.Errorf("expected session label 'sid-1' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ERROR") {
+		t.Errorf("expected ERROR header in tabular output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "TERM") {
+		t.Errorf("expected TERM header in tabular output, got:\n%s", out)
 	}
 }
 
@@ -65,8 +71,8 @@ func TestFormatStatusSessionsNudgeAnnotation(t *testing.T) {
 	if out == "" {
 		t.Fatal("expected non-empty output for session with pending nudge, got empty")
 	}
-	if !strings.Contains(out, "nudge:[disrupted,manual]") {
-		t.Errorf("expected nudge annotation in output, got:\n%s", out)
+	if !strings.Contains(out, "[disrupted,manual]") {
+		t.Errorf("expected nudge column '[disrupted,manual]' in output, got:\n%s", out)
 	}
 }
 

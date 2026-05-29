@@ -49,71 +49,108 @@ func stateFromDaemon(s *pb.DaemonState) bridgeState {
 // Returns curr so callers can `prev = diffAndLog(prev, curr, log)`.
 func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
 	if !prev.initialized {
-		log(fmt.Sprintf("initial state: caffeinate=%v auto_resume=%v",
-			curr.caffeinateActive, curr.autoResumeEnabled))
+		log(fmt.Sprintf("initial state: %s, %s",
+			caffeinatePhrase(curr.caffeinateActive),
+			autoNudgePhrase(curr.autoResumeEnabled)))
 		return curr
 	}
 	if prev.caffeinateActive != curr.caffeinateActive {
-		log(fmt.Sprintf("caffeinate -> %v", curr.caffeinateActive))
+		log(caffeinatePhrase(curr.caffeinateActive))
 	}
 	if prev.autoResumeEnabled != curr.autoResumeEnabled {
-		log(fmt.Sprintf("auto_resume -> %v", curr.autoResumeEnabled))
+		log(autoNudgePhrase(curr.autoResumeEnabled))
 	}
 	return curr
 }
 
+func caffeinatePhrase(on bool) string {
+	if on {
+		return "Caffeinated Enabled"
+	}
+	return "Caffeinated Disabled"
+}
+
+func autoNudgePhrase(on bool) string {
+	if on {
+		return "Auto Nudge Enabled"
+	}
+	return "Auto Nudge Disabled"
+}
+
+// bridgeSessionInfo is the display tuple the bridge logs for one session.
+// SessionID is the stable identifier (always present); Name is the
+// human-set label (may be empty).
+type bridgeSessionInfo struct {
+	SessionID string
+	Name      string
+}
+
 // bridgeSessions is the set of sessions visible in this bridge's cmux
-// workspace at one moment in time. Keyed by PID. Value is a display name
-// (the session's Name, falling back to SessionID when Name is empty).
+// workspace at one moment in time. Keyed by PID.
 //
 // initialized matches the bridgeState convention: false → emit the full
 // list once; true → only emit add/remove deltas thereafter.
 type bridgeSessions struct {
 	initialized bool
-	byPID       map[int]string
+	byPID       map[int]bridgeSessionInfo
 }
 
 // sessionsFromDaemon extracts the per-workspace session set from a
 // DaemonState message.
 func sessionsFromDaemon(s *pb.DaemonState, ws string) bridgeSessions {
-	out := bridgeSessions{initialized: true, byPID: map[int]string{}}
+	out := bridgeSessions{initialized: true, byPID: map[int]bridgeSessionInfo{}}
 	for _, d := range s.GetDirs() {
 		for _, sv := range d.GetSessions() {
 			if sv.GetCmuxWorkspaceId() != ws {
 				continue
 			}
-			name := sv.GetName()
-			if name == "" {
-				name = sv.GetSessionId()
+			out.byPID[int(sv.GetPid())] = bridgeSessionInfo{
+				SessionID: sv.GetSessionId(),
+				Name:      sv.GetName(),
 			}
-			out.byPID[int(sv.GetPid())] = name
 		}
 	}
 	return out
 }
 
-// diffSessionsAndLog emits "+pid name" for each new session and
-// "-pid name" for each session that closed since the last tick. On the
-// initial tick (prev.initialized == false) it emits a "+pid name" line
-// for every session it currently sees so pane operators get a full
-// roster on bridge startup.
+// formatSessionEntry renders the per-session log line content used by both
+// initial-roster and add/remove deltas. Format: "<pid> <sessionid>/<name>"
+// when both fields are non-empty; falls back to whichever is present.
+func formatSessionEntry(pid int, info bridgeSessionInfo) string {
+	switch {
+	case info.SessionID != "" && info.Name != "":
+		return fmt.Sprintf("%d %s/%s", pid, info.SessionID, info.Name)
+	case info.SessionID != "":
+		return fmt.Sprintf("%d %s", pid, info.SessionID)
+	case info.Name != "":
+		return fmt.Sprintf("%d %s", pid, info.Name)
+	default:
+		return fmt.Sprintf("%d <unknown>", pid)
+	}
+}
+
+// diffSessionsAndLog emits "+<pid> <sessionid>/<name>" for each new session
+// and "-<pid> <sessionid>/<name>" for each session that closed since the
+// last tick. On the initial tick (prev.initialized == false) it emits a
+// "+" line for every session it currently sees so pane operators get a
+// full roster on bridge startup.
 //
 // Returns curr so callers can `prev = diffSessionsAndLog(prev, curr, log)`.
 func diffSessionsAndLog(prev, curr bridgeSessions, log func(string)) bridgeSessions {
 	if !prev.initialized {
-		for pid, name := range curr.byPID {
-			log(fmt.Sprintf("+%d %s", pid, name))
+		for pid, info := range curr.byPID {
+			log("+" + formatSessionEntry(pid, info))
 		}
 		return curr
 	}
-	for pid, name := range curr.byPID {
+	for pid, info := range curr.byPID {
 		if _, ok := prev.byPID[pid]; !ok {
-			log(fmt.Sprintf("+%d %s", pid, name))
+			log("+" + formatSessionEntry(pid, info))
 		}
 	}
-	for pid, name := range prev.byPID {
+	for pid, info := range prev.byPID {
 		if _, ok := curr.byPID[pid]; !ok {
-			log(fmt.Sprintf("-%d %s", pid, name))
+			log("-" + formatSessionEntry(pid, info))
 		}
 	}
 	return curr
@@ -320,6 +357,7 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string) cmuxstatus.Snapshot 
 
 	out := cmuxstatus.Snapshot{
 		CaffeinateOn: state.GetCaffeinateActive(),
+		NudgeOn:      state.GetAutoResumeEnabled(),
 	}
 	switch {
 	case working > 0:

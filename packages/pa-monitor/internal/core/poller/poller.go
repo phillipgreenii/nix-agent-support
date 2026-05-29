@@ -112,7 +112,15 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		// the cmux subcase is then refined every poll against BridgeRegistry
 		// (cheap, in-memory) so users see live "cmux (bridge disconnected)"
 		// transitions without having to wait for the session PID to recycle.
-		if host, hit := p.terminalHostCache[s.PID]; hit {
+		//
+		// Special case: cached "unknown" results are re-probed each tick.
+		// Detection can transiently fail (e.g. tmux pane created between
+		// `ps` and `list-panes`, or the tmux server briefly absent), and
+		// caching "unknown" for the PID lifetime locks in that wrong answer.
+		// Re-probing is cheap: the signaler-level cache (tmuxCacheTTL=2s,
+		// CmuxSignaler.surfaceCacheTTL similar) absorbs the cost across
+		// sessions in a single tick.
+		if host, hit := p.terminalHostCache[s.PID]; hit && host != "unknown" {
 			s.TerminalHost = host
 		} else {
 			s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)

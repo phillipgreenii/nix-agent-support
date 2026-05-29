@@ -18,8 +18,8 @@ func TestControlsTierContent(t *testing.T) {
 		{
 			name:     "wide",
 			width:    140,
-			wantAll:  []string{"Caffeinated Enabled", "tokens", "cost", "active", "all", "name", "id", "Auto Nudge Enabled", "[N] nudge", "[?]", "[q]"},
-			wantNone: []string{"[C]●", "[C] ●", "[t]tok"},
+			wantAll:  []string{"[C] ● on", "tokens", "cost", "active", "all", "name", "id", "[R] ● on", "[N] nudge", "[?]", "[q]"},
+			wantNone: []string{"[C]●", "Caffeinated Enabled", "Auto Nudge Enabled", "[t]tok"},
 		},
 		{
 			name:     "narrow",

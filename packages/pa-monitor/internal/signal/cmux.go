@@ -219,14 +219,18 @@ func (c *CmuxSignaler) cachedSurfaces() (map[int]surfaceLoc, error) {
 //
 // Steps:
 //  1. Reuse the cached surface enumeration (or refresh it).
-//  2. Look up pid in the surface map.
+//  2. Look up pid in the surface map; if the agent pid isn't directly in any
+//     surface's tty_process_pids (common when the agent is a child of a shell
+//     under the cmux pane), walk ancestors until a match is found. Mirrors
+//     the Detect-via-ancestry behavior in FindCmuxServerAncestor — otherwise
+//     Detect would return true while Send returned "no cmux surface found".
 //  3. cmux send + cmux send-key enter against the matched workspace+surface.
 func (c *CmuxSignaler) Send(pid int, text string) error {
 	locs, err := c.cachedSurfaces()
 	if err != nil {
 		return fmt.Errorf("cmux enumerate: %w", err)
 	}
-	loc, ok := locs[pid]
+	loc, ok := c.findSurfaceForPID(locs, pid)
 	if !ok {
 		return fmt.Errorf("signal: no cmux surface found for pid %d", pid)
 	}
@@ -239,6 +243,28 @@ func (c *CmuxSignaler) Send(pid int, text string) error {
 		return fmt.Errorf("cmux send-key: %w", err)
 	}
 	return nil
+}
+
+// findSurfaceForPID returns the surfaceLoc whose tty_process_pids contains
+// pid or one of pid's ancestors. Walks parents until the cmux server PID is
+// hit or no further parent is available, mirroring the ancestry approach
+// used by Detect. Returns (zero, false) if no surface matches.
+func (c *CmuxSignaler) findSurfaceForPID(locs map[int]surfaceLoc, pid int) (surfaceLoc, bool) {
+	seen := map[int]bool{}
+	for {
+		if pid < 1 || seen[pid] {
+			return surfaceLoc{}, false
+		}
+		seen[pid] = true
+		if loc, ok := locs[pid]; ok {
+			return loc, true
+		}
+		ppid, err := c.parentPID(pid)
+		if err != nil || ppid < 1 || ppid == pid {
+			return surfaceLoc{}, false
+		}
+		pid = ppid
+	}
 }
 
 // enumerateSurfaces returns a flat map keyed by every pid in any surface's

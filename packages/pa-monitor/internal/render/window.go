@@ -21,6 +21,27 @@ func LastVisibleIdx(rows []Row, offset, budget int) int {
 	return last
 }
 
+// EffectiveLastVis returns the last row index that will be visible when
+// RenderWindow / RenderWindowTree is called with the given scrollOffset and
+// bodyHeight. It accounts for the rows reserved by the top ("↑ N sessions")
+// and bottom ("↓ N sessions") scroll indicators. Use this from scroll-sync
+// code so the visible-row math matches what the renderer actually shows.
+func EffectiveLastVis(rows []Row, scrollOffset, bodyHeight int) int {
+	if len(rows) == 0 || bodyHeight <= 0 {
+		return scrollOffset - 1
+	}
+	budget := bodyHeight
+	if scrollOffset > 0 {
+		budget--
+	}
+	lastVis := LastVisibleIdx(rows, scrollOffset, budget)
+	if lastVis < len(rows)-1 {
+		budget--
+		lastVis = LastVisibleIdx(rows, scrollOffset, budget)
+	}
+	return lastVis
+}
+
 // stickyDir returns the DirIdx whose header is above scrollOffset but whose
 // sessions are within the visible window. Returns -1 when no pin is needed.
 func stickyDir(rows []Row, scrollOffset int) int {

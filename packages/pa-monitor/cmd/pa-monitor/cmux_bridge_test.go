@@ -37,8 +37,8 @@ func TestDiffAndLogCaffeinateFlip(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "caffeinate") || !strings.Contains(lines[0], "true") {
-		t.Fatalf("expected caffeinate flip line referencing true, got %q", lines[0])
+	if !strings.Contains(lines[0], "Caffeinated Enabled") {
+		t.Fatalf("expected caffeinate-on phrase, got %q", lines[0])
 	}
 }
 
@@ -52,8 +52,8 @@ func TestDiffAndLogAutoResumeFlip(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "auto_resume") || !strings.Contains(lines[0], "false") {
-		t.Fatalf("expected auto_resume flip line referencing false, got %q", lines[0])
+	if !strings.Contains(lines[0], "Auto Nudge Disabled") {
+		t.Fatalf("expected auto-nudge-off phrase, got %q", lines[0])
 	}
 }
 
@@ -71,11 +71,11 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	if !strings.Contains(lines[0], "initial state") {
 		t.Fatalf("expected line to mention 'initial state', got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], "caffeinate=true") {
-		t.Fatalf("expected initial-state line to include caffeinate=true, got %q", lines[0])
+	if !strings.Contains(lines[0], "Caffeinated Enabled") {
+		t.Fatalf("expected initial-state line to include 'Caffeinated Enabled', got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], "auto_resume=true") {
-		t.Fatalf("expected initial-state line to include auto_resume=true, got %q", lines[0])
+	if !strings.Contains(lines[0], "Auto Nudge Enabled") {
+		t.Fatalf("expected initial-state line to include 'Auto Nudge Enabled', got %q", lines[0])
 	}
 	if !got.initialized {
 		t.Fatalf("expected returned state to be marked initialized")
@@ -95,12 +95,12 @@ func TestDiffAndLogBothFlip(t *testing.T) {
 }
 
 // TestDiffSessionsInitialEmitsFullRoster: on the first observation we emit
-// a "+pid name" line for every session in the workspace so pane operators
-// get a roster at bridge startup.
+// a "+pid sid/name" line for every session in the workspace so pane
+// operators get a roster at bridge startup.
 func TestDiffSessionsInitialEmitsFullRoster(t *testing.T) {
-	curr := bridgeSessions{initialized: true, byPID: map[int]string{
-		1234: "feature-x",
-		5678: "scratch",
+	curr := bridgeSessions{initialized: true, byPID: map[int]bridgeSessionInfo{
+		1234: {SessionID: "sid-a", Name: "feature-x"},
+		5678: {SessionID: "sid-b", Name: "scratch"},
 	}}
 	var lines []string
 	diffSessionsAndLog(bridgeSessions{}, curr, captureLog(&lines))
@@ -108,37 +108,52 @@ func TestDiffSessionsInitialEmitsFullRoster(t *testing.T) {
 		t.Fatalf("expected 2 initial-roster lines, got %d: %v", len(lines), lines)
 	}
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "+1234 feature-x") {
-		t.Errorf("missing +1234 feature-x in:\n%s", joined)
+	if !strings.Contains(joined, "+1234 sid-a/feature-x") {
+		t.Errorf("missing +1234 sid-a/feature-x in:\n%s", joined)
 	}
-	if !strings.Contains(joined, "+5678 scratch") {
-		t.Errorf("missing +5678 scratch in:\n%s", joined)
+	if !strings.Contains(joined, "+5678 sid-b/scratch") {
+		t.Errorf("missing +5678 sid-b/scratch in:\n%s", joined)
 	}
 }
 
 // TestDiffSessionsLogsAdditionAndRemoval: + when a new pid appears, - when
 // a known pid disappears; identical sets emit nothing.
 func TestDiffSessionsLogsAdditionAndRemoval(t *testing.T) {
-	prev := bridgeSessions{initialized: true, byPID: map[int]string{1234: "old"}}
-	curr := bridgeSessions{initialized: true, byPID: map[int]string{5678: "new"}}
+	prev := bridgeSessions{initialized: true, byPID: map[int]bridgeSessionInfo{1234: {SessionID: "sid-old", Name: "old"}}}
+	curr := bridgeSessions{initialized: true, byPID: map[int]bridgeSessionInfo{5678: {SessionID: "sid-new", Name: "new"}}}
 	var lines []string
 	diffSessionsAndLog(prev, curr, captureLog(&lines))
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "+5678 new") {
-		t.Errorf("expected +5678 new in:\n%s", joined)
+	if !strings.Contains(joined, "+5678 sid-new/new") {
+		t.Errorf("expected +5678 sid-new/new in:\n%s", joined)
 	}
-	if !strings.Contains(joined, "-1234 old") {
-		t.Errorf("expected -1234 old in:\n%s", joined)
+	if !strings.Contains(joined, "-1234 sid-old/old") {
+		t.Errorf("expected -1234 sid-old/old in:\n%s", joined)
 	}
 }
 
 // TestDiffSessionsSilentWhenUnchanged: identical session sets across two
 // ticks emit no lines.
 func TestDiffSessionsSilentWhenUnchanged(t *testing.T) {
-	same := bridgeSessions{initialized: true, byPID: map[int]string{1234: "feature-x"}}
+	same := bridgeSessions{initialized: true, byPID: map[int]bridgeSessionInfo{1234: {SessionID: "sid-a", Name: "feature-x"}}}
 	var lines []string
 	diffSessionsAndLog(same, same, captureLog(&lines))
 	if len(lines) != 0 {
 		t.Fatalf("expected no log lines for unchanged set, got %v", lines)
+	}
+}
+
+// TestFormatSessionEntryFallbacks: when SessionID or Name is empty,
+// formatSessionEntry uses whichever is present rather than emitting an
+// empty "/" separator.
+func TestFormatSessionEntryFallbacks(t *testing.T) {
+	if got := formatSessionEntry(1, bridgeSessionInfo{SessionID: "sid"}); got != "1 sid" {
+		t.Errorf("sid-only fallback: got %q want %q", got, "1 sid")
+	}
+	if got := formatSessionEntry(2, bridgeSessionInfo{Name: "n"}); got != "2 n" {
+		t.Errorf("name-only fallback: got %q want %q", got, "2 n")
+	}
+	if got := formatSessionEntry(3, bridgeSessionInfo{}); got != "3 <unknown>" {
+		t.Errorf("empty fallback: got %q want %q", got, "3 <unknown>")
 	}
 }

@@ -140,12 +140,12 @@ func (m *Model) syncScroll() {
 		return
 	}
 	if cursorIdx < m.scrollOffset {
-		for m.scrollOffset > 0 && render.LastVisibleIdx(m.flatRows, m.scrollOffset-1, bodyHeight) >= cursorIdx {
+		for m.scrollOffset > 0 && render.EffectiveLastVis(m.flatRows, m.scrollOffset-1, bodyHeight) >= cursorIdx {
 			m.scrollOffset--
 		}
 		return
 	}
-	for m.scrollOffset < len(m.flatRows) && render.LastVisibleIdx(m.flatRows, m.scrollOffset, bodyHeight) < cursorIdx {
+	for m.scrollOffset < len(m.flatRows) && render.EffectiveLastVis(m.flatRows, m.scrollOffset, bodyHeight) < cursorIdx {
 		m.scrollOffset++
 	}
 }

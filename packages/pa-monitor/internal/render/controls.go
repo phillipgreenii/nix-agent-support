@@ -29,16 +29,14 @@ type ControlsOpts struct {
 
 // Controls returns a single-row, tier-aware controls line:
 //
-//	WIDE   ≥120  ● Caffeinated Enabled  [t] tokens · cost  [a] active · all  [n] name · id  Auto Nudge Enabled  [N] nudge  [?]  [q]
+//	WIDE   ≥120  ● [C] ● on  [t] tokens · cost  [a] active · all  [n] name · id  [R] ● on  [N] nudge  [?]  [q]
 //	NARROW 80–119 ● [C]●  [t] tok · cost  [a] act · all  [n] nm · id  [R]●  [N]nudge  [?][q]
 //	TINY   <80   ● [C]●  [t]tok  [a]act  [n]nm  [R]●  [N]nudge  [?][q]
 //
 // The leading glyph is the daemon RPC connection indicator: filled "●" when
 // the latest poll succeeded, hollow "○" when offline. The active half of
-// each toggle is highlighted via theme.ActiveToggle. At WIDE the caffeinate
-// and auto-nudge toggles use prose ("Enabled" / "Disabled"); at NARROW/TINY
-// they collapse to glyphs to fit the width budget. At TINY only the active
-// half of each binary toggle is shown.
+// each toggle is highlighted via theme.ActiveToggle. At TINY only the active
+// half of each toggle is shown.
 func Controls(opts ControlsOpts) string {
 	th := opts.Theme
 
@@ -52,27 +50,21 @@ func Controls(opts ControlsOpts) string {
 		daemonGlyph = th.Dormant.Render("○")
 	}
 
-	// Wide-form labels: prose "Enabled" / "Disabled". Highlight (bold/colour)
-	// the phrase when the feature is on; render plain when off. Grace
-	// countdown appended in parens when caffeinate is in its post-work
-	// cooldown. The [C] / [R] key hints are dropped at WIDE -- the prose
-	// labels are clear enough on their own, and the help modal ([?]) lists
-	// every keybinding.
-	caffWideOn := "Caffeinated Enabled"
-	if opts.GraceRemaining > 0 {
-		caffWideOn = fmt.Sprintf("Caffeinated Enabled (%ds)", int(opts.GraceRemaining.Seconds()))
-	}
-	caffWide := "Caffeinated Disabled"
+	caffWide := "○ off"
 	caffGlyph := "○"
 	if opts.CaffeinateOn {
 		caffGlyph = th.ActiveToggle.Render("●")
-		caffWide = th.ActiveToggle.Render(caffWideOn)
+		if opts.GraceRemaining > 0 {
+			caffWide = th.ActiveToggle.Render(fmt.Sprintf("● on %ds", int(opts.GraceRemaining.Seconds())))
+		} else {
+			caffWide = th.ActiveToggle.Render("● on")
+		}
 	}
 
-	autoResumeWide := "Auto Nudge Disabled"
+	autoResumeWide := "○ off"
 	autoResumeGlyph := "○"
 	if opts.AutoResume {
-		autoResumeWide = th.ActiveToggle.Render("Auto Nudge Enabled")
+		autoResumeWide = th.ActiveToggle.Render("● on")
 		autoResumeGlyph = th.ActiveToggle.Render("●")
 	}
 
@@ -101,7 +93,7 @@ func Controls(opts ControlsOpts) string {
 		} else {
 			nameLabel = th.ActiveToggle.Render("name")
 		}
-		fmt.Fprintf(&sb, "%s  [t] %s · %s  [a] %s · %s  [n] %s · %s  %s  [N] nudge  [?]  [q]",
+		fmt.Fprintf(&sb, "[C] %s  [t] %s · %s  [a] %s · %s  [n] %s · %s  [R] %s  [N] nudge  [?]  [q]",
 			caffWide, tokLabel, costLabel, actLabel, allLabel, nameLabel, idLabel, autoResumeWide)
 	case wrap.TierNarrow:
 		tokLabel, costLabel := "tok", "cost"
