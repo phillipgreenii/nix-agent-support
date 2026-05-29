@@ -139,7 +139,10 @@ func (c *CmuxSignaler) cachedCmuxServerPIDs() ([]int, error) {
 }
 
 // enumerateCmuxServerPIDs runs `ps -A -o pid,comm` and returns the PIDs
-// whose comm column equals "cmux".
+// whose comm column resolves to a "cmux" executable. On macOS the comm
+// column may be either a bare basename ("cmux") or an absolute path
+// into a .app bundle ("/nix/store/.../cmux.app/Contents/MacOS/cmux").
+// We take the path's basename and compare so both shapes match.
 func (c *CmuxSignaler) enumerateCmuxServerPIDs(ctx context.Context) ([]int, error) {
 	out, err := c.run(ctx, "ps", "-A", "-o", "pid,comm")
 	if err != nil {
@@ -147,20 +150,27 @@ func (c *CmuxSignaler) enumerateCmuxServerPIDs(ctx context.Context) ([]int, erro
 	}
 	var pids []int
 	for line := range strings.SplitSeq(string(out), "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 2 {
+		// Manual split: ps formats this as <padded-pid> <comm>; comm may
+		// itself contain spaces if the executable's path has any (rare
+		// but possible on macOS / NixOS). strings.Fields would shred those.
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == "" {
 			continue
 		}
-		// ps may include a header "PID COMMAND" — skip non-numeric first column.
-		pid, err := strconv.Atoi(fields[0])
+		i := strings.IndexAny(trimmed, " \t")
+		if i <= 0 {
+			continue
+		}
+		pidStr, comm := trimmed[:i], strings.TrimSpace(trimmed[i+1:])
+		pid, err := strconv.Atoi(pidStr)
 		if err != nil {
-			continue
+			continue // header row or junk
 		}
-		// `comm` is the executable's basename. Some shells (zsh launched from
-		// /usr/local/bin/cmux) may report just "cmux"; absolute-path variants
-		// would still tail to "cmux" after a basename, but ps already gives us
-		// the basename, so direct equality is sufficient.
-		if fields[1] == "cmux" {
+		base := comm
+		if j := strings.LastIndexByte(comm, '/'); j >= 0 {
+			base = comm[j+1:]
+		}
+		if base == "cmux" {
 			pids = append(pids, pid)
 		}
 	}

@@ -140,3 +140,24 @@ func TestCmuxFindCmuxServerAncestor_NoCmuxReturnsZero(t *testing.T) {
 		t.Error("FindCmuxServerAncestor = ok, want !ok (no cmux processes exist)")
 	}
 }
+
+// TestCmuxFindCmuxServerAncestor_AcceptsPathPrefixedComm regresses a real
+// user-reported bug: on macOS the cmux .app bundle's comm column is the
+// absolute path "/nix/store/.../cmux.app/Contents/MacOS/cmux" rather than
+// the bare basename. The detector must take the path's basename and match
+// on that; otherwise every cmux session shows up as "unknown" terminal.
+func TestCmuxFindCmuxServerAncestor_AcceptsPathPrefixedComm(t *testing.T) {
+	procs := []fakeProc{
+		{pid: 1623, comm: "/nix/store/13m0jxrl2i6p71zcd998xf77bpz8zyjn-cmux-0.64.10/Applications/cmux.app/Contents/MacOS/cmux", parent: 1},
+		{pid: 5001, comm: "zsh", parent: 1623},
+		{pid: 5002, comm: "claude", parent: 5001},
+	}
+	sig := &signal.CmuxSignaler{RunCmd: fakePsRun(procs)}
+	server, ok := sig.FindCmuxServerAncestor(5002)
+	if !ok {
+		t.Fatal("FindCmuxServerAncestor returned !ok for a session under a path-prefixed cmux comm")
+	}
+	if server != 1623 {
+		t.Errorf("FindCmuxServerAncestor = %d, want 1623", server)
+	}
+}

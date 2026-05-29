@@ -49,6 +49,7 @@ func runStatus(args []string) {
 			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
 	}
 	fmt.Printf("caffeinate:    %v\n", state.GetCaffeinateActive())
+	fmt.Printf("auto_resume:   %v\n", state.GetAutoResumeEnabled())
 
 	// Collect per-session details (LastError + PendingNudge) and print
 	// annotations only when at least one session has something noteworthy.
