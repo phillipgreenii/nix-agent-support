@@ -27,6 +27,7 @@ type RemotePoller struct {
 	lastAutoResumeEnabled bool
 	lastAutoResumeDelay   time.Duration
 	lastDaemonVersion     string
+	lastDaemonNow         time.Time
 }
 
 // NewRemotePoller constructs a poller. The first Snapshot call performs
@@ -90,7 +91,19 @@ func (r *RemotePoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, err
 	r.lastAutoResumeEnabled = state.GetAutoResumeEnabled()
 	r.lastAutoResumeDelay = time.Duration(state.GetAutoResumeDelayS()) * time.Second
 	r.lastDaemonVersion = state.GetDaemonVersion()
+	if ts := state.GetNow(); ts != nil {
+		r.lastDaemonNow = ts.AsTime()
+	}
 	return tree, anyWorking(tree), nil
+}
+
+// LastDaemonNow returns the daemon-side wallclock observed on the most
+// recent successful GetState. Zero value means "not yet known". Used by
+// the TUI to discard stale snapshot data after a user-triggered RPC.
+func (r *RemotePoller) LastDaemonNow() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastDaemonNow
 }
 
 // LastAutoResumeEnabled returns the auto-resume flag from the most recent

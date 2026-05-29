@@ -76,6 +76,12 @@ type Model struct {
 	autoResumeEnabled bool
 	autoResumeDelay   time.Duration
 
+	// autoResumeUserAt marks when the user last toggled auto-resume via R.
+	// pollResultMsg only overwrites autoResumeEnabled if the snapshot's
+	// daemon-side timestamp is AFTER autoResumeUserAt, preventing an
+	// in-flight stale poll from undoing the optimistic flip.
+	autoResumeUserAt time.Time
+
 	// clientVersion is this TUI binary's build identifier (set by NewModel from
 	// Options.Version). daemonVersion is the connected daemon's version,
 	// populated from DaemonState via pollResultMsg.meta. Both shown in [?].

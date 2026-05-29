@@ -49,9 +49,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.polling = false
 		m.tree = msg.tree
 		m.anyWorking = msg.anyWorking
-		m.autoResumeEnabled = msg.meta.AutoResumeEnabled
 		m.autoResumeDelay = msg.meta.AutoResumeDelay
 		m.daemonVersion = msg.meta.DaemonVersion
+		// Adopt the daemon-reported toggle values only when the snapshot's
+		// daemon timestamp is AFTER the user's last in-TUI toggle. An older
+		// snapshot was captured before the SetAutoResume / Caffeinate RPC
+		// committed, so its value is stale and would undo the optimistic
+		// flip; ignore it. Zero DaemonNow (legacy / no MetaPoller) always
+		// adopts so the local-poller / first-tick path keeps working.
+		if msg.meta.DaemonNow.IsZero() || msg.meta.DaemonNow.After(m.autoResumeUserAt) {
+			m.autoResumeEnabled = msg.meta.AutoResumeEnabled
+		}
 		if m.caffeinate != nil {
 			m.caffeinate.SetToggle(m.caffeinateOn)
 			m.caffeinate.Tick(msg.anyWorking)

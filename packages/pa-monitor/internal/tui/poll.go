@@ -14,12 +14,18 @@ type Poller interface {
 }
 
 // MetaPoller is an optional extension: pollers that have access to richer
-// daemon-state (e.g. RemotePoller) implement this trio so the TUI can read
+// daemon-state (e.g. RemotePoller) implement this so the TUI can read
 // view-state that doesn't live on the aggregate.Tree.
 type MetaPoller interface {
 	LastAutoResumeEnabled() bool
 	LastAutoResumeDelay() time.Duration
 	LastDaemonVersion() string
+	// LastDaemonNow returns the daemon-side wallclock observed on the most
+	// recent GetState. Used by the Model to break optimistic-update races:
+	// an in-flight poll that captured state BEFORE a user toggle would
+	// otherwise overwrite the optimistic value with stale data; comparing
+	// daemonNow against the user-action time tells us whether to adopt.
+	LastDaemonNow() time.Time
 }
 
 // DaemonMeta carries the values pulled off a MetaPoller and threaded through
@@ -28,6 +34,7 @@ type DaemonMeta struct {
 	AutoResumeEnabled bool
 	AutoResumeDelay   time.Duration
 	DaemonVersion     string
+	DaemonNow         time.Time
 }
 
 type pollTickMsg struct{}
@@ -56,6 +63,7 @@ func (m *Model) pollNow() tea.Cmd {
 				AutoResumeEnabled: mp.LastAutoResumeEnabled(),
 				AutoResumeDelay:   mp.LastAutoResumeDelay(),
 				DaemonVersion:     mp.LastDaemonVersion(),
+				DaemonNow:         mp.LastDaemonNow(),
 			}
 		}
 		return pollResultMsg{tree: tree, anyWorking: working, meta: meta}

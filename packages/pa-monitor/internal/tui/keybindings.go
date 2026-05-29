@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
@@ -159,8 +161,11 @@ func handleToggleCaffeinate(m *Model) tea.Cmd {
 
 func handleToggleAutoResume(m *Model) tea.Cmd {
 	want := !m.autoResumeEnabled
-	// Optimistic update; daemon confirmation arrives on the next TreeUpdatedMsg.
+	// Optimistic update. Stamp autoResumeUserAt so any pollResultMsg whose
+	// underlying daemon snapshot pre-dates this action does NOT overwrite the
+	// flipped value with stale data.
 	m.autoResumeEnabled = want
+	m.autoResumeUserAt = time.Now()
 	if m.onToggleAutoResume != nil {
 		m.onToggleAutoResume(want)
 	}
