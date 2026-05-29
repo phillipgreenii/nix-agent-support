@@ -24,6 +24,31 @@ and for mail use `gc mail <subcommand>` where subcommands are `inbox`, `send`,
 4. **Dispatch:** `gc sling <agent> <bead-id>` to route work to agents
 5. **Monitor:** `gc bd list` and `gc session peek <name>` to track progress
 
+## Deciding which rig owns the work (explicit triage)
+
+When you emit a bead during a conversation, decide which rig owns
+the work and use `gc --rig=<name> bd create …` so the bead is born
+in the target db. Categories:
+
+- **city** (work on this gc repo, `/Users/phillipg/gc`): use
+  `gc bd create` (no `--rig` flag — HQ is the city).
+- **ziprecruiter** (monorepo at `/Volumes/ziprecruiter/monorepo`):
+  use `gc --rig=ziprecruiter bd create`.
+- **personal** (one of `nix_overlay`, `nix_personal`,
+  `nix_repo_base`, `nix_ziprecruiter`, `nix_support_apps`,
+  `nix_agent_support`): use `gc --rig=<one-of-those> bd create`.
+
+If you cannot tell which rig owns the work, open a `type=triage`
+bead in hq instead:
+
+    gc bd create --type=triage \
+      --title="triage: <one-line>" \
+      --description="<enough context for triager>" \
+      --priority=2
+
+The triager will classify and route it asynchronously via the
+pgii-foremen pack (see HACKS.md HACK 17 for the wake mechanism).
+
 ## Working with rig beads
 
 Use `gc bd` to run bead commands against any rig from the city root:

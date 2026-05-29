@@ -384,23 +384,10 @@
                   test -f "$pack/agents/deacon/prompt.template.md"             || { echo "missing deacon/prompt.template.md"; exit 1; }
                   test -f "$pack/agents/operator/prompt.md"                    || { echo "missing operator/prompt.md"; exit 1; }
 
-                  # Foreman: agent.toml (post-template), no .template suffix, work_query under PACK_ROOT
-                  test -f "$pack/agents/foreman/agent.toml"                    || { echo "missing foreman/agent.toml"; exit 1; }
-                  ! test -f "$pack/agents/foreman/agent.toml.template"         || { echo "stale foreman/agent.toml.template"; exit 1; }
-                  test -f "$pack/agents/foreman/prompt.template.md"            || { echo "missing foreman/prompt.template.md"; exit 1; }
-                  test -x "$pack/agents/foreman/work_query.sh"                 || { echo "foreman/work_query.sh not exec"; exit 1; }
-                  grep -qE "work_query = \"$pack/agents/foreman/work_query\\.sh\"" "$pack/agents/foreman/agent.toml" \
-                    || { echo "PACK_ROOT not substituted in foreman agent.toml"; exit 1; }
-
-                  # Pool fields dropped per Phase 4 design
-                  ! grep -qE '(min|max)_active_sessions' "$pack/agents/foreman/agent.toml" \
-                    || { echo "foreman pool config still present (should be dropped)"; exit 1; }
-
-                  # Foreman prompt fix-up: pg-worker present, zr-worker absent
-                  grep -q 'pg-worker' "$pack/agents/foreman/prompt.template.md" \
-                    || { echo "pg-worker missing in foreman prompt"; exit 1; }
-                  ! grep -qE '\bzr-worker\b' "$pack/agents/foreman/prompt.template.md" \
-                    || { echo "zr-worker still in foreman prompt"; exit 1; }
+                  # Legacy foreman was retired 2026-05-29 (triage-extension
+                  # Phase 11). Verify it's gone — its responsibilities are
+                  # now in pgii-pack-foremen's three category foremen.
+                  ! test -e "$pack/agents/foreman"                             || { echo "legacy agents/foreman not removed"; exit 1; }
 
                   # Formula + 3 doctor checks
                   test -f "$pack/formulas/mol-deacon-patrol.toml"              || { echo "missing mol-deacon-patrol formula"; exit 1; }

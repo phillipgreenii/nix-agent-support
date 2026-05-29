@@ -67,6 +67,33 @@ escalation.
 7. **If you hit any ambiguity** about what "done" looks like beyond the
    acceptance criteria — escalate. Don't guess.
 
+## Wrong-rig escalation
+
+If, after claiming a bead, you determine the work doesn't belong in
+this rig — the code paths you'd touch live elsewhere, or the bead's
+metadata points at a different repo — do NOT proceed. Escalate:
+
+```bash
+gc mail send "${CATEGORY}-foreman" \
+  -s "ESCALATION: wrong-rig $BEAD_ID [HIGH]" \
+  -m "Bead is for <suspected rig>, not this rig. Evidence: <…>"
+gc bd update "$BEAD_ID" --add-label=gc:escalation --assignee="" --status=open
+```
+
+Where `${CATEGORY}` is derived from your current rig:
+
+- HQ → `city-foreman`
+- `ziprecruiter` → `zr-foreman`
+- any `nix_*` rig → `personal-foreman`
+
+Then exit cleanly. Do NOT touch the bead's code paths; the foreman
+will re-triage and emit a bead in the correct rig.
+
+(Note: bd 1.0.4 does NOT accept `--status=escalated` as a status
+value. The `gc:escalation` LABEL plus releasing the assignee is the
+correct signaling pattern — the new bead ends up back in the foreman
+work_queries via the label.)
+
 ## Startup
 
 ```bash

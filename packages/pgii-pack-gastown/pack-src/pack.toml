@@ -12,11 +12,10 @@
 #   agents/operator/       — user-pairing agent. Keeps the mayor
 #                            unblocked for coordination by absorbing
 #                            long user sessions.
-#   agents/foreman/        — tier-2 triage between worker pools and mayor.
-#                            Fills missing acceptance_criteria, resolves
-#                            worker escalations, mails mayor when human
-#                            input is required. On-demand, city scope,
-#                            opus model.
+#   (agents/foreman/ — RETIRED 2026-05-29 by triage-extension Phase 11.
+#    Its tier-2 triage responsibilities are split across three category
+#    foremen now in pgii-pack-foremen: city-foreman, zr-foreman,
+#    personal-foreman. Each operates in its own scope.)
 #   formulas/mol-deacon-patrol.toml — gastown's patrol formula, copied
 #                            here so deacon can pour its next-iteration
 #                            wisp without enabling the gastown pack.
@@ -47,6 +46,5 @@ mode = "always"
 template = "operator"
 mode = "always"
 
-[[named_session]]
-template = "foreman"
-mode = "on_demand"
+# Legacy `foreman` named_session retired 2026-05-29 (triage-extension
+# Phase 11). Use pgii-pack-foremen's category foremen instead.
