@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
@@ -22,7 +23,21 @@ type server struct {
 	state   *sharedState
 	// version is the build identifier reported on DaemonState. Set by serve().
 	version string
+	// bridges tracks cmux-bridge registrations so RegisterBridge handlers
+	// can update last-seen and the poller can refine "cmux" terminal-host
+	// labels with bridge status.
+	bridges *bridge.Registry
+	// cmuxAncestor is consulted in RegisterBridge to walk the caller-supplied
+	// bridge PID's ancestry to its cmux server PID, which is the registry
+	// key.
+	cmuxAncestor cmuxAncestryFn
 }
+
+// cmuxAncestryFn is the minimal slice of CmuxSignaler used by the
+// RegisterBridge handler: walk an arbitrary PID's ancestry to find its
+// cmux server PID. Function-shaped so tests can inject a fake without
+// constructing a CmuxSignaler.
+type cmuxAncestryFn func(pid int) (int, bool)
 
 func newServer(s *sharedState) *server {
 	return &server{started: time.Now(), state: s}
@@ -243,6 +258,33 @@ func (s *server) NudgeCancel(ctx context.Context, req *pb.NudgeCancelRequest) (*
 	return &pb.NudgeCancelResponse{CancelledSessionIds: sids}, nil
 }
 
+// RegisterBridge records or refreshes a cmux-bridge entry. The bridge
+// provides its workspace_id (for display/logging) and its own PID; the
+// daemon walks bridge_pid's ancestry to find the cmux server PID, which is
+// the actual registry key consulted by the poller's TerminalHost refinement.
+//
+// If the bridge PID has no cmux server ancestor (e.g. the bridge is running
+// outside cmux somehow, or the cmuxAncestor walker is unconfigured), the
+// call is a no-op success — the caller doesn't need to know how the daemon
+// resolves cmux membership.
+func (s *server) RegisterBridge(ctx context.Context, req *pb.RegisterBridgeRequest) (*pb.RegisterBridgeResponse, error) {
+	if s.bridges == nil || s.cmuxAncestor == nil {
+		return &pb.RegisterBridgeResponse{}, nil
+	}
+	bridgePID := int(req.GetBridgePid())
+	if bridgePID < 1 {
+		return nil, status.Error(codes.InvalidArgument, "bridge_pid must be > 0")
+	}
+	serverPID, ok := s.cmuxAncestor(bridgePID)
+	if !ok {
+		// No cmux server ancestor — caller isn't actually inside cmux. Silent
+		// success; the bridge's TerminalHost won't be refined but no harm done.
+		return &pb.RegisterBridgeResponse{}, nil
+	}
+	s.bridges.Register(req.GetWorkspaceId(), bridgePID, serverPID)
+	return &pb.RegisterBridgeResponse{}, nil
+}
+
 func (s *server) SetAutoResume(ctx context.Context, req *pb.SetAutoResumeRequest) (*pb.SetAutoResumeResponse, error) {
 	w := s.state.Watermarks()
 	if w == nil {
@@ -330,10 +372,16 @@ func (s *server) buildState() *pb.DaemonState {
 
 // serve runs the gRPC server on the given listener. Caller owns the
 // returned stop func.
-func serve(lis net.Listener, state *sharedState, version string) (*grpc.Server, func()) {
+//
+// bridges + cmuxAncestor are both optional; when nil the RegisterBridge
+// handler becomes a no-op success and poller-side cmux refinement falls
+// back to a bare "cmux" label.
+func serve(lis net.Listener, state *sharedState, version string, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version
+	srv.bridges = bridges
+	srv.cmuxAncestor = cmuxAncestor
 	pb.RegisterPaMonitorServer(gs, srv)
 
 	go func() {

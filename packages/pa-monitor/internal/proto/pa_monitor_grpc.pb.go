@@ -30,6 +30,7 @@ const (
 	PaMonitor_NudgeQueue_FullMethodName     = "/pa_monitor.v1.PaMonitor/NudgeQueue"
 	PaMonitor_NudgeCancel_FullMethodName    = "/pa_monitor.v1.PaMonitor/NudgeCancel"
 	PaMonitor_SetAutoResume_FullMethodName  = "/pa_monitor.v1.PaMonitor/SetAutoResume"
+	PaMonitor_RegisterBridge_FullMethodName = "/pa_monitor.v1.PaMonitor/RegisterBridge"
 )
 
 // PaMonitorClient is the client API for PaMonitor service.
@@ -69,6 +70,13 @@ type PaMonitorClient interface {
 	NudgeCancel(ctx context.Context, in *NudgeCancelRequest, opts ...grpc.CallOption) (*NudgeCancelResponse, error)
 	// SetAutoResume toggles the auto-resume feature daemon-wide.
 	SetAutoResume(ctx context.Context, in *SetAutoResumeRequest, opts ...grpc.CallOption) (*SetAutoResumeResponse, error)
+	// RegisterBridge announces a cmux-bridge to the daemon. Called by
+	// cmux-bridge on startup and as a periodic heartbeat. The daemon uses
+	// bridge_pid to derive the bridge's cmux server (parent ancestor named
+	// "cmux") and tracks last-seen so it can surface session terminal status
+	// (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
+	// the same cmux workspace.
+	RegisterBridge(ctx context.Context, in *RegisterBridgeRequest, opts ...grpc.CallOption) (*RegisterBridgeResponse, error)
 }
 
 type paMonitorClient struct {
@@ -198,6 +206,16 @@ func (c *paMonitorClient) SetAutoResume(ctx context.Context, in *SetAutoResumeRe
 	return out, nil
 }
 
+func (c *paMonitorClient) RegisterBridge(ctx context.Context, in *RegisterBridgeRequest, opts ...grpc.CallOption) (*RegisterBridgeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterBridgeResponse)
+	err := c.cc.Invoke(ctx, PaMonitor_RegisterBridge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PaMonitorServer is the server API for PaMonitor service.
 // All implementations must embed UnimplementedPaMonitorServer
 // for forward compatibility.
@@ -235,6 +253,13 @@ type PaMonitorServer interface {
 	NudgeCancel(context.Context, *NudgeCancelRequest) (*NudgeCancelResponse, error)
 	// SetAutoResume toggles the auto-resume feature daemon-wide.
 	SetAutoResume(context.Context, *SetAutoResumeRequest) (*SetAutoResumeResponse, error)
+	// RegisterBridge announces a cmux-bridge to the daemon. Called by
+	// cmux-bridge on startup and as a periodic heartbeat. The daemon uses
+	// bridge_pid to derive the bridge's cmux server (parent ancestor named
+	// "cmux") and tracks last-seen so it can surface session terminal status
+	// (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
+	// the same cmux workspace.
+	RegisterBridge(context.Context, *RegisterBridgeRequest) (*RegisterBridgeResponse, error)
 	mustEmbedUnimplementedPaMonitorServer()
 }
 
@@ -277,6 +302,9 @@ func (UnimplementedPaMonitorServer) NudgeCancel(context.Context, *NudgeCancelReq
 }
 func (UnimplementedPaMonitorServer) SetAutoResume(context.Context, *SetAutoResumeRequest) (*SetAutoResumeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetAutoResume not implemented")
+}
+func (UnimplementedPaMonitorServer) RegisterBridge(context.Context, *RegisterBridgeRequest) (*RegisterBridgeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterBridge not implemented")
 }
 func (UnimplementedPaMonitorServer) mustEmbedUnimplementedPaMonitorServer() {}
 func (UnimplementedPaMonitorServer) testEmbeddedByValue()                   {}
@@ -490,6 +518,24 @@ func _PaMonitor_SetAutoResume_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PaMonitor_RegisterBridge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterBridgeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaMonitorServer).RegisterBridge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaMonitor_RegisterBridge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaMonitorServer).RegisterBridge(ctx, req.(*RegisterBridgeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PaMonitor_ServiceDesc is the grpc.ServiceDesc for PaMonitor service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -536,6 +582,10 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetAutoResume",
 			Handler:    _PaMonitor_SetAutoResume_Handler,
+		},
+		{
+			MethodName: "RegisterBridge",
+			Handler:    _PaMonitor_RegisterBridge_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

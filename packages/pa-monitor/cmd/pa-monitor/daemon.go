@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
@@ -83,6 +84,23 @@ func runDaemon(args []string) {
 	// Ensure caffeinate is killed even if Run returns abnormally.
 	defer func() { _ = caffProc.Kill() }()
 
+	// cmux-bridge registry: tracks bridges that have called RegisterBridge,
+	// so the poller can refine "cmux" terminal-host labels into "cmux" /
+	// "cmux (no bridge)" / "cmux (bridge disconnected)". staleAfter of 30s
+	// gives bridges ~3 of their default 10s heartbeats before being marked
+	// stale; tune via the bridge's heartbeatInterval if you change it.
+	bridgeRegistry := bridge.NewRegistry(30 * time.Second)
+	// CmuxAncestor for the RegisterBridge handler. Fishes the package
+	// singleton CmuxSignaler out of DefaultSignalers() so the daemon's
+	// signal slice and the registry handler share a single ps-cache.
+	var cmuxAncestor func(int) (int, bool)
+	for _, sig := range signallayer.DefaultSignalers() {
+		if cs, ok := sig.(*signallayer.CmuxSignaler); ok {
+			cmuxAncestor = cs.FindCmuxServerAncestor
+			break
+		}
+	}
+
 	opts := daemon.RunOptions{
 		Paths:               paths,
 		Emitter:             emitter,
@@ -92,6 +110,8 @@ func runDaemon(args []string) {
 		InitialCaffeinateOn: rs.CaffeinateOn,
 		RuntimePath:         runtimePath,
 		Version:             version,
+		BridgeRegistry:      bridgeRegistry,
+		CmuxAncestor:        cmuxAncestor,
 		Detectors: []labels.Detector{
 			detectors.Terminal{},
 			detectors.Gascity{},
@@ -104,6 +124,7 @@ func runDaemon(args []string) {
 
 	if !*disablePoller {
 		p, blockTr, weekTr, weeklyFn := buildPoller(cfg)
+		p.BridgeRegistry = bridgeRegistry
 		opts.Poller = p
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr

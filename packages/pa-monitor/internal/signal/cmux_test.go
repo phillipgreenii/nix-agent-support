@@ -17,26 +17,6 @@ func stubEnv(m map[string]string) func(string) (string, bool) {
 	}
 }
 
-func TestCmuxDetectReturnsTrueWhenWorkspaceEnvSet(t *testing.T) {
-	// Detect now requires the pid to live in some cmux surface. Provide a surface
-	// containing the test pid; the env-set-only case is covered separately.
-	surfaces := []fakeSurface{{"workspace:1", "surface:1", []int{1234}}}
-	sig := &signal.CmuxSignaler{
-		RunCmd:    fakeCmuxRun(surfaces, nil),
-		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "ws-123"}),
-	}
-	if !sig.Detect(1234) {
-		t.Error("Detect = false, want true when CMUX_WORKSPACE_ID is set and pid is in a surface")
-	}
-}
-
-func TestCmuxDetectReturnsFalseWhenWorkspaceEnvUnset(t *testing.T) {
-	sig := &signal.CmuxSignaler{LookupEnv: stubEnv(map[string]string{})}
-	if sig.Detect(1234) {
-		t.Error("Detect = true, want false when CMUX_WORKSPACE_ID is unset")
-	}
-}
-
 // fakeCmuxRun returns a RunCmd that responds to `cmux --json top --processes`
 // with a synthesized JSON envelope built from `surfaces`, and to
 // `cmux send --workspace ... --surface ... <text>` /
@@ -171,56 +151,4 @@ func TestCmuxSendErrorsWhenNoSurfaceFound(t *testing.T) {
 	}
 }
 
-func TestCmuxDetectReturnsTrueOnlyWhenPidIsInCmuxSurface(t *testing.T) {
-	surfaces := []fakeSurface{
-		{"workspace:1", "surface:1", []int{100, 1000}},
-	}
-	sig := &signal.CmuxSignaler{
-		RunCmd:    fakeCmuxRun(surfaces, nil),
-		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "workspace:1"}),
-	}
-	if !sig.Detect(1000) {
-		t.Error("Detect(1000) = false, want true (pid 1000 in surface:1's tty_process_pids)")
-	}
-}
-
-func TestCmuxDetectReturnsFalseWhenPidNotInAnySurface(t *testing.T) {
-	surfaces := []fakeSurface{
-		{"workspace:1", "surface:1", []int{100, 1000}},
-	}
-	sig := &signal.CmuxSignaler{
-		RunCmd:    fakeCmuxRun(surfaces, nil),
-		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "workspace:1"}),
-	}
-	// 26168 is the VS Code extension Claude from the user's bug report —
-	// in cmux's env but not in any cmux surface.
-	if sig.Detect(26168) {
-		t.Error("Detect(26168) = true, want false (pid not in any surface's tty_process_pids)")
-	}
-}
-
-func TestCmuxDetectIsFastViaCache(t *testing.T) {
-	// Counts how many times the RunCmd is invoked for the JSON enumeration.
-	// All repeated Detects within 2s should share one underlying subprocess.
-	var enumCalls int
-	surfaces := []fakeSurface{
-		{"workspace:1", "surface:1", []int{1000}},
-	}
-	base := fakeCmuxRun(surfaces, nil)
-	counting := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if name == "cmux" && len(args) >= 3 && args[0] == "--json" && args[1] == "top" && args[2] == "--processes" {
-			enumCalls++
-		}
-		return base(ctx, name, args...)
-	}
-	sig := &signal.CmuxSignaler{
-		RunCmd:    counting,
-		LookupEnv: stubEnv(map[string]string{"CMUX_WORKSPACE_ID": "workspace:1"}),
-	}
-	for i := 0; i < 5; i++ {
-		sig.Detect(1000)
-	}
-	if enumCalls != 1 {
-		t.Errorf("enumeration ran %d times across 5 Detects; want 1 (cache should coalesce)", enumCalls)
-	}
-}
+// Detect ancestry-based behaviour lives in cmux_detect_test.go.

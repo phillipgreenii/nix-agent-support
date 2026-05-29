@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,6 +28,13 @@ type CmuxSignaler struct {
 	cacheAt   time.Time
 	cacheLocs map[int]surfaceLoc
 	cacheErr  error
+
+	// Independent cache for cmux server PIDs (used by ancestry-based Detect).
+	// Refreshed at the same surfaceCacheTTL cadence as cacheLocs but kept
+	// separate so the two enumeration commands stay independent.
+	serverCacheAt   time.Time
+	serverCachePids []int
+	serverCacheErr  error
 }
 
 // surfaceLoc identifies a cmux surface by its enclosing workspace and surface ref.
@@ -70,20 +79,113 @@ func (c *CmuxSignaler) lookupEnv(key string) (string, bool) {
 	return os.LookupEnv(key)
 }
 
-// Detect returns true when pa-monitor is itself running inside cmux AND
-// the target pid is in some cmux surface's tty_process_pids. Pids reachable via
-// other transports (tmux, VS Code extension, plain terminal) yield false so
-// ResolveSignaler can fall through cleanly.
+// Detect returns true when targetPID has a cmux server in its ancestry.
+// Implemented via ps-A enumeration of cmux server PIDs + ancestry walk; works
+// regardless of whether pa-monitor itself is running inside cmux.
+//
+// (Earlier behaviour gated on CMUX_WORKSPACE_ID being set in pa-monitor's
+// own env, which broke detection whenever the daemon was started by a
+// LaunchAgent. The ancestry approach mirrors TmuxSignaler.)
 func (c *CmuxSignaler) Detect(pid int) bool {
-	if v, _ := c.lookupEnv("CMUX_WORKSPACE_ID"); v == "" {
-		return false
-	}
-	locs, err := c.cachedSurfaces()
-	if err != nil {
-		return false
-	}
-	_, ok := locs[pid]
+	_, ok := c.FindCmuxServerAncestor(pid)
 	return ok
+}
+
+// FindCmuxServerAncestor walks the process tree from targetPID upward,
+// returning the PID of the first ancestor whose process name (comm) is
+// "cmux". Returns (0, false) if no such ancestor exists. Used by the
+// poller to enrich session TerminalHost with bridge-status information.
+func (c *CmuxSignaler) FindCmuxServerAncestor(targetPID int) (int, bool) {
+	servers, err := c.cachedCmuxServerPIDs()
+	if err != nil || len(servers) == 0 {
+		return 0, false
+	}
+	serverSet := make(map[int]bool, len(servers))
+	for _, p := range servers {
+		serverSet[p] = true
+	}
+	pid := targetPID
+	seen := map[int]bool{}
+	for {
+		if pid < 1 || seen[pid] {
+			return 0, false
+		}
+		seen[pid] = true
+		if serverSet[pid] {
+			return pid, true
+		}
+		ppid, err := c.parentPID(pid)
+		if err != nil || ppid < 1 {
+			return 0, false
+		}
+		pid = ppid
+	}
+}
+
+// cachedCmuxServerPIDs returns the PIDs of running cmux server processes
+// (those where `ps -A -o pid,comm` reports comm == "cmux"). Cached for
+// surfaceCacheTTL so a sweep over N sessions runs ps once.
+func (c *CmuxSignaler) cachedCmuxServerPIDs() ([]int, error) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if !c.serverCacheAt.IsZero() && time.Since(c.serverCacheAt) < surfaceCacheTTL {
+		return c.serverCachePids, c.serverCacheErr
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pids, err := c.enumerateCmuxServerPIDs(ctx)
+	c.serverCachePids, c.serverCacheErr, c.serverCacheAt = pids, err, time.Now()
+	return pids, err
+}
+
+// enumerateCmuxServerPIDs runs `ps -A -o pid,comm` and returns the PIDs
+// whose comm column equals "cmux".
+func (c *CmuxSignaler) enumerateCmuxServerPIDs(ctx context.Context) ([]int, error) {
+	out, err := c.run(ctx, "ps", "-A", "-o", "pid,comm")
+	if err != nil {
+		return nil, fmt.Errorf("ps -A: %w", err)
+	}
+	var pids []int
+	for line := range strings.SplitSeq(string(out), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		// ps may include a header "PID COMMAND" — skip non-numeric first column.
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		// `comm` is the executable's basename. Some shells (zsh launched from
+		// /usr/local/bin/cmux) may report just "cmux"; absolute-path variants
+		// would still tail to "cmux" after a basename, but ps already gives us
+		// the basename, so direct equality is sufficient.
+		if fields[1] == "cmux" {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
+}
+
+// parentPID returns the parent PID of pid via `ps -o ppid= -p <pid>`.
+// Returns 0 if pid has no parent (or the lookup fails). Used by ancestry
+// walking; mirrors the same idiom in TmuxSignaler.findPaneLocForPID.
+func (c *CmuxSignaler) parentPID(pid int) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := c.run(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
+	if err != nil {
+		return 0, err
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return 0, nil
+	}
+	ppid, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+	return ppid, nil
 }
 
 // cachedSurfaces returns the surface map, caching for surfaceCacheTTL so that a

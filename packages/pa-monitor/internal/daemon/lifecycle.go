@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
@@ -170,6 +171,15 @@ type RunOptions struct {
 	// inspect the tree (including PendingNudge annotations) without going
 	// through the gRPC layer.
 	TreeObserver func(*aggregate.Tree)
+	// BridgeRegistry, if non-nil, is wired into the gRPC server so
+	// RegisterBridge handlers can record cmux-bridge presence + last-seen.
+	// The same registry should be passed to the poller (PollerInterface
+	// implementations that consult it) so terminal-host refinement works.
+	BridgeRegistry *bridge.Registry
+	// CmuxAncestor, if non-nil alongside BridgeRegistry, is the function the
+	// RegisterBridge handler uses to walk a bridge PID's ancestry to its
+	// cmux server PID. Typically (*signal.CmuxSignaler).FindCmuxServerAncestor.
+	CmuxAncestor func(pid int) (int, bool)
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -201,7 +211,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version)
+	_, stop := serve(lis, state, version, opts.BridgeRegistry, opts.CmuxAncestor)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())

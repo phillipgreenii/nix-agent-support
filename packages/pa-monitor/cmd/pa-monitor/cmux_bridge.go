@@ -123,12 +123,55 @@ func logBridgeVersions(ctx context.Context) {
 	fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s daemon=%s\n", version, state.GetDaemonVersion())
 }
 
+// bridgeHeartbeatInterval is how often the bridge re-calls RegisterBridge
+// on the daemon to refresh its lastSeen timestamp. Must be shorter than the
+// daemon's bridge.Registry staleAfter window (30s) by enough margin to
+// survive a missed call. ~10s gives 3 attempts before the daemon flags us
+// as disconnected.
+const bridgeHeartbeatInterval = 10 * time.Second
+
+// registerBridge calls the daemon's RegisterBridge RPC on the given client.
+// Failures are non-fatal — the bridge keeps streaming state; the only
+// effect of a failed registration is that sessions in this cmux workspace
+// will surface as "cmux (no bridge)" until a later attempt succeeds.
+func registerBridge(ctx context.Context, client *rpcclient.Client, ws string) {
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := client.C.RegisterBridge(cctx, &pb.RegisterBridgeRequest{
+		WorkspaceId: ws,
+		BridgePid:   int32(os.Getpid()),
+	}); err != nil {
+		// Older daemons (pre-RPC) will return Unimplemented; that's fine,
+		// just log at debug level.
+		fmt.Fprintf(os.Stderr, "cmux-bridge: RegisterBridge: %v\n", err)
+	}
+}
+
 func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) error {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
+
+	// Announce ourselves to the daemon so it can refine "cmux" terminal-host
+	// labels for sessions in our workspace. Then start a goroutine that
+	// re-registers every bridgeHeartbeatInterval as a liveness heartbeat.
+	registerBridge(ctx, client, ws)
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat()
+	go func() {
+		t := time.NewTicker(bridgeHeartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-t.C:
+				registerBridge(heartbeatCtx, client, ws)
+			}
+		}
+	}()
 
 	stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 2000})
 	if err != nil {

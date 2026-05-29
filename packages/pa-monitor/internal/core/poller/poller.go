@@ -4,13 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // stalePauseGrace bounds how far past the rate-limit reset the TUI will still
@@ -41,6 +42,12 @@ type Poller struct {
 	CCUsageStateFn   func() (probed bool, err error)
 	PRLookupFn       func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
 	Signalers        []signal.Signaler
+	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
+	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
+	// whether a cmux-bridge has registered for the session's cmux server PID.
+	// Nil disables the enrichment; sessions in cmux are reported as plain
+	// "cmux".
+	BridgeRegistry *bridge.Registry
 
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
@@ -100,12 +107,19 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			}
 		}
 
-		// TerminalHost cache: detect once per PID lifetime.
+		// TerminalHost cache: detect once per PID lifetime. The cached value
+		// is the bare signaler.Name() ("tmux", "cmux", "ghostty", "unknown");
+		// the cmux subcase is then refined every poll against BridgeRegistry
+		// (cheap, in-memory) so users see live "cmux (bridge disconnected)"
+		// transitions without having to wait for the session PID to recycle.
 		if host, hit := p.terminalHostCache[s.PID]; hit {
 			s.TerminalHost = host
 		} else {
 			s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
 			p.terminalHostCache[s.PID] = s.TerminalHost
+		}
+		if s.TerminalHost == "cmux" {
+			s.TerminalHost = refineCmuxTerminalHost(p.Signalers, p.BridgeRegistry, s.PID)
 		}
 
 		// Burn rate: add delta (tokens generated since last poll) to ring buffers.
@@ -250,4 +264,38 @@ func detectTerminalHost(signalers []signal.Signaler, pid int) string {
 		}
 	}
 	return "unknown"
+}
+
+// refineCmuxTerminalHost takes a "cmux" detection and refines it against the
+// bridge registry, returning one of:
+//   - "cmux" — a bridge is registered and recently seen
+//   - "cmux (bridge disconnected)" — a bridge was registered but is stale
+//   - "cmux (no bridge)" — no bridge has ever registered for this server
+//
+// If br is nil or the CmuxSignaler cannot resolve a server ancestor (e.g.
+// because the ps cache expired between Detect and this call), falls back to
+// the bare "cmux" string — never worse than the pre-refinement value.
+func refineCmuxTerminalHost(signalers []signal.Signaler, br *bridge.Registry, pid int) string {
+	if br == nil {
+		return "cmux"
+	}
+	for _, s := range signalers {
+		cs, ok := s.(*signal.CmuxSignaler)
+		if !ok {
+			continue
+		}
+		serverPID, ok := cs.FindCmuxServerAncestor(pid)
+		if !ok {
+			return "cmux"
+		}
+		switch br.StatusForServer(serverPID) {
+		case bridge.Alive:
+			return "cmux"
+		case bridge.Stale:
+			return "cmux (bridge disconnected)"
+		case bridge.Unknown:
+			return "cmux (no bridge)"
+		}
+	}
+	return "cmux"
 }

@@ -49,6 +49,14 @@ service PaMonitor {
 
   // SetAutoResume toggles the auto-resume feature daemon-wide.
   rpc SetAutoResume(SetAutoResumeRequest) returns (SetAutoResumeResponse);
+
+  // RegisterBridge announces a cmux-bridge to the daemon. Called by
+  // cmux-bridge on startup and as a periodic heartbeat. The daemon uses
+  // bridge_pid to derive the bridge's cmux server (parent ancestor named
+  // "cmux") and tracks last-seen so it can surface session terminal status
+  // (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
+  // the same cmux workspace.
+  rpc RegisterBridge(RegisterBridgeRequest) returns (RegisterBridgeResponse);
 }
 
 message GetStateRequest {}
@@ -216,6 +224,20 @@ message SetAutoResumeRequest {
 message SetAutoResumeResponse {
   bool enabled = 1;
 }
+
+// RegisterBridgeRequest carries the bridge's process identity so the
+// daemon can walk its ancestry to find the cmux server (parent process
+// named "cmux") it belongs to.
+message RegisterBridgeRequest {
+  // CMUX_WORKSPACE_ID the bridge belongs to. Carried for display / logging;
+  // the daemon does not key registry state on this (it keys on cmux server
+  // PID derived from bridge_pid).
+  string workspace_id = 1;
+  // PID of the bridge process making the call.
+  int32 bridge_pid = 2;
+}
+
+message RegisterBridgeResponse {}
 
 // --- ApiError / PendingNudge --- //
 
