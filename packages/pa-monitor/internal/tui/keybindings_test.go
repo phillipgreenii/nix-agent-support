@@ -51,24 +51,32 @@ func TestDispatchQViaBindings(t *testing.T) {
 
 // --- R keybind (toggle auto-resume) ---
 
-func TestKeybindR_TogglesAutoResumeOptimistically(t *testing.T) {
+// TestKeybindR_NilCallbackFallsBackToLocalFlip: with no callback wired
+// the R handler falls back to flipping autoResumeEnabled locally so the
+// keybinding still has an effect in test / non-remote contexts.
+func TestKeybindR_NilCallbackFallsBackToLocalFlip(t *testing.T) {
 	m := NewModel(Options{Tree: &aggregate.Tree{}})
 	m.autoResumeEnabled = false
 	handleToggleAutoResume(m)
 	if !m.autoResumeEnabled {
-		t.Error("pressing R should flip autoResumeEnabled true (optimistic update)")
+		t.Error("nil-callback fallback: pressing R should flip autoResumeEnabled true")
 	}
 	handleToggleAutoResume(m)
 	if m.autoResumeEnabled {
-		t.Error("pressing R again should flip autoResumeEnabled back to false")
+		t.Error("nil-callback fallback: pressing R again should flip back to false")
 	}
 }
 
+// TestKeybindR_FiresCallback verifies the OnToggleAutoResume callback
+// receives the desired new state. Each press computes the next desired
+// state from m.autoResumeEnabled, so the test manually mutates the model
+// after the first press to simulate the daemon committing the change via
+// AutoResumeResultMsg in real flows.
 func TestKeybindR_FiresCallback(t *testing.T) {
 	var calls []bool
 	m := NewModel(Options{
 		Tree:               &aggregate.Tree{},
-		OnToggleAutoResume: func(enable bool) { calls = append(calls, enable) },
+		OnToggleAutoResume: func(want bool) tea.Cmd { calls = append(calls, want); return nil },
 	})
 	m.autoResumeEnabled = false
 
@@ -76,19 +84,16 @@ func TestKeybindR_FiresCallback(t *testing.T) {
 	if len(calls) != 1 || !calls[0] {
 		t.Errorf("first R: want calls=[true], got %v", calls)
 	}
+	if m.autoResumeEnabled {
+		t.Error("with callback wired, R must NOT optimistically flip; should wait for AutoResumeResultMsg")
+	}
+
+	// Simulate the daemon committing the new state.
+	m.autoResumeEnabled = true
 
 	handleToggleAutoResume(m)
 	if len(calls) != 2 || calls[1] {
 		t.Errorf("second R: want calls=[true,false], got %v", calls)
-	}
-}
-
-func TestKeybindR_NilCallbackIsSafe(t *testing.T) {
-	m := NewModel(Options{Tree: &aggregate.Tree{}})
-	// Must not panic when OnToggleAutoResume is nil.
-	handleToggleAutoResume(m)
-	if !m.autoResumeEnabled {
-		t.Error("autoResumeEnabled should flip even without callback")
 	}
 }
 

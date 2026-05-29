@@ -113,6 +113,20 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 		return nil, status.Errorf(codes.InvalidArgument, "Caffeinate: action must be on|off|toggle, got %q", req.GetAction())
 	}
 	s.state.setCaffeinateOn(target)
+	// Synchronously update the operational gauge (caffeinateActive) so the
+	// RPC response and any subsequent buildState read reflect the intent
+	// immediately. Without this the response and any pollResultMsg that
+	// arrives before the next tick still report the OLD operational state
+	// (caffeinateActive is otherwise only refreshed by the tick loop), which
+	// caused the TUI toggle to flap on press. The tick loop will reconcile
+	// against the actual caffeinate.Manager state on its next pass; if the
+	// manager fails to spawn the proc, that reconciliation flips the gauge
+	// back -- but the common path is consistent.
+	cause := ""
+	if target {
+		cause = "manual"
+	}
+	s.state.setCaffeinateActive(target, cause)
 	// Persist to runtime.json via read-modify-write so other fields are preserved.
 	s.state.mu.RLock()
 	path := s.state.runtimePath
@@ -122,8 +136,7 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 		state.CaffeinateOn = target
 		_ = WriteRuntimeState(path, state)
 	}
-	active, cause := s.state.caffeinateView()
-	return &pb.CaffeinateResponse{Active: active, Cause: cause}, nil
+	return &pb.CaffeinateResponse{Active: target, Cause: cause}, nil
 }
 
 func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoRequest) (*pb.SessionDetail, error) {

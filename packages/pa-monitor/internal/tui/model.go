@@ -30,14 +30,18 @@ type Options struct {
 	Reporter             cmuxstatus.Reporter
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
-	// OnCaffeinateToggle, when non-nil, is called whenever the user
-	// toggles caffeinate via the C keybinding. Dispatches the Caffeinate
-	// RPC against the daemon.
-	OnCaffeinateToggle func(on bool)
-	// OnToggleAutoResume, when non-nil, is called whenever the user presses R.
-	// The argument is the new desired state (true = enable). Dispatches the
-	// SetAutoResume RPC against the daemon.
-	OnToggleAutoResume func(enable bool)
+	// OnCaffeinateToggle, when non-nil, is called whenever the user presses C.
+	// The argument is the new desired state (true = enable). Returns a
+	// tea.Cmd that performs the Caffeinate RPC; the Cmd MUST emit a
+	// CaffeinateResultMsg on success or CaffeinateErrMsg on failure so the
+	// Update loop can lock m.caffeinateOn to the daemon's reported state.
+	// (Returning a Cmd instead of doing a fire-and-forget side effect lets
+	// the TUI avoid the optimistic flip + race-guard dance, which previously
+	// caused the toggle to flap on press while the daemon's tick caught up.)
+	OnCaffeinateToggle func(want bool) tea.Cmd
+	// OnToggleAutoResume mirrors OnCaffeinateToggle for the R keybinding.
+	// Returned Cmd MUST emit AutoResumeResultMsg / AutoResumeErrMsg.
+	OnToggleAutoResume func(want bool) tea.Cmd
 	// OnManualNudge, when non-nil, is called whenever the user presses M.
 	// selector is a gRPC-style nudge selector (e.g. "session:<id>" or
 	// "path:/some/dir"). cancel is true when the nudge should be cancelled
@@ -108,8 +112,8 @@ type Model struct {
 
 	errorLogger *ErrorLogger
 
-	onCaffeinateToggle func(bool)
-	onToggleAutoResume func(bool)
+	onCaffeinateToggle func(want bool) tea.Cmd
+	onToggleAutoResume func(want bool) tea.Cmd
 	onManualNudge      func(selector string, cancel bool)
 }
 

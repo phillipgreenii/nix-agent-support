@@ -17,6 +17,31 @@ type TreeUpdatedMsg struct {
 	AutoResumeDelay   time.Duration
 }
 
+// CaffeinateResultMsg is dispatched by the Cmd returned from
+// Options.OnCaffeinateToggle when the daemon's Caffeinate RPC commits.
+// Carrying the post-action active state from the RPC response lets the
+// TUI lock its local toggle to the daemon's truth without an optimistic
+// flip + race-guard dance (which caused visible flapping on press).
+type CaffeinateResultMsg struct {
+	Active bool
+}
+
+// CaffeinateErrMsg is dispatched when the Caffeinate RPC fails. The TUI
+// logs via the shared ErrorLogger; local toggle state is left unchanged.
+type CaffeinateErrMsg struct {
+	Err error
+}
+
+// AutoResumeResultMsg / AutoResumeErrMsg mirror Caffeinate{Result,Err}Msg
+// for the R-keybinding's SetAutoResume RPC path.
+type AutoResumeResultMsg struct {
+	Enabled bool
+}
+
+type AutoResumeErrMsg struct {
+	Err error
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -86,6 +111,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildFlatRows()
 		m.clampCursor()
 		m.syncScroll()
+	case CaffeinateResultMsg:
+		// The daemon's Caffeinate RPC committed; lock our local toggle to
+		// the daemon-reported post-action state. caffeinateUserAt stays
+		// stamped so any in-flight stale pollResultMsg won't undo us.
+		m.caffeinateOn = msg.Active
+		m.reporter.Push(m.buildSidebarSnapshot())
+	case CaffeinateErrMsg:
+		// RPC dial/send failed -- log for diagnostics, leave local toggle
+		// unchanged. The user can press C again to retry.
+		m.signalLog("Caffeinate RPC failed: " + msg.Err.Error())
+	case AutoResumeResultMsg:
+		m.autoResumeEnabled = msg.Enabled
+	case AutoResumeErrMsg:
+		m.signalLog("SetAutoResume RPC failed: " + msg.Err.Error())
 	}
 	return m, nil
 }

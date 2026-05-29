@@ -49,34 +49,40 @@ func runTUIRemote() {
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,
 		Version:              version,
-		OnCaffeinateToggle: func(on bool) {
+		OnCaffeinateToggle: func(want bool) tea.Cmd {
 			action := "off"
-			if on {
+			if want {
 				action = "on"
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			c, err := rpcclient.Dial(ctx)
-			if err != nil {
-				errLog.LogString(fmt.Sprintf("remote caffeinate dial: %v", err))
-				return
-			}
-			defer c.Close()
-			if _, err := c.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action}); err != nil {
-				errLog.LogString(fmt.Sprintf("remote caffeinate %s: %v", action, err))
+			return func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				c, err := rpcclient.Dial(ctx)
+				if err != nil {
+					return tui.CaffeinateErrMsg{Err: fmt.Errorf("dial: %w", err)}
+				}
+				defer c.Close()
+				resp, err := c.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action})
+				if err != nil {
+					return tui.CaffeinateErrMsg{Err: fmt.Errorf("Caffeinate %s: %w", action, err)}
+				}
+				return tui.CaffeinateResultMsg{Active: resp.GetActive()}
 			}
 		},
-		OnToggleAutoResume: func(enable bool) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			c, err := rpcclient.Dial(ctx)
-			if err != nil {
-				errLog.LogString(fmt.Sprintf("remote SetAutoResume dial: %v", err))
-				return
-			}
-			defer c.Close()
-			if _, err := c.C.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: enable}); err != nil {
-				errLog.LogString(fmt.Sprintf("remote SetAutoResume(%v): %v", enable, err))
+		OnToggleAutoResume: func(want bool) tea.Cmd {
+			return func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				c, err := rpcclient.Dial(ctx)
+				if err != nil {
+					return tui.AutoResumeErrMsg{Err: fmt.Errorf("dial: %w", err)}
+				}
+				defer c.Close()
+				resp, err := c.C.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: want})
+				if err != nil {
+					return tui.AutoResumeErrMsg{Err: fmt.Errorf("SetAutoResume(%v): %w", want, err)}
+				}
+				return tui.AutoResumeResultMsg{Enabled: resp.GetEnabled()}
 			}
 		},
 		OnManualNudge: func(selector string, cancel bool) {

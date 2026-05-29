@@ -162,31 +162,36 @@ func handleToggleID(m *Model) tea.Cmd {
 	return nil
 }
 
+// handleToggleCaffeinate stamps caffeinateUserAt (for the pollResultMsg
+// race guard) and returns the Cmd that performs the Caffeinate RPC. The
+// Cmd emits a CaffeinateResultMsg with the daemon-reported new state,
+// which Update applies to m.caffeinateOn -- no optimistic local flip,
+// so the toggle can never flap on press.
+//
+// When no callback is wired (tests / non-remote contexts) we fall back
+// to a local flip so the previous contract -- "C flips the toggle" --
+// keeps holding without a daemon attached.
 func handleToggleCaffeinate(m *Model) tea.Cmd {
-	m.caffeinateOn = !m.caffeinateOn
-	// Stamp caffeinateUserAt so any pollResultMsg whose underlying daemon
-	// snapshot pre-dates this action does NOT overwrite the flipped value
-	// with stale data. Mirrors handleToggleAutoResume.
+	want := !m.caffeinateOn
 	m.caffeinateUserAt = time.Now()
 	if m.onCaffeinateToggle != nil {
-		// Dispatches the Caffeinate RPC to the daemon so the *daemon's*
-		// caffeinate manager actually runs.
-		m.onCaffeinateToggle(m.caffeinateOn)
+		return m.onCaffeinateToggle(want)
 	}
+	m.caffeinateOn = want
 	m.reporter.Push(m.buildSidebarSnapshot())
 	return nil
 }
 
+// handleToggleAutoResume mirrors handleToggleCaffeinate for the R key.
+// The daemon's SetAutoResume RPC returns the post-action state in its
+// response; the returned Cmd dispatches an AutoResumeResultMsg from it.
 func handleToggleAutoResume(m *Model) tea.Cmd {
 	want := !m.autoResumeEnabled
-	// Optimistic update. Stamp autoResumeUserAt so any pollResultMsg whose
-	// underlying daemon snapshot pre-dates this action does NOT overwrite the
-	// flipped value with stale data.
-	m.autoResumeEnabled = want
 	m.autoResumeUserAt = time.Now()
 	if m.onToggleAutoResume != nil {
-		m.onToggleAutoResume(want)
+		return m.onToggleAutoResume(want)
 	}
+	m.autoResumeEnabled = want
 	return nil
 }
 
