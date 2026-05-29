@@ -143,20 +143,17 @@ type RunOptions struct {
 	// WeeklyEvery controls how often WeeklyFn is invoked relative to
 	// the main tick. 0 means once per tick.
 	WeeklyEvery int
-	// NudgeFn dispatches a signal to the given pid. nil → Nudge RPC
-	// returns FailedPrecondition.
-	NudgeFn func(pid int, text string) error
 	// Version is the build identifier reported on DaemonState. Defaults to "dev".
 	Version string
-	// Nudger config — passed to nudger.TickContext each tick. Defaults applied
-	// if zero.
+	// Nudger config — passed to nudger.TickContext each tick. Defaults
+	// applied if zero. NudgerSignalers must be non-empty for the daemon
+	// to construct its WatermarkStore and accept NudgeQueue / NudgeCancel
+	// / SetAutoResume RPCs.
 	AutoResumeMessage string
 	AutoResumeDelay   time.Duration
 	DisruptGrace      time.Duration
 	EscalationAfter   time.Duration
-	// NudgerSignalers — non-nil enables the daemon-side nudger. When nil,
-	// the existing NudgeFn path stays in effect (back-compat).
-	NudgerSignalers []signal.Signaler
+	NudgerSignalers   []signal.Signaler
 	// Detectors run against each session at tick time to derive labels
 	// for emitted metrics. Built-in detectors live in
 	// internal/labels/detectors. Empty → only the {state, plan_tier}
@@ -204,7 +201,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, opts.NudgeFn, version)
+	_, stop := serve(lis, state, version)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())

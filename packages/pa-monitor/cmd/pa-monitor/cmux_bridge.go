@@ -79,15 +79,15 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 	}
 	defer client.Close()
 
-	stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{HeartbeatIntervalMs: 2000})
+	stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 2000})
 	if err != nil {
 		return err
 	}
 
-	// Heartbeat-miss watchdog: client requires 2s heartbeats; 4s budget.
-	const hbBudget = 4 * time.Second
+	// Watchdog: client requires 2s pushes from the server; 4s budget.
+	const pushBudget = 4 * time.Second
 	type recvResult struct {
-		msg *pb.WatchStateEvent
+		msg *pb.DaemonState
 		err error
 	}
 	recvCh := make(chan recvResult, 1)
@@ -103,18 +103,17 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(hbBudget):
-			return fmt.Errorf("heartbeat missed: no message in %s", hbBudget)
+		case <-time.After(pushBudget):
+			return fmt.Errorf("push missed: no message in %s", pushBudget)
 		case r := <-recvCh:
 			if r.err != nil {
 				return r.err
 			}
 			next()
-			state := r.msg.GetState()
-			if state == nil {
+			if r.msg == nil {
 				continue
 			}
-			snap := snapshotForWorkspace(state, ws)
+			snap := snapshotForWorkspace(r.msg, ws)
 			reporter.Push(snap)
 		}
 	}

@@ -110,24 +110,16 @@ func runDaemon(args []string) {
 		opts.WeeklyFn = weeklyFn
 		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — weekly fetch is slow
 
-		// Reuse the poller's signaler set for both the legacy Nudge RPC
-		// (NudgeFn) and the new nudger subsystem (NudgerSignalers). Without
-		// NudgerSignalers being non-empty, lifecycle.go skips constructing
-		// the WatermarkStore — which makes SetAutoResume + NudgeQueue +
-		// NudgeCancel return FailedPrecondition.
-		signalers := signallayer.DefaultSignalers()
-		opts.NudgerSignalers = signalers
+		// Without NudgerSignalers being non-empty, lifecycle.go skips
+		// constructing the WatermarkStore — which makes SetAutoResume,
+		// NudgeQueue, and NudgeCancel all return FailedPrecondition. The
+		// integration test TestRunWith_SetAutoResumePersistsViaGetState
+		// guards this contract.
+		opts.NudgerSignalers = signallayer.DefaultSignalers()
 		opts.AutoResumeMessage = cfg.AutoResumeMessage
 		opts.AutoResumeDelay = cfg.AutoResumeDelay
 		opts.DisruptGrace = cfg.DisruptGrace
 		opts.EscalationAfter = cfg.EscalationAfter
-		opts.NudgeFn = func(pid int, text string) error {
-			sig := signallayer.ResolveSignaler(signalers, pid)
-			if sig == nil {
-				return fmt.Errorf("no signaler for pid %d", pid)
-			}
-			return sig.Send(pid, text)
-		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

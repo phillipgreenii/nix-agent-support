@@ -72,7 +72,7 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 
 	client := pb.NewPaMonitorClient(conn)
 	stream, err := client.WatchState(context.Background(), &pb.WatchStateRequest{
-		HeartbeatIntervalMs: 100,
+		PushIntervalMs: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recv first: %v", err)
 	}
-	if first.GetState() == nil {
+	if first == nil {
 		t.Errorf("first message has no DaemonState: %+v", first)
 	}
 
@@ -96,7 +96,7 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("recv: %v", err)
 		}
-		if msg.GetState() != nil {
+		if msg != nil {
 			stateCount++
 		}
 	}
@@ -128,7 +128,7 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 
 	client := pb.NewPaMonitorClient(conn)
 	stream, err := client.WatchState(context.Background(), &pb.WatchStateRequest{
-		HeartbeatIntervalMs: 10, // below 50ms floor
+		PushIntervalMs: 10, // below 50ms floor
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 		if err != nil {
 			t.Fatalf("recv: %v", err)
 		}
-		if msg.GetState() != nil {
+		if msg != nil {
 			stateCount++
 		}
 	}

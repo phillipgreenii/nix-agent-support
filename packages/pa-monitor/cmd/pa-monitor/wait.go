@@ -59,19 +59,19 @@ func runWaitUntilAgentsFinished(args []string) {
 			continue
 		}
 
-		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{HeartbeatIntervalMs: 1000})
+		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 1000})
 		if err != nil {
 			cancel()
 			client.Close()
 			continue
 		}
 
-		// Heartbeat-miss watchdog: per spec, the client treats no
-		// messages within 2× heartbeat interval as a hung daemon and
-		// reconnects. Default heartbeat = 1000ms here → 2s budget.
-		const hbBudget = 2 * time.Second
+		// Watchdog: no push from the daemon within 2× the requested push
+		// interval is treated as a hung daemon; reconnect. Default
+		// PushIntervalMs = 1000ms here → 2s budget.
+		const pushBudget = 2 * time.Second
 		type recvResult struct {
-			msg *pb.WatchStateEvent
+			msg *pb.DaemonState
 			err error
 		}
 		recvCh := make(chan recvResult, 1)
@@ -88,15 +88,15 @@ func runWaitUntilAgentsFinished(args []string) {
 			select {
 			case <-ctx.Done():
 				break streamLoop
-			case <-time.After(hbBudget):
-				fmt.Fprintln(os.Stderr, "wait: heartbeat missed, reconnecting")
+			case <-time.After(pushBudget):
+				fmt.Fprintln(os.Stderr, "wait: push missed, reconnecting")
 				break streamLoop
 			case r := <-recvCh:
 				if r.err != nil {
 					break streamLoop
 				}
 				next()
-				st := r.msg.GetState()
+				st := r.msg
 				if st == nil {
 					continue
 				}

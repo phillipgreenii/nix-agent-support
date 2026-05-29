@@ -23,7 +23,6 @@ const (
 	PaMonitor_WatchState_FullMethodName     = "/pa_monitor.v1.PaMonitor/WatchState"
 	PaMonitor_Ping_FullMethodName           = "/pa_monitor.v1.PaMonitor/Ping"
 	PaMonitor_Caffeinate_FullMethodName     = "/pa_monitor.v1.PaMonitor/Caffeinate"
-	PaMonitor_Nudge_FullMethodName          = "/pa_monitor.v1.PaMonitor/Nudge"
 	PaMonitor_IsAnyBusy_FullMethodName      = "/pa_monitor.v1.PaMonitor/IsAnyBusy"
 	PaMonitor_GetSessionInfo_FullMethodName = "/pa_monitor.v1.PaMonitor/GetSessionInfo"
 	PaMonitor_GetPathInfo_FullMethodName    = "/pa_monitor.v1.PaMonitor/GetPathInfo"
@@ -43,18 +42,17 @@ const (
 type PaMonitorClient interface {
 	// GetState returns a snapshot of the daemon's current state.
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*DaemonState, error)
-	// WatchState streams updates whenever state changes. Idle periods are
-	// filled with Heartbeat messages so clients can detect a hung daemon.
-	WatchState(ctx context.Context, in *WatchStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchStateEvent], error)
+	// WatchState streams DaemonState updates. The daemon pushes a fresh
+	// state on every tick (interval requested via push_interval_ms, with
+	// a 50ms server floor and a 2s default). Subscribers detect a hung
+	// daemon by missing pushes within their own watchdog budget.
+	WatchState(ctx context.Context, in *WatchStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DaemonState], error)
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	// Caffeinate toggles the caffeinate manager. Result reflects the new
 	// state. Persisted to runtime.json.
 	Caffeinate(ctx context.Context, in *CaffeinateRequest, opts ...grpc.CallOption) (*CaffeinateResponse, error)
-	// Nudge sends a signal to one or more session(s) selected by the
-	// Selector.
-	Nudge(ctx context.Context, in *NudgeRequest, opts ...grpc.CallOption) (*NudgeResponse, error)
 	// IsAnyBusy returns whether any agent is currently in the working
 	// state. Powers the `agents-busy-check` CLI subcommand.
 	IsAnyBusy(ctx context.Context, in *IsAnyBusyRequest, opts ...grpc.CallOption) (*IsAnyBusyResponse, error)
@@ -91,13 +89,13 @@ func (c *paMonitorClient) GetState(ctx context.Context, in *GetStateRequest, opt
 	return out, nil
 }
 
-func (c *paMonitorClient) WatchState(ctx context.Context, in *WatchStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchStateEvent], error) {
+func (c *paMonitorClient) WatchState(ctx context.Context, in *WatchStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DaemonState], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &PaMonitor_ServiceDesc.Streams[0], PaMonitor_WatchState_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[WatchStateRequest, WatchStateEvent]{ClientStream: stream}
+	x := &grpc.GenericClientStream[WatchStateRequest, DaemonState]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -108,7 +106,7 @@ func (c *paMonitorClient) WatchState(ctx context.Context, in *WatchStateRequest,
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type PaMonitor_WatchStateClient = grpc.ServerStreamingClient[WatchStateEvent]
+type PaMonitor_WatchStateClient = grpc.ServerStreamingClient[DaemonState]
 
 func (c *paMonitorClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -124,16 +122,6 @@ func (c *paMonitorClient) Caffeinate(ctx context.Context, in *CaffeinateRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CaffeinateResponse)
 	err := c.cc.Invoke(ctx, PaMonitor_Caffeinate_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paMonitorClient) Nudge(ctx context.Context, in *NudgeRequest, opts ...grpc.CallOption) (*NudgeResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(NudgeResponse)
-	err := c.cc.Invoke(ctx, PaMonitor_Nudge_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,18 +208,17 @@ func (c *paMonitorClient) SetAutoResume(ctx context.Context, in *SetAutoResumeRe
 type PaMonitorServer interface {
 	// GetState returns a snapshot of the daemon's current state.
 	GetState(context.Context, *GetStateRequest) (*DaemonState, error)
-	// WatchState streams updates whenever state changes. Idle periods are
-	// filled with Heartbeat messages so clients can detect a hung daemon.
-	WatchState(*WatchStateRequest, grpc.ServerStreamingServer[WatchStateEvent]) error
+	// WatchState streams DaemonState updates. The daemon pushes a fresh
+	// state on every tick (interval requested via push_interval_ms, with
+	// a 50ms server floor and a 2s default). Subscribers detect a hung
+	// daemon by missing pushes within their own watchdog budget.
+	WatchState(*WatchStateRequest, grpc.ServerStreamingServer[DaemonState]) error
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	// Caffeinate toggles the caffeinate manager. Result reflects the new
 	// state. Persisted to runtime.json.
 	Caffeinate(context.Context, *CaffeinateRequest) (*CaffeinateResponse, error)
-	// Nudge sends a signal to one or more session(s) selected by the
-	// Selector.
-	Nudge(context.Context, *NudgeRequest) (*NudgeResponse, error)
 	// IsAnyBusy returns whether any agent is currently in the working
 	// state. Powers the `agents-busy-check` CLI subcommand.
 	IsAnyBusy(context.Context, *IsAnyBusyRequest) (*IsAnyBusyResponse, error)
@@ -261,7 +248,7 @@ type UnimplementedPaMonitorServer struct{}
 func (UnimplementedPaMonitorServer) GetState(context.Context, *GetStateRequest) (*DaemonState, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetState not implemented")
 }
-func (UnimplementedPaMonitorServer) WatchState(*WatchStateRequest, grpc.ServerStreamingServer[WatchStateEvent]) error {
+func (UnimplementedPaMonitorServer) WatchState(*WatchStateRequest, grpc.ServerStreamingServer[DaemonState]) error {
 	return status.Errorf(codes.Unimplemented, "method WatchState not implemented")
 }
 func (UnimplementedPaMonitorServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
@@ -269,9 +256,6 @@ func (UnimplementedPaMonitorServer) Ping(context.Context, *PingRequest) (*PingRe
 }
 func (UnimplementedPaMonitorServer) Caffeinate(context.Context, *CaffeinateRequest) (*CaffeinateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Caffeinate not implemented")
-}
-func (UnimplementedPaMonitorServer) Nudge(context.Context, *NudgeRequest) (*NudgeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Nudge not implemented")
 }
 func (UnimplementedPaMonitorServer) IsAnyBusy(context.Context, *IsAnyBusyRequest) (*IsAnyBusyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IsAnyBusy not implemented")
@@ -338,11 +322,11 @@ func _PaMonitor_WatchState_Handler(srv interface{}, stream grpc.ServerStream) er
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(PaMonitorServer).WatchState(m, &grpc.GenericServerStream[WatchStateRequest, WatchStateEvent]{ServerStream: stream})
+	return srv.(PaMonitorServer).WatchState(m, &grpc.GenericServerStream[WatchStateRequest, DaemonState]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type PaMonitor_WatchStateServer = grpc.ServerStreamingServer[WatchStateEvent]
+type PaMonitor_WatchStateServer = grpc.ServerStreamingServer[DaemonState]
 
 func _PaMonitor_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PingRequest)
@@ -376,24 +360,6 @@ func _PaMonitor_Caffeinate_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PaMonitorServer).Caffeinate(ctx, req.(*CaffeinateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaMonitor_Nudge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(NudgeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaMonitorServer).Nudge(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaMonitor_Nudge_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaMonitorServer).Nudge(ctx, req.(*NudgeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -542,10 +508,6 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Caffeinate",
 			Handler:    _PaMonitor_Caffeinate_Handler,
-		},
-		{
-			MethodName: "Nudge",
-			Handler:    _PaMonitor_Nudge_Handler,
 		},
 		{
 			MethodName: "IsAnyBusy",

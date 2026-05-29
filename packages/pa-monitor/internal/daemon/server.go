@@ -22,9 +22,6 @@ type server struct {
 	state   *sharedState
 	// version is the build identifier reported on DaemonState. Set by serve().
 	version string
-	// nudgeFn is the signal-layer dispatcher. Plumbed by RunWith when
-	// signalers are configured. nil → Nudge RPC returns FailedPrecondition.
-	nudgeFn func(pid int, text string) error
 }
 
 func newServer(s *sharedState) *server {
@@ -40,15 +37,11 @@ func (s *server) GetState(ctx context.Context, _ *pb.GetStateRequest) (*pb.Daemo
 }
 
 func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {
-	if err := stream.Send(&pb.WatchStateEvent{
-		Payload: &pb.WatchStateEvent_State{
-			State: s.buildState(),
-		},
-	}); err != nil {
+	if err := stream.Send(s.buildState()); err != nil {
 		return err
 	}
 
-	interval := time.Duration(req.GetHeartbeatIntervalMs()) * time.Millisecond
+	interval := time.Duration(req.GetPushIntervalMs()) * time.Millisecond
 	switch {
 	case interval == 0:
 		interval = 2 * time.Second
@@ -65,15 +58,9 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			// Send the current state on every tick so subscribers (TUI,
-			// cmux-bridge) see RPC-driven changes like Caffeinate /
-			// SetAutoResume immediately. The state payload doubles as a
-			// liveness ping — heartbeat semantics are subsumed.
-			if err := stream.Send(&pb.WatchStateEvent{
-				Payload: &pb.WatchStateEvent_State{
-					State: s.buildState(),
-				},
-			}); err != nil {
+			// Push the current state on every tick so subscribers see
+			// RPC-driven changes (Caffeinate, SetAutoResume) immediately.
+			if err := stream.Send(s.buildState()); err != nil {
 				return err
 			}
 		}
@@ -122,51 +109,6 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 	}
 	active, cause := s.state.caffeinateView()
 	return &pb.CaffeinateResponse{Active: active, Cause: cause}, nil
-}
-
-func (s *server) Nudge(ctx context.Context, req *pb.NudgeRequest) (*pb.NudgeResponse, error) {
-	t := s.state.snapshot()
-	if t == nil {
-		return &pb.NudgeResponse{}, nil
-	}
-	sel := req.GetSelector()
-	if sel == nil {
-		return nil, status.Error(codes.InvalidArgument, "Nudge: selector required")
-	}
-
-	var targets []*aggregate.SessionView
-	for _, sv := range t.Sessions() {
-		if matchesSelector(sv, sel) {
-			targets = append(targets, sv)
-		}
-	}
-
-	if s.nudgeFn == nil {
-		return nil, status.Error(codes.FailedPrecondition, "Nudge: signal layer not wired into daemon")
-	}
-
-	text := req.GetText()
-	if text == "" {
-		text = "Continue."
-	}
-
-	var sent, errors uint32
-	postWindow := false
-	for _, sv := range targets {
-		if !sv.RateLimitResetsAt.IsZero() && time.Now().After(sv.RateLimitResetsAt) {
-			postWindow = true
-		}
-		if err := s.nudgeFn(sv.PID, text); err != nil {
-			errors++
-		} else {
-			sent++
-		}
-	}
-	return &pb.NudgeResponse{
-		SentCount:  sent,
-		ErrorCount: errors,
-		PostWindow: postWindow,
-	}, nil
 }
 
 func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoRequest) (*pb.SessionDetail, error) {
@@ -388,10 +330,9 @@ func (s *server) buildState() *pb.DaemonState {
 
 // serve runs the gRPC server on the given listener. Caller owns the
 // returned stop func.
-func serve(lis net.Listener, state *sharedState, nudgeFn func(int, string) error, version string) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version string) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
-	srv.nudgeFn = nudgeFn
 	srv.version = version
 	pb.RegisterPaMonitorServer(gs, srv)
 

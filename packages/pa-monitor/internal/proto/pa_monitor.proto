@@ -13,9 +13,11 @@ service PaMonitor {
   // GetState returns a snapshot of the daemon's current state.
   rpc GetState(GetStateRequest) returns (DaemonState);
 
-  // WatchState streams updates whenever state changes. Idle periods are
-  // filled with Heartbeat messages so clients can detect a hung daemon.
-  rpc WatchState(WatchStateRequest) returns (stream WatchStateEvent);
+  // WatchState streams DaemonState updates. The daemon pushes a fresh
+  // state on every tick (interval requested via push_interval_ms, with
+  // a 50ms server floor and a 2s default). Subscribers detect a hung
+  // daemon by missing pushes within their own watchdog budget.
+  rpc WatchState(WatchStateRequest) returns (stream DaemonState);
 
   // Ping is a cheap liveness check used by clients to confirm the daemon
   // is responsive before issuing a heavier RPC.
@@ -24,10 +26,6 @@ service PaMonitor {
   // Caffeinate toggles the caffeinate manager. Result reflects the new
   // state. Persisted to runtime.json.
   rpc Caffeinate(CaffeinateRequest) returns (CaffeinateResponse);
-
-  // Nudge sends a signal to one or more session(s) selected by the
-  // Selector.
-  rpc Nudge(NudgeRequest) returns (NudgeResponse);
 
   // IsAnyBusy returns whether any agent is currently in the working
   // state. Powers the `agents-busy-check` CLI subcommand.
@@ -56,22 +54,10 @@ service PaMonitor {
 message GetStateRequest {}
 
 message WatchStateRequest {
-  // Heartbeat interval requested by the client, in milliseconds.
-  // 0 means "use server default". Positive values below the server
-  // floor (50ms) are clamped to the floor.
-  uint32 heartbeat_interval_ms = 1;
-}
-
-message WatchStateEvent {
-  oneof payload {
-    DaemonState state = 1;
-    Heartbeat heartbeat = 2;
-  }
-}
-
-message Heartbeat {
-  google.protobuf.Timestamp ts = 1;
-  uint64 daemon_uptime_seconds = 2;
+  // Push interval requested by the client, in milliseconds. 0 means
+  // "use server default" (2s). Positive values below the server floor
+  // (50ms) are clamped to the floor.
+  uint32 push_interval_ms = 1;
 }
 
 message PingRequest {}
@@ -203,17 +189,6 @@ message Selector {
     string path = 2;
     string cmux_workspace_id = 3;
   }
-}
-
-message NudgeRequest {
-  Selector selector = 1;
-  string text = 2; // optional; daemon supplies a sensible default
-}
-
-message NudgeResponse {
-  uint32 sent_count = 1;
-  uint32 error_count = 2;
-  bool post_window = 3; // true when the nudge fired after a 5h block reset
 }
 
 message NudgeQueueRequest {

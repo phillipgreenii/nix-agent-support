@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
@@ -315,5 +316,136 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 
 	if !foundPendingNudge {
 		t.Error("PendingNudge with source=disrupted was never set on the published tree (annotation before dispatch is broken)")
+	}
+}
+
+// TestRunWith_SetAutoResumePersistsViaGetState is the regression guard
+// for the missing-NudgerSignalers bug: previously the daemon was started
+// with empty NudgerSignalers, lifecycle.go skipped constructing the
+// WatermarkStore, and SetAutoResume returned FailedPrecondition silently.
+// The TUI's optimistic R-flip was then undone by the next poll, because
+// the daemon still reported the OLD AutoResumeEnabled value.
+//
+// This test exercises the path actually used in production:
+//   - Real RunWith() with NudgerSignalers + Poller + RuntimePath.
+//   - gRPC dial.
+//   - SetAutoResume(true).
+//   - GetState; assert AutoResumeEnabled == true.
+func TestRunWith_SetAutoResumePersistsViaGetState(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+	runtimePath := filepath.Join(dir, "runtime.json")
+
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Path: "/p"}}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:       paths,
+			Tick:        30 * time.Millisecond,
+			RuntimePath: runtimePath,
+			Poller: &stubPoller{
+				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					return tree, false, nil
+				},
+			},
+			NudgerSignalers: []signal.Signaler{&captureSignaler{}},
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("RunWith did not return after cancel")
+		}
+	})
+
+	waitForFile(t, paths.Socket)
+
+	conn := dialUnix(t, paths.Socket)
+	defer conn.Close()
+	client := pb.NewPaMonitorClient(conn)
+
+	// SetAutoResume must succeed (not FailedPrecondition).
+	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err != nil {
+		t.Fatalf("SetAutoResume: %v (this means lifecycle.go skipped WatermarkStore construction — check NudgerSignalers wiring)", err)
+	}
+
+	// GetState must reflect the change.
+	state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if !state.GetAutoResumeEnabled() {
+		t.Errorf("after SetAutoResume(true), GetState.AutoResumeEnabled = false (daemon did not persist the change)")
+	}
+
+	// Flip the other way.
+	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: false}); err != nil {
+		t.Fatalf("SetAutoResume(false): %v", err)
+	}
+	state2, err := client.GetState(context.Background(), &pb.GetStateRequest{})
+	if err != nil {
+		t.Fatalf("GetState (after off): %v", err)
+	}
+	if state2.GetAutoResumeEnabled() {
+		t.Errorf("after SetAutoResume(false), GetState.AutoResumeEnabled = true")
+	}
+}
+
+// TestRunWith_RejectsConfigWithoutNudgerSignalers is the explicit-contract
+// counterpart: if a caller constructs RunOptions WITHOUT NudgerSignalers,
+// SetAutoResume returns FailedPrecondition. This documents the contract
+// that landed pa-monitor in its broken state and makes future regressions
+// visible immediately.
+func TestRunWith_RejectsConfigWithoutNudgerSignalers(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+	runtimePath := filepath.Join(dir, "runtime.json")
+
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Path: "/p"}}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:       paths,
+			Tick:        30 * time.Millisecond,
+			RuntimePath: runtimePath,
+			Poller: &stubPoller{
+				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					return tree, false, nil
+				},
+			},
+			// NudgerSignalers intentionally absent.
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("RunWith did not return after cancel")
+		}
+	})
+
+	waitForFile(t, paths.Socket)
+
+	conn := dialUnix(t, paths.Socket)
+	defer conn.Close()
+	client := pb.NewPaMonitorClient(conn)
+
+	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err == nil {
+		t.Error("SetAutoResume without NudgerSignalers should fail with FailedPrecondition, got nil error")
 	}
 }
