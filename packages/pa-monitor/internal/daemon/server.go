@@ -65,12 +65,13 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// Send the current state on every tick so subscribers (TUI,
+			// cmux-bridge) see RPC-driven changes like Caffeinate /
+			// SetAutoResume immediately. The state payload doubles as a
+			// liveness ping — heartbeat semantics are subsumed.
 			if err := stream.Send(&pb.WatchStateEvent{
-				Payload: &pb.WatchStateEvent_Heartbeat{
-					Heartbeat: &pb.Heartbeat{
-						Ts:                  timestamppb.Now(),
-						DaemonUptimeSeconds: uint64(time.Since(s.started).Seconds()),
-					},
+				Payload: &pb.WatchStateEvent_State{
+					State: s.buildState(),
 				},
 			}); err != nil {
 				return err

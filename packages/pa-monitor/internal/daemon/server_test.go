@@ -53,7 +53,7 @@ func TestServer_PingReturnsTimestamp(t *testing.T) {
 	}
 }
 
-func TestWatchState_EmitsHeartbeats(t *testing.T) {
+func TestWatchState_PushesPeriodicState(t *testing.T) {
 	dir := shortTempDir(t)
 	paths := Paths{
 		Dir:     dir,
@@ -86,19 +86,22 @@ func TestWatchState_EmitsHeartbeats(t *testing.T) {
 		t.Errorf("first message has no DaemonState: %+v", first)
 	}
 
-	hbCount := 0
+	// After the initial state, the daemon pushes State events on every
+	// tick (was Heartbeats; now State so subscribers see RPC-driven
+	// changes like Caffeinate / SetAutoResume immediately).
+	stateCount := 0
 	deadline := time.Now().Add(350 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		msg, err := stream.Recv()
 		if err != nil {
 			t.Fatalf("recv: %v", err)
 		}
-		if msg.GetHeartbeat() != nil {
-			hbCount++
+		if msg.GetState() != nil {
+			stateCount++
 		}
 	}
-	if hbCount < 2 {
-		t.Errorf("heartbeats received = %d, want >= 2", hbCount)
+	if stateCount < 2 {
+		t.Errorf("periodic states received = %d, want >= 2", stateCount)
 	}
 }
 
@@ -134,22 +137,22 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 	if _, err := stream.Recv(); err != nil {
 		t.Fatal(err)
 	}
-	// Within 300ms we expect at least 4 heartbeats if interval was
+	// Within 300ms we expect at least 4 state pushes if interval was
 	// clamped to 50ms (300/50=6, with timing slop ~4). If the code
 	// fell back to the 2s default we'd see 0 in this window.
-	hbCount := 0
+	stateCount := 0
 	deadline := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		msg, err := stream.Recv()
 		if err != nil {
 			t.Fatalf("recv: %v", err)
 		}
-		if msg.GetHeartbeat() != nil {
-			hbCount++
+		if msg.GetState() != nil {
+			stateCount++
 		}
 	}
-	if hbCount < 3 {
-		t.Errorf("clamp to 50ms expected ~5-6 heartbeats in 300ms, got %d (likely fell back to 2s default)", hbCount)
+	if stateCount < 3 {
+		t.Errorf("clamp to 50ms expected ~5-6 state pushes in 300ms, got %d (likely fell back to 2s default)", stateCount)
 	}
 }
 
