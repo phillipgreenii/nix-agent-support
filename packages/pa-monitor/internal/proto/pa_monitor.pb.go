@@ -1957,95 +1957,6 @@ func (x *PathRollup) GetDirectory() *Directory {
 	return nil
 }
 
-type DrainRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Maximum time to wait for in-flight telemetry to flush.
-	TimeoutMs     uint32 `protobuf:"varint,1,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DrainRequest) Reset() {
-	*x = DrainRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DrainRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DrainRequest) ProtoMessage() {}
-
-func (x *DrainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DrainRequest.ProtoReflect.Descriptor instead.
-func (*DrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{29}
-}
-
-func (x *DrainRequest) GetTimeoutMs() uint32 {
-	if x != nil {
-		return x.TimeoutMs
-	}
-	return 0
-}
-
-type DrainResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Clean         bool                   `protobuf:"varint,1,opt,name=clean,proto3" json:"clean,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DrainResponse) Reset() {
-	*x = DrainResponse{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DrainResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DrainResponse) ProtoMessage() {}
-
-func (x *DrainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DrainResponse.ProtoReflect.Descriptor instead.
-func (*DrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{30}
-}
-
-func (x *DrainResponse) GetClean() bool {
-	if x != nil {
-		return x.Clean
-	}
-	return false
-}
-
 var File_internal_proto_pa_monitor_proto protoreflect.FileDescriptor
 
 const file_internal_proto_pa_monitor_proto_rawDesc = "" +
@@ -2205,12 +2116,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"D\n" +
 	"\n" +
 	"PathRollup\x126\n" +
-	"\tdirectory\x18\x01 \x01(\v2\x18.pa_monitor.v1.DirectoryR\tdirectory\"-\n" +
-	"\fDrainRequest\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs\"%\n" +
-	"\rDrainResponse\x12\x14\n" +
-	"\x05clean\x18\x01 \x01(\bR\x05clean2\xd0\a\n" +
+	"\tdirectory\x18\x01 \x01(\v2\x18.pa_monitor.v1.DirectoryR\tdirectory2\x8c\a\n" +
 	"\tPaMonitor\x12F\n" +
 	"\bGetState\x12\x1e.pa_monitor.v1.GetStateRequest\x1a\x1a.pa_monitor.v1.DaemonState\x12L\n" +
 	"\n" +
@@ -2220,8 +2126,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"Caffeinate\x12 .pa_monitor.v1.CaffeinateRequest\x1a!.pa_monitor.v1.CaffeinateResponse\x12N\n" +
 	"\tIsAnyBusy\x12\x1f.pa_monitor.v1.IsAnyBusyRequest\x1a .pa_monitor.v1.IsAnyBusyResponse\x12T\n" +
 	"\x0eGetSessionInfo\x12$.pa_monitor.v1.GetSessionInfoRequest\x1a\x1c.pa_monitor.v1.SessionDetail\x12K\n" +
-	"\vGetPathInfo\x12!.pa_monitor.v1.GetPathInfoRequest\x1a\x19.pa_monitor.v1.PathRollup\x12B\n" +
-	"\x05Drain\x12\x1b.pa_monitor.v1.DrainRequest\x1a\x1c.pa_monitor.v1.DrainResponse\x12Q\n" +
+	"\vGetPathInfo\x12!.pa_monitor.v1.GetPathInfoRequest\x1a\x19.pa_monitor.v1.PathRollup\x12Q\n" +
 	"\n" +
 	"NudgeQueue\x12 .pa_monitor.v1.NudgeQueueRequest\x1a!.pa_monitor.v1.NudgeQueueResponse\x12T\n" +
 	"\vNudgeCancel\x12!.pa_monitor.v1.NudgeCancelRequest\x1a\".pa_monitor.v1.NudgeCancelResponse\x12Z\n" +
@@ -2240,7 +2145,7 @@ func file_internal_proto_pa_monitor_proto_rawDescGZIP() []byte {
 	return file_internal_proto_pa_monitor_proto_rawDescData
 }
 
-var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*GetStateRequest)(nil),        // 0: pa_monitor.v1.GetStateRequest
 	(*WatchStateRequest)(nil),      // 1: pa_monitor.v1.WatchStateRequest
@@ -2271,26 +2176,24 @@ var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*SessionDetail)(nil),          // 26: pa_monitor.v1.SessionDetail
 	(*GetPathInfoRequest)(nil),     // 27: pa_monitor.v1.GetPathInfoRequest
 	(*PathRollup)(nil),             // 28: pa_monitor.v1.PathRollup
-	(*DrainRequest)(nil),           // 29: pa_monitor.v1.DrainRequest
-	(*DrainResponse)(nil),          // 30: pa_monitor.v1.DrainResponse
-	(*timestamppb.Timestamp)(nil),  // 31: google.protobuf.Timestamp
+	(*timestamppb.Timestamp)(nil),  // 29: google.protobuf.Timestamp
 }
 var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
-	31, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
-	31, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
+	29, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
+	29, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
 	5,  // 2: pa_monitor.v1.DaemonState.dirs:type_name -> pa_monitor.v1.Directory
 	8,  // 3: pa_monitor.v1.DaemonState.active_block:type_name -> pa_monitor.v1.Block
 	9,  // 4: pa_monitor.v1.DaemonState.active_week:type_name -> pa_monitor.v1.Week
-	31, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
+	29, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
 	6,  // 6: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
 	7,  // 7: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
-	31, // 8: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	31, // 9: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
-	31, // 10: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
-	31, // 11: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
-	31, // 12: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	31, // 13: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
-	31, // 14: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	29, // 8: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	29, // 9: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
+	29, // 10: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
+	29, // 11: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
+	29, // 12: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
+	29, // 13: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	29, // 14: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
 	12, // 15: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
 	7,  // 16: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
 	21, // 17: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
@@ -2303,25 +2206,23 @@ var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
 	23, // 24: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
 	25, // 25: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
 	27, // 26: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	29, // 27: pa_monitor.v1.PaMonitor.Drain:input_type -> pa_monitor.v1.DrainRequest
-	13, // 28: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
-	15, // 29: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
-	17, // 30: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
-	19, // 31: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
-	4,  // 32: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	4,  // 33: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
-	3,  // 34: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	11, // 35: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	24, // 36: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	26, // 37: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	28, // 38: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	30, // 39: pa_monitor.v1.PaMonitor.Drain:output_type -> pa_monitor.v1.DrainResponse
-	14, // 40: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
-	16, // 41: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
-	18, // 42: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
-	20, // 43: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
-	32, // [32:44] is the sub-list for method output_type
-	20, // [20:32] is the sub-list for method input_type
+	13, // 27: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	15, // 28: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	17, // 29: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	19, // 30: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
+	4,  // 31: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	4,  // 32: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
+	3,  // 33: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	11, // 34: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	24, // 35: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	26, // 36: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	28, // 37: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	14, // 38: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	16, // 39: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	18, // 40: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	20, // 41: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
+	31, // [31:42] is the sub-list for method output_type
+	20, // [20:31] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name
 	20, // [20:20] is the sub-list for extension extendee
 	0,  // [0:20] is the sub-list for field type_name
@@ -2343,7 +2244,7 @@ func file_internal_proto_pa_monitor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_pa_monitor_proto_rawDesc), len(file_internal_proto_pa_monitor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

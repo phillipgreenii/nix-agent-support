@@ -37,10 +37,6 @@ service PaMonitor {
   // GetPathInfo returns the directory rollup for a workspace path.
   rpc GetPathInfo(GetPathInfoRequest) returns (PathRollup);
 
-  // Drain asks the daemon to flush pending telemetry and shut down
-  // cleanly. Used for orderly host shutdown.
-  rpc Drain(DrainRequest) returns (DrainResponse);
-
   // NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
   rpc NudgeQueue(NudgeQueueRequest) returns (NudgeQueueResponse);
 
@@ -281,15 +277,4 @@ message GetPathInfoRequest {
 
 message PathRollup {
   Directory directory = 1;
-}
-
-// --- Drain --- //
-
-message DrainRequest {
-  // Maximum time to wait for in-flight telemetry to flush.
-  uint32 timeout_ms = 1;
-}
-
-message DrainResponse {
-  bool clean = 1;
 }

@@ -26,7 +26,6 @@ const (
 	PaMonitor_IsAnyBusy_FullMethodName      = "/pa_monitor.v1.PaMonitor/IsAnyBusy"
 	PaMonitor_GetSessionInfo_FullMethodName = "/pa_monitor.v1.PaMonitor/GetSessionInfo"
 	PaMonitor_GetPathInfo_FullMethodName    = "/pa_monitor.v1.PaMonitor/GetPathInfo"
-	PaMonitor_Drain_FullMethodName          = "/pa_monitor.v1.PaMonitor/Drain"
 	PaMonitor_NudgeQueue_FullMethodName     = "/pa_monitor.v1.PaMonitor/NudgeQueue"
 	PaMonitor_NudgeCancel_FullMethodName    = "/pa_monitor.v1.PaMonitor/NudgeCancel"
 	PaMonitor_SetAutoResume_FullMethodName  = "/pa_monitor.v1.PaMonitor/SetAutoResume"
@@ -61,9 +60,6 @@ type PaMonitorClient interface {
 	GetSessionInfo(ctx context.Context, in *GetSessionInfoRequest, opts ...grpc.CallOption) (*SessionDetail, error)
 	// GetPathInfo returns the directory rollup for a workspace path.
 	GetPathInfo(ctx context.Context, in *GetPathInfoRequest, opts ...grpc.CallOption) (*PathRollup, error)
-	// Drain asks the daemon to flush pending telemetry and shut down
-	// cleanly. Used for orderly host shutdown.
-	Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error)
 	// NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
 	NudgeQueue(ctx context.Context, in *NudgeQueueRequest, opts ...grpc.CallOption) (*NudgeQueueResponse, error)
 	// NudgeCancel cancels a previously queued nudge.
@@ -166,16 +162,6 @@ func (c *paMonitorClient) GetPathInfo(ctx context.Context, in *GetPathInfoReques
 	return out, nil
 }
 
-func (c *paMonitorClient) Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (*DrainResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DrainResponse)
-	err := c.cc.Invoke(ctx, PaMonitor_Drain_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *paMonitorClient) NudgeQueue(ctx context.Context, in *NudgeQueueRequest, opts ...grpc.CallOption) (*NudgeQueueResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(NudgeQueueResponse)
@@ -244,9 +230,6 @@ type PaMonitorServer interface {
 	GetSessionInfo(context.Context, *GetSessionInfoRequest) (*SessionDetail, error)
 	// GetPathInfo returns the directory rollup for a workspace path.
 	GetPathInfo(context.Context, *GetPathInfoRequest) (*PathRollup, error)
-	// Drain asks the daemon to flush pending telemetry and shut down
-	// cleanly. Used for orderly host shutdown.
-	Drain(context.Context, *DrainRequest) (*DrainResponse, error)
 	// NudgeQueue enqueues a nudge to be sent when a session next becomes idle.
 	NudgeQueue(context.Context, *NudgeQueueRequest) (*NudgeQueueResponse, error)
 	// NudgeCancel cancels a previously queued nudge.
@@ -290,9 +273,6 @@ func (UnimplementedPaMonitorServer) GetSessionInfo(context.Context, *GetSessionI
 }
 func (UnimplementedPaMonitorServer) GetPathInfo(context.Context, *GetPathInfoRequest) (*PathRollup, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPathInfo not implemented")
-}
-func (UnimplementedPaMonitorServer) Drain(context.Context, *DrainRequest) (*DrainResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Drain not implemented")
 }
 func (UnimplementedPaMonitorServer) NudgeQueue(context.Context, *NudgeQueueRequest) (*NudgeQueueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NudgeQueue not implemented")
@@ -446,24 +426,6 @@ func _PaMonitor_GetPathInfo_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PaMonitor_Drain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DrainRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaMonitorServer).Drain(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaMonitor_Drain_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaMonitorServer).Drain(ctx, req.(*DrainRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _PaMonitor_NudgeQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NudgeQueueRequest)
 	if err := dec(in); err != nil {
@@ -566,10 +528,6 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPathInfo",
 			Handler:    _PaMonitor_GetPathInfo_Handler,
-		},
-		{
-			MethodName: "Drain",
-			Handler:    _PaMonitor_Drain_Handler,
 		},
 		{
 			MethodName: "NudgeQueue",

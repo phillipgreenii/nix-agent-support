@@ -97,11 +97,6 @@ func (s *server) IsAnyBusy(ctx context.Context, _ *pb.IsAnyBusyRequest) (*pb.IsA
 	return &pb.IsAnyBusyResponse{AnyBusy: busy > 0, BusyCount: busy}, nil
 }
 
-// Caffeinate, Nudge, GetSessionInfo, GetPathInfo, Drain — stubs returning
-// Unimplemented for now. Plan 3 will wire each as the corresponding
-// daemon-side concern (manager, signal layer, lookup helpers, shutdown
-// hook) is plumbed.
-
 func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb.CaffeinateResponse, error) {
 	current := s.state.isCaffeinateOn()
 	var target bool
@@ -349,19 +344,6 @@ func dirToWire(d *aggregate.Directory) *pb.Directory {
 		return t.GetDirs()[0]
 	}
 	return nil
-}
-
-func (s *server) Drain(ctx context.Context, req *pb.DrainRequest) (*pb.DrainResponse, error) {
-	// v1: Drain is a politeness signal. Real shutdown happens via
-	// SIGTERM to the daemon process. We return immediately so callers
-	// know the daemon is responsive; the OTel flush + cleanup defers
-	// fire on the SIGTERM path.
-	timeoutMS := req.GetTimeoutMs()
-	if timeoutMS == 0 {
-		timeoutMS = 5000
-	}
-	_ = timeoutMS
-	return &pb.DrainResponse{Clean: true}, nil
 }
 
 // buildState constructs the wire DaemonState from the shared tree plus
