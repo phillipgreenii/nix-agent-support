@@ -23,8 +23,12 @@ case "${1:-}" in
   ;;
 esac
 
+# Resolve which update-locks-lib.bash to source via the canonical flake resolver.
+# Pass WORKSPACE_ROOT so the resolver can prefer the on-disk sibling when present.
+export WORKSPACE_ROOT
+UL_LIB_DIR=$(nix run "github:phillipgreenii/nix-repo-base#determine-ul-lib-dir")
 # shellcheck disable=SC1091
-source "${WORKSPACE_ROOT}/phillipg-nix-repo-base/lib/scripts/update-locks-lib.bash"
+source "${UL_LIB_DIR}/update-locks-lib.bash"
 ul_reexec_in_dev_shell "$@"
 ul_setup "phillipgreenii-nix-agent-support" "${SCRIPT_DIR}"
 
