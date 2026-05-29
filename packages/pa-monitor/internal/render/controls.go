@@ -22,9 +22,9 @@ type ControlsOpts struct {
 
 // Controls returns a single-row, tier-aware controls line:
 //
-//	WIDE   ≥120  [C] ● on  [t] tokens · cost  [a] active · all  [n] name · id  [R] ● on  [M] now  [?]  [q]
-//	NARROW 80–119 [C]●  [t] tok · cost  [a] act · all  [n] nm · id  [R]●  [M]now  [?][q]
-//	TINY   <80   [C]●  [t]tok  [a]act  [n]nm  [R]●  [M]now  [?][q]
+//	WIDE   ≥120  [C] ● on  [t] tokens · cost  [a] active · all  [n] name · id  [R] ● on  [N] nudge  [?]  [q]
+//	NARROW 80–119 [C]●  [t] tok · cost  [a] act · all  [n] nm · id  [R]●  [N]nudge  [?][q]
+//	TINY   <80   [C]●  [t]tok  [a]act  [n]nm  [R]●  [N]nudge  [?][q]
 //
 // The active half of each toggle is highlighted via theme.ActiveToggle.
 // At TINY only the active half of each toggle is shown.
@@ -70,7 +70,7 @@ func Controls(opts ControlsOpts) string {
 		} else {
 			nameLabel = th.ActiveToggle.Render("name")
 		}
-		fmt.Fprintf(&sb, "[C] %s  [t] %s · %s  [a] %s · %s  [n] %s · %s  [R] %s  [M] now  [?]  [q]",
+		fmt.Fprintf(&sb, "[C] %s  [t] %s · %s  [a] %s · %s  [n] %s · %s  [R] %s  [N] nudge  [?]  [q]",
 			caffWide, tokLabel, costLabel, actLabel, allLabel, nameLabel, idLabel, autoResumeWide)
 	case wrap.TierNarrow:
 		tokLabel, costLabel := "tok", "cost"
@@ -91,7 +91,7 @@ func Controls(opts ControlsOpts) string {
 		} else {
 			nmLabel = th.ActiveToggle.Render("nm")
 		}
-		fmt.Fprintf(&sb, "[C]%s  [t] %s · %s  [a] %s · %s  [n] %s · %s  [R]%s  [M]now  [?][q]",
+		fmt.Fprintf(&sb, "[C]%s  [t] %s · %s  [a] %s · %s  [n] %s · %s  [R]%s  [N]nudge  [?][q]",
 			caffGlyph, tokLabel, costLabel, actLabel, allLabel, nmLabel, idLabel, autoResumeGlyph)
 	default: // TierTiny
 		tokOrCost := "tok"
@@ -106,7 +106,7 @@ func Controls(opts ControlsOpts) string {
 		if opts.ForceID {
 			nmOrID = "id"
 		}
-		fmt.Fprintf(&sb, "[C]%s  [t]%s  [a]%s  [n]%s  [R]%s  [M]now  [?][q]",
+		fmt.Fprintf(&sb, "[C]%s  [t]%s  [a]%s  [n]%s  [R]%s  [N]nudge  [?][q]",
 			caffGlyph, th.ActiveToggle.Render(tokOrCost), th.ActiveToggle.Render(actOrAll), th.ActiveToggle.Render(nmOrID), autoResumeGlyph)
 	}
 	return sb.String()

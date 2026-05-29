@@ -110,7 +110,7 @@ func makeSessionTree(dirPath, sid string, nudge *aggregate.PendingNudge) *aggreg
 	return &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
 }
 
-func TestKeybindM_QueuesManualOnLeafSession(t *testing.T) {
+func TestKeybindN_QueuesManualOnLeafSession(t *testing.T) {
 	var gotSelector string
 	var gotCancel bool
 	var called bool
@@ -141,7 +141,7 @@ func TestKeybindM_QueuesManualOnLeafSession(t *testing.T) {
 	}
 }
 
-func TestKeybindM_CancelsWhenAllPending(t *testing.T) {
+func TestKeybindN_CancelsWhenAllPending(t *testing.T) {
 	var gotCancel bool
 	var called bool
 
@@ -166,7 +166,7 @@ func TestKeybindM_CancelsWhenAllPending(t *testing.T) {
 	}
 }
 
-func TestKeybindM_PathNodeUsesPathSelector(t *testing.T) {
+func TestKeybindN_PathNodeUsesPathSelector(t *testing.T) {
 	var gotSelector string
 	var called bool
 
@@ -193,7 +193,7 @@ func TestKeybindM_PathNodeUsesPathSelector(t *testing.T) {
 	}
 }
 
-func TestKeybindM_NilCallbackIsSafe(t *testing.T) {
+func TestKeybindN_NilCallbackIsSafe(t *testing.T) {
 	tree := makeSessionTree("/proj/d", "sid-4", nil)
 	m := NewModel(Options{Tree: tree})
 	m.cursor = 1

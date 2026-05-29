@@ -18,20 +18,20 @@ func TestControlsTierContent(t *testing.T) {
 		{
 			name:     "wide",
 			width:    140,
-			wantAll:  []string{"[C] ●", "tokens", "cost", "active", "all", "name", "id", "[R] ●", "[M] now", "[?]", "[q]"},
+			wantAll:  []string{"[C] ●", "tokens", "cost", "active", "all", "name", "id", "[R] ●", "[N] nudge", "[?]", "[q]"},
 			wantNone: []string{"[C]●", "[t]tok"},
 		},
 		{
 			name:     "narrow",
 			width:    100,
-			wantAll:  []string{"[C]●", "[t] tok", "cost", "[a] act", "all", "[n] nm", "id", "[R]●", "[M]now", "[?]", "[q]"},
-			wantNone: []string{"[C] ●", "tokens", "active", "[M] now"},
+			wantAll:  []string{"[C]●", "[t] tok", "cost", "[a] act", "all", "[n] nm", "id", "[R]●", "[N]nudge", "[?]", "[q]"},
+			wantNone: []string{"[C] ●", "tokens", "active", "[N] nudge"},
 		},
 		{
 			name:     "tiny",
 			width:    60,
-			wantAll:  []string{"[C]●", "[t]tok", "[a]act", "[n]nm", "[R]●", "[M]now", "[?]", "[q]"},
-			wantNone: []string{"[C] ●", "[C]affeinate", "tokens", "active", "[M] now", "tok · cost"},
+			wantAll:  []string{"[C]●", "[t]tok", "[a]act", "[n]nm", "[R]●", "[N]nudge", "[?]", "[q]"},
+			wantNone: []string{"[C] ●", "[C]affeinate", "tokens", "active", "[N] nudge", "tok · cost"},
 		},
 	}
 	for _, tc := range cases {

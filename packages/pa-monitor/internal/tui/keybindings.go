@@ -35,7 +35,7 @@ var Bindings = []Binding{
 	{Keys: []string{"n"}, Description: "Toggle name / id", Handle: handleToggleID},
 	{Keys: []string{"C"}, Description: "Toggle caffeinate", Handle: handleToggleCaffeinate},
 	{Keys: []string{"R"}, Description: "Toggle auto-resume", Handle: handleToggleAutoResume},
-	{Keys: []string{"M"}, Description: "Manually fire resume", Handle: handleManualResume},
+	{Keys: []string{"N"}, Description: "Nudge (cursor scope; root = all sessions)", Handle: handleManualResume},
 }
 
 // --- Handlers (one per Binding) ---
