@@ -3,6 +3,9 @@ nudge = "Process open feedback on your PRs and apply fixes via pg-pr."
 idle_timeout = "30m"
 min_active_sessions = 0
 max_active_sessions = 1
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-pr-support__pr-self-fixer" }
 # Open process-feedback cycles whose parent PR has role=mine.
 # Resolves parent metadata via a follow-up bd show. We accept a small extra
 # bd call per cycle to avoid baking the role into the cycle bead itself

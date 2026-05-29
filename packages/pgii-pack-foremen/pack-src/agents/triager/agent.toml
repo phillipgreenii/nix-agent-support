@@ -6,6 +6,9 @@
 
 scope = "city"
 wake_mode = "fresh"
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-foremen__triager" }
 idle_timeout = "30m"
 min_active_sessions = 0
 max_active_sessions = 1

@@ -54,7 +54,11 @@ pre_start = [
 # non-interactive bash source the script below, which evaluates direnv
 # export for the cwd. The script is idempotent (guards via env sentinel)
 # and a no-op if direnv or .envrc is absent.
-env = { BASH_ENV = "${PACK_ROOT}/agents/worker/scripts/bash-env.sh" }
+# BEADS_ACTOR uses the rig name as a suffix so the audit trail
+# distinguishes which rig's worker pool did the write
+# (workers spawn one per rig). Pin so bd writes never fall through
+# to git user.name → "Phillip Green II".
+env = { BASH_ENV = "${PACK_ROOT}/agents/worker/scripts/bash-env.sh", BEADS_ACTOR = "pgii-workers__worker__{{.Rig}}" }
 nudge = "Run gc hook for routed work, then bd ready to find a ready bead with acceptance_criteria."
 
 # Pick up open beads in the current rig's bd store that have AC populated

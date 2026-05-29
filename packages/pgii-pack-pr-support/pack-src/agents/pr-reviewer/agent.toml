@@ -3,6 +3,9 @@ nudge = "Process open feedback on team PRs and draft reviews via pg-pr review dr
 idle_timeout = "30m"
 min_active_sessions = 0
 max_active_sessions = 1
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-pr-support__pr-reviewer" }
 # Open process-feedback cycles on team PRs (role != "mine").
 work_query = """
 bd list --json --limit 0 --type=task \

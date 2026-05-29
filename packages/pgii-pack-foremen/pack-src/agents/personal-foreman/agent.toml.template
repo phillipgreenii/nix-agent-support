@@ -18,5 +18,8 @@ min_active_sessions = 0
 max_active_sessions = 1
 model = "claude-opus-4-7"
 nudge = "Wake check: personal work beads needing enhancement, rig-picking, or multi-rig tracking."
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-foremen__personal-foreman" }
 
 work_query = "${PACK_ROOT}/agents/personal-foreman/work_query.sh"

@@ -17,3 +17,6 @@ work_dir = ".gc/agents/operator"
 nudge = "Standing by for user instructions."
 idle_timeout = "2h"
 max_active_sessions = 1
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-gastown__operator" }

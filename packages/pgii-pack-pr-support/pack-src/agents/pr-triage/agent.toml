@@ -3,6 +3,9 @@ nudge = "Triage open feedback on PRs into action beads."
 idle_timeout = "30m"
 min_active_sessions = 0
 max_active_sessions = 1
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-pr-support__pr-triage" }
 # Open process-feedback cycle beads. Triage runs on both mine and team PRs;
 # differentiation happens inside the agent prompt.
 work_query = """

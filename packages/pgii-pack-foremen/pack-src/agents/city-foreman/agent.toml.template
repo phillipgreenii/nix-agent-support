@@ -12,6 +12,9 @@ min_active_sessions = 0
 max_active_sessions = 1
 model = "claude-opus-4-7"
 nudge = "Wake check: hq work beads needing enhancement or AC-fill."
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-foremen__city-foreman" }
 
 # Pick up hq beads that need foreman attention:
 #   - not yet foreman-triaged AND status=open, OR

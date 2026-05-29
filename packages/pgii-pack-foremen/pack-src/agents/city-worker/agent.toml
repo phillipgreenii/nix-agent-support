@@ -12,6 +12,9 @@ idle_timeout = "1h"
 min_active_sessions = 0
 max_active_sessions = 1
 nudge = "Run gc hook for routed work, then bd ready to find a ready bead with acceptance_criteria."
+# Pin BEADS_ACTOR so bd writes from this session never fall through
+# to git user.name (which would attribute to "Phillip Green II").
+env = { BEADS_ACTOR = "pgii-foremen__city-worker" }
 
 work_dir = ".gc/worktrees/city/worker/{{.AgentBase}}"
 
