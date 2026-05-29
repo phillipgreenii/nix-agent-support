@@ -70,12 +70,12 @@ in
       text = ''
         #!/bin/sh
         # pa-monitor LaunchAgent shim. Path is stable across pa-monitor
-        # rebuilds; exec's the user nix profile binary which IS updated
-        # atomically on home-manager activation.
+        # rebuilds; exec's the nix-darwin per-user profile binary which IS
+        # updated atomically on home-manager activation.
         #
         # Run `launchctl kickstart -k gui/$UID/com.phillipg.pa-monitor-daemon`
         # after a rebuild to pick up new code.
-        exec "$HOME/.nix-profile/bin/pa-monitor" daemon "$@"
+        exec "/etc/profiles/per-user/${config.home.username}/bin/pa-monitor" daemon "$@"
       '';
       executable = true;
     };
