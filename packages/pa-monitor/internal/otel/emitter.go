@@ -56,6 +56,19 @@ type Emitter struct {
 	sessionsErroredObs  map[string]int64 // kind -> count; replaced per tick
 	caffeinateActiveVal int64
 	caffeinateAttrs     []attribute.KeyValue
+	// caffeinateActiveKnown gates observation. Without it the callback fires
+	// once before any RecordCaffeinateActive call (the SDK collects shortly
+	// after registration) and observes 0 with NO attrs, creating a permanent
+	// label-less series in the exporter. After the first push the attrs map
+	// is populated and subsequent observations carry plan_tier etc -- the
+	// label-less ghost series sticks around forever as a stuck-at-0 line.
+	caffeinateActiveKnown bool
+	// autoResumeEnabledVal / autoResumeEnabledAttrs / autoResumeEnabledKnown
+	// mirror the caffeinate triplet for the pa_monitor.auto_resume.enabled
+	// gauge.
+	autoResumeEnabledVal   int64
+	autoResumeEnabledAttrs []attribute.KeyValue
+	autoResumeEnabledKnown bool
 	// blockCostUSD / weekCostUSD buffer the latest cost-in-USD for the active
 	// 5h block and the active week. Pushed by RecordBlockCost / RecordWeekCost
 	// (typically from the daemon's tick loop) and read by the gauge callback.
@@ -136,6 +149,10 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	autoResumeGauge, err := meter.Int64ObservableGauge("pa_monitor.auto_resume.enabled")
+	if err != nil {
+		return err
+	}
 
 	// Synchronous counters for transition events.
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
@@ -170,15 +187,20 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		e.mu.Lock()
 		obs := e.sessionsObs
 		erroredObs := e.sessionsErroredObs
-		caffVal := e.caffeinateActiveVal
-		caffAttrs := e.caffeinateAttrs
+		caffVal, caffAttrs, caffKnown := e.caffeinateActiveVal, e.caffeinateAttrs, e.caffeinateActiveKnown
+		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
 		e.mu.Unlock()
 		for _, s := range obs {
 			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
 		}
-		o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
+		if caffKnown {
+			o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
+		}
+		if autoKnown {
+			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
+		}
 		for kind, count := range erroredObs {
 			o.ObserveInt64(sessionsErroredGauge, count,
 				metric.WithAttributes(attribute.String("kind", kind)))
@@ -190,7 +212,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveFloat64(weekCostGauge, weekCost, metric.WithAttributes(weekAttrs...))
 		}
 		return nil
-	}, sessionsGauge, caffGauge, sessionsErroredGauge, blockCostGauge, weekCostGauge)
+	}, sessionsGauge, caffGauge, autoResumeGauge, sessionsErroredGauge, blockCostGauge, weekCostGauge)
 	return err
 }
 
@@ -267,7 +289,9 @@ func (e *Emitter) RecordSessionsCount(byState map[string]int, baseAttrs map[stri
 	e.mu.Unlock()
 }
 
-// RecordCaffeinateActive sets the caffeinate gauge. nil-safe.
+// RecordCaffeinateActive sets the caffeinate gauge. nil-safe. Until the
+// first call, the gauge is not observed (avoiding a ghost label-less
+// series at 0 before the daemon tick loop fires).
 func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	if e == nil {
 		return
@@ -280,6 +304,26 @@ func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	e.mu.Lock()
 	e.caffeinateActiveVal = v
 	e.caffeinateAttrs = kv
+	e.caffeinateActiveKnown = true
+	e.mu.Unlock()
+}
+
+// RecordAutoResumeEnabled sets the auto-resume gauge. nil-safe. Mirrors
+// RecordCaffeinateActive: pushed each tick by the daemon, observed only
+// after the first push.
+func (e *Emitter) RecordAutoResumeEnabled(enabled bool, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	v := int64(0)
+	if enabled {
+		v = 1
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.autoResumeEnabledVal = v
+	e.autoResumeEnabledAttrs = kv
+	e.autoResumeEnabledKnown = true
 	e.mu.Unlock()
 }
 

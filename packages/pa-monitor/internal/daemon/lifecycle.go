@@ -332,6 +332,18 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					opts.Emitter.RecordCaffeinateGraceExpired(nil)
 				}
 			}
+			// Push the auto-resume intent each tick so its observable gauge
+			// tracks the daemon's actual setting (mirrors caffeinate). Reads
+			// from the WatermarkStore which is the source of truth for the
+			// nudger's auto-resume flag.
+			state.mu.RLock()
+			wmForGauge := state.watermarks
+			state.mu.RUnlock()
+			if wmForGauge != nil {
+				opts.Emitter.RecordAutoResumeEnabled(wmForGauge.AutoResumeEnabled(), map[string]string{
+					"plan_tier": opts.PlanTier,
+				})
+			}
 			if tree.ActiveBlock != nil {
 				opts.Emitter.RecordBlockCost(tree.ActiveBlock.CostUSD, map[string]string{
 					"plan_tier": opts.PlanTier,

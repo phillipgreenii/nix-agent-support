@@ -56,7 +56,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 5,
         "w": 12,
         "h": 7
       },
@@ -87,7 +87,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 5,
         "w": 12,
         "h": 7
       },
@@ -100,7 +100,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "currencyUSD"
+          "unit": "currencyUSD",
+          "min": 0
         }
       }
     },
@@ -114,7 +115,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 7,
+        "y": 12,
         "w": 12,
         "h": 7
       },
@@ -127,7 +128,8 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "currencyUSD"
+          "unit": "currencyUSD",
+          "min": 0
         }
       }
     },
@@ -141,7 +143,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 7,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -162,7 +164,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 7,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -175,7 +177,7 @@
     },
     {
       "id": 6,
-      "title": "Caffeinate active",
+      "title": "Toggles (caffeinate / auto-nudge)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -183,22 +185,32 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 19,
         "w": 12,
         "h": 6
       },
       "targets": [
         {
-          "expr": "pa_monitor_caffeinate_active",
-          "legendFormat": "active",
+          "expr": "max(pa_monitor_caffeinate_active)",
+          "legendFormat": "Caffeinated",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(pa_monitor_caffeinate_rounds_total[5m]))",
-          "legendFormat": "rounds/sec",
+          "expr": "max(pa_monitor_auto_resume_enabled)",
+          "legendFormat": "Auto Nudge",
           "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1.05,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2
+          }
+        }
+      }
     },
     {
       "id": 7,
@@ -210,7 +222,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 14,
+        "y": 19,
         "w": 12,
         "h": 6
       },
@@ -228,7 +240,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 25,
         "w": 24,
         "h": 1
       },
@@ -244,7 +256,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 26,
         "w": 12,
         "h": 7
       },
@@ -275,7 +287,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 26,
         "w": 12,
         "h": 7
       },
@@ -297,7 +309,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 33,
         "w": 6,
         "h": 4
       },
@@ -318,7 +330,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 28,
+        "y": 33,
         "w": 6,
         "h": 4
       },
@@ -339,7 +351,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 28,
+        "y": 33,
         "w": 12,
         "h": 7
       },
@@ -366,7 +378,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 40,
         "w": 24,
         "h": 1
       }
@@ -381,7 +393,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 36,
+        "y": 41,
         "w": 6,
         "h": 4
       },
@@ -403,7 +415,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 36,
+        "y": 41,
         "w": 18,
         "h": 6
       },
@@ -431,7 +443,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 47,
         "w": 24,
         "h": 1
       }
@@ -446,13 +458,13 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 48,
         "w": 8,
         "h": 7
       },
       "targets": [
         {
-          "expr": "sum by (agent_kind) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "expr": "sum by (agent_kind) (pa_monitor_sessions_count{agent_kind!=\"\", workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
           "legendFormat": "{{agent_kind}}",
           "refId": "A"
         }
@@ -469,22 +481,44 @@
     },
     {
       "id": 19,
-      "title": "Sessions by model",
-      "type": "timeseries",
+      "title": "Session state mix (now)",
+      "type": "piechart",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 8,
-        "y": 43,
+        "y": 48,
         "w": 8,
         "h": 7
       },
       "targets": [
         {
-          "expr": "sum by (model) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
-          "legendFormat": "{{model}}",
+          "expr": "sum by (state) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Sessions by workspace.scope",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 48,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (workspace_scope) (pa_monitor_sessions_count{workspace_scope!=\"\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{workspace_scope}}",
           "refId": "A"
         }
       ],
@@ -499,33 +533,152 @@
       }
     },
     {
-      "id": 20,
-      "title": "Sessions by workspace.scope",
-      "type": "timeseries",
+      "id": 100,
+      "title": "Current status",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 101,
+      "title": "Sessions (current)",
+      "type": "stat",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 16,
-        "y": 43,
-        "w": 8,
-        "h": 7
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
-          "expr": "sum by (workspace_scope) (pa_monitor_sessions_count{plan_tier=~\"$plan_tier\"})",
-          "legendFormat": "{{workspace_scope}}",
+          "expr": "sum(pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "sessions",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Sessions errored (current)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(pa_monitor_sessions_errored)",
+          "legendFormat": "errored",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "stacking": {
-              "mode": "normal"
-            }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
           }
+        }
+      }
+    },
+    {
+      "id": 103,
+      "title": "Caffeinated",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "max(pa_monitor_caffeinate_active)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Disabled"
+                },
+                "1": {
+                  "text": "Enabled"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 104,
+      "title": "Auto Nudge",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "max(pa_monitor_auto_resume_enabled)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Disabled"
+                },
+                "1": {
+                  "text": "Enabled"
+                }
+              }
+            }
+          ]
         }
       }
     }
