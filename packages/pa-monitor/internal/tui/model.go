@@ -54,12 +54,13 @@ type Model struct {
 	forceID       bool
 	costMode      bool
 	caffeinateOn  bool
-	width, height     int
-	selected          *aggregate.SessionView
-	activeModal       ModalKind
-	modalScrollOffset int
-	cursor            int
-	scrollOffset      int
+	width, height       int
+	selected            *aggregate.SessionView
+	activeModal         ModalKind
+	modalScrollOffset   int
+	detailsScrollOffset int
+	cursor              int
+	scrollOffset        int
 	theme         render.Theme
 
 	poller     Poller

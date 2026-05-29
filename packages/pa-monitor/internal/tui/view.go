@@ -24,7 +24,7 @@ func (m *Model) View() string {
 		return "loading…"
 	}
 	if m.selected != nil {
-		return wrap.Block(RenderDetails(m.selected, m.width), wrap.EffectiveWidth(m.width))
+		return wrap.Block(RenderDetailsWindow(m.selected, m.width, m.height, m.detailsScrollOffset), wrap.EffectiveWidth(m.width))
 	}
 
 	now := time.Now()

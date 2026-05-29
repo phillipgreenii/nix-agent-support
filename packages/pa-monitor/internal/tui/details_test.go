@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
@@ -176,6 +177,130 @@ func TestHumanizeAge(t *testing.T) {
 		if got != c.want {
 			t.Errorf("humanizeAge(%v) = %q, want %q", c.d, got, c.want)
 		}
+	}
+}
+
+// --- Scrollable details viewport ---
+
+// longPromptSV builds a SessionView with a multi-line FirstPrompt so the
+// rendered details are guaranteed to exceed a small viewport.
+func longPromptSV() *aggregate.SessionView {
+	lines := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		lines = append(lines, "prompt line padding for scroll test")
+	}
+	return &aggregate.SessionView{
+		Session: &session.Session{SessionID: "id1", Name: "n1"},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			FirstPrompt: strings.Join(lines, "\n"),
+		},
+	}
+}
+
+// TestDetailsDownKeyScrollsWhenSelected verifies that pressing 'j' (down) while
+// a session is selected increments detailsScrollOffset rather than moving the
+// session-list cursor.
+func TestDetailsDownKeyScrollsWhenSelected(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.selected = longPromptSV()
+	m.width = 80
+	m.height = 10
+	before := m.detailsScrollOffset
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.detailsScrollOffset <= before {
+		t.Errorf("down with selection: expected detailsScrollOffset > %d, got %d", before, m.detailsScrollOffset)
+	}
+}
+
+// TestDetailsUpKeyDecreasesOffset verifies that pressing 'k' (up) with a
+// positive scroll offset decreases the offset.
+func TestDetailsUpKeyDecreasesOffset(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.selected = longPromptSV()
+	m.width = 80
+	m.height = 10
+	m.detailsScrollOffset = 5
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.detailsScrollOffset != 4 {
+		t.Errorf("up with selection from offset=5: want 4, got %d", m.detailsScrollOffset)
+	}
+}
+
+// TestDetailsUpKeyAtZeroClamps verifies the offset never goes negative.
+func TestDetailsUpKeyAtZeroClamps(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.selected = longPromptSV()
+	m.width = 80
+	m.height = 10
+	m.detailsScrollOffset = 0
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.detailsScrollOffset != 0 {
+		t.Errorf("up at offset=0: want 0, got %d", m.detailsScrollOffset)
+	}
+}
+
+// TestEscResetsDetailsScrollOffset verifies that closing the details panel
+// also resets the scroll offset.
+func TestEscResetsDetailsScrollOffset(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}})
+	m.selected = longPromptSV()
+	m.detailsScrollOffset = 7
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.selected != nil {
+		t.Errorf("esc should clear m.selected; got %#v", m.selected)
+	}
+	if m.detailsScrollOffset != 0 {
+		t.Errorf("esc should reset detailsScrollOffset to 0; got %d", m.detailsScrollOffset)
+	}
+}
+
+// TestEnterResetsDetailsScrollOffset verifies that re-opening a session resets
+// the scroll offset so the new view starts at the top.
+func TestEnterResetsDetailsScrollOffset(t *testing.T) {
+	sv := &aggregate.SessionView{
+		Session: &session.Session{SessionID: "id1"},
+	}
+	d := &aggregate.Directory{Path: "/p", Sessions: []*aggregate.SessionView{sv}}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	// Position cursor on a session row.
+	for i, r := range m.flatRows {
+		if r.Session != nil {
+			m.cursor = i
+			break
+		}
+	}
+	m.detailsScrollOffset = 9
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.selected == nil {
+		t.Fatalf("enter should select a session; got nil")
+	}
+	if m.detailsScrollOffset != 0 {
+		t.Errorf("enter should reset detailsScrollOffset to 0; got %d", m.detailsScrollOffset)
+	}
+}
+
+// TestRenderDetailsWindowClipsToHeight verifies the windowed renderer clips
+// long content to the supplied viewport and indicates more content below.
+func TestRenderDetailsWindowClipsToHeight(t *testing.T) {
+	sv := longPromptSV()
+	height := 8
+	out := RenderDetailsWindow(sv, 80, height, 0)
+	lines := strings.Split(out, "\n")
+	if len(lines) > height {
+		t.Errorf("RenderDetailsWindow: output has %d lines, want <= %d", len(lines), height)
+	}
+	if !strings.Contains(out, "↓") {
+		t.Errorf("expected a ↓ overflow indicator when content exceeds viewport:\n%s", out)
+	}
+}
+
+// TestRenderDetailsWindowShowsAboveIndicator verifies the windowed renderer
+// shows an ↑ indicator when scrolled past the top.
+func TestRenderDetailsWindowShowsAboveIndicator(t *testing.T) {
+	sv := longPromptSV()
+	out := RenderDetailsWindow(sv, 80, 8, 5)
+	if !strings.Contains(out, "↑") {
+		t.Errorf("expected a ↑ overflow indicator when scrollOffset>0:\n%s", out)
 	}
 }
 

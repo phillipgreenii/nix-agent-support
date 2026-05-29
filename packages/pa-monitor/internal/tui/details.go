@@ -72,6 +72,72 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	return sb.String()
 }
 
+// RenderDetailsWindow renders a height-bounded viewport over the full
+// details body, starting at `scrollOffset` content lines. It returns at most
+// `height` "\n"-separated lines and prepends/appends "↑ N more" / "↓ N more"
+// indicators when content extends beyond the viewport.
+//
+// height <= 0 or width <= 0 falls back to the unclipped RenderDetails output.
+func RenderDetailsWindow(sv *aggregate.SessionView, width, height, scrollOffset int) string {
+	full := RenderDetails(sv, width)
+	if height <= 0 {
+		return full
+	}
+	lines := strings.Split(full, "\n")
+	if len(lines) <= height {
+		return full
+	}
+
+	// Clamp scrollOffset to valid range.
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	maxOffset := len(lines) - height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
+	}
+
+	hasAbove := scrollOffset > 0
+	// Reserve indicator lines from the available budget. The indicators take
+	// the place of the topmost / bottommost visible lines.
+	rowBudget := height
+	if hasAbove {
+		rowBudget--
+	}
+	if rowBudget < 1 {
+		rowBudget = 1
+	}
+	end := scrollOffset + rowBudget
+	if end > len(lines) {
+		end = len(lines)
+	}
+	hasBelow := end < len(lines)
+	if hasBelow {
+		rowBudget--
+		if rowBudget < 1 {
+			rowBudget = 1
+		}
+		end = scrollOffset + rowBudget
+		if end > len(lines) {
+			end = len(lines)
+		}
+		hasBelow = end < len(lines)
+	}
+
+	var out []string
+	if hasAbove {
+		out = append(out, fmt.Sprintf("↑ %d more", scrollOffset))
+	}
+	out = append(out, lines[scrollOffset:end]...)
+	if hasBelow {
+		out = append(out, fmt.Sprintf("↓ %d more", len(lines)-end))
+	}
+	return strings.Join(out, "\n")
+}
+
 // isEscalated reports whether the error record was escalated: the kind is
 // inherently retryable by spec (unknown or server_error) but IsRetryable has
 // been flipped to false by the daemon's escalation logic.

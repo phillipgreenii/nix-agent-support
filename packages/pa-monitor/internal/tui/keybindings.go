@@ -63,6 +63,12 @@ func handleDown(m *Model) tea.Cmd {
 		// overshoot temporarily.
 		return nil
 	}
+	if m.selected != nil {
+		// Details viewport scrolls instead of moving the underlying list cursor.
+		// Clamping to the actual content length happens in the renderer.
+		m.detailsScrollOffset++
+		return nil
+	}
 	start := m.cursor + 1
 	if start < len(m.flatRows) {
 		m.cursor = nextSelectable(m.flatRows, start, +1)
@@ -79,6 +85,12 @@ func handleUp(m *Model) tea.Cmd {
 		}
 		return nil
 	}
+	if m.selected != nil {
+		if m.detailsScrollOffset > 0 {
+			m.detailsScrollOffset--
+		}
+		return nil
+	}
 	start := m.cursor - 1
 	if start >= 0 {
 		m.cursor = nextSelectable(m.flatRows, start, -1)
@@ -91,6 +103,7 @@ func handleUp(m *Model) tea.Cmd {
 func handleEnter(m *Model) tea.Cmd {
 	if row, ok := m.rowAt(m.cursor); ok && row.Kind == render.SessionKind {
 		m.selected = row.Session
+		m.detailsScrollOffset = 0
 	}
 	return nil
 }
@@ -127,6 +140,7 @@ func handleEsc(m *Model) tea.Cmd {
 		return nil
 	}
 	m.selected = nil
+	m.detailsScrollOffset = 0
 	return nil
 }
 
