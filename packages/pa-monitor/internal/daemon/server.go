@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
@@ -31,6 +32,9 @@ type server struct {
 	// the server doesn't have to reach into config; empty falls back to the
 	// hardcoded "continue" sentinel inside the handler.
 	autoResumeMessage string
+	// writeService persists toggle changes (Caffeinate, SetAutoResume) to
+	// the ToggleStore. Set by serve().
+	writeService *service.WriteService
 	// bridges tracks cmux-bridge registrations so RegisterBridge handlers
 	// can update last-seen and the poller can refine "cmux" terminal-host
 	// labels with bridge status.
@@ -130,6 +134,10 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 		cause = "manual"
 	}
 	s.state.setCaffeinateActive(target, cause)
+	// Persist to ToggleStore.
+	if s.writeService != nil {
+		_ = s.writeService.SetToggle(ctx, "caffeinate_on", target)
+	}
 	// Persist to runtime.json via read-modify-write so other fields are preserved.
 	s.state.mu.RLock()
 	path := s.state.runtimePath
@@ -311,6 +319,10 @@ func (s *server) SetAutoResume(ctx context.Context, req *pb.SetAutoResumeRequest
 		return nil, status.Error(codes.FailedPrecondition, "SetAutoResume: nudger not configured")
 	}
 	w.SetAutoResumeEnabled(req.GetEnabled())
+	// Persist to ToggleStore.
+	if s.writeService != nil {
+		_ = s.writeService.SetToggle(ctx, "auto_resume_enabled", req.GetEnabled())
+	}
 	return &pb.SetAutoResumeResponse{Enabled: req.GetEnabled()}, nil
 }
 
@@ -384,12 +396,13 @@ func (s *server) buildState() *pb.DaemonState {
 // bridges + cmuxAncestor are both optional; when nil the RegisterBridge
 // handler becomes a no-op success and poller-side cmux refinement falls
 // back to a bare "cmux" label.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version
 	srv.planTier = planTier
 	srv.autoResumeMessage = autoResumeMessage
+	srv.writeService = writeService
 	srv.bridges = bridges
 	srv.cmuxAncestor = cmuxAncestor
 	pb.RegisterPaMonitorServer(gs, srv)

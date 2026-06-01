@@ -231,7 +231,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.BridgeRegistry, opts.CmuxAncestor)
+	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, opts.BridgeRegistry, opts.CmuxAncestor)
 	defer stop()
 
 	defer opts.Emitter.Shutdown(context.Background())

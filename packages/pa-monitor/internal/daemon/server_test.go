@@ -13,6 +13,8 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
@@ -429,6 +431,128 @@ func TestCaffeinatePreservesNudgerPersistence(t *testing.T) {
 	}
 	if !reloaded.AutoResumeEnabled {
 		t.Error("AutoResumeEnabled was zeroed by Caffeinate — read-modify-write broken")
+	}
+}
+
+func TestServerCaffeinatePersistsToToggleStore(t *testing.T) {
+	// Setup: in-memory DB + WriteService + new test server.
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	state := newSharedState()
+	srv := newServer(state)
+	srv.writeService = ws
+
+	// Call Caffeinate({Action: "on"}).
+	ctx := context.Background()
+	resp, err := srv.Caffeinate(ctx, &pb.CaffeinateRequest{Action: "on"})
+	if err != nil {
+		t.Fatalf("Caffeinate: %v", err)
+	}
+	if !resp.GetActive() {
+		t.Error("Caffeinate response Active = false, want true")
+	}
+
+	// Sync WriteService so DB writes complete.
+	if err := ws.Sync(ctx); err != nil {
+		t.Fatalf("ws.Sync: %v", err)
+	}
+
+	// Read ToggleStore directly to verify persistence.
+	ts := sqlite.NewToggleStore(db)
+	val, present, err := ts.Get(ctx, "caffeinate_on")
+	if err != nil {
+		t.Fatalf("ToggleStore.Get(caffeinate_on): %v", err)
+	}
+	if !present {
+		t.Error("caffeinate_on not present in ToggleStore after Caffeinate(on)")
+	}
+	if !val {
+		t.Error("caffeinate_on = false in ToggleStore, want true")
+	}
+}
+
+func TestServerSetAutoResumePersistsToToggleStore(t *testing.T) {
+	// Setup: in-memory DB + WriteService + new test server.
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	state := newSharedState()
+	srv := newServer(state)
+	srv.writeService = ws
+
+	// Create a watermark store so SetAutoResume doesn't fail.
+	dir := t.TempDir()
+	wm, err := NewWatermarkStore(filepath.Join(dir, "runtime.json"), nil)
+	if err != nil {
+		t.Fatalf("NewWatermarkStore: %v", err)
+	}
+	state.mu.Lock()
+	state.watermarks = wm
+	state.mu.Unlock()
+
+	// Call SetAutoResume({Enabled: true}).
+	ctx := context.Background()
+	resp, err := srv.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: true})
+	if err != nil {
+		t.Fatalf("SetAutoResume: %v", err)
+	}
+	if !resp.GetEnabled() {
+		t.Error("SetAutoResume response Enabled = false, want true")
+	}
+
+	// Sync WriteService so DB writes complete.
+	if err := ws.Sync(ctx); err != nil {
+		t.Fatalf("ws.Sync: %v", err)
+	}
+
+	// Read ToggleStore directly to verify persistence.
+	ts := sqlite.NewToggleStore(db)
+	val, present, err := ts.Get(ctx, "auto_resume_enabled")
+	if err != nil {
+		t.Fatalf("ToggleStore.Get(auto_resume_enabled): %v", err)
+	}
+	if !present {
+		t.Error("auto_resume_enabled not present in ToggleStore after SetAutoResume(true)")
+	}
+	if !val {
+		t.Error("auto_resume_enabled = false in ToggleStore, want true")
 	}
 }
 
