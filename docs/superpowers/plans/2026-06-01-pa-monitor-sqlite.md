@@ -136,10 +136,7 @@ git commit -m "chore(pa-monitor): add modernc.org/sqlite dependency"
 // callers without an explicit mutex.
 package store
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 // Filter is the active/all distinction enforced by SessionStore.List.
 type Filter int
