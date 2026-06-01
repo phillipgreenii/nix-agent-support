@@ -1,7 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -59,5 +62,113 @@ func TestWriteService_SerializesWrites(t *testing.T) {
 	}
 	if len(ids) != 20 {
 		t.Errorf("got %d session rows, want 20", len(ids))
+	}
+}
+
+// goroutineRecordingSessionStore is a test-only SessionStore that records
+// the goroutine ID of every Upsert call so we can verify serialisation.
+type goroutineRecordingSessionStore struct {
+	mu  sync.Mutex
+	ids []int64
+}
+
+func (g *goroutineRecordingSessionStore) Upsert(_ context.Context, _ store.Session) error {
+	g.mu.Lock()
+	g.ids = append(g.ids, currentGoroutineID())
+	g.mu.Unlock()
+	return nil
+}
+
+func (g *goroutineRecordingSessionStore) List(_ context.Context, _ store.Filter, _ int64, _ store.FreshnessWindow) ([]store.SessionWithContribution, error) {
+	return nil, nil
+}
+
+func (g *goroutineRecordingSessionStore) GetByID(_ context.Context, _ string, _ store.FreshnessWindow) (*store.Session, error) {
+	return nil, nil
+}
+
+func (g *goroutineRecordingSessionStore) MarkDeleted(_ context.Context, _ []string, _ time.Time) error {
+	return nil
+}
+
+func (g *goroutineRecordingSessionStore) MarkRevived(_ context.Context, _ []string) error {
+	return nil
+}
+
+func (g *goroutineRecordingSessionStore) HardDelete(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (g *goroutineRecordingSessionStore) AllSessionIDs(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
+// currentGoroutineID parses the current goroutine ID from the stack trace.
+func currentGoroutineID() int64 {
+	b := make([]byte, 64)
+	b = b[:runtime.Stack(b, false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	i := bytes.IndexByte(b, ' ')
+	id, _ := strconv.ParseInt(string(b[:i]), 10, 64)
+	return id
+}
+
+func TestWriteService_OpsRunOnSingleGoroutine(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := &goroutineRecordingSessionStore{}
+
+	ws := NewWriteService(WriteDeps{
+		Sessions:      recorder,
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ws.Start(ctx)
+
+	now := time.Now().UTC()
+
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ws.UpsertSession(ctx, store.Session{
+				SessionID:       strconv.Itoa(i),
+				LastProcessedAt: now,
+				UpdatedAt:       now,
+				CreatedAt:       now,
+			})
+		}(i)
+	}
+	wg.Wait()
+	if err := ws.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	recorder.mu.Lock()
+	ids := recorder.ids
+	recorder.mu.Unlock()
+
+	if len(ids) != n {
+		t.Fatalf("got %d recorded calls, want %d", len(ids), n)
+	}
+	first := ids[0]
+	for i, id := range ids[1:] {
+		if id != first {
+			t.Errorf("op %d ran on goroutine %d, want %d (all ops must use the single writer goroutine)", i+1, id, first)
+		}
 	}
 }

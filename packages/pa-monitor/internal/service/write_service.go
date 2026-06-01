@@ -4,7 +4,7 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -24,10 +24,12 @@ type WriteDeps struct {
 // WriteService serialises mutations to the stores through a single goroutine.
 // Concurrent callers submit closures; the goroutine runs them in arrival order.
 type WriteService struct {
-	deps WriteDeps
-	ch   chan writeOp
-	stop chan struct{}
-	wg   sync.WaitGroup
+	deps      WriteDeps
+	ch        chan writeOp
+	stop      chan struct{}
+	wg        sync.WaitGroup
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 type writeOp struct {
@@ -46,17 +48,33 @@ func NewWriteService(deps WriteDeps) *WriteService {
 }
 
 func (w *WriteService) Start(ctx context.Context) {
-	w.wg.Add(1)
-	go w.loop(ctx)
+	w.startOnce.Do(func() {
+		w.wg.Add(1)
+		go w.loop(ctx)
+	})
 }
 
 func (w *WriteService) Stop() {
-	close(w.stop)
+	w.stopOnce.Do(func() { close(w.stop) })
 	w.wg.Wait()
 }
 
+var errWriteServiceStopped = errors.New("write service stopped")
+
 func (w *WriteService) loop(ctx context.Context) {
 	defer w.wg.Done()
+	defer func() {
+		// Drain any ops left in the queue so their submitters are never
+		// blocked forever after the loop exits.
+		for {
+			select {
+			case op := <-w.ch:
+				op.done <- errWriteServiceStopped
+			default:
+				return
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -69,7 +87,11 @@ func (w *WriteService) loop(ctx context.Context) {
 	}
 }
 
-// submit enqueues fn and waits for it to complete.
+// submit enqueues fn and blocks until the writer goroutine returns its
+// result. If ctx is cancelled before the op is enqueued, returns ctx.Err()
+// without enqueuing. If ctx is cancelled AFTER the op is enqueued, the
+// caller returns ctx.Err() but the op still executes — write durability is
+// the writer's responsibility, not the caller's.
 func (w *WriteService) submit(ctx context.Context, fn func(context.Context) error) error {
 	done := make(chan error, 1)
 	select {
@@ -164,10 +186,7 @@ func (w *WriteService) HardDeleteSessions(ctx context.Context, cutoff time.Time)
 		n = got
 		return err
 	})
-	if err != nil {
-		return 0, fmt.Errorf("hard delete: %w", err)
-	}
-	return n, nil
+	return n, err
 }
 
 // Mirror the block/week orphan + hard-delete operations.
