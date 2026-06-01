@@ -1,10 +1,5 @@
 package signal
 
-import "errors"
-
-// ErrNotImplemented is returned by stub Signalers not yet wired up.
-var ErrNotImplemented = errors.New("signaler not implemented for this terminal")
-
 // Signaler injects keyboard input into the terminal session hosting a process.
 type Signaler interface {
 	Name() string
@@ -28,10 +23,8 @@ func ResolveSignaler(signalers []Signaler, pid int) Signaler {
 var defaultSignalers = []Signaler{
 	&TmuxSignaler{},
 	&CmuxSignaler{},
-	&GhosttySignaler{},
-	&VSCodeSignaler{},
 }
 
 // DefaultSignalers returns the standard ordered list of Signalers.
-// TmuxSignaler is tried first; stubs follow for future implementation.
+// TmuxSignaler is tried first.
 func DefaultSignalers() []Signaler { return defaultSignalers }

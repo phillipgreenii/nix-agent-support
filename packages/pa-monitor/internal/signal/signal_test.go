@@ -136,18 +136,6 @@ func TestResolveSignalerReturnsNilWhenNoneMatch(t *testing.T) {
 	}
 }
 
-func TestStubSignalersSendNotImplemented(t *testing.T) {
-	stubs := []signal.Signaler{&signal.GhosttySignaler{}, &signal.VSCodeSignaler{}}
-	for _, s := range stubs {
-		if s.Detect(1) {
-			t.Errorf("%s.Detect returned true, want false (stub)", s.Name())
-		}
-		if err := s.Send(1, "hi"); err != signal.ErrNotImplemented {
-			t.Errorf("%s.Send err = %v, want ErrNotImplemented", s.Name(), err)
-		}
-	}
-}
-
 func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 	// Process ancestry: 1000 (claude) → 500 (bash) → 100 (tmuxinator).
 	// New Detect requires a pane match, not just a comm match — tmuxinator
