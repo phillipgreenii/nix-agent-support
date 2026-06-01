@@ -184,6 +184,16 @@ func (w *WriteService) RecordNudge(ctx context.Context, ev store.NudgeEvent) err
 	})
 }
 
+// Toggles returns the underlying ToggleStore. Used by the one-shot
+// runtime.json migration on daemon startup (MigrateRuntimeJSON).
+func (w *WriteService) Toggles() store.ToggleStore { return w.deps.Toggles }
+
+// Nudges returns the underlying NudgeStore. Used by MigrateRuntimeJSON.
+func (w *WriteService) Nudges() store.NudgeStore { return w.deps.Nudges }
+
+// Sessions returns the underlying SessionStore. Used by MigrateRuntimeJSON.
+func (w *WriteService) Sessions() store.SessionStore { return w.deps.Sessions }
+
 // MarkSessionEscalated persists the escalation flip (last_error_retryable =
 // false) for a session whose DisruptEscalated watermark is set. Called by the
 // daemon's escalation loop so the DB reflects the in-memory flip.

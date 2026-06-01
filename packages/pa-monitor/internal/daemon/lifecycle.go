@@ -243,6 +243,21 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 	defer opts.Emitter.Shutdown(context.Background())
 
+	// One-shot migration: copy runtime.json toggles into the DB, then delete
+	// the file. Runs before NewWatermarkStore so that, on first startup after
+	// migration, the WatermarkStore sees an absent file (empty state) rather
+	// than the stale JSON. Best-effort — log the error but continue startup.
+	if opts.RuntimePath != "" && opts.WriteService != nil {
+		if err := MigrateRuntimeJSON(ctx, opts.RuntimePath,
+			opts.WriteService.Toggles(),
+			opts.WriteService.Nudges(),
+			opts.WriteService.Sessions(),
+		); err != nil {
+			// Non-fatal: daemon can still run without the migration.
+			_ = fmt.Errorf("runtime.json migration (non-fatal): %w", err)
+		}
+	}
+
 	// Construct Nudger + WatermarkStore when configured.
 	if opts.RuntimePath != "" && len(opts.NudgerSignalers) > 0 {
 		watermarks, err := NewWatermarkStore(opts.RuntimePath, opts.Emitter)
