@@ -20,7 +20,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
 // PIDLock holds the pidfile flock for the lifetime of the daemon process.
@@ -118,6 +120,15 @@ type PollerInterface interface {
 	Snapshot(ctx context.Context) (*aggregate.Tree, bool, error)
 }
 
+// BlockWeekIDSetter is an optional extension of PollerInterface. When the
+// PollerInterface value also implements this interface, RunWith assigns the
+// surrogate block/week ids after each ccusage upsert so that the next
+// Snapshot call can attach contributions to the correct parent rows.
+type BlockWeekIDSetter interface {
+	SetActiveBlockID(id int64)
+	SetActiveWeekID(id int64)
+}
+
 // When Poller is non-nil, each tick calls Snapshot, folds the result
 // into the shared state visible to gRPC handlers, and feeds the block
 // and week trackers (if provided).
@@ -180,6 +191,10 @@ type RunOptions struct {
 	// RegisterBridge handler uses to walk a bridge PID's ancestry to its
 	// cmux server PID. Typically (*signal.CmuxSignaler).FindCmuxServerAncestor.
 	CmuxAncestor func(pid int) (int, bool)
+	// WriteService, when non-nil, receives block and week upserts after each
+	// ccusage tick. The returned surrogate ids are assigned to the poller's
+	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.
+	WriteService *service.WriteService
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -295,6 +310,31 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					tree.ActiveWeek = w
 				}
 			}
+
+			// Persist the active block and week to the DB, then propagate
+			// their surrogate ids to the poller so contribution upserts in the
+			// next Snapshot have valid parent ids.
+			if opts.WriteService != nil {
+				if tree.ActiveBlock != nil {
+					nowUTC := time.Now().UTC()
+					b := blockToStoreBlock(tree.ActiveBlock, opts.PlanTier, nowUTC)
+					if blockID, err := opts.WriteService.UpsertBlock(ctx, b); err == nil {
+						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
+							setter.SetActiveBlockID(blockID)
+						}
+					}
+				}
+				if tree.ActiveWeek != nil {
+					nowUTC := time.Now().UTC()
+					w := weekToStoreWeek(tree.ActiveWeek, opts.PlanTier, nowUTC)
+					if weekID, err := opts.WriteService.UpsertWeek(ctx, w); err == nil {
+						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
+							setter.SetActiveWeekID(weekID)
+						}
+					}
+				}
+			}
+
 			if opts.BlockTracker != nil {
 				opts.BlockTracker.Update(tree.ActiveBlock)
 			}
@@ -691,4 +731,40 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 // lifecycle_test.go and any caller that doesn't need RunOptions yet.
 func Run(ctx context.Context, p Paths) error {
 	return RunWith(ctx, RunOptions{Paths: p})
+}
+
+// blockToStoreBlock converts a ccusage.Block into a store.Block ready for
+// persistence. PlanCapUSD is derived from the plan tier.
+func blockToStoreBlock(b *ccusage.Block, planTier string, now time.Time) store.Block {
+	sb := store.Block{
+		BlockID:         b.ID,
+		StartedAt:       b.StartTime,
+		EndedAt:         b.EndTime,
+		PlanCapUSD:      ccusage.PlanCapUSD(planTier),
+		TotalCostUSD:    b.CostUSD,
+		LastProcessedAt: now,
+		UpdatedAt:       now,
+	}
+	return sb
+}
+
+// weekToStoreWeek converts a ccusage.WeeklyEntry into a store.Week. The
+// week window is anchored on the Monday (Period) and extends 7 days.
+func weekToStoreWeek(w *ccusage.WeeklyEntry, planTier string, now time.Time) store.Week {
+	// Parse the Monday anchor from "YYYY-MM-DD".
+	var startedAt time.Time
+	if t, err := time.Parse("2006-01-02", w.Period); err == nil {
+		startedAt = t.UTC()
+	}
+	endedAt := startedAt.AddDate(0, 0, 7)
+	sw := store.Week{
+		WeekID:          w.Period,
+		StartedAt:       startedAt,
+		EndedAt:         endedAt,
+		WeekCapUSD:      ccusage.WeekCapUSD(planTier),
+		TotalCostUSD:    w.TotalCost,
+		LastProcessedAt: now,
+		UpdatedAt:       now,
+	}
+	return sw
 }

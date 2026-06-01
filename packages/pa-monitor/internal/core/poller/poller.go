@@ -2,7 +2,7 @@ package poller
 
 import (
 	"context"
-	"fmt"
+	"database/sql"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
@@ -57,6 +57,12 @@ type Poller struct {
 	// The in-memory aggregate.Tree path also remains until Task 19 cuts over.
 	WriteService *service.WriteService
 
+	// DB is used to look up the surrogate session id (SELECT id FROM sessions
+	// WHERE session_id = ?) so contribution rows can reference the correct
+	// parent. This is intentional short-term coupling; a later refactor will
+	// extract this lookup into a Service interface.
+	DB *sql.DB
+
 	// ActiveBlockID is the surrogate id of the current block in the DB.
 	// Set by the daemon main loop after ccusage poller upserts the block.
 	// 0 means no active block yet — contributions are skipped this tick.
@@ -70,6 +76,14 @@ type Poller struct {
 	terminalHostCache map[int]string
 	transcriptCache   map[string]cachedTranscript
 }
+
+// SetActiveBlockID implements daemon.BlockWeekIDSetter. Called by the daemon
+// main loop after upserting the active block so that the next Snapshot can
+// attach per-session contributions to the correct block row.
+func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
+
+// SetActiveWeekID implements daemon.BlockWeekIDSetter.
+func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
 
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
@@ -302,12 +316,28 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				ss.LastErrorTerminal = le.IsTerminal
 				ss.LastErrorRetryable = le.IsRetryable
 			}
-			if err := p.WriteService.UpsertSession(ctx, ss); err != nil {
-				return nil, false, fmt.Errorf("write session %s: %w", sv.SessionID, err)
+			// Best-effort write — DB failures must not abort the tick.
+			_ = p.WriteService.UpsertSession(ctx, ss)
+
+			if p.ActiveBlockID > 0 && p.DB != nil {
+				var sessRowID int64
+				if err := p.DB.QueryRowContext(ctx,
+					"SELECT id FROM sessions WHERE session_id = ?", sv.SessionID).Scan(&sessRowID); err == nil {
+					_ = p.WriteService.UpsertBlockContribution(ctx, store.Contribution{
+						SessionID: sessRowID, ParentID: p.ActiveBlockID,
+						CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+					})
+				}
 			}
-			if p.ActiveBlockID > 0 {
-				// Contribution upsert is wired in Task 17 once ActiveBlockID
-				// propagation is in place.
+			if p.ActiveWeekID > 0 && p.DB != nil {
+				var sessRowID int64
+				if err := p.DB.QueryRowContext(ctx,
+					"SELECT id FROM sessions WHERE session_id = ?", sv.SessionID).Scan(&sessRowID); err == nil {
+					_ = p.WriteService.UpsertWeekContribution(ctx, store.Contribution{
+						SessionID: sessRowID, ParentID: p.ActiveWeekID,
+						CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+					})
+				}
 			}
 		}
 	}

@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -12,7 +15,10 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
+	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
 
 // fakePoller implements the small subset of *poller.Poller that RunWith
@@ -132,4 +138,157 @@ type stubPoller struct {
 
 func (s *stubPoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	return s.snapshot(ctx)
+}
+
+// TestTickIntegration_WritesBlocksAndContributions verifies that when
+// WriteService is wired into RunOptions:
+//   - The active block from ccusage is persisted to the blocks table after
+//     the first tick.
+//   - Per-session contributions are persisted to session_block_contributions
+//     after the second tick (ActiveBlockID is propagated between ticks).
+func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+
+	// --- in-memory SQLite + WriteService ---
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	// --- session fixture on disk ---
+	sessDir := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessJSON, _ := json.Marshal(map[string]any{
+		"sessionId": "test-sess-1",
+		"pid":       os.Getpid(), // use current PID so PidAlive returns true
+		"cwd":       dir,
+		"kind":      "project",
+		"startedAt": time.Now().UnixMilli(),
+	})
+	if err := os.WriteFile(filepath.Join(sessDir, "test-sess-1.json"), sessJSON, 0o600); err != nil {
+		t.Fatalf("write session fixture: %v", err)
+	}
+
+	// --- ccusage fixture ---
+	activeBlockBody, _ := json.Marshal(map[string]any{
+		"blocks": []map[string]any{
+			{
+				"id":        "2026-06-01T10Z",
+				"startTime": "2026-06-01T10:00:00Z",
+				"endTime":   "2026-06-01T15:00:00Z",
+				"isActive":  true,
+				"costUSD":   5.0,
+			},
+		},
+	})
+
+	// --- real *poller.Poller wired with DB and WriteService ---
+	p := &poller.Poller{
+		SessionsDir: sessDir,
+		ClaudeHome:  dir,
+		PidAlive:    func(pid int) bool { return pid == os.Getpid() },
+		Now:         time.Now,
+		CCUsageFn: func(ctx context.Context) ([]byte, error) {
+			return activeBlockBody, nil
+		},
+		WriteService: ws,
+		DB:           db,
+	}
+
+	tickCount := 0
+	tickSynced := make(chan struct{}, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:        paths,
+			Tick:         30 * time.Millisecond,
+			Poller:       p,
+			WriteService: ws,
+			// TreeObserver fires after each tick so we can sync and count.
+			TreeObserver: func(_ *aggregate.Tree) {
+				tickCount++
+				// Sync the write service so DB queries below see committed rows.
+				_ = ws.Sync(ctx)
+				if tickCount <= 3 {
+					select {
+					case tickSynced <- struct{}{}:
+					default:
+					}
+				}
+			},
+		})
+	}()
+
+	waitForFile(t, paths.Socket)
+
+	// Wait for at least 2 ticks (tick 1 writes block; tick 2 writes contributions).
+	for i := 0; i < 2; i++ {
+		select {
+		case <-tickSynced:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for tick %d", i+1)
+		}
+	}
+
+	// --- assert blocks table ---
+	var blockID int64
+	var blockStringID string
+	err = db.QueryRowContext(context.Background(),
+		"SELECT id, block_id FROM blocks WHERE block_id = ?", "2026-06-01T10Z").Scan(&blockID, &blockStringID)
+	if err == sql.ErrNoRows {
+		t.Fatal("blocks table: expected row for 2026-06-01T10Z, got none")
+	}
+	if err != nil {
+		t.Fatalf("blocks query: %v", err)
+	}
+	if blockStringID != "2026-06-01T10Z" {
+		t.Errorf("block_id = %q, want 2026-06-01T10Z", blockStringID)
+	}
+
+	// Wait for one more tick to ensure contributions land (they need ActiveBlockID set).
+	select {
+	case <-tickSynced:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for contribution tick")
+	}
+
+	// --- assert session_block_contributions ---
+	var contribCount int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM session_block_contributions WHERE block_id = ?", blockID).Scan(&contribCount); err != nil {
+		t.Fatalf("contributions query: %v", err)
+	}
+	if contribCount == 0 {
+		t.Errorf("session_block_contributions: expected >= 1 row for block id %d, got 0", blockID)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWith did not return")
+	}
 }
