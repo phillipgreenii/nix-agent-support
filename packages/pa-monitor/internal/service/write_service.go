@@ -88,20 +88,39 @@ func (w *WriteService) loop(ctx context.Context) {
 }
 
 // submit enqueues fn and blocks until the writer goroutine returns its
-// result. If ctx is cancelled before the op is enqueued, returns ctx.Err()
-// without enqueuing. If ctx is cancelled AFTER the op is enqueued, the
-// caller returns ctx.Err() but the op still executes — write durability is
-// the writer's responsibility, not the caller's.
+// result. Three early-return paths:
+//   - ctx is cancelled before the op is enqueued → returns ctx.Err()
+//   - Stop() is called before the op is enqueued → returns
+//     errWriteServiceStopped
+//   - ctx is cancelled AFTER the op is enqueued → returns ctx.Err();
+//     the op still executes (write durability is the writer's
+//     responsibility, not the caller's).
+//
+// If Stop is called AFTER the op is enqueued, the deferred drain in
+// loop will pop the op and reply via op.done; the caller returns either
+// the real result (if drain processed first) or errWriteServiceStopped.
 func (w *WriteService) submit(ctx context.Context, fn func(context.Context) error) error {
 	done := make(chan error, 1)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-w.stop:
+		return errWriteServiceStopped
 	case w.ch <- writeOp{fn: fn, done: done}:
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-w.stop:
+		// Stop fired after we enqueued. The drain (deferred in loop) will
+		// pop us and reply via op.done, OR our op may have already run; in
+		// either case, prefer the real result if it's ready.
+		select {
+		case err := <-done:
+			return err
+		default:
+			return errWriteServiceStopped
+		}
 	case err := <-done:
 		return err
 	}
