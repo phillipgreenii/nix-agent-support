@@ -23,7 +23,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/labels/detectors"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
+	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
 
 // runDaemon is invoked by the dispatcher when the user runs
@@ -126,6 +128,37 @@ func runDaemon(args []string) {
 	if !*disablePoller {
 		p, blockTr, weekTr, weeklyFn := buildPoller(cfg)
 		p.BridgeRegistry = bridgeRegistry
+
+		// Open the SQLite database and wire WriteService into the poller so
+		// that contribution rows are persisted on every tick. The DB lives at
+		// <XDG state dir>/pa-monitor/state.db — the same directory the daemon
+		// already uses for its pidfile and socket.
+		dbPath := filepath.Join(paths.Dir, "state.db")
+		if db, err := sqlite.Open(dbPath); err != nil {
+			fmt.Fprintf(os.Stderr, "daemon: sqlite open %s: %v (continuing without DB)\n", dbPath, err)
+		} else if err := sqlite.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			fmt.Fprintf(os.Stderr, "daemon: sqlite migrate: %v (continuing without DB)\n", err)
+		} else {
+			ws := service.NewWriteService(service.WriteDeps{
+				Sessions:      sqlite.NewSessionStore(db),
+				Blocks:        sqlite.NewBlockStore(db),
+				Weeks:         sqlite.NewWeekStore(db),
+				Contributions: sqlite.NewContributionStore(db),
+				Toggles:       sqlite.NewToggleStore(db),
+				Nudges:        sqlite.NewNudgeStore(db),
+			})
+			ws.Start(context.Background())
+			// Ensure the write goroutine is stopped on daemon exit.
+			defer ws.Stop()
+
+			// Wire into both the poller (per-session upserts + contributions)
+			// and RunOptions (block / week upserts in lifecycle.go).
+			p.WriteService = ws
+			p.DB = db
+			opts.WriteService = ws
+		}
+
 		opts.Poller = p
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr

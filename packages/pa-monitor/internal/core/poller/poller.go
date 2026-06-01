@@ -319,24 +319,22 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			// Best-effort write — DB failures must not abort the tick.
 			_ = p.WriteService.UpsertSession(ctx, ss)
 
-			if p.ActiveBlockID > 0 && p.DB != nil {
+			if p.DB != nil && (p.ActiveBlockID > 0 || p.ActiveWeekID > 0) {
 				var sessRowID int64
 				if err := p.DB.QueryRowContext(ctx,
 					"SELECT id FROM sessions WHERE session_id = ?", sv.SessionID).Scan(&sessRowID); err == nil {
-					_ = p.WriteService.UpsertBlockContribution(ctx, store.Contribution{
-						SessionID: sessRowID, ParentID: p.ActiveBlockID,
-						CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
-					})
-				}
-			}
-			if p.ActiveWeekID > 0 && p.DB != nil {
-				var sessRowID int64
-				if err := p.DB.QueryRowContext(ctx,
-					"SELECT id FROM sessions WHERE session_id = ?", sv.SessionID).Scan(&sessRowID); err == nil {
-					_ = p.WriteService.UpsertWeekContribution(ctx, store.Contribution{
-						SessionID: sessRowID, ParentID: p.ActiveWeekID,
-						CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
-					})
+					if p.ActiveBlockID > 0 {
+						_ = p.WriteService.UpsertBlockContribution(ctx, store.Contribution{
+							SessionID: sessRowID, ParentID: p.ActiveBlockID,
+							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+						})
+					}
+					if p.ActiveWeekID > 0 {
+						_ = p.WriteService.UpsertWeekContribution(ctx, store.Contribution{
+							SessionID: sessRowID, ParentID: p.ActiveWeekID,
+							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+						})
+					}
 				}
 			}
 		}
