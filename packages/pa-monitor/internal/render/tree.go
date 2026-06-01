@@ -3,12 +3,23 @@ package render
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
+
+// recentNudgeWindow is how long after a successful nudge fire the tree row
+// continues to show the "✉" marker. Picked long enough to survive normal poll
+// jitter and let an operator notice between glances, but short enough that
+// it doesn't pollute steady-state rows.
+const recentNudgeWindow = 60 * time.Second
+
+// nowFn lets tests inject a deterministic clock for the recent-nudge marker
+// logic. Defaults to time.Now.
+var nowFn = time.Now
 
 const (
 	col1Width    = 12 // model name (sessions) or counts (rollups). Sized so "99● 99○ 99✕" fits without wrap.
@@ -174,8 +185,15 @@ func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) str
 //  3. LastError terminal+non-retryable → ✗ (non-retryable / escalated error).
 //  4. Otherwise → normal idle/dormant glyph.
 //
-// When PendingNudge has sources AND the primary glyph is NOT Working, a "↪"
-// marker is appended.
+// Nudge markers (independent of the error precedence above) appended to the
+// primary glyph when the row is NOT Working / rate-limited:
+//   - "↪" when PendingNudge has sources (nudge queued, not yet fired).
+//   - "✉" when LastNudgedAt is within recentNudgeWindow AND no nudge is
+//     currently pending. Lets the operator see a fire actually happened.
+//
+// Both markers can co-occur in practice (a fresh queue immediately after a
+// fire), and PendingNudge takes visual priority since it represents
+// imminent action.
 func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	rateLimited := !s.SessionEnrichment.RateLimitResetsAt.IsZero()
 	primary := symbol(s.Status, s.SessionEnrichment.AwaitingInput, rateLimited, theme)
@@ -196,9 +214,14 @@ func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 		}
 	}
 
-	// Append nudge-queued marker when sources are pending.
-	if s.SessionEnrichment.PendingNudge != nil && len(s.SessionEnrichment.PendingNudge.Sources) > 0 {
+	// Nudge markers.
+	hasPending := s.SessionEnrichment.PendingNudge != nil && len(s.SessionEnrichment.PendingNudge.Sources) > 0
+	switch {
+	case hasPending:
 		primary += "↪"
+	case !s.SessionEnrichment.LastNudgedAt.IsZero() &&
+		nowFn().Sub(s.SessionEnrichment.LastNudgedAt) < recentNudgeWindow:
+		primary += "✉"
 	}
 
 	return primary

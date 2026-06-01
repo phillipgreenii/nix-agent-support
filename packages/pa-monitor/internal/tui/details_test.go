@@ -130,7 +130,8 @@ func TestDetailsLastErrorNonTerminalHidden(t *testing.T) {
 	}
 }
 
-// TestDetailsPendingNudgeShown verifies that PendingNudge sources are shown.
+// TestDetailsPendingNudgeShown verifies that PendingNudge sources surface in
+// the "Nudge:" block when something is currently queued.
 func TestDetailsPendingNudgeShown(t *testing.T) {
 	nudge := &aggregate.PendingNudge{Sources: []string{"disrupted", "manual"}}
 	sv := &aggregate.SessionView{
@@ -138,24 +139,78 @@ func TestDetailsPendingNudgeShown(t *testing.T) {
 		SessionEnrichment: aggregate.SessionEnrichment{PendingNudge: nudge},
 	}
 	out := RenderDetails(sv, 120)
-	if !strings.Contains(out, "Pending nudge") {
-		t.Errorf("details missing Pending nudge section:\n%s", out)
+	if !strings.Contains(out, "Nudge:") {
+		t.Errorf("details missing Nudge: block:\n%s", out)
+	}
+	if !strings.Contains(out, "pending:") {
+		t.Errorf("details missing pending: line:\n%s", out)
 	}
 	if !strings.Contains(out, "disrupted") || !strings.Contains(out, "manual") {
 		t.Errorf("details missing nudge sources:\n%s", out)
 	}
 }
 
-// TestDetailsNoPendingNudgeWhenNil verifies that the Pending nudge section is
-// absent when PendingNudge is nil.
-func TestDetailsNoPendingNudgeWhenNil(t *testing.T) {
+// TestDetailsNoNudgeBlockWhenEmpty verifies that the Nudge: block is absent
+// when both PendingNudge and LastNudgedAt are empty.
+func TestDetailsNoNudgeBlockWhenEmpty(t *testing.T) {
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1"},
 		SessionEnrichment: aggregate.SessionEnrichment{PendingNudge: nil},
 	}
 	out := RenderDetails(sv, 120)
-	if strings.Contains(out, "Pending nudge") {
-		t.Errorf("nil PendingNudge should not produce a Pending nudge section:\n%s", out)
+	if strings.Contains(out, "Nudge:") {
+		t.Errorf("empty nudge state should not produce a Nudge: block:\n%s", out)
+	}
+}
+
+// TestDetailsLastNudgeShownWithoutPending verifies that nudge history surfaces
+// even when nothing is currently queued.
+func TestDetailsLastNudgeShownWithoutPending(t *testing.T) {
+	sv := &aggregate.SessionView{
+		Session: &session.Session{SessionID: "id1"},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			LastNudgedAt:     time.Now().Add(-3 * time.Minute),
+			LastNudgeSources: []string{"manual"},
+		},
+	}
+	out := RenderDetails(sv, 120)
+	if !strings.Contains(out, "Nudge:") {
+		t.Errorf("details missing Nudge: header when LastNudgedAt set:\n%s", out)
+	}
+	if strings.Contains(out, "pending:") {
+		t.Errorf("no pending intents — pending: line should be absent:\n%s", out)
+	}
+	if !strings.Contains(out, "last sent:") {
+		t.Errorf("details missing last sent: line:\n%s", out)
+	}
+	if !strings.Contains(out, "3 minutes ago") {
+		t.Errorf("details missing humanized age:\n%s", out)
+	}
+	if !strings.Contains(out, "via:") || !strings.Contains(out, "manual") {
+		t.Errorf("details missing via: source line:\n%s", out)
+	}
+}
+
+// TestDetailsPendingAndLastBothShown verifies that the Nudge: block renders
+// both the pending sources and the last-sent line when both apply.
+func TestDetailsPendingAndLastBothShown(t *testing.T) {
+	sv := &aggregate.SessionView{
+		Session: &session.Session{SessionID: "id1"},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			PendingNudge:     &aggregate.PendingNudge{Sources: []string{"window_reset"}},
+			LastNudgedAt:     time.Now().Add(-10 * time.Second),
+			LastNudgeSources: []string{"disrupted"},
+		},
+	}
+	out := RenderDetails(sv, 120)
+	if !strings.Contains(out, "pending:") || !strings.Contains(out, "window_reset") {
+		t.Errorf("expected pending: line with window_reset:\n%s", out)
+	}
+	if !strings.Contains(out, "last sent:") {
+		t.Errorf("expected last sent: line:\n%s", out)
+	}
+	if !strings.Contains(out, "via:") || !strings.Contains(out, "disrupted") {
+		t.Errorf("expected via: line with disrupted:\n%s", out)
 	}
 }
 

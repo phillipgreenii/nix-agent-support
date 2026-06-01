@@ -63,13 +63,38 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 		sb.WriteString(fmt.Sprintf("             %s\n", humanizeAge(time.Since(le.At))))
 	}
 
-	// Pending nudge section.
-	if sv.SessionEnrichment.PendingNudge != nil && len(sv.SessionEnrichment.PendingNudge.Sources) > 0 {
-		sb.WriteString(fmt.Sprintf("Pending nudge: [%s]\n", strings.Join(sv.SessionEnrichment.PendingNudge.Sources, ", ")))
+	// Nudge section: shows pending intents (when queued) and most recent
+	// fire (when the watermark has been populated). Either, both, or neither
+	// can appear. The block is preceded by a blank line so it stands apart
+	// from the error block above.
+	pendingSources := nudgeSources(sv)
+	hasLast := !sv.SessionEnrichment.LastNudgedAt.IsZero()
+	if len(pendingSources) > 0 || hasLast {
+		sb.WriteString("\nNudge:\n")
+		if len(pendingSources) > 0 {
+			sb.WriteString(fmt.Sprintf("  pending: [%s]\n", strings.Join(pendingSources, ", ")))
+		}
+		if hasLast {
+			ageStr := humanizeAge(time.Since(sv.SessionEnrichment.LastNudgedAt))
+			sb.WriteString(fmt.Sprintf("  last sent: %s\n", ageStr))
+			if len(sv.SessionEnrichment.LastNudgeSources) > 0 {
+				sb.WriteString(fmt.Sprintf("  via: [%s]\n", strings.Join(sv.SessionEnrichment.LastNudgeSources, ", ")))
+			}
+		}
 	}
 
 	sb.WriteString("\n[esc] close")
 	return sb.String()
+}
+
+// nudgeSources returns the currently-pending nudge sources, or nil when
+// nothing is pending. Pulled out so RenderDetails can show "Nudge:" header
+// only when at least one of the sub-fields applies.
+func nudgeSources(sv *aggregate.SessionView) []string {
+	if sv.SessionEnrichment.PendingNudge == nil {
+		return nil
+	}
+	return sv.SessionEnrichment.PendingNudge.Sources
 }
 
 // RenderDetailsWindow renders a height-bounded viewport over the full
