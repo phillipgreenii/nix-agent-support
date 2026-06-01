@@ -260,6 +260,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		state.nudger = n
 		state.watermarks = watermarks
 		state.mu.Unlock()
+		state.setPendingNudgeQueue(n)
 	}
 
 	// Wire tracker callbacks to emitter counters/events.
@@ -475,6 +476,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 				// Escalation flip: surface IsRetryable=false on terminal errors
 				// for sessions whose watermark marks DisruptEscalated.
+				// Also persist the flip to the DB so it survives a restart.
 				for _, dir := range tree.Dirs {
 					for _, sv := range dir.Sessions {
 						if sv.LastError == nil || !sv.LastError.IsTerminal {
@@ -488,6 +490,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 						le := *sv.LastError
 						le.IsRetryable = false
 						sv.LastError = &le
+						// Persist the flip so the DB-materialised path sees it.
+						if opts.WriteService != nil {
+							_ = opts.WriteService.MarkSessionEscalated(ctx, sv.SessionID)
+						}
 					}
 				}
 			}

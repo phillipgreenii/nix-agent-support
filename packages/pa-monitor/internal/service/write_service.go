@@ -184,6 +184,15 @@ func (w *WriteService) RecordNudge(ctx context.Context, ev store.NudgeEvent) err
 	})
 }
 
+// MarkSessionEscalated persists the escalation flip (last_error_retryable =
+// false) for a session whose DisruptEscalated watermark is set. Called by the
+// daemon's escalation loop so the DB reflects the in-memory flip.
+func (w *WriteService) MarkSessionEscalated(ctx context.Context, sessionID string) error {
+	return w.submit(ctx, func(ctx context.Context) error {
+		return w.deps.Sessions.MarkEscalated(ctx, sessionID)
+	})
+}
+
 // MarkSessionsDeleted / Revived / HardDelete delegate to SessionStore;
 // invoked by the GC sweeper.
 func (w *WriteService) MarkSessionsDeleted(ctx context.Context, keepIDs []string) error {

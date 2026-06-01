@@ -205,6 +205,13 @@ func (s *SessionStore) HardDelete(ctx context.Context, cutoff time.Time) (int64,
 	return res.RowsAffected()
 }
 
+func (s *SessionStore) MarkEscalated(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE sessions SET last_error_retryable = 0 WHERE session_id = ? AND deleted_at IS NULL",
+		sessionID)
+	return err
+}
+
 func (s *SessionStore) AllSessionIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT session_id FROM sessions")
 	if err != nil {

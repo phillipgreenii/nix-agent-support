@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -10,6 +12,12 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
+
+// pendingNudgeQuerier is the interface sharedState uses to look up pending
+// nudge sources per session at snapshot time. *nudger.Nudger satisfies it.
+type pendingNudgeQuerier interface {
+	PendingSourcesForSession(sid string) []nudger.Source
+}
 
 // sharedState holds the daemon's current view of the world. The tick
 // loop writes; the gRPC handlers read. RWMutex bounded — Tree pointers
@@ -23,6 +31,7 @@ type sharedState struct {
 	caffeinateCause  string
 	runtimePath      string // for persistence on toggle
 	nudger           *nudger.Nudger
+	nudgerForPending pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
 	watermarks       *WatermarkStore
 	autoResumeDelay  time.Duration // static config: how long to wait before auto-nudging
 }
@@ -43,6 +52,14 @@ func (s *sharedState) setReadService(rs *service.ReadService) {
 	s.mu.Unlock()
 }
 
+// setPendingNudgeQueue wires in the nudger used to annotate the DB-materialised
+// tree with live pending-nudge state at snapshot time.
+func (s *sharedState) setPendingNudgeQueue(q pendingNudgeQuerier) {
+	s.mu.Lock()
+	s.nudgerForPending = q
+	s.mu.Unlock()
+}
+
 // snapshot returns the current aggregate.Tree. When a ReadService is wired
 // (production path), it materialises the tree from the DB on each call.
 // When no ReadService is set (tests that inject via setTree), it falls back
@@ -55,10 +72,34 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 
 	if rs != nil {
 		st, err := rs.GetState(context.Background(), store.FilterAll)
-		if err != nil || st == nil {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "pa-monitor: snapshot: DB read error: %v\n", err)
 			return nil
 		}
-		return convertStateToAggregateTree(st)
+		if st == nil {
+			return nil
+		}
+		tree := convertStateToAggregateTree(st)
+		// Annotate sessions with live pending-nudge state from the in-memory
+		// nudger. The DB does not persist pending intents — they live only in
+		// the nudger's PendingStore.
+		s.mu.RLock()
+		pnq := s.nudgerForPending
+		s.mu.RUnlock()
+		if pnq != nil && tree != nil {
+			for _, sv := range tree.Sessions() {
+				sources := pnq.PendingSourcesForSession(sv.SessionID)
+				if len(sources) == 0 {
+					continue
+				}
+				strs := make([]string, 0, len(sources))
+				for _, src := range sources {
+					strs = append(strs, string(src))
+				}
+				sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
+			}
+		}
+		return tree
 	}
 	return fallback
 }

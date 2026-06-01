@@ -103,6 +103,10 @@ func (g *goroutineRecordingSessionStore) AllSessionIDs(_ context.Context) ([]str
 	return nil, nil
 }
 
+func (g *goroutineRecordingSessionStore) MarkEscalated(_ context.Context, _ string) error {
+	return nil
+}
+
 // currentGoroutineID parses the current goroutine ID from the stack trace.
 func currentGoroutineID() int64 {
 	b := make([]byte, 64)
@@ -147,6 +151,10 @@ func (b *blockingSessionStore) HardDelete(_ context.Context, _ time.Time) (int64
 
 func (b *blockingSessionStore) AllSessionIDs(_ context.Context) ([]string, error) {
 	return nil, nil
+}
+
+func (b *blockingSessionStore) MarkEscalated(_ context.Context, _ string) error {
+	return nil
 }
 
 // TestWriteService_StopUnblocksFullQueueSenders verifies that senders blocked

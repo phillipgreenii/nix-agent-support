@@ -95,6 +95,13 @@ func (n *Nudger) SourcesFor(sid string) []Source {
 	return n.store.SourcesFor(sid)
 }
 
+// PendingSourcesForSession returns the pending nudge sources for the given
+// session, or nil if none. Used by sharedState.snapshot to annotate the
+// DB-materialised tree with live pending-nudge state.
+func (n *Nudger) PendingSourcesForSession(sid string) []Source {
+	return n.store.SourcesFor(sid)
+}
+
 // SnapshotStore returns a copy of all pending intents (for persistence).
 func (n *Nudger) SnapshotStore() []NudgeIntent {
 	return n.store.List()

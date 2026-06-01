@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"sort"
-	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
@@ -26,6 +25,9 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 
 	tree := &aggregate.Tree{
 		GeneratedAt: st.Now,
+		// CCUsageProbed is true on the DB path by definition: if the DB had no
+		// data, GetState would return nil and we would never reach this function.
+		CCUsageProbed: true,
 	}
 
 	// Convert block.
@@ -41,23 +43,22 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 	}
 
 	// Convert directories.
-	var windowResetsAt time.Time
 	for _, dir := range st.Dirs {
 		ad := convertDirectory(dir)
 		if ad.Path == "" {
 			continue
-		}
-		for _, sv := range ad.Sessions {
-			if sv.RateLimitResetsAt.After(windowResetsAt) {
-				windowResetsAt = sv.RateLimitResetsAt
-			}
 		}
 		tree.Dirs = append(tree.Dirs, ad)
 	}
 	sort.Slice(tree.Dirs, func(i, j int) bool {
 		return tree.Dirs[i].Path < tree.Dirs[j].Path
 	})
-	tree.WindowResetsAt = windowResetsAt
+
+	// Fix #1: prefer the block-level RateLimitResetsAt over per-session
+	// aggregation. The block column is authoritative for the global window.
+	if st.Block != nil && st.Block.RateLimitResetsAt != nil {
+		tree.WindowResetsAt = *st.Block.RateLimitResetsAt
+	}
 
 	return tree
 }
@@ -133,13 +134,11 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 		SessionTokens: int(sc.SessionTokens),
 		BurnRateShort: sc.BurnRateShort,
 		BurnRateLong:  sc.BurnRateLong,
-		// CostUSD: use the block-contribution cost when present; fall back to
-		// the session-lifetime cost so the display layer always has a value.
-		CostUSD:       sc.CostUSD,
+		// CostUSD is always the block-scoped contribution. The session's
+		// lifetime cost (sc.CostUSD) is not used here — it lives in its own
+		// column and is not the right value for per-block display.
+		CostUSD:       sc.BlockCostUSD,
 		AwaitingInput: sc.AwaitingInput,
-	}
-	if sc.BlockCostUSD > 0 {
-		en.CostUSD = sc.BlockCostUSD
 	}
 
 	// Reconstruct LastError from the stored fields.

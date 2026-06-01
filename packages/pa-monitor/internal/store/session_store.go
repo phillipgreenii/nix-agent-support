@@ -74,6 +74,11 @@ type SessionStore interface {
 	// AllSessionIDs returns every SessionID present (alive or soft-deleted).
 	// Used by GC's file-reconciliation step.
 	AllSessionIDs(ctx context.Context) ([]string, error)
+
+	// MarkEscalated sets last_error_retryable = false for the given session,
+	// persisting the escalation flip that the daemon's escalation loop applies
+	// to the in-memory tree. No-op if the session does not exist.
+	MarkEscalated(ctx context.Context, sessionID string) error
 }
 
 // SessionWithContribution joins a session with its contribution to a
