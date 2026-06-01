@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"os"
@@ -195,6 +196,10 @@ type RunOptions struct {
 	// ccusage tick. The returned surrogate ids are assigned to the poller's
 	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.
 	WriteService *service.WriteService
+	// DB, when non-nil alongside WriteService, is used by the nudge recorder
+	// adapter to resolve session string ids to surrogate row ids before
+	// persisting nudge events.
+	DB *sql.DB
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -238,7 +243,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			return fmt.Errorf("read runtime.json: %w", err)
 		}
 		sig := &SignalerAdapter{Signalers: opts.NudgerSignalers}
-		n := nudger.New(sig, watermarks)
+		var nr nudger.NudgeRecorder
+		if opts.WriteService != nil && opts.DB != nil {
+			nr = &nudgeRecorder{ws: opts.WriteService, db: opts.DB}
+		}
+		n := nudger.New(sig, watermarks, nr)
 		n.LoadStore(watermarks.LoadIntents())
 		state.mu.Lock()
 		state.nudger = n
@@ -454,7 +463,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 						}
 					}
 				}
-				n.Dispatch(tctx)
+				n.Dispatch(ctx, tctx)
 				wm.SaveIntents(n.SnapshotStore())
 
 				// Escalation flip: surface IsRetryable=false on terminal errors

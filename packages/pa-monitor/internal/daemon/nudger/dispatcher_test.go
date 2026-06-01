@@ -1,6 +1,7 @@
 package nudger
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -77,7 +78,7 @@ func TestDispatcherFiresOnceAndClears(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 1 {
 		t.Fatalf("len(sent) = %d, want 1 (one signal per session)", len(sig.sent))
 	}
@@ -100,7 +101,7 @@ func TestDispatcherSuppressesWorking(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 0 {
 		t.Errorf("len(sent) = %d, want 0 (suppressed)", len(sig.sent))
 	}
@@ -120,7 +121,7 @@ func TestDispatcherSendFailureLeavesIntent(t *testing.T) {
 	sig := &fakeSignaler{err: errors.New("no signaler for pid")}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if !store.HasAny("sid-1") {
 		t.Error("store cleared after send failure; should retry next tick")
 	}
@@ -134,7 +135,7 @@ func TestDispatcherSessionMissingSilently(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if store.HasAny("missing-sid") {
 		t.Error("intent not dropped for missing session")
 	}
@@ -152,7 +153,7 @@ func TestDispatcherTextPrecedenceManualWins(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 1 || sig.sent[0].Text != "manual-override" {
 		t.Errorf("sent = %+v, want manual text override", sig.sent)
 	}
@@ -199,9 +200,83 @@ func TestDispatcherRemoveKeysPreservesConcurrentIntent(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Signaler: sig, Recorder: rec}
-	d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if store.HasAny("sid-1") {
 		t.Error("window_reset intent not removed after successful dispatch")
+	}
+}
+
+// fakeNudgeRecorder records each RecordEvent for inspection in tests.
+type fakeNudgeRecorder struct {
+	mu     sync.Mutex
+	events []RecordEvent
+}
+
+func (f *fakeNudgeRecorder) Record(_ context.Context, ev RecordEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, ev)
+	return nil
+}
+
+// TestDispatcher_RecordsOnSend verifies that a successful dispatch causes the
+// NudgeRecorder to be invoked with an event that carries the correct session id,
+// result="sent", and source list.
+func TestDispatcher_RecordsOnSend(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(sig.sent) != 1 {
+		t.Fatalf("len(sent) = %d, want 1", len(sig.sent))
+	}
+
+	nudgeRec.mu.Lock()
+	events := nudgeRec.events
+	nudgeRec.mu.Unlock()
+
+	if len(events) != 1 {
+		t.Fatalf("NudgeRecorder.Record called %d times, want 1", len(events))
+	}
+	ev := events[0]
+	if ev.SessionID != "sid-1" {
+		t.Errorf("event.SessionID = %q, want sid-1", ev.SessionID)
+	}
+	if ev.Result != "sent" {
+		t.Errorf("event.Result = %q, want sent", ev.Result)
+	}
+	if ev.Text != "continue" {
+		t.Errorf("event.Text = %q, want continue", ev.Text)
+	}
+	if len(ev.Sources) != 1 || ev.Sources[0] != string(SourceWindowReset) {
+		t.Errorf("event.Sources = %v, want [window_reset]", ev.Sources)
+	}
+	if !ev.FiredAt.Equal(now) {
+		t.Errorf("event.FiredAt = %v, want %v", ev.FiredAt, now)
+	}
+}
+
+// TestDispatcher_NudgeRecorderNilSafe verifies that a nil NudgeRecorder does
+// not panic on successful dispatch (the Recorder field may be nil in tests
+// and early-startup paths).
+func TestDispatcher_NudgeRecorderNilSafe(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "x", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nil}
+	// Must not panic.
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	if len(sig.sent) != 1 {
+		t.Errorf("len(sent) = %d, want 1", len(sig.sent))
 	}
 }
 
@@ -220,7 +295,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
 		d := &Dispatcher{Signaler: sig, Recorder: rec}
-		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
 		rec.mu.Unlock()
@@ -239,7 +314,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
 		d := &Dispatcher{Signaler: sig, Recorder: rec}
-		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
 		rec.mu.Unlock()
@@ -255,7 +330,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
 		d := &Dispatcher{Signaler: sig, Recorder: rec}
-		d.Dispatch(TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
 		rec.mu.Unlock()

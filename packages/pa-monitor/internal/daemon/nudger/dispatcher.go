@@ -1,6 +1,7 @@
 package nudger
 
 import (
+	"context"
 	"sort"
 	"time"
 
@@ -36,16 +37,37 @@ type Recorder interface {
 	RecordQueued(sid string, source Source)
 }
 
+// NudgeRecorder is the persistence hook for the dispatcher. The daemon
+// wires a WriteService-backed implementation; the nudger itself doesn't
+// know about SQLite.
+type NudgeRecorder interface {
+	Record(ctx context.Context, ev RecordEvent) error
+}
+
+// RecordEvent carries the data for one dispatched (or suppressed) nudge
+// that should be persisted to the nudge_history table.
+type RecordEvent struct {
+	SessionID       string // string id from session.json; recorder maps to surrogate
+	Text            string
+	Result          string // 'sent' | 'failed' | 'suppressed' | 'escalated'
+	ErrorText       string
+	CausedByErrorAt *time.Time
+	Escalated       bool
+	FiredAt         time.Time
+	Sources         []string
+}
+
 // Dispatcher fires nudges based on the pending store, performs the
 // active-session suppression check, and clears intents after success or
 // suppression. Send failures leave intents for the next tick.
 type Dispatcher struct {
-	Signaler Signaler
-	Recorder Recorder
+	Signaler      Signaler
+	Recorder      Recorder
+	NudgeRecorder NudgeRecorder
 }
 
 // Dispatch iterates pending intents once, grouped by session.
-func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
+func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *PendingStore) {
 	intents := store.List()
 	if len(intents) == 0 {
 		return
@@ -92,10 +114,13 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		}
 		var cause *transcript.ErrorRecord
 		var kind string
+		var causeAt *time.Time
 		for _, in := range group {
 			if in.Key.Source == SourceDisrupted && in.Cause != nil {
 				cause = in.Cause
 				kind = string(in.Cause.Kind)
+				t := in.Cause.At
+				causeAt = &t
 				break
 			}
 		}
@@ -103,6 +128,22 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		escalated := wm.DisruptEscalated
 		d.Recorder.RecordSent(sid, sources, kind, escalated)
 		d.Recorder.UpdateWatermarks(sid, ctx.Now, sources, cause, escalated)
+		if d.NudgeRecorder != nil {
+			srcStrs := make([]string, len(sources))
+			for i, s := range sources {
+				srcStrs[i] = string(s)
+			}
+			_ = d.NudgeRecorder.Record(goCtx, RecordEvent{
+				SessionID:       sid,
+				Text:            text,
+				Result:          "sent",
+				ErrorText:       kind,
+				CausedByErrorAt: causeAt,
+				Escalated:       escalated,
+				FiredAt:         ctx.Now,
+				Sources:         srcStrs,
+			})
+		}
 		store.RemoveKeys(observedKeys)
 		for _, in := range group {
 			if in.Key.Source == SourceWindowReset {

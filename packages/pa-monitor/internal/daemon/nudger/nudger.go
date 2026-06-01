@@ -1,6 +1,9 @@
 package nudger
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Nudger is the top-level façade. Owns the pending store and the three
 // producers; runs Tick on every daemon tick.
@@ -13,10 +16,10 @@ type Nudger struct {
 }
 
 // New constructs a Nudger ready for Tick.
-func New(signaler Signaler, recorder Recorder) *Nudger {
+func New(signaler Signaler, recorder Recorder, nudgeRecorder NudgeRecorder) *Nudger {
 	return &Nudger{
 		store:       NewPendingStore(),
-		dispatcher:  &Dispatcher{Signaler: signaler, Recorder: recorder},
+		dispatcher:  &Dispatcher{Signaler: signaler, Recorder: recorder, NudgeRecorder: nudgeRecorder},
 		windowProd:  &WindowResetProducer{},
 		disruptProd: NewDisruptProducer(),
 		manualProd:  &ManualProducer{},
@@ -52,14 +55,14 @@ func (n *Nudger) Reconcile(ctx TickContext) {
 }
 
 // Dispatch runs the dispatcher against the current pending store.
-func (n *Nudger) Dispatch(ctx TickContext) {
-	n.dispatcher.Dispatch(ctx, n.store)
+func (n *Nudger) Dispatch(goCtx context.Context, ctx TickContext) {
+	n.dispatcher.Dispatch(goCtx, ctx, n.store)
 }
 
 // Tick is a convenience: Reconcile then Dispatch. Existing tests use Tick.
-func (n *Nudger) Tick(ctx TickContext) {
+func (n *Nudger) Tick(goCtx context.Context, ctx TickContext) {
 	n.Reconcile(ctx)
-	n.Dispatch(ctx)
+	n.Dispatch(goCtx, ctx)
 }
 
 // QueueManual enqueues manual nudges for the given session IDs.
