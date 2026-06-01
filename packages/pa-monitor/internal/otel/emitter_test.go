@@ -19,7 +19,6 @@ func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 func TestEmitter_NilSafeMethods(t *testing.T) {
 	var e *Emitter
 	// Methods MUST not panic on nil receiver.
-	e.RecordSessionsCount(map[string]int{"working": 1}, nil)
 	e.RecordCaffeinateActive(false, nil)
 	e.RecordBlockCost(3.14, map[string]string{"plan_tier": "max_5x"})
 	e.RecordWeekCost(42.0, nil)

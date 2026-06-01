@@ -272,23 +272,6 @@ func (e *Emitter) RecordSessionGroups(groups []SessionGroup, baseAttrs map[strin
 	e.mu.Unlock()
 }
 
-// RecordSessionsCount sets per-state session gauges. nil-safe. Kept for
-// back-compat; prefer RecordSessionGroups when per-workspace labels are
-// available.
-func (e *Emitter) RecordSessionsCount(byState map[string]int, baseAttrs map[string]string) {
-	if e == nil {
-		return
-	}
-	obs := make([]stateObs, 0, len(byState))
-	for state, count := range byState {
-		attrs := mergeAttrs(baseAttrs, "state", state)
-		obs = append(obs, stateObs{state: state, count: int64(count), attrs: attrs})
-	}
-	e.mu.Lock()
-	e.sessionsObs = obs
-	e.mu.Unlock()
-}
-
 // RecordCaffeinateActive sets the caffeinate gauge. nil-safe. Until the
 // first call, the gauge is not observed (avoiding a ghost label-less
 // series at 0 before the daemon tick loop fires).
@@ -506,14 +489,6 @@ func attrsToKV(m map[string]string) []attribute.KeyValue {
 			continue
 		}
 		out = append(out, attribute.String(k, v))
-	}
-	return out
-}
-
-func mergeAttrs(base map[string]string, extraKey, extraVal string) []attribute.KeyValue {
-	out := attrsToKV(base)
-	if extraVal != "" {
-		out = append(out, attribute.String(extraKey, extraVal))
 	}
 	return out
 }

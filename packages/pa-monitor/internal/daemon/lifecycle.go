@@ -435,9 +435,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 }
 
 // updateGauges pushes session counts grouped by (state + per-workspace +
-// per-agent labels) into the emitter gauges. When no detectors are
-// configured, falls back to a per-state-only emission (back-compat).
-// nil-safe on emitter.
+// per-agent labels) into the emitter gauges. Production always passes a
+// non-empty detector set (see cmd/pa-monitor/daemon.go), so this function
+// assumes detector-based emission. nil-safe on emitter.
 func updateGauges(
 	e *otel.Emitter,
 	tree *aggregate.Tree,
@@ -448,16 +448,6 @@ func updateGauges(
 	labelCache map[string]labels.Set,
 ) {
 	if e == nil || tree == nil {
-		return
-	}
-	if len(detectors) == 0 && len(decorators) == 0 {
-		byState := map[string]int{}
-		for _, d := range tree.Dirs {
-			byState["working"] += d.WorkingN
-			byState["idle"] += d.IdleN
-			byState["dormant"] += d.DormantN
-		}
-		e.RecordSessionsCount(byState, map[string]string{"plan_tier": planTier})
 		return
 	}
 
