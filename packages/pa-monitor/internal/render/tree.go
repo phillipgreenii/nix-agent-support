@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
@@ -80,29 +79,6 @@ const prefixCols = 5
 // minLabelWidth keeps rows readable on narrow terminals.
 const minLabelWidth = 32
 
-func Tree(tree *aggregate.Tree, opts TreeOpts) string {
-	var sb strings.Builder
-	rowIdx := 0
-	for _, d := range tree.Dirs {
-		visible := visibleSessions(d.Sessions, opts.ShowAll)
-		if len(visible) == 0 {
-			continue
-		}
-		sb.WriteString(renderDirRow(d, opts))
-		for i, s := range visible {
-			prefix := "├─"
-			if i == len(visible)-1 {
-				prefix = "└─"
-			}
-			selected := opts.HasCursor && rowIdx == opts.Cursor
-			sb.WriteString(renderSession(s, opts, prefix, selected))
-			rowIdx++
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String()
-}
-
 func visibleSessions(ss []*aggregate.SessionView, showAll bool) []*aggregate.SessionView {
 	if showAll {
 		return ss
@@ -114,26 +90,6 @@ func visibleSessions(ss []*aggregate.SessionView, showAll bool) []*aggregate.Ses
 		}
 	}
 	return out
-}
-
-// dirRollupCols formats the five stat columns for a directory rollup row.
-// Counts go into col1; %, bar, amount, and burn share the same grid as session rows.
-func dirRollupCols(d *aggregate.Directory, opts TreeOpts) (col1, pct, bar, amount, burn string) {
-	col1 = countsString(d.WorkingN, d.IdleN, d.DormantN, opts.ShowAll)
-
-	rollupPct := 0.0
-	if opts.TotalSessionTokens > 0 {
-		rollupPct = 100 * float64(d.TotalTokens) / float64(opts.TotalSessionTokens)
-	}
-	pct = fmt.Sprintf("%.0f%%", rollupPct)
-	bar = progressBar(rollupPct, colBarWidth)
-
-	amount = FmtTok(d.TotalTokens)
-	if opts.CostMode {
-		amount = fmt.Sprintf("$%.2f", d.TotalCostUSD)
-	}
-	burn = fmt.Sprintf("%sk/m", fmtK(d.BurnRateSum))
-	return
 }
 
 // countsString formats the rollup counts column ("3● 1○ 1✕"), omitting zero
@@ -150,34 +106,6 @@ func countsString(workingN, idleN, dormantN int, showAll bool) string {
 		parts = append(parts, fmt.Sprintf("%d✕", dormantN))
 	}
 	return strings.Join(parts, " ")
-}
-
-func renderDirRow(d *aggregate.Directory, opts TreeOpts) string {
-	col1, pct, bar, amount, burn := dirRollupCols(d, opts)
-	stats := renderStatsBlock(col1, pct, bar, amount, burn)
-
-	// Match the session row's visible width: prefix(5) + label(32) + "  "(2)
-	// + stats(41). prefixCols already covers cursor + branch glyph + the
-	// single space after it; the extra 2 cols here are the "  " separator
-	// the session format puts between the label and the stats block.
-	rowWidth := prefixCols + minLabelWidth + 2 + statsBlockCols
-	if opts.Width > 0 {
-		rowWidth = opts.Width
-	}
-
-	branchStr := ""
-	if d.Branch != "" {
-		branchStr = "  🌿 " + opts.Theme.Branch.Render(d.Branch)
-		if d.PRInfo != nil {
-			prNum := osc8Link(d.PRInfo.URL, fmt.Sprintf("#%d", d.PRInfo.Number))
-			prTitle := wrap.Line(d.PRInfo.Title, 40)
-			branchStr += "  →  " + prNum + " " + prTitle
-		}
-	}
-
-	leftWidth := max(rowWidth-lipgloss.Width(stats)-1, lipgloss.Width(d.Path))
-	pathStyle := opts.Theme.DirRow.Width(leftWidth).Align(lipgloss.Left)
-	return pathStyle.Render(d.Path+branchStr) + " " + stats + "\n"
 }
 
 func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selected bool) string {
@@ -306,13 +234,6 @@ func FmtTok(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
-}
-
-// osc8Link wraps text in an OSC 8 terminal hyperlink. Terminals that support
-// OSC 8 (iTerm2, Kitty, WezTerm, GNOME Terminal) render text as a clickable
-// link. lipgloss v1.1.0 treats OSC sequences as zero-width via charmbracelet/x/ansi.
-func osc8Link(url, text string) string {
-	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, text)
 }
 
 // RenderPathNode renders one PathNode row with collapse glyph, indentation, and rollup stats.

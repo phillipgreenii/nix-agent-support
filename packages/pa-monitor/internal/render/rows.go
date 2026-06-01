@@ -9,17 +9,14 @@ import (
 type RowKind int
 
 const (
-	DirHeaderKind RowKind = iota
-	SessionKind
-	BlankKind    // blank separator line after each directory group
-	PathNodeKind // collapsible path tree node (replaces DirHeaderKind in tree mode)
+	SessionKind RowKind = iota
+	BlankKind           // blank separator line after each directory group
+	PathNodeKind        // collapsible path tree node
 )
 
 // Row is one logical element in the rendered session list.
 type Row struct {
 	Kind    RowKind
-	DirIdx  int // DirHeaderKind/SessionKind (legacy): index into tree.Dirs
-	SessIdx int // SessionKind (legacy): index within dir's visible sessions
 	FlatIdx int // SessionKind: global session index matching TreeOpts.Cursor
 
 	// Path-tree mode fields (set by FlattenPathTree)
@@ -31,32 +28,6 @@ type Row struct {
 	Node          *aggregate.PathNode    // PathNodeKind: direct node pointer
 
 	LineCount int // terminal lines this row occupies (currently always 1)
-}
-
-// FlattenRows converts a Tree into an ordered slice of Rows for window rendering.
-// Empty dirs (no visible sessions under the current opts) are omitted.
-func FlattenRows(tree *aggregate.Tree, opts TreeOpts) []Row {
-	var rows []Row
-	flatIdx := 0
-	for dirIdx, d := range tree.Dirs {
-		visible := visibleSessions(d.Sessions, opts.ShowAll)
-		if len(visible) == 0 {
-			continue
-		}
-		rows = append(rows, Row{Kind: DirHeaderKind, DirIdx: dirIdx, LineCount: 1})
-		for sessIdx := range visible {
-			rows = append(rows, Row{
-				Kind:      SessionKind,
-				DirIdx:    dirIdx,
-				SessIdx:   sessIdx,
-				FlatIdx:   flatIdx,
-				LineCount: 1,
-			})
-			flatIdx++
-		}
-		rows = append(rows, Row{Kind: BlankKind, DirIdx: dirIdx, LineCount: 1})
-	}
-	return rows
 }
 
 // FlattenPathTree converts a PathNode tree into an ordered slice of Rows.
