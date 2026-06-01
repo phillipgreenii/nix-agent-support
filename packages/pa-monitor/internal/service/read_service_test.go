@@ -60,3 +60,53 @@ func TestReadService_GetState_AllFilter(t *testing.T) {
 		t.Errorf("Active filter returned %d sessions, want 1 (alive only)", len(active.Sessions))
 	}
 }
+
+func TestReadService_GetState_NoActiveBlock(t *testing.T) {
+	db, _ := sqlite.Open(":memory:")
+	defer db.Close()
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	pid := 100
+
+	ss := sqlite.NewSessionStore(db)
+	// Alive session, no contributions, no active block in the DB.
+	_ = ss.Upsert(ctx, store.Session{
+		SessionID:       "alive-no-block",
+		PID:             &pid,
+		Cwd:             "/x",
+		Status:          "working",
+		LastProcessedAt: now,
+		UpdatedAt:       now,
+		CreatedAt:       now,
+	})
+
+	rs := NewReadService(ReadDeps{
+		Sessions: ss,
+		Blocks:   sqlite.NewBlockStore(db),
+		Weeks:    sqlite.NewWeekStore(db),
+		Toggles:  sqlite.NewToggleStore(db),
+		Nudges:   sqlite.NewNudgeStore(db),
+	})
+
+	st, err := rs.GetState(ctx, store.FilterAll)
+	if err != nil {
+		t.Fatalf("GetState all: %v", err)
+	}
+	if st.Block != nil {
+		t.Errorf("Block = %+v, want nil (no active block)", st.Block)
+	}
+	if len(st.Sessions) != 1 {
+		t.Errorf("FilterAll w/ no block returned %d sessions, want 1 (alive PID still counts)", len(st.Sessions))
+	}
+
+	st, err = rs.GetState(ctx, store.FilterActive)
+	if err != nil {
+		t.Fatalf("GetState active: %v", err)
+	}
+	if len(st.Sessions) != 0 {
+		t.Errorf("FilterActive w/ no block returned %d sessions, want 0 (active requires block)", len(st.Sessions))
+	}
+}

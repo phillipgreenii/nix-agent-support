@@ -20,6 +20,14 @@ type Directory struct {
 // BuildDirectories rolls a flat session list into directory groups keyed by Cwd.
 // Counts and totals are computed in this pass; PR info and branch resolution
 // stay in the daemon layer (file-backed prCache).
+//
+// TotalTokens and TotalCostUSD aggregate the session-LIFETIME values
+// (sc.SessionTokens, sc.CostUSD), matching today's aggregate.Directory
+// semantics. Per-block roll-ups live on session_block_contributions; if a
+// future consumer needs "dir cost this block", sum sc.BlockCostUSD instead.
+//
+// Branch resolution is "first non-empty wins" in input order — deterministic
+// because the input slice order from SessionStore.List is stable.
 func BuildDirectories(sessions []store.SessionWithContribution) []*Directory {
 	byCwd := map[string]*Directory{}
 	for _, sc := range sessions {
