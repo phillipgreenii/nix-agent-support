@@ -424,44 +424,6 @@ func TestServerSetAutoResumeNudgerNil(t *testing.T) {
 	}
 }
 
-// TestCaffeinatePreservesNudgerPersistence verifies that calling Caffeinate
-// uses a read-modify-write so it does NOT zero out other runtime.json fields
-// (specifically AutoResumeEnabled / nudger watermarks).
-func TestCaffeinatePreservesNudgerPersistence(t *testing.T) {
-	dir := t.TempDir()
-	runtimePath := filepath.Join(dir, "runtime.json")
-
-	// Pre-populate runtime.json with AutoResumeEnabled=true.
-	initial := RuntimeState{AutoResumeEnabled: true, CaffeinateOn: false}
-	if err := WriteRuntimeState(runtimePath, initial); err != nil {
-		t.Fatalf("WriteRuntimeState: %v", err)
-	}
-
-	state := newSharedState()
-	state.mu.Lock()
-	state.runtimePath = runtimePath
-	state.mu.Unlock()
-
-	srv := newServer(state)
-
-	// Call Caffeinate(on).
-	_, err := srv.Caffeinate(context.Background(), &pb.CaffeinateRequest{Action: "on"})
-	if err != nil {
-		t.Fatalf("Caffeinate(on): %v", err)
-	}
-
-	// Reload runtime.json and verify AutoResumeEnabled was preserved.
-	reloaded, err := ReadRuntimeState(runtimePath)
-	if err != nil {
-		t.Fatalf("ReadRuntimeState after Caffeinate: %v", err)
-	}
-	if !reloaded.CaffeinateOn {
-		t.Error("CaffeinateOn = false after Caffeinate(on), want true")
-	}
-	if !reloaded.AutoResumeEnabled {
-		t.Error("AutoResumeEnabled was zeroed by Caffeinate — read-modify-write broken")
-	}
-}
 
 func TestServerCaffeinatePersistsToToggleStore(t *testing.T) {
 	// Setup: in-memory DB + WriteService + new test server.

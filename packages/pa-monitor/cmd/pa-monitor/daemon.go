@@ -67,10 +67,6 @@ func runDaemon(args []string) {
 	}
 
 	runtimePath := filepath.Join(paths.Dir, "runtime.json")
-	rs, rsErr := daemon.ReadRuntimeState(runtimePath)
-	if rsErr != nil {
-		fmt.Fprintf(os.Stderr, "daemon: read runtime state (continuing): %v\n", rsErr)
-	}
 
 	// Caffeinate manager — daemon owns its own Proc so the wrapper PID
 	// is the daemon itself; agents are simply observed by the poller.
@@ -109,7 +105,7 @@ func runDaemon(args []string) {
 		Tick:                time.Duration(*tickS) * time.Second,
 		PlanTier:            cfg.PlanTier,
 		Caffeinate:          caffMgr,
-		InitialCaffeinateOn: rs.CaffeinateOn,
+		InitialCaffeinateOn: false, // updated from DB below when available
 		RuntimePath:         runtimePath,
 		Version:             version,
 		BridgeRegistry:      bridgeRegistry,
@@ -157,6 +153,12 @@ func runDaemon(args []string) {
 			p.WriteService = ws
 			p.DB = db
 			opts.WriteService = ws
+
+			// Read the persisted caffeinate toggle from the DB (primary source
+			// of truth since the runtime.json -> SQLite migration).
+			if v, ok, err := sqlite.NewToggleStore(db).Get(context.Background(), "caffeinate_on"); err == nil && ok {
+				opts.InitialCaffeinateOn = v
+			}
 		}
 
 		opts.Poller = p

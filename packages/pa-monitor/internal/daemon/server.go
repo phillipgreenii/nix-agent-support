@@ -134,18 +134,9 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 		cause = "manual"
 	}
 	s.state.setCaffeinateActive(target, cause)
-	// Persist to ToggleStore.
+	// Persist to ToggleStore (primary persistence since migration to SQLite).
 	if s.writeService != nil {
 		_ = s.writeService.SetToggle(ctx, "caffeinate_on", target)
-	}
-	// Persist to runtime.json via read-modify-write so other fields are preserved.
-	s.state.mu.RLock()
-	path := s.state.runtimePath
-	s.state.mu.RUnlock()
-	if path != "" {
-		state, _ := ReadRuntimeState(path) // best-effort; missing file → empty
-		state.CaffeinateOn = target
-		_ = WriteRuntimeState(path, state)
 	}
 	return &pb.CaffeinateResponse{Active: target, Cause: cause}, nil
 }
