@@ -38,7 +38,10 @@ func DefaultPidAlive(pid int) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
-// Discover reads all session files and returns live sessions only.
+// Discover reads all session files and returns every session, with
+// Session.PidAlive set from the PidAlive hook. Dead-PID sessions are
+// kept so the poller can persist their last-known state until the
+// underlying .jsonl file is removed (GC sweeper handles that).
 // Malformed files are silently skipped.
 func (d *Discoverer) Discover() ([]*Session, error) {
 	entries, err := os.ReadDir(d.SessionsDir)
