@@ -1,7 +1,10 @@
 {
   "title": "pa-monitor overview",
   "uid": "pa-monitor-overview",
-  "tags": ["pa-monitor", "claude-agents"],
+  "tags": [
+    "pa-monitor",
+    "claude-agents"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "10s",
@@ -291,6 +294,230 @@
       ]
     },
     {
+      "id": 21,
+      "title": "Active sessions",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 8
+      },
+      "description": "One row per active (non-Dormant) session — mirrors the TUI 'active' view. Joined on session_id from pa_monitor_session_info (labels), pa_monitor_session_tokens, and pa_monitor_session_cost_usd.",
+      "targets": [
+        {
+          "expr": "pa_monitor_session_info{plan_tier=~\"$plan_tier\", workspace_scope=~\"$scope\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A",
+          "legendFormat": "__auto"
+        },
+        {
+          "expr": "pa_monitor_session_tokens",
+          "format": "table",
+          "instant": true,
+          "refId": "B",
+          "legendFormat": "__auto"
+        },
+        {
+          "expr": "pa_monitor_session_cost_usd",
+          "format": "table",
+          "instant": true,
+          "refId": "C",
+          "legendFormat": "__auto"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "session_id",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "service_name 1": true,
+              "service_name 2": true,
+              "service_name 3": true,
+              "service_version 1": true,
+              "service_version 2": true,
+              "service_version 3": true,
+              "telemetry_sdk_language 1": true,
+              "telemetry_sdk_language 2": true,
+              "telemetry_sdk_language 3": true,
+              "telemetry_sdk_name 1": true,
+              "telemetry_sdk_name 2": true,
+              "telemetry_sdk_name 3": true,
+              "telemetry_sdk_version 1": true,
+              "telemetry_sdk_version 2": true,
+              "telemetry_sdk_version 3": true,
+              "otel_scope_name 1": true,
+              "otel_scope_name 2": true,
+              "otel_scope_name 3": true,
+              "otel_scope_version 1": true,
+              "otel_scope_version 2": true,
+              "otel_scope_version 3": true,
+              "Value #A": true
+            },
+            "indexByName": {
+              "cwd": 0,
+              "terminal_host": 1,
+              "session_id": 2,
+              "session_name": 3,
+              "status": 4,
+              "model": 5,
+              "Value #B": 6,
+              "Value #C": 7,
+              "error_kind": 8
+            },
+            "renameByName": {
+              "cwd": "path",
+              "terminal_host": "terminal",
+              "session_id": "id",
+              "session_name": "name",
+              "Value #B": "tokens",
+              "Value #C": "cost",
+              "error_kind": "current error"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tokens"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "working": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "idle": {
+                        "color": "yellow",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "current error"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "": {
+                        "color": "text",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".+",
+                      "result": {
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
       "id": 2,
       "title": "5h block usage vs cap",
       "type": "timeseries",
@@ -300,7 +527,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 20,
         "w": 12,
         "h": 7
       },
@@ -329,7 +556,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 20,
         "w": 12,
         "h": 7
       },
@@ -358,7 +585,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 19,
+        "y": 27,
         "w": 6,
         "h": 4
       },
@@ -379,7 +606,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 19,
+        "y": 27,
         "w": 6,
         "h": 4
       },
@@ -396,7 +623,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 31,
         "w": 24,
         "h": 1
       },
@@ -412,7 +639,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 32,
         "w": 12,
         "h": 7
       },
@@ -443,7 +670,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 32,
         "w": 12,
         "h": 7
       },
@@ -466,7 +693,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 39,
         "w": 12,
         "h": 7
       },
@@ -488,7 +715,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 31,
+        "y": 39,
         "w": 12,
         "h": 7
       },
@@ -519,7 +746,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 38,
+        "y": 46,
         "w": 8,
         "h": 4
       },
@@ -540,7 +767,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 38,
+        "y": 46,
         "w": 8,
         "h": 4
       },
@@ -561,7 +788,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 38,
+        "y": 46,
         "w": 8,
         "h": 4
       },
@@ -583,7 +810,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 50,
         "w": 24,
         "h": 6
       },
@@ -611,7 +838,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 48,
+        "y": 56,
         "w": 24,
         "h": 1
       },
@@ -627,7 +854,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 57,
         "w": 12,
         "h": 7
       },
@@ -659,7 +886,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 49,
+        "y": 57,
         "w": 12,
         "h": 7
       },
