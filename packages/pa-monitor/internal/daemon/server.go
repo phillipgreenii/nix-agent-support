@@ -292,7 +292,7 @@ func (s *server) RegisterBridge(ctx context.Context, req *pb.RegisterBridgeReque
 		// success; the bridge's TerminalHost won't be refined but no harm done.
 		return &pb.RegisterBridgeResponse{}, nil
 	}
-	s.bridges.Register(req.GetWorkspaceId(), bridgePID, serverPID)
+	s.bridges.Register(serverPID)
 	return &pb.RegisterBridgeResponse{}, nil
 }
 
@@ -390,6 +390,3 @@ func serve(lis net.Listener, state *sharedState, version, planTier string, bridg
 
 	return gs, func() { gs.GracefulStop() }
 }
-
-// avoid "imported and not used" until other consumers land
-var _ = aggregate.Tree{}

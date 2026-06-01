@@ -34,11 +34,10 @@ type Registry struct {
 	now        func() time.Time
 }
 
+// entry is the per-server liveness record. Only lastSeen is read back;
+// the cmux server PID is the map key, so it does not need to be stored.
 type entry struct {
-	workspaceID string
-	bridgePID   int
-	serverPID   int
-	lastSeen    time.Time
+	lastSeen time.Time
 }
 
 // NewRegistry constructs a registry. staleAfter is the cutoff beyond which
@@ -51,18 +50,13 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 	}
 }
 
-// Register records or refreshes a bridge entry. serverPID must be the
-// cmux server PID derived from bridgePID's ancestry; the registry treats
-// it as opaque and trusts the caller's derivation.
-func (r *Registry) Register(workspaceID string, bridgePID, serverPID int) {
+// Register records or refreshes a bridge entry. serverPID is the cmux server
+// PID derived from the bridge's ancestry; the registry treats it as opaque
+// and trusts the caller's derivation.
+func (r *Registry) Register(serverPID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byServer[serverPID] = &entry{
-		workspaceID: workspaceID,
-		bridgePID:   bridgePID,
-		serverPID:   serverPID,
-		lastSeen:    r.now(),
-	}
+	r.byServer[serverPID] = &entry{lastSeen: r.now()}
 }
 
 // SetNowForTest overrides the clock used by the registry. Whitebox test
