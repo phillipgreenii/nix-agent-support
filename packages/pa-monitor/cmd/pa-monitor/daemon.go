@@ -163,6 +163,7 @@ func runDaemon(args []string) {
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr
 		opts.WeeklyFn = weeklyFn
+		opts.SessionsDir = p.SessionsDir
 		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — weekly fetch is slow
 
 		// Without NudgerSignalers being non-empty, lifecycle.go skips

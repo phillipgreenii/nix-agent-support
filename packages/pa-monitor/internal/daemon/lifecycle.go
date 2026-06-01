@@ -204,6 +204,10 @@ type RunOptions struct {
 	// adapter to resolve session string ids to surrogate row ids before
 	// persisting nudge events.
 	DB *sql.DB
+	// SessionsDir is the directory where Claude Code writes .json session files.
+	// When non-empty alongside WriteService, an hourly GC sweeper goroutine is
+	// started to reconcile files with the DB and hard-delete stale rows.
+	SessionsDir string
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -256,6 +260,18 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			// Non-fatal: daemon can still run without the migration.
 			_ = fmt.Errorf("runtime.json migration (non-fatal): %w", err)
 		}
+	}
+
+	// Launch the hourly GC sweeper when a WriteService and a sessions directory
+	// are both available.
+	if opts.WriteService != nil && opts.SessionsDir != "" {
+		sweeper := &GCSweeper{
+			SessionsDir:     opts.SessionsDir,
+			WriteService:    opts.WriteService,
+			Interval:        time.Hour,
+			HardDeleteAfter: 24 * time.Hour,
+		}
+		go sweeper.Run(ctx)
 	}
 
 	// Construct Nudger + WatermarkStore when configured.
