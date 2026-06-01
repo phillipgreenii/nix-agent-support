@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
+	"github.com/phillipgreenii/pa-monitor/internal/otel"
 )
 
 // fakeDetector emits a fixed label-key=value pair for every session it
@@ -17,7 +18,7 @@ type fakeDetector struct {
 	fn  func(labels.Session) string
 }
 
-func (d fakeDetector) Name() string                { return d.key }
+func (d fakeDetector) Name() string { return d.key }
 func (d fakeDetector) Detect(s labels.Session) labels.Set {
 	return labels.Set{d.key: d.fn(s)}
 }
@@ -170,5 +171,118 @@ func TestPruneLabelCache_DropsVanishedSessions(t *testing.T) {
 	}
 	if _, ok := cache["vanish2"]; ok {
 		t.Error("vanish2 entry should be pruned")
+	}
+}
+
+// TestBuildSessionInfoRows_OnlyNonDormant confirms the cardinality-cap
+// policy: dormant sessions are dropped from the per-session emit,
+// matching the TUI "active" view and keeping session_id series bounded
+// by the live process count rather than session history.
+func TestBuildSessionInfoRows_OnlyNonDormant(t *testing.T) {
+	working := &aggregate.SessionView{
+		Session: &session.Session{
+			SessionID:    "sid-work",
+			Name:         "feat-x",
+			Cwd:          "/repo/a",
+			TerminalHost: "tmux",
+			Status:       session.Working,
+		},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			Model:         "claude-opus-4-7",
+			SessionTokens: 100,
+			CostUSD:       0.10,
+		},
+	}
+	idle := &aggregate.SessionView{
+		Session: &session.Session{
+			SessionID:    "sid-idle",
+			Cwd:          "/repo/b",
+			TerminalHost: "cmux (bridge disconnected)",
+			Status:       session.Idle,
+		},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			Model: "claude-sonnet-4-7",
+			LastError: &transcript.ErrorRecord{
+				Kind:       transcript.ErrRateLimit,
+				IsTerminal: true,
+				At:         time.Now(),
+			},
+		},
+	}
+	idleNonTerminalErr := &aggregate.SessionView{
+		Session: &session.Session{
+			SessionID: "sid-idle-recovered",
+			Status:    session.Idle,
+		},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			LastError: &transcript.ErrorRecord{
+				Kind:       transcript.ErrRateLimit,
+				IsTerminal: false, // user resumed after error
+			},
+		},
+	}
+	dormant := &aggregate.SessionView{
+		Session: &session.Session{
+			SessionID: "sid-dorm",
+			Cwd:       "/repo/c",
+			Status:    session.Dormant,
+		},
+	}
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{
+		{Sessions: []*aggregate.SessionView{working, idle, idleNonTerminalErr, dormant}},
+	}}
+
+	rows := buildSessionInfoRows(tree, "max_5x", nil, nil, labels.NewCardinalityCap(10), map[string]labels.Set{})
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3 (dormant excluded, three non-dormant kept)", len(rows))
+	}
+
+	byID := map[string]otel.SessionInfo{}
+	for _, r := range rows {
+		byID[r.SessionID] = r
+		if r.SessionID == "sid-dorm" {
+			t.Error("dormant session leaked into emit")
+		}
+	}
+
+	// Working row: terminal abbrev TMUX, no error_kind.
+	w := byID["sid-work"]
+	if w.TerminalHost != "TMUX" {
+		t.Errorf("working terminal = %q, want TMUX", w.TerminalHost)
+	}
+	if w.ErrorKind != "" {
+		t.Errorf("working ErrorKind = %q, want empty", w.ErrorKind)
+	}
+	if w.Tokens != 100 || w.CostUSD != 0.10 {
+		t.Errorf("working tokens/cost = %d/%v, want 100/0.10", w.Tokens, w.CostUSD)
+	}
+	if w.Status != "working" {
+		t.Errorf("working status = %q, want working", w.Status)
+	}
+	if w.Labels["plan_tier"] != "max_5x" {
+		t.Errorf("working plan_tier label = %q, want max_5x", w.Labels["plan_tier"])
+	}
+
+	// Idle row with terminal error: error_kind populated, cmux refinement
+	// collapses to CMUX.
+	i := byID["sid-idle"]
+	if i.TerminalHost != "CMUX" {
+		t.Errorf("idle terminal = %q, want CMUX (cmux refinements collapse)", i.TerminalHost)
+	}
+	if i.ErrorKind != "rate_limit" {
+		t.Errorf("idle ErrorKind = %q, want rate_limit", i.ErrorKind)
+	}
+
+	// Idle row with NON-terminal error: error_kind MUST be empty.
+	r := byID["sid-idle-recovered"]
+	if r.ErrorKind != "" {
+		t.Errorf("non-terminal error ErrorKind = %q, want empty (user resumed)", r.ErrorKind)
+	}
+}
+
+// TestBuildSessionInfoRows_NilTree returns nil rather than panicking.
+func TestBuildSessionInfoRows_NilTree(t *testing.T) {
+	if got := buildSessionInfoRows(nil, "", nil, nil, nil, nil); got != nil {
+		t.Errorf("buildSessionInfoRows(nil) = %v, want nil", got)
 	}
 }

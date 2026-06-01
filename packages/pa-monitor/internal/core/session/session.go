@@ -86,3 +86,24 @@ func Classify(now, mtime time.Time, working, idle time.Duration) Status {
 		return Dormant
 	}
 }
+
+// TerminalAbbrev maps the daemon-reported terminal_host string into the short
+// abbreviations used in CLI tables and dashboard rows: CMUX/TMUX/GHOSTTY/VSCODE/UNKN.
+// The cmux refinements ("cmux (bridge disconnected)" etc.) collapse to CMUX so the
+// column width stays bounded. Shared between the CLI status formatter and the
+// daemon's per-session OTel emitter so a single source-of-truth maps the value.
+func TerminalAbbrev(host string) string {
+	host = strings.ToLower(host)
+	switch {
+	case strings.HasPrefix(host, "cmux"):
+		return "CMUX"
+	case host == "tmux":
+		return "TMUX"
+	case host == "ghostty":
+		return "GHOSTTY"
+	case host == "vscode":
+		return "VSCODE"
+	default:
+		return "UNKN"
+	}
+}

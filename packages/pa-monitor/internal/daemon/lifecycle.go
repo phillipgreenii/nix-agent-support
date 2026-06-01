@@ -361,6 +361,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				})
 			}
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
+			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
 			pruneLabelCache(labelCache, tree)
 
@@ -483,6 +484,78 @@ func updateGauges(
 		})
 	}
 	e.RecordSessionGroups(groups, map[string]string{"plan_tier": planTier})
+}
+
+// updateSessionInfo builds one OTel row per non-Dormant session and pushes
+// it through e.RecordSessionInfo. "Non-Dormant" mirrors the TUI's active
+// view; dormant sessions live indefinitely in the tree so emitting them
+// would unbound session_id cardinality on the exporter. nil-safe on emitter.
+//
+// Each row carries the columns the dashboard's active-sessions table needs:
+// session_id, session_name, cwd, terminal_host (abbreviated), status,
+// model, error_kind (empty when no terminal error), tokens, cost. The
+// session's labels.Set is also forwarded so workspace.scope / agent.* etc.
+// can filter the table via Grafana variables.
+func updateSessionInfo(
+	e *otel.Emitter,
+	tree *aggregate.Tree,
+	planTier string,
+	detectors []labels.Detector,
+	decorators []*labels.Decorator,
+	cap *labels.CardinalityCap,
+	labelCache map[string]labels.Set,
+) {
+	if e == nil {
+		return
+	}
+	e.RecordSessionInfo(buildSessionInfoRows(tree, planTier, detectors, decorators, cap, labelCache))
+}
+
+// buildSessionInfoRows is the pure row-builder split out of updateSessionInfo
+// so tests can assert the filter + column derivation without touching the
+// OTel SDK. tree==nil returns nil. Dormant sessions are skipped — the
+// cardinality cap policy that mirrors the TUI's active view.
+func buildSessionInfoRows(
+	tree *aggregate.Tree,
+	planTier string,
+	detectors []labels.Detector,
+	decorators []*labels.Decorator,
+	cap *labels.CardinalityCap,
+	labelCache map[string]labels.Set,
+) []otel.SessionInfo {
+	if tree == nil {
+		return nil
+	}
+	rows := make([]otel.SessionInfo, 0)
+	for _, sv := range tree.Sessions() {
+		if sv == nil || sv.Session == nil {
+			continue
+		}
+		if sv.Status == session.Dormant {
+			continue
+		}
+		errKind := ""
+		if sv.LastError != nil && sv.LastError.IsTerminal {
+			errKind = string(sv.LastError.Kind)
+		}
+		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
+		// Pass plan_tier through as a baseline label so the dashboard's
+		// $plan_tier filter applies to this gauge too.
+		ls["plan_tier"] = planTier
+		rows = append(rows, otel.SessionInfo{
+			SessionID:    sv.SessionID,
+			SessionName:  sv.Session.Name,
+			Cwd:          sv.Cwd,
+			TerminalHost: session.TerminalAbbrev(sv.TerminalHost),
+			Status:       session.Status(sv.Status).String(),
+			Model:        sv.SessionEnrichment.Model,
+			ErrorKind:    errKind,
+			Tokens:       int64(sv.SessionEnrichment.SessionTokens),
+			CostUSD:      sv.SessionEnrichment.CostUSD,
+			Labels:       ls,
+		})
+	}
+	return rows
 }
 
 // labelsForSession runs detectors + decorators against the session,

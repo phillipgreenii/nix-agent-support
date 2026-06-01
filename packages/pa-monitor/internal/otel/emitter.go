@@ -33,6 +33,38 @@ type stateObs struct {
 	attrs []attribute.KeyValue
 }
 
+// sessionInfoObs is a per-session row observation. The info gauge always
+// emits 1; tokens / cost share the same key set so a Grafana table can
+// join them by session_id. Snapshotted by the meter callback.
+type sessionInfoObs struct {
+	sessionID string
+	tokens    int64
+	costUSD   float64
+	attrs     []attribute.KeyValue
+}
+
+// SessionInfo carries the per-session label set and metric values the
+// emitter publishes on the pa_monitor.session.info /
+// pa_monitor.session.tokens / pa_monitor.session.cost.usd gauges.
+//
+// Only the columns the dashboard table needs are present. ErrorKind is
+// the empty string when the session has no terminal error.
+type SessionInfo struct {
+	SessionID    string
+	SessionName  string
+	Cwd          string
+	TerminalHost string // already-abbreviated host (CMUX/TMUX/...)
+	Status       string // session.Status.String()
+	Model        string
+	ErrorKind    string  // empty when no terminal error
+	Tokens       int64   // SessionEnrichment.SessionTokens
+	CostUSD      float64 // SessionEnrichment.CostUSD
+	// Labels carries extra attributes merged into the info gauge attrs —
+	// typically the workspace.scope / plan_tier baseline so Grafana variables
+	// can filter the table. Keys with empty values are dropped by attrsToKV.
+	Labels map[string]string
+}
+
 // Emitter holds the OTel SDK handles. A nil *Emitter is a valid no-op
 // emitter.
 type Emitter struct {
@@ -41,15 +73,15 @@ type Emitter struct {
 	logger          otellog.Logger
 
 	// Counters — sync (not observable). Nil when SDK uninitialised.
-	blockLimitHits    metric.Int64Counter
-	weekLimitHits     metric.Int64Counter
-	caffeinateRounds  metric.Int64Counter
-	caffeinateGrace   metric.Int64Counter
-	contextLimitHits  metric.Int64Counter
-	nudgesSent        metric.Int64Counter
-	nudgeSuppressed   metric.Int64Counter
-	nudgeQueued       metric.Int64Counter
-	apiErrorObserved  metric.Int64Counter
+	blockLimitHits   metric.Int64Counter
+	weekLimitHits    metric.Int64Counter
+	caffeinateRounds metric.Int64Counter
+	caffeinateGrace  metric.Int64Counter
+	contextLimitHits metric.Int64Counter
+	nudgesSent       metric.Int64Counter
+	nudgeSuppressed  metric.Int64Counter
+	nudgeQueued      metric.Int64Counter
+	apiErrorObserved metric.Int64Counter
 
 	mu                  sync.Mutex
 	sessionsObs         []stateObs
@@ -80,6 +112,11 @@ type Emitter struct {
 	weekCostUSD    float64
 	weekCostAttrs  []attribute.KeyValue
 	weekCostKnown  bool
+	// sessionInfoObs buffers one row per active (non-Dormant) session. The
+	// daemon's tick loop replaces the slice each tick via RecordSessionInfo;
+	// the meter callback emits one Observe call per row across the three
+	// session.* gauges (info=1, tokens, cost.usd) on each scrape.
+	sessionInfoObs []sessionInfoObs
 }
 
 // New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set,
@@ -153,6 +190,24 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	// Per-session gauges. Cardinality contract: session_id is unbounded
+	// over the lifetime of the daemon (every started session is a new id),
+	// so the producer (RecordSessionInfo) MUST cap which sessions it
+	// publishes — today we only emit rows for non-Dormant sessions, which
+	// bounds the active series to the live process count and lets stale
+	// session_ids age out of the exporter on the next scrape.
+	sessionInfoGauge, err := meter.Int64ObservableGauge("pa_monitor.session.info")
+	if err != nil {
+		return err
+	}
+	sessionTokensGauge, err := meter.Int64ObservableGauge("pa_monitor.session.tokens")
+	if err != nil {
+		return err
+	}
+	sessionCostGauge, err := meter.Float64ObservableGauge("pa_monitor.session.cost.usd")
+	if err != nil {
+		return err
+	}
 
 	// Synchronous counters for transition events.
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
@@ -191,6 +246,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
+		sessionInfo := e.sessionInfoObs
 		e.mu.Unlock()
 		for _, s := range obs {
 			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
@@ -211,8 +267,20 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		if weekKnown {
 			o.ObserveFloat64(weekCostGauge, weekCost, metric.WithAttributes(weekAttrs...))
 		}
+		// Per-session rows: same attrs on all three gauges so Grafana
+		// joins-by-field on session_id pull one row per session.
+		for _, si := range sessionInfo {
+			o.ObserveInt64(sessionInfoGauge, 1, metric.WithAttributes(si.attrs...))
+			// tokens / cost gauges carry only session_id to keep their
+			// series cardinality minimal — the info gauge holds the rest.
+			idAttr := attribute.String("session_id", si.sessionID)
+			o.ObserveInt64(sessionTokensGauge, si.tokens, metric.WithAttributes(idAttr))
+			o.ObserveFloat64(sessionCostGauge, si.costUSD, metric.WithAttributes(idAttr))
+		}
 		return nil
-	}, sessionsGauge, caffGauge, autoResumeGauge, sessionsErroredGauge, blockCostGauge, weekCostGauge)
+	}, sessionsGauge, caffGauge, autoResumeGauge, sessionsErroredGauge,
+		blockCostGauge, weekCostGauge,
+		sessionInfoGauge, sessionTokensGauge, sessionCostGauge)
 	return err
 }
 
@@ -445,6 +513,51 @@ func (e *Emitter) RecordApiErrorObserved(attrs map[string]string) {
 		e.apiErrorObserved.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("session.api_error.observed", attrs)
+}
+
+// RecordSessionInfo replaces the buffered per-session rows. Callers MUST
+// pre-filter to active (non-Dormant) sessions so the cardinality of
+// session_id is bounded by the live process count rather than session
+// history; dormant rows quietly drop from the next scrape because they
+// are absent from the new slice. nil-safe.
+func (e *Emitter) RecordSessionInfo(rows []SessionInfo) {
+	if e == nil {
+		return
+	}
+	obs := make([]sessionInfoObs, 0, len(rows))
+	for _, r := range rows {
+		// Build the info gauge's attribute set: per-row label columns
+		// (only those needed by the dashboard table) plus any baseline
+		// labels the caller threaded through (workspace.scope, plan_tier).
+		merged := map[string]string{
+			"session_id":    r.SessionID,
+			"session_name":  r.SessionName,
+			"cwd":           r.Cwd,
+			"terminal_host": r.TerminalHost,
+			"status":        r.Status,
+			"model":         r.Model,
+			"error_kind":    r.ErrorKind,
+		}
+		for k, v := range r.Labels {
+			if v == "" {
+				continue
+			}
+			// Caller labels do NOT override the per-row column keys.
+			if _, taken := merged[k]; taken {
+				continue
+			}
+			merged[k] = v
+		}
+		obs = append(obs, sessionInfoObs{
+			sessionID: r.SessionID,
+			tokens:    r.Tokens,
+			costUSD:   r.CostUSD,
+			attrs:     attrsToKV(merged),
+		})
+	}
+	e.mu.Lock()
+	e.sessionInfoObs = obs
+	e.mu.Unlock()
 }
 
 // RecordSessionsErrored replaces the latest sessions-errored observation.

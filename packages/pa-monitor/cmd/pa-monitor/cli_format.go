@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
@@ -112,24 +113,10 @@ func sessionLabel(v *pb.SessionView) string {
 	return sid
 }
 
-// terminalAbbrev maps the daemon-reported terminal_host string into the short
-// abbreviations used in CLI tables: CMUX/TMUX/GHOSTTY/VSCODE/UNKN. The cmux
-// refinements ("cmux (bridge disconnected)" etc.) collapse to CMUX so the
-// column width stays bounded.
+// terminalAbbrev is a thin alias kept for call-site readability. The actual
+// mapping lives on the session package so the daemon's OTel emitter shares it.
 func terminalAbbrev(host string) string {
-	host = strings.ToLower(host)
-	switch {
-	case strings.HasPrefix(host, "cmux"):
-		return "CMUX"
-	case host == "tmux":
-		return "TMUX"
-	case host == "ghostty":
-		return "GHOSTTY"
-	case host == "vscode":
-		return "VSCODE"
-	default:
-		return "UNKN"
-	}
+	return session.TerminalAbbrev(host)
 }
 
 // formatSessionInfo renders the Last error and Pending nudge sections for the
