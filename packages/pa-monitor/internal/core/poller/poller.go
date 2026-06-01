@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
@@ -11,7 +12,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
 // stalePauseGrace bounds how far past the rate-limit reset the TUI will still
@@ -48,6 +51,17 @@ type Poller struct {
 	// Nil disables the enrichment; sessions in cmux are reported as plain
 	// "cmux".
 	BridgeRegistry *bridge.Registry
+
+	// WriteService is optional. When non-nil, every tick UPSERTs all
+	// discovered sessions and their current-block contributions into the DB.
+	// The in-memory aggregate.Tree path also remains until Task 19 cuts over.
+	WriteService *service.WriteService
+
+	// ActiveBlockID is the surrogate id of the current block in the DB.
+	// Set by the daemon main loop after ccusage poller upserts the block.
+	// 0 means no active block yet — contributions are skipped this tick.
+	ActiveBlockID int64
+	ActiveWeekID  int64
 
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
@@ -249,6 +263,55 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	tree := aggregate.Build(sessions, enriched, prByDir, block, p.PlanTier)
 	tree.CCUsageProbed = ccUsageProbed
 	tree.CCUsageErr = ccUsageErr
+
+	if p.WriteService != nil {
+		nowUTC := now.UTC()
+		for _, sv := range tree.Sessions() {
+			ss := store.Session{
+				SessionID:       sv.SessionID,
+				PID:             pidPtrIfAlive(sv.PID, sv.Session),
+				Cwd:             sv.Cwd,
+				Name:            sv.Name,
+				Kind:            sv.Kind,
+				Entrypoint:      sv.Entrypoint,
+				Model:           sv.SessionEnrichment.Model,
+				TerminalHost:    sv.TerminalHost,
+				Branch:          sv.Branch,
+				Status:          sv.Session.Status.String(),
+				FirstPrompt:     sv.SessionEnrichment.FirstPrompt,
+				Labels:          nil, // populated when label pipeline runs in daemon
+				TranscriptMTime: sv.TranscriptMTime,
+				StartedAt:       sv.StartedAt,
+				ContextTokens:   uint64(sv.SessionEnrichment.ContextTokens),
+				SessionTokens:   uint64(sv.SessionEnrichment.SessionTokens),
+				SubagentCount:   uint32(sv.SessionEnrichment.SubagentCount),
+				SubshellCount:   uint32(sv.SessionEnrichment.SubshellCount),
+				BurnRateShort:   sv.SessionEnrichment.BurnRateShort,
+				BurnRateLong:    sv.SessionEnrichment.BurnRateLong,
+				CostUSD:         sv.SessionEnrichment.CostUSD,
+				AwaitingInput:   sv.SessionEnrichment.AwaitingInput,
+				LastProcessedAt: nowUTC,
+				UpdatedAt:       nowUTC,
+			}
+			// fold LastError if present
+			if sv.SessionEnrichment.LastError != nil {
+				le := sv.SessionEnrichment.LastError
+				ss.LastErrorKind = string(le.Kind)
+				ss.LastErrorText = le.Text
+				ss.LastErrorAt = le.At
+				ss.LastErrorTerminal = le.IsTerminal
+				ss.LastErrorRetryable = le.IsRetryable
+			}
+			if err := p.WriteService.UpsertSession(ctx, ss); err != nil {
+				return nil, false, fmt.Errorf("write session %s: %w", sv.SessionID, err)
+			}
+			if p.ActiveBlockID > 0 {
+				// Contribution upsert is wired in Task 17 once ActiveBlockID
+				// propagation is in place.
+			}
+		}
+	}
+
 	return tree, anyWorking, nil
 }
 
@@ -272,6 +335,16 @@ func detectTerminalHost(signalers []signal.Signaler, pid int) string {
 		}
 	}
 	return "unknown"
+}
+
+// pidPtrIfAlive returns a pointer to pid when the session's PID is alive,
+// nil otherwise. Used to write a NULL pid to the DB for dead processes.
+func pidPtrIfAlive(pid int, s *session.Session) *int {
+	if s != nil && !s.PidAlive {
+		return nil
+	}
+	p := pid
+	return &p
 }
 
 // refineCmuxTerminalHost takes a "cmux" detection and refines it against the

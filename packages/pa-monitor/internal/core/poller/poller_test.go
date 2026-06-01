@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
 
 // makeRateLimitFixture writes a session file + transcript with a single
@@ -290,5 +292,63 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 		if count > 1 {
 			t.Errorf("PRLookupFn called %d times for cwd=%q, want at most 1", count, cwd)
 		}
+	}
+}
+
+// mustWrite writes body to dir/name, fataling the test on any error.
+func mustWrite(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPoller_WritesToStores(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ws.Start(ctx)
+
+	dir := t.TempDir()
+	mustWrite(t, dir, "a.json", `{"pid":12345,"sessionId":"sid-a","cwd":"/p"}`)
+
+	p := &Poller{
+		SessionsDir:      dir,
+		PidAlive:         func(int) bool { return true },
+		WorkingThreshold: 30 * time.Second,
+		IdleThreshold:    10 * time.Minute,
+		Now:              time.Now,
+		Signalers:        nil,
+		WriteService:     ws,
+	}
+	if _, _, err := p.Snapshot(ctx); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := ws.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	ids, err := sqlite.NewSessionStore(db).AllSessionIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "sid-a" {
+		t.Errorf("AllSessionIDs = %v, want [sid-a]", ids)
 	}
 }
