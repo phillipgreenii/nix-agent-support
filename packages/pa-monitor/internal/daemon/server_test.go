@@ -258,6 +258,48 @@ func TestServerNudgeQueueIdempotent(t *testing.T) {
 	}
 }
 
+// TestServerNudgeQueueUsesConfiguredDefault verifies that NudgeQueue calls
+// with an empty Text fall back to the server's configured autoResumeMessage,
+// and that the literal "continue" sentinel is only used when the
+// configured default is also empty.
+func TestServerNudgeQueueUsesConfiguredDefault(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-defaulted")
+	srv.autoResumeMessage = "carry on"
+	ctx := context.Background()
+
+	if _, err := srv.NudgeQueue(ctx, &pb.NudgeQueueRequest{
+		Selector: "session:sid-defaulted",
+	}); err != nil {
+		t.Fatalf("NudgeQueue: %v", err)
+	}
+	intents := srv.state.Nudger().SnapshotStore()
+	if len(intents) != 1 {
+		t.Fatalf("expected 1 queued intent, got %d", len(intents))
+	}
+	if intents[0].Text != "carry on" {
+		t.Errorf("queued text = %q, want %q (configured autoResumeMessage)", intents[0].Text, "carry on")
+	}
+}
+
+func TestServerNudgeQueueFallsBackToContinue(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-fallback")
+	// autoResumeMessage left empty — should drop through to the "continue" sentinel.
+	ctx := context.Background()
+
+	if _, err := srv.NudgeQueue(ctx, &pb.NudgeQueueRequest{
+		Selector: "session:sid-fallback",
+	}); err != nil {
+		t.Fatalf("NudgeQueue: %v", err)
+	}
+	intents := srv.state.Nudger().SnapshotStore()
+	if len(intents) != 1 {
+		t.Fatalf("expected 1 queued intent, got %d", len(intents))
+	}
+	if intents[0].Text != "continue" {
+		t.Errorf("queued text = %q, want %q (final fallback)", intents[0].Text, "continue")
+	}
+}
+
 // TestServerSetAutoResumePersists verifies that SetAutoResume toggles the
 // watermarks flag and it is readable immediately after each call.
 func TestServerSetAutoResumePersists(t *testing.T) {
