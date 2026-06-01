@@ -197,8 +197,7 @@ type RunOptions struct {
 	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.
 	WriteService *service.WriteService
 	// ReadService, when non-nil, is wired into sharedState so snapshot()
-	// materialises the aggregate.Tree from the DB on each call rather than
-	// returning the in-memory tree pointer set by the poller.
+	// materialises the aggregate.Tree from the DB on each call.
 	ReadService *service.ReadService
 	// DB, when non-nil alongside WriteService, is used by the nudge recorder
 	// adapter to resolve session string ids to surrogate row ids before

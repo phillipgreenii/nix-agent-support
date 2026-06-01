@@ -20,8 +20,8 @@ type pendingNudgeQuerier interface {
 }
 
 // sharedState holds the daemon's current view of the world. The tick
-// loop writes; the gRPC handlers read. RWMutex bounded — Tree pointers
-// are immutable once published, so handlers can read freely.
+// loop writes; the gRPC handlers read. All read access to tree state goes
+// through snapshot() which materialises from the DB via ReadService.
 type sharedState struct {
 	mu               sync.RWMutex
 	readService      *service.ReadService
