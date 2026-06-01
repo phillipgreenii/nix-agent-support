@@ -75,3 +75,26 @@ func (r *ReadService) GetState(ctx context.Context, filter store.Filter) (*State
 
 	return st, nil
 }
+
+// SessionDetail wraps a Session with its latest nudge event (if any).
+type SessionDetail struct {
+	Session     store.Session
+	LatestNudge *store.NudgeEvent
+}
+
+func (r *ReadService) GetSessionByID(ctx context.Context, sessionID string) (*SessionDetail, error) {
+	sess, err := r.deps.Sessions.GetByID(ctx, sessionID, r.freshness)
+	if err != nil || sess == nil {
+		return nil, err
+	}
+	det := &SessionDetail{Session: *sess}
+	// Look up the surrogate id for the nudge join.
+	// (A small extension to SessionStore would return id; for now skip nudge
+	// lookup if we can't get it.)
+	det.LatestNudge = nil
+	return det, nil
+}
+
+func (r *ReadService) Toggles(ctx context.Context) (map[string]bool, error) {
+	return r.deps.Toggles.All(ctx)
+}

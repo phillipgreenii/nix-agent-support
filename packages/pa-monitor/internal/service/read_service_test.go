@@ -110,3 +110,22 @@ func TestReadService_GetState_NoActiveBlock(t *testing.T) {
 		t.Errorf("FilterActive w/ no block returned %d sessions, want 0 (active requires block)", len(st.Sessions))
 	}
 }
+
+func TestReadService_GetSessionByID(t *testing.T) {
+	db, _ := sqlite.Open(":memory:")
+	defer db.Close()
+	_ = sqlite.Migrate(context.Background(), db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ss := sqlite.NewSessionStore(db)
+	_ = ss.Upsert(ctx, store.Session{SessionID: "sid-1", Cwd: "/x", Status: "idle", LastProcessedAt: now, UpdatedAt: now, CreatedAt: now})
+
+	rs := NewReadService(ReadDeps{Sessions: ss, Blocks: sqlite.NewBlockStore(db), Weeks: sqlite.NewWeekStore(db), Toggles: sqlite.NewToggleStore(db), Nudges: sqlite.NewNudgeStore(db)})
+	got, err := rs.GetSessionByID(ctx, "sid-1")
+	if err != nil || got == nil {
+		t.Fatalf("GetSessionByID: %v %v", got, err)
+	}
+	if got.Session.SessionID != "sid-1" {
+		t.Errorf("SessionID = %q", got.Session.SessionID)
+	}
+}
