@@ -390,18 +390,27 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				}
 				n.Reconcile(tctx)
 				// Annotate sessions BEFORE dispatch so clients see what's queued.
+				// Pending-nudge sources surface as PendingNudge.Sources; nudge
+				// history (LastNudgedAt + LastNudgeSources) is sourced from the
+				// watermark store and surfaces for every session that has ever
+				// received a nudge — independent of whether anything is currently
+				// pending.
 				for _, dir := range tree.Dirs {
 					for _, sv := range dir.Sessions {
 						sid := sv.SessionID
-						if !n.PendingFor(sid) {
-							continue
+						if n.PendingFor(sid) {
+							sources := n.SourcesFor(sid)
+							strs := make([]string, 0, len(sources))
+							for _, s := range sources {
+								strs = append(strs, string(s))
+							}
+							sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
 						}
-						sources := n.SourcesFor(sid)
-						strs := make([]string, 0, len(sources))
-						for _, s := range sources {
-							strs = append(strs, string(s))
+						wmSession := wm.SessionWatermark(sid)
+						if !wmSession.LastNudgedAt.IsZero() {
+							sv.LastNudgedAt = wmSession.LastNudgedAt
+							sv.LastNudgeSources = wmSession.LastNudgeSources
 						}
-						sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
 					}
 				}
 				n.Dispatch(tctx)

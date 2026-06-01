@@ -63,8 +63,15 @@ func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	x := w.state.Nudger.Sessions[sid]
+	// Defensive copy of the sources slice so callers can't mutate the
+	// store's internal state via aliasing.
+	var sources []string
+	if len(x.LastNudgeSources) > 0 {
+		sources = append([]string(nil), x.LastNudgeSources...)
+	}
 	return nudger.SessionWatermark{
 		LastNudgedAt:        x.LastNudgedAt,
+		LastNudgeSources:    sources,
 		LastDisruptNudgeAt:  x.LastDisruptNudgeAt,
 		LastDisruptNudgeFor: x.LastDisruptNudgeFor,
 		DisruptEscalated:    x.DisruptEscalated,
@@ -110,11 +117,14 @@ func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKi
 	})
 }
 
-func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, cause *transcript.ErrorRecord, escalated bool) {
+func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, sources []nudger.Source, cause *transcript.ErrorRecord, escalated bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	wm := w.state.Nudger.Sessions[sid]
 	wm.LastNudgedAt = now
+	// Materialize sources as []string for json persistence. Sorted for
+	// stability with joinSources (and so disk diffs stay small).
+	wm.LastNudgeSources = sortedSourceStrings(sources)
 	if cause != nil {
 		wm.LastDisruptNudgeAt = now
 		wm.LastDisruptNudgeFor = cause.At
@@ -122,6 +132,24 @@ func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, cause *tran
 	wm.DisruptEscalated = escalated
 	w.state.Nudger.Sessions[sid] = wm
 	_ = WriteRuntimeState(w.path, w.state) // best-effort
+}
+
+// sortedSourceStrings returns a sorted []string copy of sources. Returns nil
+// when sources is empty so the json `omitempty` tag can elide the field.
+func sortedSourceStrings(sources []nudger.Source) []string {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make([]string, len(sources))
+	for i, s := range sources {
+		out[i] = string(s)
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j-1] > out[j]; j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	return out
 }
 
 // SetDisruptEscalated implements nudger.WatermarkView. It persists the

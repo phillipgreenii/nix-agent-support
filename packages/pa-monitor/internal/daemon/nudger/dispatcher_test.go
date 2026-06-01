@@ -51,7 +51,7 @@ func (r *fakeRecorder) RecordSent(sid string, sources []Source, errorKind string
 	defer r.mu.Unlock()
 	r.sent = append(r.sent, sid)
 }
-func (r *fakeRecorder) UpdateWatermarks(sid string, now time.Time, cause *transcript.ErrorRecord, escalated bool) {
+func (r *fakeRecorder) UpdateWatermarks(sid string, now time.Time, sources []Source, cause *transcript.ErrorRecord, escalated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.watermarkOps = append(r.watermarkOps, sid)

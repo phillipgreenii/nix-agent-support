@@ -22,6 +22,12 @@ type SessionEnrichment struct {
 	RateLimitResetsAt time.Time // non-zero: session paused; window resets at this time
 	LastError         *transcript.ErrorRecord // most recent api error from snapshot; nil if none
 	PendingNudge      *PendingNudge           // set by daemon nudger; nil when no intents pending
+
+	// Nudge history (watermarks): populated by the daemon's lifecycle
+	// annotation loop from WatermarkStore. Zero/empty when the session
+	// has never received a nudge.
+	LastNudgedAt     time.Time // wall clock of the most recent successful nudge fire
+	LastNudgeSources []string  // sources that fired together at LastNudgedAt
 }
 
 // PendingNudge surfaces which nudge sources are currently queued for this

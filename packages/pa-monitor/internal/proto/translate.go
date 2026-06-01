@@ -96,6 +96,13 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 	if !sv.RateLimitResetsAt.IsZero() {
 		out.RateLimitResetsAt = timestamppb.New(sv.RateLimitResetsAt)
 	}
+	// Nudge history: only emit on the wire when the session has actually
+	// received a nudge. LastNudgeSources rides along even when empty so the
+	// renderer can detect "fired but source unknown" gracefully.
+	if !sv.LastNudgedAt.IsZero() {
+		out.LastNudgedAt = timestamppb.New(sv.LastNudgedAt)
+		out.LastNudgeSources = sv.LastNudgeSources
+	}
 	// Workspace tags from the session's env. Daemon-side privacy guard:
 	// only forward known keys; never wire-expose arbitrary env.
 	if sv.Env != nil {

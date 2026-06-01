@@ -35,6 +35,7 @@ type PersistedIntent struct {
 // NudgerSessionWatermarks tracks per-session nudge timing to prevent double-nudge after restart.
 type NudgerSessionWatermarks struct {
 	LastNudgedAt        time.Time `json:"last_nudged_at,omitempty"`
+	LastNudgeSources    []string  `json:"last_nudge_sources,omitempty"`
 	LastDisruptNudgeAt  time.Time `json:"last_disrupt_nudge_at,omitempty"`
 	LastDisruptNudgeFor time.Time `json:"last_disrupt_nudge_for,omitempty"`
 	DisruptEscalated    bool      `json:"disrupt_escalated,omitempty"`

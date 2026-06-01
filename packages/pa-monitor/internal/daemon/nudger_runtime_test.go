@@ -53,7 +53,7 @@ func TestWatermarkStoreUpdateAndRead(t *testing.T) {
 	}
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	cause := &transcript.ErrorRecord{Kind: transcript.ErrUnknown, At: now.Add(-1 * time.Minute)}
-	w.UpdateWatermarks("sid-1", now, cause, false)
+	w.UpdateWatermarks("sid-1", now, []nudger.Source{nudger.SourceDisrupted}, cause, false)
 	w.SetWindowResetFiredFor(now.Add(-5 * time.Minute))
 
 	wm := w.SessionWatermark("sid-1")
@@ -84,7 +84,7 @@ func TestWatermarkStorePersistsToDisk(t *testing.T) {
 	path := t.TempDir() + "/runtime.json"
 	w, _ := NewWatermarkStore(path, nil)
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
-	w.UpdateWatermarks("sid-1", now, nil, false)
+	w.UpdateWatermarks("sid-1", now, nil, nil, false)
 	// Reload from disk; watermark must survive.
 	w2, err := NewWatermarkStore(path, nil)
 	if err != nil {
@@ -94,4 +94,39 @@ func TestWatermarkStorePersistsToDisk(t *testing.T) {
 	if !wm.LastNudgedAt.Equal(now) {
 		t.Errorf("after reload: LastNudgedAt = %v, want %v", wm.LastNudgedAt, now)
 	}
+}
+
+// TestWatermarkStoreLastNudgeSourcesRoundTrip verifies that the sources passed
+// to UpdateWatermarks survive a disk round-trip in sorted order so the details
+// panel renders a stable "via: [...]" line across daemon restarts.
+func TestWatermarkStoreLastNudgeSourcesRoundTrip(t *testing.T) {
+	path := t.TempDir() + "/runtime.json"
+	w, _ := NewWatermarkStore(path, nil)
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	// Order intentionally reversed so we exercise the sort.
+	in := []nudger.Source{nudger.SourceManual, nudger.SourceDisrupted}
+	w.UpdateWatermarks("sid-1", now, in, nil, false)
+
+	wm := w.SessionWatermark("sid-1")
+	if got, want := wm.LastNudgeSources, []string{"disrupted", "manual"}; !equalStrSlice(got, want) {
+		t.Errorf("LastNudgeSources = %v, want %v", got, want)
+	}
+	// Reload; should still be sorted.
+	w2, _ := NewWatermarkStore(path, nil)
+	wm2 := w2.SessionWatermark("sid-1")
+	if got, want := wm2.LastNudgeSources, []string{"disrupted", "manual"}; !equalStrSlice(got, want) {
+		t.Errorf("after reload: LastNudgeSources = %v, want %v", got, want)
+	}
+}
+
+func equalStrSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

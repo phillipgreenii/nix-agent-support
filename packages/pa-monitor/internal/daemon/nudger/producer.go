@@ -43,6 +43,7 @@ type WatermarkView interface {
 
 type SessionWatermark struct {
 	LastNudgedAt        time.Time
+	LastNudgeSources    []string
 	LastDisruptNudgeAt  time.Time
 	LastDisruptNudgeFor time.Time
 	DisruptEscalated    bool

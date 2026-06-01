@@ -102,6 +102,8 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	out.StartedAt = timeFromTS(sv.GetStartedAt())
 	out.TranscriptMTime = timeFromTS(sv.GetTranscriptMtime())
 	out.RateLimitResetsAt = timeFromTS(sv.GetRateLimitResetsAt())
+	out.LastNudgedAt = timeFromTS(sv.GetLastNudgedAt())
+	out.LastNudgeSources = sv.GetLastNudgeSources()
 	out.Status = statusFromString(sv.GetStatus())
 	// Reconstruct env subset so clients can filter by workspace.
 	env := map[string]string{}

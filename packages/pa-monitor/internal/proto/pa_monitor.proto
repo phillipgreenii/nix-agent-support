@@ -150,6 +150,12 @@ message SessionView {
   string gc_rig = 25;
   string gc_agent = 26;
   string workspace_env = 27; // value of $WORKSPACE
+
+  // nudge history (watermarks)
+  // Set when the daemon has fired at least one nudge for this session.
+  // Both fields are zero/empty when no nudge has ever been delivered.
+  google.protobuf.Timestamp last_nudged_at = 28;     // wall clock of most recent successful fire
+  repeated string last_nudge_sources = 29;           // sources that fired together at last_nudged_at
 }
 
 message Block {

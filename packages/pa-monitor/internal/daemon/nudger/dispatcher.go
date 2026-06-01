@@ -20,7 +20,12 @@ type Signaler interface {
 type Recorder interface {
 	RecordSuppressed(sid string, sources []Source, cause string)
 	RecordSent(sid string, sources []Source, errorKind string, escalated bool)
-	UpdateWatermarks(sid string, now time.Time, cause *transcript.ErrorRecord, escalated bool)
+	// UpdateWatermarks records the fact that sources fired for sid at now.
+	// sources is the slice of every Source delivered in the single Signaler.Send
+	// (multiple intents can coalesce per session). The recorder is responsible
+	// for persisting LastNudgedAt + LastNudgeSources alongside the disrupt
+	// watermarks driven by cause.
+	UpdateWatermarks(sid string, now time.Time, sources []Source, cause *transcript.ErrorRecord, escalated bool)
 	// AdvanceWindowResetFiredFor records that the window-reset nudge for
 	// WindowResetsAt=at fired this tick. Called by the dispatcher exactly
 	// once per tick when any session with SourceWindowReset is dispatched.
@@ -97,7 +102,7 @@ func (d *Dispatcher) Dispatch(ctx TickContext, store *PendingStore) {
 		wm := ctx.Watermarks.SessionWatermark(sid)
 		escalated := wm.DisruptEscalated
 		d.Recorder.RecordSent(sid, sources, kind, escalated)
-		d.Recorder.UpdateWatermarks(sid, ctx.Now, cause, escalated)
+		d.Recorder.UpdateWatermarks(sid, ctx.Now, sources, cause, escalated)
 		store.RemoveKeys(observedKeys)
 		for _, in := range group {
 			if in.Key.Source == SourceWindowReset {
