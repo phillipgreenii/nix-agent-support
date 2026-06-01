@@ -196,6 +196,10 @@ type RunOptions struct {
 	// ccusage tick. The returned surrogate ids are assigned to the poller's
 	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.
 	WriteService *service.WriteService
+	// ReadService, when non-nil, is wired into sharedState so snapshot()
+	// materialises the aggregate.Tree from the DB on each call rather than
+	// returning the in-memory tree pointer set by the poller.
+	ReadService *service.ReadService
 	// DB, when non-nil alongside WriteService, is used by the nudge recorder
 	// adapter to resolve session string ids to surrogate row ids before
 	// persisting nudge events.
@@ -225,6 +229,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	state.setCaffeinateOn(opts.InitialCaffeinateOn)
 	if opts.Caffeinate != nil {
 		opts.Caffeinate.SetToggle(opts.InitialCaffeinateOn)
+	}
+	if opts.ReadService != nil {
+		state.setReadService(opts.ReadService)
 	}
 
 	version := opts.Version

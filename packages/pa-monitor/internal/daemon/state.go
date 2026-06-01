@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
 // sharedState holds the daemon's current view of the world. The tick
@@ -14,6 +17,7 @@ import (
 type sharedState struct {
 	mu               sync.RWMutex
 	tree             *aggregate.Tree
+	readService      *service.ReadService
 	caffeinateOn     bool
 	caffeinateActive bool // distinct from "on": on=user wants caffeinate, active=process running
 	caffeinateCause  string
@@ -33,10 +37,30 @@ func (s *sharedState) setTree(t *aggregate.Tree) {
 	s.mu.Unlock()
 }
 
+func (s *sharedState) setReadService(rs *service.ReadService) {
+	s.mu.Lock()
+	s.readService = rs
+	s.mu.Unlock()
+}
+
+// snapshot returns the current aggregate.Tree. When a ReadService is wired
+// (production path), it materialises the tree from the DB on each call.
+// When no ReadService is set (tests that inject via setTree), it falls back
+// to the in-memory tree pointer so existing tests continue to work.
 func (s *sharedState) snapshot() *aggregate.Tree {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.tree
+	rs := s.readService
+	fallback := s.tree
+	s.mu.RUnlock()
+
+	if rs != nil {
+		st, err := rs.GetState(context.Background(), store.FilterAll)
+		if err != nil || st == nil {
+			return nil
+		}
+		return convertStateToAggregateTree(st)
+	}
+	return fallback
 }
 
 func (s *sharedState) setCaffeinateOn(on bool) {
