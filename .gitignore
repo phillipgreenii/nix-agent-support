@@ -6,6 +6,7 @@ result
 # compiled Go binary checked in by accident during package migration; rebuilds
 # dirty the working tree on every `go build` in the package dir
 /packages/pa-monitor/pa-monitor
+/packages/pa-monitor-decorator-gc/pa-monitor-decorator-gc
 
 # Beads / Dolt files (added by bd init)
 .dolt/

@@ -91,6 +91,9 @@
           pa-monitor = final.callPackage ./packages/pa-monitor {
             version = phillipgreenii-nix-base.lib.mkVersion self;
           };
+          pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
+            version = phillipgreenii-nix-base.lib.mkVersion self;
+          };
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
           pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };
@@ -502,6 +505,7 @@
             inherit (pkgs)
               claude-extended-tool-approver
               pa-monitor
+              pa-monitor-decorator-gc
               pgii-pack-test-fixture
               pgii-pack-pr-support
               pgii-pack-dolt-hacks
