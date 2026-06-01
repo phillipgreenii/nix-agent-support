@@ -137,6 +137,9 @@ func blockToProto(b *ccusage.Block, capUSD float64) *Block {
 	if capUSD > 0 {
 		pb.WindowPct = b.CostUSD / capUSD
 	}
+	if b.CapHitAt != nil {
+		pb.CapHitAt = timestamppb.New(*b.CapHitAt)
+	}
 	return pb
 }
 
@@ -155,6 +158,9 @@ func weekToProto(w *ccusage.WeeklyEntry, capUSD float64) *Week {
 	}
 	if capUSD > 0 {
 		pw.WindowPct = w.TotalCost / capUSD
+	}
+	if w.CapHitAt != nil {
+		pw.CapHitAt = timestamppb.New(*w.CapHitAt)
 	}
 	return pw
 }

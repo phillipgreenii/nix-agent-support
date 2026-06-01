@@ -173,6 +173,7 @@ func storeBlockToCCUsageBlock(b *store.Block) *ccusage.Block {
 		EndTime:   b.EndedAt,
 		IsActive:  true, // GetActive only returns the active block
 		CostUSD:   b.TotalCostUSD,
+		CapHitAt:  b.CapHitAt,
 		// BurnRate and Projection are not persisted; zero-value is safe
 		// for proto serialisation and nil-checks.
 	}
@@ -186,6 +187,7 @@ func storeWeekToCCUsageWeek(w *store.Week) *ccusage.WeeklyEntry {
 	return &ccusage.WeeklyEntry{
 		Period:    w.WeekID, // "YYYY-MM-DD" Monday anchor stored as WeekID
 		TotalCost: w.TotalCostUSD,
+		CapHitAt:  w.CapHitAt,
 	}
 }
 

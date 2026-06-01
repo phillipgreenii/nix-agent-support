@@ -20,6 +20,7 @@ type Block struct {
 	CostUSD    float64    `json:"costUSD"`
 	BurnRate   BurnRate   `json:"burnRate"`
 	Projection Projection `json:"projection"`
+	CapHitAt   *time.Time `json:"capHitAt,omitempty"`
 }
 
 type BlocksResponse struct {
@@ -29,9 +30,10 @@ type BlocksResponse struct {
 // WeeklyEntry mirrors one row from `ccusage weekly --json --offline`.
 // Period is the Monday of the week in YYYY-MM-DD form, local time.
 type WeeklyEntry struct {
-	Period    string  `json:"period"`
-	TotalCost float64 `json:"totalCost"`
-	Agent     string  `json:"agent"`
+	Period    string     `json:"period"`
+	TotalCost float64    `json:"totalCost"`
+	Agent     string     `json:"agent"`
+	CapHitAt  *time.Time `json:"capHitAt,omitempty"`
 }
 
 type WeeklyResponse struct {

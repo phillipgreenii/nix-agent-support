@@ -169,6 +169,7 @@ message Block {
   double projection_total_cost = 8;
   uint32 projection_remaining_minutes = 9;
   double window_pct = 10; // cost_usd / plan_cap_usd
+  google.protobuf.Timestamp cap_hit_at = 11; // when plan cap was first hit; unset if not hit
 }
 
 message Week {
@@ -176,6 +177,7 @@ message Week {
   string period = 2;                        // YYYY-MM-DD (Monday)
   double cost_usd = 3;
   double window_pct = 4; // cost_usd / week_cap_usd
+  google.protobuf.Timestamp cap_hit_at = 5; // when week cap was first hit; unset if not hit
 }
 
 // --- Caffeinate --- //

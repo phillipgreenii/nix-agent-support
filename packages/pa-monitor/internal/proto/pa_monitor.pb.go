@@ -818,6 +818,7 @@ type Block struct {
 	ProjectionTotalCost        float64                `protobuf:"fixed64,8,opt,name=projection_total_cost,json=projectionTotalCost,proto3" json:"projection_total_cost,omitempty"`
 	ProjectionRemainingMinutes uint32                 `protobuf:"varint,9,opt,name=projection_remaining_minutes,json=projectionRemainingMinutes,proto3" json:"projection_remaining_minutes,omitempty"`
 	WindowPct                  float64                `protobuf:"fixed64,10,opt,name=window_pct,json=windowPct,proto3" json:"window_pct,omitempty"` // cost_usd / plan_cap_usd
+	CapHitAt                   *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=cap_hit_at,json=capHitAt,proto3" json:"cap_hit_at,omitempty"`    // when plan cap was first hit; unset if not hit
 	unknownFields              protoimpl.UnknownFields
 	sizeCache                  protoimpl.SizeCache
 }
@@ -922,12 +923,20 @@ func (x *Block) GetWindowPct() float64 {
 	return 0
 }
 
+func (x *Block) GetCapHitAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CapHitAt
+	}
+	return nil
+}
+
 type Week struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`         // YYYY-Www
 	Period        string                 `protobuf:"bytes,2,opt,name=period,proto3" json:"period,omitempty"` // YYYY-MM-DD (Monday)
 	CostUsd       float64                `protobuf:"fixed64,3,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
 	WindowPct     float64                `protobuf:"fixed64,4,opt,name=window_pct,json=windowPct,proto3" json:"window_pct,omitempty"` // cost_usd / week_cap_usd
+	CapHitAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=cap_hit_at,json=capHitAt,proto3" json:"cap_hit_at,omitempty"`    // when week cap was first hit; unset if not hit
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -988,6 +997,13 @@ func (x *Week) GetWindowPct() float64 {
 		return x.WindowPct
 	}
 	return 0
+}
+
+func (x *Week) GetCapHitAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CapHitAt
+	}
+	return nil
 }
 
 type CaffeinateRequest struct {
@@ -2058,7 +2074,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\bgc_agent\x18\x1a \x01(\tR\agcAgent\x12#\n" +
 	"\rworkspace_env\x18\x1b \x01(\tR\fworkspaceEnv\x12@\n" +
 	"\x0elast_nudged_at\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\flastNudgedAt\x12,\n" +
-	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\"\xa6\x03\n" +
+	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\"\xe0\x03\n" +
 	"\x05Block\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\n" +
@@ -2072,13 +2088,17 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x1cprojection_remaining_minutes\x18\t \x01(\rR\x1aprojectionRemainingMinutes\x12\x1d\n" +
 	"\n" +
 	"window_pct\x18\n" +
-	" \x01(\x01R\twindowPct\"h\n" +
+	" \x01(\x01R\twindowPct\x128\n" +
+	"\n" +
+	"cap_hit_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\bcapHitAt\"\xa2\x01\n" +
 	"\x04Week\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06period\x18\x02 \x01(\tR\x06period\x12\x19\n" +
 	"\bcost_usd\x18\x03 \x01(\x01R\acostUsd\x12\x1d\n" +
 	"\n" +
-	"window_pct\x18\x04 \x01(\x01R\twindowPct\"+\n" +
+	"window_pct\x18\x04 \x01(\x01R\twindowPct\x128\n" +
+	"\n" +
+	"cap_hit_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bcapHitAt\"+\n" +
 	"\x11CaffeinateRequest\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\"t\n" +
 	"\x12CaffeinateResponse\x12\x16\n" +
@@ -2214,40 +2234,42 @@ var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
 	29, // 11: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
 	29, // 12: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
 	29, // 13: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	29, // 14: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
-	29, // 15: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
-	12, // 16: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
-	7,  // 17: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
-	21, // 18: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
-	22, // 19: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
-	5,  // 20: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
-	0,  // 21: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
-	1,  // 22: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
-	2,  // 23: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
-	10, // 24: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
-	23, // 25: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
-	25, // 26: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
-	27, // 27: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	13, // 28: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
-	15, // 29: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
-	17, // 30: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
-	19, // 31: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
-	4,  // 32: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	4,  // 33: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
-	3,  // 34: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	11, // 35: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	24, // 36: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	26, // 37: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	28, // 38: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	14, // 39: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
-	16, // 40: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
-	18, // 41: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
-	20, // 42: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
-	32, // [32:43] is the sub-list for method output_type
-	21, // [21:32] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	29, // 14: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
+	29, // 15: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
+	29, // 16: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	29, // 17: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	12, // 18: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
+	7,  // 19: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
+	21, // 20: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
+	22, // 21: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
+	5,  // 22: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
+	0,  // 23: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
+	1,  // 24: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
+	2,  // 25: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
+	10, // 26: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
+	23, // 27: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
+	25, // 28: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
+	27, // 29: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
+	13, // 30: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	15, // 31: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	17, // 32: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	19, // 33: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
+	4,  // 34: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	4,  // 35: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
+	3,  // 36: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	11, // 37: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	24, // 38: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	26, // 39: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	28, // 40: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	14, // 41: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	16, // 42: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	18, // 43: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	20, // 44: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
+	34, // [34:45] is the sub-list for method output_type
+	23, // [23:34] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_pa_monitor_proto_init() }

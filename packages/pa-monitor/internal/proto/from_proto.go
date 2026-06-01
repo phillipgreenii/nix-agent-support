@@ -132,7 +132,7 @@ func blockFromProto(b *Block) *ccusage.Block {
 	if b == nil {
 		return nil
 	}
-	return &ccusage.Block{
+	out := &ccusage.Block{
 		StartTime: timeFromTS(b.GetStartTime()),
 		EndTime:   timeFromTS(b.GetEndTime()),
 		IsActive:  b.GetIsActive(),
@@ -146,16 +146,26 @@ func blockFromProto(b *Block) *ccusage.Block {
 			RemainingMinutes: int(b.GetProjectionRemainingMinutes()),
 		},
 	}
+	if ts := b.GetCapHitAt(); ts != nil {
+		t := timeFromTS(ts)
+		out.CapHitAt = &t
+	}
+	return out
 }
 
 func weekFromProto(w *Week) *ccusage.WeeklyEntry {
 	if w == nil {
 		return nil
 	}
-	return &ccusage.WeeklyEntry{
+	out := &ccusage.WeeklyEntry{
 		Period:    w.GetPeriod(),
 		TotalCost: w.GetCostUsd(),
 	}
+	if ts := w.GetCapHitAt(); ts != nil {
+		t := timeFromTS(ts)
+		out.CapHitAt = &t
+	}
+	return out
 }
 
 func statusFromString(s string) session.Status {
