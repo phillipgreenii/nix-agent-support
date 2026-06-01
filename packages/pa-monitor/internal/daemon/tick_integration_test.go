@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,19 +19,17 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
 
-// fakePoller implements the small subset of *poller.Poller that RunWith
-// uses on the tick path: nothing — RunWith calls Snapshot. We synthesise
-// a Tree directly without going through the real poller.
+// TestRunWith_IntegratesPollerTrackersAndState verifies that:
+//  1. GetState reflects synthesised sessions persisted via WriteService.
+//  2. IsAnyBusy returns true when any directory has working sessions.
+//  3. block.Tracker advances to the synthesised block id.
 //
-// This test asserts that:
-//  1. The shared state is updated after a tick.
-//  2. GetState reflects the synthesised state.
-//  3. IsAnyBusy returns true when any directory has working sessions.
-//  4. block.Tracker.OnLimitHit is invoked when the synthesised block
-//     exceeds the cap.
+// The stubPoller writes sessions directly into the DB (via WriteService)
+// on each Snapshot call so the DB-only snapshot() path can read them back.
 func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	dir := shortTempDir(t)
 	paths := Paths{
@@ -39,7 +38,40 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 		Socket:  filepath.Join(dir, "daemon.sock"),
 	}
 
-	// Synthesised state: 2 working sessions, 1 idle.
+	// --- in-memory SQLite + WriteService + ReadService ---
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	rs := service.NewReadService(service.ReadDeps{
+		Sessions: sqlite.NewSessionStore(db),
+		Blocks:   sqlite.NewBlockStore(db),
+		Weeks:    sqlite.NewWeekStore(db),
+		Toggles:  sqlite.NewToggleStore(db),
+		Nudges:   sqlite.NewNudgeStore(db),
+	})
+
+	// Synthesised state: 2 working sessions, 1 idle, one active block.
+	activeBlock := &ccusage.Block{
+		StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC),
+		IsActive:  true,
+		CostUSD:   100.0, // above cap
+	}
 	tree := &aggregate.Tree{
 		Dirs: []*aggregate.Directory{
 			{
@@ -47,30 +79,23 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 				WorkingN: 2,
 				IdleN:    1,
 				Sessions: []*aggregate.SessionView{
-					{Session: &session.Session{SessionID: "a", Status: session.Working}},
-					{Session: &session.Session{SessionID: "b", Status: session.Working}},
-					{Session: &session.Session{SessionID: "c", Status: session.Idle}},
+					{Session: &session.Session{SessionID: "a", Status: session.Working, Cwd: "/p1"}},
+					{Session: &session.Session{SessionID: "b", Status: session.Working, Cwd: "/p1"}},
+					{Session: &session.Session{SessionID: "c", Status: session.Idle, Cwd: "/p1"}},
 				},
 			},
 		},
-		ActiveBlock: &ccusage.Block{
-			StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC),
-			IsActive:  true,
-			CostUSD:   100.0, // above cap
-		},
+		ActiveBlock: activeBlock,
 	}
 
-	// Use a Poller-like value with the field signature RunWith expects.
-	// RunWith calls opts.Poller.Snapshot via the concrete *poller.Poller,
-	// so we wrap via a function adapter type below.
 	bt := block.NewTracker(50.0) // cap below cost → should fire OnLimitHit
 	wt := week.NewTracker(0)     // disabled
 
 	hitCount := atomic.Int32{}
-	// OnLimitHit will be overridden by RunWith; we wrap to count via emitter? No — RunWith
-	// only assigns OnLimitHit when Emitter is non-nil. To observe, set our own callback
-	// before RunWith starts. The RunWith code first assigns (overwriting). So we test the
-	// callback by inspecting tracker state after the tick.
+
+	// tickReady is closed once the first full tick (write + sync) has landed.
+	tickReady := make(chan struct{})
+	var tickReadyOnce sync.Once
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -80,9 +105,30 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 			Tick:  50 * time.Millisecond,
 			Poller: &stubPoller{
 				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					// Write sessions into the DB so the DB-path snapshot() can
+					// read them back. This mirrors what the real *poller.Poller
+					// does via its embedded WriteService.
+					now := time.Now()
+					pid := 12345
+					statuses := map[string]string{"a": "working", "b": "working", "c": "idle"}
+					for sid, status := range statuses {
+						_ = ws.UpsertSession(ctx, store.Session{
+							SessionID:       sid,
+							PID:             &pid,
+							Cwd:             "/p1",
+							Status:          status,
+							LastProcessedAt: now,
+							UpdatedAt:       now,
+							CreatedAt:       now,
+						})
+					}
+					_ = ws.Sync(ctx)
+					tickReadyOnce.Do(func() { close(tickReady) })
 					return tree, true, nil
 				},
 			},
+			WriteService: ws,
+			ReadService:  rs,
 			BlockTracker: bt,
 			WeekTracker:  wt,
 		})
@@ -90,8 +136,12 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 
 	waitForFile(t, paths.Socket)
 
-	// Give the tick loop time to fire at least twice.
-	time.Sleep(150 * time.Millisecond)
+	// Wait for the first tick to land in the DB.
+	select {
+	case <-tickReady:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for first tick")
+	}
 
 	// Verify GetState reflects synthesised dirs.
 	conn := dialUnix(t, paths.Socket)
@@ -119,7 +169,7 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 		t.Errorf("block.id = %q, want 2026-05-20T14Z", bt.ID())
 	}
 
-	_ = hitCount
+	_ = hitCount.Load()
 
 	cancel()
 	select {

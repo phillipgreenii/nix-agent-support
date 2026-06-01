@@ -10,10 +10,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
@@ -182,11 +181,60 @@ func (noopSignaler) Send(_ int, _ string) error { return nil }
 var _ signal.Signaler = noopSignaler{}
 
 // newTestServerWithNudger builds a server backed by a real Nudger +
-// WatermarkStore and a tree containing one Idle session with ID sid.
+// WatermarkStore and an in-memory SQLite DB containing one Idle session
+// with ID sid. The ReadService is wired so snapshot() reads from the DB.
 func newTestServerWithNudger(t *testing.T, sid string) *server {
 	t.Helper()
 	dir := t.TempDir()
 	runtimePath := filepath.Join(dir, "runtime.json")
+
+	// --- in-memory SQLite + WriteService + ReadService ---
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	deps := service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	}
+	ws := service.NewWriteService(deps)
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	// Seed one Idle session so expandStringSelector can match.
+	pid := 12345
+	now := time.Now()
+	if err := ws.UpsertSession(context.Background(), store.Session{
+		SessionID:       sid,
+		PID:             &pid,
+		Cwd:             "/work",
+		Status:          "idle",
+		LastProcessedAt: now,
+		UpdatedAt:       now,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
+	}
+	// Sync so the row is visible before any snapshot() call.
+	if err := ws.Sync(context.Background()); err != nil {
+		t.Fatalf("ws.Sync: %v", err)
+	}
+
+	rs := service.NewReadService(service.ReadDeps{
+		Sessions: sqlite.NewSessionStore(db),
+		Blocks:   sqlite.NewBlockStore(db),
+		Weeks:    sqlite.NewWeekStore(db),
+		Toggles:  sqlite.NewToggleStore(db),
+		Nudges:   sqlite.NewNudgeStore(db),
+	})
 
 	wm, err := NewWatermarkStore(runtimePath, nil)
 	if err != nil {
@@ -199,26 +247,7 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	state.nudger = n
 	state.watermarks = wm
 	state.mu.Unlock()
-
-	// Publish a tree with one idle session so expandStringSelector can match.
-	tree := &aggregate.Tree{
-		Dirs: []*aggregate.Directory{
-			{
-				Path:  "/work",
-				IdleN: 1,
-				Sessions: []*aggregate.SessionView{
-					{
-						Session: &session.Session{
-							SessionID: sid,
-							PID:       12345,
-							Status:    session.Idle,
-						},
-					},
-				},
-			},
-		},
-	}
-	state.setTree(tree)
+	state.setReadService(rs)
 
 	return newServer(state)
 }
@@ -556,5 +585,3 @@ func TestServerSetAutoResumePersistsToToggleStore(t *testing.T) {
 	}
 }
 
-// Ensure time is imported (used in newTestServerWithNudger via aggregate.Tree).
-var _ = time.Now

@@ -24,7 +24,6 @@ type pendingNudgeQuerier interface {
 // are immutable once published, so handlers can read freely.
 type sharedState struct {
 	mu               sync.RWMutex
-	tree             *aggregate.Tree
 	readService      *service.ReadService
 	caffeinateOn     bool
 	caffeinateActive bool // distinct from "on": on=user wants caffeinate, active=process running
@@ -38,12 +37,6 @@ type sharedState struct {
 
 func newSharedState() *sharedState {
 	return &sharedState{}
-}
-
-func (s *sharedState) setTree(t *aggregate.Tree) {
-	s.mu.Lock()
-	s.tree = t
-	s.mu.Unlock()
 }
 
 func (s *sharedState) setReadService(rs *service.ReadService) {
@@ -60,48 +53,43 @@ func (s *sharedState) setPendingNudgeQueue(q pendingNudgeQuerier) {
 	s.mu.Unlock()
 }
 
-// snapshot returns the current aggregate.Tree. When a ReadService is wired
-// (production path), it materialises the tree from the DB on each call.
-// When no ReadService is set (tests that inject via setTree), it falls back
-// to the in-memory tree pointer so existing tests continue to work.
+// snapshot materialises the current aggregate.Tree from the DB via ReadService.
+// Returns nil when ReadService is not yet wired (daemon not fully started).
 func (s *sharedState) snapshot() *aggregate.Tree {
 	s.mu.RLock()
 	rs := s.readService
-	fallback := s.tree
+	pq := s.nudgerForPending
 	s.mu.RUnlock()
 
-	if rs != nil {
-		st, err := rs.GetState(context.Background(), store.FilterAll)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "pa-monitor: snapshot: DB read error: %v\n", err)
-			return nil
-		}
-		if st == nil {
-			return nil
-		}
-		tree := convertStateToAggregateTree(st)
-		// Annotate sessions with live pending-nudge state from the in-memory
-		// nudger. The DB does not persist pending intents — they live only in
-		// the nudger's PendingStore.
-		s.mu.RLock()
-		pnq := s.nudgerForPending
-		s.mu.RUnlock()
-		if pnq != nil && tree != nil {
-			for _, sv := range tree.Sessions() {
-				sources := pnq.PendingSourcesForSession(sv.SessionID)
-				if len(sources) == 0 {
-					continue
-				}
-				strs := make([]string, 0, len(sources))
-				for _, src := range sources {
-					strs = append(strs, string(src))
-				}
-				sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
-			}
-		}
-		return tree
+	if rs == nil {
+		return nil
 	}
-	return fallback
+	st, err := rs.GetState(context.Background(), store.FilterAll)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pa-monitor: snapshot: DB read error: %v\n", err)
+		return nil
+	}
+	if st == nil {
+		return nil
+	}
+	tree := convertStateToAggregateTree(st)
+	// Annotate sessions with live pending-nudge state from the in-memory
+	// nudger. The DB does not persist pending intents — they live only in
+	// the nudger's PendingStore.
+	if pq != nil && tree != nil {
+		for _, sv := range tree.Sessions() {
+			sources := pq.PendingSourcesForSession(sv.SessionID)
+			if len(sources) == 0 {
+				continue
+			}
+			strs := make([]string, 0, len(sources))
+			for _, src := range sources {
+				strs = append(strs, string(src))
+			}
+			sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
+		}
+	}
+	return tree
 }
 
 func (s *sharedState) setCaffeinateOn(on bool) {

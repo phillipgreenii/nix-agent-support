@@ -501,7 +501,6 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.TreeObserver != nil {
 				opts.TreeObserver(tree)
 			}
-			state.setTree(tree)
 		}
 	}
 }
