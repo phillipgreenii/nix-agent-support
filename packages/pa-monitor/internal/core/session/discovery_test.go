@@ -14,20 +14,45 @@ func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
-func TestDiscoverReadsFilesAndFiltersDeadPids(t *testing.T) {
-	d := &Discoverer{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		PidAlive:    fakePidAlive(map[int]bool{12345: true, 67890: false}),
-	}
-	got, err := d.Discover()
-	if err != nil {
+func mustWrite(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(dir+"/"+name, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("want 1 live session, got %d", len(got))
+}
+
+func TestDiscoverReadsFilesAndKeepsDeadPids(t *testing.T) {
+	dir := t.TempDir()
+	// Write three session files. PIDs: 100 (alive), 200 (dead), 300 (alive).
+	mustWrite(t, dir, "a.json", `{"pid":100,"sessionId":"a","cwd":"/p"}`)
+	mustWrite(t, dir, "b.json", `{"pid":200,"sessionId":"b","cwd":"/p"}`)
+	mustWrite(t, dir, "c.json", `{"pid":300,"sessionId":"c","cwd":"/p"}`)
+
+	d := Discoverer{
+		SessionsDir: dir,
+		PidAlive: func(pid int) bool {
+			return pid == 100 || pid == 300
+		},
 	}
-	if got[0].PID != 12345 || got[0].SessionID != "abc-def" || got[0].Name != "demo" {
-		t.Errorf("unexpected session: %+v", got[0])
+	out, err := d.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("got %d sessions, want 3 (no dead-PID filter)", len(out))
+	}
+	byID := map[string]*Session{}
+	for _, s := range out {
+		byID[s.SessionID] = s
+	}
+	if !byID["a"].PidAlive {
+		t.Errorf("session a: PidAlive false, want true")
+	}
+	if byID["b"].PidAlive {
+		t.Errorf("session b: PidAlive true, want false")
+	}
+	if !byID["c"].PidAlive {
+		t.Errorf("session c: PidAlive false, want true")
 	}
 }
 

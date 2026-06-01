@@ -228,7 +228,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 	for _, s := range sessions {
-		if s.Status == session.Dormant && p.PidAlive != nil && p.PidAlive(s.PID) && pidActiveSID[s.PID] == s.SessionID {
+		if s.Status == session.Dormant && s.PidAlive && pidActiveSID[s.PID] == s.SessionID {
 			s.Status = session.Idle
 		}
 	}

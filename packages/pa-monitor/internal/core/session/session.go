@@ -44,6 +44,10 @@ type Session struct {
 	// nil/empty maps. Static for the lifetime of a session — read once,
 	// reused.
 	Env map[string]string
+
+	// PidAlive is set by the Discoverer based on its PidAlive function.
+	// Used by the poller to decide whether to write a non-NULL pid to the DB.
+	PidAlive bool
 }
 
 // Label returns the display label. If forceID is true, returns the full SessionID.

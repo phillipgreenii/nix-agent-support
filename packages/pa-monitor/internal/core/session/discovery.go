@@ -61,8 +61,9 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		if err := json.Unmarshal(body, &r); err != nil {
 			continue
 		}
-		if d.PidAlive != nil && !d.PidAlive(r.PID) {
-			continue
+		alive := true
+		if d.PidAlive != nil {
+			alive = d.PidAlive(r.PID)
 		}
 		readEnv := d.ReadEnv
 		if readEnv == nil {
@@ -79,6 +80,7 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 			Name:       r.Name,
 			StartedAt:  time.UnixMilli(r.StartedAt),
 			Env:        env,
+			PidAlive:   alive,
 		})
 	}
 	return out, nil
