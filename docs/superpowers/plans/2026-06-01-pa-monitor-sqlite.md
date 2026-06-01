@@ -1228,10 +1228,10 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 func (s *SessionStore) GetByID(ctx context.Context, sessionID string, fresh store.FreshnessWindow) (*store.Session, error) {
 	cutoff := time.Now().UTC().Add(-fresh.Sessions)
 	row := s.db.QueryRowContext(ctx, sessionSelectColumns+`
-		FROM sessions
-		WHERE session_id = ?
-		  AND deleted_at IS NULL
-		  AND last_processed_at > ?
+		FROM sessions s
+		WHERE s.session_id = ?
+		  AND s.deleted_at IS NULL
+		  AND s.last_processed_at > ?
 	`, sessionID, formatTime(cutoff))
 	sess, err := scanSession(row)
 	if err == sql.ErrNoRows {
