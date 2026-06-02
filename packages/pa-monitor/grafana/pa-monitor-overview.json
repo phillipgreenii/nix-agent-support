@@ -1,10 +1,7 @@
 {
   "title": "pa-monitor overview",
   "uid": "pa-monitor-overview",
-  "tags": [
-    "pa-monitor",
-    "claude-agents"
-  ],
+  "tags": ["pa-monitor", "claude-agents"],
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "10s",
@@ -905,6 +902,114 @@
             }
           }
         }
+      }
+    },
+    {
+      "id": 30,
+      "title": "Caffeinate & context limits",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 22,
+      "title": "Caffeinate rounds (by cause)",
+      "type": "timeseries",
+      "description": "Caffeinate activations (pa_monitor_caffeinate_rounds_total) split by cause — a round is one off→on transition of the caffeinate manager (manual toggle vs agents_active).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (cause) (increase(pa_monitor_caffeinate_rounds_total[5m]))",
+          "legendFormat": "{{cause}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Context-limit hits (by model, 1h)",
+      "type": "timeseries",
+      "description": "Sessions that hit the model context window — Claude Code 'prompt is too long' (invalid_request) errors, counted via pa_monitor_session_context_limit_hits_total and split by model.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 65,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (increase(pa_monitor_session_context_limit_hits_total[1h]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 31,
+      "title": "Event log",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 25,
+      "title": "pa-monitor events (OTel log stream)",
+      "type": "logs",
+      "description": "Structured OTel log events emitted by the daemon (block/week limit hits, caffeinate start/grace, nudge queued/sent/suppressed, api_error.observed, session.context.limit_hit). Requires a Loki datasource (uid 'loki') provisioned by the consuming observability flake; the OTLP log pipeline must land records under service_name=\"pa-monitor\". Adjust the selector if your Loki label set differs.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"pa-monitor\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
       }
     }
   ]
