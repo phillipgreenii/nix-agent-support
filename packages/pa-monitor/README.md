@@ -67,9 +67,9 @@ pa-monitor config show
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set (typically by the workspace observability LaunchAgent env), the daemon emits:
 
 - **Metrics**
-  - Observable gauges: `pa_monitor.sessions.count` (by `state` + workspace/agent/model labels), `pa_monitor.sessions.errored` (by `kind`), `pa_monitor.caffeinate.active`, `pa_monitor.auto_resume.enabled`, `pa_monitor.block.cost.usd`, `pa_monitor.week.cost.usd`.
-  - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`.
-- **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`.
+  - Observable gauges: `pa_monitor.sessions.count` (by `state` + workspace/agent/model labels), `pa_monitor.sessions.errored` (by `kind`), `pa_monitor.caffeinate.active`, `pa_monitor.auto_resume.enabled`, `pa_monitor.block.cost.usd`, `pa_monitor.week.cost.usd`, and per-active-session `pa_monitor.session.info` / `pa_monitor.session.tokens` / `pa_monitor.session.cost.usd` (keyed by `session_id`, one row per non-Dormant session).
+  - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`, `pa_monitor.session.context.limit_hits_total` (context-window-exceeded / "prompt is too long" hits, by `model`).
+- **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`, `session.context.limit_hit`.
 
 The disabled-state contract: when the env var is unset, the OTel SDK is never initialised and every emit is a nil-receiver no-op.
 
