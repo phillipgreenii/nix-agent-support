@@ -772,6 +772,15 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 					"kind":        kind,
 					"is_terminal": isTerminalStr,
 				})
+				// A context-window-exceeded error ("prompt is too long") is a
+				// distinct, separately-counted condition. Fire it on the same
+				// newly-advanced edge so each hit is counted once.
+				if le.IsContextLimit {
+					e.RecordContextLimitHit(map[string]string{
+						"session_id": sv.SessionID,
+						"model":      sv.Model,
+					})
+				}
 			}
 		}
 	}

@@ -131,6 +131,39 @@ func TestEmitErrorMetrics_NilTree(t *testing.T) {
 	emitErrorMetrics(nil, nil, prev)
 }
 
+// TestEmitErrorMetrics_ContextLimit verifies a context-limit error is handled
+// on the newly-advanced edge (previousErrors advances) and that the
+// RecordContextLimitHit branch is nil-safe. Counter emission itself is an
+// SDK concern; detection is covered in transcript.TestLastAPIErrorDetectsContextLimit.
+func TestEmitErrorMetrics_ContextLimit(t *testing.T) {
+	prev := map[string]time.Time{}
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	sv := &aggregate.SessionView{
+		Session: &session.Session{SessionID: "sid-ctx"},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			Model: "claude-opus-4-8",
+			LastError: &transcript.ErrorRecord{
+				Kind:           transcript.ErrInvalidRequest,
+				Text:           "Prompt is too long: 215000 tokens > 200000 maximum",
+				At:             now,
+				IsTerminal:     true,
+				IsContextLimit: true,
+			},
+		},
+	}
+	tree := &aggregate.Tree{
+		Dirs: []*aggregate.Directory{
+			{Sessions: []*aggregate.SessionView{sv}},
+		},
+	}
+
+	// nil emitter — must not panic and must advance the dedup bookkeeping.
+	emitErrorMetrics(nil, tree, prev)
+	if !prev["sid-ctx"].Equal(now) {
+		t.Errorf("previousErrors not advanced for context-limit error: got %v, want %v", prev["sid-ctx"], now)
+	}
+}
+
 func TestEmitErrorMetrics_NoError(t *testing.T) {
 	// Sessions with no LastError should not populate previousErrors.
 	prev := map[string]time.Time{}

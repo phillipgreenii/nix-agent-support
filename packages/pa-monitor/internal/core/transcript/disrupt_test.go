@@ -77,6 +77,41 @@ func TestLastAPIErrorDetectsEachKind(t *testing.T) {
 	}
 }
 
+// TestLastAPIErrorDetectsContextLimit covers the IsContextLimit flag: it is
+// set only for invalid_request errors whose text is the Claude Code
+// "prompt is too long" context-window message, not for other invalid_request
+// errors (e.g. low credit balance) nor for other kinds.
+func TestLastAPIErrorDetectsContextLimit(t *testing.T) {
+	ts := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		kind ErrorKind
+		text string
+		want bool
+	}{
+		{"prompt too long with token counts", ErrInvalidRequest, "Prompt is too long: 215000 tokens > 200000 maximum", true},
+		{"prompt too long lowercased + prefixed", ErrInvalidRequest, "API Error: prompt is too long", true},
+		{"other invalid_request", ErrInvalidRequest, "Your credit balance is too low to access the Anthropic API", false},
+		{"rate limit is not a context limit", ErrRateLimit, "You've hit your limit · resets 7:10pm (America/New_York)", false},
+		{"server error is not a context limit", ErrServerError, "API Error: 529 Overloaded", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := t.TempDir() + "/t.jsonl"
+			if err := writeTestFile(path, apiErrorEvent(ts, tc.kind, tc.text)+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LastAPIError(path)
+			if err != nil {
+				t.Fatalf("LastAPIError err = %v, want nil", err)
+			}
+			if got.IsContextLimit != tc.want {
+				t.Errorf("IsContextLimit = %v, want %v (kind=%q text=%q)", got.IsContextLimit, tc.want, tc.kind, tc.text)
+			}
+		})
+	}
+}
+
 func TestLastAPIErrorIsTerminalFlipsOnResume(t *testing.T) {
 	ts := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
 	path := t.TempDir() + "/t.jsonl"

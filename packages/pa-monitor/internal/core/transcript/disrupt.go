@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,22 @@ type ErrorRecord struct {
 	At          time.Time
 	IsTerminal  bool
 	IsRetryable bool
+	// IsContextLimit is true when this error is the Claude Code
+	// context-window-exceeded condition (an invalid_request whose text is
+	// the "prompt is too long" message). Distinguished from other
+	// invalid_request errors (low credit balance, bad params) so callers
+	// can count context-limit hits separately.
+	IsContextLimit bool
+}
+
+// isContextLimitText reports whether an api-error of the given kind is the
+// context-window-exceeded condition. Claude Code surfaces it as an
+// invalid_request whose message contains "prompt is too long" (often with a
+// "<N> tokens > <max> maximum" suffix); matched case-insensitively so a
+// leading "API Error: " prefix and casing variations still register.
+func isContextLimitText(kind ErrorKind, text string) bool {
+	return kind == ErrInvalidRequest &&
+		strings.Contains(strings.ToLower(text), "prompt is too long")
 }
 
 // LastAPIError returns the most recent isApiErrorMessage event in the
@@ -104,11 +121,12 @@ func LastAPIError(path string) (ErrorRecord, error) {
 		}
 		lastIdx = i
 		rec = ErrorRecord{
-			Kind:        kind,
-			Text:        text,
-			At:          ev.Timestamp,
-			IsTerminal:  true,
-			IsRetryable: kind.IsRetryable(),
+			Kind:           kind,
+			Text:           text,
+			At:             ev.Timestamp,
+			IsTerminal:     true,
+			IsRetryable:    kind.IsRetryable(),
+			IsContextLimit: isContextLimitText(kind, text),
 		}
 	}
 	if lastIdx < 0 {
