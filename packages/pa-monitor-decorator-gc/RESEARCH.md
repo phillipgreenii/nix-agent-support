@@ -47,7 +47,7 @@ provider-state shows `running:false` and `bd dolt start` was not
 invoked (research must not perturb live agents). These outputs are
 left as a TODO for re-running once Dolt is up. The env captured below
 is what the decorator actually sees on stdin — `gc bd show` would only
-add work-item metadata that the decorator could fetch *itself* if
+add work-item metadata that the decorator could fetch _itself_ if
 needed.
 
 ## Live sessions sampled
@@ -56,13 +56,13 @@ City root: `/Users/phillipg/gc` (only city running on this host).
 OTEL_SERVICE_NAME=gascity, OTEL_RESOURCE_ATTRIBUTES=`gc.city=/Users/phillipg/gc`
 on every session.
 
-| Role     | PID    | GC_AGENT                | GC_SESSION_ID | GC_SESSION_NAME       | GC_TEMPLATE            | GC_SESSION_ORIGIN | GC_DIR                                  | cwd                                   |
-|----------|--------|-------------------------|---------------|------------------------|-------------------------|-------------------|------------------------------------------|----------------------------------------|
-| mayor    | 56575  | pgii-gastown.mayor      | gc-b9nm       | pgii-gastown__mayor    | pgii-gastown.mayor      | named             | /Users/phillipg/gc                       | /Users/phillipg/gc                     |
-| deacon   | 25155  | pgii-gastown.deacon     | gc-5z36       | pgii-gastown__deacon   | pgii-gastown.deacon     | named             | /Users/phillipg/gc/.gc/agents/deacon     | /Users/phillipg/gc/.gc/agents/deacon   |
-| dog-1    | 45744  | dog-gc-9xsla            | gc-9xsla      | dog-gc-9xsla           | dog                     | ephemeral         | /Users/phillipg/gc                       | /Users/phillipg/gc                     |
-| dog-2    | 45746  | dog-gc-yxrta            | gc-yxrta      | dog-gc-yxrta           | dog                     | ephemeral         | /Users/phillipg/gc                       | /Users/phillipg/gc                     |
-| dog-3    | 40755  | dog-gc-69m41            | gc-69m41      | dog-gc-69m41           | dog                     | ephemeral         | /Users/phillipg/gc                       | /Users/phillipg/gc                     |
+| Role   | PID   | GC_AGENT            | GC_SESSION_ID | GC_SESSION_NAME        | GC_TEMPLATE         | GC_SESSION_ORIGIN | GC_DIR                               | cwd                                  |
+| ------ | ----- | ------------------- | ------------- | ---------------------- | ------------------- | ----------------- | ------------------------------------ | ------------------------------------ |
+| mayor  | 56575 | pgii-gastown.mayor  | gc-b9nm       | pgii-gastown\_\_mayor  | pgii-gastown.mayor  | named             | /Users/phillipg/gc                   | /Users/phillipg/gc                   |
+| deacon | 25155 | pgii-gastown.deacon | gc-5z36       | pgii-gastown\_\_deacon | pgii-gastown.deacon | named             | /Users/phillipg/gc/.gc/agents/deacon | /Users/phillipg/gc/.gc/agents/deacon |
+| dog-1  | 45744 | dog-gc-9xsla        | gc-9xsla      | dog-gc-9xsla           | dog                 | ephemeral         | /Users/phillipg/gc                   | /Users/phillipg/gc                   |
+| dog-2  | 45746 | dog-gc-yxrta        | gc-yxrta      | dog-gc-yxrta           | dog                 | ephemeral         | /Users/phillipg/gc                   | /Users/phillipg/gc                   |
+| dog-3  | 40755 | dog-gc-69m41        | gc-69m41      | dog-gc-69m41           | dog                 | ephemeral         | /Users/phillipg/gc                   | /Users/phillipg/gc                   |
 
 Note: argv-suffix `[gc] dog-N` (e.g. `[gc] dog-1 • 2026-05-29T...`)
 is the controller's friendly pool-slot label and is **not** in any env
@@ -73,11 +73,11 @@ controller maps gc-id -> dog-N elsewhere.
 
 ### Roles I could NOT find live
 
-| Role     | Status                                                  |
-|----------|---------------------------------------------------------|
-| witness  | not running (no `pgii-gastown.witness` GC_AGENT seen)   |
-| polecat  | not running                                             |
-| operator | not running                                             |
+| Role     | Status                                                |
+| -------- | ----------------------------------------------------- |
+| witness  | not running (no `pgii-gastown.witness` GC_AGENT seen) |
+| polecat  | not running                                           |
+| operator | not running                                           |
 
 These are documented in the pack at
 `packages/pgii-pack-gastown/` (deacon, operator, mayor agents +
@@ -249,31 +249,31 @@ Convention: dotted keys, lowercase, namespaced. Add labels on top of
 what the built-in `gascity` detector already emits — don't restate
 `workspace.scope=gascity` unless GC_RIG is empty (see observation #1).
 
-| Label key                      | Source field(s)                                                                 | Example value                  | Stability | Cardinality risk                      | Notes |
-|--------------------------------|----------------------------------------------------------------------------------|--------------------------------|-----------|---------------------------------------|-------|
-| `workspace.scope`              | `GC_CITY` set OR `GC_PROVIDER=claude && GC_BEADS_PREFIX=gc`                       | `gascity`                      | high      | 1 distinct                            | Fallback when `GC_RIG` is empty (today's reality). Only emit if built-in detector wouldn't already set it. |
-| `workspace.project`            | basename of `GC_CITY` (e.g. `gc`)                                                 | `gc`                           | high      | 1-3 per host                          | Built-in detector emits `GC_RIG` if non-empty; this is the fallback when GC_RIG is empty. Skip if already set. |
-| `agent.role`                   | `GC_AGENT` split on `.` (named) OR `GC_TEMPLATE` (pool, e.g. `dog`)                | `mayor`, `deacon`, `dog`       | high      | ~6-10 per city                        | Roles: mayor, deacon, dog, witness, polecat, operator, foreman (retired), worker. Built-in detector already sets this from `GC_AGENT` raw — the decorator should **normalise** (split `.`, collapse pool ids) and overwrite. |
-| `agent.template`               | `GC_TEMPLATE`                                                                    | `pgii-gastown.mayor`, `dog`    | high      | ~5-15 per host                        | Template the supervisor launched from. Useful to distinguish `pgii-gastown.mayor` from a future `other-city.mayor`. |
-| `agent.session_origin`         | `GC_SESSION_ORIGIN`                                                              | `named`, `ephemeral`           | high      | 2                                     | Distinguishes pool slots (recycled) from permanent agents. Very useful for Grafana panels. |
-| `gascity.city`                 | basename of `GC_CITY` (or last segment of path)                                  | `gc`                           | high      | 1-3 per host                          | If host runs multiple cities. Skip if duplicate of `workspace.project`. |
-| `gascity.pack`                 | `GC_PACK_NAME`                                                                   | `maintenance`                  | med       | 1-5                                   | Which pack scheduled this agent. Today only `maintenance` seen; rig-mode agents would carry a different pack. |
-| `gascity.runtime_epoch`        | `GC_RUNTIME_EPOCH`                                                               | `2`, `3`, `4`                  | low       | grows monotonically per session       | **DO NOT LABEL** — monotonic counter, would blow cardinality. Listed here so we explicitly reject it. |
-| `gascity.continuation_epoch`   | `GC_CONTINUATION_EPOCH`                                                          | `1`, `2`                       | low       | grows                                 | **DO NOT LABEL** — same reason as runtime_epoch. |
-| `gascity.rig.owner`            | future: from `gc rig show $GC_RIG --json`                                        | `phillipg`                     | high      | 1-5                                   | Only when `GC_RIG` is non-empty (rig-mode). Needs Dolt at decorator runtime — costly. Defer. |
-| `gascity.mol_state`            | future: from `gc bd show $GC_SESSION_ID --json` → metadata.mol_state              | `running`, `nudging`, `done`   | med       | ~5-10                                 | Per-tick shell out to Dolt. **Discuss before implementing** — every tick spawns a `gc` subprocess. |
-| `workspace.project_owner`      | not derivable from env alone (would need a per-rig owner map)                    | `phillipg`                     | high      | 1-5                                   | Defer until rig-owner mapping exists; could be a static lookup in decorator config. |
+| Label key                    | Source field(s)                                                      | Example value                | Stability | Cardinality risk                | Notes                                                                                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------- | ---------------------------- | --------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace.scope`            | `GC_CITY` set OR `GC_PROVIDER=claude && GC_BEADS_PREFIX=gc`          | `gascity`                    | high      | 1 distinct                      | Fallback when `GC_RIG` is empty (today's reality). Only emit if built-in detector wouldn't already set it.                                                                                                                   |
+| `workspace.project`          | basename of `GC_CITY` (e.g. `gc`)                                    | `gc`                         | high      | 1-3 per host                    | Built-in detector emits `GC_RIG` if non-empty; this is the fallback when GC_RIG is empty. Skip if already set.                                                                                                               |
+| `agent.role`                 | `GC_AGENT` split on `.` (named) OR `GC_TEMPLATE` (pool, e.g. `dog`)  | `mayor`, `deacon`, `dog`     | high      | ~6-10 per city                  | Roles: mayor, deacon, dog, witness, polecat, operator, foreman (retired), worker. Built-in detector already sets this from `GC_AGENT` raw — the decorator should **normalise** (split `.`, collapse pool ids) and overwrite. |
+| `agent.template`             | `GC_TEMPLATE`                                                        | `pgii-gastown.mayor`, `dog`  | high      | ~5-15 per host                  | Template the supervisor launched from. Useful to distinguish `pgii-gastown.mayor` from a future `other-city.mayor`.                                                                                                          |
+| `agent.session_origin`       | `GC_SESSION_ORIGIN`                                                  | `named`, `ephemeral`         | high      | 2                               | Distinguishes pool slots (recycled) from permanent agents. Very useful for Grafana panels.                                                                                                                                   |
+| `gascity.city`               | basename of `GC_CITY` (or last segment of path)                      | `gc`                         | high      | 1-3 per host                    | If host runs multiple cities. Skip if duplicate of `workspace.project`.                                                                                                                                                      |
+| `gascity.pack`               | `GC_PACK_NAME`                                                       | `maintenance`                | med       | 1-5                             | Which pack scheduled this agent. Today only `maintenance` seen; rig-mode agents would carry a different pack.                                                                                                                |
+| `gascity.runtime_epoch`      | `GC_RUNTIME_EPOCH`                                                   | `2`, `3`, `4`                | low       | grows monotonically per session | **DO NOT LABEL** — monotonic counter, would blow cardinality. Listed here so we explicitly reject it.                                                                                                                        |
+| `gascity.continuation_epoch` | `GC_CONTINUATION_EPOCH`                                              | `1`, `2`                     | low       | grows                           | **DO NOT LABEL** — same reason as runtime_epoch.                                                                                                                                                                             |
+| `gascity.rig.owner`          | future: from `gc rig show $GC_RIG --json`                            | `phillipg`                   | high      | 1-5                             | Only when `GC_RIG` is non-empty (rig-mode). Needs Dolt at decorator runtime — costly. Defer.                                                                                                                                 |
+| `gascity.mol_state`          | future: from `gc bd show $GC_SESSION_ID --json` → metadata.mol_state | `running`, `nudging`, `done` | med       | ~5-10                           | Per-tick shell out to Dolt. **Discuss before implementing** — every tick spawns a `gc` subprocess.                                                                                                                           |
+| `workspace.project_owner`    | not derivable from env alone (would need a per-rig owner map)        | `phillipg`                   | high      | 1-5                             | Defer until rig-owner mapping exists; could be a static lookup in decorator config.                                                                                                                                          |
 
 ### Hard "no" list (explicitly rejected)
 
-| Field                     | Why rejected                                              |
-|---------------------------|-----------------------------------------------------------|
-| `GC_SESSION_ID`           | Unbounded — one per session ever                          |
-| `GC_INSTANCE_TOKEN`       | Unbounded — random per spawn                              |
-| `BEADS_ACTOR`             | Same as `GC_SESSION_NAME` for dogs; redundant + unbounded |
-| `GC_RUNTIME_EPOCH`        | Monotonic counter                                         |
-| `GC_CONTINUATION_EPOCH`   | Monotonic counter                                         |
-| `GC_DIR` / cwd            | Already exposed via session.CWD; no useful label value    |
+| Field                   | Why rejected                                              |
+| ----------------------- | --------------------------------------------------------- |
+| `GC_SESSION_ID`         | Unbounded — one per session ever                          |
+| `GC_INSTANCE_TOKEN`     | Unbounded — random per spawn                              |
+| `BEADS_ACTOR`           | Same as `GC_SESSION_NAME` for dogs; redundant + unbounded |
+| `GC_RUNTIME_EPOCH`      | Monotonic counter                                         |
+| `GC_CONTINUATION_EPOCH` | Monotonic counter                                         |
+| `GC_DIR` / cwd          | Already exposed via session.CWD; no useful label value    |
 
 ### Open questions for Phil + Claude
 
@@ -283,7 +283,7 @@ what the built-in `gascity` detector already emits — don't restate
    decorator fill the gap. Decorator side is reversible if we change
    our mind.
 2. **`agent.role` normalisation:** is it OK for the decorator to
-   *overwrite* the built-in detector's `agent.role` (which is the raw
+   _overwrite_ the built-in detector's `agent.role` (which is the raw
    `GC_AGENT`) with a normalised value (`mayor` vs
    `pgii-gastown.mayor`)? The `Merge` semantics say the argument wins,
    so order in the daemon's detector list matters. Need confirmation
