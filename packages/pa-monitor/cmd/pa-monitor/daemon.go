@@ -57,13 +57,55 @@ func runDaemon(args []string) {
 		os.Exit(2)
 	}
 
-	emitter, err := otel.New(context.Background(), otel.Options{
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	opts, cleanup, err := buildRunOptions(ctx, cfg, paths, version,
+		time.Duration(*tickS)*time.Second, *disablePoller)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: build run options: %v\n", err)
+		os.Exit(1)
+	}
+	defer cleanup()
+
+	if err := daemon.RunWith(ctx, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// buildRunOptions assembles the daemon's RunOptions exactly the way
+// runDaemon does — same store wiring, same WriteService / ReadService
+// construction, same fields — but stops short of calling daemon.RunWith.
+// The returned cleanup function releases the WriteService goroutine,
+// closes the otel emitter, and kills any caffeinate subprocess; callers
+// must always invoke it.
+//
+// runDaemon uses this in production; daemon_test.go uses it for a smoke
+// test that asserts the required RunOptions fields (WriteService,
+// ReadService, SessionsDir) are wired. Two regressions shipped where
+// runDaemon forgot to set one of these — keeping the assembly in a
+// testable helper catches that class of bug at test time.
+func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths, ver string, tick time.Duration, disablePoller bool) (daemon.RunOptions, func(), error) {
+	// Accumulate cleanup steps; run them in reverse order on success or
+	// on error from anywhere in this function.
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	fail := func(err error) (daemon.RunOptions, func(), error) {
+		cleanup()
+		return daemon.RunOptions{}, func() {}, err
+	}
+
+	emitter, err := otel.New(ctx, otel.Options{
 		ServiceName:    "pa-monitor",
-		ServiceVersion: version,
+		ServiceVersion: ver,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: otel init: %v\n", err)
-		os.Exit(1)
+		return fail(fmt.Errorf("otel init: %w", err))
 	}
 
 	runtimePath := filepath.Join(paths.Dir, "runtime.json")
@@ -80,7 +122,7 @@ func runDaemon(args []string) {
 		PID:     os.Getpid(),
 	}
 	// Ensure caffeinate is killed even if Run returns abnormally.
-	defer func() { _ = caffProc.Kill() }()
+	cleanups = append(cleanups, func() { _ = caffProc.Kill() })
 
 	// cmux-bridge registry: tracks bridges that have called RegisterBridge,
 	// so the poller can refine "cmux" terminal-host labels into "cmux" /
@@ -102,12 +144,12 @@ func runDaemon(args []string) {
 	opts := daemon.RunOptions{
 		Paths:               paths,
 		Emitter:             emitter,
-		Tick:                time.Duration(*tickS) * time.Second,
+		Tick:                tick,
 		PlanTier:            cfg.PlanTier,
 		Caffeinate:          caffMgr,
 		InitialCaffeinateOn: false, // updated from DB below when available
 		RuntimePath:         runtimePath,
-		Version:             version,
+		Version:             ver,
 		BridgeRegistry:      bridgeRegistry,
 		CmuxAncestor:        cmuxAncestor,
 		Detectors: []labels.Detector{
@@ -121,8 +163,8 @@ func runDaemon(args []string) {
 		Decorators: buildDecorators(cfg.Decorators),
 	}
 
-	if !*disablePoller {
-		p, blockTr, weekTr, weeklyFn := buildPoller(cfg)
+	if !disablePoller {
+		p, blockTr, weekTr, weeklyFn := buildPoller(ctx, cfg)
 		p.BridgeRegistry = bridgeRegistry
 
 		// Open the SQLite database and wire WriteService into the poller so
@@ -146,7 +188,7 @@ func runDaemon(args []string) {
 			})
 			ws.Start(context.Background())
 			// Ensure the write goroutine is stopped on daemon exit.
-			defer ws.Stop()
+			cleanups = append(cleanups, ws.Stop)
 
 			// ReadService materialises the aggregate.Tree from DB queries on
 			// every snapshot. Without this, sharedState.snapshot() returns nil
@@ -194,13 +236,7 @@ func runDaemon(args []string) {
 		opts.EscalationAfter = cfg.EscalationAfter
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
-
-	if err := daemon.RunWith(ctx, opts); err != nil {
-		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
-		os.Exit(1)
-	}
+	return opts, cleanup, nil
 }
 
 // buildDecorators translates the user's [[decorator]] config blocks into
@@ -226,15 +262,18 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 }
 
 // buildPoller wires the same poller the TUI uses, but for the daemon
-// process. ccusage runs are cached so the hot path stays cheap.
-func buildPoller(cfg config.Config) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*ccusage.WeeklyEntry, error)) {
+// process. ccusage runs are cached so the hot path stays cheap. The ctx
+// controls the lifetime of the background ccusage refresh goroutine —
+// pass the daemon's signal-bound ctx in production so the goroutine
+// exits on SIGTERM; tests pass a short-lived ctx to avoid leaks.
+func buildPoller(ctx context.Context, cfg config.Config) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*ccusage.WeeklyEntry, error)) {
 	home, _ := os.UserHomeDir()
 
 	ccusageCache := ccusage.NewCachedRunner(60*time.Second, 60*time.Second,
 		func(ctx context.Context) ([]byte, error) {
 			return exec.CommandContext(ctx, "ccusage", "blocks", "--active", "--json", "--offline").Output()
 		})
-	ccusageCache.Start(context.Background())
+	ccusageCache.Start(ctx)
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 	signalers := signallayer.DefaultSignalers()
