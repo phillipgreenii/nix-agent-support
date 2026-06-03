@@ -148,11 +148,25 @@ func runDaemon(args []string) {
 			// Ensure the write goroutine is stopped on daemon exit.
 			defer ws.Stop()
 
+			// ReadService materialises the aggregate.Tree from DB queries on
+			// every snapshot. Without this, sharedState.snapshot() returns nil
+			// and all gRPC clients see an empty DaemonState (CLI: 0 sessions,
+			// TUI: 'loading…' forever).
+			rs := service.NewReadService(service.ReadDeps{
+				Sessions: sqlite.NewSessionStore(db),
+				Blocks:   sqlite.NewBlockStore(db),
+				Weeks:    sqlite.NewWeekStore(db),
+				Toggles:  sqlite.NewToggleStore(db),
+				Nudges:   sqlite.NewNudgeStore(db),
+			})
+
 			// Wire into both the poller (per-session upserts + contributions)
-			// and RunOptions (block / week upserts in lifecycle.go).
+			// and RunOptions (block / week upserts in lifecycle.go, read
+			// materialisation in sharedState).
 			p.WriteService = ws
 			p.DB = db
 			opts.WriteService = ws
+			opts.ReadService = rs
 
 			// Read the persisted caffeinate toggle from the DB (primary source
 			// of truth since the runtime.json -> SQLite migration).
