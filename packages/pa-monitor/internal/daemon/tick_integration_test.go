@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
+	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -176,6 +177,129 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunWith did not return")
+	}
+}
+
+// TestCaffeinate_TogglePersistsAcrossTicks is a regression test for the bug
+// where calling the Caffeinate(on) RPC while no agents are working caused the
+// TUI indicator to revert to OFF on the very next tick.
+//
+// Root cause: lifecycle.go computed active := newState != caffeinate.StateOff,
+// but Manager.Tick(anyWorking=false) leaves state==StateOff when the toggle is
+// on-but-idle (it waits for agents to start before spawning). The next tick
+// then called setCaffeinateActive(false), overwriting the RPC handler's
+// synchronous setCaffeinateActive(true).
+//
+// Fix: active := newState != caffeinate.StateOff || toggleOn, so the indicator
+// reflects the user's intent even when the subprocess hasn't spawned yet.
+func TestCaffeinate_TogglePersistsAcrossTicks(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+
+	// in-memory SQLite + WriteService + ReadService
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ws.Start(context.Background())
+	t.Cleanup(ws.Stop)
+
+	rs := service.NewReadService(service.ReadDeps{
+		Sessions: sqlite.NewSessionStore(db),
+		Blocks:   sqlite.NewBlockStore(db),
+		Weeks:    sqlite.NewWeekStore(db),
+		Toggles:  sqlite.NewToggleStore(db),
+		Nudges:   sqlite.NewNudgeStore(db),
+	})
+
+	// Caffeinate manager with no-op Spawn/Kill so the test doesn't try to
+	// launch a real caffeinate(1) process.
+	caffMgr := &caffeinate.Manager{
+		Grace:   60 * time.Second,
+		Spawn:   func(int) error { return nil },
+		Kill:    func() error { return nil },
+		IsAlive: nil,
+		Now:     time.Now,
+	}
+
+	// tickSeen is closed after the first tick fires so we can advance to it.
+	tickSeen := make(chan struct{})
+	var tickSeenOnce sync.Once
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:        paths,
+			Tick:         30 * time.Millisecond,
+			Caffeinate:   caffMgr,
+			WriteService: ws,
+			ReadService:  rs,
+			// stubPoller: no working sessions (anyWorking=false every tick).
+			Poller: &stubPoller{
+				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					tickSeenOnce.Do(func() { close(tickSeen) })
+					return &aggregate.Tree{}, false, nil
+				},
+			},
+		})
+	}()
+
+	waitForFile(t, paths.Socket)
+
+	conn := dialUnix(t, paths.Socket)
+	defer conn.Close()
+	client := pb.NewPaMonitorClient(conn)
+
+	// Flip caffeinate ON while no agents are working.
+	resp, err := client.Caffeinate(context.Background(), &pb.CaffeinateRequest{Action: "on"})
+	if err != nil {
+		t.Fatalf("Caffeinate RPC: %v", err)
+	}
+	if !resp.GetActive() {
+		t.Fatal("Caffeinate RPC: Active = false immediately after toggling on")
+	}
+
+	// Wait for at least one tick to fire (anyWorking=false every tick).
+	select {
+	case <-tickSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for first tick")
+	}
+	// Allow time for a second tick to ensure the gauge has been reconciled.
+	time.Sleep(100 * time.Millisecond)
+
+	// The key assertion: caffeinate_active must still be true after tick
+	// reconciliation even though no agents are running.
+	state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if !state.GetCaffeinateActive() {
+		t.Error("caffeinate_active reverted to false after tick — toggle did not persist across ticks (regression)")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWith did not return after cancel")
 	}
 }
 

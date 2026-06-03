@@ -396,14 +396,21 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				}
 			}
 			if opts.Caffeinate != nil {
-				opts.Caffeinate.SetToggle(state.isCaffeinateOn())
+				toggleOn := state.isCaffeinateOn()
+				opts.Caffeinate.SetToggle(toggleOn)
 				prevState := opts.Caffeinate.State()
 				opts.Caffeinate.Tick(anyWorking)
 				newState := opts.Caffeinate.State()
-				active := newState != caffeinate.StateOff
+				// active is true when the subprocess is running OR when the
+				// user toggle is on but the manager is waiting for agents to
+				// start before spawning (StateOff + toggle=true). Without the
+				// toggleOn guard, a tick with anyWorking=false would reset
+				// caffeinateActive to false immediately after the user flips
+				// the toggle on, causing the TUI indicator to revert.
+				active := newState != caffeinate.StateOff || toggleOn
 				cause := ""
 				if active {
-					if state.isCaffeinateOn() {
+					if toggleOn {
 						cause = "manual"
 					}
 					if anyWorking {
