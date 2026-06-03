@@ -12,9 +12,6 @@ last-touched
 # Daemon runtime (lock, log, pid)
 daemon.*
 
-# Interactions log (runtime, not versioned)
-interactions.jsonl
-
 # Push state (runtime, per-machine)
 push-state.json
 
@@ -71,8 +68,3 @@ bd.db
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
 # since no pattern above ignores them.
-
-# Gas City
-.beads/*
-!.beads/config.yaml
-!.beads/metadata.json
