@@ -144,22 +144,33 @@ Panels (title "Dolt Maintenance — Overview"):
 - **Loki logs panel:** recent dolt-maintenance actions (decisions/reasons/
   outcomes) — the "Recent gascity logs" analog.
 
-### 5. home-manager wiring (agent-support HM config)
+### 5. nix wiring (mirrors the pa-monitor pattern)
 
-- `launchd.agents.gc-dolt-maintenance`: hourly (`StartCalendarInterval` Minute
-  0), logs → `~/.gc/dolt-maintenance.log`, `RunAtLoad = false`.
-  `EnvironmentVariables` set `OTEL_EXPORTER_OTLP_ENDPOINT`,
-  `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, and an `OTEL_SERVICE_NAME` /
-  resource so emitted telemetry carries `service.name = gc-dolt-maintenance`.
-- `home.activation.gcBdImportBreaker`: `gc-bd-import-breaker apply --city
-<cityPath>` (idempotent) every switch.
-- `phillipgreenii.observability.dashboardProviders.dolt-maintenance` provisions
-  the dashboard.
-- Module options (defaults): `cityPath = /Users/phillipg/gc`,
-  `flattenCommitThreshold = 5000`, `busyProcThreshold = 4`,
-  `minFlattenIntervalHours = 6`, `maxFlattenIntervalHours = 24`, `stateDir`,
-  `logPath`, `otelEnabled = true`, `otlpEndpoint = http://127.0.0.1:4318`,
-  `otelServiceName = gc-dolt-maintenance`. Injected via mkBashScript `config`.
+**Darwin module** (`darwin/modules/gc-dolt-maintenance/`) — house rule: launchd
+and dashboard provisioning live in darwin, NOT home-manager (HM `launchd.agents`
+is forbidden here; see `home/programs/pa-monitor/default.nix`):
+
+- launchd via the canonical helper
+  `phillipgreenii.system.launchdServices.userAgents.gc-dolt-maintenance`
+  (ADR 0049, hash-based reload): hourly `serviceConfig.StartCalendarInterval =
+{ Minute = 0; }`, `RunAtLoad`/`KeepAlive` false, `StandardOut/ErrPath` →
+  `~/.gc/dolt-maintenance.log`, `EnvironmentVariables = emitterEnv`.
+- OTel env via the house helper:
+  `emitterEnv = obs.mkEmitterEnv { serviceName = "gc-dolt-maintenance";
+protocol = "http/protobuf"; }` (no hand-rolled `OTEL_*`).
+- `phillipgreenii.observability.dashboardProviders.dolt-maintenance =
+{ folder = "Claude Agents"; dashboards = [ ../../../packages/…/grafana/
+dolt-maintenance-overview.json ]; }`, guarded by `lib.mkIf (obs.enable or false)`.
+
+**Home module** (`home/programs/gc-dolt-maintenance/`): installs the two script
+packages into the user env and registers `home.activation.gcBdImportBreaker`
+(`gc-bd-import-breaker apply --city <cityPath>`, idempotent, every switch).
+
+**Module options** (defaults): `cityPath = /Users/phillipg/gc`,
+`flattenCommitThreshold = 5000`, `busyProcThreshold = 4`,
+`minFlattenIntervalHours = 6`, `maxFlattenIntervalHours = 24`, `stateDir`,
+`logPath`, `otelEnabled = true`. Injected via mkBashScript `config`. (The OTLP
+endpoint/protocol come from `mkEmitterEnv`, not a separate option.)
 
 ## Observability (telemetry schema)
 
