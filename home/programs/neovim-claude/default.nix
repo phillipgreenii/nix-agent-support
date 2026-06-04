@@ -11,7 +11,7 @@
         pkgs.unstable.vimPlugins.claudecode-nvim
       ];
 
-      extraLuaConfig = builtins.readFile ./config.lua;
+      initLua = builtins.readFile ./config.lua;
     };
   };
 }
