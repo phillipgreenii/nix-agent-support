@@ -17,13 +17,6 @@ buildGoModule rec {
 
   vendorHash = null;
 
-  # Upstream go.mod requires Go 1.26; pinned nixpkgs ships 1.25. goccc uses
-  # only stdlib (no 1.26-specific features), so relaxing the directive is
-  # safe. Drop once nixpkgs catches up.
-  postPatch = ''
-    substituteInPlace go.mod --replace-fail "go 1.26.0" "go 1.25"
-  '';
-
   meta = {
     description = "Cost calculator and customizable statusline for Claude Code";
     homepage = "https://github.com/backstabslash/goccc";
