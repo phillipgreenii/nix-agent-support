@@ -1,5 +1,4 @@
 setup() {
-  load ../../test-support/test_helper
   # shellcheck source=/dev/null
   source "${LIB_PATH:-$BATS_TEST_DIRNAME/../gc-dolt-maintenance-lib.bash}"
 }

@@ -1,9 +1,5 @@
 # shellcheck shell=bash
 
-# Load shared helpers at file scope so our teardown() overrides the helper's.
-# shellcheck disable=SC1091
-load ../../test-support/test_helper
-
 setup() {
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR
@@ -13,12 +9,12 @@ setup() {
   export CITY
   mkdir -p "$CITY/.beads/dolt/hq"   # pretend dolt exists
   printf 'x\n' >"$CITY/.beads/issues.jsonl"                # non-empty -> must be backed up
-  BREAKER="${SCRIPT_PATH:-$BATS_TEST_DIRNAME/../gc-bd-import-breaker.sh}"
+  BREAKER="${SCRIPT_PATH:-${SCRIPTS_DIR:-$BATS_TEST_DIRNAME/..}/gc-bd-import-breaker.sh}"
   export BREAKER
 }
 
 teardown() {
-  chflags nouchg "$CITY/.beads/issues.jsonl" 2>/dev/null || true
+  /usr/bin/chflags nouchg "$CITY/.beads/issues.jsonl" 2>/dev/null || true
   rm -rf "$TEST_DIR"
 }
 

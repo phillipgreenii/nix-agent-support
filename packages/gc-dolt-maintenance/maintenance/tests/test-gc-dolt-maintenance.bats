@@ -1,18 +1,27 @@
 # shellcheck shell=bash
 
-load ../../test-support/test_helper   # file-scope load so our setup/teardown win
-
 setup() {
   command -v dolt >/dev/null || skip "dolt not on PATH"
+  # In the nix build sandbox, starting dolt sql-server as a background process
+  # causes the bats process to hang waiting for the server after tests complete
+  # (the dolt server stays alive after kill; process-group cleanup blocks the
+  # nix sandbox builder). Skip the integration test in that context.
+  [[ -n "${NIX_BUILD_TOP:-}" ]] && skip "nix sandbox: dolt sql-server integration skipped (process-group hang)"
   TEST_DIR="$(mktemp -d)"; export HOME="$TEST_DIR"
   for v in $(env | grep -oE '^(OTEL|GC|BEADS|DOLT)[A-Z_]*' || true); do unset "$v"; done
   export GC_OTEL_DISABLE=1
   # dolt requires HOME/.dolt/config_global.json for user identity
   mkdir -p "$HOME/.dolt"
   printf '{"user.email":"test@test.invalid","user.name":"test"}\n' >"$HOME/.dolt/config_global.json"
-  # provide lib functions to the script subprocess
+  # provide lib functions to the script subprocess; LIB_PATH set by nix check
   # shellcheck source=/dev/null
-  source "$BATS_TEST_DIRNAME/../../decision/gc-dolt-maintenance-lib.bash"
+  if [[ -n "${LIB_PATH:-}" ]]; then
+    # nix sandbox: source each colon-separated composed library path
+    IFS=: read -ra _libs <<< "$LIB_PATH"
+    for _lib in "${_libs[@]}"; do source "$_lib"; done
+  else
+    source "$BATS_TEST_DIRNAME/../../decision/gc-dolt-maintenance-lib.bash"
+  fi
   # shellcheck disable=SC2329  # defined for export -f to subprocess; not called directly
   otlp_gauge() { :; }
   # shellcheck disable=SC2329  # defined for export -f to subprocess; not called directly
@@ -35,7 +44,7 @@ setup() {
   printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_DIR/bin/bd"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_DIR/bin/curl"
   chmod +x "$TEST_DIR/bin/"*; export PATH="$TEST_DIR/bin:$PATH"
-  SCRIPT="${SCRIPT_PATH:-$BATS_TEST_DIRNAME/../gc-dolt-maintenance.sh}"
+  SCRIPT="${SCRIPT_PATH:-${SCRIPTS_DIR:-$BATS_TEST_DIRNAME/..}/gc-dolt-maintenance.sh}"
 }
 
 teardown() {     # ALWAYS runs, even on failure

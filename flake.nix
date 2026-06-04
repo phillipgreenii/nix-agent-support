@@ -153,6 +153,31 @@
             };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
+          gascity = final.callPackage ./packages/gascity { };
+          gc-bd-import-breaker =
+            let
+              result = import ./packages/gc-dolt-maintenance {
+                pkgs = final;
+                inherit bashBuilders;
+                inherit (final) gascity;
+              };
+            in
+            final.symlinkJoin {
+              name = "gc-bd-import-breaker";
+              paths = result.gc-bd-import-breaker.packages;
+            };
+          gc-dolt-maintenance =
+            let
+              result = import ./packages/gc-dolt-maintenance {
+                pkgs = final;
+                inherit bashBuilders;
+                inherit (final) gascity;
+              };
+            in
+            final.symlinkJoin {
+              name = "gc-dolt-maintenance";
+              paths = result.gc-dolt-maintenance.packages;
+            };
         };
 
       systemOutputs = flake-utils.lib.eachDefaultSystem (
@@ -495,7 +520,12 @@
 
                 touch $out
               '';
-          };
+          }
+          // (import ./packages/gc-dolt-maintenance {
+            inherit pkgs;
+            bashBuilders = pkgs._agentSupportBashBuilders;
+            inherit (pkgs) gascity;
+          }).checks;
 
           packages = {
             # Re-export overlay-defined Go packages so `nix-update -F` (used in
@@ -515,6 +545,8 @@
               pg-pr
               goccc
               toktrack
+              gc-bd-import-breaker
+              gc-dolt-maintenance
               ;
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}

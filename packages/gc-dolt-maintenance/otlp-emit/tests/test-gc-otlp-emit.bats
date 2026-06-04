@@ -1,5 +1,4 @@
 setup() {
-  load ../../test-support/test_helper
   TEST_DIR="$(mktemp -d)"; export HOME="$TEST_DIR"
   for v in $(env | grep -oE '^(OTEL|GC|BEADS|DOLT)[A-Z_]*' || true); do unset "$v"; done
   # shellcheck source=/dev/null

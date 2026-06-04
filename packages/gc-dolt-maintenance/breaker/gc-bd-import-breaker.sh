@@ -121,7 +121,7 @@ status)
 
 revert)
   if [[ -e $JSONL ]] && is_immutable "$JSONL"; then
-    chflags nouchg "$JSONL"
+    /usr/bin/chflags nouchg "$JSONL"
     echo "breaker reverted: cleared uchg on $JSONL"
     echo "note: bd/exports may now refill it; re-apply if the spiral returns."
     command -v otlp_log >/dev/null 2>&1 && otlp_log INFO "breaker revert" city="$CITY" || true
@@ -142,7 +142,7 @@ apply)
 
   # Clear any pre-existing immutability so we can replace the file.
   if [[ -e $JSONL ]] && is_immutable "$JSONL"; then
-    chflags nouchg "$JSONL"
+    /usr/bin/chflags nouchg "$JSONL"
   fi
 
   # Back up real content (a regular non-empty file) before discarding it.
@@ -156,7 +156,7 @@ apply)
 
   rm -f "$JSONL"
   : >"$JSONL"
-  chflags uchg "$JSONL"
+  /usr/bin/chflags uchg "$JSONL"
 
   if [[ "$(file_size "$JSONL")" == "0" ]] && is_immutable "$JSONL"; then
     echo "breaker APPLIED: $JSONL is now 0-byte + immutable (uchg)"
