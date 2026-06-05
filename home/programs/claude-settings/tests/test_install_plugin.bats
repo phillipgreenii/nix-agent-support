@@ -72,7 +72,7 @@ _write_manifest() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"beads@beads-marketplace updated"* ]]
   # No WARNING since the fallback succeeded
-  ! [[ "$output" == *"WARNING"* ]]
+  [[ "$output" != *"WARNING"* ]]
   grep -Fxq "plugin install beads@beads-marketplace --scope user" "$CALLS"
   grep -Fxq "plugin update beads@beads-marketplace --scope user" "$CALLS"
 }
@@ -88,8 +88,8 @@ _write_manifest() {
   [[ "$stderr" == *"install boom"* ]]
   [[ "$stderr" == *"update boom"* ]]
   # stdout has no success line
-  ! [[ "$output" == *"installed"* ]]
-  ! [[ "$output" == *"updated"* ]]
+  [[ "$output" != *"installed"* ]]
+  [[ "$output" != *"updated"* ]]
 }
 
 @test "valid manifest in cache is preserved" {
@@ -121,9 +121,22 @@ _write_manifest() {
   [[ "$stderr" == *"removing"* ]]
 }
 
-@test "structurally-broken manifest (missing .version) is removed" {
+@test "manifest with name but no .version is preserved (version is optional)" {
   _mock_claude 0 0 "" ""
-  _write_manifest "beads-marketplace" "beads" "1.0.4" '{"name":"beads"}'
+  # Plugins pinned by git ref (e.g. caveman) carry no semver in plugin.json;
+  # a missing optional .version must NOT be treated as corrupt.
+  _write_manifest "caveman" "caveman" "18e45320a0b1" '{"name":"caveman"}'
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "caveman@caveman" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ -f "$CACHE_ROOT/caveman/caveman/18e45320a0b1/.claude-plugin/plugin.json" ]
+  [[ "$stderr" != *"WARNING corrupt manifest"* ]]
+}
+
+@test "manifest missing required .name is removed with WARNING" {
+  _mock_claude 0 0 "" ""
+  _write_manifest "beads-marketplace" "beads" "1.0.4" '{"version":"1.0.4"}'
 
   run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
 
@@ -140,5 +153,5 @@ _write_manifest() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"caveman@caveman installed"* ]]
-  ! [[ "$stderr" == *"WARNING"* ]]
+  [[ "$stderr" != *"WARNING"* ]]
 }

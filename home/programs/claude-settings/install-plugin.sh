@@ -3,8 +3,11 @@
 # Validate cached manifests for a Claude Code plugin, then install or update
 # it via the supplied claude binary. Surfaces stderr from install/update
 # only if both fail. Removes cached versions with corrupt manifests
-# (anything that fails `jq -e '.name and .version'`) before attempting
-# install/update.
+# (anything that fails `jq -e '.name'` — i.e. unparseable JSON or a missing
+# required `name`) before attempting install/update. `version` is NOT
+# required: it is optional in the plugin manifest and lives in the
+# marketplace's marketplace.json, so plugins pinned by git ref (e.g.
+# caveman) or without a semver legitimately omit it.
 #
 # Usage:
 #   install-plugin.sh <claude_bin> <plugin@marketplace> <cache_root>
@@ -32,7 +35,7 @@ if [ -d "$plugin_cache" ]; then
     [ -d "$ver_dir" ] || continue
     manifest="$ver_dir.claude-plugin/plugin.json"
     if [ -f "$manifest" ]; then
-      if ! jq -e '.name and .version' <"$manifest" >/dev/null 2>&1; then
+      if ! jq -e '.name' <"$manifest" >/dev/null 2>&1; then
         echo "claude-settings: WARNING corrupt manifest at $manifest — removing $ver_dir" >&2
         rm -rf "$ver_dir"
       fi
