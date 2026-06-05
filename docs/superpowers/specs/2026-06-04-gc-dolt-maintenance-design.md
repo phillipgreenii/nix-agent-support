@@ -1,7 +1,7 @@
 # Spec: nix-managed Dolt maintenance for gc (breaker + self-gating flatten + OTel + dashboard)
 
 **Date:** 2026-06-04
-**Status:** Approved (brainstorming)
+**Status:** Implemented — build + review complete (Tasks 1–8); live migration (Task 9) pending/blocked. See the plan's status banner.
 **Repo:** `phillipgreenii-nix-agent-support`
 
 ## Problem

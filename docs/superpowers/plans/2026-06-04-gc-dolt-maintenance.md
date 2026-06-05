@@ -2,6 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. ALSO REQUIRED: the `bash-scripting` skill (mkBashBuilders is the authoritative framework for every script/library here).
 
+## Status — 2026-06-04: build + review COMPLETE; live migration PENDING
+
+This banner is the authoritative completion record (individual step checkboxes below are left as execution notes).
+
+- **Tasks 1–8 (packages, libs, flake+gascity, dashboard, darwin+home modules): DONE & committed.** `nix flake check` green for all four package checks.
+- **Independent review:** found 2 macOS/strict-mode criticals — broken `pgrep` busy-count (safety rule dead) and `set -e` aborting the run on a single bad DB — plus 1 important (redundant city-scoped flatten). **All fixed** (`c03a4d9`) with a `set -euo pipefail` regression test.
+- **Commits** (`phillipgreenii-nix-agent-support`, branch `upgrade/nixpkgs-26.05`): `588b09b` otlp-emit · `2caf005` decision · `74f73a8` breaker · `0517e54` maintenance · `1757424` flake+gascity · `78d185d` dashboard · `7b11a4b` darwin · `d74c7f6` home · `c03a4d9` review-fixes. Enable flag: `phillipg-nix-ziprecruiter@eef2fd4`.
+- **Task 9 (live migration): NOT DONE — deferred + blocked.** The `darwin-rebuild`/`home-manager switch`, retiring the hand-rolled `tools/`, and the HACK 18 doc-repoint are pending. Blocked by a PRE-EXISTING `nodePackages`/neovim build break on this branch (full system build can't succeed until fixed). Until the switch lands, the hand-rolled breaker (immutable-empty `issues.jsonl`, in the gc repo `tools/`) remains the live protection. Caveat: the darwin/home modules are lint-clean + reviewer-confirmed to mirror pa-monitor, but a full-system build (the ultimate verification) is gated on that neovim fix.
+
+---
+
 **Goal:** Replace today's hand-rolled dolt-maintenance scripts with nix-managed, self-gating maintenance (durable import breaker + hourly stats-purge/GC + gated history flatten), emitting OTLP metrics+logs, plus a Grafana dashboard modeled on the gascity one.
 
 **Architecture:** Two `mkBashScript` commands (`gc-bd-import-breaker`, `gc-dolt-maintenance`) + two `mkBashLibrary` libs (`gc-otlp-emit`, `gc-dolt-maintenance-lib`) in `phillipgreenii-nix-agent-support/packages/`. A **darwin** module registers the hourly LaunchAgent (via `phillipgreenii.system.launchdServices.userAgents`, ADR 0049) and the Grafana dashboard (`phillipgreenii.observability.dashboardProviders`). A **home** module installs the commands and runs the breaker via `home.activation`. Telemetry is best-effort `curl`→OTLP/JSON (no Go SDK in bash). Reference spec: `docs/superpowers/specs/2026-06-04-gc-dolt-maintenance-design.md`.
