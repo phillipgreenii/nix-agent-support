@@ -22,6 +22,7 @@
     ./programs/bash-lsp
     ./programs/claude-activity
     ./programs/pa-monitor
+    ./programs/gc-dolt-maintenance
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
     ./programs/pg-pr
