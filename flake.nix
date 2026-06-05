@@ -54,6 +54,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-unstable,
       llm-agents,
       phillipgreenii-nix-overlay,
       phillipgreenii-nix-base,
@@ -153,7 +154,24 @@
             };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
-          gascity = final.callPackage ./packages/gascity { };
+          # Single source of truth for the gas city package across the
+          # workspace. ziprecruiter consumes this via overlays.default and no
+          # longer defines its own pkgs/gascity.
+          #
+          # dolt is threaded from final.unstable so consumers that pin
+          # unstable.dolt get that version (ziprecruiter pins the official dolt
+          # 2.1.1 release); standalone agent-support resolves final.unstable
+          # from the systemOutputs overlay below (nixpkgs-unstable).
+          #
+          # beads (bd) is bundled into the gc wrapper because the supervisor
+          # runs under launchd with a minimal PATH and otherwise can't find bd.
+          # Route it through final.llm-agentsPkgs.beads so consumers pin it
+          # (ziprecruiter pins beads v1.0.4 there); fall back to the llm-agents
+          # input for standalone agent-support builds where that attr is absent.
+          gascity = final.callPackage ./packages/gascity {
+            inherit (final.unstable) dolt;
+            beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+          };
           gc-bd-import-breaker =
             let
               result = import ./packages/gc-dolt-maintenance {
@@ -187,6 +205,17 @@
             inherit system;
             overlays = [
               phillipgreenii-nix-overlay.overlays.default
+              # Provide `unstable` for STANDALONE agent-support builds so the
+              # exported overlay's `final.unstable.dolt` (used by gascity)
+              # resolves here too. Deliberately NOT part of overlays.default,
+              # so it never clobbers a consumer's own `unstable` — e.g.
+              # ziprecruiter extends unstable.dolt to the official 2.1.1 release.
+              (_final: _prev: {
+                unstable = import nixpkgs-unstable {
+                  inherit system;
+                  config.allowUnfree = true;
+                };
+              })
               llmAgentsCcusageOverlay
               overlay
             ];
