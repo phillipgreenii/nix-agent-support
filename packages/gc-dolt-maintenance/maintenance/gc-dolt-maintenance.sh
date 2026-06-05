@@ -10,6 +10,12 @@ DOLT_ROOT="$CITY/.beads/dolt"
 
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
+# Count running `bd` client processes. Portable on macOS (system pgrep -f works;
+# only -c is unsupported) and safe under set -e/pipefail (pgrep exits 1 when none).
+bd_proc_count() {
+  { /usr/bin/pgrep -f 'bin/bd ' 2>/dev/null || true; } | wc -l | tr -d ' '
+}
+
 breaker_applied() {
   local f="$CITY/.beads/issues.jsonl"
   [[ -e $f && "$(/usr/bin/stat -f '%z' "$f" 2>/dev/null)" == "0" ]] &&
@@ -41,12 +47,13 @@ log "=== gc-dolt-maintenance start (city=$CITY) ==="
 ba=0
 breaker_applied && ba=1
 otlp_gauge dolt_maint_breaker_applied "$ba"
-otlp_gauge dolt_maint_busy_procs "$(pgrep -fc 'bin/bd ' || echo 0)"
+otlp_gauge dolt_maint_busy_procs "$(bd_proc_count)"
 
 for dbdir in "$DOLT_ROOT"/*/; do
   [[ -d "$dbdir/.dolt" ]] || continue
   db=$(basename "$dbdir")
-  before=$(du -sm "$dbdir" 2>/dev/null | cut -f1)
+  before=$(du -sm "$dbdir" 2>/dev/null | cut -f1) || true
+  before=${before:-0}
 
   for proc in DOLT_STATS_PURGE DOLT_GC; do
     if (cd "$dbdir" && dolt sql -q "CALL $proc()") >/dev/null 2>&1; then
@@ -57,15 +64,16 @@ for dbdir in "$DOLT_ROOT"/*/; do
       otlp_log WARN "$proc failed" db="$db"
     fi
   done
-  after=$(du -sm "$dbdir" 2>/dev/null | cut -f1)
+  after=$(du -sm "$dbdir" 2>/dev/null | cut -f1) || true
+  after=${after:-0}
   log "$db: ${before:-?}MB -> ${after:-?}MB"
 
-  commit=$(cd "$dbdir" && dolt sql -r csv -q "SELECT COUNT(*) FROM dolt_log" 2>/dev/null | tail -1)
+  commit=$( (cd "$dbdir" && dolt sql -r csv -q "SELECT COUNT(*) FROM dolt_log" 2>/dev/null | tail -1) || true)
   commit=${commit:-0}
   size_bytes=$((${after:-0} * 1024 * 1024))
   remote=0
   (cd "$dbdir" && [[ -n "$(dolt remote -v 2>/dev/null)" ]]) && remote=1
-  busy=$(pgrep -fc 'bin/bd ' || echo 0)
+  busy=$(bd_proc_count)
   statef="$STATE_DIR/$db.last-flatten"
   if [[ -f $statef ]]; then hours=$((($(date +%s) - $(cat "$statef")) / 3600)); else hours=999999; fi
   ba=0
@@ -76,7 +84,9 @@ for dbdir in "$DOLT_ROOT"/*/; do
   otlp_gauge dolt_maint_hours_since_flatten "$hours" db="$db"
   otlp_gauge dolt_maint_has_remote "$remote" db="$db"
 
-  if [[ $DO_FLATTEN == 1 ]]; then
+  # Flatten only the city DB (hq); gc bd flatten is city-scoped.
+  # Rig DBs get the cheap tier only; remote DBs are excluded by should_flatten anyway.
+  if [[ $DO_FLATTEN == 1 && $db == "hq" ]]; then
     decision=$(should_flatten "$commit" "$busy" "$hours" "$ba" "$remote" "$COMMIT_THR" "$BUSY_THR" "$MIN_H" "$MAX_H")
     log "$db: flatten decision=$decision (commit=$commit busy=$busy hours=$hours)"
     otlp_log INFO "flatten_decision ${decision%%:*}" db="$db" reason="${decision#*:}" commit_count="$commit"

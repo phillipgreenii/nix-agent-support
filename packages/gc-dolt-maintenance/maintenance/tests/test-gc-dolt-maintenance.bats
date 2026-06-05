@@ -59,3 +59,18 @@ teardown() {     # ALWAYS runs, even on failure
   [[ "$output" == *"DOLT_STATS_PURGE ok"* ]]
   [[ "$output" == *"flatten decision=no:"* ]]
 }
+
+@test "a broken/unreadable DB does not abort the whole run" {
+  mkdir -p "$CITY/.beads/dolt/broken/.dolt"   # looks like a db dir but has no real data/server
+  run bash "$SCRIPT" --city "$CITY"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"=== gc-dolt-maintenance done ==="* ]]   # loop completed past the bad db
+  [[ "$output" == *"hq:"* ]]                                # hq still processed
+}
+
+@test "run survives a broken DB even under set -euo pipefail" {
+  mkdir -p "$CITY/.beads/dolt/broken/.dolt"
+  run bash -euo pipefail "$SCRIPT" --city "$CITY"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"=== gc-dolt-maintenance done ==="* ]]
+}

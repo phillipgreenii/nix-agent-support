@@ -19,7 +19,6 @@ mkBashScript {
     pkgs.curl
     pkgs.jq
     pkgs.coreutils
-    pkgs.procps
   ];
   testDeps = [
     pkgs.dolt
