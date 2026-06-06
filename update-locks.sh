@@ -56,4 +56,13 @@ ul_run_step "update-toktrack" \
   "update-locks: bump toktrack rev + src hash + cargoHash" \
   nix run nixpkgs#nix-update -- -F toktrack
 
+# gascity (gc) — upstream-released Go binary pinned in packages/gascity.
+# nix-update bumps version + src hash + vendorHash to the latest GitHub release.
+# NOTE: gascity ships breaking changes across minor versions (Pack V2 enforcement,
+# orders.overrides semantics, model aliases). Review the changelog before applying
+# a bump that this step surfaces; the update summary at the end flags when it moves.
+ul_run_step "update-gascity" \
+  "update-locks: bump gascity version + src hash + vendorHash" \
+  nix run nixpkgs#nix-update -- -F gascity
+
 ul_finalize

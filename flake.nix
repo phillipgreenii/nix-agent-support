@@ -576,6 +576,7 @@
               toktrack
               gc-bd-import-breaker
               gc-dolt-maintenance
+              gascity
               ;
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}
