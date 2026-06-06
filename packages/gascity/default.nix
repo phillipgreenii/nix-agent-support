@@ -14,16 +14,16 @@
 
 buildGoModule rec {
   pname = "gascity";
-  version = "1.1.0";
+  version = "1.2.1";
 
   src = fetchFromGitHub {
     owner = "gastownhall";
     repo = "gascity";
     rev = "v${version}";
-    hash = "sha256-1W4bKBcRcEd5MBKCQr005EY/veZu/Co2G5pL2WE7Nmk=";
+    hash = "sha256-q9ehkxbkq4bnGn8vB0OM/8MJRk6zgVCBLnlrmHx7/RI=";
   };
 
-  vendorHash = "sha256-d1esYYBayZ6oFFGC+5/ufa0n8XXrZX5cZa0Lns+NB7s=";
+  vendorHash = "sha256-jKuPfAilxCndnkOCJf475wLh0DyxZxXQ33c+7nwFYzM=";
 
   go = go_1_25;
 
