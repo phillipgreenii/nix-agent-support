@@ -37,6 +37,12 @@ type TmuxSignaler struct {
 
 func (t *TmuxSignaler) Name() string { return "tmux" }
 
+// RequiredBinaries reports the executables TmuxSignaler shells out to. Used by
+// the daemon's startup check: without `tmux` on PATH, enumeratePanes silently
+// swallows the exec error, every tmux session classifies as "unknown", and its
+// auto-resume nudges are undeliverable.
+func (t *TmuxSignaler) RequiredBinaries() []string { return []string{"tmux"} }
+
 func (t *TmuxSignaler) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if t.RunCmd != nil {
 		return t.RunCmd(ctx, name, args...)

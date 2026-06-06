@@ -1,9 +1,15 @@
 {
   lib,
+  stdenv,
   buildGoModule,
   makeWrapper,
   ccusage,
   gh,
+  tmux,
+  # cmux is a macOS-only .app from phillipgreenii-nix-overlay (already a
+  # declared input + applied overlay). Defaulted to null so the package still
+  # evaluates on non-darwin, where it is omitted from PATH below.
+  cmux ? null,
   version ? "dev",
 }:
 
@@ -23,8 +29,14 @@ buildGoModule {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # Wrap `ccusage` onto the binary's PATH so the 5h billing-block header
-  # works out-of-the-box without requiring the user to `npm i -g ccusage`.
+  # Wrap the binaries pa-monitor shells out to onto its PATH so they work
+  # out-of-the-box under launchd (whose default PATH is /usr/bin:/bin:...):
+  #   - ccusage: 5h billing-block header
+  #   - gh: PR-status lookups
+  #   - tmux / cmux: signal-layer detection + auto-resume delivery. These are
+  #     NOT optional — without them every session on that multiplexer is
+  #     classified "unknown" and its auto-resume nudges silently fail. cmux is
+  #     darwin-only (a .app bundle); guarded so non-darwin builds still work.
   postInstall = ''
     mkdir -p $out/share/bash-completion/completions
     mkdir -p $out/share/zsh/site-functions
@@ -33,10 +45,14 @@ buildGoModule {
 
     wrapProgram $out/bin/pa-monitor \
       --prefix PATH : ${
-        lib.makeBinPath [
-          ccusage
-          gh
-        ]
+        lib.makeBinPath (
+          [
+            ccusage
+            gh
+            tmux
+          ]
+          ++ lib.optionals (stdenv.hostPlatform.isDarwin && cmux != null) [ cmux ]
+        )
       }
   '';
 

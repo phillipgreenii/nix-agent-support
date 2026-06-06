@@ -73,15 +73,16 @@ type Emitter struct {
 	logger          otellog.Logger
 
 	// Counters — sync (not observable). Nil when SDK uninitialised.
-	blockLimitHits   metric.Int64Counter
-	weekLimitHits    metric.Int64Counter
-	caffeinateRounds metric.Int64Counter
-	caffeinateGrace  metric.Int64Counter
-	contextLimitHits metric.Int64Counter
-	nudgesSent       metric.Int64Counter
-	nudgeSuppressed  metric.Int64Counter
-	nudgeQueued      metric.Int64Counter
-	apiErrorObserved metric.Int64Counter
+	blockLimitHits     metric.Int64Counter
+	weekLimitHits      metric.Int64Counter
+	caffeinateRounds   metric.Int64Counter
+	caffeinateGrace    metric.Int64Counter
+	contextLimitHits   metric.Int64Counter
+	nudgesSent         metric.Int64Counter
+	nudgeSuppressed    metric.Int64Counter
+	nudgeQueued        metric.Int64Counter
+	apiErrorObserved   metric.Int64Counter
+	signalerBinMissing metric.Int64Counter
 
 	mu                  sync.Mutex
 	sessionsObs         []stateObs
@@ -235,6 +236,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 	if e.apiErrorObserved, err = meter.Int64Counter("pa_monitor.session.api_error.observed_total"); err != nil {
+		return err
+	}
+	if e.signalerBinMissing, err = meter.Int64Counter("pa_monitor.signaler.binary_missing_total"); err != nil {
 		return err
 	}
 
@@ -513,6 +517,20 @@ func (e *Emitter) RecordApiErrorObserved(attrs map[string]string) {
 		e.apiErrorObserved.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("session.api_error.observed", attrs)
+}
+
+// RecordSignalerBinaryMissing fires pa_monitor.signaler.binary_missing_total
+// and logs a signaler.binary_missing event. Called once per missing binary at
+// daemon startup so an unwrapped tmux/cmux dependency is loudly visible instead
+// of silently disabling that terminal's detection and auto-resume.
+func (e *Emitter) RecordSignalerBinaryMissing(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.signalerBinMissing != nil {
+		e.signalerBinMissing.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("signaler.binary_missing", attrs)
 }
 
 // RecordSessionInfo replaces the buffered per-session rows. Callers MUST

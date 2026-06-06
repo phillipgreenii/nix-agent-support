@@ -65,6 +65,11 @@ type cmuxTopOutput struct {
 
 func (c *CmuxSignaler) Name() string { return "cmux" }
 
+// RequiredBinaries reports the executables CmuxSignaler shells out to. Detect
+// works via ps ancestry without it, but surface enumeration and Send call the
+// `cmux` CLI — so a missing binary breaks cmux auto-resume delivery silently.
+func (c *CmuxSignaler) RequiredBinaries() []string { return []string{"cmux"} }
+
 func (c *CmuxSignaler) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if c.RunCmd != nil {
 		return c.RunCmd(ctx, name, args...)

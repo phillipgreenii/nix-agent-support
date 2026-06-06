@@ -136,6 +136,51 @@ func TestResolveSignalerReturnsNilWhenNoneMatch(t *testing.T) {
 	}
 }
 
+func TestTmuxRequiredBinaries(t *testing.T) {
+	got := (&signal.TmuxSignaler{}).RequiredBinaries()
+	if len(got) != 1 || got[0] != "tmux" {
+		t.Errorf("TmuxSignaler.RequiredBinaries() = %v, want [tmux]", got)
+	}
+}
+
+func TestCmuxRequiredBinaries(t *testing.T) {
+	got := (&signal.CmuxSignaler{}).RequiredBinaries()
+	if len(got) != 1 || got[0] != "cmux" {
+		t.Errorf("CmuxSignaler.RequiredBinaries() = %v, want [cmux]", got)
+	}
+}
+
+func TestMissingBinariesReportsUnresolvable(t *testing.T) {
+	// lookPath resolves tmux but not cmux.
+	lookPath := func(name string) (string, error) {
+		if name == "tmux" {
+			return "/usr/bin/tmux", nil
+		}
+		return "", fmt.Errorf("exec: %q: executable file not found in $PATH", name)
+	}
+	missing := signal.MissingBinaries(
+		[]signal.Signaler{&signal.TmuxSignaler{}, &signal.CmuxSignaler{}},
+		lookPath,
+	)
+	if len(missing) != 1 {
+		t.Fatalf("MissingBinaries = %v, want exactly one entry", missing)
+	}
+	if missing[0].Signaler != "cmux" || missing[0].Binary != "cmux" {
+		t.Errorf("missing[0] = %+v, want {Signaler:cmux Binary:cmux}", missing[0])
+	}
+}
+
+func TestMissingBinariesEmptyWhenAllResolvable(t *testing.T) {
+	lookPath := func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	missing := signal.MissingBinaries(
+		[]signal.Signaler{&signal.TmuxSignaler{}, &signal.CmuxSignaler{}},
+		lookPath,
+	)
+	if len(missing) != 0 {
+		t.Errorf("MissingBinaries = %v, want empty when every binary resolves", missing)
+	}
+}
+
 func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 	// Process ancestry: 1000 (claude) → 500 (bash) → 100 (tmuxinator).
 	// New Detect requires a pane match, not just a comm match — tmuxinator

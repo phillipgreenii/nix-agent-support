@@ -68,6 +68,23 @@ func runDaemon(args []string) {
 	}
 	defer cleanup()
 
+	// Startup health check: tmux/cmux are required, not optional. Each
+	// signaler shells out to its multiplexer's CLI; a missing binary (e.g.
+	// absent from the launchd PATH) otherwise fails silently — the terminal
+	// classifies as "unknown" and auto-resume nudges are dropped with no
+	// signal. Report loudly (stderr + metric) but keep running so billing /
+	// context / other-multiplexer monitoring stays alive.
+	for _, mb := range signallayer.MissingBinaries(signallayer.DefaultSignalers(), exec.LookPath) {
+		fmt.Fprintf(os.Stderr,
+			"daemon: ERROR: signaler %q requires %q which is not on PATH; "+
+				"detection and auto-resume for %s sessions are disabled until it is installed\n",
+			mb.Signaler, mb.Binary, mb.Signaler)
+		opts.Emitter.RecordSignalerBinaryMissing(map[string]string{
+			"signaler": mb.Signaler,
+			"binary":   mb.Binary,
+		})
+	}
+
 	if err := daemon.RunWith(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(1)
