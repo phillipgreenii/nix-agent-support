@@ -12,7 +12,7 @@ buildGoModule {
 
   subPackages = [ "cmd/claude-extended-tool-approver" ];
 
-  vendorHash = "sha256-FuA/H29f1r8nCuTWIiqaBzG7d+Q0pmGR2I9bLpjqssU=";
+  vendorHash = "sha256-y+iJfbPlL5NHCtXUGFjQg0sGW7qycNaABtKBts7b5L4=";
 
   ldflags = [
     "-X main.Version=${version}"
