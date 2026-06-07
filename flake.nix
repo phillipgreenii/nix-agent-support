@@ -303,7 +303,7 @@
                 ];
                 text = builtins.readFile ./home/programs/claude-settings/replace-managed-keys.sh;
               };
-              tests = ./home/programs/claude-settings/tests;
+              tests = ./home/programs/claude-settings/tests/test_replace.bats;
               extraInputs = [
                 pkgs.jq
                 pkgs.coreutils
