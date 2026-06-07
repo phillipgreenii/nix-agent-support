@@ -357,9 +357,7 @@
               test -f "$pack/agents/pr-self-fixer/agent.toml"             || { echo "missing pr-self-fixer"; exit 1; }
               test -f "$pack/agents/pr-triage/agent.toml"                 || { echo "missing pr-triage"; exit 1; }
               test -f "$pack/orders/pr-watcher.toml"                      || { echo "missing pr-watcher order"; exit 1; }
-              test -f "$pack/orders/wake-on-work.toml"                    || { echo "missing wake-on-work order"; exit 1; }
               test -x "$pack/scripts/pr-watcher.sh"                       || { echo "pr-watcher.sh not exec"; exit 1; }
-              test -x "$pack/scripts/wake-on-work.sh"                     || { echo "wake-on-work.sh not exec"; exit 1; }
               for d in check-pr-watcher-recent-runs \
                        check-pr-agent-woke-no-progress \
                        check-pr-feedback-backlog \
@@ -383,8 +381,6 @@
                        hack-autoclose-completed-mols \
                        hack-daily-summary \
                        hack-message-forwarder \
-                       hack-mol-dog-jsonl \
-                       hack-order-override-watchdog \
                        hack-stale-lock-sweeper; do
                 test -f "$pack/orders/$o.toml" || { echo "missing orders/$o.toml"; exit 1; }
                 test -x "$pack/scripts/$o.sh"  || { echo "scripts/$o.sh not exec"; exit 1; }
@@ -393,8 +389,7 @@
               test -f "$pack/scripts/hack-archive-and-compact.RUNBOOK.md" || { echo "missing RUNBOOK"; exit 1; }
               for d in check-formulas-dir \
                        check-hack-2-still-needed \
-                       check-hack-10-still-needed \
-                       check-hack-11-still-needed; do
+                       check-hack-10-still-needed; do
                 test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
                 test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
               done

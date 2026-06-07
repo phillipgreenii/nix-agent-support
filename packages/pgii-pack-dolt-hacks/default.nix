@@ -6,7 +6,7 @@ mkPgiiPack {
   name = "pgii-dolt-hacks";
   src = ./pack-src;
   meta = with lib; {
-    description = "HACK orders for dolt storage/lifecycle issues and gascity 1.1.0 supervisor regressions (HACK 2, 10, 11, 12, 14, 15 + hack-daily-summary).";
+    description = "HACK orders for dolt storage/lifecycle issues (HACK 2, 10, 14, 15, 16). HACK 11 (mol-dog-jsonl wrapper) + HACK 12 (order-override-watchdog) retired on gascity 1.2.1, which honors [[orders.overrides]] and ships the issue_type jsonl-export fix.";
     license = licenses.mit;
     platforms = platforms.unix;
   };
