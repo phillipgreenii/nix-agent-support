@@ -1,13 +1,21 @@
 # pgii-packs home-manager module.
 #
 # Exposes per-pack toggles plus a list of cities to install into. The
-# activation script (./activation.sh) writes managed [imports.<name>]
-# blocks into each city's pack.toml at home-manager activation time.
+# activation script (./activation.sh) writes managed import blocks into each
+# city at home-manager activation time, routed by pack scope:
+#   - city-scope packs → [imports.<name>] in <city>/pack.toml
+#   - rig-scope  packs → [defaults.rig.imports.<name>] in <city>/city.toml
 #
-# Why pack.toml (not city.toml): gascity treats [packs.<name>] in city.toml
-# as a remote git source. Local file-system imports go through
-# [imports.<name>] in the city's top-level pack.toml. Verified empirically
-# against gascity 1.1.0.
+# Why two target files (gascity 1.2.x split):
+#   - City-scope local file-system imports go through [imports.<name>] in the
+#     city's top-level pack.toml. (gascity treats [packs.<name>] in city.toml
+#     as a remote git source, so we cannot use that.)
+#   - Rig-scope imports MUST live in city.toml. gascity 1.2.x rejects
+#     [defaults.rig.imports.<name>] in pack.toml ("belongs in city.toml, not
+#     pack.toml"), which breaks gc bd / order parsing city-wide. Verified
+#     empirically + via the 1.2.1 binary strings. (gascity 1.1.0 accepted
+#     both scopes in pack.toml; activation.sh now relocates rig-scope blocks
+#     and strips any stale rig blocks left in pack.toml.)
 #
 # Spec: docs/superpowers/specs/2026-05-26-pgii-packs-migration-design.md
 {
@@ -63,10 +71,12 @@ in
         example = [ "/Users/phillipg/gc" ];
         description = ''
           Absolute paths to gascity cities (directories containing pack.toml)
-          that should receive managed [imports.<name>] blocks for any
-          enabled pgii pack below. The activation script writes/updates the
-          blocks in <city>/pack.toml on every home-manager rebuild;
-          disabling a pack removes its block on the next rebuild.
+          that should receive managed import blocks for any enabled pgii pack
+          below. The activation script writes/updates the blocks on every
+          home-manager rebuild, routed by pack scope: city-scope packs land in
+          <city>/pack.toml ([imports.<name>]); rig-scope packs land in
+          <city>/city.toml ([defaults.rig.imports.<name>]). Disabling a pack
+          removes its block on the next rebuild.
         '';
       };
 
@@ -74,9 +84,10 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          After writing pack.toml, run `gc --city <city> supervisor reload`
-          for each city whose <city>/.gc/controller.sock exists and where
-          `gc` is on PATH. Reload failures warn but do not fail activation.
+          After writing pack.toml/city.toml, run
+          `gc --city <city> supervisor reload` for each city whose
+          <city>/.gc/controller.sock exists and where `gc` is on PATH. Reload
+          failures warn but do not fail activation.
         '';
       };
     };
