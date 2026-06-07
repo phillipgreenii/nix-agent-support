@@ -1,0 +1,10 @@
+# HACK 12: detect [[orders.overrides]] regression and re-apply via
+# `gc supervisor reload`. Works around gascity 1.1.0 dropping override
+# application on automatic config reloads. See HACKS.md HACK 12.
+[order]
+description = "HACK 12: detect [[orders.overrides]] regression and reload supervisor to re-apply"
+trigger     = "cooldown"
+interval    = "5m"
+exec        = "${SCRIPTS_DIR}/hack-order-override-watchdog.sh"
+timeout     = "60s"
+enabled     = true

@@ -381,6 +381,8 @@
                        hack-autoclose-completed-mols \
                        hack-daily-summary \
                        hack-message-forwarder \
+                       hack-mol-dog-jsonl \
+                       hack-order-override-watchdog \
                        hack-stale-lock-sweeper; do
                 test -f "$pack/orders/$o.toml" || { echo "missing orders/$o.toml"; exit 1; }
                 test -x "$pack/scripts/$o.sh"  || { echo "scripts/$o.sh not exec"; exit 1; }
@@ -389,7 +391,8 @@
               test -f "$pack/scripts/hack-archive-and-compact.RUNBOOK.md" || { echo "missing RUNBOOK"; exit 1; }
               for d in check-formulas-dir \
                        check-hack-2-still-needed \
-                       check-hack-10-still-needed; do
+                       check-hack-10-still-needed \
+                       check-hack-11-still-needed; do
                 test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
                 test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
               done
