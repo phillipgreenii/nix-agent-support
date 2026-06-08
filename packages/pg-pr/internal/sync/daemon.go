@@ -175,7 +175,11 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 func runOnce(ctx context.Context, e *Engine, log *slog.Logger) {
 	start := time.Now()
 	sum, err := e.Sync(ctx)
-	dur := time.Since(start)
+	logSyncOutcome(log, sum, err, time.Since(start))
+}
+
+// logSyncOutcome logs the result of one sync iteration.
+func logSyncOutcome(log *slog.Logger, sum *Summary, err error, dur time.Duration) {
 	if err != nil {
 		log.Error("sync iteration failed",
 			"err", err.Error(),
@@ -187,14 +191,29 @@ func runOnce(ctx context.Context, e *Engine, log *slog.Logger) {
 		log.Info("sync iteration finished", "duration_ms", dur.Milliseconds())
 		return
 	}
-	log.Info("sync iteration finished",
+	attrs := []any{
 		"duration_ms", dur.Milliseconds(),
 		"total_prs", sum.TotalPRs,
 		"created", sum.BeadsCreated,
 		"updated", sum.BeadsUpdated,
 		"closed", sum.BeadsClosed,
 		"errors", len(sum.Errors),
-	)
+	}
+	if len(sum.Errors) > 0 {
+		// Surface the actual error messages, not just the count. The per-repo
+		// state file is overwritten every sync, so a bare count hides the
+		// cause (e.g. "invalid issue type: feedback" went unnoticed for a long
+		// time precisely because only the count reached the logs). WARN level
+		// so it's visible without terminating the daemon.
+		details := make([]string, len(sum.Errors))
+		for i, se := range sum.Errors {
+			details[i] = se.Repo + ": " + se.Message
+		}
+		log.Warn("sync iteration finished with errors",
+			append(attrs, "error_details", details)...)
+		return
+	}
+	log.Info("sync iteration finished", attrs...)
 }
 
 // ReplaceCfg swaps the engine's config in-place. Used by Daemon on SIGHUP.

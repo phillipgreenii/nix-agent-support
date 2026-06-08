@@ -71,12 +71,34 @@ func (c *Client) CreateProcessingCycle(ctx context.Context, prBeadID, title stri
 // FindOpenProcessingCycle returns the open processing-cycle bead linked
 // to the given merge-request bead, if one exists. Returns (id, true) on
 // hit; ("", false, nil) when none open.
+//
+// Strategy: resolve the merge-request's children with a SINGLE dependency
+// query (ListChildrenOfPR), then intersect with the open process-feedback
+// tasks. This replaces the previous approach of scanning every open task and
+// probing each with a per-task `isChildOf` dep query — which made O(N) dep
+// calls per PR against a slow dolt server.
+//
+// Critically, every bd error PROPAGATES. The old code's `isChildOf` swallowed
+// dep-query errors as `false`, so a single transient bd/dolt failure turned
+// into a silent "no open cycle" — and the sync caller responded by creating a
+// SECOND cycle for a PR that already had one. That is the root cause of the
+// duplicate-cycle accumulation (48 cycles for 27 PRs). Returning an error here
+// makes the caller skip creation and retry on the next sync instead.
 func (c *Client) FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error) {
 	if prBeadID == "" {
 		return "", false, errors.New("processing-cycle: pr bead id required")
 	}
-	// Strategy: list dependents of the merge-request bead (children) filtered
-	// to open tasks whose title carries the canonical prefix.
+	childIDs, err := c.ListChildrenOfPR(ctx, prBeadID)
+	if err != nil {
+		return "", false, fmt.Errorf("find open processing-cycle: list children of %s: %w", prBeadID, err)
+	}
+	if len(childIDs) == 0 {
+		return "", false, nil
+	}
+	isChild := make(map[string]struct{}, len(childIDs))
+	for _, id := range childIDs {
+		isChild[id] = struct{}{}
+	}
 	out, err := c.Runner.Run(ctx,
 		"list",
 		"--type=task",
@@ -85,7 +107,7 @@ func (c *Client) FindOpenProcessingCycle(ctx context.Context, prBeadID string) (
 		"--limit=0",
 	)
 	if err != nil {
-		return "", false, fmt.Errorf("list processing-cycles: %w", err)
+		return "", false, fmt.Errorf("find open processing-cycle: list tasks: %w", err)
 	}
 	issues, err := parseBDList(out)
 	if err != nil {
@@ -95,8 +117,7 @@ func (c *Client) FindOpenProcessingCycle(ctx context.Context, prBeadID string) (
 		if !strings.HasPrefix(iss.Title, processingCycleTitlePrefix) {
 			continue
 		}
-		// Verify the parent-child link points at prBeadID.
-		if c.isChildOf(ctx, iss.ID, prBeadID) {
+		if _, ok := isChild[iss.ID]; ok {
 			return iss.ID, true, nil
 		}
 	}

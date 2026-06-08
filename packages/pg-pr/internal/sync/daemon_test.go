@@ -440,3 +440,28 @@ func TestDaemonNoDashboardWhenNil(t *testing.T) {
 		t.Fatal("daemon did not exit after cancel")
 	}
 }
+
+// TestLogSyncOutcome_LogsErrorDetails pins the observability fix: when a sync
+// finishes with per-repo errors recorded in the Summary (the normal path —
+// errors land in Summary.Errors, not as a returned Go error), the daemon must
+// log the actual error MESSAGES, not just a count. Previously only
+// "errors": <count> was logged at INFO, so the "why" (e.g. "invalid issue
+// type: feedback") was invisible in the logs and only reached the per-repo
+// state file (overwritten each sync).
+func TestLogSyncOutcome_LogsErrorDetails(t *testing.T) {
+	var buf strings.Builder
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	sum := &Summary{
+		TotalPRs: 3,
+		Errors: []SummaryError{
+			{Repo: "ZR-Private/ziprecruiter", Message: "PR #92955 feedback: invalid issue type: feedback"},
+		},
+	}
+
+	logSyncOutcome(log, sum, nil, 1500*time.Millisecond)
+
+	out := buf.String()
+	if !strings.Contains(out, "invalid issue type: feedback") {
+		t.Fatalf("sync error messages must appear in the daemon log so failures are diagnosable; got: %s", out)
+	}
+}
