@@ -21,7 +21,7 @@ buildGoModule {
 
   subPackages = [ "cmd/pa-monitor" ];
 
-  vendorHash = "sha256-XWGzlXmtEtNEBnNn7KTmkPyBHqODkdnJ7tis0hs07sw=";
+  vendorHash = "sha256-ewUU2IGaIrf8lywo24Rzz+QQeLXLCbaIQa2P5uITuGg=";
 
   ldflags = [
     "-X main.version=${version}"
