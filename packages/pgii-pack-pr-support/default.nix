@@ -6,7 +6,7 @@ mkPgiiPack {
   name = "pgii-pr-support";
   src = ./pack-src;
   meta = with lib; {
-    description = "PR review / triage / self-fix agents + pr-watcher / wake-on-work orders.";
+    description = "PR review / triage / self-fix agents + PR-related doctor checks.";
     license = licenses.mit;
     platforms = platforms.unix;
   };

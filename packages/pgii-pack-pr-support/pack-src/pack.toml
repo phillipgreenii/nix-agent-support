@@ -1,5 +1,6 @@
-# pgii-pr-support — PR review / triage / self-fix agents + pr-watcher /
-# wake-on-work orders + scripts + PR-related doctor checks.
+# pgii-pr-support — PR review / triage / self-fix agents + scripts +
+# PR-related doctor checks. (pr-watcher order removed 2026-06-08: the
+# standalone org.nixos.pg-pr-sync launchd daemon owns sync now.)
 #
 # Migrated from phillipg-nix-ziprecruiter/modules/pg-pr-zr/pack-src/ (nix-built
 # half-migration) and ~/gc/assets/imports/zr/doctor/ (legacy hand-built pack).

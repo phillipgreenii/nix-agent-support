@@ -356,10 +356,11 @@
               test -f "$pack/agents/pr-reviewer/agent.toml"               || { echo "missing pr-reviewer"; exit 1; }
               test -f "$pack/agents/pr-self-fixer/agent.toml"             || { echo "missing pr-self-fixer"; exit 1; }
               test -f "$pack/agents/pr-triage/agent.toml"                 || { echo "missing pr-triage"; exit 1; }
-              test -f "$pack/orders/pr-watcher.toml"                      || { echo "missing pr-watcher order"; exit 1; }
-              test -x "$pack/scripts/pr-watcher.sh"                       || { echo "pr-watcher.sh not exec"; exit 1; }
-              for d in check-pr-watcher-recent-runs \
-                       check-pr-agent-woke-no-progress \
+              # pr-watcher order + script and the check-pr-watcher-recent-runs
+              # doctor check were removed 2026-06-08: the standalone
+              # org.nixos.pg-pr-sync launchd daemon owns PR sync now, so the
+              # gas-city order is gone. No longer asserted here.
+              for d in check-pr-agent-woke-no-progress \
                        check-pr-feedback-backlog \
                        check-pr-feedback-throughput \
                        check-pr-orphan-beads \
