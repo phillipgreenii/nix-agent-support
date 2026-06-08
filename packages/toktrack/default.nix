@@ -6,16 +6,16 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "toktrack";
-  version = "2.9.0";
+  version = "2.10.0";
 
   src = fetchFromGitHub {
     owner = "mag123c";
     repo = "toktrack";
     rev = "v${version}";
-    hash = "sha256-1yxdDxxzLDWDumHUvQmr2w6gMtBeSyFXb+jxuGNiXiE=";
+    hash = "sha256-kFruC8uTu0xD9UPxhAgzQ0DeQzXoVDwSqzrQH18DBCo=";
   };
 
-  cargoHash = "sha256-dz0A0cfJoIn7EnvgZi/WYpM6slNNCg58qJqKTqOAyzY=";
+  cargoHash = "sha256-MgVig1QPy4nyLmWGtmkog01yvu/XQd3909EdJK2omTA=";
 
   # rusqlite uses the `bundled` feature (vendored C SQLite), and reqwest uses
   # `rustls-tls` (no openssl), so no system libs or darwin frameworks needed.
