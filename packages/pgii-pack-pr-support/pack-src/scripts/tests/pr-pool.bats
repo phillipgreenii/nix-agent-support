@@ -54,3 +54,25 @@ load_script() {
   run precheck
   [ "$status" -ne 0 ]
 }
+
+@test "discover_cycles: returns only cycles whose parent PR author is me" {
+  export SELF_LOGIN="phillipgziprecruiter"
+  # bd list -> two process-feedback cycles (mine zr-mine, team zr-team) + noise.
+  # bd show zr-mine -> parent zr-prm ; bd show zr-team -> parent zr-prt.
+  # bd show zr-prm -> author me ; bd show zr-prt -> author someone-else.
+  make_stub bd '
+case "$1 $2" in
+  "list --type=task")
+    echo "[{\"id\":\"zr-mine\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-team\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-x\",\"title\":\"other task\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+  "show zr-mine") echo "{\"id\":\"zr-mine\",\"parent\":\"zr-prm\"}" ;;
+  "show zr-team") echo "{\"id\":\"zr-team\",\"parent\":\"zr-prt\"}" ;;
+  "show zr-prm")  echo "{\"id\":\"zr-prm\",\"metadata\":{\"author\":\"phillipgziprecruiter\",\"pr_number\":1}}" ;;
+  "show zr-prt")  echo "{\"id\":\"zr-prt\",\"metadata\":{\"author\":\"someone-else\",\"pr_number\":2}}" ;;
+esac'
+  load_script
+  run discover_cycles
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zr-mine"* ]]
+  [[ "$output" != *"zr-team"* ]]
+  [[ "$output" != *"zr-x"* ]]
+}

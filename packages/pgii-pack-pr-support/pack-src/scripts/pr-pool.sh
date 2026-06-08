@@ -42,6 +42,42 @@ precheck() {
   return 0
 }
 
+# resolve_self prints the configured GitHub login (cached in $SELF_LOGIN).
+resolve_self() {
+  if [ -z "$SELF_LOGIN" ]; then
+    SELF_LOGIN="$(pg-pr config show --json 2>/dev/null | jq -r '.self_login // empty')"
+  fi
+  printf '%s' "$SELF_LOGIN"
+}
+
+# bd_obj runs `bd show <id> --json` and normalizes bd's array-or-object shape.
+bd_obj() {
+  bd show "$1" --json 2>/dev/null | jq 'if type=="array" then .[0] else . end'
+}
+
+# discover_cycles prints the IDs of open process-feedback cycles whose parent
+# merge-request was authored by me. One id per line.
+discover_cycles() {
+  local self
+  self="$(resolve_self)"
+  [ -z "$self" ] && {
+    log "ERROR: could not resolve self_login from pg-pr config"
+    return 1
+  }
+  bd list --type=task --status=open --json --limit 0 2>/dev/null |
+    jq -r 'if type=="array" then . else [] end
+             | map(select(.title | startswith("process-feedback:")))
+             | .[].id' |
+    while read -r cid; do
+      [ -z "$cid" ] && continue
+      local pid author
+      pid="$(bd_obj "$cid" | jq -r '.parent // empty')"
+      [ -z "$pid" ] && continue
+      author="$(bd_obj "$pid" | jq -r '.metadata.author // ""')"
+      [ "$author" = "$self" ] && printf '%s\n' "$cid" || true
+    done
+}
+
 main() {
   mkdir -p "$LOG_DIR"
   precheck || exit 1
