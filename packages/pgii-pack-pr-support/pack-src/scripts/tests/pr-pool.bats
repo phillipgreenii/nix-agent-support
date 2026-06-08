@@ -55,6 +55,20 @@ load_script() {
   [ "$status" -ne 0 ]
 }
 
+@test "dispatch: starts a detached tmux session running claude with the right flags" {
+  make_stub tmux 'exit 0'
+  make_stub uuidgen 'echo 11111111-2222-3333-4444-555555555555'
+  load_script
+  run dispatch zr-mine
+  [ "$status" -eq 0 ]
+  # session name echoed for the caller
+  [[ "$output" == *"pf-zr-mine"* ]]
+  grep -q -- "-L pgpool new-session -d -s pf-zr-mine" "$CALLS_LOG"
+  grep -q -- "-u" "$CALLS_LOG"
+  grep -q -- "claude --dangerously-skip-permissions --effort max --session-id 11111111-2222-3333-4444-555555555555" "$CALLS_LOG"
+  grep -q -- "BEADS_ACTOR=pgii-pool__process-feedback" "$CALLS_LOG"
+}
+
 @test "discover_cycles: returns only cycles whose parent PR author is me" {
   export SELF_LOGIN="phillipgziprecruiter"
   # bd list -> two process-feedback cycles (mine zr-mine, team zr-team) + noise.
