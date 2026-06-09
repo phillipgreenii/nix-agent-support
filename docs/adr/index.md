@@ -14,3 +14,4 @@
 | [0009](0009-pg-pr-bead-schema.md)                                | pg-pr bead schema                                             | Accepted | 2026-05-20 |
 | [0010](0010-pg-pr-defer-forgejo-to-v2.md)                        | pg-pr: defer forgejo to v2                                    | Accepted | 2026-05-20 |
 | [0011](0011-pa-monitor-daemon-otel-split.md)                     | pa-monitor Daemon + OTel Split                                | Accepted | 2026-05-20 |
+| [0012](0012-pg-pr-fingerprint-driven-daemon-sync.md)             | pg-pr fingerprint-driven daemon sync                          | Accepted | 2026-06-09 |
