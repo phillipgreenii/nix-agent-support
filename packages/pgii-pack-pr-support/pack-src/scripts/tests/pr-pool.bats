@@ -321,3 +321,13 @@ esac'
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /rename" "$CALLS_LOG"
   grep -q -- "process-feedback zr-c PR #7" "$CALLS_LOG"
 }
+
+@test "clear_context: submits /clear and waits for the prompt" {
+  export PR_POOL_SEND_SETTLE=0 PR_POOL_READY_TIMEOUT=2
+  make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
+  load_script
+  run clear_context
+  [ "$status" -eq 0 ]
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /clear" "$CALLS_LOG"
+  grep -q -- "capture-pane" "$CALLS_LOG"
+}

@@ -165,6 +165,13 @@ submit_line() {
   tmux -L "$SOCKET" send-keys -t "$sess" Enter
 }
 
+# clear_context resets claude's context for the next work item, then waits for
+# the prompt to return so the session is ready to be reused.
+clear_context() {
+  submit_line "$ROLE_NAME" "/clear" || return 1
+  wait_ready "$ROLE_NAME"
+}
+
 # nudge_text builds the instruction sent to the feedback processor. Points at the
 # refreshed SKILL.md; the processor creates/links work beads (children of the PR
 # bead) and de-duplicates against the PR's existing open work beads. It does NOT
