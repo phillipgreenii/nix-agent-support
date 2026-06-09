@@ -97,6 +97,21 @@ dispatch() {
   printf '%s\n' "$sess"
 }
 
+# wait_ready polls the pane until the ready prompt appears, bounded by
+# READY_TIMEOUT seconds. Returns nonzero on timeout so the caller can flag.
+wait_ready() {
+  local sess="$1" deadline
+  deadline=$(($(date +%s) + READY_TIMEOUT))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if tmux -L "$SOCKET" capture-pane -p -t "$sess" 2>/dev/null | grep -qF "$READY_PROMPT"; then
+      return 0
+    fi
+    sleep 1
+  done
+  log "wait_ready: $sess never reached the prompt within ${READY_TIMEOUT}s"
+  return 1
+}
+
 main() {
   mkdir -p "$LOG_DIR"
   precheck || exit 1

@@ -90,3 +90,20 @@ esac'
   [[ "$output" != *"zr-team"* ]]
   [[ "$output" != *"zr-x"* ]]
 }
+
+@test "wait_ready: returns 0 once the ready prompt appears" {
+  export PR_POOL_READY_TIMEOUT=2
+  make_stub tmux 'echo "welcome to claude"; echo "❯ "'
+  load_script
+  run wait_ready pf-zr-mine
+  [ "$status" -eq 0 ]
+  grep -q "tmux" "$CALLS_LOG"
+}
+
+@test "wait_ready: times out (nonzero) when the prompt never appears" {
+  export PR_POOL_READY_TIMEOUT=1
+  make_stub tmux 'echo "still booting"'
+  load_script
+  run wait_ready pf-zr-mine
+  [ "$status" -ne 0 ]
+}
