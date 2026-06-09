@@ -81,28 +81,6 @@ discover_cycles() {
     done
 }
 
-# session_name maps a cycle id to its tmux session name.
-session_name() { printf 'pf-%s' "$1"; }
-
-# dispatch starts a detached, interactive claude in a tmux pane for the cycle.
-# Prints the session name. BEADS_DIR/WORKSPACE_ROOT are pinned per session so
-# bd/pg-pr always resolve to the monorepo's zr .beads, regardless of tmux server age.
-dispatch() {
-  local cid="$1" sess
-  sess="$(session_name "$cid")"
-  tmux -u -L "$SOCKET" new-session -d -s "$sess" -c "$REPO_ROOT" \
-    -e "BEADS_ACTOR=$ACTOR" \
-    -e "BEADS_DIR=$REPO_ROOT/.beads" \
-    -e "WORKSPACE_ROOT=$REPO_ROOT" \
-    claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" \
-    >/dev/null ||
-    {
-      log "ERROR: tmux new-session failed for $cid"
-      return 1
-    }
-  printf '%s\n' "$sess"
-}
-
 # ensure_session creates the role-named claude session if it does not exist
 # (pinning BEADS_DIR/WORKSPACE_ROOT/BEADS_ACTOR per session), else reuses it.
 # Idempotent across work items in a run. Waits for the prompt before returning.
@@ -250,24 +228,29 @@ gated() {
   return 1
 }
 
-# work_one dispatches + drives one cycle to completion.
-# Returns wait_done's exit code on success; 1 on any earlier failure.
+# work_one drives one cycle to completion in the (reused) role session: ensure
+# the session, name the conversation, nudge, wait for close, then /clear for the
+# next item. Returns wait_done's exit code on success; 1 on any earlier failure.
+# wait_done handles its own unclaim on failure; clear_context always runs so the
+# session is left ready (and reusable).
 work_one() {
-  local cid="$1" sess
-  sess="$(dispatch "$cid")" || return 1
-  if ! wait_ready "$sess"; then
+  local cid="$1" rc
+  ensure_session || return 1
+  claude_rename "$(cycle_label "$cid")"
+  if ! send_nudge "$ROLE_NAME" "$cid"; then
     unclaim "$cid"
+    clear_context
     return 1
   fi
-  send_nudge "$sess" "$cid" || {
-    unclaim "$cid"
-    return 1
-  }
-  wait_done "$cid" "$sess"
+  wait_done "$cid" "$ROLE_NAME"
+  rc=$?
+  clear_context
+  return "$rc"
 }
 
-# drain_once works up to MAX discoverable cycles per pass (serially). Returns 0
-# whether gated (paused) or after attempting up to MAX discoverable cycles.
+# drain_once works up to MAX discoverable cycles per pass (serially) in one
+# reused role session, then tears the session down. Returns 0 whether gated
+# (paused) or after attempting up to MAX cycles.
 drain_once() {
   gated && return 0
   local cid worked=0
@@ -281,6 +264,7 @@ drain_once() {
     work_one "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
     worked=$((worked + 1))
   done < <(discover_cycles)
+  teardown_session
   log "pr-pool: drain pass complete ($worked cycle(s) attempted)"
   return 0
 }

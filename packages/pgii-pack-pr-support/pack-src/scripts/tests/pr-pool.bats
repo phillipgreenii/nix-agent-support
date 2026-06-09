@@ -55,21 +55,6 @@ load_script() {
   [ "$status" -ne 0 ]
 }
 
-@test "dispatch: starts a detached tmux session running claude with the right flags" {
-  make_stub tmux 'exit 0'
-  make_stub uuidgen 'echo 11111111-2222-3333-4444-555555555555'
-  load_script
-  run dispatch zr-mine
-  [ "$status" -eq 0 ]
-  # session name echoed for the caller
-  [[ "$output" == *"pf-zr-mine"* ]]
-  grep -q -- "-L pgpool new-session -d -s pf-zr-mine" "$CALLS_LOG"
-  grep -q -- "-u" "$CALLS_LOG"
-  grep -q -- "claude --dangerously-skip-permissions --effort max --session-id 11111111-2222-3333-4444-555555555555" "$CALLS_LOG"
-  grep -q -- "BEADS_ACTOR=pgii-pool__process-feedback" "$CALLS_LOG"
-  grep -q -- "BEADS_DIR=$REPO_ROOT/.beads" "$CALLS_LOG"
-  grep -q -- "WORKSPACE_ROOT=$REPO_ROOT" "$CALLS_LOG"
-}
 
 @test "discover_cycles: returns only cycles whose parent PR author is me" {
   export SELF_LOGIN="phillipgziprecruiter"
@@ -193,23 +178,32 @@ esac'
   [ "$status" -eq 0 ]
 }
 
-@test "drain_once: dispatches, nudges and waits for one discovered cycle" {
+@test "drain_once: works one cycle in the role session, then tears down" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
-  make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
   make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
   make_stub bd '
 case "$1 $2" in
   "list --type=task") echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
   "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\",\"status\":\"closed\"}" ;;
-  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\"}}" ;;
-  *) echo "{\"id\":\"zr-c\",\"status\":\"closed\"}" ;;
+  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\",\"pr_number\":7}}" ;;
+  *) echo "{}" ;;
 esac'
   load_script
   run drain_once
   [ "$status" -eq 0 ]
-  grep -q -- "new-session -d -s pf-zr-c" "$CALLS_LOG"
-  grep -q -- "send-keys -t pf-zr-c" "$CALLS_LOG"
+  grep -q -- "new-session -d -s PR FEEDBACK PROCESSOR" "$CALLS_LOG"
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /rename" "$CALLS_LOG"
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
+  grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
+  grep -q -- "kill-session -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
 }
 
 @test "nudge_text: instructs dedup vs the PR's open work beads + work beads as PR children" {
@@ -237,23 +231,28 @@ esac'
 @test "drain_once: stops after MAX cycles per pass" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX=1 PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
-  # TWO discoverable cycles (both mine, both close immediately); MAX=1 must work only one.
-  make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
   make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
   make_stub bd '
 case "$1 $2" in
   "list --type=task") echo "[{\"id\":\"zr-a\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-b\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
   "show zr-a")  echo "{\"id\":\"zr-a\",\"parent\":\"zr-pa\",\"status\":\"closed\"}" ;;
   "show zr-b")  echo "{\"id\":\"zr-b\",\"parent\":\"zr-pb\",\"status\":\"closed\"}" ;;
-  "show zr-pa") echo "{\"id\":\"zr-pa\",\"metadata\":{\"author\":\"me\"}}" ;;
-  "show zr-pb") echo "{\"id\":\"zr-pb\",\"metadata\":{\"author\":\"me\"}}" ;;
+  "show zr-pa") echo "{\"id\":\"zr-pa\",\"metadata\":{\"author\":\"me\",\"pr_number\":1}}" ;;
+  "show zr-pb") echo "{\"id\":\"zr-pb\",\"metadata\":{\"author\":\"me\",\"pr_number\":2}}" ;;
   *) echo "{}" ;;
 esac'
   load_script
   run drain_once
   [ "$status" -eq 0 ]
-  # MAX=1 -> exactly ONE cycle dispatched, even though TWO are discoverable.
-  [ "$(grep -c -- 'new-session -d -s pf-' "$CALLS_LOG")" -eq 1 ]
+  # MAX=1 -> the nudge (which carries SKILL_MD) is sent exactly once.
+  [ "$(grep -c -- '/abs/SKILL.md' "$CALLS_LOG")" -eq 1 ]
 }
 
 @test "ensure_session: creates the role session when absent, with pinned env" {
