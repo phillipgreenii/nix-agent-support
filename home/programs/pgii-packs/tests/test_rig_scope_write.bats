@@ -65,6 +65,36 @@ EOF
   grep -q "already-managed-elsewhere" "$city/city.toml"
 }
 
+@test "rig-scope un-sentineled block from a nix-store build of this pack is adopted, not rejected" {
+  # gascity re-serializes city.toml and drops comments, which strips our
+  # `# BEGIN/END pgii-pack:<name> (managed)` sentinels and leaves a BARE
+  # [defaults.rig.imports.<name>] block whose source is still a /nix/store
+  # build of this pack. A human never hand-types a store path, so the block
+  # is unambiguously our own stripped output: adopt and re-wrap it instead of
+  # failing the whole activation (and therefore the home-manager apply).
+  local pack; pack=$(mkRigPack "test-rig-pack")
+  local city; city=$(mkCity gc)
+  printf '%s\n' '[workspace]' 'name = "gc"' >"$city/city.toml"
+  cat >>"$city/city.toml" <<EOF
+
+[defaults.rig.imports.test-rig-pack]
+source = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test-rig-pack-0.1.0"
+export = true
+EOF
+
+  run "$SCRIPT" --cities "$(citiesJson "$city")" \
+                --packs  "$(packsJson "test-rig-pack" "$pack")"
+  [ "$status" -eq 0 ]
+
+  # Re-wrapped in managed sentinels, pointing at the CURRENT pack path.
+  blockExists "$city/city.toml" "test-rig-pack"
+  [ "$(blockPath "$city/city.toml" "test-rig-pack")" = "$pack" ]
+  # Exactly one declaration of the key — the stale bare block is gone, not duplicated.
+  [ "$(grep -c '^\[defaults\.rig\.imports\.test-rig-pack\]$' "$city/city.toml")" -eq 1 ]
+  # Hand-written content survives.
+  grep -q "^\[workspace\]" "$city/city.toml"
+}
+
 @test "rig-scope managed block in city.toml does NOT trigger collision" {
   local pack; pack=$(mkRigPack "test-rig-pack")
   local city; city=$(mkCity gc $'[workspace]\nname = "gc"')

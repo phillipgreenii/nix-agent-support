@@ -231,6 +231,9 @@ process_target() {
   shift
   local -a names=("$@")
 
+  # Keys whose bare (sentinel-stripped) block we will adopt and re-wrap below.
+  local -a adopt_keys=()
+
   # Fast path: if the file already holds exactly our desired managed blocks
   # (same set, sources and scope headers) and nothing else, do nothing. This
   # keeps `home-manager switch` from rewriting the file on every no-op rebuild.
@@ -274,10 +277,30 @@ process_target() {
       ' "$target")
 
       if [ "$inside_managed" = "-1" ]; then
-        echo "pgii-packs: ERROR: Hand-written [$toml_key] exists in $target" >&2
-        echo "  Either rename or delete the hand-written block, or remove" >&2
-        echo "  phillipgreenii.programs.pgii.packs.$name from your config." >&2
-        exit 3
+        # The key exists outside our sentinels. gascity re-serializes
+        # pack.toml/city.toml on some operations and drops comments, which
+        # strips our `# BEGIN/END pgii-pack:<name> (managed)` markers and
+        # leaves a bare block still pointing at a /nix/store build of THIS
+        # pack. A human never hand-types a store path, so that is unambiguously
+        # our own stripped output: adopt it (schedule removal of the bare table
+        # below, then re-emit it wrapped in sentinels). Any other un-sentineled
+        # source is treated as genuine hand-written config and still aborts,
+        # preserving the safety guard.
+        local bare_source
+        bare_source=$(awk -v key="[$toml_key]" '
+          $0 == key            { in_table = 1; next }
+          in_table && /^\[/    { exit }
+          in_table && /^source = / { gsub(/^source = "|"$/, ""); print; exit }
+        ' "$target")
+        # $name is a derivation name ([a-z0-9-]+), regex-safe in this match.
+        if [[ $bare_source =~ ^/nix/store/.*-${name}- ]]; then
+          adopt_keys+=("$toml_key")
+        else
+          echo "pgii-packs: ERROR: Hand-written [$toml_key] exists in $target" >&2
+          echo "  Either rename or delete the hand-written block, or remove" >&2
+          echo "  phillipgreenii.programs.pgii.packs.$name from your config." >&2
+          exit 3
+        fi
       fi
     fi
   done
@@ -295,6 +318,23 @@ process_target() {
     in_block && /^# END pgii-pack:.* \(managed\)$/ { in_block = 0; next }
     !in_block { print }
   ' "$target" >"$tmp"
+
+  # Drop any bare (sentinel-stripped) blocks we adopted in the pre-flight, so
+  # the fresh sentineled block re-emitted below does not duplicate the key. A
+  # TOML table runs from its header line to the next header (or EOF); only the
+  # adopted key's table is removed, leaving any parent tables and sibling
+  # content intact.
+  if [ "${#adopt_keys[@]}" -gt 0 ]; then
+    local akey
+    for akey in "${adopt_keys[@]}"; do
+      awk -v key="[$akey]" '
+        $0 == key         { skip = 1; next }
+        skip && /^\[/     { skip = 0 }
+        !skip             { print }
+      ' "$tmp" >"$tmp.adopt"
+      mv "$tmp.adopt" "$tmp"
+    done
+  fi
 
   # Trim trailing blank lines so we do not accumulate them on each rewrite.
   # This only ever drops trailing empty lines; non-blank hand-written content

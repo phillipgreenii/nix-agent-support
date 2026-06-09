@@ -24,6 +24,34 @@ EOF
   grep -q "somewhere-by-hand" "$city/pack.toml"
 }
 
+@test "city-scope un-sentineled block from a nix-store build of this pack is adopted, not rejected" {
+  # Symmetric to the rig-scope case: if gascity strips our sentinels from
+  # pack.toml, the bare [imports.<name>] still points at a /nix/store build of
+  # this pack. Adopt and re-wrap it instead of failing the activation.
+  local seed
+  seed=$(cat <<EOF
+[pack]
+name = "gc"
+schema = 2
+
+[imports.pgii-pack-foo]
+source = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-pgii-pack-foo-0.1.0"
+export = true
+EOF
+)
+  local city; city=$(mkCity gc "$seed")
+
+  run "$SCRIPT" --cities "$(citiesJson "$city")" \
+                --packs  "$(packsJson "pgii-pack-foo" "/nix/store/ccccccccccccccccccccccccccccccccc-pgii-pack-foo-0.1.0")"
+  [ "$status" -eq 0 ]
+  blockExists "$city/pack.toml" "pgii-pack-foo"
+  [ "$(blockPath "$city/pack.toml" "pgii-pack-foo")" = "/nix/store/ccccccccccccccccccccccccccccccccc-pgii-pack-foo-0.1.0" ]
+  # No duplicate: the stale bare table is gone, exactly one declaration remains.
+  [ "$(grep -c '^\[imports\.pgii-pack-foo\]$' "$city/pack.toml")" -eq 1 ]
+  # Hand-written [pack] header survives.
+  grep -q "^\[pack\]" "$city/pack.toml"
+}
+
 @test "hand-written collision: managed block does NOT trigger collision" {
   local seed
   seed=$(cat <<EOF
