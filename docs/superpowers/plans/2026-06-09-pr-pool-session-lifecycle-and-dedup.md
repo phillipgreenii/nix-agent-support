@@ -112,7 +112,7 @@ There can legitimately be more than one open cycle for a PR (pg-pr starts a new 
 
 Confirm, by re-reading the file: (a) no "Phase 3" / "implement the change" language remains; (b) work beads are described as **children of the PR bead**, `discovered-from` feedback; (c) the de-dup step (consider the PR's existing open work beads, link/update instead of duplicate) is present; (d) the "never close the cycle before all feedback children are closed" boundary remains. Fix inline if any are missing.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-process-feedback/SKILL.md
