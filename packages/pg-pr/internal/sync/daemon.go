@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -233,16 +234,31 @@ func xdgRuntimeDir() string {
 	return os.TempDir()
 }
 
-// NewJSONLogger returns a slog.Logger writing structured JSON to stderr.
-// CLI wiring calls this when --log-json is set.
-func NewJSONLogger() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+// newStderrHandler builds the daemon's base slog handler at Info level.
+// jsonFormat selects JSON vs human-readable text. The writer is injectable
+// for tests; production callers use NewJSONHandler/NewTextHandler (os.Stderr).
+func newStderrHandler(w io.Writer, jsonFormat bool) slog.Handler {
+	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	if jsonFormat {
+		return slog.NewJSONHandler(w, opts)
+	}
+	return slog.NewTextHandler(w, opts)
 }
 
+// NewJSONHandler returns the stderr JSON slog.Handler used by the daemon when
+// --log-json is set. CLI wiring composes it with the OTLP bridge handler.
+func NewJSONHandler() slog.Handler { return newStderrHandler(os.Stderr, true) }
+
+// NewTextHandler returns the stderr text slog.Handler (default daemon format).
+func NewTextHandler() slog.Handler { return newStderrHandler(os.Stderr, false) }
+
+// NewJSONLogger returns a slog.Logger writing structured JSON to stderr.
+// Retained for back-compat / standalone use; the daemon path composes
+// handlers directly (see cmd/pg-pr/sync.go).
+func NewJSONLogger() *slog.Logger { return slog.New(NewJSONHandler()) }
+
 // NewTextLogger returns a slog.Logger writing human-readable text to stderr.
-func NewTextLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-}
+func NewTextLogger() *slog.Logger { return slog.New(NewTextHandler()) }
 
 // startMetricsServer launches the Prometheus scrape endpoint in a
 // background goroutine and returns a shutdown closure. When

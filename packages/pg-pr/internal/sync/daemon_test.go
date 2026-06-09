@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -438,6 +439,27 @@ func TestDaemonNoDashboardWhenNil(t *testing.T) {
 	case <-doneCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("daemon did not exit after cancel")
+	}
+}
+
+func TestNewStderrHandler_JSONFormat(t *testing.T) {
+	var buf bytes.Buffer
+	slog.New(newStderrHandler(&buf, true)).Error("boom", "err", "bad")
+	out := buf.String()
+	if !strings.Contains(out, `"msg":"boom"`) || !strings.Contains(out, `"err":"bad"`) {
+		t.Fatalf("unexpected json log: %q", out)
+	}
+	if !strings.Contains(out, `"level":"ERROR"`) {
+		t.Fatalf("missing level: %q", out)
+	}
+}
+
+func TestNewStderrHandler_TextFormat(t *testing.T) {
+	var buf bytes.Buffer
+	slog.New(newStderrHandler(&buf, false)).Warn("watch")
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "watch") {
+		t.Fatalf("unexpected text log: %q", out)
 	}
 }
 

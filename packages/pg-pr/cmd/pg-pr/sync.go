@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
@@ -12,6 +13,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd/ghactions"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
@@ -81,10 +83,14 @@ configured repo.`,
 			if err != nil {
 				return fmt.Errorf("invalid --interval: %w", err)
 			}
-			var logger = sync.NewTextLogger()
+			var base = sync.NewTextHandler()
 			if syFlags.logJSON {
-				logger = sync.NewJSONLogger()
+				base = sync.NewJSONHandler()
 			}
+			// Fan out to stderr (preserves ~/Library/Logs/pg-pr-sync.err)
+			// and the OTLP bridge (→ otelcol → Loki). The bridge is a
+			// no-op when no OTLP endpoint is configured.
+			logger := slog.New(telemetry.Fanout(base, telemetry.NewSlogHandler()))
 			// Construct the dashboard store + agent registry and wire them
 			// onto the engine. The registry is required for snapshot
 			// approval classification; a config with no agents yields an
