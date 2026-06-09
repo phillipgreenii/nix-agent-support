@@ -120,6 +120,23 @@ ensure_session() {
   wait_ready "$ROLE_NAME"
 }
 
+# cycle_label builds a human-friendly claude conversation name for a cycle:
+# "process-feedback <cid> PR #<n>", falling back to just the cid if the parent
+# PR number can't be resolved.
+cycle_label() {
+  local cid="$1" pid pr
+  pid="$(bd_obj "$cid" | jq -r '.parent // empty')"
+  pr="$(bd_obj "$pid" | jq -r '.metadata.pr_number // empty')"
+  if [ -n "$pr" ]; then
+    printf 'process-feedback %s PR #%s' "$cid" "$pr"
+  else
+    printf 'process-feedback %s' "$cid"
+  fi
+}
+
+# claude_rename names the current claude conversation (findability + monitoring).
+claude_rename() { submit_line "$ROLE_NAME" "/rename \"$1\""; }
+
 # wait_ready polls the pane until the ready prompt glyph appears, bounded by
 # READY_TIMEOUT seconds. Returns nonzero on timeout so the caller can flag.
 # We match the glyph alone (READY_PROMPT default "❯") because claude renders its

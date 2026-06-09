@@ -289,3 +289,35 @@ esac'
   [ "$status" -eq 0 ]
   ! grep -q -- "new-session" "$CALLS_LOG"
 }
+
+@test "cycle_label: includes the cycle id and the parent PR number" {
+  make_stub bd '
+case "$1 $2" in
+  "show zr-c") echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\"}" ;;
+  "show zr-p") echo "{\"id\":\"zr-p\",\"metadata\":{\"pr_number\":7}}" ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run cycle_label zr-c
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zr-c"* ]]
+  [[ "$output" == *"PR #7"* ]]
+}
+
+@test "cycle_label: falls back to the cycle id when no PR number" {
+  make_stub bd 'echo "{}"'
+  load_script
+  run cycle_label zr-c
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zr-c"* ]]
+}
+
+@test "claude_rename: submits a /rename with the given name" {
+  export PR_POOL_SEND_SETTLE=0
+  make_stub tmux 'exit 0'
+  load_script
+  run claude_rename "process-feedback zr-c PR #7"
+  [ "$status" -eq 0 ]
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /rename" "$CALLS_LOG"
+  grep -q -- "process-feedback zr-c PR #7" "$CALLS_LOG"
+}
