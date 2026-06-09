@@ -112,6 +112,24 @@ wait_ready() {
   return 1
 }
 
+# nudge_text builds the instruction sent to the worker. Points at the clean
+# SKILL.md only; overrides its "implement the change" step (step 1 creates an
+# action bead instead of applying a fix) and forbids picking up new beads.
+nudge_text() {
+  local cid="$1"
+  printf '%s' "Read $SKILL_MD and process the process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), and for each create an action bead (task/bug, discovered-from the feedback) describing any needed code change — do NOT apply fixes and do NOT work the new action beads. Close non-actionable feedback. Then close the cycle with a one-line summary and exit."
+}
+
+# send_nudge types the nudge into the pane and presses Enter.
+send_nudge() {
+  local sess="$1" cid="$2"
+  [ -z "$SKILL_MD" ] && {
+    log "ERROR: PR_POOL_SKILL_MD unset (path to pg-pr-process-feedback SKILL.md)"
+    return 1
+  }
+  tmux -L "$SOCKET" send-keys -t "$sess" "$(nudge_text "$cid")" Enter
+}
+
 main() {
   mkdir -p "$LOG_DIR"
   precheck || exit 1

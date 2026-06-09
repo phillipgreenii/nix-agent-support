@@ -107,3 +107,14 @@ esac'
   run wait_ready pf-zr-mine
   [ "$status" -ne 0 ]
 }
+
+@test "send_nudge: sends a keys line naming the SKILL.md path and the cycle id" {
+  export PR_POOL_SKILL_MD="/abs/SKILL.md"
+  make_stub tmux 'exit 0'
+  load_script
+  run send_nudge pf-zr-mine zr-mine
+  [ "$status" -eq 0 ]
+  grep -q -- "send-keys -t pf-zr-mine" "$CALLS_LOG"
+  grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
+  grep -q -- "zr-mine" "$CALLS_LOG"
+}
