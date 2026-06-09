@@ -38,7 +38,7 @@ The current `SKILL.md` is stale (says feedback "lands in Phase 3"; tells the age
 
 - Modify: `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-process-feedback/SKILL.md`
 
-- [ ] **Step 1: Replace the file contents**
+- [x] **Step 1: Replace the file contents**
 
 Overwrite `SKILL.md` with exactly:
 
@@ -108,7 +108,7 @@ There can legitimately be more than one open cycle for a PR (pg-pr starts a new 
 - Don't strip the 🤖 marker — `pg-pr comment` adds it automatically.
 ````
 
-- [ ] **Step 2: Self-review the new content against the contract**
+- [x] **Step 2: Self-review the new content against the contract**
 
 Confirm, by re-reading the file: (a) no "Phase 3" / "implement the change" language remains; (b) work beads are described as **children of the PR bead**, `discovered-from` feedback; (c) the de-dup step (consider the PR's existing open work beads, link/update instead of duplicate) is present; (d) the "never close the cycle before all feedback children are closed" boundary remains. Fix inline if any are missing.
 
@@ -118,6 +118,8 @@ Confirm, by re-reading the file: (a) no "Phase 3" / "implement the change" langu
 git add packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-process-feedback/SKILL.md
 git commit -m "docs(pg-pr): refresh process-feedback skill (work beads = PR children; dedup open work)"
 ```
+
+> ✅ **Task A1 complete** — commit `1d4935a`. Spec+quality review clean (contract-compliant, internally consistent, stale Phase-3/implement language removed).
 
 ---
 
@@ -130,7 +132,7 @@ The nudge no longer needs to override "implement the change" (the skill is now c
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh` (the `nudge_text` function)
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pr-pool.bats`:
 
@@ -148,12 +150,12 @@ Append to `pr-pool.bats`:
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats -f "nudge_text"`
 Expected: FAIL — the current nudge lacks "open work bead"/"child of the PR bead" and still contains "exit".
 
-- [ ] **Step 3: Replace `nudge_text`**
+- [x] **Step 3: Replace `nudge_text`**
 
 In `pr-pool.sh`, replace the whole `nudge_text` function (its comment currently begins `# nudge_text builds the instruction sent to the worker.`) with:
 
@@ -169,12 +171,12 @@ nudge_text() {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats -f "nudge_text"` → PASS.
 Then run the full suite to confirm no regressions.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -193,7 +195,7 @@ Generalize the "type a line into claude, settle, then a SEPARATE Enter" pattern 
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pr-pool.bats`:
 
@@ -209,12 +211,12 @@ Append to `pr-pool.bats`:
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `... -f "submit_line"`
 Expected: FAIL — `submit_line: command not found`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pr-pool.sh`, add a config var immediately after the `SEND_SETTLE=…` config line (in the env-var block near the top):
 
@@ -250,11 +252,11 @@ send_nudge() {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 Run: `... -f "submit_line"` → PASS. Then the full suite (the existing `send_nudge` test still passes — it asserts the text + a separate `Enter`, which `submit_line` produces).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -273,7 +275,7 @@ Add the new function without removing `dispatch` yet (so the suite stays green).
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `pr-pool.bats`. The tmux stub is **stateful** (a file marks whether the session exists) so `has-session`/`new-session`/`kill-session` behave realistically:
 
@@ -313,12 +315,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `... -f "ensure_session"`
 Expected: FAIL — `ensure_session: command not found`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pr-pool.sh`, add `ensure_session` immediately after the `dispatch` function. It targets `$ROLE_NAME` and waits for readiness on both create and reuse (so a stale leftover session is still confirmed ready before use):
 
@@ -342,11 +344,11 @@ ensure_session() {
 }
 ```
 
-- [ ] **Step 4: Run them to verify they pass**
+- [x] **Step 4: Run them to verify they pass**
 
 Run: `... -f "ensure_session"` → PASS (both). Then the full suite.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -365,7 +367,7 @@ Name the claude conversation per work item for findability. The tmux session sta
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `pr-pool.bats`:
 
@@ -403,12 +405,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `... -f "cycle_label|claude_rename"`
 Expected: FAIL — functions not defined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pr-pool.sh`, add after `ensure_session`:
 
@@ -431,11 +433,11 @@ cycle_label() {
 claude_rename() { submit_line "$ROLE_NAME" "/rename \"$1\""; }
 ```
 
-- [ ] **Step 4: Run them to verify they pass**
+- [x] **Step 4: Run them to verify they pass**
 
 Run: `... -f "cycle_label|claude_rename"` → PASS. Then the full suite.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -454,7 +456,7 @@ Reset claude's context for the next work item and wait for the prompt to return.
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pr-pool.bats`:
 
@@ -470,12 +472,12 @@ Append to `pr-pool.bats`:
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `... -f "clear_context"`
 Expected: FAIL — `clear_context: command not found`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pr-pool.sh`, add after `claude_rename`:
 
@@ -488,11 +490,11 @@ clear_context() {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 Run: `... -f "clear_context"` → PASS. Then the full suite.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -511,7 +513,7 @@ End-of-run cleanup: graceful exit, then guaranteed `kill-session`. No-op when no
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `pr-pool.bats`:
 
@@ -545,12 +547,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `... -f "teardown"`
 Expected: FAIL — `teardown: command not found`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `pr-pool.sh`, add a config var after the `ROLE_NAME` line:
 
@@ -570,11 +572,11 @@ teardown() {
 }
 ```
 
-- [ ] **Step 4: Run them to verify they pass**
+- [x] **Step 4: Run them to verify they pass**
 
 Run: `... -f "teardown"` → PASS (both). Then the full suite.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -593,7 +595,7 @@ Switch the orchestration onto the new lifecycle and delete the obsolete per-cycl
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh` (`work_one`, `drain_once`; remove `session_name` + `dispatch`)
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats` (delete the `dispatch` test; update the two `drain_once` tests)
 
-- [ ] **Step 1: Update the tests first (they should fail against current code)**
+- [x] **Step 1: Update the tests first (they should fail against current code)**
 
 In `pr-pool.bats`:
 
@@ -662,12 +664,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the suite to verify the updated tests fail**
+- [x] **Step 2: Run the suite to verify the updated tests fail**
 
 Run: `... -f "drain_once"`
 Expected: FAIL — `drain_once` still calls `dispatch` (per-cycle `pf-` session), so the role-session and `kill-session` assertions don't match yet.
 
-- [ ] **Step 3: Rewire `work_one` and `drain_once`; remove `dispatch`/`session_name`**
+- [x] **Step 3: Rewire `work_one` and `drain_once`; remove `dispatch`/`session_name`**
 
 In `pr-pool.sh`:
 
@@ -722,12 +724,12 @@ drain_once() {
 }
 ```
 
-- [ ] **Step 4: Run the full suite to verify it passes**
+- [x] **Step 4: Run the full suite to verify it passes**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: PASS — all tests green, fast, no hang. (The `main: optional sentinel pauses` test still passes: `gated` returns before any session work, so no `new-session`.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
@@ -741,12 +743,12 @@ git commit -m "feat(pr-pool): role-session lifecycle (ensure/rename/clear/teardo
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Build the bats flake check**
+- [x] **Step 1: Build the bats flake check**
 
 Run: `nix build --no-link '.#checks.aarch64-darwin.test-pgii-pack-pr-support-bats'`
 Expected: builds green (the whole suite runs in the sandbox).
 
-- [ ] **Step 2: Confirm the pack still builds**
+- [x] **Step 2: Confirm the pack still builds**
 
 Run: `nix build --no-link '.#checks.aarch64-darwin.check-pgii-pack-pr-support-layout' '.#pgii-pack-pr-support'`
 Expected: both build. (No commit — nothing changed.)
@@ -759,7 +761,7 @@ Validate the lifecycle and dedup on the live `zr` store, exactly as step 1's Tas
 
 **Files:** none (manual verification; any fix gets a failing bats test first, per TDD).
 
-- [ ] **Step 1: Resolve the SKILL.md path and pick a target cycle**
+- [x] **Step 1: Resolve the SKILL.md path and pick a target cycle**
 
 ```bash
 SKILL=$(realpath ~/phillipg_mbp/phillipgreenii-nix-agent-support/packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-process-feedback/SKILL.md)
@@ -772,7 +774,7 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bash -c '
 
 For dedup specifically, prefer a PR that **already has an open work bead** (so you can confirm the processor links instead of duplicating). To check a candidate cycle `<cid>`: `bd show <cid> --json | jq -r '.parent'` → `<PR>`, then `bd children <PR> --status=open` and look for an existing `task`/`bug`.
 
-- [ ] **Step 2: Run the full orchestrator against one cycle, watching the session**
+- [x] **Step 2: Run the full orchestrator against one cycle, watching the session**
 
 ```bash
 cd /Volumes/ziprecruiter/monorepo
@@ -786,7 +788,7 @@ env -u BEADS_DIR -u WORKSPACE_ROOT \
 
 Expected: the session is named `PR FEEDBACK PROCESSOR`; the conversation is `/rename`d (`process-feedback <cid> PR #<n>`); the nudge submits; the worker creates/links a work bead as a **child of the PR bead**; the cycle closes; then the session is **torn down** (`exit` + `kill-session`) and the run exits.
 
-- [ ] **Step 3: Verify outcome in beads + no orphan session**
+- [x] **Step 3: Verify outcome in beads + no orphan session**
 
 ```bash
 cd /Volumes/ziprecruiter/monorepo
@@ -799,7 +801,7 @@ tmux -L pgpool ls 2>&1   # expect: no server / no "PR FEEDBACK PROCESSOR" sessio
 
 Confirm: cycle `closed`; the work bead is a **child of the PR bead**; if the PR already had an open work bead, the processor **linked/updated** it (no duplicate); no leftover `pgpool` session.
 
-- [ ] **Step 4: Commit any fixes surfaced by the smoke test** (each with its own failing bats test first, per TDD — e.g. if the `EXIT_CMD`/`/exit` incantation doesn't gracefully quit claude, adjust it; `kill-session` should still have closed the session).
+- [x] **Step 4: Commit any fixes surfaced by the smoke test** (each with its own failing bats test first, per TDD — e.g. if the `EXIT_CMD`/`/exit` incantation doesn't gracefully quit claude, adjust it; `kill-session` should still have closed the session).
 
 ---
 
