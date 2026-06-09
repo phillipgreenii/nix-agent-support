@@ -211,3 +211,25 @@ esac'
   grep -q -- "new-session -d -s pf-zr-c" "$CALLS_LOG"
   grep -q -- "send-keys -t pf-zr-c" "$CALLS_LOG"
 }
+
+@test "drain_once: stops after MAX cycles per pass" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
+  export PR_POOL_MAX=1 PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
+  # TWO discoverable cycles (both mine, both close immediately); MAX=1 must work only one.
+  make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
+  make_stub uuidgen 'echo uuid'
+  make_stub bd '
+case "$1 $2" in
+  "list --type=task") echo "[{\"id\":\"zr-a\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-b\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+  "show zr-a")  echo "{\"id\":\"zr-a\",\"parent\":\"zr-pa\",\"status\":\"closed\"}" ;;
+  "show zr-b")  echo "{\"id\":\"zr-b\",\"parent\":\"zr-pb\",\"status\":\"closed\"}" ;;
+  "show zr-pa") echo "{\"id\":\"zr-pa\",\"metadata\":{\"author\":\"me\"}}" ;;
+  "show zr-pb") echo "{\"id\":\"zr-pb\",\"metadata\":{\"author\":\"me\"}}" ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  # MAX=1 -> exactly ONE cycle dispatched, even though TWO are discoverable.
+  [ "$(grep -c -- 'new-session -d -s pf-' "$CALLS_LOG")" -eq 1 ]
+}

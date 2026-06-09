@@ -207,14 +207,17 @@ work_one() {
   wait_done "$cid" "$sess"
 }
 
-# drain_once works every currently-discoverable cycle (serially; MAX is the
-# reserved concurrency knob, =1 in step 1). Returns 0 whether gated (paused)
-# or after attempting all discoverable cycles.
+# drain_once works up to MAX discoverable cycles per pass (serially). Returns 0
+# whether gated (paused) or after attempting up to MAX discoverable cycles.
 drain_once() {
   gated && return 0
   local cid worked=0
   while read -r cid; do
     [ -z "$cid" ] && continue
+    if [ "$worked" -ge "$MAX" ]; then
+      log "pr-pool: reached MAX=$MAX cycle(s) this pass; stopping"
+      break
+    fi
     log "pr-pool: working cycle $cid"
     work_one "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
     worked=$((worked + 1))
