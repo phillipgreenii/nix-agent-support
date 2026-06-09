@@ -14,6 +14,7 @@ POLL_INTERVAL="${PR_POOL_POLL_INTERVAL:-10}"
 READY_PROMPT="${PR_POOL_READY_PROMPT:-❯}"               # glyph alone; claude follows it with a non-breaking space (U+00A0), not ASCII
 SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"                 # seconds between typing the nudge and pressing Enter
 ROLE_NAME="${PR_POOL_ROLE_NAME:-PR FEEDBACK PROCESSOR}" # tmux session name = the role; monitoring keys on this
+EXIT_CMD="${PR_POOL_EXIT_CMD:-/exit}"                   # graceful claude exit; kill-session is the guaranteed fallback
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
@@ -170,6 +171,14 @@ submit_line() {
 clear_context() {
   submit_line "$ROLE_NAME" "/clear" || return 1
   wait_ready "$ROLE_NAME"
+}
+
+# teardown_session gracefully exits claude, then closes the session. kill-session is the
+# guaranteed teardown even if the graceful exit doesn't land. No-op if absent.
+teardown_session() {
+  tmux -L "$SOCKET" has-session -t "$ROLE_NAME" 2>/dev/null || return 0
+  submit_line "$ROLE_NAME" "$EXIT_CMD" || true
+  tmux -L "$SOCKET" kill-session -t "$ROLE_NAME" >/dev/null 2>&1 || true
 }
 
 # nudge_text builds the instruction sent to the feedback processor. Points at the

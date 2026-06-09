@@ -331,3 +331,31 @@ esac'
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /clear" "$CALLS_LOG"
   grep -q -- "capture-pane" "$CALLS_LOG"
 }
+
+@test "teardown_session: sends exit then kills the role session" {
+  export PR_POOL_SEND_SETTLE=0
+  : > "$TEST_DIR/sess"   # session exists
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  load_script
+  run teardown_session
+  [ "$status" -eq 0 ]
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /exit" "$CALLS_LOG"
+  grep -q -- "kill-session -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
+}
+
+@test "teardown_session: no-op when no role session exists" {
+  make_stub tmux '
+case "$*" in
+  *has-session*) exit 1 ;;
+esac'
+  load_script
+  run teardown_session
+  [ "$status" -eq 0 ]
+  ! grep -q -- "kill-session" "$CALLS_LOG"
+}
