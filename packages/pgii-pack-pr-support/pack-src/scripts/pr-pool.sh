@@ -102,6 +102,24 @@ dispatch() {
   printf '%s\n' "$sess"
 }
 
+# ensure_session creates the role-named claude session if it does not exist
+# (pinning BEADS_DIR/WORKSPACE_ROOT/BEADS_ACTOR per session), else reuses it.
+# Idempotent across work items in a run. Waits for the prompt before returning.
+ensure_session() {
+  if ! tmux -L "$SOCKET" has-session -t "$ROLE_NAME" 2>/dev/null; then
+    tmux -u -L "$SOCKET" new-session -d -s "$ROLE_NAME" -c "$REPO_ROOT" \
+      -e "BEADS_ACTOR=$ACTOR" \
+      -e "BEADS_DIR=$REPO_ROOT/.beads" \
+      -e "WORKSPACE_ROOT=$REPO_ROOT" \
+      claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" \
+      >/dev/null || {
+      log "ERROR: tmux new-session failed for role '$ROLE_NAME'"
+      return 1
+    }
+  fi
+  wait_ready "$ROLE_NAME"
+}
+
 # wait_ready polls the pane until the ready prompt glyph appears, bounded by
 # READY_TIMEOUT seconds. Returns nonzero on timeout so the caller can flag.
 # We match the glyph alone (READY_PROMPT default "❯") because claude renders its

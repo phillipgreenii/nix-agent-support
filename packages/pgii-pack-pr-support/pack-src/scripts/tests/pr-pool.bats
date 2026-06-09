@@ -255,3 +255,37 @@ esac'
   # MAX=1 -> exactly ONE cycle dispatched, even though TWO are discoverable.
   [ "$(grep -c -- 'new-session -d -s pf-' "$CALLS_LOG")" -eq 1 ]
 }
+
+@test "ensure_session: creates the role session when absent, with pinned env" {
+  make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  load_script
+  run ensure_session
+  [ "$status" -eq 0 ]
+  grep -q -- "new-session -d -s PR FEEDBACK PROCESSOR" "$CALLS_LOG"
+  grep -q -- "BEADS_DIR=$REPO_ROOT/.beads" "$CALLS_LOG"
+  grep -q -- "WORKSPACE_ROOT=$REPO_ROOT" "$CALLS_LOG"
+  grep -q -- "BEADS_ACTOR=pgii-pool__process-feedback" "$CALLS_LOG"
+}
+
+@test "ensure_session: reuses an existing role session (no second new-session)" {
+  make_stub uuidgen 'echo uuid'
+  : > "$TEST_DIR/sess"   # pretend the session already exists
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  load_script
+  run ensure_session
+  [ "$status" -eq 0 ]
+  ! grep -q -- "new-session" "$CALLS_LOG"
+}
