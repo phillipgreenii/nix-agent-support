@@ -178,7 +178,7 @@ git commit -m "feat(pr-pool): script skeleton + precheck (zr workspace + bd reac
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `pr-pool.bats`:
 
@@ -206,12 +206,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f discover_cycles`
 Expected: FAIL — `discover_cycles: command not found` / no output.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add to `pr-pool.sh` (before `main`):
 
@@ -249,7 +249,7 @@ discover_cycles() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats ... -f discover_cycles`
 Expected: PASS.
@@ -262,13 +262,15 @@ git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh \
 git commit -m "feat(pr-pool): discover_cycles filters to my PRs by parent author"
 ```
 
+> ✅ **Task 2 complete** — commit `90dc766`. (`|| true` added to the filter line for `pipefail` correctness; shfmt reformatted.)
+
 ---
 
 ## Task 3: dispatch (spawn claude in a tmux pane)
 
 **Files:** `pr-pool.sh`, `pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 @test "dispatch: starts a detached tmux session running claude with the right flags" {
@@ -286,12 +288,12 @@ git commit -m "feat(pr-pool): discover_cycles filters to my PRs by parent author
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f dispatch`
 Expected: FAIL — `dispatch: command not found`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```bash
 # session_name maps a cycle id to its tmux session name.
@@ -310,7 +312,7 @@ dispatch() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats ... -f dispatch`
 Expected: PASS.
@@ -321,13 +323,15 @@ Expected: PASS.
 git add -u && git commit -m "feat(pr-pool): dispatch claude into a dedicated tmux socket"
 ```
 
+> ✅ **Task 3 complete** — commit `e57dc44`. (Staged the two pr-pool files explicitly rather than `git add -u`, to keep the `home/programs/pgii-packs/` WIP unstaged; shfmt reformatted.)
+
 ---
 
 ## Task 4: wait_ready (poll for the claude prompt, with timeout)
 
 **Files:** `pr-pool.sh`, `pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 @test "wait_ready: returns 0 once the ready prompt appears" {
@@ -345,12 +349,12 @@ git add -u && git commit -m "feat(pr-pool): dispatch claude into a dedicated tmu
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f wait_ready`
 Expected: FAIL — `wait_ready: command not found`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```bash
 # wait_ready polls the pane until the ready prompt appears, bounded by
@@ -368,7 +372,7 @@ wait_ready() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats ... -f wait_ready`
 Expected: PASS.
@@ -379,13 +383,15 @@ Expected: PASS.
 git add -u && git commit -m "feat(pr-pool): wait_ready polls for the claude prompt with a timeout"
 ```
 
+> ✅ **Task 4 complete** — commit `9b73378`. **Plan-test fix:** the spec's `PR_POOL_READY_TIMEOUT=N run wait_ready` pattern does NOT work — `READY_TIMEOUT` is resolved once at source time inside `load_script`, so the prefix override never lands and the timeout test looped the full 60s default. Fixed by `export PR_POOL_READY_TIMEOUT=N` BEFORE `load_script` (matching this file's existing `export SELF_LOGIN` pattern); dropped the dead `PR_POOL_POLL_INTERVAL=1`; added `grep -q tmux` to the happy-path test. **⚠️ Same broken pattern is in Tasks 6 & 7 tests (`PR_POOL_MAX_WAIT`/`PR_POOL_POLL_INTERVAL` prefix on `run`) — must apply the same export-before-load_script fix there (MAX_WAIT default is 1800s).**
+
 ---
 
 ## Task 5: send_nudge (direct the worker)
 
 **Files:** `pr-pool.sh`, `pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 @test "send_nudge: sends a keys line naming the SKILL.md path and the cycle id" {
@@ -400,12 +406,12 @@ git add -u && git commit -m "feat(pr-pool): wait_ready polls for the claude prom
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f send_nudge`
 Expected: FAIL — `send_nudge: command not found`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```bash
 # nudge_text builds the instruction sent to the worker. Points at the clean
@@ -424,7 +430,7 @@ send_nudge() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats ... -f send_nudge`
 Expected: PASS.
@@ -435,13 +441,15 @@ Expected: PASS.
 git add -u && git commit -m "feat(pr-pool): send_nudge directs the worker at the SKILL.md"
 ```
 
+> ✅ **Task 5 complete** — commit `433a611`. Spec + code-quality reviews clean (APPROVED). Reviewer noted two optional test gaps (no SKILL_MD-empty failure-path test; no `Enter` assertion) — deferred as non-blocking nice-to-haves.
+
 ---
 
 ## Task 6: wait_done (completion, with flag + unclaim on failure)
 
 **Files:** `pr-pool.sh`, `pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 @test "wait_done: returns 0 when the cycle closes" {
@@ -462,12 +470,12 @@ git add -u && git commit -m "feat(pr-pool): send_nudge directs the worker at the
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f wait_done`
 Expected: FAIL — `wait_done: command not found`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```bash
 # cycle_status prints the cycle bead's status.
@@ -501,7 +509,7 @@ wait_done() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats ... -f wait_done`
 Expected: PASS.
@@ -512,13 +520,15 @@ Expected: PASS.
 git add -u && git commit -m "feat(pr-pool): wait_done with flag + unclaim on failure (never auto-close)"
 ```
 
+> ✅ **Task 6 complete** — commit `a01a17a` (amended; message reworded to "wait_done unclaims on failure, never auto-closes (guards the close/exit race)"). Used the corrected `export PR_POOL_MAX_WAIT=N PR_POOL_POLL_INTERVAL=N; load_script` test pattern (same fix as Task 4 — the plan's `run`-prefix form would have hung 1800s). **Code-review fix:** added a TOCTOU guard — `wait_done` re-checks `cycle_status` immediately before each `unclaim` (pane-died + timeout paths) and returns 0 if the cycle is already `closed`, so a cycle the worker closed in the same instant it exited is never reverted to `open` (which would dupe action beads). Added a stateful-stub regression test for it (now 11 tests).
+
 ---
 
 ## Task 7: main drain loop (cap, sentinels, drain)
 
 **Files:** `pr-pool.sh`, `pr-pool.bats`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 @test "main: optional sentinel pauses before any work" {
@@ -549,12 +559,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bats ... -f "sentinel|drain_once"`
 Expected: FAIL — `drain_once: command not found`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Add `gated` + `drain_once` and rewrite `main`:
 
@@ -598,7 +608,7 @@ main() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: PASS (all tests).
@@ -609,6 +619,8 @@ Expected: PASS (all tests).
 git add -u && git commit -m "feat(pr-pool): main drain loop with read-only sentinel gates"
 ```
 
+> ✅ **Task 7 complete** — commit `32f1d88` (amended). Used the corrected `export …; load_script` timeout pattern. **Two extra test-stub fixes (beyond the timeout pattern):** (a) the `drain_once` `bd` stub's `show zr-c` now includes `"status":"closed"` so `wait_done` sees the cycle close (honoring the plan's `# closes immediately` comment); (b) the `tmux` stub echoes `❯ ` only for `capture-pane` (not `new-session`) — the plan's unconditional echo leaked into `work_one`'s capture of `dispatch`'s stdout and corrupted the session name. **Code-review fixes:** (1) the sentinel test was vacuous (it passed because `discover_cycles` found nothing, not because `gated` paused) — rewrote it to seed a discoverable cycle so the gate is the only thing preventing dispatch; verified by negative check (test fails when `gated && return 0` is removed). (2) Hardened `dispatch` with `>/dev/null` on `tmux new-session` so its stdout contract (session name only) is explicit — this is the root cause of fix (b). (3) Tightened `work_one`/`drain_once` return-value comments. Suite is now 13 tests.
+
 > **MAX/concurrency note:** step 1 works cycles serially (cap effectively 1). `MAX` is reserved as the knob a future daemon raises; implementing >1 concurrency (tracking N live panes) is out of scope here and is a later task.
 
 ---
@@ -617,7 +629,7 @@ git add -u && git commit -m "feat(pr-pool): main drain loop with read-only senti
 
 **Files:** `flake.nix`
 
-- [ ] **Step 1: Add the check (after `test-pgii-pack-dolt-hacks-bats`)**
+- [x] **Step 1: Add the check (after `test-pgii-pack-dolt-hacks-bats`)**
 
 ```nix
             test-pgii-pack-pr-support-bats =
@@ -636,34 +648,43 @@ git add -u && git commit -m "feat(pr-pool): main drain loop with read-only senti
                 '';
 ```
 
-- [ ] **Step 2: Run the check**
+- [x] **Step 2: Run the check**
 
 Run: `nix build --no-link '.#checks.aarch64-darwin.test-pgii-pack-pr-support-bats'`
 Expected: builds (bats green inside the sandbox).
 
-- [ ] **Step 3: Confirm the pack still builds (layout check unaffected — pr-pool.sh adds an exec script, no removed assertions)**
+- [x] **Step 3: Confirm the pack still builds (layout check unaffected — pr-pool.sh adds an exec script, no removed assertions)**
 
 Run: `nix build --no-link '.#checks.aarch64-darwin.check-pgii-pack-pr-support-layout' '.#pgii-pack-pr-support'`
 Expected: both build.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add flake.nix && git commit -m "test(pgii-pr-support): run pr-pool bats in flake checks"
 ```
 
+> ✅ **Task 8 complete** — commit `58e156f`. Check `test-pgii-pack-pr-support-bats` mirrors `test-pgii-pack-dolt-hacks-bats` (nativeBuildInputs bats/bash/jq, runs `$pack/scripts/tests/pr-pool.bats`). Both `test-pgii-pack-pr-support-bats` (13 bats green in sandbox) and `check-pgii-pack-pr-support-layout` + `.#pgii-pack-pr-support` build (exit 0).
+
 ---
+
+> ✅ **Tasks 1–8 complete** (commits `bd1ecc1`→`58e156f`); 13 bats tests green via the flake check. **Final holistic review (Opus): READY FOR LIVE SMOKE TEST**, no blockers. Open follow-ups surfaced for the live run below:
+>
+> - **Important (warm-socket env):** the dispatched pane inherits the `pgpool` tmux _server's_ env (captured at server start), not `pr-pool.sh`'s cleaned env. A fresh socket (the documented single-cycle smoke test) is fine, but a pre-existing/warm `pgpool` server (or a future multi-cycle drain) could let the `~/phillipg_mbp/.envrc` `BEADS_DIR`/`WORKSPACE_ROOT` taint reach the worker. Optional hardening: pin them per session with `-e "BEADS_DIR=$REPO_ROOT/.beads" -e "WORKSPACE_ROOT=$REPO_ROOT"` on `new-session`. Does NOT block single-cycle Task 9.
+> - **Watch-list #1 (nudge vs SKILL.md):** the nudge says create an action bead per actionable feedback child but does not tell the worker to _close_ those children, while `SKILL.md` says never close the cycle until every child is closed → the worker may refuse to close (→ `wait_done` times out + unclaims). Most likely thing to surface during Task 9; iterate the nudge text per Step 5 if so.
+> - Other watch items: `❯ ` ready-prompt must match real `claude` output under `tmux -u`; 60s `READY_TIMEOUT` enough for `--effort max` first launch; PR-dedup descope assumption (≈1 cycle per PR); send-keys delivers the full nudge + `Enter`.
+> - Minor (non-blocking): `drain_once` reports a `discover_cycles` failure as "0 cycles" (Step-2 dry-contact check mitigates); test-coverage nice-to-haves (`send_nudge`-unset-SKILL_MD, `discover_cycles`-empty-self, `dispatch`-fail unclaim, `Enter` token).
 
 ## Task 9: Live smoke test (real bd/tmux/claude, MAX=1)
 
 **Files:** none (manual verification).
 
-- [ ] **Step 1: Resolve the SKILL.md absolute path**
+- [x] **Step 1: Resolve the SKILL.md absolute path**
 
 Run: `ls "$(nix build --no-link --print-out-paths '.#pgii-pack-pr-support' 2>/dev/null)"` is NOT it — the skill lives in the plugin. Use the source path:
 `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-process-feedback/SKILL.md` (absolute it with `realpath`).
 
-- [ ] **Step 2: Dry contact — confirm `discover_cycles`'s inputs resolve**
+- [x] **Step 2: Dry contact — confirm `discover_cycles`'s inputs resolve**
 
 Verify the building blocks (no script sourcing) from the monorepo root with the
 `.envrc` taint scrubbed:
@@ -679,7 +700,7 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bash -c '
 
 Expected: `self_login: phillipgziprecruiter` and a non-zero cycle count (these are exactly what `resolve_self` + `discover_cycles` consume). If `self_login` is empty, `discover_cycles` will error out by design.
 
-- [ ] **Step 3: Full run against ONE cycle, watching the pane**
+- [x] **Step 3: Full run against ONE cycle, watching the pane**
 
 Run:
 
@@ -693,11 +714,36 @@ PR_POOL_SKILL_MD="$(realpath ~/phillipg_mbp/phillipgreenii-nix-agent-support/pac
 
 Expected: a `pf-<id>` pane spawns running claude; the nudge lands; the worker reads feedback children, creates action bead(s), closes the cycle; `pr-pool` logs the drain pass and exits.
 
-- [ ] **Step 4: Verify outcome in beads**
+- [x] **Step 4: Verify outcome in beads**
 
 Run: `bd show <cycle-id> --json | jq .status` → `closed`; `bd list --type=task --json --limit 0 | jq '[.[]|select(.created_by=="'"$ACTOR"'" or (.title|test("action|fix")))]'` shows new action beads (spot check).
 
-- [ ] **Step 5: Commit any fixes surfaced by the smoke test** (with their own failing bats test first, per TDD).
+- [x] **Step 5: Commit any fixes surfaced by the smoke test** (with their own failing bats test first, per TDD).
+
+---
+
+> ### Task 9 live smoke-test results (2026-06-09, target cycle `zr-u2a` / PR #89771)
+>
+> Ran via `work_one zr-u2a` (sourced the script, `main` suppressed) rather than full `pr-pool.sh`, because the documented `PR_POOL_MAX=1 pr-pool.sh` invocation is a **no-op limiter** — `drain_once` works _every_ discovered cycle and `MAX` is unused, so a full run would have drained all **10** of my open cycles, not one. (Wiring `MAX` as a per-pass cap is deferred — see note below.)
+>
+> **Pipeline validated end-to-end on real infra:** dispatch ✓ → claude launched in a `pf-zr-u2a` pane ✓ → `wait_ready` matched the prompt ✓ → nudge submitted ✓ → worker claimed the cycle, read both feedback children, **created action bead `zr-l296`** (bug, by actor `pgii-pool__process-feedback`), closed the non-actionable child, **closed both children then the cycle** ✓. **Step 4 verified:** `zr-u2a` → `closed` (assignee `pgii-pool__process-feedback`), `zr-l296` open, children `zr-4cwt`/`zr-5kj2` closed. Watch-list #1 did **not** bite — the worker closed children before the cycle.
+>
+> **Two real bugs surfaced and fixed (TDD, committed):**
+>
+> 1. `fix(pr-pool): match claude prompt glyph in wait_ready` (`2d58328`) — claude renders `❯` + a **non-breaking space (U+00A0)**, but `READY_PROMPT` defaulted to `❯ ` (ASCII space), so `wait_ready` never matched and timed out (first run hung the full 180s, nudge never sent). Fixed to match the glyph alone (+ nbsp regression test).
+> 2. `fix(pr-pool): send_nudge submits via a separate Enter after a settle` (`e472bac`) — `send-keys "$text" Enter` in one burst is ingested by claude as a **paste**, so the trailing `Enter` became a newline and the nudge never submitted (second run sat un-submitted until `wait_done` timed out at 900s). Root-caused live (a standalone `Enter` to the pane submitted instantly). Fixed: type, `sleep $SEND_SETTLE` (new `PR_POOL_SEND_SETTLE`, default 1s), then a separate `send-keys Enter` (+ test asserting the standalone Enter).
+>
+> Also committed earlier: `fix(pr-pool): pin BEADS_DIR/WORKSPACE_ROOT per tmux session` (`2886846`) for the warm-socket finding.
+>
+> **Automated re-run confirmed (2026-06-09, cycle `zr-7hms`):** after wiring `MAX`, re-ran the FULL `pr-pool.sh` with `PR_POOL_MAX=1` (default `SEND_SETTLE=1`). The complete production path validated automatically — `main → precheck → drain_once → discover_cycles → work_one → dispatch → wait_ready → send_nudge (automated submit) → wait_done`. The nudge **submitted via the code path** (no manual Enter), the worker claimed + processed `zr-7hms` (open→in_progress→closed in ~4.5 min), and `drain_once` logged "reached MAX=1 cycle(s) this pass; stopping" + "drain pass complete (1 cycle(s) attempted)" then exited 0 — the `MAX=1` cap held (did NOT touch a 2nd of the ~9 discoverable cycles). `send_nudge`'s default 1s settle is sufficient for the automated submit.
+>
+> **Other live observations (non-blocking, candidates for later steps):**
+>
+> - The dispatched claude pane does **not self-exit** after closing the cycle (stays at the prompt despite the nudge's "and exit"). `wait_done` still succeeds (it keys off cycle status), but orphaned panes would accumulate on the `pgpool` socket in a daemon — the orchestrator should `kill-session` after `wait_done` returns 0.
+> - Action bead `zr-l296` has `discovered_from = null` — the nudge asks for "discovered-from the feedback" but the worker didn't set the link. Nudge/worker wording detail, not orchestrator code.
+> - A non-blocking `SessionStart:startup hook error … node: command not found` appears in the pane (a startup hook lacks `node` in the dispatched env). Harmless to the run.
+> - `MAX` is now **wired** as a per-pass cap (commit `06d1938`, default 1) — `drain_once` stops after `MAX` cycles; the documented `pr-pool.sh`/`PR_POOL_MAX=1` invocation is now safe. SC2034 on `MAX` is gone.
+> - **PR-dedup may be needed after all (watch-list #4):** the two cycles processed during Task 9 (`zr-u2a` then `zr-7hms`) BOTH produced an action bead for PR #89771's failing `check-gradle-jdk17` build (`zr-l296` and `zr-cgls`) — i.e. duplicate process-feedback cycles for the same PR exist, so the orchestrator (no dedup) created duplicate action beads. The plan mooted dedup assuming "≈1 cycle per PR"; that assumption does NOT hold here. Confirm/clean up duplicate cycles (and consider dedup-by-PR) before any unattended multi-cycle/daemon run.
 
 ---
 
