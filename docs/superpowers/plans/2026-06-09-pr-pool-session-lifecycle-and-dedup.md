@@ -127,7 +127,7 @@ The nudge no longer needs to override "implement the change" (the skill is now c
 
 **Files:**
 
-- Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh` (`nudge_text`, lines 121–127)
+- Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh` (the `nudge_text` function)
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
 - [ ] **Step 1: Write the failing test**
@@ -155,7 +155,7 @@ Expected: FAIL — the current nudge lacks "open work bead"/"child of the PR bea
 
 - [ ] **Step 3: Replace `nudge_text`**
 
-In `pr-pool.sh`, replace the `nudge_text` function (lines 121–127) with:
+In `pr-pool.sh`, replace the whole `nudge_text` function (its comment currently begins `# nudge_text builds the instruction sent to the worker.`) with:
 
 ```bash
 # nudge_text builds the instruction sent to the feedback processor. Points at the
@@ -216,7 +216,7 @@ Expected: FAIL — `submit_line: command not found`.
 
 - [ ] **Step 3: Implement**
 
-In `pr-pool.sh`, add a config var after the `SEND_SETTLE` line (line 15):
+In `pr-pool.sh`, add a config var immediately after the `SEND_SETTLE=…` config line (in the env-var block near the top):
 
 ```bash
 ROLE_NAME="${PR_POOL_ROLE_NAME:-PR FEEDBACK PROCESSOR}" # tmux session name = the role; monitoring keys on this
@@ -237,7 +237,7 @@ submit_line() {
 }
 ```
 
-Replace the body of `send_nudge` (lines 133–142) to route through `submit_line`:
+Replace the whole `send_nudge` function to route through `submit_line`:
 
 ```bash
 send_nudge() {
@@ -320,7 +320,7 @@ Expected: FAIL — `ensure_session: command not found`.
 
 - [ ] **Step 3: Implement**
 
-In `pr-pool.sh`, add `ensure_session` immediately after `dispatch` (after line 102). It targets `$ROLE_NAME` and waits for readiness on both create and reuse (so a stale leftover session is still confirmed ready before use):
+In `pr-pool.sh`, add `ensure_session` immediately after the `dispatch` function. It targets `$ROLE_NAME` and waits for readiness on both create and reuse (so a stale leftover session is still confirmed ready before use):
 
 ```bash
 # ensure_session creates the role-named claude session if it does not exist
@@ -597,7 +597,7 @@ Switch the orchestration onto the new lifecycle and delete the obsolete per-cycl
 
 In `pr-pool.bats`:
 
-(a) **Delete** the `@test "dispatch: starts a detached tmux session running claude with the right flags"` block (lines 58–72 in the original file) — `dispatch` is being removed.
+(a) **Delete** the entire `@test "dispatch: starts a detached tmux session running claude with the right flags"` block — `dispatch` is being removed.
 
 (b) **Replace** the `@test "drain_once: dispatches, nudges and waits for one discovered cycle"` block with:
 
@@ -671,9 +671,9 @@ Expected: FAIL — `drain_once` still calls `dispatch` (per-cycle `pf-` session)
 
 In `pr-pool.sh`:
 
-(a) **Delete** `session_name` (lines 82–83) and `dispatch` (lines 85–102).
+(a) **Delete** the `session_name` one-liner and the entire `dispatch` function.
 
-(b) **Replace** `work_one` (lines 194–208) with:
+(b) **Replace** the whole `work_one` function with:
 
 ```bash
 # work_one drives one cycle to completion in the (reused) role session: ensure
@@ -697,7 +697,7 @@ work_one() {
 }
 ```
 
-(c) **Replace** `drain_once` (lines 210–227) with (add `teardown` after the loop):
+(c) **Replace** the whole `drain_once` function with (it adds `teardown` after the loop):
 
 ```bash
 # drain_once works up to MAX discoverable cycles per pass (serially) in one
