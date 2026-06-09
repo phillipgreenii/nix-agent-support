@@ -179,6 +179,16 @@ esac'
   ! grep -q "new-session" "$CALLS_LOG"
 }
 
+@test "wait_ready: matches claude's real prompt (glyph + non-breaking space)" {
+  export PR_POOL_READY_TIMEOUT=2
+  # Real claude renders ❯ followed by U+00A0 (non-breaking space, bytes c2 a0),
+  # NOT an ASCII space — surfaced by the live smoke test. wait_ready must match.
+  make_stub tmux 'printf "\xe2\x9d\xaf\xc2\xa0\n"'
+  load_script
+  run wait_ready pf-x
+  [ "$status" -eq 0 ]
+}
+
 @test "drain_once: dispatches, nudges and waits for one discovered cycle" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1

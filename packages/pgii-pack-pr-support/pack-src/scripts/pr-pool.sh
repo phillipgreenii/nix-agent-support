@@ -11,7 +11,7 @@ SKILL_MD="${PR_POOL_SKILL_MD:-}"
 READY_TIMEOUT="${PR_POOL_READY_TIMEOUT:-60}"
 MAX_WAIT="${PR_POOL_MAX_WAIT:-1800}"
 POLL_INTERVAL="${PR_POOL_POLL_INTERVAL:-10}"
-READY_PROMPT="${PR_POOL_READY_PROMPT:-❯ }"
+READY_PROMPT="${PR_POOL_READY_PROMPT:-❯}" # glyph alone; claude follows it with a non-breaking space (U+00A0), not ASCII
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
@@ -100,8 +100,10 @@ dispatch() {
   printf '%s\n' "$sess"
 }
 
-# wait_ready polls the pane until the ready prompt appears, bounded by
+# wait_ready polls the pane until the ready prompt glyph appears, bounded by
 # READY_TIMEOUT seconds. Returns nonzero on timeout so the caller can flag.
+# We match the glyph alone (READY_PROMPT default "❯") because claude renders its
+# prompt as ❯+U+00A0 (non-breaking space), not ❯+ASCII-space.
 wait_ready() {
   local sess="$1" deadline
   deadline=$(($(date +%s) + READY_TIMEOUT))
