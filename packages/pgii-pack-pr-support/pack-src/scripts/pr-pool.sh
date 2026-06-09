@@ -12,6 +12,7 @@ READY_TIMEOUT="${PR_POOL_READY_TIMEOUT:-60}"
 MAX_WAIT="${PR_POOL_MAX_WAIT:-1800}"
 POLL_INTERVAL="${PR_POOL_POLL_INTERVAL:-10}"
 READY_PROMPT="${PR_POOL_READY_PROMPT:-❯}" # glyph alone; claude follows it with a non-breaking space (U+00A0), not ASCII
+SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"   # seconds between typing the nudge and pressing Enter
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
@@ -125,14 +126,19 @@ nudge_text() {
   printf '%s' "Read $SKILL_MD and process the process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), and for each create an action bead (task/bug, discovered-from the feedback) describing any needed code change — do NOT apply fixes and do NOT work the new action beads. Close non-actionable feedback. Then close the cycle with a one-line summary and exit."
 }
 
-# send_nudge types the nudge into the pane and presses Enter.
+# send_nudge types the nudge into the pane, then submits it. The Enter MUST be
+# a SEPARATE send-keys after a brief settle: if text+Enter are sent in one
+# burst, claude ingests it as a paste and the trailing Enter becomes a newline
+# instead of submitting (confirmed live).
 send_nudge() {
   local sess="$1" cid="$2"
   [ -z "$SKILL_MD" ] && {
     log "ERROR: PR_POOL_SKILL_MD unset (path to pg-pr-process-feedback SKILL.md)"
     return 1
   }
-  tmux -L "$SOCKET" send-keys -t "$sess" "$(nudge_text "$cid")" Enter
+  tmux -L "$SOCKET" send-keys -t "$sess" "$(nudge_text "$cid")" || return 1
+  sleep "$SEND_SETTLE"
+  tmux -L "$SOCKET" send-keys -t "$sess" Enter
 }
 
 # cycle_status prints the cycle bead's status.

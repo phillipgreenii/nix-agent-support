@@ -110,8 +110,9 @@ esac'
   [ "$status" -ne 0 ]
 }
 
-@test "send_nudge: sends a keys line naming the SKILL.md path and the cycle id" {
+@test "send_nudge: types the nudge then submits with a separate Enter" {
   export PR_POOL_SKILL_MD="/abs/SKILL.md"
+  export PR_POOL_SEND_SETTLE=0
   make_stub tmux 'exit 0'
   load_script
   run send_nudge pf-zr-mine zr-mine
@@ -119,6 +120,9 @@ esac'
   grep -q -- "send-keys -t pf-zr-mine" "$CALLS_LOG"
   grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
   grep -q -- "zr-mine" "$CALLS_LOG"
+  # Enter must be a SEPARATE send-keys (not bundled with the text), else claude
+  # ingests the burst as a paste and never submits.
+  grep -qE "send-keys -t pf-zr-mine Enter$" "$CALLS_LOG"
 }
 
 @test "wait_done: returns 0 when the cycle closes" {
@@ -191,7 +195,7 @@ esac'
 
 @test "drain_once: dispatches, nudges and waits for one discovered cycle" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
-  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
   make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
   make_stub uuidgen 'echo uuid'
   make_stub bd '
