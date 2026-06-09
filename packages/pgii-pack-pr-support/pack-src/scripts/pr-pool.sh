@@ -130,6 +130,42 @@ send_nudge() {
   tmux -L "$SOCKET" send-keys -t "$sess" "$(nudge_text "$cid")" Enter
 }
 
+# cycle_status prints the cycle bead's status.
+cycle_status() { bd_obj "$1" | jq -r '.status // ""'; }
+
+# pane_alive returns 0 while the tmux session still exists.
+pane_alive() { tmux -L "$SOCKET" capture-pane -p -t "$1" >/dev/null 2>&1; }
+
+# unclaim returns a claimed-but-unfinished cycle to the open pool so the next
+# run can see it (discover/list filters --status=open; a stranded in_progress
+# cycle would be invisible otherwise).
+unclaim() { bd update "$1" --status=open --assignee="" >/dev/null 2>&1 || true; }
+
+# wait_done polls until the cycle closes (success) or MAX_WAIT elapses / the
+# pane dies (failure). On failure it unclaims + flags; it NEVER auto-closes.
+# Before unclaiming it re-checks status, so a cycle the worker closed in the
+# same instant it exited is never reverted to open (which would dupe work).
+wait_done() {
+  local cid="$1" sess="$2" deadline
+  deadline=$(($(date +%s) + MAX_WAIT))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    case "$(cycle_status "$cid")" in
+    closed) return 0 ;;
+    esac
+    if ! pane_alive "$sess"; then
+      [ "$(cycle_status "$cid")" = "closed" ] && return 0
+      log "wait_done: $sess exited before closing $cid; unclaiming"
+      unclaim "$cid"
+      return 1
+    fi
+    sleep "$POLL_INTERVAL"
+  done
+  [ "$(cycle_status "$cid")" = "closed" ] && return 0
+  log "wait_done: $cid not closed within ${MAX_WAIT}s; unclaiming + flagging"
+  unclaim "$cid"
+  return 1
+}
+
 main() {
   mkdir -p "$LOG_DIR"
   precheck || exit 1

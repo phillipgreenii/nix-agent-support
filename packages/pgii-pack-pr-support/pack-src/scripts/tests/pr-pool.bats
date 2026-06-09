@@ -118,3 +118,43 @@ esac'
   grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
   grep -q -- "zr-mine" "$CALLS_LOG"
 }
+
+@test "wait_done: returns 0 when the cycle closes" {
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1
+  make_stub bd 'echo "{\"id\":\"zr-mine\",\"status\":\"closed\"}"'
+  make_stub tmux 'echo "pane alive"'
+  load_script
+  run wait_done zr-mine pf-zr-mine
+  [ "$status" -eq 0 ]
+}
+
+@test "wait_done: on timeout, unclaims the cycle and returns nonzero" {
+  export PR_POOL_MAX_WAIT=1 PR_POOL_POLL_INTERVAL=1
+  make_stub bd 'echo "{\"id\":\"zr-mine\",\"status\":\"in_progress\"}"'
+  make_stub tmux 'echo "pane alive"'
+  load_script
+  run wait_done zr-mine pf-zr-mine
+  [ "$status" -ne 0 ]
+  grep -q -- "update zr-mine --status=open --assignee=" "$CALLS_LOG"
+}
+
+@test "wait_done: pane dies just as the cycle closes -> success, no unclaim" {
+  export PR_POOL_MAX_WAIT=5 PR_POOL_POLL_INTERVAL=1
+  # bd show: in_progress on the first poll, closed thereafter — simulates the
+  # worker closing the cycle and exiting between the status poll and the pane
+  # check. A stranded close must NOT be unclaimed.
+  make_stub bd '
+n="$(cat "$TEST_DIR/bd_n" 2>/dev/null || echo 0)"
+echo $((n + 1)) > "$TEST_DIR/bd_n"
+case "$1" in
+  show)
+    if [ "$n" -ge 1 ]; then echo "{\"id\":\"zr-mine\",\"status\":\"closed\"}";
+    else echo "{\"id\":\"zr-mine\",\"status\":\"in_progress\"}"; fi ;;
+  *) echo "{}" ;;
+esac'
+  make_stub tmux 'exit 1'
+  load_script
+  run wait_done zr-mine pf-zr-mine
+  [ "$status" -eq 0 ]
+  ! grep -q -- "update zr-mine --status=open" "$CALLS_LOG"
+}
