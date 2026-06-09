@@ -67,6 +67,8 @@ load_script() {
   grep -q -- "-u" "$CALLS_LOG"
   grep -q -- "claude --dangerously-skip-permissions --effort max --session-id 11111111-2222-3333-4444-555555555555" "$CALLS_LOG"
   grep -q -- "BEADS_ACTOR=pgii-pool__process-feedback" "$CALLS_LOG"
+  grep -q -- "BEADS_DIR=$REPO_ROOT/.beads" "$CALLS_LOG"
+  grep -q -- "WORKSPACE_ROOT=$REPO_ROOT" "$CALLS_LOG"
 }
 
 @test "discover_cycles: returns only cycles whose parent PR author is me" {

@@ -82,13 +82,15 @@ discover_cycles() {
 session_name() { printf 'pf-%s' "$1"; }
 
 # dispatch starts a detached, interactive claude in a tmux pane for the cycle.
-# Prints the session name. BEADS_DIR/WORKSPACE_ROOT were already unset at the
-# top, so the pane inherits a clean env and its bd/pg-pr resolve to zr.
+# Prints the session name. BEADS_DIR/WORKSPACE_ROOT are pinned per session so
+# bd/pg-pr always resolve to the monorepo's zr .beads, regardless of tmux server age.
 dispatch() {
   local cid="$1" sess
   sess="$(session_name "$cid")"
   tmux -u -L "$SOCKET" new-session -d -s "$sess" -c "$REPO_ROOT" \
     -e "BEADS_ACTOR=$ACTOR" \
+    -e "BEADS_DIR=$REPO_ROOT/.beads" \
+    -e "WORKSPACE_ROOT=$REPO_ROOT" \
     claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" \
     >/dev/null ||
     {
