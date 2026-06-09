@@ -118,12 +118,14 @@ wait_ready() {
   return 1
 }
 
-# nudge_text builds the instruction sent to the worker. Points at the clean
-# SKILL.md only; overrides its "implement the change" step (step 1 creates an
-# action bead instead of applying a fix) and forbids picking up new beads.
+# nudge_text builds the instruction sent to the feedback processor. Points at the
+# refreshed SKILL.md; the processor creates/links work beads (children of the PR
+# bead) and de-duplicates against the PR's existing open work beads. It does NOT
+# implement fixes, does NOT work the new beads, and does NOT exit — the
+# orchestrator owns session teardown.
 nudge_text() {
   local cid="$1"
-  printf '%s' "Read $SKILL_MD and process the process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), and for each create an action bead (task/bug, discovered-from the feedback) describing any needed code change — do NOT apply fixes and do NOT work the new action beads. Close non-actionable feedback. Then close the cycle with a one-line summary and exit."
+  printf '%s' "Read $SKILL_MD and process process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), resolve the parent PR bead and review the PR's existing open work beads (bd children <PR> --status=open). For each feedback, create a work bead (task/bug) as a child of the PR bead, discovered-from the feedback — but if that work matches an existing open work bead, link/update it instead of creating a duplicate. Do NOT apply fixes and do NOT work the new work beads. Close each feedback bead, then close the cycle with a one-line summary."
 }
 
 # send_nudge types the nudge into the pane, then submits it. The Enter MUST be

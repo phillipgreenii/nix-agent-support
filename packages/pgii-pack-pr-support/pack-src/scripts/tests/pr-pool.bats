@@ -212,6 +212,18 @@ esac'
   grep -q -- "send-keys -t pf-zr-c" "$CALLS_LOG"
 }
 
+@test "nudge_text: instructs dedup vs the PR's open work beads + work beads as PR children" {
+  export PR_POOL_SKILL_MD="/abs/SKILL.md"
+  load_script
+  run nudge_text zr-c
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/abs/SKILL.md"* ]]
+  [[ "$output" == *"zr-c"* ]]
+  [[ "$output" == *"open work bead"* ]]
+  [[ "$output" == *"child of the PR bead"* ]]
+  [[ "$output" != *"exit"* ]]
+}
+
 @test "drain_once: stops after MAX cycles per pass" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX=1 PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
