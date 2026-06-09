@@ -158,3 +158,40 @@ esac'
   [ "$status" -eq 0 ]
   ! grep -q -- "update zr-mine --status=open" "$CALLS_LOG"
 }
+
+@test "main: optional sentinel pauses before any work" {
+  export PR_POOL_QUOTA_PAUSED="$TEST_DIR/PAUSED"; : > "$PR_POOL_QUOTA_PAUSED"
+  export SELF_LOGIN="me"
+  # A cycle that WOULD be discovered + dispatched if gated() didn't pause first.
+  make_stub bd '
+case "$1 $2" in
+  "list --type=task") echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+  "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\"}" ;;
+  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\"}}" ;;
+  *) exit 0 ;;
+esac'
+  make_stub tmux 'exit 0'   # guard: must never be called while paused
+  load_script
+  run main
+  [ "$status" -eq 0 ]
+  ! grep -q "new-session" "$CALLS_LOG"
+}
+
+@test "drain_once: dispatches, nudges and waits for one discovered cycle" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1
+  make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
+  make_stub uuidgen 'echo uuid'
+  make_stub bd '
+case "$1 $2" in
+  "list --type=task") echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+  "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\",\"status\":\"closed\"}" ;;
+  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\"}}" ;;
+  *) echo "{\"id\":\"zr-c\",\"status\":\"closed\"}" ;;
+esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  grep -q -- "new-session -d -s pf-zr-c" "$CALLS_LOG"
+  grep -q -- "send-keys -t pf-zr-c" "$CALLS_LOG"
+}

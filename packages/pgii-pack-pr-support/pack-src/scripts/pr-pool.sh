@@ -89,7 +89,8 @@ dispatch() {
   sess="$(session_name "$cid")"
   tmux -u -L "$SOCKET" new-session -d -s "$sess" -c "$REPO_ROOT" \
     -e "BEADS_ACTOR=$ACTOR" \
-    claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" ||
+    claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" \
+    >/dev/null ||
     {
       log "ERROR: tmux new-session failed for $cid"
       return 1
@@ -166,10 +167,56 @@ wait_done() {
   return 1
 }
 
+# gated returns 0 (pause) if an optional, read-only sentinel file is present.
+# Paths default to empty (disabled). The script never creates/edits/removes them.
+gated() {
+  [ -n "$QUOTA_PAUSED" ] && [ -f "$QUOTA_PAUSED" ] && {
+    log "QUOTA_PAUSED present; pausing"
+    return 0
+  }
+  [ -n "$CICD_DOWN" ] && [ -f "$CICD_DOWN" ] && {
+    log "CICD_DOWN present; pausing"
+    return 0
+  }
+  return 1
+}
+
+# work_one dispatches + drives one cycle to completion.
+# Returns wait_done's exit code on success; 1 on any earlier failure.
+work_one() {
+  local cid="$1" sess
+  sess="$(dispatch "$cid")" || return 1
+  if ! wait_ready "$sess"; then
+    unclaim "$cid"
+    return 1
+  fi
+  send_nudge "$sess" "$cid" || {
+    unclaim "$cid"
+    return 1
+  }
+  wait_done "$cid" "$sess"
+}
+
+# drain_once works every currently-discoverable cycle (serially; MAX is the
+# reserved concurrency knob, =1 in step 1). Returns 0 whether gated (paused)
+# or after attempting all discoverable cycles.
+drain_once() {
+  gated && return 0
+  local cid worked=0
+  while read -r cid; do
+    [ -z "$cid" ] && continue
+    log "pr-pool: working cycle $cid"
+    work_one "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
+    worked=$((worked + 1))
+  done < <(discover_cycles)
+  log "pr-pool: drain pass complete ($worked cycle(s) attempted)"
+  return 0
+}
+
 main() {
   mkdir -p "$LOG_DIR"
   precheck || exit 1
-  log "pr-pool: precheck passed (REPO_ROOT=$REPO_ROOT)"
+  drain_once
 }
 
 main "$@"
