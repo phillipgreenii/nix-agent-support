@@ -27,14 +27,20 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel"
+	otlploggrpc "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	otlploghttp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	logglobal "go.opentelemetry.io/otel/log/global"
+	lognoop "go.opentelemetry.io/otel/log/noop"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -50,16 +56,16 @@ const TracerName = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/p
 // resources. Safe to call even when Init installed a no-op provider.
 type ShutdownFunc func(context.Context) error
 
-// Init configures the global OTel tracer provider.
+// Init configures the global OTel tracer provider and LoggerProvider.
 //
 // Behaviour:
 //
-//   - If OTEL_EXPORTER_OTLP_ENDPOINT is empty, Init installs a no-op
-//     tracer provider and returns a no-op shutdown. No error.
-//   - If the exporter fails to initialise, Init logs one stderr warning,
-//     installs a no-op provider, and returns a no-op shutdown. No error.
-//   - On success, Init installs a batching sdktrace provider and returns
-//     its Shutdown method.
+//   - If OTEL_EXPORTER_OTLP_ENDPOINT is empty, Init installs no-op providers
+//     and returns a no-op shutdown. No error.
+//   - If an exporter fails to initialise, Init logs one stderr warning,
+//     installs a no-op provider for that signal, and continues. No error.
+//   - On success, Init installs batching SDK providers and returns a combined
+//     Shutdown that flushes all of them.
 //
 // serviceName is used when OTEL_SERVICE_NAME is unset.
 func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error) {
@@ -67,20 +73,60 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 
 	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if endpoint == "" {
-		// No collector configured — install a no-op provider so callers
-		// can call otel.Tracer(...) without nil-deref worries.
+		// No collector configured — install no-op providers so callers can
+		// use otel.Tracer(...) and the global LoggerProvider without nil
+		// worries.
 		otel.SetTracerProvider(noop.NewTracerProvider())
+		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return noopShutdown, nil
 	}
 
-	exp, err := newOTLPExporter(ctx)
-	if err != nil {
+	res := buildResource(ctx, serviceName, version)
+	var shutdowns []ShutdownFunc
+
+	// Traces.
+	if traceExp, err := newOTLPExporter(ctx); err != nil {
 		fmt.Fprintf(os.Stderr,
-			"pg-pr: OTel exporter init failed (%v); traces will be no-op\n", err)
+			"pg-pr: OTel trace exporter init failed (%v); traces will be no-op\n", err)
 		otel.SetTracerProvider(noop.NewTracerProvider())
-		return noopShutdown, nil
+	} else {
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExp),
+			sdktrace.WithResource(res),
+		)
+		otel.SetTracerProvider(tp)
+		shutdowns = append(shutdowns, tp.Shutdown)
 	}
 
+	// Logs.
+	if logExp, err := newOTLPLogExporter(ctx); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"pg-pr: OTel log exporter init failed (%v); logs will be no-op\n", err)
+		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+	} else {
+		lp := sdklog.NewLoggerProvider(
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+			sdklog.WithResource(res),
+		)
+		logglobal.SetLoggerProvider(lp)
+		shutdowns = append(shutdowns, lp.Shutdown)
+	}
+
+	return func(ctx context.Context) error {
+		var errs []error
+		for _, s := range shutdowns {
+			if err := s(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}, nil
+}
+
+// buildResource constructs the shared OTel resource (service.name/version +
+// env + runtime attrs), degrading to a schemaless resource if detection
+// fails. service.name comes from OTEL_SERVICE_NAME, else serviceName.
+func buildResource(ctx context.Context, serviceName, version string) *resource.Resource {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(envOr("OTEL_SERVICE_NAME", serviceName)),
@@ -91,20 +137,24 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 		resource.WithProcessRuntimeVersion(),
 	)
 	if err != nil {
-		// Resource detection should never fail in practice; degrade to
-		// the bare-attributes resource and keep going.
-		res = resource.NewSchemaless(
+		return resource.NewSchemaless(
 			semconv.ServiceName(envOr("OTEL_SERVICE_NAME", serviceName)),
 			semconv.ServiceVersion(version),
 		)
 	}
+	return res
+}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
-		sdktrace.WithResource(res),
-	)
-	otel.SetTracerProvider(tp)
-	return tp.Shutdown, nil
+// newOTLPLogExporter builds the OTLP log exporter, mirroring
+// newOTLPExporter's protocol switch (grpc vs default http/protobuf). Endpoint
+// and TLS come from env vars honored by the exporter packages.
+func newOTLPLogExporter(ctx context.Context) (sdklog.Exporter, error) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))) {
+	case "grpc":
+		return otlploggrpc.New(ctx)
+	default:
+		return otlploghttp.New(ctx)
+	}
 }
 
 // Tracer returns a tracer scoped to the pg-pr instrumentation library.

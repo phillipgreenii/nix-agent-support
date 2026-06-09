@@ -2,10 +2,13 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	otellog "go.opentelemetry.io/otel/log"
+	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -91,4 +94,35 @@ func TestEnvOr(t *testing.T) {
 	if got := envOr("PG_PR_TEST_VAR", "fallback"); got != "set-value" {
 		t.Fatalf("envOr set: got %q want set-value", got)
 	}
+}
+
+func TestInit_NoEndpoint_InstallsNoopLoggerProvider(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+
+	shutdown, err := Init(context.Background(), "pg-pr-test", "v0.0.0")
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
+
+	lp := logglobal.GetLoggerProvider()
+	if lp == nil {
+		t.Fatal("nil global logger provider")
+	}
+	lg := lp.Logger("probe")
+	var rec otellog.Record
+	rec.SetBody(otellog.StringValue("probe"))
+	lg.Emit(context.Background(), rec)
+}
+
+func TestNewSlogHandler_NoProvider_NoError(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	if _, err := Init(context.Background(), "pg-pr-test", "v0.0.0"); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	h := NewSlogHandler()
+	if h == nil {
+		t.Fatal("NewSlogHandler returned nil")
+	}
+	slog.New(h).Warn("probe", "k", "v")
 }

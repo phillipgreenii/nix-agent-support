@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 )
 
 // fanoutHandler dispatches each record to every wrapped handler. A child is
@@ -64,4 +66,14 @@ func (f fanoutHandler) WithGroup(name string) slog.Handler {
 		next[i] = h.WithGroup(name)
 	}
 	return fanoutHandler{handlers: next}
+}
+
+// NewSlogHandler returns an slog.Handler that exports records to the global
+// OTel LoggerProvider (installed by Init). When no OTLP endpoint is
+// configured the global provider is a no-op, so this handler is a cheap
+// no-op and is safe to include unconditionally. The instrumentation scope
+// name is TracerName; it does NOT set service_name — that comes from the
+// resource (OTEL_SERVICE_NAME) configured in Init.
+func NewSlogHandler() slog.Handler {
+	return otelslog.NewHandler(TracerName)
 }
