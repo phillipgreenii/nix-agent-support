@@ -11,8 +11,9 @@ SKILL_MD="${PR_POOL_SKILL_MD:-}"
 READY_TIMEOUT="${PR_POOL_READY_TIMEOUT:-60}"
 MAX_WAIT="${PR_POOL_MAX_WAIT:-1800}"
 POLL_INTERVAL="${PR_POOL_POLL_INTERVAL:-10}"
-READY_PROMPT="${PR_POOL_READY_PROMPT:-❯}" # glyph alone; claude follows it with a non-breaking space (U+00A0), not ASCII
-SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"   # seconds between typing the nudge and pressing Enter
+READY_PROMPT="${PR_POOL_READY_PROMPT:-❯}"               # glyph alone; claude follows it with a non-breaking space (U+00A0), not ASCII
+SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"                 # seconds between typing the nudge and pressing Enter
+ROLE_NAME="${PR_POOL_ROLE_NAME:-PR FEEDBACK PROCESSOR}" # tmux session name = the role; monitoring keys on this
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
@@ -118,6 +119,17 @@ wait_ready() {
   return 1
 }
 
+# submit_line types a line into the claude pane, settles, then sends a SEPARATE
+# Enter. Bundling text+Enter makes claude treat the burst as a paste and the
+# trailing Enter becomes a newline instead of submitting (confirmed live). Used
+# for /rename, the nudge, /clear, and exit.
+submit_line() {
+  local sess="$1" text="$2"
+  tmux -L "$SOCKET" send-keys -t "$sess" "$text" || return 1
+  sleep "$SEND_SETTLE"
+  tmux -L "$SOCKET" send-keys -t "$sess" Enter
+}
+
 # nudge_text builds the instruction sent to the feedback processor. Points at the
 # refreshed SKILL.md; the processor creates/links work beads (children of the PR
 # bead) and de-duplicates against the PR's existing open work beads. It does NOT
@@ -128,19 +140,13 @@ nudge_text() {
   printf '%s' "Read $SKILL_MD and process process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), resolve the parent PR bead and review the PR's existing open work beads (bd children <PR> --status=open). For each feedback, create a work bead (task/bug) as a child of the PR bead, discovered-from the feedback — but if that work matches an existing open work bead, link/update it instead of creating a duplicate. Do NOT apply fixes and do NOT work the new work beads. Close each feedback bead, then close the cycle with a one-line summary."
 }
 
-# send_nudge types the nudge into the pane, then submits it. The Enter MUST be
-# a SEPARATE send-keys after a brief settle: if text+Enter are sent in one
-# burst, claude ingests it as a paste and the trailing Enter becomes a newline
-# instead of submitting (confirmed live).
 send_nudge() {
   local sess="$1" cid="$2"
   [ -z "$SKILL_MD" ] && {
     log "ERROR: PR_POOL_SKILL_MD unset (path to pg-pr-process-feedback SKILL.md)"
     return 1
   }
-  tmux -L "$SOCKET" send-keys -t "$sess" "$(nudge_text "$cid")" || return 1
-  sleep "$SEND_SETTLE"
-  tmux -L "$SOCKET" send-keys -t "$sess" Enter
+  submit_line "$sess" "$(nudge_text "$cid")"
 }
 
 # cycle_status prints the cycle bead's status.

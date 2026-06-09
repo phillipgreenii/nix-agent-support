@@ -224,6 +224,16 @@ esac'
   [[ "$output" != *"exit"* ]]
 }
 
+@test "submit_line: types the text then submits with a SEPARATE Enter" {
+  export PR_POOL_SEND_SETTLE=0
+  make_stub tmux 'exit 0'
+  load_script
+  run submit_line "SESS" "hello world"
+  [ "$status" -eq 0 ]
+  grep -q -- "send-keys -t SESS hello world" "$CALLS_LOG"
+  grep -qE "send-keys -t SESS Enter$" "$CALLS_LOG"
+}
+
 @test "drain_once: stops after MAX cycles per pass" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX=1 PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
