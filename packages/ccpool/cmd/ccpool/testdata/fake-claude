@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# fake-claude — test stub standing in for the real `claude` REPL.
+# Parses --session-id, fires the SessionStart hook, then idles.
+set -euo pipefail
+
+uuid=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id) uuid="$2"; shift 2 ;;
+    --name|--model|--plugin-dir|--resume) shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+cc="${CCPOOL_BIN:-ccpool}"
+transcript="${FAKE_CLAUDE_TRANSCRIPT:-/tmp/fake-claude-$uuid.jsonl}"
+printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' \
+  "$uuid" "$transcript" "$PWD" | "$cc" hook start || true
+
+# Idle so the tmux session stays alive until the test kills it.
+exec sleep 600

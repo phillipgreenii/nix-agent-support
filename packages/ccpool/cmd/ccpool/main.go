@@ -13,6 +13,7 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 	known := map[string]bool{
 		"hook":    true,
 		"list":    true,
+		"new":     true,
 		"version": true,
 	}
 	if len(args) < 2 {
@@ -31,6 +32,8 @@ func main() {
 		os.Exit(runHook(rest))
 	case "list":
 		os.Exit(runList(rest))
+	case "new":
+		os.Exit(runNew(rest))
 	case "version":
 		fmt.Println(version)
 	default:
