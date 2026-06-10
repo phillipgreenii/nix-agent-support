@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/lock"
+	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
@@ -57,6 +58,8 @@ func buildService() (*session.Service, *store.Store, int) {
 		Wait:       storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
 		Transcript: transcriptAdapter{},
 		Lock:       lock.New(cfg.RuntimeDir),
+		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
+		NotifyOn:   cfg.Notify.On,
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -158,5 +159,38 @@ func TestSend_timeoutFallsBackToNeedsInput(t *testing.T) {
 	}
 	if res.State != store.NeedsInput {
 		t.Errorf("timeout+awaiting should yield needs_input, got %+v", res)
+	}
+}
+
+type recordNotify struct{ events []notify.Event }
+
+func (r *recordNotify) Notify(e notify.Event) error { r.events = append(r.events, e); return nil }
+
+// The §8.3 step-6 fallback (timeout -> awaiting) fires NO Notification hook, so
+// Send must drive the notifier itself (spec §10).
+func TestSend_fallbackFiresNotifier(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
+		return wait.Outcome{State: store.Working, TimedOut: true}, nil
+	})
+	rn := &recordNotify{}
+	s := New(Deps{
+		Tmux: &sendTmux{live: true}, Trust: &fakeTrust{}, Store: st, Wait: w,
+		Transcript: fakeTranscript{awaiting: true},
+		Notify:     rn, NotifyOn: []string{"needs_input", "failed"},
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+		NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
+	})
+	res, err := s.Send(ctx, "a", "pick one", ModeRefuseIfBusy)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.State != store.NeedsInput {
+		t.Fatalf("state = %v, want needs_input", res.State)
+	}
+	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
+		t.Errorf("fallback must fire exactly one needs_input notification; got %+v", rn.events)
 	}
 }

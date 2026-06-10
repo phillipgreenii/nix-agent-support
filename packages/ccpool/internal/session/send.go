@@ -117,6 +117,9 @@ func (s *Service) resolveOutcome(ctx context.Context, name, transcriptPath strin
 		if transcriptPath != "" {
 			if awaiting, _ := s.d.Transcript.IsAwaitingInput(transcriptPath); awaiting {
 				_, _ = s.d.Store.Transition(ctx, name, store.NeedsInput, "", "")
+				// This transition fires no Notification hook (AskUserQuestion gap),
+				// so the notifier must be driven here (spec §10).
+				s.fireNotify(ctx, name, store.Working, store.NeedsInput)
 				return Result{State: store.NeedsInput}, nil
 			}
 		}

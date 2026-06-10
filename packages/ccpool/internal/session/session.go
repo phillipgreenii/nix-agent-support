@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/launch"
+	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -75,6 +76,8 @@ type Deps struct {
 	Wait       Waiter
 	Transcript Transcript
 	Lock       Locker
+	Notify     notify.Notifier // optional (nil = no-op); fires the §8.3 fallback edge (§10)
+	NotifyOn   []string        // states that trigger a notification
 	Socket     string
 	Prefix     string
 	PluginDir  string
@@ -185,6 +188,20 @@ func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid string
 			fmt.Errorf("session %q did not reach ready before timeout (state=%s)", name, out.State)
 	}
 	return Handle{Name: name, UUID: uuid, TmuxSession: tmuxName, State: out.State}, nil
+}
+
+// fireNotify edge-triggers the configured notifier for a transition that the
+// hook does NOT see (the §8.3 step-6 AskUserQuestion fallback, spec §10). No-op
+// when no notifier is wired or the edge/membership test fails.
+func (s *Service) fireNotify(ctx context.Context, name string, prior, to store.State) {
+	if s.d.Notify == nil || !notify.ShouldNotify(s.d.NotifyOn, string(prior), string(to)) {
+		return
+	}
+	uuid, cwd := "", ""
+	if row, ok, _ := s.d.Store.GetByName(ctx, name); ok {
+		uuid, cwd = row.UUID, row.CWD
+	}
+	_ = s.d.Notify.Notify(notify.Event{Name: name, UUID: uuid, State: string(to), CWD: cwd})
 }
 
 func orDefault(v, def string) string {
