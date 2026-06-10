@@ -30,12 +30,15 @@ in
       '';
       runAtLoad = true;
       # `ccpool reap` is a periodic short task (StartInterval), not a long-running
-      # daemon — it does its work and exits, so it is never in state=running at
-      # post-activation check time. Exempt it from the launchd health check
-      # (which is for keep-alive daemons); StartInterval keeps it recurring.
+      # daemon — it does its work and exits. keepAlive defaults to true in the
+      # helper, which would make launchd RESTART it on every exit (a ~10s respawn
+      # loop). Disable keepAlive so StartInterval is the only re-trigger (runs at
+      # load, then every `interval` seconds), and exempt it from the health check
+      # (which expects state=running, which a one-shot never reaches).
+      keepAlive = false;
       healthCheck = false;
       serviceConfig = {
-        StartInterval = interval; # periodic timer, not keepAlive
+        StartInterval = interval; # the periodic re-trigger
       };
     };
   };
