@@ -84,3 +84,51 @@ func (s *Store) List(ctx context.Context) ([]Session, error) {
 	}
 	return out, rows.Err()
 }
+
+// Transition sets state on the row named `name`, bumps generation, sets
+// last_activity_at to now, and (when non-empty) updates uuid and transcript_path.
+// Returns the prior state (for the hook's notifier edge-trigger, §10).
+func (s *Store) Transition(ctx context.Context, name string, to State, uuid, transcriptPath string) (State, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var prior State
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM sessions WHERE name = ?`, name).Scan(&prior); err != nil {
+		return "", fmt.Errorf("transition: load %q: %w", name, err)
+	}
+	now := s.clock.Now().Unix()
+	// All bind params positional; uuid/transcriptPath are passed twice so the
+	// CASE-WHEN guard and the assignment share one value.
+	_, err = tx.ExecContext(ctx, `
+		UPDATE sessions SET
+			state = ?,
+			generation = generation + 1,
+			last_activity_at = ?,
+			uuid = CASE WHEN ? <> '' THEN ? ELSE uuid END,
+			transcript_path = CASE WHEN ? <> '' THEN ? ELSE transcript_path END
+		WHERE name = ?`,
+		to, now, uuid, uuid, transcriptPath, transcriptPath, name)
+	if err != nil {
+		return "", fmt.Errorf("transition %q: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return prior, nil
+}
+
+// Upsert ensures a row exists for name; if absent it is inserted as Starting.
+// If present it is left untouched (does not clobber uuid/state). Used by `hook start`.
+func (s *Store) Upsert(ctx context.Context, name, uuid string) error {
+	_, ok, err := s.GetByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return s.Insert(ctx, Session{Name: name, UUID: uuid, State: Starting})
+}
