@@ -1,18 +1,23 @@
 // Package sync — daemon mode.
 //
-// `pg-pr sync --daemon` loops over Engine.Sync at a configured interval. The
-// daemon owns three resources:
+// `pg-pr sync --daemon` runs a fingerprint-driven loop: every interval it polls
+// GitHub for a cheap per-PR change signature (the detector, fingerprintTick),
+// diffs it against the previous tick plus the open merge-request beads, and
+// enqueues only the changed PRs onto two dedup FIFO queues (mine / team). Two
+// worker goroutines drain the queues serially via refreshPR — the only path
+// that mutates beads or the snapshot — and a single snapshot-owner goroutine
+// rebuilds and publishes the dashboard snapshot per PR. The daemon owns:
 //
 //   - A file lock at $XDG_RUNTIME_DIR/pg-pr/daemon.lock (or os.TempDir
 //     fallback) to enforce a single instance per user.
-//   - A SIGHUP listener that re-reads the config file and replaces the
-//     engine's config without restarting the process.
-//   - The caller-provided context, which is cancelled by SIGINT/SIGTERM at
-//     the CLI layer; cancellation finishes the current iteration and exits
-//     cleanly.
+//   - A SIGHUP listener that re-reads the config file and atomically replaces
+//     the engine's config without restarting the process.
+//   - The caller-provided context, which is cancelled by SIGINT/SIGTERM at the
+//     CLI layer; cancellation stops the tick loop, drains the workers, and
+//     exits cleanly.
 //
-// Failed iterations are logged but do not terminate the daemon — the next
-// tick will try again.
+// A failed fingerprint poll is logged and skipped (no beads change); the next
+// tick retries.
 package sync
 
 import (
@@ -207,6 +212,9 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 func (e *Engine) runWorker(ctx context.Context, q *refreshQueue, group string, updates chan<- snapshotUpdate, log *slog.Logger, wg *stdsync.WaitGroup) {
 	defer wg.Done()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		k, ok := q.dequeue()
 		if !ok {
 			select {
