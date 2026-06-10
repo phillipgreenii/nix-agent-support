@@ -36,6 +36,7 @@ type Claude struct {
 	PluginDir    string `toml:"plugin_dir"`
 	DefaultCwd   string `toml:"default_cwd"`
 	DefaultModel string `toml:"default_model"`
+	Bin          string `toml:"bin"`
 }
 type List struct {
 	DoneTTL   Duration `toml:"done_ttl"`
@@ -61,6 +62,7 @@ func defaults() Config {
 	return Config{
 		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute)},
 		Tmux:   Tmux{Socket: "ccpool", Prefix: "cc-"},
+		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
 		Wait:   Wait{Timeout: Duration(10 * time.Minute)},
 	}

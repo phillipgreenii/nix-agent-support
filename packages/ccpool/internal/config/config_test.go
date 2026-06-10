@@ -33,6 +33,19 @@ func TestLoad_defaultsWhenNoFile(t *testing.T) {
 	}
 }
 
+func TestLoad_claudeBinDefaultsToClaude(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Claude.Bin != "claude" {
+		t.Errorf("Claude.Bin = %q, want claude", c.Claude.Bin)
+	}
+}
+
 func TestLoad_readsTOMLOverrides(t *testing.T) {
 	dir := t.TempDir()
 	cfgDir := filepath.Join(dir, "cfg", "ccpool")
