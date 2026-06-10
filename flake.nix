@@ -89,6 +89,7 @@
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             version = phillipgreenii-nix-base.lib.mkVersion self;
           };
+          ccpool = final.callPackage ./packages/ccpool { };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             version = phillipgreenii-nix-base.lib.mkVersion self;
           };
@@ -576,6 +577,7 @@
             # Without this, nix-update 1.14+ reports `pkg = null` (surfaced as
             # "expected a set but found null").
             inherit (pkgs)
+              ccpool
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-gc
