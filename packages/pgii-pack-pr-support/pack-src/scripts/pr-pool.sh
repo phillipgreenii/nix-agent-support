@@ -90,22 +90,25 @@ discover_cycles() {
     done
 }
 
-# ensure_session creates the role-named claude session if it does not exist
-# (pinning BEADS_DIR/WORKSPACE_ROOT/BEADS_ACTOR per session), else reuses it.
-# Idempotent across work items in a run. Waits for the prompt before returning.
+# ensure_session creates the role's named claude session if absent (pinning
+# BEADS_DIR/WORKSPACE_ROOT and the role's BEADS_ACTOR), else reuses it. The role
+# defaults to feedback-processor. Waits for the prompt before returning.
 ensure_session() {
-  if ! tmux -L "$SOCKET" has-session -t "$ROLE_NAME" 2>/dev/null; then
-    tmux -u -L "$SOCKET" new-session -d -s "$ROLE_NAME" -c "$REPO_ROOT" \
-      -e "BEADS_ACTOR=$ACTOR" \
+  local role="${1:-feedback-processor}" sess actor
+  sess="$(role_session "$role")"
+  actor="$(role_actor "$role")"
+  if ! tmux -L "$SOCKET" has-session -t "$sess" 2>/dev/null; then
+    tmux -u -L "$SOCKET" new-session -d -s "$sess" -c "$REPO_ROOT" \
+      -e "BEADS_ACTOR=$actor" \
       -e "BEADS_DIR=$REPO_ROOT/.beads" \
       -e "WORKSPACE_ROOT=$REPO_ROOT" \
       claude --dangerously-skip-permissions --effort max --session-id "$(uuidgen)" \
       >/dev/null || {
-      log "ERROR: tmux new-session failed for role '$ROLE_NAME'"
+      log "ERROR: tmux new-session failed for role '$role' (session '$sess')"
       return 1
     }
   fi
-  wait_ready "$ROLE_NAME"
+  wait_ready "$sess"
 }
 
 # cycle_label builds a human-friendly claude conversation name for a cycle:
@@ -122,8 +125,8 @@ cycle_label() {
   fi
 }
 
-# claude_rename names the current claude conversation (findability + monitoring).
-claude_rename() { submit_line "$ROLE_NAME" "/rename \"$1\""; }
+# claude_rename names the current claude conversation in the given session.
+claude_rename() { submit_line "$1" "/rename \"$2\""; }
 
 # wait_ready polls the pane until the ready prompt glyph appears, bounded by
 # READY_TIMEOUT seconds. Returns nonzero on timeout so the caller can flag.
@@ -153,19 +156,20 @@ submit_line() {
   tmux -L "$SOCKET" send-keys -t "$sess" Enter
 }
 
-# clear_context resets claude's context for the next work item, then waits for
-# the prompt to return so the session is ready to be reused.
+# clear_context resets claude's context in the given session, then waits for the
+# prompt so the session is ready for the next item.
 clear_context() {
-  submit_line "$ROLE_NAME" "/clear" || return 1
-  wait_ready "$ROLE_NAME"
+  submit_line "$1" "/clear" || return 1
+  wait_ready "$1"
 }
 
-# teardown_session gracefully exits claude, then closes the session. kill-session is the
-# guaranteed teardown even if the graceful exit doesn't land. No-op if absent.
+# teardown_session gracefully exits claude in the given session, then kills it.
+# kill-session is the guaranteed teardown. No-op if the session is absent.
 teardown_session() {
-  tmux -L "$SOCKET" has-session -t "$ROLE_NAME" 2>/dev/null || return 0
-  submit_line "$ROLE_NAME" "$EXIT_CMD" || true
-  tmux -L "$SOCKET" kill-session -t "$ROLE_NAME" >/dev/null 2>&1 || true
+  local sess="$1"
+  tmux -L "$SOCKET" has-session -t "$sess" 2>/dev/null || return 0
+  submit_line "$sess" "$EXIT_CMD" || true
+  tmux -L "$SOCKET" kill-session -t "$sess" >/dev/null 2>&1 || true
 }
 
 # --- per-role config table (bash-3.2-safe case resolvers) ----------------
@@ -210,13 +214,14 @@ worker_label() {
   fi
 }
 
+# send_nudge sends the role-appropriate instruction line into the session.
 send_nudge() {
-  local sess="$1" cid="$2"
-  [ -z "$SKILL_MD" ] && {
-    log "ERROR: PR_POOL_SKILL_MD unset (path to pg-pr-process-feedback SKILL.md)"
+  local role="$1" sess="$2" id="$3"
+  [ -z "$(role_skill "$role")" ] && {
+    log "ERROR: SKILL.md path unset for role '$role'"
     return 1
   }
-  submit_line "$sess" "$(nudge_text_feedback "$cid")"
+  submit_line "$sess" "$(role_nudge "$role" "$id")"
 }
 
 # cycle_status prints the cycle bead's status.
@@ -269,23 +274,23 @@ gated() {
   return 1
 }
 
-# work_one drives one cycle to completion in the (reused) role session: ensure
-# the session, name the conversation, nudge, wait for close, then /clear for the
-# next item. Returns wait_done's exit code on success; 1 on any earlier failure.
-# wait_done handles its own unclaim on failure; clear_context always runs so the
-# session is left ready (and reusable).
+# work_one drives one bead to completion in its role's (reused) session: ensure
+# the session, name the conversation, nudge, wait for the role's completion
+# signal, then /clear for the next item. wait_done handles its own unclaim on
+# failure; clear_context always runs so the session is left ready/reusable.
 work_one() {
-  local cid="$1" rc
-  ensure_session || return 1
-  claude_rename "$(cycle_label "$cid")"
-  if ! send_nudge "$ROLE_NAME" "$cid"; then
-    unclaim "$cid"
-    clear_context
+  local role="$1" id="$2" sess rc
+  sess="$(role_session "$role")"
+  ensure_session "$role" || return 1
+  claude_rename "$sess" "$(role_convo_name "$role" "$id")"
+  if ! send_nudge "$role" "$sess" "$id"; then
+    unclaim "$id"
+    clear_context "$sess"
     return 1
   fi
-  wait_done "$cid" "$ROLE_NAME"
+  wait_done "$id" "$sess"
   rc=$?
-  clear_context
+  clear_context "$sess"
   return "$rc"
 }
 
@@ -302,10 +307,10 @@ drain_once() {
       break
     fi
     log "pr-pool: working cycle $cid"
-    work_one "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
+    work_one feedback-processor "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
     worked=$((worked + 1))
   done < <(discover_cycles)
-  teardown_session
+  teardown_session "$(role_session feedback-processor)"
   log "pr-pool: drain pass complete ($worked cycle(s) attempted)"
   return 0
 }

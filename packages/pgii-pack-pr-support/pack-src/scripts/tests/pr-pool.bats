@@ -100,13 +100,11 @@ esac'
   export PR_POOL_SEND_SETTLE=0
   make_stub tmux 'exit 0'
   load_script
-  run send_nudge pf-zr-mine zr-mine
+  run send_nudge feedback-processor pf-zr-mine zr-mine
   [ "$status" -eq 0 ]
   grep -q -- "send-keys -t pf-zr-mine" "$CALLS_LOG"
   grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
   grep -q -- "zr-mine" "$CALLS_LOG"
-  # Enter must be a SEPARATE send-keys (not bundled with the text), else claude
-  # ingests the burst as a paste and never submits.
   grep -qE "send-keys -t pf-zr-mine Enter$" "$CALLS_LOG"
 }
 
@@ -315,7 +313,7 @@ esac'
   export PR_POOL_SEND_SETTLE=0
   make_stub tmux 'exit 0'
   load_script
-  run claude_rename "process-feedback zr-c PR #7"
+  run claude_rename "PR FEEDBACK PROCESSOR" "process-feedback zr-c PR #7"
   [ "$status" -eq 0 ]
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /rename" "$CALLS_LOG"
   grep -q -- "process-feedback zr-c PR #7" "$CALLS_LOG"
@@ -325,7 +323,7 @@ esac'
   export PR_POOL_SEND_SETTLE=0 PR_POOL_READY_TIMEOUT=2
   make_stub tmux 'case "$*" in *capture-pane*) echo "❯ " ;; esac'
   load_script
-  run clear_context
+  run clear_context "PR FEEDBACK PROCESSOR"
   [ "$status" -eq 0 ]
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /clear" "$CALLS_LOG"
   grep -q -- "capture-pane" "$CALLS_LOG"
@@ -333,7 +331,7 @@ esac'
 
 @test "teardown_session: sends exit then kills the role session" {
   export PR_POOL_SEND_SETTLE=0
-  : > "$TEST_DIR/sess"   # session exists
+  : > "$TEST_DIR/sess"
   make_stub tmux '
 case "$*" in
   *new-session*)  : > "$TEST_DIR/sess" ;;
@@ -342,21 +340,33 @@ case "$*" in
   *capture-pane*) echo "❯ " ;;
 esac'
   load_script
-  run teardown_session
+  run teardown_session "PR FEEDBACK PROCESSOR"
   [ "$status" -eq 0 ]
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /exit" "$CALLS_LOG"
   grep -q -- "kill-session -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
 }
 
 @test "teardown_session: no-op when no role session exists" {
-  make_stub tmux '
-case "$*" in
-  *has-session*) exit 1 ;;
-esac'
+  make_stub tmux 'case "$*" in *has-session*) exit 1 ;; esac'
   load_script
-  run teardown_session
+  run teardown_session "PR FEEDBACK PROCESSOR"
   [ "$status" -eq 0 ]
   ! grep -q -- "kill-session" "$CALLS_LOG"
+}
+
+@test "ensure_session worker: creates the WORKER session with the worker actor" {
+  make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/wsess" ;;
+  *has-session*)  [ -f "$TEST_DIR/wsess" ] && exit 0 || exit 1 ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  load_script
+  run ensure_session worker
+  [ "$status" -eq 0 ]
+  grep -q -- "new-session -d -s WORKER" "$CALLS_LOG"
+  grep -q -- "BEADS_ACTOR=pgii-pool__worker" "$CALLS_LOG"
 }
 
 @test "role resolvers: worker vs feedback-processor (and default) map correctly" {
@@ -424,4 +434,23 @@ esac'
   [ "$(role_nudge feedback-processor zr-c)" = "$(nudge_text_feedback zr-c)" ]
   [ "$(role_convo_name worker zr-w1)" = "$(worker_label zr-w1)" ]
   [ "$(role_convo_name feedback-processor zr-c)" = "$(cycle_label zr-c)" ]
+}
+
+@test "work_one: send_nudge failure unclaims, still clears, and returns nonzero" {
+  unset PR_POOL_SKILL_MD                      # role_skill feedback-processor -> "" -> send_nudge fails
+  export PR_POOL_SEND_SETTLE=0 PR_POOL_READY_TIMEOUT=2
+  make_stub uuidgen 'echo uuid'
+  make_stub bd 'echo "{}"'                    # cycle_label parent-walk + unclaim
+  make_stub tmux '
+case "$*" in
+  *new-session*)  : > "$TEST_DIR/sess" ;;
+  *has-session*)  [ -f "$TEST_DIR/sess" ] && exit 0 || exit 1 ;;
+  *kill-session*) rm -f "$TEST_DIR/sess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  load_script
+  run work_one feedback-processor zr-c
+  [ "$status" -ne 0 ]
+  grep -q -- "update zr-c --status=open --assignee=" "$CALLS_LOG"      # unclaim ran
+  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /clear" "$CALLS_LOG"  # clear_context ran
 }
