@@ -551,13 +551,13 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	}
 	inputs := make([]snapshot.PRInput, 0, len(observed))
 	for key, pr := range observed {
-		// Ensure pr.Repo carries the configured remote — VCS providers may
-		// omit it on the returned api.PR (the watched-set key holds the
-		// authoritative repo identifier).
-		if pr.Repo == "" {
-			pr.Repo = key.Repo
+		// Resolve the per-PR config the same way as the old inline block:
+		// repoConfig(remote) lookup, falling back to an empty RepoConfig
+		// (carrying the remote) on miss so buildPRInput still stamps pr.Repo.
+		rcfg, rerr := e.repoConfig(key.Repo)
+		if rerr != nil {
+			rcfg = config.RepoConfig{Remote: key.Repo}
 		}
-		in := snapshot.PRInput{PR: pr}
 		// Snapshot enrichment: prefer the bulk-fetched data populated by
 		// EnrichedPRsProvider; only fall back to per-PR REST calls when
 		// the bulk fetch wasn't available (test fakes, GraphQL error,
@@ -568,70 +568,11 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 				enriched = &ep
 			}
 		}
-		rcfg, rerr := e.repoConfig(key.Repo)
-		if enriched != nil {
-			in.Reviews = enriched.Reviews
-			in.Comments = enriched.Comments
-			in.CIRuns = enriched.CIRuns
-		} else if rerr == nil {
-			if vp, err := e.providerFor(rcfg); err == nil {
-				if rl, ok := vp.(ReviewLister); ok {
-					if reviews, rrErr := rl.ListReviews(ctx, key.Repo, pr.Number); rrErr == nil {
-						in.Reviews = reviews
-					}
-				}
-				if reader, ok := vp.(CommentReader); ok {
-					if comments, cerr := reader.ListComments(ctx, key.Repo, pr.Number); cerr == nil {
-						in.Comments = comments
-					}
-				}
-			}
-			if cp := e.firstCICDFor(rcfg); cp != nil {
-				// Prefer the branch-known path (ghactions.Provider.ListRunsByBranch)
-				// when the provider supports it and api.PR carries the head branch —
-				// avoids one `gh pr view` per PR per tick.
-				if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
-					if runs, cerr := bl.ListRunsByBranch(ctx, key.Repo, pr.Branch); cerr == nil {
-						in.CIRuns = runs
-					}
-				} else if runs, cerr := cp.ListRuns(ctx, key.Repo, pr.Number); cerr == nil {
-					in.CIRuns = runs
-				}
-			}
-		}
-		// bd dep tree via per-repo client. The lookup is best-effort and
-		// requires the concrete *beads.Client (test fakes don't implement
-		// DepTreeUp); when the assertion fails we just skip deps for this
-		// PR.
 		bdc := repoClients[key.Repo]
 		if bdc == nil {
 			bdc = e.bdClientFor(rcfg)
 		}
-		if c, ok := bdc.(*beads.Client); ok {
-			cache := cachesByRepo[key.Repo]
-			var mrID string
-			if mr, found := cache.FindMergeRequest(key.Repo, pr.Number); found {
-				mrID = mr.ID
-			} else {
-				if mr, ferr := c.FindByRepoAndNumber(ctx, key.Repo, pr.Number); ferr == nil && mr != nil {
-					mrID = mr.ID
-				}
-			}
-			if mrID != "" {
-				// Cached dep tree first; live DepTreeUp only when the
-				// workspace-wide bulk fetch wasn't available for this PR.
-				var deps []beads.DepNode
-				if cached, ok := cache.DepsUpFor(mrID); ok {
-					deps = cached
-				} else if liveDeps, derr := c.DepTreeUp(ctx, mrID); derr == nil {
-					deps = liveDeps
-				}
-				if cache != nil {
-					beads.ApplyHumanLabels(deps, cache.HumanLabeled)
-				}
-				in.BeadsDeps = deps
-			}
-		}
+		in := e.buildPRInput(ctx, pr, enriched, bdc, cachesByRepo[key.Repo], rcfg)
 		// JIRA — left empty for v1; downstream task wires this from
 		// feedback beads.
 		inputs = append(inputs, in)
@@ -647,6 +588,128 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	})
 	e.deps.Snapshot.Set(snap)
 	telemetry.SnapshotPresent.Set(1)
+}
+
+// depTreeReader is the subset of *beads.Client that buildPRInput needs for the
+// dep-tree + human-label overlay. Asserting an interface (not the concrete
+// *beads.Client) keeps buildPRInput unit-testable; the real client satisfies it.
+type depTreeReader interface {
+	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
+	DepTreeUp(ctx context.Context, rootID string) ([]beads.DepNode, error)
+	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
+}
+
+// buildPRInput assembles the per-PR snapshot input for one observed PR:
+// reviews/comments/CI runs (from bulk enrichment when present, else per-PR
+// REST) plus the bd dep tree with `human` labels overlaid.
+//
+// Inputs:
+//   - enriched, when non-nil, supplies reviews/comments/CI runs from the
+//     per-repo GraphQL bulk fetch; otherwise the helper falls back to per-PR
+//     ReviewLister/CommentReader/CICD calls (providers lacking those optional
+//     capabilities are tolerated — those fields stay empty).
+//   - bdc is the per-repo bd client. The dep-tree path runs whenever a cache
+//     is present OR bdc satisfies depTreeReader (the real *beads.Client does;
+//     test fakes may inject it explicitly).
+//   - cache, when non-nil (full-sync path), answers the merge-request lookup,
+//     dep tree, and `human` label overlay from the per-tick bulk fetch. When
+//     nil (daemon per-PR refresh), buildPRInput fetches HumanLabeledBeads
+//     itself via the reader so the `human` overlay — and therefore
+//     WaitingOnMe — does not regress.
+//   - rcfg carries this PR's repo config; its Remote stamps pr.Repo when the
+//     VCS provider omitted it.
+func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.EnrichedPR, bdc BeadClient, cache *beads.TickCache, rcfg config.RepoConfig) snapshot.PRInput {
+	// Ensure pr.Repo carries the configured remote — VCS providers may omit
+	// it on the returned api.PR.
+	if pr.Repo == "" {
+		pr.Repo = rcfg.Remote
+	}
+	in := snapshot.PRInput{PR: pr}
+
+	// --- reviews/comments/CI runs ---
+	if enriched != nil {
+		in.Reviews = enriched.Reviews
+		in.Comments = enriched.Comments
+		in.CIRuns = enriched.CIRuns
+	} else {
+		if vp, err := e.providerFor(rcfg); err == nil {
+			if rl, ok := vp.(ReviewLister); ok {
+				if reviews, rrErr := rl.ListReviews(ctx, pr.Repo, pr.Number); rrErr == nil {
+					in.Reviews = reviews
+				}
+			}
+			if reader, ok := vp.(CommentReader); ok {
+				if comments, cerr := reader.ListComments(ctx, pr.Repo, pr.Number); cerr == nil {
+					in.Comments = comments
+				}
+			}
+		}
+		if cp := e.firstCICDFor(rcfg); cp != nil {
+			// Prefer the branch-known path (ghactions.Provider.ListRunsByBranch)
+			// when the provider supports it and api.PR carries the head branch —
+			// avoids one `gh pr view` per PR per tick.
+			if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
+				if runs, cerr := bl.ListRunsByBranch(ctx, pr.Repo, pr.Branch); cerr == nil {
+					in.CIRuns = runs
+				}
+			} else if runs, cerr := cp.ListRuns(ctx, pr.Repo, pr.Number); cerr == nil {
+				in.CIRuns = runs
+			}
+		}
+	}
+
+	// --- dep tree + human labels ---
+	// The dep path runs whenever a cache is present (full-sync) or bdc
+	// satisfies depTreeReader (real *beads.Client, or a test fake). Test
+	// fakes that don't implement depTreeReader fall through with no deps.
+	reader, hasReader := bdc.(depTreeReader)
+	if cache != nil || hasReader {
+		var mrID string
+		if cache != nil {
+			if mr, found := cache.FindMergeRequest(pr.Repo, pr.Number); found {
+				mrID = mr.ID
+			}
+		}
+		if mrID == "" && hasReader {
+			if mr, ferr := reader.FindByRepoAndNumber(ctx, pr.Repo, pr.Number); ferr == nil && mr != nil {
+				mrID = mr.ID
+			}
+		}
+		if mrID != "" {
+			// Cached dep tree first; live DepTreeUp only when the
+			// workspace-wide bulk fetch wasn't available for this PR.
+			// cacheHit distinguishes "cache has this PR (possibly with zero
+			// deps) — authoritative, skip the live call" from "cache miss —
+			// fall back to DepTreeUp", matching the pre-refactor semantics
+			// of cache.DepsUpFor's ok return.
+			var deps []beads.DepNode
+			cacheHit := false
+			if cache != nil {
+				if cached, ok := cache.DepsUpFor(mrID); ok {
+					deps = cached
+					cacheHit = true
+				}
+			}
+			if !cacheHit && hasReader {
+				if live, derr := reader.DepTreeUp(ctx, mrID); derr == nil {
+					deps = live
+				}
+			}
+			// Human-label overlay: from the cache on the full-sync path
+			// (the cache != nil branch wins so HumanLabeledBeads is NOT
+			// re-fetched); else fetch it live so the cache-less daemon
+			// per-PR refresh path still applies `human`.
+			if cache != nil {
+				beads.ApplyHumanLabels(deps, cache.HumanLabeled)
+			} else if hasReader {
+				if set, herr := reader.HumanLabeledBeads(ctx); herr == nil {
+					beads.ApplyHumanLabels(deps, set)
+				}
+			}
+			in.BeadsDeps = deps
+		}
+	}
+	return in
 }
 
 // allTeamMembers returns the de-duplicated union of TeamMembers across all
