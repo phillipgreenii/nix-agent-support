@@ -16,6 +16,15 @@ SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"                 # seconds between typing
 ROLE_NAME="${PR_POOL_ROLE_NAME:-PR FEEDBACK PROCESSOR}" # tmux session name = the role; monitoring keys on this
 EXIT_CMD="${PR_POOL_EXIT_CMD:-/exit}"                   # graceful claude exit; kill-session is the guaranteed fallback
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
+WORKER_SKILL_MD="${PR_POOL_WORKER_SKILL_MD:-}"                          # worker SKILL.md (analogue of SKILL_MD)
+FEEDBACK_SESSION="${PR_POOL_FEEDBACK_SESSION:-$ROLE_NAME}"              # tmux session for the feedback-processor role
+WORKER_SESSION="${PR_POOL_WORKER_SESSION:-WORKER}"                      # tmux session for the worker role
+FEEDBACK_ACTOR="${PR_POOL_FEEDBACK_ACTOR:-$ACTOR}"                      # BEADS_ACTOR for feedback-processor
+WORKER_ACTOR="${PR_POOL_WORKER_ACTOR:-pgii-pool__worker}"               # BEADS_ACTOR for worker
+MAX_FEEDBACK="${PR_POOL_MAX_FEEDBACK:-1}"                               # per-role concurrency cap (feedback)
+MAX_WORKER="${PR_POOL_MAX_WORKER:-1}"                                   # per-role concurrency cap (worker)
+WORKTREE_DIR="${PR_POOL_WORKTREE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool/worktrees}" # passed to the worker in its nudge
+ROLES="feedback-processor worker"                                       # role list for drain + teardown
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
 LOG_DIR="${PR_POOL_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool}"
@@ -159,14 +168,46 @@ teardown_session() {
   tmux -L "$SOCKET" kill-session -t "$ROLE_NAME" >/dev/null 2>&1 || true
 }
 
-# nudge_text builds the instruction sent to the feedback processor. Points at the
+# --- per-role config table (bash-3.2-safe case resolvers) ----------------
+# The "*" default branch resolves to the feedback-processor role so callers
+# that omit the role keep step-1 behavior.
+role_session()    { case "${1:-}" in worker) printf '%s' "$WORKER_SESSION";;   *) printf '%s' "$FEEDBACK_SESSION";; esac; }
+role_actor()      { case "${1:-}" in worker) printf '%s' "$WORKER_ACTOR";;     *) printf '%s' "$FEEDBACK_ACTOR";; esac; }
+role_skill()      { case "${1:-}" in worker) printf '%s' "$WORKER_SKILL_MD";;  *) printf '%s' "$SKILL_MD";; esac; }
+role_max()        { case "${1:-}" in worker) printf '%s' "$MAX_WORKER";;       *) printf '%s' "$MAX_FEEDBACK";; esac; }
+role_nudge()      { case "${1:-}" in worker) nudge_text_worker "${2:-}";;      *) nudge_text_feedback "${2:-}";; esac; }
+role_convo_name() { case "${1:-}" in worker) worker_label "${2:-}";;           *) cycle_label "${2:-}";; esac; }
+
+# nudge_text_feedback builds the instruction sent to the feedback processor. Points at the
 # refreshed SKILL.md; the processor creates/links work beads (children of the PR
 # bead) and de-duplicates against the PR's existing open work beads. It does NOT
 # implement fixes, does NOT work the new beads, and does NOT exit — the
 # orchestrator owns session teardown.
-nudge_text() {
+nudge_text_feedback() {
   local cid="$1"
   printf '%s' "Read $SKILL_MD and process process-feedback cycle $cid: claim it, read its feedback children (bd children $cid), resolve the parent PR bead and review the PR's existing open work beads (bd children <PR> --status=open). For each feedback, create a work bead (task/bug) as a child of the PR bead, discovered-from the feedback — but if that work matches an existing open work bead, link/update it instead of creating a duplicate. Do NOT apply fixes and do NOT work the new work beads. Close each feedback bead, then close the cycle with a one-line summary."
+}
+
+# nudge_text_worker builds the worker's instruction line. The worker does all
+# git work itself (pr-pool stays git-free): resolve PR+branch bead-first, work in
+# an isolated worktree, commit but never push, record then swap labels, never
+# close. WORKTREE_DIR is expanded so the agent gets a concrete path.
+nudge_text_worker() {
+  local id="$1"
+  printf '%s' "Read $WORKER_SKILL_MD and implement work bead $id. Claim it (bd update $id --claim). Resolve its PR + head branch bead-first from the parent merge-request bead's metadata (repo, pr_number, branch — no gh needed) and assert metadata.author is me; if you cannot resolve the PR or it is not mine, abort WITHOUT editing anything and leave it for worker-stuck. Create or reuse an isolated git worktree for that branch under $WORKTREE_DIR, implement the change the bead describes, and commit it (do NOT push, do NOT force). Then record the worktree path + commit SHA on the bead with bd comment, and ONLY AFTER that swap labels atomically: bd update $id --add-label needs-push --remove-label worker-ready. Leave the bead claimed/in_progress; do NOT close it."
+}
+
+# worker_label builds the claude conversation name for a work bead:
+# "worker <id> PR #<n>", falling back to just the id.
+worker_label() {
+  local id="$1" pid pr
+  pid="$(bd_obj "$id" | jq -r '.parent // empty')"
+  pr="$(bd_obj "$pid" | jq -r '.metadata.pr_number // empty')"
+  if [ -n "$pr" ]; then
+    printf 'worker %s PR #%s' "$id" "$pr"
+  else
+    printf 'worker %s' "$id"
+  fi
 }
 
 send_nudge() {
@@ -175,7 +216,7 @@ send_nudge() {
     log "ERROR: PR_POOL_SKILL_MD unset (path to pg-pr-process-feedback SKILL.md)"
     return 1
   }
-  submit_line "$sess" "$(nudge_text "$cid")"
+  submit_line "$sess" "$(nudge_text_feedback "$cid")"
 }
 
 # cycle_status prints the cycle bead's status.

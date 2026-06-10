@@ -206,10 +206,10 @@ esac'
   grep -q -- "kill-session -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
 }
 
-@test "nudge_text: instructs dedup vs the PR's open work beads + work beads as PR children" {
+@test "nudge_text_feedback: instructs dedup vs the PR's open work beads + work beads as PR children" {
   export PR_POOL_SKILL_MD="/abs/SKILL.md"
   load_script
-  run nudge_text zr-c
+  run nudge_text_feedback zr-c
   [ "$status" -eq 0 ]
   [[ "$output" == *"/abs/SKILL.md"* ]]
   [[ "$output" == *"zr-c"* ]]
@@ -357,4 +357,71 @@ esac'
   run teardown_session
   [ "$status" -eq 0 ]
   ! grep -q -- "kill-session" "$CALLS_LOG"
+}
+
+@test "role resolvers: worker vs feedback-processor (and default) map correctly" {
+  export PR_POOL_SKILL_MD="/abs/feedback.md" PR_POOL_WORKER_SKILL_MD="/abs/worker.md"
+  load_script
+  [ "$(role_session worker)" = "WORKER" ]
+  [ "$(role_session feedback-processor)" = "PR FEEDBACK PROCESSOR" ]
+  [ "$(role_session)" = "PR FEEDBACK PROCESSOR" ]          # default branch
+  [ "$(role_actor worker)" = "pgii-pool__worker" ]
+  [ "$(role_actor feedback-processor)" = "pgii-pool__process-feedback" ]
+  [ "$(role_skill worker)" = "/abs/worker.md" ]
+  [ "$(role_skill feedback-processor)" = "/abs/feedback.md" ]
+  [ "$(role_max worker)" = "1" ]
+  [ "$(role_max feedback-processor)" = "1" ]
+}
+
+@test "nudge_text_worker: worktree, commit-no-push, record-then-swap, abort-to-stuck" {
+  export PR_POOL_WORKER_SKILL_MD="/abs/worker.md" PR_POOL_WORKTREE_DIR="/tmp/test-worktrees"
+  load_script
+  run nudge_text_worker zr-w1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/abs/worker.md"* ]]
+  [[ "$output" == *"zr-w1"* ]]
+  [[ "$output" == *"worktree"* ]]
+  [[ "$output" == *"do NOT push"* ]]
+  [[ "$output" == *"needs-push"* ]]
+  [[ "$output" == *"worker-ready"* ]]
+  [[ "$output" == *"worker-stuck"* ]]
+  [[ "$output" == *"/tmp/test-worktrees"* ]]
+}
+
+@test "worker_label: includes the work-bead id and the parent PR number" {
+  make_stub bd '
+case "$1 $2" in
+  "show zr-w1") echo "{\"id\":\"zr-w1\",\"parent\":\"zr-p\"}" ;;
+  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"pr_number\":42}}" ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run worker_label zr-w1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zr-w1"* ]]
+  [[ "$output" == *"PR #42"* ]]
+}
+
+@test "worker_label: falls back to the work-bead id when no PR number" {
+  make_stub bd 'echo "{}"'
+  load_script
+  run worker_label zr-w1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"zr-w1"* ]]
+  [[ "$output" != *"PR #"* ]]
+}
+
+@test "role_nudge / role_convo_name: dispatch to the right per-role helper" {
+  export PR_POOL_SKILL_MD="/abs/feedback.md" PR_POOL_WORKER_SKILL_MD="/abs/worker.md"
+  make_stub bd '
+case "$1 $2" in
+  "show zr-w1") echo "{\"id\":\"zr-w1\",\"parent\":\"zr-p\"}" ;;
+  "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-pc\"}" ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  [ "$(role_nudge worker zr-w1)" = "$(nudge_text_worker zr-w1)" ]
+  [ "$(role_nudge feedback-processor zr-c)" = "$(nudge_text_feedback zr-c)" ]
+  [ "$(role_convo_name worker zr-w1)" = "$(worker_label zr-w1)" ]
+  [ "$(role_convo_name feedback-processor zr-c)" = "$(cycle_label zr-c)" ]
 }
