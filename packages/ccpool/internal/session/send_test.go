@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -78,8 +79,12 @@ func TestSend_refusesWhenBusy(t *testing.T) {
 	st := newMemStore(t)
 	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
 	s := newSendService(t, st, &sendTmux{live: true}, fakeTranscript{}, waitFunc(nil))
-	if _, err := s.Send(ctx, "a", "hi", ModeRefuseIfBusy); err == nil {
-		t.Error("Send must refuse a busy session in default mode")
+	_, err := s.Send(ctx, "a", "hi", ModeRefuseIfBusy)
+	if err == nil {
+		t.Fatal("Send must refuse a busy session in default mode")
+	}
+	if !errors.Is(err, ErrBusy) {
+		t.Errorf("busy refusal must wrap ErrBusy (for exit-code 5 mapping); got %v", err)
 	}
 }
 

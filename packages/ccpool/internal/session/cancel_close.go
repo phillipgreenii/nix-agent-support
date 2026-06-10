@@ -37,7 +37,7 @@ func (s *Service) Close(ctx context.Context, name string, purge bool) error {
 	return s.withLock(name, func() error {
 		tmuxName := s.d.Prefix + name
 		if s.d.Tmux.HasSession(tmuxName) {
-			_ = s.clearInput(tmuxName)
+			// deliverCommand clears the input line itself, so no separate clear here.
 			if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
 				return err
 			}

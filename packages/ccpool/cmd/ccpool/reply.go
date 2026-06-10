@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -86,6 +87,9 @@ func runReply(args []string) int {
 	res, err := svc.Send(context.Background(), name, prompt, mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "reply:", err)
+		if errors.Is(err, session.ErrBusy) {
+			return 5 // dedicated "busy" exit code (spec §12/§20)
+		}
 		return 1
 	}
 	switch res.State {

@@ -2,12 +2,17 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
+
+// ErrBusy is returned by Send in ModeRefuseIfBusy when the session is not idle.
+// Callers map it to the dedicated "busy" exit code (spec §12/§20).
+var ErrBusy = errors.New("session busy")
 
 // Send delivers prompt to the live session `name` and (unless ModeNoWait) blocks
 // for the turn outcome, returning the assistant reply. Spec §8.3.
@@ -38,7 +43,7 @@ func (s *Service) sendLocked(ctx context.Context, name, prompt string, mode Mode
 	switch mode {
 	case ModeRefuseIfBusy:
 		if !idle {
-			return Result{State: row.State}, fmt.Errorf("session %q is busy (state=%s); use --interrupt or --queue-message", name, row.State)
+			return Result{State: row.State}, fmt.Errorf("session %q is busy (state=%s); use --interrupt or --queue-message: %w", name, row.State, ErrBusy)
 		}
 	case ModeInterrupt:
 		if !idle {
