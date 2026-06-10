@@ -861,7 +861,7 @@ Create the worker agent's SKILL, mirroring the structure of the existing `pg-pr-
 
 - Create: `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md`
 
-- [ ] **Step 1: Write the worker SKILL**
+- [x] **Step 1: Write the worker SKILL**
 
 Create `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md` with:
 
@@ -967,12 +967,12 @@ worktree add` refuses a branch already checked out elsewhere, so reuse an
 - Do not close the bead; `needs-push` is the human's review queue.
 ````
 
-- [ ] **Step 2: Verify formatting + structure**
+- [x] **Step 2: Verify formatting + structure**
 
 Run: `prek run --all-files 2>&1 | tail -20` (or `pre-commit run --all-files`)
 Expected: PASS (treefmt may reformat the new SKILL.md — re-stage if so).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md
