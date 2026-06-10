@@ -16,10 +16,13 @@ import (
 const tmuxCacheTTL = 2 * time.Second
 
 // paneLoc identifies a tmux pane by the socket name (`-L`) of its server and
-// the canonical pane target string (`<session>:<window>.<pane>`).
+// the canonical pane target string (`<session>:<window>.<pane>`). panePID is
+// the pane's shell pid (`#{pane_pid}`) — the key used to read the pane process
+// env for the PA_MONITOR_NO_NUDGE opt-out check before delivering a nudge.
 type paneLoc struct {
 	socketName string
 	paneID     string
+	panePID    int
 }
 
 // TmuxSignaler sends keys to the tmux pane hosting a process. Multi-socket
@@ -107,10 +110,39 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 	if loc == nil {
 		return fmt.Errorf("signal: no tmux pane found for pid %d", pid)
 	}
+	// Opt-out: ccpool-managed pool sessions export PA_MONITOR_NO_NUDGE=1 in the
+	// pane's process env so pa-monitor never injects "continue" into them
+	// (spec §16.9). Read the pane shell pid's env and skip delivery if marked.
+	// A read failure (pid gone, env unreadable) is non-fatal — fall through and
+	// deliver as before; the marker is an opt-out, not a gate.
+	if env, errEnv := t.processEnv(loc.panePID); errEnv == nil && env["PA_MONITOR_NO_NUDGE"] == "1" {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err = t.run(ctx, "tmux", "-L", loc.socketName, "send-keys", "-t", loc.paneID, text, "Enter")
 	return err
+}
+
+// processEnv returns the environment of pid (same-user readable on macOS/linux)
+// via `ps eww -p <pid> -o command=`, which prints the full argv followed by the
+// process environment as `KEY=VALUE` tokens. Only well-formed `KEY=VALUE`
+// tokens are kept; argv tokens without an `=` are ignored. Used to honor the
+// PA_MONITOR_NO_NUDGE opt-out for ccpool-managed pool sessions.
+func (t *TmuxSignaler) processEnv(pid int) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := t.run(ctx, "ps", "eww", "-p", strconv.Itoa(pid), "-o", "command=")
+	if err != nil {
+		return nil, err
+	}
+	env := map[string]string{}
+	for _, tok := range strings.Fields(string(out)) {
+		if k, v, ok := strings.Cut(tok, "="); ok {
+			env[k] = v
+		}
+	}
+	return env, nil
 }
 
 // enumeratePanes discovers running tmux servers via `ps -A -o pid,comm,args`
@@ -144,7 +176,7 @@ func (t *TmuxSignaler) enumeratePanes(ctx context.Context) (map[int]paneLoc, err
 			if err != nil {
 				continue
 			}
-			result[pid] = paneLoc{socketName: name, paneID: fields[1]}
+			result[pid] = paneLoc{socketName: name, paneID: fields[1], panePID: pid}
 		}
 	}
 	return result, nil

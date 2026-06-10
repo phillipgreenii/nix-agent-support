@@ -33,6 +33,12 @@ func fakeMultiSocketRun(
 			if len(args) >= 1 && args[0] == "-A" {
 				return []byte(psListAll), nil
 			}
+			// Pane env read: ps eww -p <pid> -o command=. Default fake returns
+			// an empty env (no PA_MONITOR_NO_NUDGE marker) so Send delivers
+			// normally; the marker-skip path has its own fake below.
+			if len(args) >= 1 && args[0] == "eww" {
+				return []byte(""), nil
+			}
 			// Ancestry walk: ps -o ppid=,comm= -p <pid>
 			pidStr := args[len(args)-1]
 			pid, _ := strconv.Atoi(pidStr)
@@ -108,6 +114,62 @@ func TestTmuxSendErrorsWhenNoPaneFound(t *testing.T) {
 	err := sig.Send(1000, "continue")
 	if err == nil {
 		t.Error("Send should return error when no pane found for PID")
+	}
+}
+
+func TestTmuxSendSkippedWhenNoNudgeMarkerPresent(t *testing.T) {
+	// agent 1000 -> bash 500 -> shell 100, pane default:main:0.0 (pane_pid 100).
+	// The pane process env carries PA_MONITOR_NO_NUDGE=1 (a ccpool-managed pool
+	// session), so Send must NOT issue a send-keys call (spec §16.9).
+	tree := map[int][2]string{
+		1000: {"500", "claude"},
+		500:  {"100", "bash"},
+	}
+	panes := map[string]string{
+		"default": "100 main:0.0\n",
+	}
+	var sent []string
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent)
+	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		// Intercept the pane env read for pane_pid 100 and return the marker.
+		if name == "ps" && len(args) >= 3 && args[0] == "eww" && args[2] == "100" {
+			return []byte("/bin/bash PA_MONITOR_NO_NUDGE=1 TERM=xterm"), nil
+		}
+		return base(ctx, name, args...)
+	}
+	sig := &signal.TmuxSignaler{RunCmd: run}
+	if err := sig.Send(1000, "continue"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Errorf("send-keys issued %d time(s) %v; want 0 (PA_MONITOR_NO_NUDGE=1 must skip)", len(sent), sent)
+	}
+}
+
+func TestTmuxSendDeliversWhenMarkerAbsent(t *testing.T) {
+	// Same topology, but the pane env has no PA_MONITOR_NO_NUDGE marker, so the
+	// nudge is delivered normally.
+	tree := map[int][2]string{
+		1000: {"500", "claude"},
+		500:  {"100", "bash"},
+	}
+	panes := map[string]string{
+		"default": "100 main:0.0\n",
+	}
+	var sent []string
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent)
+	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "ps" && len(args) >= 3 && args[0] == "eww" && args[2] == "100" {
+			return []byte("/bin/bash TERM=xterm SHLVL=1"), nil
+		}
+		return base(ctx, name, args...)
+	}
+	sig := &signal.TmuxSignaler{RunCmd: run}
+	if err := sig.Send(1000, "continue"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 send-keys call (no marker), got %d: %v", len(sent), sent)
 	}
 }
 
