@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"count to one"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"earlier text"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"BANANA"}]}}
