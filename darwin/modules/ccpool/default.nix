@@ -29,6 +29,11 @@ in
         exec ${pkg}/bin/ccpool reap
       '';
       runAtLoad = true;
+      # `ccpool reap` is a periodic short task (StartInterval), not a long-running
+      # daemon — it does its work and exits, so it is never in state=running at
+      # post-activation check time. Exempt it from the launchd health check
+      # (which is for keep-alive daemons); StartInterval keeps it recurring.
+      healthCheck = false;
       serviceConfig = {
         StartInterval = interval; # periodic timer, not keepAlive
       };
