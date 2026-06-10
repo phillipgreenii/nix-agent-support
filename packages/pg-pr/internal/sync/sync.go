@@ -198,8 +198,16 @@ func New(d Deps) (*Engine, error) {
 }
 
 // cfg returns the engine's current config. Reads are atomic so the daemon's
-// detector/workers/owner can read while SIGHUP swaps via ReplaceCfg.
-func (e *Engine) cfg() *config.Config { return e.cfgP.Load() }
+// detector/workers/owner can read while SIGHUP swaps via ReplaceCfg. Falls back
+// to the seed deps.Cfg when cfgP was never stored — engines built as struct
+// literals (some tests) skip New, and deps.Cfg is never mutated after New so
+// the fallback is race-safe.
+func (e *Engine) cfg() *config.Config {
+	if c := e.cfgP.Load(); c != nil {
+		return c
+	}
+	return e.deps.Cfg
+}
 
 // bdClientFor returns the BeadClient the engine should use for operations
 // against the given repo's workspace.
