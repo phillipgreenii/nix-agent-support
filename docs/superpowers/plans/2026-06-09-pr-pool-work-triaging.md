@@ -563,7 +563,7 @@ Switch discovery to `bd ready` (per role; native `--label` for the worker), emit
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Rewrite the discovery + drain tests for `bd ready` + role tags**
+- [x] **Step 1: Rewrite the discovery + drain tests for `bd ready` + role tags**
 
 Replace the existing `discover_cycles` test with discovery tests against `bd ready`:
 
@@ -734,12 +734,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the suite to confirm the discovery/drain tests fail**
+- [x] **Step 2: Run the suite to confirm the discovery/drain tests fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: discovery + drain tests FAIL (`discover` not defined; `drain_once` still on `discover_cycles`/`MAX`).
 
-- [ ] **Step 3: Replace `discover_cycles` with `discover_feedback` + `discover_worker` + `discover`**
+- [x] **Step 3: Replace `discover_cycles` with `discover_feedback` + `discover_worker` + `discover`**
 
 Remove `discover_cycles`. Add:
 
@@ -785,7 +785,7 @@ discover() {
 }
 ```
 
-- [ ] **Step 4: Rewrite `drain_once` for per-role caps + teardown-all**
+- [x] **Step 4: Rewrite `drain_once` for per-role caps + teardown-all**
 
 Add a `teardown_all` helper (place near `teardown_session`):
 
@@ -834,17 +834,17 @@ EOF
 }
 ```
 
-- [ ] **Step 5: Run the suite to verify green**
+- [x] **Step 5: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS.
 
-- [ ] **Step 6: Full flake check (the bats flake check + formatting)**
+- [x] **Step 6: Full flake check (the bats flake check + formatting)**
 
 Run: `nix flake check 2>&1 | tail -20`
 Expected: the `test-pgii-pack-pr-support-bats` check passes; no failures.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
