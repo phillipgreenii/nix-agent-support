@@ -983,7 +983,7 @@ git commit -m "feat(pg-pr-plugin): pg-pr-work-bead worker SKILL contract" -- pac
 
 ## Final verification (after all tasks)
 
-- [ ] **Full gate:** `nix flake check` passes (incl. `test-pgii-pack-pr-support-bats`); `prek run --all-files` passes.
+- [x] **Full gate:** `nix flake check` passes (incl. `test-pgii-pack-pr-support-bats`); `prek run --all-files` passes.
 - [ ] **Live smoke (manual — CONFIRM the target bead with the user first; it mutates real beads and creates a real worktree).** From the monorepo root: hand-label one of _your own_ work beads `worker-ready` (`bd update <id> --add-label worker-ready`), then run `pr-pool.sh` with `PR_POOL_SKILL_MD` + `PR_POOL_WORKER_SKILL_MD` pointing at the two SKILLs and default caps. Verify: a `WORKER` tmux session spawns on `-L pgpool`; the agent resolves the branch from the MR bead (no `gh`); a worktree + commit appear and the **remote branch head is unchanged** (`git ls-remote`); the bead gains `needs-push` + a path/SHA comment and stays `in_progress`; the session is torn down. Then force a failure (label a bead whose PR is closed) and confirm it lands in `bd list --label worker-stuck`.
 
 ---
