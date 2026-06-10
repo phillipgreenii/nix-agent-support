@@ -16,8 +16,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
@@ -30,7 +32,7 @@ type Provider struct {
 
 // New constructs a GitHub VCS provider backed by the gh CLI on PATH.
 func New() *Provider {
-	return &Provider{gh: &cliGHRunner{}}
+	return &Provider{gh: &cliGHRunner{src: defaultTokenSource()}}
 }
 
 // NewWithRunner constructs a Provider with an injected ghRunner — used by
@@ -47,29 +49,60 @@ type ghRunner interface {
 	RunStdin(ctx context.Context, stdin []byte, args ...string) (stdout []byte, err error)
 }
 
-// cliGHRunner is the production runner that invokes the real `gh` binary.
-type cliGHRunner struct{}
-
-func (cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
-	return cliGHRunner{}.RunStdin(ctx, nil, args...)
+// cliGHRunner is the production runner that invokes the real `gh` binary. It
+// resolves a GitHub token once (lazily, success-cached) via its TokenSource and
+// injects GH_TOKEN into every child env so gh never reads the macOS keychain at
+// runtime — fixing intermittent 401s from concurrent keychain reads under the
+// launchd agent.
+type cliGHRunner struct {
+	src  TokenSource
+	mu   sync.Mutex
+	tok  string
+	have bool
 }
 
-func (cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+// token returns the resolved token, resolving (and caching) it at most once.
+// Failures are NOT cached so a transient resolution error can be retried.
+func (r *cliGHRunner) token(ctx context.Context) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.have {
+		return r.tok, nil
+	}
+	t, err := r.src.Token(ctx)
+	if err != nil {
+		return "", err // do NOT cache failure
+	}
+	r.tok, r.have = t, true
+	return t, nil
+}
+
+func (r *cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return r.RunStdin(ctx, nil, args...)
+}
+
+func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+	tok, err := r.token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gh %s: %w", strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
+	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Env = envWithGHToken(os.Environ(), tok)
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+			st := strings.TrimSpace(stderr.String())
+			if isAuthFailure(exitErr.ExitCode(), st) {
+				return stdout.Bytes(), fmt.Errorf("gh %s: %s: %w", strings.Join(args, " "), st, ErrGHAuthInvalid)
+			}
+			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, st)
 		}
-		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)",
-			strings.Join(args, " "), err)
+		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}
 	return stdout.Bytes(), nil
 }
@@ -791,5 +824,16 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 	return out, nil
 }
 
+// CheckAuth verifies the resolved token works with one cheap authenticated
+// GraphQL call. errors.Is(err, ErrGHAuthInvalid) distinguishes a bad token
+// from a transient/network failure.
+func (p *Provider) CheckAuth(ctx context.Context) error {
+	_, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ viewer { login } }")
+	return err
+}
+
 // Compile-time check that Provider satisfies vcs.Provider.
 var _ vcs.Provider = (*Provider)(nil)
+
+// Compile-time check that Provider satisfies vcs.AuthChecker.
+var _ vcs.AuthChecker = (*Provider)(nil)

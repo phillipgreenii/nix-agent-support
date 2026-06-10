@@ -36,6 +36,14 @@ type Provider interface {
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
 
+// AuthChecker is an optional capability: a one-shot auth preflight the daemon
+// runs before spinning up workers. Returns nil when authenticated; an error
+// wrapping (via errors.Is) the provider's auth-invalid sentinel when the token
+// is missing/invalid; any other error for transient/network failures.
+type AuthChecker interface {
+	CheckAuth(ctx context.Context) error
+}
+
 // EnrichedPR bundles a PR with everything the sync snapshot loop reads
 // per-PR. Providers that can fetch this data in one round-trip (e.g.
 // GitHub via a single GraphQL search) implement EnrichedPRsProvider;
