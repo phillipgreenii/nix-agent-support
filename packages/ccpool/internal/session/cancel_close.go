@@ -1,0 +1,79 @@
+package session
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/phillipgreenii/ccpool/internal/store"
+)
+
+// Cancel interrupts the current turn (Escape) and resets the session to idle.
+// No Stop hook fires on a user interrupt (spec §4/§8.5), so Cancel resets state
+// itself rather than waiting. It also clears the restored input buffer.
+func (s *Service) Cancel(ctx context.Context, name string) error {
+	return s.withLock(name, func() error { return s.cancelLocked(ctx, name) })
+}
+
+func (s *Service) cancelLocked(ctx context.Context, name string) error {
+	tmuxName := s.d.Prefix + name
+	if !s.d.Tmux.HasSession(tmuxName) {
+		return fmt.Errorf("session %q is not live", name)
+	}
+	if err := s.d.Tmux.SendKeys(tmuxName, "Escape"); err != nil {
+		return fmt.Errorf("send Escape: %w", err)
+	}
+	if err := s.clearInput(tmuxName); err != nil {
+		return err
+	}
+	_, err := s.d.Store.Transition(ctx, name, store.Ready, "", "")
+	return err
+}
+
+// Close ends the local REPL: clear input, send /exit, wait briefly for the tmux
+// session to vanish, else force-kill (spec §8.4). The conversation stays
+// resumable; --purge additionally deletes the store row.
+func (s *Service) Close(ctx context.Context, name string, purge bool) error {
+	return s.withLock(name, func() error {
+		tmuxName := s.d.Prefix + name
+		if s.d.Tmux.HasSession(tmuxName) {
+			_ = s.clearInput(tmuxName)
+			if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
+				return err
+			}
+			if !s.waitGone(tmuxName, 3*time.Second) {
+				if err := s.d.Tmux.KillSession(tmuxName); err != nil {
+					return fmt.Errorf("force kill: %w", err)
+				}
+			}
+		}
+		if purge {
+			return s.d.Store.Delete(ctx, name)
+		}
+		return nil
+	})
+}
+
+// deliverCommand sends a raw slash-command (e.g. /exit) — NOT space-guarded,
+// unlike a message (spec §8.4): clear input, paste the command, submit.
+func (s *Service) deliverCommand(tmuxName, cmd string) error {
+	if err := s.clearInput(tmuxName); err != nil {
+		return err
+	}
+	if err := s.d.Tmux.Paste(tmuxName, cmd); err != nil {
+		return err
+	}
+	return s.d.Tmux.SendKeys(tmuxName, "Enter")
+}
+
+// waitGone polls liveness until the session disappears or the budget elapses.
+func (s *Service) waitGone(tmuxName string, budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if !s.d.Tmux.HasSession(tmuxName) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return !s.d.Tmux.HasSession(tmuxName)
+}
