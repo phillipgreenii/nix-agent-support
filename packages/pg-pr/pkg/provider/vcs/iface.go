@@ -13,6 +13,14 @@ import (
 // ErrNotImplemented is returned by stub methods during Phase 0.
 var ErrNotImplemented = errors.New("pg-pr: not implemented in this phase")
 
+// ErrAuthInvalid is the provider-agnostic auth-invalid sentinel. A provider's
+// CheckAuth / poll methods wrap this (so errors.Is(err, ErrAuthInvalid) holds)
+// when the underlying credentials are missing/invalid — distinguishing a real
+// auth failure from a transient/network error. internal/sync references this
+// sentinel directly (it only depends on the vcs interfaces, not the concrete
+// provider) to drive the daemon's preflight + restart-to-refresh escalation.
+var ErrAuthInvalid = errors.New("vcs: provider authentication failed")
+
 // Provider abstracts a VCS (GitHub, Forgejo, …) for PR-related operations.
 type Provider interface {
 	GetPR(ctx context.Context, repo string, number int) (*api.PR, error)

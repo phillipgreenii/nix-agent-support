@@ -465,14 +465,24 @@ func TestNewStderrHandler_TextFormat(t *testing.T) {
 	}
 }
 
-// fakeFingerprintVCS implements VCSProvider + vcs.FingerprintProvider + GetPR.
+// fakeFingerprintVCS implements VCSProvider + vcs.FingerprintProvider + GetPR
+// + the optional vcs.AuthChecker capability.
 type fakeFingerprintVCS struct {
 	fakeVCS // embed the existing fake to satisfy VCSProvider; override GetPR/FingerprintPRs
 	mine    []vcs.PRFingerprint
 	getPR   api.PR
+
+	// fpErr, when non-nil, is returned from every FingerprintPRs call instead
+	// of a roster (drives the daemon's poll-side auth escalation tests).
+	fpErr error
+	// checkAuthErr is returned from CheckAuth (nil = authenticated).
+	checkAuthErr error
 }
 
 func (f *fakeFingerprintVCS) FingerprintPRs(_ context.Context, query string) (vcs.FingerprintResult, error) {
+	if f.fpErr != nil {
+		return vcs.FingerprintResult{}, f.fpErr
+	}
 	// Return the mine set only for the mine query (author:me); empty for team.
 	if strings.Contains(query, "author:me") && !strings.Contains(query, "author:teammate") {
 		return vcs.FingerprintResult{PRs: f.mine}, nil
@@ -483,6 +493,7 @@ func (f *fakeFingerprintVCS) GetPR(_ context.Context, _ string, _ int) (*api.PR,
 	pr := f.getPR
 	return &pr, nil
 }
+func (f *fakeFingerprintVCS) CheckAuth(_ context.Context) error { return f.checkAuthErr }
 
 func TestDaemon_FingerprintTickPopulatesSnapshot(t *testing.T) {
 	vp := &fakeFingerprintVCS{

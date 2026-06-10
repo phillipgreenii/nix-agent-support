@@ -1,14 +1,18 @@
 package github
 
 import (
-	"errors"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // ErrGHAuthInvalid signals that gh could not authenticate (missing/invalid
 // token). Callers detect it via errors.Is to trigger the daemon's restart-to-
-// refresh escalation.
-var ErrGHAuthInvalid = errors.New("github: gh authentication failed")
+// refresh escalation. It is an alias for the provider-agnostic
+// vcs.ErrAuthInvalid sentinel so internal/sync can match on the latter without
+// importing this concrete provider (errors.Is(err, vcs.ErrAuthInvalid) holds
+// for any error wrapping ErrGHAuthInvalid).
+var ErrGHAuthInvalid = vcs.ErrAuthInvalid
 
 // isAuthFailure classifies a gh failure as an auth problem from its exit code
 // and stderr. gh 2.93 surfaces: exit 4 + "gh auth login" (no token); exit 1 +

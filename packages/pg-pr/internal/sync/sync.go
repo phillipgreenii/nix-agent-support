@@ -173,6 +173,12 @@ type Engine struct {
 	// daemon loop goroutine touches them, so no lock is needed.
 	prevMine map[prKey]string
 	prevTeam map[prKey]string
+
+	// authFailStreak counts consecutive fingerprint ticks whose polls failed
+	// with an auth-invalid error. Only the daemon loop goroutine touches it
+	// (via fingerprintTick), so no lock is needed. The daemon escalates a
+	// restart-to-refresh once it crosses maxAuthFailStreak.
+	authFailStreak int
 }
 
 // New constructs an Engine. Returns an error if required deps are missing.

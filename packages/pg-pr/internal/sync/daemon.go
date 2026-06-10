@@ -41,6 +41,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/httpapi"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // DefaultMetricsAddr is the address the daemon's Prometheus scrape
@@ -100,6 +101,12 @@ type DaemonOpts struct {
 // on clean shutdown; returns an error only when the daemon cannot start
 // (lock already held, lock dir creation failed, etc.).
 func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
+	// Internal cancelable context: the auth-escalation path calls cancel() to
+	// tear down the workers + owner through their existing ctx.Done() paths.
+	// SIGINT/SIGTERM cancellation of the parent ctx still propagates here.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if opts.Interval <= 0 {
 		opts.Interval = DefaultDaemonInterval
 	}
@@ -153,9 +160,28 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 		"metrics_addr", opts.MetricsAddr)
 	defer opts.Logger.Info("pg-pr daemon stopped")
 
+	// Startup auth preflight (fail fast). A real auth failure exits before any
+	// goroutine starts → non-zero process exit → launchd (KeepAlive) restarts
+	// the daemon, which re-resolves the token. A transient/inconclusive error
+	// is logged and tolerated (the loop's poll-side escalation is the backstop).
+	// Providers without the optional AuthChecker capability (e.g. test stubs)
+	// skip the preflight entirely.
+	if checker, ok := e.firstAuthChecker(); ok {
+		if err := checker.CheckAuth(ctx); err != nil {
+			if errors.Is(err, vcs.ErrAuthInvalid) {
+				telemetry.GHAuthFailuresTotal.WithLabelValues("preflight").Inc()
+				return fmt.Errorf("daemon: gh auth preflight failed (fix `gh auth login`): %w", err)
+			}
+			opts.Logger.Warn("gh auth preflight inconclusive (transient?); continuing", "err", err.Error())
+		} else {
+			opts.Logger.Info("gh auth preflight ok")
+		}
+	}
+
 	// Detector state lives on the engine; only this goroutine touches it.
 	e.prevMine = map[prKey]string{}
 	e.prevTeam = map[prKey]string{}
+	e.authFailStreak = 0
 
 	// Workers always have a place to send snapshot deltas. When the dashboard
 	// is disabled this is a throwaway sink that's simply never served.
@@ -177,8 +203,21 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 	go e.runWorker(ctx, mineQ, "mine", updates, opts.Logger, &wg)
 	go e.runWorker(ctx, teamQ, "team", updates, opts.Logger, &wg)
 
+	// maxAuthFailStreak is the number of consecutive auth-failing ticks the
+	// daemon tolerates before escalating a restart-to-refresh (exit non-nil →
+	// launchd restarts → token re-resolved).
+	const maxAuthFailStreak = 3
+	authEscalated := false
+
 	for ctx.Err() == nil {
 		e.fingerprintTick(ctx, mineQ, teamQ, opts.Logger)
+
+		if e.authFailStreak >= maxAuthFailStreak {
+			opts.Logger.Error("gh auth unrecoverable; exiting for restart", "consecutive_ticks", e.authFailStreak)
+			authEscalated = true
+			cancel() // tear down workers + owner via ctx
+			break
+		}
 
 		select {
 		case <-ctx.Done():
@@ -204,6 +243,12 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 	wg.Wait()
 	close(updates)
 	<-ownerDone
+	// Only the auth-escalation path returns an error (propagates to the CLI →
+	// non-zero exit → launchd restart). The normal SIGINT/SIGTERM ctx-cancel
+	// path returns nil for a clean shutdown.
+	if authEscalated {
+		return fmt.Errorf("daemon: gh auth unrecoverable after %d ticks: %w", maxAuthFailStreak, vcs.ErrAuthInvalid)
+	}
 	return nil
 }
 

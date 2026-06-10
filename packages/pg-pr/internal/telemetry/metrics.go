@@ -97,6 +97,10 @@ var (
 		Name: "pg_pr_snapshot_present",
 		Help: "1 once the dashboard snapshot has been populated for the first time this process; otherwise 0.",
 	})
+
+	GHAuthFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "pg_pr_gh_auth_failures_total",
+			Help: "gh auth failures by stage (preflight|poll)."}, []string{"stage"})
 )
 
 func init() {
@@ -115,6 +119,7 @@ func init() {
 		GraphQLCost,
 		GraphQLRateRemaining,
 		SnapshotPresent,
+		GHAuthFailuresTotal,
 	)
 }
 

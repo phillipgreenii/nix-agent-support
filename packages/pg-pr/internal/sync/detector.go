@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -101,6 +102,18 @@ func (e *Engine) firstFingerprintProvider() (vcs.FingerprintProvider, bool) {
 	return nil, false
 }
 
+// firstAuthChecker returns the first registered VCS provider that supports the
+// optional auth-preflight capability. Mirrors firstFingerprintProvider so the
+// daemon can run a startup CheckAuth without coupling to a concrete provider.
+func (e *Engine) firstAuthChecker() (vcs.AuthChecker, bool) {
+	for _, p := range e.deps.VCS {
+		if ac, ok := p.(vcs.AuthChecker); ok {
+			return ac, true
+		}
+	}
+	return nil, false
+}
+
 // openBeadsForGroup enumerates open merge-request beads across the given repos
 // (each repo's own bd workspace), keyed by prKey, filtered to mine (mine=true)
 // or team (mine=false) by author. Per-repo list errors are skipped (conservative:
@@ -151,13 +164,26 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 		return // no fingerprint-capable provider (e.g. test stub) — nothing to do
 	}
 
+	// Track auth health for the daemon's restart-to-refresh escalation.
+	// authErr latches on the FIRST poll (mine or any team) that fails with an
+	// auth-invalid error; anySuccess latches on the first poll that succeeds.
+	// We bump the streak only on auth failure and reset it only on a real
+	// success — a flapping network (transient errors, no successes) neither
+	// escalates nor masks a sustained auth failure.
+	authErr := false
+	anySuccess := false
+
 	// MINE: one cross-repo query.
 	start := e.deps.Now()
 	mineRes, mineErr := prov.FingerprintPRs(ctx, buildMineQuery(cfg))
 	e.recordPoll("mine", mineRes, mineErr, e.deps.Now().Sub(start))
 	if mineErr != nil {
+		if errors.Is(mineErr, vcs.ErrAuthInvalid) {
+			authErr = true
+		}
 		log.Warn("mine fingerprint poll failed", "err", mineErr.Error())
 	} else {
+		anySuccess = true
 		mineBeads := e.openBeadsForGroup(ctx, cfg.Repos, true)
 		d := diffRoster(e.prevMine, mineRes.PRs, mineBeads, !mineRes.Truncated)
 		for k := range d.enqueued {
@@ -181,6 +207,9 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 		res, err := prov.FingerprintPRs(ctx, q)
 		e.recordPoll("team", res, err, e.deps.Now().Sub(s))
 		if err != nil {
+			if errors.Is(err, vcs.ErrAuthInvalid) {
+				authErr = true
+			}
 			log.Warn("team fingerprint poll failed", "repo", rcfg.Remote, "err", err.Error())
 			// preserve this repo's prev entries so we don't lose change-tracking
 			for k, h := range e.prevTeam {
@@ -190,6 +219,7 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 			}
 			continue
 		}
+		anySuccess = true
 		repoPrev := map[prKey]string{}
 		for k, h := range e.prevTeam {
 			if k.Repo == rcfg.Remote {
@@ -209,4 +239,15 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 	}
 	e.prevTeam = newPrevTeam
 	telemetry.RefreshQueueDepth.WithLabelValues("team").Set(float64(teamQ.depth()))
+
+	// Update the auth-fail streak for the daemon's escalation. Escalate on
+	// sustained auth failure; reset only on a genuine poll success so a
+	// flapping network doesn't mask a real auth problem.
+	switch {
+	case authErr:
+		e.authFailStreak++
+		telemetry.GHAuthFailuresTotal.WithLabelValues("poll").Inc()
+	case anySuccess:
+		e.authFailStreak = 0
+	}
 }
