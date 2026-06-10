@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# fake-claude — test stub standing in for the real `claude` REPL.
-# Parses --session-id, fires the SessionStart hook, then idles.
-set -euo pipefail
+# fake-claude — test stub. Fires SessionStart, then on each input line writes an
+# assistant reply to the transcript and fires Stop (one "turn" per line).
+set -uo pipefail
 
 uuid=""
 while [ $# -gt 0 ]; do
@@ -14,8 +14,14 @@ done
 
 cc="${CCPOOL_BIN:-ccpool}"
 transcript="${FAKE_CLAUDE_TRANSCRIPT:-/tmp/fake-claude-$uuid.jsonl}"
-printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' \
-  "$uuid" "$transcript" "$PWD" | "$cc" hook start || true
+: > "$transcript"
 
-# Idle so the tmux session stays alive until the test kills it.
-exec sleep 600
+payload() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"%s"}' "$uuid" "$transcript" "$PWD" "$1"; }
+
+payload SessionStart | "$cc" hook start || true
+
+# One turn per input line. Ignore the line content (bracketed-paste markers).
+while IFS= read -r _line; do
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK-DONE"}]}}\n' >> "$transcript"
+  payload Stop | "$cc" hook stop || true
+done
