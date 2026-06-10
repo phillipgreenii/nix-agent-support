@@ -13,9 +13,9 @@ type reapTmux struct {
 	closed map[string]bool
 }
 
-func (r *reapTmux) HasSession(name string) bool                          { return r.live[name] }
-func (r *reapTmux) NewSession(string, map[string]string, []string) error { return nil }
-func (r *reapTmux) SendKeys(string, ...string) error                     { return nil }
+func (r *reapTmux) HasSession(name string) bool                                  { return r.live[name] }
+func (r *reapTmux) NewSession(string, string, map[string]string, []string) error { return nil }
+func (r *reapTmux) SendKeys(string, ...string) error                             { return nil }
 func (r *reapTmux) Paste(name, body string) error {
 	if body == "/exit" { // simulate graceful exit so waitGone returns fast
 		r.live[name] = false

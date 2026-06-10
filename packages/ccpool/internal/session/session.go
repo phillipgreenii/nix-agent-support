@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/launch"
@@ -16,7 +17,7 @@ import (
 
 type Tmux interface {
 	HasSession(name string) bool
-	NewSession(name string, env map[string]string, argv []string) error
+	NewSession(name, cwd string, env map[string]string, argv []string) error
 	SendKeys(name string, keys ...string) error
 	Paste(name, body string) error
 	KillSession(name string) error
@@ -120,6 +121,14 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Ha
 		return Handle{Name: name, UUID: row.UUID, TmuxSession: tmuxName, State: row.State}, nil
 	}
 
+	// Canonicalize the cwd so the trust key matches what Claude records (it
+	// resolves symlinks, e.g. macOS /tmp -> /private/tmp). Without this, a
+	// symlinked --cwd is pre-trusted under the wrong key and the launch stalls
+	// on the folder-trust prompt. Best-effort: a non-existent dir keeps as-is.
+	if resolved, rerr := filepath.EvalSymlinks(cwd); rerr == nil {
+		cwd = resolved
+	}
+
 	if err := s.d.Trust.EnsureTrusted(cwd); err != nil {
 		return Handle{}, fmt.Errorf("pre-trust %q: %w", cwd, err)
 	}
@@ -136,7 +145,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Ha
 			return Handle{}, err
 		}
 		argv := launch.BuildResume(launch.Spec{ClaudeBin: s.d.ClaudeBin, Name: name, PluginDir: s.d.PluginDir, Model: orDefault(model, row.Model)})
-		return s.launchAndWait(ctx, name, tmuxName, row.UUID, since, argv)
+		return s.launchAndWait(ctx, name, tmuxName, row.UUID, row.CWD, since, argv)
 	}
 
 	// Brand new.
@@ -154,7 +163,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Ha
 		return Handle{}, err
 	}
 	argv := launch.BuildNew(launch.Spec{ClaudeBin: s.d.ClaudeBin, UUID: uuid, Name: name, PluginDir: s.d.PluginDir, Model: model})
-	return s.launchAndWait(ctx, name, tmuxName, uuid, since, argv)
+	return s.launchAndWait(ctx, name, tmuxName, uuid, cwd, since, argv)
 }
 
 // currentGeneration reads the row's current generation (the wait baseline).
@@ -169,14 +178,14 @@ func (s *Service) currentGeneration(ctx context.Context, name string) (int64, er
 	return row.Generation, nil
 }
 
-// launchAndWait starts the tmux session and blocks until generation > since.
-func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid string, since int64, argv []string) (Handle, error) {
+// launchAndWait starts the tmux session (in cwd) and blocks until generation > since.
+func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid, cwd string, since int64, argv []string) (Handle, error) {
 	env := map[string]string{
 		"CCPOOL_NAME":         name,
 		"CCPOOL_UUID":         uuid,
 		"PA_MONITOR_NO_NUDGE": "1",
 	}
-	if err := s.d.Tmux.NewSession(tmuxName, env, argv); err != nil {
+	if err := s.d.Tmux.NewSession(tmuxName, cwd, env, argv); err != nil {
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)
 	}
 	out, err := s.d.Wait.Wait(ctx, name, since)

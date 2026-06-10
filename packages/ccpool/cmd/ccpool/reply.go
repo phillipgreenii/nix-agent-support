@@ -31,13 +31,13 @@ func runReply(args []string) int {
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
 	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
 	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
-	_ = fs.Parse(args)
-	if fs.NArg() < 2 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool reply <name> <prompt> [--no-wait]")
+	pos := parseInterspersed(fs, args) // flags may follow the positional name/prompt
+	if len(pos) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: ccpool reply <name> <prompt> [--no-wait] [--queue-message] [--interrupt]")
 		return 2
 	}
-	name := fs.Arg(0)
-	prompt := fs.Arg(1)
+	name := pos[0]
+	prompt := pos[1]
 
 	cfg, err := config.Load()
 	if err != nil {

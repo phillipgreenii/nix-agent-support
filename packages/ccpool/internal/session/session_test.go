@@ -16,13 +16,14 @@ type fakeTmux struct {
 }
 type newCall struct {
 	name string
+	cwd  string
 	env  map[string]string
 	argv []string
 }
 
 func (f *fakeTmux) HasSession(name string) bool { return f.live[name] }
-func (f *fakeTmux) NewSession(name string, env map[string]string, argv []string) error {
-	f.newCalls = append(f.newCalls, newCall{name, env, argv})
+func (f *fakeTmux) NewSession(name, cwd string, env map[string]string, argv []string) error {
+	f.newCalls = append(f.newCalls, newCall{name, cwd, env, argv})
 	f.live[name] = true
 	return nil
 }
@@ -69,6 +70,9 @@ func TestEnsure_new_insertsBeforeLaunch_waitsReady(t *testing.T) {
 	nc := ft.newCalls[0]
 	if nc.name != "cc-alpha" {
 		t.Errorf("tmux session name = %q, want cc-alpha", nc.name)
+	}
+	if nc.cwd != "/tmp/proj" {
+		t.Errorf("tmux session cwd = %q, want /tmp/proj (the --cwd must set the session working dir)", nc.cwd)
 	}
 	if nc.env["CCPOOL_NAME"] != "alpha" || nc.env["CCPOOL_UUID"] != "uuid-1" || nc.env["PA_MONITOR_NO_NUDGE"] != "1" {
 		t.Errorf("env markers missing: %v", nc.env)

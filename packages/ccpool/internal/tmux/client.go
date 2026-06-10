@@ -46,8 +46,11 @@ func (c *Client) tmux(args ...string) ([]byte, error) {
 // NewSession starts a detached session running argv, with env exported at the
 // session level via -e (so the pane shell — the pid the nudger keys on —
 // carries the markers, spec §8.1). env keys are sorted for deterministic argv.
-func (c *Client) NewSession(name string, env map[string]string, argv []string) error {
+func (c *Client) NewSession(name, cwd string, env map[string]string, argv []string) error {
 	args := []string{"new-session", "-d", "-s", name}
+	if cwd != "" {
+		args = append(args, "-c", cwd) // session working directory (the project dir)
+	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)

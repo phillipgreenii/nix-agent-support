@@ -25,7 +25,7 @@ func (c *closeTmux) HasSession(string) bool {
 	}
 	return c.live
 }
-func (c *closeTmux) NewSession(string, map[string]string, []string) error { return nil }
+func (c *closeTmux) NewSession(string, string, map[string]string, []string) error { return nil }
 func (c *closeTmux) SendKeys(_ string, keys ...string) error {
 	c.keys = append(c.keys, keys)
 	return nil

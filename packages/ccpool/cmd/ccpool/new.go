@@ -23,12 +23,12 @@ func runNew(args []string) int {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
 	cwd := fs.String("cwd", "", "project dir (default: current dir)")
 	model := fs.String("model", "", "claude model")
-	_ = fs.Parse(args)
-	if fs.NArg() < 1 {
+	pos := parseInterspersed(fs, args) // flags may follow the positional name
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m]")
 		return 2
 	}
-	name := fs.Arg(0)
+	name := pos[0]
 
 	cfg, err := config.Load()
 	if err != nil {

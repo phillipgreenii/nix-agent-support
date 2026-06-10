@@ -11,19 +11,32 @@ func TestClient_NewSession_argv(t *testing.T) {
 		got = append(got, args)
 		return nil, nil
 	}}
-	err := c.NewSession("cc-alpha",
+	err := c.NewSession("cc-alpha", "/proj/dir",
 		map[string]string{"CCPOOL_NAME": "alpha", "PA_MONITOR_NO_NUDGE": "1"},
 		[]string{"claude", "--session-id", "u1"})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	want := []string{
-		"-L", "ccpool", "new-session", "-d", "-s", "cc-alpha",
+		"-L", "ccpool", "new-session", "-d", "-s", "cc-alpha", "-c", "/proj/dir",
 		"-e", "CCPOOL_NAME=alpha", "-e", "PA_MONITOR_NO_NUDGE=1",
 		"--", "claude", "--session-id", "u1",
 	}
 	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Errorf("argv = %v\nwant %v", got, want)
+	}
+}
+
+func TestClient_NewSession_omitsCwdWhenEmpty(t *testing.T) {
+	var got [][]string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) { got = append(got, args); return nil, nil }}
+	if err := c.NewSession("cc-a", "", nil, []string{"claude"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got[0] {
+		if a == "-c" {
+			t.Errorf("empty cwd must not add -c; argv=%v", got[0])
+		}
 	}
 }
 
