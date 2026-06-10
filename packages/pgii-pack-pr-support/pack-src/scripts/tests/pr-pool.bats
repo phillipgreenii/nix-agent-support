@@ -56,26 +56,48 @@ load_script() {
 }
 
 
-@test "discover_cycles: returns only cycles whose parent PR author is me" {
+@test "discover: feedback route tags my process-feedback cycles (via bd ready)" {
   export SELF_LOGIN="phillipgziprecruiter"
-  # bd list -> two process-feedback cycles (mine zr-mine, team zr-team) + noise.
-  # bd show zr-mine -> parent zr-prm ; bd show zr-team -> parent zr-prt.
-  # bd show zr-prm -> author me ; bd show zr-prt -> author someone-else.
   make_stub bd '
-case "$1 $2" in
-  "list --type=task")
-    echo "[{\"id\":\"zr-mine\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-team\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-x\",\"title\":\"other task\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
-  "show zr-mine") echo "{\"id\":\"zr-mine\",\"parent\":\"zr-prm\"}" ;;
-  "show zr-team") echo "{\"id\":\"zr-team\",\"parent\":\"zr-prt\"}" ;;
-  "show zr-prm")  echo "{\"id\":\"zr-prm\",\"metadata\":{\"author\":\"phillipgziprecruiter\",\"pr_number\":1}}" ;;
-  "show zr-prt")  echo "{\"id\":\"zr-prt\",\"metadata\":{\"author\":\"someone-else\",\"pr_number\":2}}" ;;
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[]" ;;
+      *) echo "[{\"id\":\"zr-mine\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-team\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-x\",\"title\":\"other task\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+    esac ;;
+  show)
+    case "$2" in
+      zr-mine) echo "{\"id\":\"zr-mine\",\"parent\":\"zr-prm\"}" ;;
+      zr-team) echo "{\"id\":\"zr-team\",\"parent\":\"zr-prt\"}" ;;
+      zr-prm)  echo "{\"id\":\"zr-prm\",\"metadata\":{\"author\":\"phillipgziprecruiter\",\"pr_number\":1}}" ;;
+      zr-prt)  echo "{\"id\":\"zr-prt\",\"metadata\":{\"author\":\"someone-else\",\"pr_number\":2}}" ;;
+      *) echo "{}" ;;
+    esac ;;
 esac'
   load_script
-  run discover_cycles
+  run discover
   [ "$status" -eq 0 ]
-  [[ "$output" == *"zr-mine"* ]]
+  [[ "$output" == *"feedback-processor	zr-mine"* ]]
   [[ "$output" != *"zr-team"* ]]
   [[ "$output" != *"zr-x"* ]]
+}
+
+@test "discover: worker route tags worker-ready beads (native --label)" {
+  export SELF_LOGIN="me"
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[]" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run discover
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worker	zr-w1"* ]]
+  grep -q -- "ready --label worker-ready" "$CALLS_LOG"
 }
 
 @test "wait_ready: returns 0 once the ready prompt appears" {
@@ -172,15 +194,13 @@ esac'
 @test "main: optional sentinel pauses before any work" {
   export PR_POOL_QUOTA_PAUSED="$TEST_DIR/PAUSED"; : > "$PR_POOL_QUOTA_PAUSED"
   export SELF_LOGIN="me"
-  # A cycle that WOULD be discovered + dispatched if gated() didn't pause first.
   make_stub bd '
-case "$1 $2" in
-  "list --type=task") echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
-  "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\"}" ;;
-  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\"}}" ;;
+case "$1" in
+  ready) echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+  show)  case "$2" in zr-c) echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\"}" ;; zr-p) echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\"}}" ;; *) echo "{}" ;; esac ;;
   *) exit 0 ;;
 esac'
-  make_stub tmux 'exit 0'   # guard: must never be called while paused
+  make_stub tmux 'exit 0'
   load_script
   run main
   [ "$status" -eq 0 ]
@@ -197,7 +217,7 @@ esac'
   [ "$status" -eq 0 ]
 }
 
-@test "drain_once: works one cycle in the role session, then tears down" {
+@test "drain_once: works one feedback cycle in the role session, then tears down" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
   export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
   make_stub uuidgen 'echo uuid'
@@ -209,10 +229,18 @@ case "$*" in
   *capture-pane*) echo "❯ " ;;
 esac'
   make_stub bd '
-case "$1 $2" in
-  "list --type=task") echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
-  "show zr-c")  echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\",\"status\":\"closed\"}" ;;
-  "show zr-p")  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\",\"pr_number\":7}}" ;;
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[]" ;;
+      *) echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+    esac ;;
+  show)
+    case "$2" in
+      zr-c) echo "{\"id\":\"zr-c\",\"parent\":\"zr-p\",\"status\":\"closed\"}" ;;
+      zr-p) echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\",\"pr_number\":7}}" ;;
+      *) echo "{}" ;;
+    esac ;;
   *) echo "{}" ;;
 esac'
   load_script
@@ -220,7 +248,6 @@ esac'
   [ "$status" -eq 0 ]
   grep -q -- "new-session -d -s PR FEEDBACK PROCESSOR" "$CALLS_LOG"
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /rename" "$CALLS_LOG"
-  grep -q -- "send-keys -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
   grep -q -- "/abs/SKILL.md" "$CALLS_LOG"
   grep -q -- "kill-session -t PR FEEDBACK PROCESSOR" "$CALLS_LOG"
 }
@@ -247,9 +274,10 @@ esac'
   grep -qE "send-keys -t SESS Enter$" "$CALLS_LOG"
 }
 
-@test "drain_once: stops after MAX cycles per pass" {
+@test "drain_once: per-role cap stops the feedback role after MAX_FEEDBACK" {
   export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md"
-  export PR_POOL_MAX=1 PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
+  export PR_POOL_MAX_FEEDBACK=1 PR_POOL_MAX_WORKER=0
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
   make_stub uuidgen 'echo uuid'
   make_stub tmux '
 case "$*" in
@@ -259,18 +287,25 @@ case "$*" in
   *capture-pane*) echo "❯ " ;;
 esac'
   make_stub bd '
-case "$1 $2" in
-  "list --type=task") echo "[{\"id\":\"zr-a\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-b\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
-  "show zr-a")  echo "{\"id\":\"zr-a\",\"parent\":\"zr-pa\",\"status\":\"closed\"}" ;;
-  "show zr-b")  echo "{\"id\":\"zr-b\",\"parent\":\"zr-pb\",\"status\":\"closed\"}" ;;
-  "show zr-pa") echo "{\"id\":\"zr-pa\",\"metadata\":{\"author\":\"me\",\"pr_number\":1}}" ;;
-  "show zr-pb") echo "{\"id\":\"zr-pb\",\"metadata\":{\"author\":\"me\",\"pr_number\":2}}" ;;
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[]" ;;
+      *) echo "[{\"id\":\"zr-a\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"},{\"id\":\"zr-b\",\"title\":\"process-feedback: o/r#2\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+    esac ;;
+  show)
+    case "$2" in
+      zr-a)  echo "{\"id\":\"zr-a\",\"parent\":\"zr-pa\",\"status\":\"closed\"}" ;;
+      zr-b)  echo "{\"id\":\"zr-b\",\"parent\":\"zr-pb\",\"status\":\"closed\"}" ;;
+      zr-pa) echo "{\"id\":\"zr-pa\",\"metadata\":{\"author\":\"me\",\"pr_number\":1}}" ;;
+      zr-pb) echo "{\"id\":\"zr-pb\",\"metadata\":{\"author\":\"me\",\"pr_number\":2}}" ;;
+      *) echo "{}" ;;
+    esac ;;
   *) echo "{}" ;;
 esac'
   load_script
   run drain_once
   [ "$status" -eq 0 ]
-  # MAX=1 -> the nudge (which carries SKILL_MD) is sent exactly once.
   [ "$(grep -c -- '/abs/SKILL.md' "$CALLS_LOG")" -eq 1 ]
 }
 
@@ -494,4 +529,47 @@ esac'
   [ "$status" -ne 0 ]
   grep -q -- "update zr-c --status=open --assignee=" "$CALLS_LOG"      # unclaim ran
   grep -q -- "send-keys -t PR FEEDBACK PROCESSOR /clear" "$CALLS_LOG"  # clear_context ran
+}
+
+@test "drain_once: tears down every role session, incl. one not dispatched this pass" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md" PR_POOL_WORKER_SKILL_MD="/abs/W.md"
+  export PR_POOL_SEND_SETTLE=0
+  : > "$TEST_DIR/WORKER.sess"
+  make_stub tmux '
+case "$*" in
+  *"has-session -t WORKER"*)               [ -f "$TEST_DIR/WORKER.sess" ] && exit 0 || exit 1 ;;
+  *"kill-session -t WORKER"*)              rm -f "$TEST_DIR/WORKER.sess" ;;
+  *"has-session -t PR FEEDBACK PROCESSOR"*) exit 1 ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  make_stub bd 'case "$1" in ready) echo "[]" ;; *) echo "{}" ;; esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  grep -q -- "kill-session -t WORKER" "$CALLS_LOG"
+}
+
+@test "drain_once: worker cap=0 skips a worker-ready bead even when one exists" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md" PR_POOL_WORKER_SKILL_MD="/abs/W.md"
+  export PR_POOL_MAX_WORKER=0 PR_POOL_SEND_SETTLE=0
+  make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *has-session*) exit 1 ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[]" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  ! grep -q -- "/abs/W.md" "$CALLS_LOG"                 # worker nudge never sent (cap=0)
+  ! grep -q -- "new-session -d -s WORKER" "$CALLS_LOG"  # worker session never created
 }

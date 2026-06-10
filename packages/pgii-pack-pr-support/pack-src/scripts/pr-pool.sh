@@ -5,7 +5,6 @@ set -uo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 SELF_LOGIN="${SELF_LOGIN:-}"
-MAX="${PR_POOL_MAX:-1}"
 SOCKET="${PR_POOL_SOCKET:-pgpool}"
 SKILL_MD="${PR_POOL_SKILL_MD:-}"
 READY_TIMEOUT="${PR_POOL_READY_TIMEOUT:-60}"
@@ -67,18 +66,18 @@ bd_obj() {
   bd show "$1" --json 2>/dev/null | jq 'if type=="array" then .[0] else . end'
 }
 
-# discover_cycles prints the IDs of open process-feedback cycles whose parent
-# merge-request was authored by me. One id per line.
-discover_cycles() {
+# discover_feedback prints "feedback-processor<TAB><cycle-id>" for each open
+# process-feedback cycle (from bd ready) whose parent merge-request is mine.
+discover_feedback() {
   local self
   self="$(resolve_self)"
   [ -z "$self" ] && {
     log "ERROR: could not resolve self_login from pg-pr config"
     return 1
   }
-  bd list --type=task --status=open --json --limit 0 2>/dev/null |
+  bd ready --json --limit 0 2>/dev/null |
     jq -r 'if type=="array" then . else [] end
-             | map(select(.title | startswith("process-feedback:")))
+             | map(select(.issue_type=="task" and (.title | startswith("process-feedback:"))))
              | .[].id' |
     while read -r cid; do
       [ -z "$cid" ] && continue
@@ -86,8 +85,25 @@ discover_cycles() {
       pid="$(bd_obj "$cid" | jq -r '.parent // empty')"
       [ -z "$pid" ] && continue
       author="$(bd_obj "$pid" | jq -r '.metadata.author // ""')"
-      [ "$author" = "$self" ] && printf '%s\n' "$cid" || true
+      [ "$author" = "$self" ] && printf 'feedback-processor\t%s\n' "$cid" || true
     done
+}
+
+# discover_worker prints "worker<TAB><bead-id>" for each worker-ready bead, using
+# bd ready's native label filter (the .labels field is null when unset, so a jq
+# label check is avoided here).
+discover_worker() {
+  bd ready --label worker-ready --json --limit 0 2>/dev/null |
+    jq -r 'if type=="array" then . else [] end | .[].id' |
+    while read -r id; do
+      [ -n "$id" ] && printf 'worker\t%s\n' "$id"
+    done
+}
+
+# discover prints role<TAB>bead-id lines for every dispatchable ready bead.
+discover() {
+  discover_feedback
+  discover_worker
 }
 
 # ensure_session creates the role's named claude session if absent (pinning
@@ -161,6 +177,15 @@ submit_line() {
 clear_context() {
   submit_line "$1" "/clear" || return 1
   wait_ready "$1"
+}
+
+# teardown_all tears down every known role's session (not only ones created this
+# pass), reaping strays from crashed/earlier runs or roles no longer dispatched.
+teardown_all() {
+  local role
+  for role in $ROLES; do
+    teardown_session "$(role_session "$role")"
+  done
 }
 
 # teardown_session gracefully exits claude in the given session, then kills it.
@@ -321,24 +346,33 @@ work_one() {
   return "$rc"
 }
 
-# drain_once works up to MAX discoverable cycles per pass (serially) in one
-# reused role session, then tears the session down. Returns 0 whether gated
-# (paused) or after attempting up to MAX cycles.
+# drain_once works each role's discovered beads up to that role's cap (so neither
+# role can starve the other), then tears down all role sessions. Returns 0
+# whether gated (paused) or after attempting the capped work.
 drain_once() {
   gated && return 0
-  local cid worked=0
-  while read -r cid; do
-    [ -z "$cid" ] && continue
-    if [ "$worked" -ge "$MAX" ]; then
-      log "pr-pool: reached MAX=$MAX cycle(s) this pass; stopping"
-      break
-    fi
-    log "pr-pool: working cycle $cid"
-    work_one feedback-processor "$cid" || log "pr-pool: cycle $cid did not complete (flagged)"
-    worked=$((worked + 1))
-  done < <(discover_cycles)
-  teardown_session "$(role_session feedback-processor)"
-  log "pr-pool: drain pass complete ($worked cycle(s) attempted)"
+  local all role total=0
+  all="$(discover)"
+  for role in $ROLES; do
+    local cap worked=0 r id
+    cap="$(role_max "$role")"
+    while IFS="$(printf '\t')" read -r r id; do
+      [ "$r" = "$role" ] || continue
+      [ -z "$id" ] && continue
+      if [ "$worked" -ge "$cap" ]; then
+        log "pr-pool: reached cap=$cap for role '$role' this pass; stopping that role"
+        break
+      fi
+      log "pr-pool: working $role $id"
+      work_one "$role" "$id" || log "pr-pool: $role $id did not complete (flagged)"
+      worked=$((worked + 1))
+      total=$((total + 1))
+    done <<EOF
+$all
+EOF
+  done
+  teardown_all
+  log "pr-pool: drain pass complete ($total item(s) attempted)"
   return 0
 }
 
