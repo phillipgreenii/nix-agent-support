@@ -190,7 +190,7 @@ Make `ensure_session`/`claude_rename`/`clear_context`/`teardown_session`/`send_n
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Update the affected existing tests to the new signatures** (they will fail against the old code)
+- [x] **Step 1: Update the affected existing tests to the new signatures** (they will fail against the old code)
 
 Replace these existing tests' call lines (bodies otherwise unchanged):
 
@@ -273,12 +273,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the suite to confirm the updated/new tests fail**
+- [x] **Step 2: Run the suite to confirm the updated/new tests fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: the five rewritten tests + the new `ensure_session worker` test FAIL (old signatures use the `ROLE_NAME` global / `ensure_session` ignores its arg).
 
-- [ ] **Step 3: Generalize `ensure_session` to take a role**
+- [x] **Step 3: Generalize `ensure_session` to take a role**
 
 Replace `ensure_session` with:
 
@@ -305,7 +305,7 @@ ensure_session() {
 }
 ```
 
-- [ ] **Step 4: Generalize `claude_rename`, `clear_context`, `teardown_session` to take the session**
+- [x] **Step 4: Generalize `claude_rename`, `clear_context`, `teardown_session` to take the session**
 
 ```bash
 # claude_rename names the current claude conversation in the given session.
@@ -332,7 +332,7 @@ teardown_session() {
 }
 ```
 
-- [ ] **Step 5: Generalize `send_nudge` to pick the nudge by role**
+- [x] **Step 5: Generalize `send_nudge` to pick the nudge by role**
 
 Replace `send_nudge` with:
 
@@ -348,7 +348,7 @@ send_nudge() {
 }
 ```
 
-- [ ] **Step 6: Update `work_one` to thread the role + session** (keep `wait_done`'s current 2-arg call — changed in Task 3)
+- [x] **Step 6: Update `work_one` to thread the role + session** (keep `wait_done`'s current 2-arg call — changed in Task 3)
 
 Replace `work_one` with:
 
@@ -374,16 +374,16 @@ work_one() {
 }
 ```
 
-- [ ] **Step 7: Update `drain_once`'s call sites to the new signatures** (still `discover_cycles` + `MAX`; rewritten in Task 4)
+- [x] **Step 7: Update `drain_once`'s call sites to the new signatures** (still `discover_cycles` + `MAX`; rewritten in Task 4)
 
 In `drain_once`, change `work_one "$cid"` to `work_one feedback-processor "$cid"`, and change the trailing `teardown_session` call to `teardown_session "$(role_session feedback-processor)"`.
 
-- [ ] **Step 8: Run the suite to verify green**
+- [x] **Step 8: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS (rewritten lifecycle tests, the new worker-session test, and the still-`bd list` drain tests).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
