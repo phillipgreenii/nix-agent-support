@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,7 +57,7 @@ func runNew(args []string) int {
 	home, _ := os.UserHomeDir()
 	svc := session.New(session.Deps{
 		Tmux:      tmux.NewClient(cfg.Tmux.Socket),
-		Trust:     truster{path: home + "/.claude.json"},
+		Trust:     truster{path: filepath.Join(home, ".claude.json")},
 		Store:     st,
 		Wait:      storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
 		Socket:    cfg.Tmux.Socket,

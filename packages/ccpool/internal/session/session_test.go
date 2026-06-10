@@ -114,3 +114,49 @@ func newMemStore(t *testing.T) *store.Store {
 type fixedClock struct{}
 
 func (fixedClock) Now() time.Time { return time.Unix(100, 0) }
+
+func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	// Cold row in a terminal state; not live → resume path. Insert sets generation=1.
+	if err := st.Insert(ctx, store.Session{Name: "beta", UUID: "u-beta", State: store.Done, TmuxSession: "cc-beta", Model: "opus"}); err != nil {
+		t.Fatal(err)
+	}
+	ft := &fakeTmux{live: map[string]bool{}}
+	var sawState store.State
+	var sawSince int64
+	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
+		// At wait time the row must already be `starting` (flipped before launch, §8.2 step 3).
+		row, _, _ := st.GetByName(ctx, name)
+		sawState = row.State
+		sawSince = since
+		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/beta.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+		NewUUID: func() string { return "must-not-be-used" },
+		Now:     func() time.Time { return time.Unix(1, 0) },
+	})
+
+	h, err := s.Ensure(ctx, "beta", "/tmp/proj", "")
+	if err != nil {
+		t.Fatalf("Ensure resume: %v", err)
+	}
+	if h.UUID != "u-beta" {
+		t.Errorf("resume must preserve uuid u-beta, got %q", h.UUID)
+	}
+	if sawState != store.Starting {
+		t.Errorf("row state at launch = %q, want starting (flipped before launch)", sawState)
+	}
+	if sawSince != 2 { // gen 1 after Insert, 2 after the starting-flip
+		t.Errorf("since = %d, want 2 (read-back post-flip generation, not a magic literal)", sawSince)
+	}
+	if len(ft.newCalls) != 1 || ft.newCalls[0].argv[1] != "--resume" {
+		t.Errorf("resume must use BuildResume argv; got %v", ft.newCalls)
+	}
+	if h.State != store.Ready {
+		t.Errorf("final state = %q, want ready", h.State)
+	}
+}
