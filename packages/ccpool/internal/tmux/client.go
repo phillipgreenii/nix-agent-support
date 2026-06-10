@@ -5,24 +5,33 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strings"
 )
 
 // Client is the tmux adapter. All operations target the dedicated -L socket
 // (spec §3). run is injectable for tests; production uses execRun.
 type Client struct {
-	Socket string
-	run    func(args ...string) ([]byte, error)
+	Socket   string
+	run      func(args ...string) ([]byte, error)
+	runStdin func(stdin string, args ...string) ([]byte, error)
 }
 
 // NewClient returns a Client bound to socket, shelling out to the real tmux.
 func NewClient(socket string) *Client {
 	c := &Client{Socket: socket}
 	c.run = c.execRun
+	c.runStdin = c.execRunStdin
 	return c
 }
 
 func (c *Client) execRun(args ...string) ([]byte, error) {
 	return exec.Command("tmux", args...).CombinedOutput()
+}
+
+func (c *Client) execRunStdin(stdin string, args ...string) ([]byte, error) {
+	cmd := exec.Command("tmux", args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	return cmd.CombinedOutput()
 }
 
 func (c *Client) tmux(args ...string) ([]byte, error) {
@@ -84,4 +93,16 @@ func (c *Client) ShowEnvironment(name, key string) string {
 		return s[i:]
 	}
 	return ""
+}
+
+// Paste delivers body to the session's input via bracketed paste, so multi-line
+// and special-char prompts arrive as a single message (spec §8.3, verified §4).
+// Caller sends Enter separately to submit.
+func (c *Client) Paste(name, body string) error {
+	const buf = "ccpool-paste"
+	if _, err := c.runStdin(body, "-L", c.Socket, "load-buffer", "-b", buf, "-"); err != nil {
+		return fmt.Errorf("tmux load-buffer: %w", err)
+	}
+	_, err := c.tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", name)
+	return err
 }

@@ -48,3 +48,35 @@ func TestClient_KillSession_argv(t *testing.T) {
 		t.Errorf("argv = %v want %v", got[0], want)
 	}
 }
+
+func TestClient_Paste_loadsBufferThenPastesBracketed(t *testing.T) {
+	var got [][]string
+	var stdinSeen string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		got = append(got, args)
+		return nil, nil
+	}}
+	c.runStdin = func(stdin string, args ...string) ([]byte, error) {
+		stdinSeen = stdin
+		got = append(got, args)
+		return nil, nil
+	}
+	if err := c.Paste("cc-a", "hello\nworld"); err != nil {
+		t.Fatalf("Paste: %v", err)
+	}
+	// first call: load-buffer via stdin; second: paste-buffer -p
+	if stdinSeen != "hello\nworld" {
+		t.Errorf("load-buffer stdin = %q, want the body", stdinSeen)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 tmux calls, got %d: %v", len(got), got)
+	}
+	wantLoad := []string{"-L", "ccpool", "load-buffer", "-b", "ccpool-paste", "-"}
+	wantPaste := []string{"-L", "ccpool", "paste-buffer", "-p", "-d", "-b", "ccpool-paste", "-t", "cc-a"}
+	if !reflect.DeepEqual(got[0], wantLoad) {
+		t.Errorf("load argv = %v want %v", got[0], wantLoad)
+	}
+	if !reflect.DeepEqual(got[1], wantPaste) {
+		t.Errorf("paste argv = %v want %v", got[1], wantPaste)
+	}
+}
