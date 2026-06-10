@@ -167,6 +167,12 @@ type Deps struct {
 type Engine struct {
 	deps Deps
 	cfgP atomic.Pointer[config.Config]
+
+	// prevMine / prevTeam hold the previous-tick fingerprint rosters for the
+	// daemon's detector (keyed by prKey, value = fingerprint hash). Only the
+	// daemon loop goroutine touches them, so no lock is needed.
+	prevMine map[prKey]string
+	prevTeam map[prKey]string
 }
 
 // New constructs an Engine. Returns an error if required deps are missing.

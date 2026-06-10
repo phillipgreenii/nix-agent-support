@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	stdsync "sync"
 	"syscall"
 	"time"
 
@@ -44,7 +45,7 @@ import (
 const DefaultMetricsAddr = "127.0.0.1:9818"
 
 // DefaultDaemonInterval is used when DaemonOpts.Interval is unset/zero.
-const DefaultDaemonInterval = 10 * time.Minute
+const DefaultDaemonInterval = 60 * time.Second
 
 // DaemonOpts configures Engine.Daemon. Zero values are accepted: Interval
 // defaults to DefaultDaemonInterval, Logger to slog.Default, LockDir to
@@ -147,36 +148,84 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 		"metrics_addr", opts.MetricsAddr)
 	defer opts.Logger.Info("pg-pr daemon stopped")
 
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil
-		}
-		runOnce(ctx, e, opts.Logger)
+	// Detector state lives on the engine; only this goroutine touches it.
+	e.prevMine = map[prKey]string{}
+	e.prevTeam = map[prKey]string{}
+
+	// Workers always have a place to send snapshot deltas. When the dashboard
+	// is disabled this is a throwaway sink that's simply never served.
+	ownerStore := opts.Dashboard
+	if ownerStore == nil {
+		ownerStore = snapshot.NewStore()
+	}
+
+	updates := make(chan snapshotUpdate, 64)
+	ownerDone := make(chan struct{})
+	go func() {
+		e.runSnapshotOwner(updates, ownerStore)
+		ownerDone <- struct{}{}
+	}()
+
+	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
+	var wg stdsync.WaitGroup
+	wg.Add(2)
+	go e.runWorker(ctx, mineQ, "mine", updates, opts.Logger, &wg)
+	go e.runWorker(ctx, teamQ, "team", updates, opts.Logger, &wg)
+
+	for ctx.Err() == nil {
+		e.fingerprintTick(ctx, mineQ, teamQ, opts.Logger)
 
 		select {
 		case <-ctx.Done():
 			opts.Logger.Info("pg-pr daemon shutting down", "reason", ctx.Err().Error())
-			return nil
 		case <-sighup:
 			opts.Logger.Info("SIGHUP received; reloading config")
 			cfg, err := opts.ReloadConfig(ctx)
 			if err != nil {
 				opts.Logger.Error("config reload failed; keeping previous", "err", err.Error())
-				continue
+			} else {
+				e.ReplaceCfg(cfg)
+				opts.Logger.Info("config reloaded", "path", cfg.Path)
 			}
-			e.ReplaceCfg(cfg)
-			opts.Logger.Info("config reloaded", "path", cfg.Path)
 		case <-time.After(opts.Interval):
 		}
+		if ctx.Err() != nil {
+			break
+		}
 	}
+
+	// Shutdown: workers drain in-flight refreshes then exit on ctx.Done; once
+	// both are done, close the update channel so the owner drains and returns.
+	wg.Wait()
+	close(updates)
+	<-ownerDone
+	return nil
 }
 
-// runOnce executes one Sync iteration and logs the outcome. A failing sync
-// is logged but does NOT terminate the daemon.
-func runOnce(ctx context.Context, e *Engine, log *slog.Logger) {
-	start := time.Now()
-	sum, err := e.Sync(ctx)
-	logSyncOutcome(log, sum, err, time.Since(start))
+// runWorker drains q serially, calling refreshPR and forwarding the snapshot
+// delta to the owner. Exits when the queue is empty AND ctx is cancelled.
+func (e *Engine) runWorker(ctx context.Context, q *refreshQueue, group string, updates chan<- snapshotUpdate, log *slog.Logger, wg *stdsync.WaitGroup) {
+	defer wg.Done()
+	for {
+		k, ok := q.dequeue()
+		if !ok {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(250 * time.Millisecond):
+				continue
+			}
+		}
+		telemetry.RefreshQueueDepth.WithLabelValues(group).Set(float64(q.depth()))
+		start := e.deps.Now()
+		in, err := e.refreshPR(ctx, k.Repo, k.Number)
+		telemetry.SyncPRDuration.WithLabelValues(k.Repo, group).Observe(e.deps.Now().Sub(start).Seconds())
+		if err != nil {
+			log.Warn("refresh failed", "group", group, "repo", k.Repo, "number", k.Number, "err", err.Error())
+			continue
+		}
+		updates <- snapshotUpdate{Key: k, Input: in} // in may be nil → owner deletes
+	}
 }
 
 // logSyncOutcome logs the result of one sync iteration.

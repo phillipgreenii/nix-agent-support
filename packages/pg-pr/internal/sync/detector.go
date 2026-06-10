@@ -1,18 +1,20 @@
 package sync
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // fingerprintHash is a stable hash of the change-relevant fields.
-//
-//nolint:unused // consumed by the daemon fingerprint loop landed in a follow-up task.
 func fingerprintHash(f vcs.PRFingerprint) string {
 	s := fmt.Sprintf("%s|%s|%s|%s|%t|%d|%d|%d",
 		f.UpdatedAt, f.HeadOID, f.StatusRollup, f.State, f.IsDraft,
@@ -22,8 +24,6 @@ func fingerprintHash(f vcs.PRFingerprint) string {
 }
 
 // diffResult is the detector's per-tick decision for one group.
-//
-//nolint:unused // consumed by the daemon fingerprint loop landed in a follow-up task.
 type diffResult struct {
 	enqueued map[prKey]bool
 	reasons  map[prKey]string // added|changed|disappeared
@@ -35,8 +35,6 @@ type diffResult struct {
 // the disappeared check (mass-close guard) but still records the roster.
 // Callers pass the roster entries for one group; "added" = no open bead,
 // "changed" = bead exists and fingerprint is new/differs.
-//
-//nolint:unused // consumed by the daemon fingerprint loop landed in a follow-up task.
 func diffRoster(prev map[prKey]string, roster []vcs.PRFingerprint, openBeads map[prKey]bool, complete bool) diffResult {
 	d := diffResult{
 		enqueued: map[prKey]bool{},
@@ -71,8 +69,6 @@ func diffRoster(prev map[prKey]string, roster []vcs.PRFingerprint, openBeads map
 }
 
 // buildMineQuery is the cross-repo "my open PRs" search (drafts included).
-//
-//nolint:unused // consumed by the daemon fingerprint loop landed in a follow-up task.
 func buildMineQuery(cfg *config.Config) string {
 	parts := []string{"is:pr", "is:open", "author:" + cfg.SelfLogin}
 	for _, r := range cfg.Repos {
@@ -83,8 +79,6 @@ func buildMineQuery(cfg *config.Config) string {
 
 // buildTeamQuery is one repo's "team open PRs" search (drafts included; empty
 // when the repo has no team members).
-//
-//nolint:unused // consumed by the daemon fingerprint loop landed in a follow-up task.
 func buildTeamQuery(rcfg config.RepoConfig) string {
 	if len(rcfg.TeamMembers) == 0 {
 		return ""
@@ -94,4 +88,125 @@ func buildTeamQuery(rcfg config.RepoConfig) string {
 		parts = append(parts, "author:"+m)
 	}
 	return strings.Join(parts, " ")
+}
+
+// firstFingerprintProvider returns the first registered VCS provider that
+// supports fingerprint polling.
+func (e *Engine) firstFingerprintProvider() (vcs.FingerprintProvider, bool) {
+	for _, p := range e.deps.VCS {
+		if fp, ok := p.(vcs.FingerprintProvider); ok {
+			return fp, true
+		}
+	}
+	return nil, false
+}
+
+// openBeadsForGroup enumerates open merge-request beads across the given repos
+// (each repo's own bd workspace), keyed by prKey, filtered to mine (mine=true)
+// or team (mine=false) by author. Per-repo list errors are skipped (conservative:
+// a missing repo just won't contribute "disappeared" candidates this tick).
+func (e *Engine) openBeadsForGroup(ctx context.Context, repos []config.RepoConfig, mine bool) map[prKey]bool {
+	out := map[prKey]bool{}
+	for _, rcfg := range repos {
+		bdc := e.bdClientFor(rcfg)
+		mrs, err := bdc.ListMergeRequests(ctx, false)
+		if err != nil {
+			continue
+		}
+		for _, mr := range mrs {
+			if mr.Fields.Repo != rcfg.Remote {
+				continue
+			}
+			if e.isSelfAuthored(mr.Fields.Author) == mine {
+				out[prKey{Repo: mr.Fields.Repo, Number: mr.Fields.PRNumber}] = true
+			}
+		}
+	}
+	return out
+}
+
+// recordPoll emits the per-poll telemetry for a fingerprint query.
+func (e *Engine) recordPoll(group string, res vcs.FingerprintResult, err error, dur time.Duration) {
+	telemetry.FingerprintPollDuration.WithLabelValues(group).Observe(dur.Seconds())
+	if err != nil {
+		telemetry.FingerprintPollErrorsTotal.WithLabelValues(group).Inc()
+		return
+	}
+	if res.Truncated {
+		telemetry.FingerprintPollTruncatedTotal.WithLabelValues(group).Inc()
+	}
+	telemetry.FingerprintPollSuccessTimestamp.WithLabelValues(group).Set(float64(e.deps.Now().Unix()))
+	telemetry.GraphQLCost.WithLabelValues(group).Set(float64(res.RateCost))
+	telemetry.GraphQLRateRemaining.Set(float64(res.RateLeft))
+}
+
+// fingerprintTick runs the mine + team fingerprint queries, diffs them against
+// the previous rosters and open beads, and enqueues changed PRs. Pure detector:
+// it never mutates beads/snapshot. Team drafts are NOT special-cased here — the
+// query includes drafts and refreshPR decides dormant-vs-active from GetPR state.
+func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue, log *slog.Logger) {
+	cfg := e.cfg()
+	prov, ok := e.firstFingerprintProvider()
+	if !ok {
+		return // no fingerprint-capable provider (e.g. test stub) — nothing to do
+	}
+
+	// MINE: one cross-repo query.
+	start := e.deps.Now()
+	mineRes, mineErr := prov.FingerprintPRs(ctx, buildMineQuery(cfg))
+	e.recordPoll("mine", mineRes, mineErr, e.deps.Now().Sub(start))
+	if mineErr != nil {
+		log.Warn("mine fingerprint poll failed", "err", mineErr.Error())
+	} else {
+		mineBeads := e.openBeadsForGroup(ctx, cfg.Repos, true)
+		d := diffRoster(e.prevMine, mineRes.PRs, mineBeads, !mineRes.Truncated)
+		for k := range d.enqueued {
+			mineQ.enqueue(k)
+			telemetry.FingerprintChangesTotal.WithLabelValues("mine", d.reasons[k]).Inc()
+			telemetry.RefreshEnqueuedTotal.WithLabelValues("mine").Inc()
+		}
+		e.prevMine = d.roster
+		telemetry.RefreshQueueDepth.WithLabelValues("mine").Set(float64(mineQ.depth()))
+	}
+
+	// TEAM: per repo (team_members are per-repo). Diff the FULL roster (drafts
+	// included). Accumulate the new prevTeam across all repos.
+	newPrevTeam := map[prKey]string{}
+	for _, rcfg := range cfg.Repos {
+		q := buildTeamQuery(rcfg)
+		if q == "" {
+			continue
+		}
+		s := e.deps.Now()
+		res, err := prov.FingerprintPRs(ctx, q)
+		e.recordPoll("team", res, err, e.deps.Now().Sub(s))
+		if err != nil {
+			log.Warn("team fingerprint poll failed", "repo", rcfg.Remote, "err", err.Error())
+			// preserve this repo's prev entries so we don't lose change-tracking
+			for k, h := range e.prevTeam {
+				if k.Repo == rcfg.Remote {
+					newPrevTeam[k] = h
+				}
+			}
+			continue
+		}
+		repoPrev := map[prKey]string{}
+		for k, h := range e.prevTeam {
+			if k.Repo == rcfg.Remote {
+				repoPrev[k] = h
+			}
+		}
+		repoBeads := e.openBeadsForGroup(ctx, []config.RepoConfig{rcfg}, false)
+		d := diffRoster(repoPrev, res.PRs, repoBeads, !res.Truncated)
+		for k := range d.enqueued {
+			teamQ.enqueue(k)
+			telemetry.FingerprintChangesTotal.WithLabelValues("team", d.reasons[k]).Inc()
+			telemetry.RefreshEnqueuedTotal.WithLabelValues("team").Inc()
+		}
+		for k, h := range d.roster {
+			newPrevTeam[k] = h
+		}
+	}
+	e.prevTeam = newPrevTeam
+	telemetry.RefreshQueueDepth.WithLabelValues("team").Set(float64(teamQ.depth()))
 }

@@ -21,6 +21,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // makeDaemonEngine builds an Engine whose Sync is cheap: empty config means
@@ -485,5 +487,68 @@ func TestLogSyncOutcome_LogsErrorDetails(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "invalid issue type: feedback") {
 		t.Fatalf("sync error messages must appear in the daemon log so failures are diagnosable; got: %s", out)
+	}
+}
+
+// fakeFingerprintVCS implements VCSProvider + vcs.FingerprintProvider + GetPR.
+type fakeFingerprintVCS struct {
+	fakeVCS // embed the existing fake to satisfy VCSProvider; override GetPR/FingerprintPRs
+	mine    []vcs.PRFingerprint
+	getPR   api.PR
+}
+
+func (f *fakeFingerprintVCS) FingerprintPRs(_ context.Context, query string) (vcs.FingerprintResult, error) {
+	// Return the mine set only for the mine query (author:me); empty for team.
+	if strings.Contains(query, "author:me") && !strings.Contains(query, "author:teammate") {
+		return vcs.FingerprintResult{PRs: f.mine}, nil
+	}
+	return vcs.FingerprintResult{}, nil
+}
+func (f *fakeFingerprintVCS) GetPR(_ context.Context, _ string, _ int) (*api.PR, error) {
+	pr := f.getPR
+	return &pr, nil
+}
+
+func TestDaemon_FingerprintTickPopulatesSnapshot(t *testing.T) {
+	vp := &fakeFingerprintVCS{
+		mine:  []vcs.PRFingerprint{{Repo: "o/r", Number: 1, Author: "me", State: "open", HeadOID: "a"}},
+		getPR: api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"},
+	}
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", WorktreeRoot: t.TempDir(), Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		VCS:   map[string]VCSProvider{"github": vp},
+		Beads: noopBeads{},
+		Now:   func() time.Time { return time.Now().UTC() },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	store := snapshot.NewStore()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- e.Daemon(ctx, DaemonOpts{
+			Interval: 20 * time.Millisecond, LockDir: t.TempDir(),
+			Logger: discardLogger(), Dashboard: store,
+		})
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		if snap, ok := store.Get(); ok && len(snap.Mine) == 1 && snap.Mine[0].Number == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatal("snapshot never populated from fingerprint tick")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not exit after cancel")
 	}
 }

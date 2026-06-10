@@ -38,8 +38,6 @@ func (m *snapshotModel) sortedInputs() []snapshot.PRInput {
 }
 
 // snapshotUpdate is the message workers send the owner. Input==nil → delete.
-//
-//nolint:unused // consumed by the daemon owner-goroutine wiring landed in a follow-up task.
 type snapshotUpdate struct {
 	Key   prKey
 	Input *snapshot.PRInput
@@ -48,8 +46,6 @@ type snapshotUpdate struct {
 // runSnapshotOwner owns the model and rebuilds+Sets the store per update until
 // updates is closed. Build inputs come from the engine so SIGHUP changes are
 // picked up on the next update.
-//
-//nolint:unused // invoked by the daemon owner-goroutine wiring landed in a follow-up task.
 func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot.Store) {
 	m := newSnapshotModel()
 	for u := range updates {
