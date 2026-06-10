@@ -33,11 +33,11 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			toClose[r.Name] = true
 		}
 	}
-	// Pass 2: over cap → close oldest-activity non-TTL sessions first.
-	// capClosures is computed from the original live count so TTL and cap
-	// closures are independent: e.g. 3 live, cap=2 → close 1 oldest non-TTL
-	// even if a TTL session is already being closed.
-	capClosures := len(live) - maxSessions
+	// Pass 2: still over cap AFTER the TTL closures → close more oldest-activity
+	// sessions. TTL closures COUNT toward the cap (spec §8.6: close "while over
+	// the cap"), so a pool already at/under cap after TTL reaping closes nothing
+	// more — otherwise we'd over-reap below the configured cap.
+	capClosures := (len(live) - len(toClose)) - maxSessions
 	for _, r := range live { // already sorted oldest-first
 		if capClosures <= 0 {
 			break
