@@ -35,7 +35,7 @@ Introduces the role resolvers and the worker-facing text helpers without changin
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh` (top-of-script vars; rename `nudge_text`; add resolvers + `worker_label` + `nudge_text_worker`; update `send_nudge`'s internal call)
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Write the failing tests** (append to `pr-pool.bats`; also rename the existing `nudge_text` test)
+- [x] **Step 1: Write the failing tests** (append to `pr-pool.bats`; also rename the existing `nudge_text` test)
 
 Rename the existing test `@test "nudge_text: instructs dedup …"` to call `nudge_text_feedback` (function name only — keep its body/asserts):
 
@@ -98,12 +98,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: the four tests above FAIL (`role_session`/`role_actor`/`role_skill`/`role_max`/`nudge_text_worker`/`worker_label`/`nudge_text_feedback` not defined).
 
-- [ ] **Step 3: Add the new top-of-script variables**
+- [x] **Step 3: Add the new top-of-script variables**
 
 In `pr-pool.sh`, in the variable block (after the existing `ACTOR=…` / before `QUOTA_PAUSED=…`), add:
 
@@ -121,7 +121,7 @@ ROLES="feedback-processor worker"                                      # role li
 
 (`ROLE_NAME`, `ACTOR`, `SKILL_MD`, `MAX` remain for now; later tasks remove `MAX`'s use and keep `ROLE_NAME`/`ACTOR` only as the feedback defaults referenced above.)
 
-- [ ] **Step 4: Add the role resolvers** (place just above `nudge_text`)
+- [x] **Step 4: Add the role resolvers** (place just above `nudge_text`)
 
 ```bash
 # --- per-role config table (bash-3.2-safe case resolvers) ----------------
@@ -135,7 +135,7 @@ role_nudge()      { case "$1" in worker) nudge_text_worker "$2";;          *) nu
 role_convo_name() { case "$1" in worker) worker_label "$2";;               *) cycle_label "$2";; esac; }
 ```
 
-- [ ] **Step 5: Rename `nudge_text` → `nudge_text_feedback` and add `nudge_text_worker` + `worker_label`**
+- [x] **Step 5: Rename `nudge_text` → `nudge_text_feedback` and add `nudge_text_worker` + `worker_label`**
 
 Rename the existing `nudge_text` function to `nudge_text_feedback` (keep its body verbatim). Immediately after it, add:
 
@@ -163,16 +163,16 @@ worker_label() {
 }
 ```
 
-- [ ] **Step 6: Update `send_nudge`'s internal call** (keep its signature for now)
+- [x] **Step 6: Update `send_nudge`'s internal call** (keep its signature for now)
 
 In `send_nudge`, change the line that builds the nudge from `nudge_text "$cid"` to `nudge_text_feedback "$cid"`.
 
-- [ ] **Step 7: Run the suite to verify green**
+- [x] **Step 7: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS (new role/worker tests + the renamed `nudge_text_feedback` test + every existing test).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
