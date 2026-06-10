@@ -8,6 +8,7 @@
 let
   cfg = config.phillipgreenii.programs.ccpool;
   tomlFormat = pkgs.formats.toml { };
+  defaultCwd = lib.attrByPath [ "claude" "default_cwd" ] "" cfg.settings;
 in
 {
   options.phillipgreenii.programs.ccpool = {
@@ -47,5 +48,14 @@ in
         claude.plugin_dir = "${cfg.package}/share/ccpool-plugin";
       }
     );
+
+    # Pre-trust default_cwd in ~/.claude.json (spec §8.1.1/§14 step 6): the
+    # primary, non-racy trust path (vs. the runtime `ensure` fallback). Best
+    # effort — a trust-write failure must not break activation; runtime covers it.
+    home.activation = lib.mkIf (defaultCwd != "") {
+      ccpoolTrust = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        $DRY_RUN_CMD ${cfg.package}/bin/ccpool trust ${lib.escapeShellArg defaultCwd} || true
+      '';
+    };
   };
 }

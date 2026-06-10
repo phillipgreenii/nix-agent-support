@@ -35,7 +35,11 @@ func LastAssistantText(path string) (string, error) {
 				b.WriteString(blk.Text)
 			}
 		}
-		last = b.String()
+		// Keep the last NON-empty assistant text, so a trailing tool_use-only
+		// assistant event doesn't blank out the real reply from an earlier turn.
+		if txt := b.String(); txt != "" {
+			last = txt
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", err

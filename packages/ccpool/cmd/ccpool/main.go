@@ -22,6 +22,7 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 		"reap":    true,
 		"reply":   true,
 		"tail":    true,
+		"trust":   true,
 		"version": true,
 	}
 	if len(args) < 2 {
@@ -58,6 +59,8 @@ func main() {
 		os.Exit(runReply(rest))
 	case "tail":
 		os.Exit(runTail(rest))
+	case "trust":
+		os.Exit(runTrust(rest))
 	case "version":
 		fmt.Println(version)
 	default:

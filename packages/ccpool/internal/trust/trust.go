@@ -43,18 +43,19 @@ func EnsureTrusted(path, cwd string) error {
 		return err
 	}
 	// Read-back-verify; retry once on mismatch (spec §8.1.1).
-	if !isTrusted(path, cwd) {
+	if !IsTrusted(path, cwd) {
 		if err := atomicWriteJSON(path, root); err != nil {
 			return err
 		}
-		if !isTrusted(path, cwd) {
+		if !IsTrusted(path, cwd) {
 			return fmt.Errorf("trust write for %q did not stick (concurrent Claude write?)", cwd)
 		}
 	}
 	return nil
 }
 
-func isTrusted(path, cwd string) bool {
+// IsTrusted reports whether cwd is marked hasTrustDialogAccepted in the JSON at path.
+func IsTrusted(path, cwd string) bool {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return false

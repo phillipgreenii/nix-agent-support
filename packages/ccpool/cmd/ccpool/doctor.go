@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
+	"github.com/phillipgreenii/ccpool/internal/trust"
 )
 
 func runDoctor(args []string) int {
@@ -28,10 +29,15 @@ func runDoctor(args []string) int {
 	}
 	defer st.Close()
 	cl := tmux.NewClient(cfg.Tmux.Socket)
+	home, _ := os.UserHomeDir()
+	claudeJSON := filepath.Join(home, ".claude.json")
 
 	report := func(r store.Session) {
 		live := cl.HasSession(cfg.Tmux.Prefix + r.Name)
-		fmt.Printf("name=%s state=%s live=%v uuid=%s\n", r.Name, r.State, live, r.UUID)
+		// cwd-trust is one of the three hang causes doctor must distinguish (§20):
+		// untrusted cwd, dropped send-key, or missing/failed hook.
+		trusted := r.CWD != "" && trust.IsTrusted(claudeJSON, r.CWD)
+		fmt.Printf("name=%s state=%s live=%v cwd_trusted=%v uuid=%s\n", r.Name, r.State, live, trusted, r.UUID)
 		fmt.Printf("  cwd=%s\n  transcript=%s\n", r.CWD, r.TranscriptPath)
 	}
 

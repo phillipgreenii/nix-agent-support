@@ -81,20 +81,6 @@ func (c *Client) HasSession(name string) bool {
 	return err == nil
 }
 
-// ShowEnvironment returns the value of one session env var, or "" if unset.
-func (c *Client) ShowEnvironment(name, key string) string {
-	out, err := c.tmux("show-environment", "-t", name, key)
-	if err != nil {
-		return ""
-	}
-	// output is "KEY=value\n"; strip "KEY=".
-	s := string(bytes.TrimSpace(out))
-	if i := len(key) + 1; len(s) >= i && s[:i] == key+"=" {
-		return s[i:]
-	}
-	return ""
-}
-
 // Paste delivers body to the session's input via bracketed paste, so multi-line
 // and special-char prompts arrive as a single message (spec §8.3, verified §4).
 // Caller sends Enter separately to submit.
