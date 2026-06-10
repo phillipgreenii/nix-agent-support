@@ -26,6 +26,7 @@ type Store interface {
 	Insert(ctx context.Context, s store.Session) error
 	Transition(ctx context.Context, name string, to store.State, uuid, transcriptPath string) (store.State, error)
 	Delete(ctx context.Context, name string) error
+	List(ctx context.Context) ([]store.Session, error)
 }
 
 // Locker serializes operations on one session name (spec §15). A nil Locker on
