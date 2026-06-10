@@ -28,6 +28,7 @@ func (f *fakeTmux) NewSession(name string, env map[string]string, argv []string)
 }
 func (f *fakeTmux) SendKeys(string, ...string) error { return nil }
 func (f *fakeTmux) Paste(string, string) error       { return nil }
+func (f *fakeTmux) KillSession(string) error         { return nil }
 
 type fakeTrust struct{ trusted []string }
 

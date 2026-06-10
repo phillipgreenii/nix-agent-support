@@ -18,12 +18,20 @@ type Tmux interface {
 	NewSession(name string, env map[string]string, argv []string) error
 	SendKeys(name string, keys ...string) error
 	Paste(name, body string) error
+	KillSession(name string) error
 }
 type Truster interface{ EnsureTrusted(cwd string) error }
 type Store interface {
 	GetByName(ctx context.Context, name string) (store.Session, bool, error)
 	Insert(ctx context.Context, s store.Session) error
 	Transition(ctx context.Context, name string, to store.State, uuid, transcriptPath string) (store.State, error)
+	Delete(ctx context.Context, name string) error
+}
+
+// Locker serializes operations on one session name (spec §15). A nil Locker on
+// Deps means "no locking" (used by unit tests with fakes).
+type Locker interface {
+	Lock(name string) (unlock func(), err error)
 }
 type Waiter interface {
 	Wait(ctx context.Context, name string, since int64) (wait.Outcome, error)
@@ -41,6 +49,8 @@ type Mode int
 const (
 	ModeRefuseIfBusy Mode = iota // default: error if the session isn't idle
 	ModeNoWait                   // deliver and return immediately
+	ModeQueue                    // skip idle check; deliver into Claude's native queue; implies no-wait
+	ModeInterrupt                // cancel the current turn, then deliver
 )
 
 // Result is the outcome of a Send.
@@ -63,6 +73,7 @@ type Deps struct {
 	Store      Store
 	Wait       Waiter
 	Transcript Transcript
+	Lock       Locker
 	Socket     string
 	Prefix     string
 	PluginDir  string
@@ -170,4 +181,18 @@ func orDefault(v, def string) string {
 		return v
 	}
 	return def
+}
+
+// withLock runs fn while holding the per-name lock. A nil Locker (tests) is a
+// no-op so existing fakes need no Lock wiring.
+func (s *Service) withLock(name string, fn func() error) error {
+	if s.d.Lock == nil {
+		return fn()
+	}
+	unlock, err := s.d.Lock.Lock(name)
+	if err != nil {
+		return fmt.Errorf("lock %q: %w", name, err)
+	}
+	defer unlock()
+	return fn()
 }
