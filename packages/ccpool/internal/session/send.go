@@ -12,6 +12,16 @@ import (
 // Send delivers prompt to the live session `name` and (unless ModeNoWait) blocks
 // for the turn outcome, returning the assistant reply. Spec §8.3.
 func (s *Service) Send(ctx context.Context, name, prompt string, mode Mode) (Result, error) {
+	var res Result
+	err := s.withLock(name, func() error {
+		var e error
+		res, e = s.sendLocked(ctx, name, prompt, mode)
+		return e
+	})
+	return res, err
+}
+
+func (s *Service) sendLocked(ctx context.Context, name, prompt string, mode Mode) (Result, error) {
 	tmuxName := s.d.Prefix + name
 	row, ok, err := s.d.Store.GetByName(ctx, name)
 	if err != nil {
@@ -25,8 +35,19 @@ func (s *Service) Send(ctx context.Context, name, prompt string, mode Mode) (Res
 	}
 
 	idle := row.State == store.Ready || row.State == store.Done
-	if mode == ModeRefuseIfBusy && !idle {
-		return Result{State: row.State}, fmt.Errorf("session %q is busy (state=%s); use --interrupt or --queue-message", name, row.State)
+	switch mode {
+	case ModeRefuseIfBusy:
+		if !idle {
+			return Result{State: row.State}, fmt.Errorf("session %q is busy (state=%s); use --interrupt or --queue-message", name, row.State)
+		}
+	case ModeInterrupt:
+		if !idle {
+			if err := s.cancelLocked(ctx, name); err != nil {
+				return Result{}, fmt.Errorf("interrupt: %w", err)
+			}
+		}
+	case ModeQueue:
+		// no idle check — deliver into Claude's native input queue, fire-and-forget.
 	}
 
 	// Flip to working as a single generation-bumping write; snapshot THAT generation.
@@ -42,7 +63,7 @@ func (s *Service) Send(ctx context.Context, name, prompt string, mode Mode) (Res
 		return Result{}, fmt.Errorf("deliver prompt: %w", err)
 	}
 
-	if mode == ModeNoWait {
+	if mode == ModeNoWait || mode == ModeQueue {
 		return Result{State: store.Working}, nil
 	}
 

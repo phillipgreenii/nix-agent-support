@@ -83,6 +83,61 @@ func TestSend_refusesWhenBusy(t *testing.T) {
 	}
 }
 
+func TestSend_interrupt_cancelsThenDelivers(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	tm := &sendTmux{live: true}
+	tr := fakeTranscript{reply: "done now"}
+	w := waitFunc(func(_ context.Context, name string, _ int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, name, store.Done, "", "")
+		return wait.Outcome{State: store.Done}, nil
+	})
+	s := newSendService(t, st, tm, tr, w)
+	res, err := s.Send(ctx, "a", "hi", ModeInterrupt)
+	if err != nil {
+		t.Fatalf("Send interrupt: %v", err)
+	}
+	if res.State != store.Done || res.Reply != "done now" {
+		t.Errorf("res = %+v", res)
+	}
+	// Escape must have been sent (the cancel) before delivery.
+	sawEscape := false
+	for _, k := range tm.keys {
+		for _, key := range k {
+			if key == "Escape" {
+				sawEscape = true
+			}
+		}
+	}
+	if !sawEscape {
+		t.Error("ModeInterrupt must Escape the current turn before delivering")
+	}
+}
+
+func TestSend_queue_deliversWithoutWaiting(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	tm := &sendTmux{live: true}
+	// waiter must NOT be called for queue mode; fail if it is.
+	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
+		t.Error("ModeQueue must not wait")
+		return wait.Outcome{}, nil
+	})
+	s := newSendService(t, st, tm, fakeTranscript{}, w)
+	res, err := s.Send(ctx, "a", "later prompt", ModeQueue)
+	if err != nil {
+		t.Fatalf("Send queue: %v", err)
+	}
+	if res.State != store.Working {
+		t.Errorf("queue result state = %q, want working (fire-and-forget)", res.State)
+	}
+	if len(tm.pasted) != 1 {
+		t.Errorf("queue must still deliver the prompt; pasted=%v", tm.pasted)
+	}
+}
+
 func TestSend_timeoutFallsBackToNeedsInput(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
