@@ -16,6 +16,8 @@ import (
 type Tmux interface {
 	HasSession(name string) bool
 	NewSession(name string, env map[string]string, argv []string) error
+	SendKeys(name string, keys ...string) error
+	Paste(name, body string) error
 }
 type Truster interface{ EnsureTrusted(cwd string) error }
 type Store interface {
@@ -27,6 +29,27 @@ type Waiter interface {
 	Wait(ctx context.Context, name string, since int64) (wait.Outcome, error)
 }
 
+// Transcript reads reply text / awaiting-input state from a transcript file.
+type Transcript interface {
+	LastAssistantText(path string) (string, error)
+	IsAwaitingInput(path string) (bool, error)
+}
+
+// Mode selects send behavior when (and how) to deliver.
+type Mode int
+
+const (
+	ModeRefuseIfBusy Mode = iota // default: error if the session isn't idle
+	ModeNoWait                   // deliver and return immediately
+)
+
+// Result is the outcome of a Send.
+type Result struct {
+	State    store.State
+	Reply    string
+	TimedOut bool
+}
+
 // waitFunc adapts a func to Waiter (used in tests and the default wiring).
 type waitFunc func(ctx context.Context, name string, since int64) (wait.Outcome, error)
 
@@ -35,16 +58,17 @@ func (f waitFunc) Wait(ctx context.Context, name string, since int64) (wait.Outc
 }
 
 type Deps struct {
-	Tmux      Tmux
-	Trust     Truster
-	Store     Store
-	Wait      Waiter
-	Socket    string
-	Prefix    string
-	PluginDir string
-	ClaudeBin string
-	NewUUID   func() string
-	Now       func() time.Time
+	Tmux       Tmux
+	Trust      Truster
+	Store      Store
+	Wait       Waiter
+	Transcript Transcript
+	Socket     string
+	Prefix     string
+	PluginDir  string
+	ClaudeBin  string
+	NewUUID    func() string
+	Now        func() time.Time
 }
 
 type Service struct{ d Deps }
