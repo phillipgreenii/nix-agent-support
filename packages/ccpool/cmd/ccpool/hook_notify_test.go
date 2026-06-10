@@ -1,0 +1,42 @@
+package main
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/phillipgreenii/ccpool/internal/notify"
+	"github.com/phillipgreenii/ccpool/internal/store"
+)
+
+type recordNotifier struct{ events []notify.Event }
+
+func (r *recordNotifier) Notify(e notify.Event) error { r.events = append(r.events, e); return nil }
+
+func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u-x", State: store.Working})
+	rn := &recordNotifier{}
+	const p = `{"session_id":"u-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "failed"}); err != nil {
+		t.Fatalf("handleHookN: %v", err)
+	}
+	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
+		t.Errorf("expected one needs_input event, got %+v", rn.events)
+	}
+}
+
+func TestHook_notify_noEdgeNoFire(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u-x", State: store.NeedsInput}) // already needs_input
+	rn := &recordNotifier{}
+	const p = `{"session_id":"u-x","hook_event_name":"Notification"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rn.events) != 0 {
+		t.Errorf("no edge (needs_input→needs_input) must not fire; got %+v", rn.events)
+	}
+}

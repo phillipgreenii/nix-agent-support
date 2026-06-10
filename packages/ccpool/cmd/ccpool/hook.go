@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -51,14 +52,22 @@ func runHook(args []string) int {
 	}
 	defer st.Close()
 
-	if err := handleHook(event, os.Stdin, st, os.Getenv("CCPOOL_NAME")); err != nil {
+	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)
+	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_NAME"), n, cfg.Notify.On); err != nil {
 		logHook(stateDir, fmt.Sprintf("hook %s: %v", event, err))
 	}
 	return 0
 }
 
-// handleHook is the testable core: parse stdin, resolve the row, transition.
+// handleHook is the production entrypoint (no notifier wired = None). Kept so
+// existing Plan 1 tests calling handleHook still compile.
 func handleHook(event string, stdin io.Reader, st *store.Store, envName string) error {
+	return handleHookN(event, stdin, st, envName, notify.None{}, nil)
+}
+
+// handleHookN parses the payload, resolves the row, transitions, and fires the
+// notifier on an edge into an On state (spec §9/§10).
+func handleHookN(event string, stdin io.Reader, st *store.Store, envName string, n notify.Notifier, on []string) error {
 	to, ok := eventState[event]
 	if !ok {
 		return fmt.Errorf("unknown hook event %q", event)
@@ -68,16 +77,13 @@ func handleHook(event string, stdin io.Reader, st *store.Store, envName string) 
 		return fmt.Errorf("decode payload: %w", err)
 	}
 	ctx := context.Background()
-
 	name, ok, err := resolveName(ctx, st, p.SessionID, envName)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		// Unresolvable: not an error (spec §9 — log + exit 0). Caller logs.
 		return nil
 	}
-
 	if event == "start" {
 		if err := st.Upsert(ctx, name, p.SessionID); err != nil {
 			return fmt.Errorf("upsert %q: %w", name, err)
@@ -87,9 +93,9 @@ func handleHook(event string, stdin io.Reader, st *store.Store, envName string) 
 	if err != nil {
 		return fmt.Errorf("transition %q: %w", name, err)
 	}
-	// Notifier edge-trigger point (real adapters in Plan 4): fire only when
-	// crossing INTO a notifying state from a different prior state.
-	maybeNotify(prior, to, name)
+	if notify.ShouldNotify(on, string(prior), string(to)) {
+		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(to), CWD: p.CWD})
+	}
 	return nil
 }
 
@@ -107,15 +113,6 @@ func resolveName(ctx context.Context, st *store.Store, sessionID, envName string
 		return envName, true, nil
 	}
 	return "", false, nil
-}
-
-// maybeNotify is a stub in Plan 1; Plan 4 wires the configured notifier here.
-func maybeNotify(prior, to store.State, name string) {
-	notifying := to == store.NeedsInput || to == store.Failed
-	if notifying && prior != to {
-		// no-op for now
-		_ = name
-	}
 }
 
 func logHook(stateDir, msg string) {
