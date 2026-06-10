@@ -48,6 +48,22 @@ func TestTransition_emptyTranscriptLeavesItUnchanged(t *testing.T) {
 	}
 }
 
+func TestDelete_removesRow(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	mustInsert(t, st, "a", "u-a")
+	if err := st.Delete(ctx, "a"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok, _ := st.GetByName(ctx, "a"); ok {
+		t.Error("row still present after Delete")
+	}
+	// Deleting a missing row is not an error.
+	if err := st.Delete(ctx, "missing"); err != nil {
+		t.Errorf("Delete(missing) = %v, want nil", err)
+	}
+}
+
 func TestUpsert_insertsWhenAbsentNoopWhenPresent(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

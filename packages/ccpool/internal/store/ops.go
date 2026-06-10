@@ -129,6 +129,15 @@ func (s *Store) Poll(ctx context.Context, name string) (int64, State, bool, erro
 	return sess.Generation, sess.State, true, nil
 }
 
+// Delete removes the row for name. Deleting a missing row is not an error.
+func (s *Store) Delete(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE name = ?`, name)
+	if err != nil {
+		return fmt.Errorf("delete %q: %w", name, err)
+	}
+	return nil
+}
+
 // Upsert ensures a row exists for name; if absent it is inserted as Starting.
 // If present it is left untouched (does not clobber uuid/state). Used by `hook start`.
 func (s *Store) Upsert(ctx context.Context, name, uuid string) error {
