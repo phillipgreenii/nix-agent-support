@@ -365,9 +365,13 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			prCtx, prSpan := startPRSpan(ctx, key.Repo, pr.Number, pr.Author)
 			defer prSpan.End()
 			startedAt := e.deps.Now()
+			group := "team"
+			if mineSet[key] {
+				group = "mine"
+			}
 			defer func() {
 				telemetry.SyncPRDuration.
-					WithLabelValues(key.Repo).
+					WithLabelValues(key.Repo, group).
 					Observe(e.deps.Now().Sub(startedAt).Seconds())
 			}()
 
@@ -524,12 +528,6 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	}
 
 	summary.FinishedAt = e.deps.Now()
-	// Record last-successful-sync per repo. Only the repos whose
-	// enumeration succeeded are eligible — partial-failure repos are
-	// skipped so dashboards don't show a misleadingly fresh timestamp.
-	for repo := range healthyRepos {
-		telemetry.ObserveSyncSuccess(repo, summary.FinishedAt)
-	}
 	// Dashboard snapshot: gather per-PR extras (reviews, comments, CI runs,
 	// bd dep tree) and store. Best-effort — errors during gathering are
 	// absorbed so a partial snapshot still lands.

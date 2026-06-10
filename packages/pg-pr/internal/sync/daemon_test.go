@@ -257,7 +257,7 @@ func TestDaemon_ServesPrometheusMetrics(t *testing.T) {
 	// Prometheus only emits a series after at least one observation has
 	// been recorded for that label set. Touch each metric so the daemon
 	// scrape produces a complete sample.
-	telemetry.SyncPRDuration.WithLabelValues("test/repo").Observe(0.01)
+	telemetry.SyncPRDuration.WithLabelValues("test/repo", "mine").Observe(0.01)
 	telemetry.SyncErrorsTotal.WithLabelValues("test/repo").Inc()
 
 	listener := make(chan net.Listener, 1)

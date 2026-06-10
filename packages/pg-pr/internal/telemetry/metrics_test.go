@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestMetricsHandler_Smokes the package-level metrics endpoint by
@@ -14,11 +13,10 @@ import (
 // appear in the OpenMetrics text output.
 func TestMetricsHandler_ServesExpectedMetricNames(t *testing.T) {
 	// Move the gauges/counters off zero so they show up in the scrape.
-	SyncPRDuration.WithLabelValues("repo/a").Observe(0.123)
+	SyncPRDuration.WithLabelValues("repo/a", "mine").Observe(0.123)
 	SyncErrorsTotal.WithLabelValues("repo/a").Inc()
 	FeedbackCreatedTotal.WithLabelValues("repo/a", "comment_thread").Inc()
 	CIOnlyAttempts.WithLabelValues("repo/a", "42").Set(3)
-	ObserveSyncSuccess("repo/a", time.Unix(1_700_000_000, 0))
 
 	srv := httptest.NewServer(MetricsHandler())
 	defer srv.Close()
@@ -41,7 +39,6 @@ func TestMetricsHandler_ServesExpectedMetricNames(t *testing.T) {
 		"pg_pr_sync_errors_total",
 		"pg_pr_feedback_created_total",
 		"pg_pr_ci_only_attempts",
-		"pg_pr_last_sync_success_timestamp_seconds",
 	}
 	for _, name := range wantNames {
 		if !strings.Contains(text, name) {
@@ -76,5 +73,34 @@ func TestSnapshotPresentMetric(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "pg_pr_snapshot_present 1") {
 		t.Errorf("expected 'pg_pr_snapshot_present 1' in body, got:\n%s", body)
+	}
+}
+
+func TestFingerprintMetricsRegistered(t *testing.T) {
+	FingerprintPollDuration.WithLabelValues("mine").Observe(0.1)
+	FingerprintChangesTotal.WithLabelValues("mine", "added").Inc()
+	RefreshQueueDepth.WithLabelValues("team").Set(3)
+	GraphQLRateRemaining.Set(4999)
+	FingerprintPollSuccessTimestamp.WithLabelValues("team").Set(1.0)
+	mfs, err := DefaultRegistry().Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	want := map[string]bool{
+		"pg_pr_fingerprint_poll_duration_seconds":          false,
+		"pg_pr_fingerprint_changes_total":                  false,
+		"pg_pr_refresh_queue_depth":                        false,
+		"pg_pr_graphql_rate_remaining":                     false,
+		"pg_pr_fingerprint_poll_success_timestamp_seconds": false,
+	}
+	for _, mf := range mfs {
+		if _, ok := want[mf.GetName()]; ok {
+			want[mf.GetName()] = true
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("metric %q not registered", name)
+		}
 	}
 }

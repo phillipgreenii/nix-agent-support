@@ -9,7 +9,6 @@ package telemetry
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,15 +21,15 @@ var defaultRegistry = prometheus.NewRegistry()
 
 // Per-metric package-level variables registered against defaultRegistry.
 // The constructors return *Vec types so callers can do
-// SyncPRDuration.WithLabelValues(repo).Observe(...).
+// SyncPRDuration.WithLabelValues(repo, group).Observe(...).
 var (
 	SyncPRDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "pg_pr_sync_pr_duration_seconds",
-			Help:    "Time spent syncing a single PR through the engine.",
+			Help:    "Time spent syncing a single PR through the engine, labeled by repo and ownership group.",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"repo"},
+		[]string{"repo", "group"},
 	)
 
 	SyncErrorsTotal = prometheus.NewCounterVec(
@@ -57,13 +56,42 @@ var (
 		[]string{"repo", "pr_number"},
 	)
 
-	LastSyncSuccessTimestamp = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "pg_pr_last_sync_success_timestamp_seconds",
-			Help: "Unix timestamp (seconds) of the last successful sync, labeled by repo.",
-		},
-		[]string{"repo"},
-	)
+	FingerprintPollDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{Name: "pg_pr_fingerprint_poll_duration_seconds",
+			Help: "Fingerprint poll latency by group.", Buckets: prometheus.DefBuckets},
+		[]string{"group"})
+
+	FingerprintPollErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "pg_pr_fingerprint_poll_errors_total",
+			Help: "Fingerprint poll errors by group."}, []string{"group"})
+
+	FingerprintPollTruncatedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "pg_pr_fingerprint_poll_truncated_total",
+			Help: "Fingerprint polls that hit the page cap (incomplete roster)."}, []string{"group"})
+
+	FingerprintPollSuccessTimestamp = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "pg_pr_fingerprint_poll_success_timestamp_seconds",
+			Help: "Unix time of last successful fingerprint poll by group."}, []string{"group"})
+
+	FingerprintChangesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "pg_pr_fingerprint_changes_total",
+			Help: "Detected changes by group and kind."}, []string{"group", "kind"})
+
+	RefreshQueueDepth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "pg_pr_refresh_queue_depth",
+			Help: "Current refresh queue depth by group."}, []string{"group"})
+
+	RefreshEnqueuedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Name: "pg_pr_refresh_enqueued_total",
+			Help: "PRs enqueued for refresh by group."}, []string{"group"})
+
+	GraphQLCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Name: "pg_pr_graphql_cost",
+			Help: "Last fingerprint query point cost by group."}, []string{"group"})
+
+	GraphQLRateRemaining = prometheus.NewGauge(
+		prometheus.GaugeOpts{Name: "pg_pr_graphql_rate_remaining",
+			Help: "GraphQL rate-limit points remaining."})
 
 	SnapshotPresent = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "pg_pr_snapshot_present",
@@ -77,7 +105,15 @@ func init() {
 		SyncErrorsTotal,
 		FeedbackCreatedTotal,
 		CIOnlyAttempts,
-		LastSyncSuccessTimestamp,
+		FingerprintPollDuration,
+		FingerprintPollErrorsTotal,
+		FingerprintPollTruncatedTotal,
+		FingerprintPollSuccessTimestamp,
+		FingerprintChangesTotal,
+		RefreshQueueDepth,
+		RefreshEnqueuedTotal,
+		GraphQLCost,
+		GraphQLRateRemaining,
 		SnapshotPresent,
 	)
 }
@@ -94,11 +130,4 @@ func DefaultRegistry() *prometheus.Registry {
 // defaultRegistry; pass a custom one only for tests.
 func MetricsHandler() http.Handler {
 	return promhttp.HandlerFor(defaultRegistry, promhttp.HandlerOpts{})
-}
-
-// ObserveSyncSuccess records a successful sync for `repo` at the given
-// wall-clock time. The timestamp value is the seconds since the Unix
-// epoch.
-func ObserveSyncSuccess(repo string, at time.Time) {
-	LastSyncSuccessTimestamp.WithLabelValues(repo).Set(float64(at.Unix()))
 }
