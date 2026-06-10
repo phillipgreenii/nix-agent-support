@@ -223,7 +223,7 @@ func (e *Engine) ReplaceCfg(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	e.deps.Cfg = cfg
+	e.cfgP.Store(cfg)
 }
 
 // xdgRuntimeDir returns $XDG_RUNTIME_DIR or os.TempDir() if unset.

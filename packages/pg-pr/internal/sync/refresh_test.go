@@ -212,3 +212,21 @@ func TestRefreshPR_ActiveMine_UpsertsSnapshot(t *testing.T) {
 		t.Fatal("active path must run the full pipeline (ListFeedbackPendingReply)")
 	}
 }
+
+func TestEngineCfg_AtomicSwap(t *testing.T) {
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "old"},
+		VCS:   map[string]VCSProvider{"github": &fakeVCS{}},
+		Beads: &refreshFakeBeads{},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if e.cfg().SelfLogin != "old" {
+		t.Fatalf("cfg() initial = %q", e.cfg().SelfLogin)
+	}
+	e.ReplaceCfg(&config.Config{SelfLogin: "new"})
+	if e.cfg().SelfLogin != "new" {
+		t.Fatalf("cfg() after swap = %q", e.cfg().SelfLogin)
+	}
+}

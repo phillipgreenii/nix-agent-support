@@ -61,7 +61,7 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 		store.Set(snapshot.Build(snapshot.BuilderInput{
 			GeneratedAt:         e.deps.Now(),
 			SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
-			Self:                e.deps.Cfg.SelfLogin, // Task 7 migrates to e.cfg().SelfLogin
+			Self:                e.cfg().SelfLogin,
 			TeamMembers:         e.allTeamMembers(),
 			Registry:            e.deps.AgentRegistry,
 			PRs:                 m.sortedInputs(),

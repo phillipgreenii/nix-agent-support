@@ -112,8 +112,8 @@ func TestDaemon_SighupReloadsConfig(t *testing.T) {
 	defer cancel()
 
 	// Snapshot pre-reload SelfLogin.
-	if e.deps.Cfg.SelfLogin != "phillipg" {
-		t.Fatalf("precondition: SelfLogin=%q", e.deps.Cfg.SelfLogin)
+	if e.cfg().SelfLogin != "phillipg" {
+		t.Fatalf("precondition: SelfLogin=%q", e.cfg().SelfLogin)
 	}
 
 	sighup := make(chan os.Signal, 1)
@@ -167,7 +167,7 @@ func TestDaemon_SighupReloadsConfig(t *testing.T) {
 		t.Fatal("Daemon did not exit after cancel")
 	}
 
-	if got := e.deps.Cfg.SelfLogin; got != "reloaded-user" {
+	if got := e.cfg().SelfLogin; got != "reloaded-user" {
 		t.Fatalf("post-SIGHUP SelfLogin: got %q want %q", got, "reloaded-user")
 	}
 	if got := reloadCount.Load(); got != 1 {
@@ -212,7 +212,7 @@ func TestDaemon_SighupReloadFailureKeepsPreviousConfig(t *testing.T) {
 
 	// Config must NOT have been replaced.
 	time.Sleep(50 * time.Millisecond)
-	if got := e.deps.Cfg.SelfLogin; got != "phillipg" {
+	if got := e.cfg().SelfLogin; got != "phillipg" {
 		t.Fatalf("SelfLogin changed despite reload failure: %q", got)
 	}
 
@@ -242,9 +242,9 @@ func TestDaemon_DefaultInterval(t *testing.T) {
 
 func TestReplaceCfg_NilIsNoop(t *testing.T) {
 	e := makeDaemonEngine(t)
-	pre := e.deps.Cfg
+	pre := e.cfg()
 	e.ReplaceCfg(nil)
-	if e.deps.Cfg != pre {
+	if e.cfg() != pre {
 		t.Fatal("ReplaceCfg(nil) replaced the config")
 	}
 }

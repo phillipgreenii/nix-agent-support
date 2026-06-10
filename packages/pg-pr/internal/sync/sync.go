@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
@@ -165,6 +166,7 @@ type Deps struct {
 // Engine carries the configured dependencies for a series of sync calls.
 type Engine struct {
 	deps Deps
+	cfgP atomic.Pointer[config.Config]
 }
 
 // New constructs an Engine. Returns an error if required deps are missing.
@@ -184,8 +186,14 @@ func New(d Deps) (*Engine, error) {
 	if d.Now == nil {
 		d.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Engine{deps: d}, nil
+	e := &Engine{deps: d}
+	e.cfgP.Store(d.Cfg)
+	return e, nil
 }
+
+// cfg returns the engine's current config. Reads are atomic so the daemon's
+// detector/workers/owner can read while SIGHUP swaps via ReplaceCfg.
+func (e *Engine) cfg() *config.Config { return e.cfgP.Load() }
 
 // bdClientFor returns the BeadClient the engine should use for operations
 // against the given repo's workspace.
@@ -282,7 +290,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// calls when an entry is missing.
 	enrichByRepo := map[string]map[int]vcs.EnrichedPR{}
 
-	for _, rcfg := range e.deps.Cfg.Repos {
+	for _, rcfg := range e.cfg().Repos {
 		func() {
 			repoCtx, repoSpan := startRepoSpan(ctx, rcfg.Remote)
 			defer repoSpan.End()
@@ -581,7 +589,7 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	snap := snapshot.Build(snapshot.BuilderInput{
 		GeneratedAt:         e.deps.Now(),
 		SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
-		Self:                e.deps.Cfg.SelfLogin,
+		Self:                e.cfg().SelfLogin,
 		TeamMembers:         e.allTeamMembers(),
 		Registry:            e.deps.AgentRegistry,
 		PRs:                 inputs,
@@ -720,7 +728,7 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 func (e *Engine) allTeamMembers() []string {
 	seen := map[string]struct{}{}
 	var out []string
-	for _, r := range e.deps.Cfg.Repos {
+	for _, r := range e.cfg().Repos {
 		for _, m := range r.TeamMembers {
 			if _, ok := seen[m]; ok {
 				continue
@@ -737,7 +745,7 @@ func (e *Engine) allTeamMembers() []string {
 // team-mate; do not modify upstream). Centralizes the ownership
 // predicate used by sync's upstream-write guards.
 func (e *Engine) isSelfAuthored(author string) bool {
-	self := e.deps.Cfg.SelfLogin
+	self := e.cfg().SelfLogin
 	return self != "" && author != "" && author == self
 }
 
@@ -956,7 +964,7 @@ func (e *Engine) tryEnumerateEnriched(ctx context.Context, provider VCSProvider,
 	if !ok {
 		return nil, false
 	}
-	self := e.deps.Cfg.SelfLogin
+	self := e.cfg().SelfLogin
 	if self == "" && len(rcfg.TeamMembers) == 0 {
 		// No authors to constrain the search — fall back rather than
 		// fetching every open PR in the repo.
@@ -1021,7 +1029,7 @@ func (e *Engine) providerFor(rcfg config.RepoConfig) (VCSProvider, error) {
 
 // repoConfig finds the config entry for a repo by remote.
 func (e *Engine) repoConfig(remote string) (config.RepoConfig, error) {
-	for _, r := range e.deps.Cfg.Repos {
+	for _, r := range e.cfg().Repos {
 		if r.Remote == remote {
 			return r, nil
 		}
