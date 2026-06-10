@@ -10,11 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // transcriptAdapter satisfies session.Transcript using the shared module.

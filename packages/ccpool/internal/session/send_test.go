@@ -17,10 +17,13 @@ type sendTmux struct {
 	keys   [][]string
 }
 
-func (s *sendTmux) HasSession(string) bool                                { return s.live }
+func (s *sendTmux) HasSession(string) bool                               { return s.live }
 func (s *sendTmux) NewSession(string, map[string]string, []string) error { return nil }
-func (s *sendTmux) SendKeys(_ string, keys ...string) error              { s.keys = append(s.keys, keys); return nil }
-func (s *sendTmux) Paste(_, body string) error                           { s.pasted = append(s.pasted, body); return nil }
+func (s *sendTmux) SendKeys(_ string, keys ...string) error {
+	s.keys = append(s.keys, keys)
+	return nil
+}
+func (s *sendTmux) Paste(_, body string) error { s.pasted = append(s.pasted, body); return nil }
 
 type fakeTranscript struct {
 	reply    string

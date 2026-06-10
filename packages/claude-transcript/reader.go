@@ -19,7 +19,6 @@ func LastAssistantText(path string) (string, error) {
 	defer f.Close()
 
 	var last string
-	var haveAssistant bool
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -30,7 +29,6 @@ func LastAssistantText(path string) (string, error) {
 		if ev.Type != "assistant" {
 			continue
 		}
-		haveAssistant = true
 		var b strings.Builder
 		for _, blk := range ev.Message.Content {
 			if blk.Type == "text" {
@@ -42,6 +40,5 @@ func LastAssistantText(path string) (string, error) {
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	_ = haveAssistant
 	return last, nil
 }
