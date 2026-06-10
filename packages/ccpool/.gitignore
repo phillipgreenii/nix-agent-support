@@ -1,0 +1,4 @@
+/ccpool
+*.test
+*.db
+*.out

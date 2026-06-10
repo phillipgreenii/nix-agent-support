@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
@@ -30,25 +31,28 @@ var eventState = map[string]store.State{
 // runHook is the CLI entrypoint. It NEVER returns nonzero on a logic failure —
 // a wedged hook must not block Claude. It logs and exits 0 (spec §9/§15).
 func runHook(args []string) int {
+	// Resolve the log dir independently of config.toml so logging survives a
+	// config-load failure (spec §9/§20 — the hook must never lose its diagnostic).
+	stateDir := config.StateDirPath()
 	if len(args) < 1 {
-		logHook("hook: missing event arg")
+		logHook(stateDir, "hook: missing event arg")
 		return 0
 	}
 	event := args[0]
 	cfg, err := config.Load()
 	if err != nil {
-		logHook(fmt.Sprintf("hook %s: config load: %v", event, err))
+		logHook(stateDir, fmt.Sprintf("hook %s: config load: %v", event, err))
 		return 0
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		logHook(fmt.Sprintf("hook %s: store open: %v", event, err))
+		logHook(stateDir, fmt.Sprintf("hook %s: store open: %v", event, err))
 		return 0
 	}
 	defer st.Close()
 
 	if err := handleHook(event, os.Stdin, st, os.Getenv("CCPOOL_NAME")); err != nil {
-		logHook(fmt.Sprintf("hook %s: %v", event, err))
+		logHook(stateDir, fmt.Sprintf("hook %s: %v", event, err))
 	}
 	return 0
 }
@@ -114,13 +118,9 @@ func maybeNotify(prior, to store.State, name string) {
 	}
 }
 
-func logHook(msg string) {
-	cfg, err := config.Load()
-	if err != nil {
-		return
-	}
-	_ = os.MkdirAll(cfg.StateDir, 0o700)
-	f, err := os.OpenFile(cfg.StateDir+"/hook.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+func logHook(stateDir, msg string) {
+	_ = os.MkdirAll(stateDir, 0o700)
+	f, err := os.OpenFile(filepath.Join(stateDir, "hook.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}

@@ -74,6 +74,13 @@ func xdg(envVar, fallbackRel string) string {
 	return filepath.Join(home, fallbackRel)
 }
 
+// StateDirPath resolves $XDG_STATE_HOME/ccpool (or ~/.local/state/ccpool) using
+// only env/home — no config.toml read — so diagnostics logging works even when
+// Load() itself fails on a malformed config.
+func StateDirPath() string {
+	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "ccpool")
+}
+
 // Load reads config.toml (if present) over the defaults and resolves paths.
 func Load() (Config, error) {
 	c := defaults()
@@ -88,9 +95,8 @@ func Load() (Config, error) {
 	}
 
 	dataHome := xdg("XDG_DATA_HOME", ".local/share")
-	stateHome := xdg("XDG_STATE_HOME", ".local/state")
 	c.DBPath = filepath.Join(dataHome, "ccpool", "store.db")
-	c.StateDir = filepath.Join(stateHome, "ccpool")
+	c.StateDir = StateDirPath()
 	if rt := os.Getenv("XDG_RUNTIME_DIR"); rt != "" {
 		c.RuntimeDir = filepath.Join(rt, "ccpool")
 	} else {
