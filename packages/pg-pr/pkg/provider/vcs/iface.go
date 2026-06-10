@@ -64,3 +64,40 @@ type EnrichedPR struct {
 type EnrichedPRsProvider interface {
 	EnrichedPRs(ctx context.Context, repo string, searchQuery string) ([]EnrichedPR, error)
 }
+
+// PRFingerprint is the change-detection signature for one open PR, fetched
+// by FingerprintProvider. It is intentionally small: just enough to decide
+// "did this PR change since last tick?" without any node bodies.
+type PRFingerprint struct {
+	Repo              string
+	Number            int
+	Author            string // canonical login (bot suffix normalized)
+	IsDraft           bool
+	State             string // lowercased: open/closed/merged
+	UpdatedAt         string
+	HeadOID           string // last commit oid — catches pushes updated_at misses
+	StatusRollup      string // statusCheckRollup.state, "" when none
+	ReviewCount       int
+	CommentCount      int
+	ReviewThreadCount int
+}
+
+// FingerprintResult bundles one fingerprint query's PRs with pagination and
+// rate-limit telemetry. Truncated is true when a hard page cap was hit before
+// pagination completed — the caller MUST treat the roster as incomplete (do
+// not infer "disappeared" from a truncated result).
+type FingerprintResult struct {
+	PRs       []PRFingerprint
+	Truncated bool
+	RateCost  int // rateLimit.cost from the GraphQL envelope
+	RateLeft  int // rateLimit.remaining
+}
+
+// FingerprintProvider is an optional capability for VCS providers that can
+// cheaply fetch per-PR change signatures via one (paginated) search. No repo
+// arg: the search may span repos and each node carries its own repo. (The
+// EnrichedPRsProvider keeps its repo arg for error context; this one does not
+// — keep the asymmetry.)
+type FingerprintProvider interface {
+	FingerprintPRs(ctx context.Context, searchQuery string) (FingerprintResult, error)
+}
