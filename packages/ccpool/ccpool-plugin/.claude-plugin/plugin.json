@@ -1,0 +1,5 @@
+{
+  "name": "ccpool",
+  "version": "0.1.0",
+  "description": "ccpool session-pool hooks: records SessionStart/Stop/StopFailure/Notification transitions into the ccpool store."
+}

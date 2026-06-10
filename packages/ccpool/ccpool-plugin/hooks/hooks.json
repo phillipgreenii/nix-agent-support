@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "ccpool hook start" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "ccpool hook stop" }] }
+    ],
+    "StopFailure": [
+      { "hooks": [{ "type": "command", "command": "ccpool hook fail" }] }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [{ "type": "command", "command": "ccpool hook notify" }]
+      }
+    ]
+  }
+}
