@@ -15,15 +15,15 @@ SEND_SETTLE="${PR_POOL_SEND_SETTLE:-1}"                 # seconds between typing
 ROLE_NAME="${PR_POOL_ROLE_NAME:-PR FEEDBACK PROCESSOR}" # tmux session name = the role; monitoring keys on this
 EXIT_CMD="${PR_POOL_EXIT_CMD:-/exit}"                   # graceful claude exit; kill-session is the guaranteed fallback
 ACTOR="${PR_POOL_ACTOR:-pgii-pool__process-feedback}"
-WORKER_SKILL_MD="${PR_POOL_WORKER_SKILL_MD:-}"                          # worker SKILL.md (analogue of SKILL_MD)
-FEEDBACK_SESSION="${PR_POOL_FEEDBACK_SESSION:-$ROLE_NAME}"              # tmux session for the feedback-processor role
-WORKER_SESSION="${PR_POOL_WORKER_SESSION:-WORKER}"                      # tmux session for the worker role
-FEEDBACK_ACTOR="${PR_POOL_FEEDBACK_ACTOR:-$ACTOR}"                      # BEADS_ACTOR for feedback-processor
-WORKER_ACTOR="${PR_POOL_WORKER_ACTOR:-pgii-pool__worker}"               # BEADS_ACTOR for worker
-MAX_FEEDBACK="${PR_POOL_MAX_FEEDBACK:-1}"                               # per-role concurrency cap (feedback)
-MAX_WORKER="${PR_POOL_MAX_WORKER:-1}"                                   # per-role concurrency cap (worker)
+WORKER_SKILL_MD="${PR_POOL_WORKER_SKILL_MD:-}"                                                  # worker SKILL.md (analogue of SKILL_MD)
+FEEDBACK_SESSION="${PR_POOL_FEEDBACK_SESSION:-$ROLE_NAME}"                                      # tmux session for the feedback-processor role
+WORKER_SESSION="${PR_POOL_WORKER_SESSION:-WORKER}"                                              # tmux session for the worker role
+FEEDBACK_ACTOR="${PR_POOL_FEEDBACK_ACTOR:-$ACTOR}"                                              # BEADS_ACTOR for feedback-processor
+WORKER_ACTOR="${PR_POOL_WORKER_ACTOR:-pgii-pool__worker}"                                       # BEADS_ACTOR for worker
+MAX_FEEDBACK="${PR_POOL_MAX_FEEDBACK:-1}"                                                       # per-role concurrency cap (feedback)
+MAX_WORKER="${PR_POOL_MAX_WORKER:-1}"                                                           # per-role concurrency cap (worker)
 WORKTREE_DIR="${PR_POOL_WORKTREE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool/worktrees}" # passed to the worker in its nudge
-ROLES="feedback-processor worker"                                       # role list for drain + teardown
+ROLES="feedback-processor worker"                                                               # role list for drain + teardown
 QUOTA_PAUSED="${PR_POOL_QUOTA_PAUSED:-}"
 CICD_DOWN="${PR_POOL_CICD_DOWN:-}"
 LOG_DIR="${PR_POOL_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool}"
@@ -200,12 +200,12 @@ teardown_session() {
 # --- per-role config table (bash-3.2-safe case resolvers) ----------------
 # The "*" default branch resolves to the feedback-processor role so callers
 # that omit the role keep step-1 behavior.
-role_session()    { case "${1:-}" in worker) printf '%s' "$WORKER_SESSION";;   *) printf '%s' "$FEEDBACK_SESSION";; esac; }
-role_actor()      { case "${1:-}" in worker) printf '%s' "$WORKER_ACTOR";;     *) printf '%s' "$FEEDBACK_ACTOR";; esac; }
-role_skill()      { case "${1:-}" in worker) printf '%s' "$WORKER_SKILL_MD";;  *) printf '%s' "$SKILL_MD";; esac; }
-role_max()        { case "${1:-}" in worker) printf '%s' "$MAX_WORKER";;       *) printf '%s' "$MAX_FEEDBACK";; esac; }
-role_nudge()      { case "${1:-}" in worker) nudge_text_worker "${2:-}";;      *) nudge_text_feedback "${2:-}";; esac; }
-role_convo_name() { case "${1:-}" in worker) worker_label "${2:-}";;           *) cycle_label "${2:-}";; esac; }
+role_session() { case "${1:-}" in worker) printf '%s' "$WORKER_SESSION" ;; *) printf '%s' "$FEEDBACK_SESSION" ;; esac }
+role_actor() { case "${1:-}" in worker) printf '%s' "$WORKER_ACTOR" ;; *) printf '%s' "$FEEDBACK_ACTOR" ;; esac }
+role_skill() { case "${1:-}" in worker) printf '%s' "$WORKER_SKILL_MD" ;; *) printf '%s' "$SKILL_MD" ;; esac }
+role_max() { case "${1:-}" in worker) printf '%s' "$MAX_WORKER" ;; *) printf '%s' "$MAX_FEEDBACK" ;; esac }
+role_nudge() { case "${1:-}" in worker) nudge_text_worker "${2:-}" ;; *) nudge_text_feedback "${2:-}" ;; esac }
+role_convo_name() { case "${1:-}" in worker) worker_label "${2:-}" ;; *) cycle_label "${2:-}" ;; esac }
 
 # nudge_text_feedback builds the instruction sent to the feedback processor. Points at the
 # refreshed SKILL.md; the processor creates/links work beads (children of the PR
@@ -286,8 +286,14 @@ done_signal() {
 #                         hold a half-built worktree; blind retry is unsafe)
 wait_done_fail() {
   case "$1" in
-  worker) log "wait_done: worker $2 $3; flagging worker-stuck"; mark_stuck "$2" ;;
-  *) log "wait_done: $2 $3; unclaiming"; unclaim "$2" ;;
+  worker)
+    log "wait_done: worker $2 $3; flagging worker-stuck"
+    mark_stuck "$2"
+    ;;
+  *)
+    log "wait_done: $2 $3; unclaiming"
+    unclaim "$2"
+    ;;
   esac
 }
 
@@ -336,7 +342,7 @@ work_one() {
   ensure_session "$role" || return 1
   claude_rename "$sess" "$(role_convo_name "$role" "$id")"
   if ! send_nudge "$role" "$sess" "$id"; then
-    unclaim "$id"
+    [ "$role" = worker ] || unclaim "$id" # worker is never unclaimed (see wait_done_fail)
     clear_context "$sess"
     return 1
   fi

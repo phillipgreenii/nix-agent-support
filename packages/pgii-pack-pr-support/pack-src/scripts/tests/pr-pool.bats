@@ -573,3 +573,79 @@ esac'
   ! grep -q -- "/abs/W.md" "$CALLS_LOG"                 # worker nudge never sent (cap=0)
   ! grep -q -- "new-session -d -s WORKER" "$CALLS_LOG"  # worker session never created
 }
+
+@test "drain_once: works one worker bead in the WORKER session, then tears down" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md" PR_POOL_WORKER_SKILL_MD="/abs/W.md"
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
+  make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*"WORKER"*)  : > "$TEST_DIR/wsess" ;;
+  *new-session*)           : > "$TEST_DIR/fsess" ;;
+  *has-session*"WORKER"*)  [ -f "$TEST_DIR/wsess" ] && exit 0 || exit 1 ;;
+  *has-session*)           [ -f "$TEST_DIR/fsess" ] && exit 0 || exit 1 ;;
+  *kill-session*"WORKER"*) rm -f "$TEST_DIR/wsess" ;;
+  *kill-session*)          rm -f "$TEST_DIR/fsess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[]" ;;
+    esac ;;
+  show)
+    case "$2" in
+      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-p\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}" ;;
+      zr-p)  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\",\"pr_number\":9}}" ;;
+      *) echo "{}" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  grep -q -- "new-session -d -s WORKER" "$CALLS_LOG"
+  grep -q -- "send-keys -t WORKER /rename" "$CALLS_LOG"
+  grep -q -- "/abs/W.md" "$CALLS_LOG"
+  grep -q -- "kill-session -t WORKER" "$CALLS_LOG"
+}
+
+@test "drain_once: works a feedback cycle AND a worker bead in one pass (no starvation)" {
+  export SELF_LOGIN="me" PR_POOL_SKILL_MD="/abs/SKILL.md" PR_POOL_WORKER_SKILL_MD="/abs/W.md"
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1 PR_POOL_SEND_SETTLE=0
+  make_stub uuidgen 'echo uuid'
+  make_stub tmux '
+case "$*" in
+  *new-session*"WORKER"*)  : > "$TEST_DIR/wsess" ;;
+  *new-session*)           : > "$TEST_DIR/fsess" ;;
+  *has-session*"WORKER"*)  [ -f "$TEST_DIR/wsess" ] && exit 0 || exit 1 ;;
+  *has-session*)           [ -f "$TEST_DIR/fsess" ] && exit 0 || exit 1 ;;
+  *kill-session*"WORKER"*) rm -f "$TEST_DIR/wsess" ;;
+  *kill-session*)          rm -f "$TEST_DIR/fsess" ;;
+  *capture-pane*) echo "❯ " ;;
+esac'
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--label worker-ready"*) echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[{\"id\":\"zr-c\",\"title\":\"process-feedback: o/r#1\",\"status\":\"open\",\"issue_type\":\"task\"}]" ;;
+    esac ;;
+  show)
+    case "$2" in
+      zr-c)  echo "{\"id\":\"zr-c\",\"parent\":\"zr-pc\",\"status\":\"closed\"}" ;;
+      zr-pc) echo "{\"id\":\"zr-pc\",\"metadata\":{\"author\":\"me\",\"pr_number\":1}}" ;;
+      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-pw\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}" ;;
+      zr-pw) echo "{\"id\":\"zr-pw\",\"metadata\":{\"author\":\"me\",\"pr_number\":2}}" ;;
+      *) echo "{}" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run drain_once
+  [ "$status" -eq 0 ]
+  grep -q -- "/abs/SKILL.md" "$CALLS_LOG"   # feedback cycle worked
+  grep -q -- "/abs/W.md" "$CALLS_LOG"       # worker bead also worked in the same pass
+}

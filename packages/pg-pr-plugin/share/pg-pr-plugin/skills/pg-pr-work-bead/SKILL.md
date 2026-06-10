@@ -54,16 +54,18 @@ bead.
    never commits to someone else's branch.
 
 4. **Create or reuse an isolated git worktree** for the head branch. `git
-   worktree add` refuses a branch already checked out elsewhere, so reuse an
+worktree add` refuses a branch already checked out elsewhere, so reuse an
    existing worktree rather than re-adding:
+
+   (`$WORKSPACE_ROOT` is the monorepo root, pinned into your session by the orchestrator.)
 
    ```bash
    WT="${PR_POOL_WORKTREE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pr-pool/worktrees}/<repo-slug>-pr<pr_number>"
-   git -C "$REPO_ROOT" fetch origin "<branch>"
+   git -C "$WORKSPACE_ROOT" fetch origin "<branch>"
    if [ -d "$WT" ]; then
      git -C "$WT" checkout "<branch>" && git -C "$WT" pull --ff-only
    else
-     git -C "$REPO_ROOT" worktree add "$WT" "<branch>"
+     git -C "$WORKSPACE_ROOT" worktree add "$WT" "<branch>"
    fi
    cd "$WT"
    ```
