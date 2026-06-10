@@ -113,7 +113,7 @@ esac'
   make_stub bd 'echo "{\"id\":\"zr-mine\",\"status\":\"closed\"}"'
   make_stub tmux 'echo "pane alive"'
   load_script
-  run wait_done zr-mine pf-zr-mine
+  run wait_done feedback-processor zr-mine pf-zr-mine
   [ "$status" -eq 0 ]
 }
 
@@ -122,7 +122,7 @@ esac'
   make_stub bd 'echo "{\"id\":\"zr-mine\",\"status\":\"in_progress\"}"'
   make_stub tmux 'echo "pane alive"'
   load_script
-  run wait_done zr-mine pf-zr-mine
+  run wait_done feedback-processor zr-mine pf-zr-mine
   [ "$status" -ne 0 ]
   grep -q -- "update zr-mine --status=open --assignee=" "$CALLS_LOG"
 }
@@ -143,9 +143,30 @@ case "$1" in
 esac'
   make_stub tmux 'exit 1'
   load_script
-  run wait_done zr-mine pf-zr-mine
+  run wait_done feedback-processor zr-mine pf-zr-mine
   [ "$status" -eq 0 ]
   ! grep -q -- "update zr-mine --status=open" "$CALLS_LOG"
+}
+
+@test "wait_done worker: succeeds when the bead gains the needs-push label" {
+  export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1
+  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}"'
+  make_stub tmux 'echo "pane alive"'
+  load_script
+  run wait_done worker zr-w1 WORKER
+  [ "$status" -eq 0 ]
+  ! grep -q -- "update zr-w1 --status=open" "$CALLS_LOG"
+}
+
+@test "wait_done worker: on timeout, stamps worker-stuck and does NOT unclaim" {
+  export PR_POOL_MAX_WAIT=1 PR_POOL_POLL_INTERVAL=1
+  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"worker-ready\"]}"'
+  make_stub tmux 'echo "pane alive"'
+  load_script
+  run wait_done worker zr-w1 WORKER
+  [ "$status" -ne 0 ]
+  grep -q -- "update zr-w1 --add-label worker-stuck" "$CALLS_LOG"
+  ! grep -q -- "update zr-w1 --status=open" "$CALLS_LOG"
 }
 
 @test "main: optional sentinel pauses before any work" {
@@ -434,6 +455,26 @@ esac'
   [ "$(role_nudge feedback-processor zr-c)" = "$(nudge_text_feedback zr-c)" ]
   [ "$(role_convo_name worker zr-w1)" = "$(worker_label zr-w1)" ]
   [ "$(role_convo_name feedback-processor zr-c)" = "$(cycle_label zr-c)" ]
+}
+
+@test "wait_done worker: pane dies just as needs-push lands -> success, no worker-stuck" {
+  export PR_POOL_MAX_WAIT=5 PR_POOL_POLL_INTERVAL=1
+  # First poll: only worker-ready (not done). Pane then reads dead; the re-check
+  # sees needs-push and must succeed WITHOUT stamping worker-stuck.
+  make_stub bd '
+n="$(cat "$TEST_DIR/bd_n" 2>/dev/null || echo 0)"
+echo $((n + 1)) > "$TEST_DIR/bd_n"
+case "$1" in
+  show)
+    if [ "$n" -ge 1 ]; then echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}";
+    else echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"worker-ready\"]}"; fi ;;
+  *) echo "{}" ;;
+esac'
+  make_stub tmux 'exit 1'
+  load_script
+  run wait_done worker zr-w1 WORKER
+  [ "$status" -eq 0 ]
+  ! grep -q -- "add-label worker-stuck" "$CALLS_LOG"
 }
 
 @test "work_one: send_nudge failure unclaims, still clears, and returns nonzero" {

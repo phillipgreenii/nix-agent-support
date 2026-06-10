@@ -235,28 +235,55 @@ pane_alive() { tmux -L "$SOCKET" capture-pane -p -t "$1" >/dev/null 2>&1; }
 # cycle would be invisible otherwise).
 unclaim() { bd update "$1" --status=open --assignee="" >/dev/null 2>&1 || true; }
 
-# wait_done polls until the cycle closes (success) or MAX_WAIT elapses / the
-# pane dies (failure). On failure it unclaims + flags; it NEVER auto-closes.
-# Before unclaiming it re-checks status, so a cycle the worker closed in the
-# same instant it exited is never reverted to open (which would dupe work).
+# bead_labels prints one label per line for a bead (handles labels==null).
+bead_labels() { bd_obj "$1" | jq -r '(.labels // []) | .[]'; }
+
+# bead_has_label returns 0 if the bead carries the exact label.
+bead_has_label() { bead_labels "$1" | grep -qxF "$2"; }
+
+# mark_stuck flags a worker bead the orchestrator could not see to completion so
+# it surfaces in `bd list --label worker-stuck`. Best-effort.
+mark_stuck() { bd update "$1" --add-label worker-stuck >/dev/null 2>&1 || true; }
+
+# done_signal returns 0 when the role's completion signal is present:
+#   feedback-processor -> the cycle bead is closed
+#   worker             -> the bead carries the needs-push label
+done_signal() {
+  case "$1" in
+  worker) bead_has_label "$2" needs-push ;;
+  *) [ "$(cycle_status "$2")" = "closed" ] ;;
+  esac
+}
+
+# wait_done_fail performs the role-specific failure action:
+#   feedback-processor -> unclaim (so the open pool resurfaces the cycle)
+#   worker             -> stamp worker-stuck, NEVER unclaim (a dead worker may
+#                         hold a half-built worktree; blind retry is unsafe)
+wait_done_fail() {
+  case "$1" in
+  worker) log "wait_done: worker $2 $3; flagging worker-stuck"; mark_stuck "$2" ;;
+  *) log "wait_done: $2 $3; unclaiming"; unclaim "$2" ;;
+  esac
+}
+
+# wait_done polls until the role's completion signal fires (success) or MAX_WAIT
+# elapses / the pane dies (failure). On failure it runs the role's fail action;
+# it NEVER auto-closes. It re-checks the signal after a pane death so a bead
+# completed in the same instant the pane exited is not treated as a failure.
 wait_done() {
-  local cid="$1" sess="$2" deadline
+  local role="$1" id="$2" sess="$3" deadline
   deadline=$(($(date +%s) + MAX_WAIT))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    case "$(cycle_status "$cid")" in
-    closed) return 0 ;;
-    esac
+    done_signal "$role" "$id" && return 0
     if ! pane_alive "$sess"; then
-      [ "$(cycle_status "$cid")" = "closed" ] && return 0
-      log "wait_done: $sess exited before closing $cid; unclaiming"
-      unclaim "$cid"
+      done_signal "$role" "$id" && return 0
+      wait_done_fail "$role" "$id" "exited before completing"
       return 1
     fi
     sleep "$POLL_INTERVAL"
   done
-  [ "$(cycle_status "$cid")" = "closed" ] && return 0
-  log "wait_done: $cid not closed within ${MAX_WAIT}s; unclaiming + flagging"
-  unclaim "$cid"
+  done_signal "$role" "$id" && return 0
+  wait_done_fail "$role" "$id" "not complete within ${MAX_WAIT}s"
   return 1
 }
 
@@ -288,7 +315,7 @@ work_one() {
     clear_context "$sess"
     return 1
   fi
-  wait_done "$id" "$sess"
+  wait_done "$role" "$id" "$sess"
   rc=$?
   clear_context "$sess"
   return "$rc"
