@@ -863,6 +863,12 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 // EnsureMergeRequest reports the bead is already closed, it returns early
 // with (id, nil) and does NOT bump summary.BeadsUpdated or run the
 // downstream pipelines — matching the prior SyncPR behavior.
+//
+// Note: unlike the pre-refactor SyncPR (which ran the feedback, draft-promote,
+// and reply phases independently, accumulating each phase's error), this
+// returns on the FIRST hard error and skips the later phases. Hard errors are
+// rare — most issues are recorded into summary.Errors and return nil — and
+// fail-fast is the intended shape for the daemon's per-PR refresh.
 func (e *Engine) applyFetchedPR(ctx context.Context, bdc BeadClient, rcfg config.RepoConfig, pr *api.PR, summary *Summary) (string, error) {
 	fields := beads.MergeRequestFields{
 		Repo:         rcfg.Remote,

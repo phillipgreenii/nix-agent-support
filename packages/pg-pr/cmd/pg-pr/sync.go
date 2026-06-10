@@ -172,7 +172,7 @@ func init() {
 	syncCmd.Flags().StringVar(&syFlags.repo, "repo", "",
 		"Repository in owner/name form (required with --pr)")
 	syncCmd.Flags().BoolVar(&syFlags.daemon, "daemon", false,
-		"Run as a daemon: loop Sync at --interval until SIGINT/SIGTERM")
+		"Run as a daemon: fingerprint-poll at --interval until SIGINT/SIGTERM")
 	syncCmd.Flags().StringVar(&syFlags.interval, "interval", "60s",
 		"Daemon fingerprint poll interval (effective only with --daemon)")
 	syncCmd.Flags().BoolVar(&syFlags.logJSON, "log-json", false,
