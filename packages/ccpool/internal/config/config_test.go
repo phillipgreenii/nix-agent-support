@@ -46,6 +46,22 @@ func TestLoad_claudeBinDefaultsToClaude(t *testing.T) {
 	}
 }
 
+func TestLoad_notifyDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Notify.Adapter != "desktop" {
+		t.Errorf("Notify.Adapter = %q, want desktop", c.Notify.Adapter)
+	}
+	if len(c.Notify.On) != 2 || c.Notify.On[0] != "needs_input" || c.Notify.On[1] != "failed" {
+		t.Errorf("Notify.On = %v, want [needs_input failed]", c.Notify.On)
+	}
+}
+
 func TestLoad_readsTOMLOverrides(t *testing.T) {
 	dir := t.TempDir()
 	cfgDir := filepath.Join(dir, "cfg", "ccpool")

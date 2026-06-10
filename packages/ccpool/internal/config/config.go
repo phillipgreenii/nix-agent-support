@@ -17,11 +17,18 @@ type Config struct {
 	Claude Claude `toml:"claude"`
 	List   List   `toml:"list"`
 	Wait   Wait   `toml:"wait"`
+	Notify Notify `toml:"notify"`
 
 	// Resolved (not from TOML):
 	DBPath     string `toml:"-"`
 	StateDir   string `toml:"-"`
 	RuntimeDir string `toml:"-"`
+}
+
+type Notify struct {
+	Adapter string   `toml:"adapter"` // none | exec | desktop
+	On      []string `toml:"on"`      // states that trigger a notification
+	Command string   `toml:"command"` // argv template for adapter=exec
 }
 
 type Pool struct {
@@ -65,6 +72,7 @@ func defaults() Config {
 		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
 		Wait:   Wait{Timeout: Duration(10 * time.Minute)},
+		Notify: Notify{Adapter: "desktop", On: []string{"needs_input", "failed"}},
 	}
 }
 
