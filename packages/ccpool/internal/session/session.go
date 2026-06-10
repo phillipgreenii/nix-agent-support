@@ -95,6 +95,16 @@ type Handle struct {
 
 // Ensure returns a live, ready handle for name, launching or resuming as needed.
 func (s *Service) Ensure(ctx context.Context, name, cwd, model string) (Handle, error) {
+	var h Handle
+	err := s.withLock(name, func() error {
+		var e error
+		h, e = s.ensureLocked(ctx, name, cwd, model)
+		return e
+	})
+	return h, err
+}
+
+func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Handle, error) {
 	tmuxName := s.d.Prefix + name
 	row, exists, err := s.d.Store.GetByName(ctx, name)
 	if err != nil {

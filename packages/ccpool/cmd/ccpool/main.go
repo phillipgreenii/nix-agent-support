@@ -11,6 +11,8 @@ var version = "dev"
 // With no subcommand, defaults to "list".
 func pickSubcommand(args []string) (cmd string, rest []string) {
 	known := map[string]bool{
+		"cancel":  true,
+		"close":   true,
 		"hook":    true,
 		"list":    true,
 		"new":     true,
@@ -29,6 +31,10 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 func main() {
 	cmd, rest := pickSubcommand(os.Args)
 	switch cmd {
+	case "cancel":
+		os.Exit(runCancel(rest))
+	case "close":
+		os.Exit(runClose(rest))
 	case "hook":
 		os.Exit(runHook(rest))
 	case "list":

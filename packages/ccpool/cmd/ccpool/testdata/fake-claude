@@ -20,8 +20,11 @@ payload() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_e
 
 payload SessionStart | "$cc" hook start || true
 
-# One turn per input line. Ignore the line content (bracketed-paste markers).
-while IFS= read -r _line; do
+# One turn per input line. Exit on /exit; otherwise fire a Stop turn.
+while IFS= read -r line; do
+  case "$line" in
+    *exit*) exit 0 ;;
+  esac
   printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK-DONE"}]}}\n' >> "$transcript"
   payload Stop | "$cc" hook stop || true
 done

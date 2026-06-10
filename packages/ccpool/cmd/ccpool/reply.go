@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/lock"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
@@ -26,6 +27,8 @@ func (transcriptAdapter) IsAwaitingInput(p string) (bool, error)     { return ct
 func runReply(args []string) int {
 	fs := flag.NewFlagSet("reply", flag.ExitOnError)
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
+	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
+	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
 	_ = fs.Parse(args)
 	if fs.NArg() < 2 {
 		fmt.Fprintln(os.Stderr, "usage: ccpool reply <name> <prompt> [--no-wait]")
@@ -53,6 +56,7 @@ func runReply(args []string) int {
 		Store:      st,
 		Wait:       storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
 		Transcript: transcriptAdapter{},
+		Lock:       lock.New(cfg.RuntimeDir),
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,
@@ -71,7 +75,12 @@ func runReply(args []string) int {
 		return 1
 	}
 	mode := session.ModeRefuseIfBusy
-	if *noWait {
+	switch {
+	case *interrupt:
+		mode = session.ModeInterrupt
+	case *queue:
+		mode = session.ModeQueue
+	case *noWait:
 		mode = session.ModeNoWait
 	}
 	res, err := svc.Send(context.Background(), name, prompt, mode)

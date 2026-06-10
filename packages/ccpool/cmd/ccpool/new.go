@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/lock"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
@@ -60,6 +61,7 @@ func runNew(args []string) int {
 		Trust:     truster{path: filepath.Join(home, ".claude.json")},
 		Store:     st,
 		Wait:      storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
+		Lock:      lock.New(cfg.RuntimeDir),
 		Socket:    cfg.Tmux.Socket,
 		Prefix:    cfg.Tmux.Prefix,
 		PluginDir: cfg.Claude.PluginDir,
