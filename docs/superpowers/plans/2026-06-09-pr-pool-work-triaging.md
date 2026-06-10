@@ -401,7 +401,7 @@ Add the worker's completion signal (`needs-push` label) and failure handling (`w
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Update the existing `wait_done` tests to the role-first signature, and add worker tests**
+- [x] **Step 1: Update the existing `wait_done` tests to the role-first signature, and add worker tests**
 
 Rewrite the three existing `wait_done` tests' call lines to `wait_done feedback-processor <id> <sess>`:
 
@@ -469,12 +469,12 @@ Append the worker completion/failure tests:
 }
 ```
 
-- [ ] **Step 2: Run the suite to confirm the new/updated tests fail**
+- [x] **Step 2: Run the suite to confirm the new/updated tests fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: the rewritten `wait_done` tests (arity) and the two worker tests FAIL.
 
-- [ ] **Step 3: Add label helpers** (place near `unclaim`)
+- [x] **Step 3: Add label helpers** (place near `unclaim`)
 
 ```bash
 # bead_labels prints one label per line for a bead (handles labels==null).
@@ -488,7 +488,7 @@ bead_has_label() { bead_labels "$1" | grep -qxF "$2"; }
 mark_stuck() { bd update "$1" --add-label worker-stuck >/dev/null 2>&1 || true; }
 ```
 
-- [ ] **Step 4: Make `wait_done` role-aware**
+- [x] **Step 4: Make `wait_done` role-aware**
 
 Replace `wait_done` (and its helpers) with:
 
@@ -536,16 +536,16 @@ wait_done() {
 }
 ```
 
-- [ ] **Step 5: Update `work_one` to pass the role to `wait_done`**
+- [x] **Step 5: Update `work_one` to pass the role to `wait_done`**
 
 In `work_one`, change `wait_done "$id" "$sess"` to `wait_done "$role" "$id" "$sess"`.
 
-- [ ] **Step 6: Run the suite to verify green**
+- [x] **Step 6: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS (feedback `wait_done` behavior preserved; worker success/stuck covered).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
