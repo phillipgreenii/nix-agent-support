@@ -27,7 +27,7 @@ backlog of ~24 PRs never clears.
 
 `refreshPR` (`internal/sync/refresh.go`) handles the active-PR case via
 `applyFetchedPR` + `buildPRInput`, and **both are called with `nil` cache and
-`nil` enriched** (`sync.go:906`, `sync.go:77`). That `nil` forces every helper down
+`nil` enriched** (`sync.go:906`, `refresh.go:77`). That `nil` forces every helper down
 its live-call fallback, so each PR pays a fan-out of ~8 sequential `bd` calls plus
 several `gh` calls. Two categories of waste dominate:
 
@@ -82,12 +82,20 @@ A single long-lived **maintenance goroutine**, started in `Engine.Daemon` alongs
 the workers and snapshot owner, with its own ticker at the daemon interval. Each
 cycle it:
 
-1. **Refreshes the `human` label set per repo** (`bd query "label=human"` via the
-   per-repo client) and `Store`s the result into an
-   `atomic.Pointer[map[string]map[string]bool]` (repo → set of bead IDs) on the
-   `Engine`.
+1. **Refreshes the `human` label set per repo** (`bd query "label=human"`) and
+   `Store`s the result into an `atomic.Pointer[map[string]map[string]bool]` (repo →
+   set of bead IDs) on the `Engine`. **`HumanLabeledBeads` is not on the `BeadClient`
+   interface** — it lives on the concrete `*beads.Client` / the `depTreeReader`
+   interface (`sync.go:622`). So the goroutine must type-assert the per-repo client
+   (`bdClientFor(rcfg).(depTreeReader)`, or a narrower label-only interface) and
+   no-op for that repo when the assertion fails (test-injected clients), exactly as
+   `buildPRInput`'s cache-less branch already does (`sync.go:691`).
 2. **Drains reply drafts per repo** (`processReplyDrafts`), moved out of
-   `applyFetchedPR`.
+   `applyFetchedPR`. `processReplyDrafts` records outcomes only into a `*Summary`
+   (`.Errors`/`.Warnings`/`.RepliesPosted`; there is no reply telemetry). In daemon
+   mode there is no returned summary, so the goroutine allocates a throwaway
+   `&Summary{}` per cycle and emits its `.Errors`/`.Warnings` via the daemon logger —
+   otherwise the team-PR ReplyDraft warning (`sync.go:1540`) is silently dropped.
 
 Rationale and properties:
 
@@ -102,9 +110,9 @@ Rationale and properties:
   critical path).
 - **Lifecycle.** Started before the loop; stops on `ctx.Done()`. It pulls once
   immediately on start so the label set is populated as soon as possible, then ticks.
-- **Reply-drain in daemon mode** has no aggregate `Summary` to return; it logs
-  errors/warnings via the daemon logger (and existing reply telemetry) instead of
-  accumulating into a returned summary.
+  Shutdown must wait for it before tearing down — add it to the existing `wg`
+  (`wg.Add(3)`) or give it a dedicated done channel awaited before `close(updates)`,
+  so an in-flight reply-drain finishes cleanly.
 
 ### Workers read the label set
 
@@ -133,9 +141,14 @@ In `refreshPR`'s active branch:
    per-PR `gh` calls (`ListReviews`, `ListComments`, `ListRunsByBranch`/`ListRuns`) —
    and bundle them into a per-PR `vcs.EnrichedPR{PR, Reviews, Comments, CIRuns}`.
 2. **Pass that `enriched` bundle to both** `applyFetchedPR` (which forwards it to
-   `processFeedback`) **and** `buildPRInput`. Both already accept a non-nil
-   `enriched` and use it instead of issuing their own fetches — this removes the
-   duplicated `ListComments` and the separate per-PR fetches inside the helpers.
+   `processFeedback` **and** `maybePromoteDraft`) **and** `buildPRInput`. All three
+   already accept a non-nil `enriched` and use it instead of issuing their own
+   fetches (`processFeedback` uses `enriched.Comments`+`enriched.CIRuns`;
+   `maybePromoteDraft` uses `enriched.CIRuns` at `sync.go:1441`; `buildPRInput` uses
+   `enriched.Reviews`/`Comments`/`CIRuns`) — this removes the duplicated `ListComments`
+   and the separate per-PR fetches inside the helpers. Forwarding to
+   `maybePromoteDraft` matters because today `applyFetchedPR` passes it `nil`
+   (`sync.go:910`), so a self-authored draft incurs an extra live CICD `ListRuns`.
 3. **Thread the bead id** returned by `EnsureMergeRequest` into `buildPRInput` so it
    uses the known id directly and skips `FindByRepoAndNumber`. `buildPRInput` gains
    an optional `knownMRID string` parameter: when non-empty it is used as `mrID`
@@ -152,7 +165,17 @@ per-tick label set together cover what `cache` used to provide.
 - **Daemon** (`refreshPR`): does not post replies — the maintenance goroutine drains
   them once per cycle.
 - **One-shot CLI** (`SyncPR`): calls `processReplyDrafts` explicitly after
-  `applyFetchedPR`, preserving today's one-shot behavior.
+  `applyFetchedPR`, preserving today's one-shot behavior — **but only when the bead
+  was not already closed.** Today `applyFetchedPR` short-circuits on `alreadyClosed`
+  (`sync.go:899`) and returns _before_ reaching `processReplyDrafts`, so a closed
+  bead skips reply-drain. `applyFetchedPR` currently returns only `(string, error)`;
+  to preserve that, change its signature to also return the `alreadyClosed` bool so
+  `SyncPR` can skip the reply call on a closed bead. (`refreshPR` ignores the new
+  flag — the daemon doesn't post replies anyway.)
+
+The full-sync path is unaffected: `Engine.Sync` calls `processReplyDrafts` directly
+(`sync.go:483`), not via `applyFetchedPR`, so moving the call out of `applyFetchedPR`
+leaves `Engine.Sync`'s reply handling intact.
 
 This is also a latency improvement: queued replies now drain every maintenance cycle
 rather than only when their PR's fingerprint happens to change.
@@ -181,11 +204,14 @@ per maintenance cycle), and the redundant `FindByRepoAndNumber` and the duplicat
   it on shutdown.
 - `internal/sync/refresh.go` — `refreshPR` builds the per-PR `enriched` bundle,
   threads the bead id, passes both into `applyFetchedPR` and `buildPRInput`.
-- `internal/sync/sync.go` — `applyFetchedPR` accepts/forwards `enriched` and no
-  longer calls `processReplyDrafts`; `buildPRInput` gains the optional `knownMRID`
-  and reads the engine's atomic label set on the cache-less branch; `SyncPR` calls
-  `processReplyDrafts` explicitly. New maintenance helper(s) and the
-  `atomic.Pointer` label field on `Engine`.
+- `internal/sync/sync.go` — `applyFetchedPR` accepts/forwards `enriched` (to both
+  `processFeedback` and `maybePromoteDraft`), no longer calls `processReplyDrafts`,
+  and additionally returns the `alreadyClosed` bool; `buildPRInput` gains the optional
+  `knownMRID` and reads the engine's atomic label set on the cache-less branch;
+  `SyncPR` calls `processReplyDrafts` explicitly (skipping on `alreadyClosed`). New
+  maintenance helper(s) and the `atomic.Pointer` label field on `Engine`.
+- `internal/sync/refresh_test.go` — rework `TestRefreshPR_ActiveMine_UpsertsSnapshot`
+  and the `refreshFakeBeads.feedbackRan` signal (see Testing).
 
 ## Testing
 
@@ -196,8 +222,15 @@ per maintenance cycle), and the redundant `FindByRepoAndNumber` and the duplicat
     is known.
   - reuse-enrichment: `ListComments` is fetched once per refresh; `processFeedback`
     and `buildPRInput` consume the same bundle.
-  - reply-drain relocation: `SyncPR` still posts replies; the daemon path does not
-    (the maintenance goroutine does).
+  - reply-drain relocation: `SyncPR` still posts replies (and skips them on an
+    already-closed bead); the daemon path does not (the maintenance goroutine does).
+- **Existing tests that must change:** `TestRefreshPR_ActiveMine_UpsertsSnapshot`
+  (`refresh_test.go:211`) currently asserts the daemon active path **does** run
+  `ListFeedbackPendingReply` (`if !bdc.feedbackRan { ... "must run the full pipeline
+(ListFeedbackPendingReply)" }`). That assertion inverts under this design — the
+  daemon path no longer drains replies — so the test (and the `refreshFakeBeads.feedbackRan`
+  signal, which currently doubles as the active-path marker) must be reworked to
+  assert the new contract instead.
 - **Integration (slow, real bd + dolt):** run the full `internal/sync` suite once
   before merge; iterate with targeted `-run` tests + `go build ./...` + `go vet ./...`.
   Trust `go build`/`go test` over editor/LSP diagnostics (often stale after edits).
