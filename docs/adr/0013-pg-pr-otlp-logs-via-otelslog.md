@@ -24,7 +24,8 @@ the daemon's `slog` logger to it via
 `go.opentelemetry.io/contrib/bridges/otelslog`. The log-signal modules are pinned
 to the `v0.20.0` line (`otel/log`, `otel/sdk/log`,
 `otlplog/otlploghttp`/`otlploggrpc`), matching the otel core `v1.44.0` already in
-use; `otelslog` resolves against that set at implementation time.
+use. The `otelslog` bridge versions on its own train and is pinned at `v0.19.0` —
+the release that requires `otel/log v0.20.0`.
 
 The daemon logger fans out to **both** stderr (unchanged) and the `otelslog`
 bridge. The `pg-pr-sync` service sets `OTEL_SERVICE_NAME=pg-pr-sync` via
@@ -37,7 +38,11 @@ bridge. The `pg-pr-sync` service sets `OTEL_SERVICE_NAME=pg-pr-sync` via
 - Zero changes to existing log call sites — the bridge is wired at the handler
   level, not at individual `log.Warn`/`log.Error` sites.
 - `slog` `WARN`/`ERROR` severity is preserved through the bridge into OTel
-  severity, so the dashboard panel can filter on error level.
+  severity, so the dashboard panel can filter on error level. (The exact LogQL
+  field carrying severity — `severity_text` vs `detected_level` — depends on the
+  running Loki version; it is verified against live Loki at rollout, falling back
+  to an unfiltered `{service_name="pg-pr-sync"}` selector if needed. See the
+  design spec.)
 - Stderr file logging (`pg-pr-sync.err`) is completely unchanged — OTLP is
   purely additive.
 - Daemon traces also light up as a free side effect: `OTEL_SERVICE_NAME` routes
