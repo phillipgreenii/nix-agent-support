@@ -120,6 +120,15 @@ func (s *Store) Transition(ctx context.Context, name string, to State, uuid, tra
 	return prior, nil
 }
 
+// Poll returns the row's current generation and state (implements wait.Poller).
+func (s *Store) Poll(ctx context.Context, name string) (int64, State, bool, error) {
+	sess, ok, err := s.GetByName(ctx, name)
+	if err != nil || !ok {
+		return 0, "", ok, err
+	}
+	return sess.Generation, sess.State, true, nil
+}
+
 // Upsert ensures a row exists for name; if absent it is inserted as Starting.
 // If present it is left untouched (does not clobber uuid/state). Used by `hook start`.
 func (s *Store) Upsert(ctx context.Context, name, uuid string) error {
