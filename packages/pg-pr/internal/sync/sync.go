@@ -802,18 +802,6 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, fmt.Errorf("sync PR: %w", err)
 	}
 
-	fields := beads.MergeRequestFields{
-		Repo:         repo,
-		PRNumber:     pr.Number,
-		State:        stateForPR(*pr),
-		Branch:       pr.Branch,
-		Base:         pr.Base,
-		Author:       pr.Author,
-		URL:          pr.URL,
-		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
-		Draft:        pr.Draft,
-	}
-
 	// If upstream is closed/merged, close the bead instead of upserting an
 	// open one and cascade-close its descendants.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
@@ -840,35 +828,62 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, nil
 	}
 
-	prBeadID, alreadyClosed, err := bdc.EnsureMergeRequest(ctx, pr.URL, fields)
-	if err != nil {
+	// Open PR: run the shared bead-upsert + feedback + (self) draft-promote +
+	// reply pipeline. Per-bead errors are accumulated into summary.Errors so
+	// the single-PR command reports partial failures the same way it always
+	// did. applyFetchedPR returns early (alreadyClosed) with err==nil when the
+	// bead is already closed upstream, leaving BeadsUpdated at 0.
+	if _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, summary); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-		summary.FinishedAt = e.deps.Now()
-		return summary, err
-	}
-	if !alreadyClosed {
-		summary.BeadsUpdated = 1
-		// Phase 3: feedback + draft pipelines. SyncPR is the single-PR
-		// ad-hoc path; building a TickCache or running a GraphQL bulk
-		// fetch for one PR is wasteful, so pass nils and let the
-		// helpers fall back to live REST/bd calls.
-		if err := e.processFeedback(ctx, bdc, nil, nil, repo, *pr, prBeadID, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-		}
-		if e.isSelfAuthored(pr.Author) {
-			if err := e.maybePromoteDraft(ctx, bdc, nil, repo, *pr, prBeadID, summary); err != nil {
-				summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-			}
-		}
-		// Phase 6 B3: post queued replies for feedback beads under this repo.
-		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-		}
 	}
 	summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 	summary.TotalPRs = 1
 	summary.FinishedAt = e.deps.Now()
 	return summary, nil
+}
+
+// applyFetchedPR runs the bead-upsert + feedback + (self) draft-promote +
+// reply pipeline for an OPEN, active PR. Caller handles closed/merged
+// separately. It is the single place the CLI one-shot (SyncPR) and the
+// daemon per-PR refresh (refreshPR) share this open-PR logic.
+//
+// Returns the merge-request bead id and the first hard error. When
+// EnsureMergeRequest reports the bead is already closed, it returns early
+// with (id, nil) and does NOT bump summary.BeadsUpdated or run the
+// downstream pipelines — matching the prior SyncPR behavior.
+func (e *Engine) applyFetchedPR(ctx context.Context, bdc BeadClient, rcfg config.RepoConfig, pr *api.PR, summary *Summary) (string, error) {
+	fields := beads.MergeRequestFields{
+		Repo:         rcfg.Remote,
+		PRNumber:     pr.Number,
+		State:        stateForPR(*pr),
+		Branch:       pr.Branch,
+		Base:         pr.Base,
+		Author:       pr.Author,
+		URL:          pr.URL,
+		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
+		Draft:        pr.Draft,
+	}
+	id, alreadyClosed, err := bdc.EnsureMergeRequest(ctx, pr.URL, fields)
+	if err != nil || alreadyClosed {
+		return id, err
+	}
+	summary.BeadsUpdated = 1
+	// Phase 3: feedback + draft pipelines. The single-PR / per-PR paths don't
+	// build a TickCache or run a GraphQL bulk fetch for one PR (wasteful), so
+	// pass nils and let the helpers fall back to live REST/bd calls.
+	if err := e.processFeedback(ctx, bdc, nil, nil, rcfg.Remote, *pr, id, summary); err != nil {
+		return id, err
+	}
+	if e.isSelfAuthored(pr.Author) {
+		if err := e.maybePromoteDraft(ctx, bdc, nil, rcfg.Remote, *pr, id, summary); err != nil {
+			return id, err
+		}
+	}
+	// Phase 6 B3: post queued replies for feedback beads under this repo.
+	if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
+		return id, err
+	}
+	return id, nil
 }
 
 // enumerate lists watched PRs for a single repo. Phase 1: self + team
