@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # Unit tests for ../pr-pool.sh. External CLIs (bd, pg-pr, tmux, claude,
 # uuidgen) are stubbed via PATH; stubs log argv to $CALLS_LOG.
+bats_require_minimum_version 1.5.0
 
 setup() {
   TEST_DIR="$(mktemp -d)"; export TEST_DIR
@@ -97,7 +98,26 @@ esac'
   run discover
   [ "$status" -eq 0 ]
   [[ "$output" == *"worker	zr-w1"* ]]
-  grep -q -- "ready --label worker-ready" "$CALLS_LOG"
+  grep -q -- "ready --label worker-ready --exclude-label human" "$CALLS_LOG"
+}
+
+@test "discover: worker route excludes human-flagged beads" {
+  export SELF_LOGIN="me"
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--exclude-label human"*) echo "[]" ;;          # human-flagged bead filtered out by bd
+      *"--label worker-ready"*)  echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[]" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run discover
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"worker	zr-w1"* ]]
+  grep -q -- "ready --label worker-ready --exclude-label human" "$CALLS_LOG"
 }
 
 @test "wait_ready: returns 0 once the ready prompt appears" {
@@ -170,24 +190,42 @@ esac'
   ! grep -q -- "update zr-mine --status=open" "$CALLS_LOG"
 }
 
-@test "wait_done worker: succeeds when the bead gains the needs-push label" {
+@test "wait_done worker: succeeds when the bead is closed" {
   export PR_POOL_MAX_WAIT=2 PR_POOL_POLL_INTERVAL=1
-  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}"'
+  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"closed\"}"'
   make_stub tmux 'echo "pane alive"'
   load_script
   run wait_done worker zr-w1 WORKER
   [ "$status" -eq 0 ]
-  ! grep -q -- "update zr-w1 --status=open" "$CALLS_LOG"
+  run ! grep -q -- "update zr-w1 --status=open" "$CALLS_LOG"   # orchestrator never unclaims a worker
+  ! grep -q -- "add-label human" "$CALLS_LOG"
 }
 
-@test "wait_done worker: on timeout, stamps worker-stuck and does NOT unclaim" {
+@test "wait_done worker: succeeds on hand-back to open after being seen in_progress" {
+  export PR_POOL_MAX_WAIT=5 PR_POOL_POLL_INTERVAL=1
+  # in_progress on the first read (claimed), open thereafter (handed back).
+  make_stub bd '
+n="$(cat "$TEST_DIR/bd_n" 2>/dev/null || echo 0)"
+echo $((n + 1)) > "$TEST_DIR/bd_n"
+case "$1" in
+  show) if [ "$n" -ge 1 ]; then echo "{\"id\":\"zr-w1\",\"status\":\"open\"}"; else echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\"}"; fi ;;
+  *) echo "{}" ;;
+esac'
+  make_stub tmux 'echo "pane alive"'
+  load_script
+  run wait_done worker zr-w1 WORKER
+  [ "$status" -eq 0 ]
+  ! grep -q -- "add-label human" "$CALLS_LOG"
+}
+
+@test "wait_done worker: on timeout, adds the human label and does NOT unclaim" {
   export PR_POOL_MAX_WAIT=1 PR_POOL_POLL_INTERVAL=1
-  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"worker-ready\"]}"'
+  make_stub bd 'echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\"}"'
   make_stub tmux 'echo "pane alive"'
   load_script
   run wait_done worker zr-w1 WORKER
   [ "$status" -ne 0 ]
-  grep -q -- "update zr-w1 --add-label worker-stuck" "$CALLS_LOG"
+  grep -q -- "update zr-w1 --add-label human" "$CALLS_LOG"
   ! grep -q -- "update zr-w1 --status=open" "$CALLS_LOG"
 }
 
@@ -439,7 +477,7 @@ esac'
   [ "$(role_max feedback-processor)" = "1" ]
 }
 
-@test "nudge_text_worker: worktree, commit-no-push, record-then-swap, abort-to-stuck" {
+@test "nudge_text_worker: phillipg-only, push-opt-in, close-or-handback, human-on-block" {
   export PR_POOL_WORKER_SKILL_MD="/abs/worker.md" PR_POOL_WORKTREE_DIR="/tmp/test-worktrees"
   load_script
   run nudge_text_worker zr-w1
@@ -447,11 +485,12 @@ esac'
   [[ "$output" == *"/abs/worker.md"* ]]
   [[ "$output" == *"zr-w1"* ]]
   [[ "$output" == *"worktree"* ]]
-  [[ "$output" == *"do NOT push"* ]]
-  [[ "$output" == *"needs-push"* ]]
-  [[ "$output" == *"worker-ready"* ]]
-  [[ "$output" == *"worker-stuck"* ]]
+  [[ "$output" == *"phillipg."* ]]
+  [[ "$output" == *"human"* ]]
+  [[ "$output" == *"close"* ]]
+  [[ "$output" == *"--force"* ]]
   [[ "$output" == *"/tmp/test-worktrees"* ]]
+  [[ "$output" != *"needs-push"* ]]
 }
 
 @test "worker_label: includes the work-bead id and the parent PR number" {
@@ -492,24 +531,22 @@ esac'
   [ "$(role_convo_name feedback-processor zr-c)" = "$(cycle_label zr-c)" ]
 }
 
-@test "wait_done worker: pane dies just as needs-push lands -> success, no worker-stuck" {
+@test "wait_done worker: pane dies just as the bead closes -> success, no human" {
   export PR_POOL_MAX_WAIT=5 PR_POOL_POLL_INTERVAL=1
-  # First poll: only worker-ready (not done). Pane then reads dead; the re-check
-  # sees needs-push and must succeed WITHOUT stamping worker-stuck.
+  # First read: still in_progress. Pane then reads dead; the re-check sees closed
+  # and must succeed WITHOUT flagging human.
   make_stub bd '
 n="$(cat "$TEST_DIR/bd_n" 2>/dev/null || echo 0)"
 echo $((n + 1)) > "$TEST_DIR/bd_n"
 case "$1" in
-  show)
-    if [ "$n" -ge 1 ]; then echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}";
-    else echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\",\"labels\":[\"worker-ready\"]}"; fi ;;
+  show) if [ "$n" -ge 1 ]; then echo "{\"id\":\"zr-w1\",\"status\":\"closed\"}"; else echo "{\"id\":\"zr-w1\",\"status\":\"in_progress\"}"; fi ;;
   *) echo "{}" ;;
 esac'
   make_stub tmux 'exit 1'
   load_script
   run wait_done worker zr-w1 WORKER
   [ "$status" -eq 0 ]
-  ! grep -q -- "add-label worker-stuck" "$CALLS_LOG"
+  ! grep -q -- "add-label human" "$CALLS_LOG"
 }
 
 @test "work_one: send_nudge failure unclaims, still clears, and returns nonzero" {
@@ -570,7 +607,7 @@ esac'
   load_script
   run drain_once
   [ "$status" -eq 0 ]
-  ! grep -q -- "/abs/W.md" "$CALLS_LOG"                 # worker nudge never sent (cap=0)
+  run ! grep -q -- "/abs/W.md" "$CALLS_LOG"                 # worker nudge never sent (cap=0)
   ! grep -q -- "new-session -d -s WORKER" "$CALLS_LOG"  # worker session never created
 }
 
@@ -597,7 +634,7 @@ case "$1" in
     esac ;;
   show)
     case "$2" in
-      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-p\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}" ;;
+      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-p\",\"status\":\"closed\"}" ;;
       zr-p)  echo "{\"id\":\"zr-p\",\"metadata\":{\"author\":\"me\",\"pr_number\":9}}" ;;
       *) echo "{}" ;;
     esac ;;
@@ -637,7 +674,7 @@ case "$1" in
     case "$2" in
       zr-c)  echo "{\"id\":\"zr-c\",\"parent\":\"zr-pc\",\"status\":\"closed\"}" ;;
       zr-pc) echo "{\"id\":\"zr-pc\",\"metadata\":{\"author\":\"me\",\"pr_number\":1}}" ;;
-      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-pw\",\"status\":\"in_progress\",\"labels\":[\"needs-push\"]}" ;;
+      zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-pw\",\"status\":\"closed\"}" ;;
       zr-pw) echo "{\"id\":\"zr-pw\",\"metadata\":{\"author\":\"me\",\"pr_number\":2}}" ;;
       *) echo "{}" ;;
     esac ;;
