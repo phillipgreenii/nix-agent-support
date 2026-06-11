@@ -69,9 +69,10 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 		return nil, nil
 	}
 
-	// Active PR: run the full upsert + feedback + (self) draft-promote +
-	// reply pipeline and build the snapshot input.
-	if _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, summary); err != nil {
+	// Active PR: run the full upsert + feedback + (self) draft-promote
+	// pipeline and build the snapshot input. Reply draining is done by the
+	// maintenance goroutine (a later task), not here.
+	if _, _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, nil, summary); err != nil {
 		return nil, err
 	}
 	in := e.buildPRInput(ctx, *pr, nil, bdc, nil, rcfg, "")

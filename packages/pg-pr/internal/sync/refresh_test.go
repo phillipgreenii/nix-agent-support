@@ -74,23 +74,24 @@ func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 // signals the three refreshPR outcomes are distinguished by:
 //   - lastState: the State passed to the most recent EnsureMergeRequest.
 //   - closed: whether CloseMergeRequest was called.
-//   - feedbackRan: whether the active pipeline reached
-//     ListFeedbackPendingReply (only the active path does; the dormant
-//     team-draft and closed/merged paths do not).
+//   - replyDrainRan: whether reply draining ran (ListFeedbackPendingReply
+//     was reached via processReplyDrafts). The daemon active path no longer
+//     drains replies; SyncPR does it explicitly.
 //
 // existing, when non-nil, is returned by ListMergeRequests so findBeadByPR
 // locates a pre-existing open bead to close on the merged path.
 type refreshFakeBeads struct {
 	noopBeads
-	existing    *beads.MergeRequest
-	lastState   string
-	closed      bool
-	feedbackRan bool
+	existing      *beads.MergeRequest
+	lastState     string
+	closed        bool
+	replyDrainRan bool // set when processReplyDrafts reached ListFeedbackPendingReply
+	ensureClosed  bool // when true, EnsureMergeRequest reports the bead already closed
 }
 
 func (f *refreshFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
 	f.lastState = fields.State
-	return "mr-1", false, nil
+	return "mr-1", f.ensureClosed, nil
 }
 
 func (f *refreshFakeBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads.MergeRequest, error) {
@@ -106,7 +107,7 @@ func (f *refreshFakeBeads) CloseMergeRequest(_ context.Context, _, _ string) err
 }
 
 func (f *refreshFakeBeads) ListFeedbackPendingReply(_ context.Context) ([]beads.Feedback, error) {
-	f.feedbackRan = true
+	f.replyDrainRan = true
 	return nil, nil
 }
 
@@ -158,8 +159,8 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 	if !bdc.closed {
 		t.Fatal("expected the existing open bead to be closed")
 	}
-	if bdc.feedbackRan {
-		t.Fatal("closed path must not run the active pipeline")
+	if bdc.replyDrainRan {
+		t.Fatal("closed path must not drain replies")
 	}
 }
 
@@ -184,8 +185,8 @@ func TestRefreshPR_TeamDraft_MarksDraftKeepsBeadHidden(t *testing.T) {
 	if bdc.closed {
 		t.Fatal("team draft bead must not be closed")
 	}
-	if bdc.feedbackRan {
-		t.Fatal("dormant team-draft path must not run the active pipeline")
+	if bdc.replyDrainRan {
+		t.Fatal("dormant team-draft path must not drain replies")
 	}
 }
 
@@ -210,8 +211,40 @@ func TestRefreshPR_ActiveMine_UpsertsSnapshot(t *testing.T) {
 	if bdc.closed {
 		t.Fatal("active PR bead must not be closed")
 	}
-	if !bdc.feedbackRan {
-		t.Fatal("active path must run the full pipeline (ListFeedbackPendingReply)")
+	if bdc.replyDrainRan {
+		t.Fatal("daemon refreshPR must NOT drain replies; the maintenance goroutine does")
+	}
+}
+
+func TestSyncPR_DrainsRepliesOnOpenBead(t *testing.T) {
+	bdc := &refreshFakeBeads{}
+	pr := api.PR{
+		Repo: "o/r", Number: 7, State: "open",
+		Author: "me", URL: "https://github.com/o/r/pull/7",
+	}
+	e := newRefreshEngine(t, "me", bdc, pr)
+
+	if _, err := e.SyncPR(context.Background(), "o/r", 7); err != nil {
+		t.Fatalf("SyncPR: %v", err)
+	}
+	if !bdc.replyDrainRan {
+		t.Fatal("SyncPR must drain replies for an open bead")
+	}
+}
+
+func TestSyncPR_SkipsReplyDrainWhenAlreadyClosed(t *testing.T) {
+	bdc := &refreshFakeBeads{ensureClosed: true}
+	pr := api.PR{
+		Repo: "o/r", Number: 8, State: "open",
+		Author: "me", URL: "https://github.com/o/r/pull/8",
+	}
+	e := newRefreshEngine(t, "me", bdc, pr)
+
+	if _, err := e.SyncPR(context.Background(), "o/r", 8); err != nil {
+		t.Fatalf("SyncPR: %v", err)
+	}
+	if bdc.replyDrainRan {
+		t.Fatal("SyncPR must skip reply drain when the bead is already closed")
 	}
 }
 
