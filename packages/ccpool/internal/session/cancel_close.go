@@ -43,13 +43,35 @@ func (s *Service) cancelLocked(ctx context.Context, name string) error {
 	if !s.d.Tmux.HasSession(tmuxName) {
 		return fmt.Errorf("session %q is not live", name)
 	}
-	if err := s.d.Tmux.SendKeys(tmuxName, "Escape"); err != nil {
-		return fmt.Errorf("send Escape: %w", err)
+	// Nothing to interrupt if already idle (standalone cancel on a ready/done
+	// session); just normalize to ready without bursting/verifying.
+	if row, ok, err := s.d.Store.GetByName(ctx, name); err == nil && ok &&
+		(row.State == store.Ready || row.State == store.Done) {
+		_, err := s.d.Store.Transition(ctx, name, store.Ready, "", "")
+		return err
+	}
+	// Brute-force a burst of Escapes spanning the thinking->streaming window; a
+	// single Escape missed 1/7 in live verification (spec §3.1/§3.2).
+	for i := 0; i < escapeBurst; i++ {
+		if i > 0 {
+			s.sleep(escapeSpacing)
+		}
+		if err := s.d.Tmux.SendKeys(tmuxName, "Escape"); err != nil {
+			return fmt.Errorf("send Escape: %w", err)
+		}
 	}
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
-	_, err := s.d.Store.Transition(ctx, name, store.Ready, "", "")
+	// Verify the interrupt landed; do NOT falsely report idle on a miss.
+	pane, err := s.d.Tmux.CapturePane(tmuxName)
+	if err != nil {
+		return fmt.Errorf("verify cancel: %w", err)
+	}
+	if !interruptLanded(pane) {
+		return ErrCancelUnconfirmed // row left as-is (working); caller fails safely
+	}
+	_, err = s.d.Store.Transition(ctx, name, store.Ready, "", "")
 	return err
 }
 

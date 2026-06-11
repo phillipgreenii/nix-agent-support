@@ -95,7 +95,7 @@ func TestSend_interrupt_cancelsThenDelivers(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
 	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
-	tm := &sendTmux{live: true}
+	tm := &sendTmux{live: true, pane: "Interrupted"}
 	tr := fakeTranscript{reply: "done now"}
 	w := waitFunc(func(_ context.Context, name string, _ int64) (wait.Outcome, error) {
 		_, _ = st.Transition(ctx, name, store.Done, "", "")
