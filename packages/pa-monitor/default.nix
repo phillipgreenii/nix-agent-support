@@ -15,11 +15,22 @@
 mkGoApp {
   pname = "pa-monitor";
 
-  src = lib.cleanSource ./.;
+  # The module uses a relative `replace ../claude-transcript` (the Claude
+  # transcript event model is shared with ccpool), so the build sandbox must
+  # contain BOTH package dirs at their relative positions. Root the source at
+  # packages/ and build the pa-monitor subdir.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../claude-transcript
+    ];
+  };
+  modRoot = "pa-monitor";
 
   subPackages = [ "cmd/pa-monitor" ];
 
-  vendorHash = "sha256-8d8iMOTN4dlgH5CwXhvy9JMRKQISWEiSvyY5QAOFY4E=";
+  vendorHash = "sha256-7Ng9sHJOrVTw14UNsyXhYI/EQOvu3d1+HIbWfUQSQVo=";
 
   # Binary version (`-X main.version`) is derived from this package's own
   # source by mkGoApp; `main.version` (lowercase) is mkGoApp's default target.
