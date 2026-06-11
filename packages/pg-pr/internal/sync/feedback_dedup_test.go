@@ -9,30 +9,24 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
-// fpCountBeads embeds noopBeads and records how many times ListChildrenOfPR is
-// called, plus the feedback it creates. It models one open processing-cycle
-// ("cycle-1") whose existing feedback is fed in via `feedback`.
+// fpCountBeads embeds noopBeads and records how many times PRFeedbackFingerprints
+// is called (the dedup must consult the PR's feedback once per refresh, not per
+// event), plus the feedback it creates. `fingerprints` is the PR's existing
+// feedback fingerprint set.
 type fpCountBeads struct {
 	noopBeads
-	childrenCalls int
-	feedback      []beads.Feedback
-	created       []beads.CreateFeedbackInput
+	fpCalls      int
+	fingerprints map[string]bool
+	created      []beads.CreateFeedbackInput
 }
 
 func (f *fpCountBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
 	return "cycle-1", true, nil
 }
 
-func (f *fpCountBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	f.childrenCalls++
-	return []string{"cycle-1"}, nil
-}
-
-func (f *fpCountBeads) ListFeedback(_ context.Context, cycleID string, _ bool) ([]beads.Feedback, error) {
-	if cycleID == "cycle-1" {
-		return f.feedback, nil
-	}
-	return nil, nil
+func (f *fpCountBeads) PRFeedbackFingerprints(context.Context, string) (map[string]bool, error) {
+	f.fpCalls++
+	return f.fingerprints, nil
 }
 
 func (f *fpCountBeads) CreateFeedback(_ context.Context, in beads.CreateFeedbackInput) (string, error) {
@@ -55,7 +49,7 @@ func TestProcessFeedback_DedupIsHoistedOutOfEventLoop(t *testing.T) {
 	// The dup comment's fingerprint already exists under the PR's cycle.
 	dupFP := commentEvent(dup).fingerprint
 	bdc := &fpCountBeads{
-		feedback: []beads.Feedback{{ID: "fb1", Fields: beads.FeedbackFields{Fingerprint: dupFP}}},
+		fingerprints: map[string]bool{dupFP: true},
 	}
 
 	e := newRefreshEngine(t, "me", &refreshFakeBeads{}, api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"})
@@ -67,9 +61,9 @@ func TestProcessFeedback_DedupIsHoistedOutOfEventLoop(t *testing.T) {
 		t.Fatalf("processFeedback: %v", err)
 	}
 
-	// The hoist: the PR's cycles are listed exactly once, not once per event.
-	if bdc.childrenCalls != 1 {
-		t.Fatalf("ListChildrenOfPR should be called once (dedup hoisted out of the event loop), got %d", bdc.childrenCalls)
+	// The PR's existing feedback is read exactly once per refresh, not per event.
+	if bdc.fpCalls != 1 {
+		t.Fatalf("PRFeedbackFingerprints should be called once per refresh, got %d", bdc.fpCalls)
 	}
 
 	// Dedup correctness preserved: the 3 fresh comments are created; the dup is not.

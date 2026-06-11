@@ -639,6 +639,13 @@ type humanLabelReader interface {
 	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
 }
 
+// feedbackFingerprinter is the narrow capability for reading a PR's existing
+// feedback fingerprints in one scoped bd call. The real *beads.Client satisfies
+// it; test fakes that don't are treated as "no existing feedback" (empty set).
+type feedbackFingerprinter interface {
+	PRFeedbackFingerprints(ctx context.Context, prBeadID string) (map[string]bool, error)
+}
+
 // humanLabelsFor returns the last-pulled `human`-label set for repo, or nil if
 // no pull has populated it yet. Safe to call from any goroutine.
 func (e *Engine) humanLabelsFor(repo string) map[string]bool {
@@ -1498,34 +1505,17 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 }
 
 // existingFeedbackFingerprints returns the set of feedback fingerprints already
-// present under any processing-cycle of prBeadID. It is built once per refresh
-// so the feedback dedup loop is an in-memory lookup rather than an
-// O(events x cycles) bd fan-out (the prior per-event findFeedbackForPR, where
-// each call did ListChildrenOfPR plus a per-cycle ListFeedback whose own
-// per-bead isChildOf scan made this the dominant daemon cost). Uses the
-// supplied bd client so the search targets the right monorepo workspace.
-//
-// A ListChildrenOfPR failure is returned (the caller cannot safely dedup); a
-// per-cycle ListFeedback failure is skipped (that cycle contributes nothing),
-// mirroring the prior per-event/per-cycle error tolerance.
+// present under prBeadID, in one scoped bd call (PRFeedbackFingerprints, a single
+// `bd dep tree --direction=up`). Built once per refresh so the per-event dedup in
+// processFeedback is an in-memory lookup. A bd client that doesn't implement the
+// capability (test fakes) yields an empty set (dedup disabled); the production
+// daemon client is *beads.Client, which does implement it.
 func (e *Engine) existingFeedbackFingerprints(ctx context.Context, bdc BeadClient, prBeadID string) (map[string]bool, error) {
-	set := map[string]bool{}
-	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
-	if err != nil {
-		return nil, err
+	fp, ok := bdc.(feedbackFingerprinter)
+	if !ok {
+		return map[string]bool{}, nil
 	}
-	for _, childID := range children {
-		fbs, ferr := bdc.ListFeedback(ctx, childID, true)
-		if ferr != nil {
-			continue
-		}
-		for _, fb := range fbs {
-			if fb.Fields.Fingerprint != "" {
-				set[fb.Fields.Fingerprint] = true
-			}
-		}
-	}
-	return set, nil
+	return fp.PRFeedbackFingerprints(ctx, prBeadID)
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
