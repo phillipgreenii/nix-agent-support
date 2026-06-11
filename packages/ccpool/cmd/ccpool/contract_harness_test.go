@@ -167,6 +167,12 @@ func (sb *sandbox) ccp(args ...string) (string, int) {
 	cmd := exec.Command(sb.bin, args...)
 	cmd.Env = sb.env
 	cmd.Dir = sb.cwd
+	// Force a non-TTY stdin. With Stdin unset, exec wires the child to /dev/null,
+	// which os.Stdin.Stat() reports as a char device -> stdinIsTerminal() is true,
+	// so multi-candidate `attend` would enter the interactive picker (fzf on
+	// /dev/tty) and hang forever under `go test`. An empty reader gives the child
+	// a pipe (not a char device), so attend correctly takes the scriptable branch.
+	cmd.Stdin = strings.NewReader("")
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {

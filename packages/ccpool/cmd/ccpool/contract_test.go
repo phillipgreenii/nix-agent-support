@@ -100,3 +100,83 @@ func TestContract_Cancel_StaleMarkerFalsePositive(t *testing.T) {
 	// thinking-cancel wrongly exits 0. Expected to FLIP to 6 (or idle) once fixed.
 	baseline(t, "pg2-33gl", "stale-marker thinking cancel (false positive) exit code", code, 0)
 }
+
+func TestContract_Send_BusyRefused(t *testing.T) {
+	sb := newSandbox(t)
+	if _, code := sb.ccp("new", "b"); code != 0 {
+		t.Fatalf("new failed")
+	}
+	sb.ccp("reply", "b", thinkingPrompt, "--no-wait")
+	sb.waitForThinking("b", 30*time.Second)
+	_, code := sb.ccp("reply", "b", "second message") // no flags -> ModeRefuseIfBusy
+	baseline(t, "n/a", "reply on busy session exit code", code, 5)
+}
+
+func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {
+	sb := newSandbox(t)
+	if _, code := sb.ccp("new", "n"); code != 0 {
+		t.Fatalf("new failed")
+	}
+	_, code, elapsed := sb.ccpTimed(20*time.Second, "reply", "n", thinkingPrompt, "--no-wait")
+	liveAssert(t, "--no-wait exit 0", code, 0)
+	liveAssert(t, "--no-wait returns under 15s (does not block on the turn)", elapsed < 15*time.Second, true)
+	pending(t, "row is 'working' after --no-wait", "reconciled state query")
+}
+
+func TestContract_Interrupt_ThinkingAborts(t *testing.T) {
+	sb := newSandbox(t)
+	if _, code := sb.ccp("new", "x"); code != 0 {
+		t.Fatalf("new failed")
+	}
+	sb.ccp("reply", "x", thinkingPrompt, "--no-wait")
+	sb.waitForThinking("x", 30*time.Second)
+	out, code, _ := sb.ccpTimed(20*time.Second, "reply", "x", "PROBE_MUST_NOT_DELIVER", "--interrupt")
+	// BASELINE: interrupt during thinking cannot confirm the cancel -> aborts -> exit 1.
+	baseline(t, "pg2-33gl", "reply --interrupt during thinking exit code", code, 1)
+	liveAssert(t, "interrupt abort does not paste the probe", strings.Contains(sb.cap("x"), "PROBE_MUST_NOT_DELIVER"), false)
+	_ = out
+	pending(t, "interrupt should carry a distinct exit code, not generic 1", "distinct interrupt exit code (exit-code-1-is-general-error)")
+}
+
+// attendFixture stands up N live sessions and sets their store states.
+func attendFixture(t *testing.T, sb *sandbox, states map[string]string) {
+	t.Helper()
+	for name := range states {
+		if _, code := sb.ccp("new", name); code != 0 {
+			t.Fatalf("fixture new %q failed", name)
+		}
+	}
+	for name, st := range states {
+		sb.setState(name, st) // both a row AND a live pane (filter drops paneless rows)
+	}
+}
+
+func TestContract_Attend_NoTTYListsCandidates(t *testing.T) {
+	sb := newSandbox(t)
+	attendFixture(t, sb, map[string]string{"q1": "needs_input", "q2": "needs_input", "q3": "done"})
+	out, code := sb.ccp("attend") // stdin is not a TTY under go test
+	liveAssert(t, "attend no-TTY exit 0", code, 0)
+	liveAssert(t, "lists q1", strings.Contains(out, "q1"), true)
+	liveAssert(t, "lists q2", strings.Contains(out, "q2"), true)
+	liveAssert(t, "excludes done q3", strings.Contains(out, "q3"), false)
+}
+
+func TestContract_Attend_IncludeDone(t *testing.T) {
+	sb := newSandbox(t)
+	attendFixture(t, sb, map[string]string{"q1": "needs_input", "q3": "done"})
+	out, code := sb.ccp("attend", "--include-done")
+	liveAssert(t, "attend --include-done exit 0", code, 0)
+	liveAssert(t, "includes done q3", strings.Contains(out, "q3"), true)
+}
+
+func TestContract_Attend_ZeroCandidates(t *testing.T) {
+	sb := newSandbox(t)
+	attendFixture(t, sb, map[string]string{"r1": "ready"})
+	out, code := sb.ccp("attend")
+	liveAssert(t, "attend zero exit 0", code, 0)
+	liveAssert(t, "says none waiting", strings.Contains(out, "no sessions waiting"), true)
+}
+
+func TestContract_Attend_NumberedAndFzfBranchSelection(t *testing.T) {
+	pending(t, "numbered/fzf TTY branch selection (stdinIsTerminal/LookPath)", "attend.go injection refactor for testable branch selection")
+}
