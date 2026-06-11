@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,18 +16,29 @@ type routingRunner struct {
 	readyWorker   string // JSON for `bd ready --label worker-ready ...`
 	show          map[string]string
 	sawWorkerArgs []string
+	readyErr      error            // if set, returned from any "ready" branch
+	showErr       map[string]error // keyed by parent id; if set, returned for that show call
 }
 
 func (r *routingRunner) Run(_ context.Context, args ...string) (string, error) {
 	switch args[0] {
 	case "ready":
+		if r.readyErr != nil {
+			return "", r.readyErr
+		}
 		if contains(args, "--label") {
 			r.sawWorkerArgs = args
 			return r.readyWorker, nil
 		}
 		return r.readyFeedback, nil
 	case "show":
-		return r.show[args[1]], nil
+		id := args[1]
+		if r.showErr != nil {
+			if err, ok := r.showErr[id]; ok {
+				return "", err
+			}
+		}
+		return r.show[id], nil
 	}
 	return "", nil
 }
@@ -104,5 +116,43 @@ func TestDiscover_emptySelfLoginErrors(t *testing.T) {
 	reg := roles.NewRegistry(config.Default())
 	if _, err := Discover(context.Background(), rr, reg, ""); err == nil {
 		t.Error("empty selfLogin should error (cannot resolve feedback ownership)")
+	}
+}
+
+func TestDiscover_toleratesReadyError(t *testing.T) {
+	rr := &routingRunner{
+		readyErr: errors.New("bd: connection refused"),
+	}
+	reg := roles.NewRegistry(config.Default())
+	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	if err != nil {
+		t.Fatalf("transient bd ready error should be swallowed, got err=%v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("transient bd ready error should yield empty dispatches, got %v", got)
+	}
+}
+
+func TestDiscover_skipsBeadOnParentShowError(t *testing.T) {
+	rr := &routingRunner{
+		readyFeedback: `[
+			{"id":"zr-bad","issue_type":"task","title":"process-feedback: A","parent":"zr-prBad"},
+			{"id":"zr-good","issue_type":"task","title":"process-feedback: B","parent":"zr-prGood"}
+		]`,
+		readyWorker: `[]`,
+		show: map[string]string{
+			"zr-prGood": `{"id":"zr-prGood","metadata":{"author":"phillipg"}}`,
+		},
+		showErr: map[string]error{
+			"zr-prBad": errors.New("bd: not found"),
+		},
+	}
+	reg := roles.NewRegistry(config.Default())
+	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	if err != nil {
+		t.Fatalf("parent lookup error should be skipped, not propagated; err=%v", err)
+	}
+	if len(got) != 1 || got[0].BeadID != "zr-good" {
+		t.Fatalf("only zr-good should be returned (zr-bad's parent errored); got %v", got)
 	}
 }

@@ -43,13 +43,13 @@ func (o *Orchestrator) DrainOnce(ctx context.Context, selfLogin string) error {
 		slog.Info("gated; pausing without dispatch")
 		return nil // NOTE: gated exit does NOT teardown (no sessions were created)
 	}
+	defer o.teardownAll(ctx) // always run teardown after the gated check, even on error
 	dispatches, err := discover.Discover(ctx, o.BD, o.Reg, selfLogin)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
 	o.drain(ctx, o.Reg.Feedback, dispatches)
 	o.drain(ctx, o.Reg.Worker, dispatches)
-	o.teardownAll(ctx)
 	return nil
 }
 
@@ -107,10 +107,8 @@ func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name s
 	deadline := time.Now().Add(o.Cfg.MaxWait)
 	seenClaimed := false
 	for time.Now().Before(deadline) {
-		status, err := beads.Status(ctx, o.BD, d.BeadID)
-		if err != nil {
-			return o.fail(ctx, d, fmt.Sprintf("bead status: %v", err))
-		}
+		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
+		status, _ := beads.Status(ctx, o.BD, d.BeadID)
 		if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
 			return nil
 		}

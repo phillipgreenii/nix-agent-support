@@ -6,6 +6,7 @@ package discover
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
@@ -41,7 +42,8 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]Dispatch, error) {
 	issues, err := beads.Ready(ctx, br) // bd ready --json --limit 0
 	if err != nil {
-		return nil, err
+		slog.Warn("discover feedback: bd ready failed", "err", err)
+		return nil, nil
 	}
 	var out []Dispatch
 	for _, iss := range issues {
@@ -53,7 +55,8 @@ func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, sel
 		}
 		parent, err := beads.ShowObj(ctx, br, iss.Parent)
 		if err != nil {
-			return nil, err
+			slog.Warn("discover feedback: parent lookup failed", "bead", iss.ID, "parent", iss.Parent, "err", err)
+			continue
 		}
 		if author, _ := parent.Metadata["author"].(string); author == selfLogin {
 			out = append(out, Dispatch{Role: role, BeadID: iss.ID})
@@ -65,7 +68,8 @@ func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, sel
 func discoverWorker(ctx context.Context, br beads.Runner, role roles.Role) ([]Dispatch, error) {
 	issues, err := beads.Ready(ctx, br, "--label", "worker-ready", "--exclude-label", "human")
 	if err != nil {
-		return nil, err
+		slog.Warn("discover worker: bd ready failed", "err", err)
+		return nil, nil
 	}
 	var out []Dispatch
 	for _, iss := range issues {

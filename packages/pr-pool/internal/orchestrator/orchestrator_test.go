@@ -50,11 +50,12 @@ func (f *fakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 
 // scriptBD serves a status sequence per bead id and records update calls.
 type scriptBD struct {
-	statusSeq map[string][]string
-	idx       map[string]int
-	updates   []string
-	ready     map[string]string // keyed by "feedback"/"worker"
-	show      map[string]string
+	statusSeq   map[string][]string
+	idx         map[string]int
+	updates     []string
+	ready       map[string]string // keyed by "feedback"/"worker"
+	show        map[string]string
+	showErrOnce map[string]error // returns error once per id, then clears
 }
 
 func (s *scriptBD) Run(_ context.Context, args ...string) (string, error) {
@@ -68,6 +69,13 @@ func (s *scriptBD) Run(_ context.Context, args ...string) (string, error) {
 		id := args[1]
 		if v, ok := s.show[id]; ok {
 			return v, nil
+		}
+		// one-shot error injection for status reads
+		if s.showErrOnce != nil {
+			if err, ok := s.showErrOnce[id]; ok {
+				delete(s.showErrOnce, id)
+				return "", err
+			}
 		}
 		// status sequence
 		if s.idx == nil {
@@ -332,4 +340,39 @@ func writeTemp(t *testing.T) (string, func()) {
 		t.Fatal(err)
 	}
 	return p, func() {}
+}
+
+func TestWaitDone_transientStatusErrorKeepsPolling(t *testing.T) {
+	// First show call for "zr-w" errors; subsequent calls return "closed".
+	bd := &scriptBD{
+		statusSeq:   map[string][]string{"zr-w": {"closed"}},
+		showErrOnce: map[string]error{"zr-w": errors.New("bd: transient error")},
+	}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err != nil {
+		t.Fatalf("transient status error should not flag bead; got err=%v; updates=%v", err, bd.updates)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("transient error must not trigger human/unclaim; updates=%v", bd.updates)
+	}
+}
+
+func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
+	cfg := fastCfg()
+	// empty selfLogin causes Discover to return an error (real precondition check)
+	bd := &scriptBD{ready: map[string]string{"feedback": "[]", "worker": "[]"}}
+	// a stray pr-pool session exists from a prior run
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{
+		{Name: "pr-pool-worker-zr-stray", Live: true},
+	}}}
+	o := newOrch(cc, bd, cfg)
+	err := o.DrainOnce(context.Background(), "") // empty selfLogin => discover errors
+	if err == nil {
+		t.Fatal("empty selfLogin should return an error from DrainOnce")
+	}
+	if !contains(cc.closed, "pr-pool-worker-zr-stray") {
+		t.Errorf("teardown must run even on discover error; closed=%v", cc.closed)
+	}
 }

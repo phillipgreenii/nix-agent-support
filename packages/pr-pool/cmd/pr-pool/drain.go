@@ -128,5 +128,8 @@ func readBeadsPrefix(repoRoot string) (string, error) {
 			return strings.TrimSpace(strings.TrimPrefix(line, "issue_prefix:")), nil
 		}
 	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("read beads config: %w", err)
+	}
 	return "", fmt.Errorf("issue_prefix not found in .beads/config.yaml")
 }
