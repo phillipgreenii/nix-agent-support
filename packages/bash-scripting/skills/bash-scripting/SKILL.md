@@ -135,7 +135,7 @@ done
 ## Help and Version
 
 - **`--help`/`-h`**: Write a `show_help()` function in `.sh`. `help2man` reads this to generate the man page, so format matters.
-- **`--version`/`-v`**: NEVER write version handling. The builder injects a handler that runs before user code. Version format: `YY.MM.DD.SSSSS+gitHash`, computed at build time.
+- **`--version`/`-v`**: NEVER write version handling. The builder injects a handler that runs before user code. Version format: `YY.MM.DD.SSSSS+<srcDigest>`, where the date is computed at build time and `<srcDigest>` is an 8-char content digest of the script's own source (its `src` plus the composed-lib paths of any `libraries` it sources). The digest is the repo-rev-**independent** identity: it changes iff the script's own source changes (committed or dirty), and an unrelated commit elsewhere in the repo does NOT change it (so the build stays cached). This is the cross-language convention from `phillipg-nix-repo-base` ADR 0006 — do NOT reintroduce a repo-`gitHash`-based version (that rebuilds every stamped artifact on every commit). The repo's own git rev lives only in the repo-meta install-metadata module.
 
 ## Error Handling
 

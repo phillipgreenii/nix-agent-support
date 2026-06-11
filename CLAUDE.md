@@ -35,6 +35,18 @@ Each program module:
 - **Test**: Use `nix flake check` to validate configuration
 - **Build**: Flake provides reusable modules, not direct machine configs
 
+## Versioning of Custom Packages
+
+Custom artifacts (Bash, Python, Go) version from a **per-source content digest**, never the repo
+git rev. The `--version` string is `YY.MM.DD.SSSSS+<srcDigest>` (build-time date + an 8-char digest
+of the artifact's own source). It changes iff that artifact's source changes (committed or dirty);
+an unrelated commit elsewhere in the repo leaves it cached. The helpers (`mkSrcDigest`,
+`mkBashScript`/`mkBashBuilders`, `mkGoApp`/`mkGoBinary`, `mkPythonPackage`) do this for you — do
+**not** thread a repo `gitHash` into a package build (that rebuilds every stamped artifact on every
+commit). The repo git rev belongs only in the repo-meta install-metadata module. Third-party deps
+bump only via `update-locks.sh`. Authority: `phillipg-nix-repo-base` ADR 0006; see also the
+`bash-scripting` skill's "Help and Version" section.
+
 ## Key Principles
 
 - **Self-Contained**: No external flake dependencies beyond declared inputs
