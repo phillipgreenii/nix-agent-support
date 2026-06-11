@@ -31,6 +31,3 @@ func main() {
 		os.Exit(2)
 	}
 }
-
-// runDrain is implemented in drain.go (Task 8). Temporary stub.
-func runDrain(_ []string) int { return 0 }
