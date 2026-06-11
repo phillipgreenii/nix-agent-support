@@ -74,6 +74,6 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	if _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, summary); err != nil {
 		return nil, err
 	}
-	in := e.buildPRInput(ctx, *pr, nil, bdc, nil, rcfg)
+	in := e.buildPRInput(ctx, *pr, nil, bdc, nil, rcfg, "")
 	return &in, nil
 }

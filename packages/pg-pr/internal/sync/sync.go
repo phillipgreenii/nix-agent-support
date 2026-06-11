@@ -605,7 +605,7 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		if bdc == nil {
 			bdc = e.bdClientFor(rcfg)
 		}
-		in := e.buildPRInput(ctx, pr, enriched, bdc, cachesByRepo[key.Repo], rcfg)
+		in := e.buildPRInput(ctx, pr, enriched, bdc, cachesByRepo[key.Repo], rcfg, "")
 		// JIRA — left empty for v1; downstream task wires this from
 		// feedback beads.
 		inputs = append(inputs, in)
@@ -692,7 +692,7 @@ func (e *Engine) refreshHumanLabels(ctx context.Context) {
 //     WaitingOnMe — does not regress.
 //   - rcfg carries this PR's repo config; its Remote stamps pr.Repo when the
 //     VCS provider omitted it.
-func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.EnrichedPR, bdc BeadClient, cache *beads.TickCache, rcfg config.RepoConfig) snapshot.PRInput {
+func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.EnrichedPR, bdc BeadClient, cache *beads.TickCache, rcfg config.RepoConfig, knownMRID string) snapshot.PRInput {
 	// Ensure pr.Repo carries the configured remote — VCS providers may omit
 	// it on the returned api.PR.
 	if pr.Repo == "" {
@@ -739,7 +739,10 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 	reader, hasReader := bdc.(depTreeReader)
 	if cache != nil || hasReader {
 		var mrID string
-		if cache != nil {
+		switch {
+		case knownMRID != "":
+			mrID = knownMRID
+		case cache != nil:
 			if mr, found := cache.FindMergeRequest(pr.Repo, pr.Number); found {
 				mrID = mr.ID
 			}
@@ -775,10 +778,8 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 			// per-PR refresh path still applies `human`.
 			if cache != nil {
 				beads.ApplyHumanLabels(deps, cache.HumanLabeled)
-			} else if hasReader {
-				if set, herr := reader.HumanLabeledBeads(ctx); herr == nil {
-					beads.ApplyHumanLabels(deps, set)
-				}
+			} else {
+				beads.ApplyHumanLabels(deps, e.humanLabelsFor(pr.Repo))
 			}
 			in.BeadsDeps = deps
 		}

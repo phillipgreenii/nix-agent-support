@@ -34,9 +34,8 @@ func (f *fakeDepBeads) HumanLabeledBeads(_ context.Context) (map[string]bool, er
 
 func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 	bdc := &fakeDepBeads{
-		mrID:  "mr-1",
-		deps:  []beads.DepNode{{ID: "fb-1", Status: "open"}},
-		human: map[string]bool{"fb-1": true},
+		mrID: "mr-1",
+		deps: []beads.DepNode{{ID: "fb-1", Status: "open"}},
 	}
 	e, err := New(Deps{
 		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}},
@@ -46,9 +45,12 @@ func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// The human-label overlay now comes from the engine's atomic set, not a
+	// per-PR HumanLabeledBeads call.
+	e.humanLabels.Store(&map[string]map[string]bool{"o/r": {"fb-1": true}})
 	pr := api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"}
 
-	in := e.buildPRInput(context.Background(), pr, nil, bdc, nil, config.RepoConfig{Remote: "o/r"})
+	in := e.buildPRInput(context.Background(), pr, nil, bdc, nil, config.RepoConfig{Remote: "o/r"}, "")
 
 	if len(in.BeadsDeps) != 1 {
 		t.Fatalf("want 1 dep, got %d", len(in.BeadsDeps))
