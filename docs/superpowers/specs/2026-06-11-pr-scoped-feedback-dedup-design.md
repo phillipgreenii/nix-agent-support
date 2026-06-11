@@ -44,10 +44,11 @@ func (c *Client) PRFeedbackFingerprints(ctx context.Context, prBeadID string) (m
 ```
 
 - Runs `bd dep tree <prBeadID> --direction=up --json`.
-- Parses each node's `issue_type` and `metadata`; for nodes with `issue_type == "feedback"`, extracts the fingerprint via the existing `feedbackFieldsFromMetadata` helper (same parser `ListFeedback` uses) and adds non-empty fingerprints to the set.
-- Empty / whitespace `prBeadID` → error. Empty tree → empty set. A bd error → returned to the caller.
+- **Decode with the existing `parseBDList(out)` → `[]bdIssue`.** The dep-tree node JSON is byte-identical to the `bd list --json` node shape (`{id, issue_type, status, metadata, ...}`), and `bdIssue` already has `Type string json:"issue_type"` + `Metadata map[string]any json:"metadata"`. Do NOT hand-roll a struct and do NOT extend `DepTreeUp`'s `{id,title,status}` decode struct (it omits `issue_type`/`metadata`).
+- For each `iss` with `iss.Type == TypeFeedback`, take `feedbackFieldsFromMetadata(iss.Metadata).Fingerprint` (the same metadata→fields parser `ListFeedback` uses) and add non-empty fingerprints to the set. Non-feedback nodes (`merge-request`, `task`/`bug` actions) have `metadata: null` (→ nil map) and are filtered out by the `Type` check.
+- Empty / whitespace `prBeadID` → error. Empty tree (`parseBDList("")` → nil) → empty set. A bd error → returned to the caller.
 
-This lives alongside `DepTreeUp` in `deptree.go` (both consume the same `bd dep tree` output; `DepTreeUp` already parses `id/title/status`, this additionally reads `issue_type` + `metadata.fingerprint`).
+Lives alongside `DepTreeUp` in `deptree.go` (same `bd dep tree` output), but uses `parseBDList` rather than `DepTreeUp`'s narrower struct.
 
 ### Component 2 — `sync`: consume it via a narrow interface
 
@@ -61,7 +62,7 @@ This lives alongside `DepTreeUp` in `deptree.go` (both consume the same `bd dep 
   ```
 - `existingFeedbackFingerprints` type-asserts `bdc` to `feedbackFingerprinter`:
   - implements it (production `*beads.Client`) → return `PRFeedbackFingerprints(...)`.
-  - does not (test fakes that don't opt in) → return an empty set, nil (no dedup; safe for unit tests).
+  - does not → return an empty set, nil (dedup disabled). This is only safe for fakes that don't seed duplicate-fingerprint feedback; a fake that asserts dedup MUST implement `PRFeedbackFingerprints` (see Testing).
 - The old `ListChildrenOfPR` + per-cycle `ListFeedback` body is removed.
 
 ### Data flow
@@ -83,8 +84,9 @@ This lives alongside `DepTreeUp` in `deptree.go` (both consume the same `bd dep 
 
 ## Testing
 
-- **`beads` unit test** (fake `CLIRunner`): feed a sample `bd dep tree --json` array containing a merge-request node, a processing-cycle/task node, and two feedback nodes (one with a fingerprint, one missing) plus an action node. Assert `PRFeedbackFingerprints` returns exactly the populated feedback fingerprint(s) and ignores non-feedback nodes. Assert the runner was invoked once with `dep tree <id> --direction=up --json`.
-- **`sync` unit test:** update the existing `TestProcessFeedback_DedupIsHoistedOutOfEventLoop` — the fake implements `PRFeedbackFingerprints` (counting calls) instead of `ListChildrenOfPR`/`ListFeedback`. Assert it is called **once** per refresh (not per event/cycle) and that the duplicate event is skipped while net-new events are created.
+- **`beads` unit test:** feed a sample `bd dep tree --json` array containing a merge-request node, a processing-cycle (`task`) node, two feedback nodes (one with `metadata.fingerprint`, one with `metadata: null`/missing), and an action (`task`/`bug`) node. Assert `PRFeedbackFingerprints` returns exactly the populated feedback fingerprint(s), ignores non-feedback nodes, and invokes the runner once with `dep tree <id> --direction=up --json`. **Runner caveat:** there is no args-keyed canned-output fake runner today (`fakeRunner` in `mergerequest_test.go` is a no-op; other beads tests use a real bd workspace via `deptree_test.go`'s pattern). The implementer must either add a small scripted `CLIRunner` stub that returns the fixture JSON, or write this against a real bd workspace like `deptree_test.go`.
+- **`sync` unit test (one test changes behavior):** `TestProcessFeedback_DedupIsHoistedOutOfEventLoop` in `feedback_dedup_test.go` MUST be migrated — its `fpCountBeads` fake must implement `PRFeedbackFingerprints` (returning the seeded dup fingerprint, counting calls) instead of `ListChildrenOfPR`/`ListFeedback`; otherwise the empty-set fallback disables dedup and the test fails (4 created, not 3; `childrenCalls` no longer meaningful). Assert `PRFeedbackFingerprints` is called **once** per refresh and the dup is skipped while net-new events are created.
+- **No other test changes behavior:** production daemon `bdc` is always `*beads.Client` (`refreshPR` → `bdClientFor` → `NewClientForRepo`, no `Deps.Beads` override), so prod dedup is real; `Sync`/`SyncPR` tests use a real `*beads.Client`; and `noopBeads`-derived fakes (`auth_escalation_test.go`, `daemon_test.go`, `sync_test.go`) already produced an empty dedup set under the old `ListChildrenOfPR`-nil path, so the empty-set fallback preserves their behavior.
 - **Live verification (post-rebuild):** refreshes complete; `pg_pr_sync_pr_duration_count` climbs; `mine`/`team` populate; `generated_at` advances.
 
 ## Affected code
