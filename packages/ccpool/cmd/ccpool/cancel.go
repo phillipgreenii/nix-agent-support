@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,10 +32,27 @@ func runCancel(args []string) int {
 	}
 	defer st.Close()
 	if err := svc.Cancel(context.Background(), fs.Arg(0)); err != nil {
-		fmt.Fprintln(os.Stderr, "cancel:", err)
-		return 1
+		if errors.Is(err, session.ErrCancelUnconfirmed) {
+			fmt.Fprintf(os.Stderr, "cancel may not have landed for %q — re-run `ccpool cancel %s` or `ccpool attach %s`\n",
+				fs.Arg(0), fs.Arg(0), fs.Arg(0))
+		} else {
+			fmt.Fprintln(os.Stderr, "cancel:", err)
+		}
+		return cancelExitCode(err)
 	}
 	return 0
+}
+
+// cancelExitCode maps a cancel error to its CLI exit code (spec §20 + 6=unconfirmed).
+func cancelExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, session.ErrCancelUnconfirmed):
+		return 6
+	default:
+		return 1
+	}
 }
 
 // buildService constructs a session.Service wired with real adapters + lock.
