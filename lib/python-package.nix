@@ -3,6 +3,7 @@
 {
   pkgs,
   lib,
+  mkSrcDigest,
 }:
 {
   # Create a Python package with automatic dependency resolution from pyproject.toml
@@ -25,7 +26,7 @@
   mkPythonPackage =
     {
       name,
-      gitHash,
+      gitHash ? null,
       src,
       customDeps ? { },
       pypiToNixNameMappings ? { },
@@ -39,6 +40,14 @@
     }:
     let
       python = pkgs.python3;
+
+      # Compute digest from source content so version is rev-independent (ADR 0006).
+      # gitHash is accepted but ignored (ADR 0006 — removal deferred; emit warning
+      # when a non-null value is passed so call sites are discoverable).
+      srcDigest =
+        lib.warnIf (gitHash != null)
+          "mkPythonPackage: gitHash is deprecated and ignored; version now derives from srcDigest (ADR 0006)"
+          (mkSrcDigest src);
 
       # Read pyproject.toml at eval-time
       pyprojectData = builtins.fromTOML (builtins.readFile "${src}/pyproject.toml");
@@ -116,7 +125,7 @@
       preBuild = ''
         # Compute build version (PEP 440 compliant: use + for local version)
         SECONDS_TODAY=$(( $(date +%s) % 86400 ))
-        BUILD_VERSION=$(printf "%s.%05d+%s" "$(date +%y.%m.%d)" "$SECONDS_TODAY" "${gitHash}")
+        BUILD_VERSION=$(printf "%s.%05d+%s" "$(date +%y.%m.%d)" "$SECONDS_TODAY" "${srcDigest}")
 
         # Replace placeholder with actual version in pyproject.toml
         substituteInPlace pyproject.toml \

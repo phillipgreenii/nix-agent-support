@@ -81,10 +81,16 @@
             inherit (final) lib;
             inherit self;
           };
+          pythonBuilders = import ./lib/python-package.nix {
+            pkgs = final;
+            inherit (final) lib;
+            inherit (phillipgreenii-nix-base.lib) mkSrcDigest;
+          };
         in
         {
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
+          _agentSupportPythonBuilders = pythonBuilders; # expose for modules
           inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           bash-scripting = final.callPackage ./packages/bash-scripting { };
           pg-pr = final.callPackage ./packages/pg-pr {
