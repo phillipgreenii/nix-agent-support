@@ -249,8 +249,8 @@ send_nudge() {
   submit_line "$sess" "$(role_nudge "$role" "$id")"
 }
 
-# cycle_status prints the cycle bead's status.
-cycle_status() { bd_obj "$1" | jq -r '.status // ""'; }
+# bead_status prints any bead's status (empty on error).
+bead_status() { bd_obj "$1" | jq -r '.status // ""'; }
 
 # pane_alive returns 0 while the tmux session still exists.
 pane_alive() { tmux -L "$SOCKET" capture-pane -p -t "$1" >/dev/null 2>&1; }
@@ -260,35 +260,38 @@ pane_alive() { tmux -L "$SOCKET" capture-pane -p -t "$1" >/dev/null 2>&1; }
 # cycle would be invisible otherwise).
 unclaim() { bd update "$1" --status=open --assignee="" >/dev/null 2>&1 || true; }
 
-# bead_labels prints one label per line for a bead (handles labels==null).
-bead_labels() { bd_obj "$1" | jq -r '(.labels // []) | .[]'; }
+# mark_human flags a bead that needs human intervention so it surfaces in
+# `bd list --label human` and is excluded from discovery. Best-effort.
+mark_human() { bd update "$1" --add-label human >/dev/null 2>&1 || true; }
 
-# bead_has_label returns 0 if the bead carries the exact label.
-bead_has_label() { bead_labels "$1" | grep -qxF "$2"; }
-
-# mark_stuck flags a worker bead the orchestrator could not see to completion so
-# it surfaces in `bd list --label worker-stuck`. Best-effort.
-mark_stuck() { bd update "$1" --add-label worker-stuck >/dev/null 2>&1 || true; }
-
-# done_signal returns 0 when the role's completion signal is present:
+# done_signal returns 0 when the role's completion is reached, given the bead's
+# current status and (for the worker) whether it was ever seen in_progress.
 #   feedback-processor -> the cycle bead is closed
-#   worker             -> the bead carries the needs-push label
+#   worker             -> the bead has LEFT in_progress: closed (resolved) or, if
+#                         it was seen claimed, open (handed back). seen_claimed
+#                         guards the pre-claim startup race (a freshly-dispatched
+#                         bead is still 'open').
 done_signal() {
-  case "$1" in
-  worker) bead_has_label "$2" needs-push ;;
-  *) [ "$(cycle_status "$2")" = "closed" ] ;;
+  local role="$1" status="$2" seen_claimed="${3:-0}"
+  case "$role" in
+  worker)
+    [ "$status" = "closed" ] && return 0
+    [ "$seen_claimed" = "1" ] && [ "$status" = "open" ] && return 0
+    return 1
+    ;;
+  *) [ "$status" = "closed" ] ;;
   esac
 }
 
 # wait_done_fail performs the role-specific failure action:
 #   feedback-processor -> unclaim (so the open pool resurfaces the cycle)
-#   worker             -> stamp worker-stuck, NEVER unclaim (a dead worker may
+#   worker             -> add the `human` label, NEVER unclaim (a dead worker may
 #                         hold a half-built worktree; blind retry is unsafe)
 wait_done_fail() {
   case "$1" in
   worker)
-    log "wait_done: worker $2 $3; flagging worker-stuck"
-    mark_stuck "$2"
+    log "wait_done: worker $2 $3; flagging human"
+    mark_human "$2"
     ;;
   *)
     log "wait_done: $2 $3; unclaiming"
@@ -299,21 +302,26 @@ wait_done_fail() {
 
 # wait_done polls until the role's completion signal fires (success) or MAX_WAIT
 # elapses / the pane dies (failure). On failure it runs the role's fail action;
-# it NEVER auto-closes. It re-checks the signal after a pane death so a bead
+# it NEVER auto-closes. It reads the bead status once per poll, tracks whether the
+# worker was ever seen in_progress, and re-checks after a pane death so a bead
 # completed in the same instant the pane exited is not treated as a failure.
 wait_done() {
-  local role="$1" id="$2" sess="$3" deadline
+  local role="$1" id="$2" sess="$3" deadline seen_claimed=0 s
   deadline=$(($(date +%s) + MAX_WAIT))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    done_signal "$role" "$id" && return 0
+    s="$(bead_status "$id")"
+    done_signal "$role" "$s" "$seen_claimed" && return 0
+    [ "$role" = "worker" ] && [ "$s" = "in_progress" ] && seen_claimed=1
     if ! pane_alive "$sess"; then
-      done_signal "$role" "$id" && return 0
+      s="$(bead_status "$id")"
+      done_signal "$role" "$s" "$seen_claimed" && return 0
       wait_done_fail "$role" "$id" "exited before completing"
       return 1
     fi
     sleep "$POLL_INTERVAL"
   done
-  done_signal "$role" "$id" && return 0
+  s="$(bead_status "$id")"
+  done_signal "$role" "$s" "$seen_claimed" && return 0
   wait_done_fail "$role" "$id" "not complete within ${MAX_WAIT}s"
   return 1
 }
