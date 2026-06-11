@@ -673,6 +673,42 @@ func (e *Engine) refreshHumanLabels(ctx context.Context) {
 	e.humanLabels.Store(&out)
 }
 
+// enrichOnePR fetches one PR's reviews, comments, and CI runs via focused
+// per-PR provider calls and bundles them into a *vcs.EnrichedPR so the feedback
+// pipeline (processFeedback / maybePromoteDraft) and the snapshot builder
+// (buildPRInput) share a single fetch instead of each issuing its own. CI runs
+// come from the first configured CICD provider, preferring the branch-known
+// path (matching buildPRInput's existing cache-less CI behavior). Providers
+// lacking an optional capability leave the corresponding field empty.
+func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api.PR) *vcs.EnrichedPR {
+	if pr.Repo == "" {
+		pr.Repo = rcfg.Remote
+	}
+	out := vcs.EnrichedPR{PR: pr}
+	if vp, err := e.providerFor(rcfg); err == nil {
+		if rl, ok := vp.(ReviewLister); ok {
+			if reviews, rerr := rl.ListReviews(ctx, pr.Repo, pr.Number); rerr == nil {
+				out.Reviews = reviews
+			}
+		}
+		if reader, ok := vp.(CommentReader); ok {
+			if comments, cerr := reader.ListComments(ctx, pr.Repo, pr.Number); cerr == nil {
+				out.Comments = comments
+			}
+		}
+	}
+	if cp := e.firstCICDFor(rcfg); cp != nil {
+		if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
+			if runs, cerr := bl.ListRunsByBranch(ctx, pr.Repo, pr.Branch); cerr == nil {
+				out.CIRuns = runs
+			}
+		} else if runs, cerr := cp.ListRuns(ctx, pr.Repo, pr.Number); cerr == nil {
+			out.CIRuns = runs
+		}
+	}
+	return &out
+}
+
 // buildPRInput assembles the per-PR snapshot input for one observed PR:
 // reviews/comments/CI runs (from bulk enrichment when present, else per-PR
 // REST) plus the bd dep tree with `human` labels overlaid.

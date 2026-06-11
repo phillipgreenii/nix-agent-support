@@ -69,12 +69,14 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 		return nil, nil
 	}
 
-	// Active PR: run the full upsert + feedback + (self) draft-promote
-	// pipeline and build the snapshot input. Reply draining is done by the
-	// maintenance goroutine (a later task), not here.
-	if _, _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, nil, summary); err != nil {
+	// Active PR: fetch this PR's enrichment once and reuse it across the
+	// feedback pipeline and the snapshot input, threading the upserted bead id
+	// so buildPRInput skips a redundant FindByRepoAndNumber.
+	enriched := e.enrichOnePR(ctx, rcfg, *pr)
+	id, _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, enriched, summary)
+	if err != nil {
 		return nil, err
 	}
-	in := e.buildPRInput(ctx, *pr, nil, bdc, nil, rcfg, "")
+	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, id)
 	return &in, nil
 }

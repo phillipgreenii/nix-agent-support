@@ -248,6 +248,28 @@ func TestSyncPR_SkipsReplyDrainWhenAlreadyClosed(t *testing.T) {
 	}
 }
 
+func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
+	bdc := &refreshFakeBeads{}
+	pr := api.PR{
+		Repo: "o/r", Number: 9, State: "open",
+		Author: "me", URL: "https://github.com/o/r/pull/9",
+	}
+	e := newRefreshEngine(t, "me", bdc, pr)
+
+	in, err := e.refreshPR(context.Background(), "o/r", 9)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in == nil {
+		t.Fatal("active self PR must yield a non-nil snapshot input")
+	}
+	// The snapshot input is built from the per-PR enrichment bundle the active
+	// path fetched once; the PR identity must round-trip.
+	if in.PR.Number != 9 || in.PR.Repo != "o/r" {
+		t.Fatalf("input PR mismatch: got %s#%d", in.PR.Repo, in.PR.Number)
+	}
+}
+
 func TestEngineCfg_AtomicSwap(t *testing.T) {
 	e, err := New(Deps{
 		Cfg:   &config.Config{SelfLogin: "old"},
