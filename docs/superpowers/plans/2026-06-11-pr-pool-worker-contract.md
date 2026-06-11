@@ -1,6 +1,6 @@
 # pr-pool worker contract Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the pr-pool worker's label-based terminal contract (`commit→swap worker-ready→needs-push→human pushes→never close`) with a status-based one: the worker ends by **closing** (resolved, incl. already-done) or **unclaiming to `open`** (hand-back), the orchestrator's `done_signal worker` succeeds when the bead **leaves `in_progress`**, and a single **`human`** label (replacing `worker-stuck`) is the needs-intervention surface.
 
@@ -36,7 +36,7 @@ Rewrite the worker completion/failure logic: `done_signal` keys on status (close
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Rewrite the worker `wait_done` tests and update the two `drain_once` worker stubs**
+- [x] **Step 1: Rewrite the worker `wait_done` tests and update the two `drain_once` worker stubs**
 
 Replace the existing test `@test "wait_done worker: succeeds when the bead gains the needs-push label" {…}` (currently at ~line 173) with these **two** tests:
 
@@ -131,12 +131,12 @@ to:
       zr-w1) echo "{\"id\":\"zr-w1\",\"parent\":\"zr-pw\",\"status\":\"closed\"}" ;;
 ```
 
-- [ ] **Step 2: Run the suite to confirm the rewritten tests fail**
+- [x] **Step 2: Run the suite to confirm the rewritten tests fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: the new/rewritten worker `wait_done` tests FAIL (old `done_signal` still keys on the `needs-push` label / `mark_stuck` still stamps `worker-stuck`).
 
-- [ ] **Step 3: Rename `cycle_status`→`bead_status`**
+- [x] **Step 3: Rename `cycle_status`→`bead_status`**
 
 Replace the comment+def (currently ~line 252):
 
@@ -154,7 +154,7 @@ bead_status() { bd_obj "$1" | jq -r '.status // ""'; }
 
 (Its only caller, `done_signal`, is rewritten in Step 6 to no longer call it directly — `wait_done` becomes the caller.)
 
-- [ ] **Step 4: Delete the now-dead label helpers**
+- [x] **Step 4: Delete the now-dead label helpers**
 
 Remove these four lines (comments + defs, currently ~lines 263-267) entirely:
 
@@ -166,7 +166,7 @@ bead_labels() { bd_obj "$1" | jq -r '(.labels // []) | .[]'; }
 bead_has_label() { bead_labels "$1" | grep -qxF "$2"; }
 ```
 
-- [ ] **Step 5: Rename `mark_stuck`→`mark_human`**
+- [x] **Step 5: Rename `mark_stuck`→`mark_human`**
 
 Replace the comment+def (currently ~lines 269-271):
 
@@ -184,7 +184,7 @@ with:
 mark_human() { bd update "$1" --add-label human >/dev/null 2>&1 || true; }
 ```
 
-- [ ] **Step 6: Rewrite `done_signal`, `wait_done_fail`, and `wait_done`**
+- [x] **Step 6: Rewrite `done_signal`, `wait_done_fail`, and `wait_done`**
 
 Replace the whole block from `# done_signal …` through the end of `wait_done` (currently ~lines 273-319) with:
 
@@ -252,12 +252,12 @@ wait_done() {
 }
 ```
 
-- [ ] **Step 7: Run the suite to verify green**
+- [x] **Step 7: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS (worker close/hand-back/timeout/pane-death + every existing feedback and drain test).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
@@ -275,7 +275,7 @@ A bead flagged `human` must not be re-dispatched. Add the native `--exclude-labe
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Update the discover worker test + add an exclusion test**
+- [x] **Step 1: Update the discover worker test + add an exclusion test**
 
 In `@test "discover: worker route tags worker-ready beads (native --label)"`, change the final assertion:
 
@@ -312,12 +312,12 @@ esac'
 }
 ```
 
-- [ ] **Step 2: Run the suite to confirm the discovery tests fail**
+- [x] **Step 2: Run the suite to confirm the discovery tests fail**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: both `discover` worker tests FAIL (`discover_worker` does not yet pass `--exclude-label human`).
 
-- [ ] **Step 3: Add `--exclude-label human` to `discover_worker`**
+- [x] **Step 3: Add `--exclude-label human` to `discover_worker`**
 
 Replace the `bd ready` line in `discover_worker` (currently ~line 96):
 
@@ -339,12 +339,12 @@ Also update the function's comment (currently ~lines 92-94) to mention the exclu
 # null when unset, so a jq label check is avoided here).
 ```
 
-- [ ] **Step 4: Run the suite to verify green**
+- [x] **Step 4: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
@@ -362,7 +362,7 @@ Replace the commit-no-push / swap-to-needs-push instruction with the new rules-b
 - Modify: `packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh`
 - Test: `packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 
-- [ ] **Step 1: Rewrite the `nudge_text_worker` test**
+- [x] **Step 1: Rewrite the `nudge_text_worker` test**
 
 Replace `@test "nudge_text_worker: worktree, commit-no-push, record-then-swap, abort-to-stuck" {…}` with:
 
@@ -384,12 +384,12 @@ Replace `@test "nudge_text_worker: worktree, commit-no-push, record-then-swap, a
 }
 ```
 
-- [ ] **Step 2: Run the suite to confirm the test fails**
+- [x] **Step 2: Run the suite to confirm the test fails**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: the rewritten `nudge_text_worker` test FAILS (old text still says `needs-push` / `do NOT push`).
 
-- [ ] **Step 3: Rewrite `nudge_text_worker`**
+- [x] **Step 3: Rewrite `nudge_text_worker`**
 
 Replace the comment+function (currently ~lines 220-227) with:
 
@@ -405,12 +405,12 @@ nudge_text_worker() {
 }
 ```
 
-- [ ] **Step 4: Run the suite to verify green**
+- [x] **Step 4: Run the suite to verify green**
 
 Run: `nix shell nixpkgs#bats --command bats packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats`
 Expected: ALL tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/pgii-pack-pr-support/pack-src/scripts/pr-pool.sh packages/pgii-pack-pr-support/pack-src/scripts/tests/pr-pool.bats
@@ -427,7 +427,7 @@ Rewrite the worker SKILL as the authoritative rules-based contract. No bats cove
 
 - Modify: `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md`
 
-- [ ] **Step 1: Replace the SKILL with the new contract**
+- [x] **Step 1: Replace the SKILL with the new contract**
 
 Overwrite `packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md` with:
 
@@ -574,13 +574,13 @@ operate under strict rules.
 - Never leave the bead `in_progress`; never leave the working tree dirty.
 ````
 
-- [ ] **Step 2: Verify formatting + structure**
+- [x] **Step 2: Verify formatting + structure**
 
 Run: `nix fmt -- packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md`
 Then `prek run --all-files 2>&1 | tail -20` (or `pre-commit run --all-files`).
 Expected: PASS (treefmt may reformat the SKILL — re-stage if so).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/pg-pr-plugin/share/pg-pr-plugin/skills/pg-pr-work-bead/SKILL.md
@@ -591,8 +591,8 @@ git commit -m "feat(pg-pr-plugin): rewrite worker SKILL to status-based contract
 
 ## Final verification (after all tasks)
 
-- [ ] **Full gate:** `nix flake check` passes (incl. `test-pgii-pack-pr-support-bats` and `treefmt-check`); `prek run --all-files` passes. If `treefmt-check` fails, run `nix fmt -- <files>` and re-commit.
-- [ ] **Grep sweep:** no stale references remain — `grep -rn "needs-push\|worker-stuck\|mark_stuck\|bead_has_label\|cycle_status" packages/pgii-pack-pr-support packages/pg-pr-plugin` returns nothing (the spec/handoff docs may still mention them historically; code/tests must not).
+- [x] **Full gate:** `nix flake check` passes (incl. `test-pgii-pack-pr-support-bats` and `treefmt-check`); `prek run --all-files` passes. If `treefmt-check` fails, run `nix fmt -- <files>` and re-commit.
+- [x] **Grep sweep:** no stale references remain — `grep -rn "needs-push\|worker-stuck\|mark_stuck\|bead_has_label\|cycle_status" packages/pgii-pack-pr-support packages/pg-pr-plugin` returns nothing (the spec/handoff docs may still mention them historically; code/tests must not).
 - [ ] **Live smoke (DEFERRED — P1 #2; confirm the target bead with the user first; blocked on the shared Dolt server being up on `127.0.0.1:25252`).** Exercises the real **commit → push a `phillipg.` branch (when the bead instructs) → close** happy path, the already-done close, and a forced needs-human (e.g. a closed PR or a non-`phillipg.` branch → `bd list --label human`). It mutates real `zr` beads and spawns `claude`.
 
 ---
