@@ -84,3 +84,55 @@ func TestProcessFeedback_DedupIsHoistedOutOfEventLoop(t *testing.T) {
 		}
 	}
 }
+
+// TestProcessFeedback_UnifiedFirstAndSecondPass verifies the cache-less path
+// serves BOTH passes from a single PRFeedbackInSubtree read: the first pass
+// (CI-success resolver) closes a matching open ci-failure feedback drawn from
+// the subtree, and the second pass dedups a duplicate comment against the same
+// slice — with exactly one subtree read and no duplicate creation.
+func TestProcessFeedback_UnifiedFirstAndSecondPass(t *testing.T) {
+	dupComment := api.Comment{ID: "c1", Author: "bot", Body: "duplicate comment"}
+	dupFP := commentEvent(dupComment).fingerprint
+
+	// A CI-success run whose ID matches an OPEN ci-failure feedback's
+	// external_id. ciRunEvent carries r.ID (NOT the run name) as externalID,
+	// so the run's ID must equal the seeded feedback's ExternalID.
+	successRun := api.CIRun{ID: "run-x", Name: "build", Conclusion: "success", Provider: "gha"}
+
+	bdc := &fpCountBeads{
+		subtree: []beads.Feedback{
+			// Open ci-failure feedback the success run should resolve (first pass).
+			{ID: "fb-ci", Status: "hooked", Fields: beads.FeedbackFields{
+				Kind: string(beads.FeedbackKindCIFailure), ExternalID: "run-x",
+			}},
+			// Existing feedback with the dup comment's fingerprint (second-pass dedup).
+			{ID: "fb-dup", Status: "hooked", Fields: beads.FeedbackFields{Fingerprint: dupFP}},
+		},
+	}
+
+	e := newRefreshEngine(t, "me", &refreshFakeBeads{}, api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"})
+	enriched := &vcs.EnrichedPR{
+		Comments: []api.Comment{dupComment},
+		CIRuns:   []api.CIRun{successRun},
+	}
+
+	summary := &Summary{}
+	if err := e.processFeedback(context.Background(), bdc, nil /* cache */, enriched, "o/r",
+		api.PR{Repo: "o/r", Number: 1}, "pr-bead-1", summary); err != nil {
+		t.Fatalf("processFeedback: %v", err)
+	}
+
+	// Single subtree read serves both passes.
+	if bdc.fpCalls != 1 {
+		t.Fatalf("PRFeedbackInSubtree should be called once, got %d", bdc.fpCalls)
+	}
+	// First pass: the open ci-failure feedback is resolved by the success run.
+	if len(bdc.closedIDs) != 1 || bdc.closedIDs[0] != "fb-ci" {
+		t.Fatalf("expected fb-ci closed by CI-success resolver, got %v", bdc.closedIDs)
+	}
+	// Second pass: the duplicate comment is NOT recreated (it dedups against the
+	// same subtree slice); the CI-success event is skipped by the create loop.
+	if len(bdc.created) != 0 {
+		t.Fatalf("expected no feedback created (dup deduped, CI-success skipped), got %d: %+v", len(bdc.created), bdc.created)
+	}
+}
