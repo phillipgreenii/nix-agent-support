@@ -1,0 +1,88 @@
+{
+  "skill_name": "pg-pr-break-down-work",
+  "evals": [
+    {
+      "id": 0,
+      "name": "pr-tests-oversized",
+      "prompt": "Break down bead zr-fix.7 ('Write automated tests for the toolchain-selection logic') — spans 4 source files; child of PR bead zr-fix (repo ZR-Private/ziprecruiter, pr_number 93270, branch phillipg.JVM-357.add-toolchain, base main); worker pool consumes it. Produce the breakdown plan.",
+      "expected_output": "Split into multiple single-file/single-module children, each labeled worker-ready, each self-contained with injected PR context (branch/repo/pr_number) and a done/acceptance gate.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Splits the oversized bead into >= 2 child beads",
+          "discriminating": false
+        },
+        {
+          "text": "Each child is scoped to a single file or module (single-context sized)",
+          "discriminating": false
+        },
+        {
+          "text": "Leaf beads are labeled worker-ready (PR/worker consumer)",
+          "discriminating": false
+        },
+        {
+          "text": "Shared context (branch/repo/pr_number) is injected into each child rather than left as a lookup",
+          "discriminating": false
+        },
+        {
+          "text": "Each child description is self-contained (no 'see parent for context')",
+          "discriminating": false
+        },
+        {
+          "text": "Each child states an explicit acceptance/done gate",
+          "discriminating": true
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "ccpool-nonpr-generalize",
+      "prompt": "Break down 'ccpool needs 3 new capabilities (N1 env injection, N2 launch flags, N3 list --json)' for a ccpool specialist (label: ccpool), NOT the PR worker pool. No PR/branch — mainline infra in packages/ccpool/. Produce the breakdown plan.",
+      "expected_output": "Three children (one per capability), each labeled 'ccpool' (NOT worker-ready), no fabricated PR/branch/pr_number fields, file paths injected per child, acceptance gate per child.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Leaf beads are labeled 'ccpool', NOT worker-ready",
+          "discriminating": true
+        },
+        {
+          "text": "Does NOT fabricate PR / branch / pr_number / merge-request fields (none exist for this work)",
+          "discriminating": true
+        },
+        {
+          "text": "Splits into ~3 children, one per capability (N1/N2/N3)",
+          "discriminating": false
+        },
+        {
+          "text": "Injects the concrete file paths (cmd/ccpool/new.go etc.) into each child",
+          "discriminating": false
+        },
+        {
+          "text": "Each child states an explicit acceptance/done gate",
+          "discriminating": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "already-right-sized",
+      "prompt": "Decide whether/how to break down bead zr-bug.3 ('Fix the off-by-one in pagination offset at refresh.go:142') — single function, single file; child of PR bead zr-bug; worker pool consumes it. Produce the plan.",
+      "expected_output": "Recognizes it is already a single-context leaf; does NOT split into children; arms the single bead worker-ready.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Does NOT split the bead into children (recognizes an already-right-sized leaf)",
+          "discriminating": false
+        },
+        {
+          "text": "Arms the single bead worker-ready",
+          "discriminating": false
+        },
+        {
+          "text": "Does not invent unnecessary scaffolding/children",
+          "discriminating": false
+        }
+      ]
+    }
+  ]
+}
