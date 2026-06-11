@@ -1415,6 +1415,21 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 		}
 	}
 
+	// Build the PR's existing-feedback fingerprint set once (cache-less path)
+	// so the dedup in the second pass is an in-memory lookup, not an
+	// O(events x cycles) bd fan-out (the old per-event findFeedbackForPR).
+	var seen map[string]bool
+	if cache == nil {
+		var err error
+		seen, err = e.existingFeedbackFingerprints(ctx, bdc, prBeadID)
+		if err != nil {
+			// Can't read existing feedback — skip creation this tick rather
+			// than risk duplicate beads (matches the prior per-event
+			// skip-on-error behavior of findFeedbackForPR).
+			return nil
+		}
+	}
+
 	// Second pass: create new feedback beads for net-new events.
 	for _, ev := range events {
 		// Skip CI success-events (they only close prior failures).
@@ -1422,19 +1437,14 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 			continue
 		}
 		// Dedup: if a feedback with this fingerprint already exists under
-		// any cycle for this PR, skip.
+		// any cycle for this PR, skip. The cache-less path consults `seen`
+		// (built once above) instead of re-listing the PR's cycles per event.
 		if cache != nil {
 			if _, ok := cache.FindFeedbackForPR(prBeadID, ev.fingerprint); ok {
 				continue
 			}
-		} else {
-			existing, err := e.findFeedbackForPR(ctx, bdc, prBeadID, ev.fingerprint)
-			if err != nil {
-				continue
-			}
-			if existing != nil {
-				continue
-			}
+		} else if ev.fingerprint != "" && seen[ev.fingerprint] {
+			continue
 		}
 
 		if !found {
@@ -1487,31 +1497,35 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 	return nil
 }
 
-// findFeedbackForPR searches every processing-cycle under prBeadID for a
-// feedback bead with the given fingerprint. Returns nil when fingerprint
-// is empty or no match is found. Uses the supplied bd client so the search
-// targets the right monorepo workspace.
-func (e *Engine) findFeedbackForPR(ctx context.Context, bdc BeadClient, prBeadID, fingerprint string) (*beads.Feedback, error) {
-	if fingerprint == "" {
-		return nil, nil
-	}
-	// We don't currently index cycles per PR cheaply; brute-force list
-	// feedback under any cycle linked from prBeadID. ListChildrenOfPR
-	// returns processing-cycles + action beads — we check each.
+// existingFeedbackFingerprints returns the set of feedback fingerprints already
+// present under any processing-cycle of prBeadID. It is built once per refresh
+// so the feedback dedup loop is an in-memory lookup rather than an
+// O(events x cycles) bd fan-out (the prior per-event findFeedbackForPR, where
+// each call did ListChildrenOfPR plus a per-cycle ListFeedback whose own
+// per-bead isChildOf scan made this the dominant daemon cost). Uses the
+// supplied bd client so the search targets the right monorepo workspace.
+//
+// A ListChildrenOfPR failure is returned (the caller cannot safely dedup); a
+// per-cycle ListFeedback failure is skipped (that cycle contributes nothing),
+// mirroring the prior per-event/per-cycle error tolerance.
+func (e *Engine) existingFeedbackFingerprints(ctx context.Context, bdc BeadClient, prBeadID string) (map[string]bool, error) {
+	set := map[string]bool{}
 	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
 	if err != nil {
 		return nil, err
 	}
 	for _, childID := range children {
-		fb, err := bdc.FindFeedbackByFingerprint(ctx, childID, fingerprint)
-		if err != nil {
+		fbs, ferr := bdc.ListFeedback(ctx, childID, true)
+		if ferr != nil {
 			continue
 		}
-		if fb != nil {
-			return fb, nil
+		for _, fb := range fbs {
+			if fb.Fields.Fingerprint != "" {
+				set[fb.Fields.Fingerprint] = true
+			}
 		}
 	}
-	return nil, nil
+	return set, nil
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
