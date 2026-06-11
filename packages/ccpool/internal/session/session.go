@@ -21,6 +21,7 @@ type Tmux interface {
 	SendKeys(name string, keys ...string) error
 	Paste(name, body string) error
 	KillSession(name string) error
+	CapturePane(name string) (string, error)
 }
 type Truster interface{ EnsureTrusted(cwd string) error }
 type Store interface {

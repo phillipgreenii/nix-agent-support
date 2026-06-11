@@ -17,6 +17,7 @@ type sendTmux struct {
 	live   bool
 	pasted []string
 	keys   [][]string
+	pane   string
 }
 
 func (s *sendTmux) HasSession(string) bool                                       { return s.live }
@@ -26,7 +27,8 @@ func (s *sendTmux) SendKeys(_ string, keys ...string) error {
 	return nil
 }
 func (s *sendTmux) Paste(_, body string) error { s.pasted = append(s.pasted, body); return nil }
-func (s *sendTmux) KillSession(string) error   { return nil }
+func (s *sendTmux) KillSession(string) error                { return nil }
+func (s *sendTmux) CapturePane(string) (string, error)      { return s.pane, nil }
 
 type fakeTranscript struct {
 	reply    string

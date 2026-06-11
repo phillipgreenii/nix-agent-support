@@ -11,6 +11,7 @@ import (
 type reapTmux struct {
 	live   map[string]bool
 	closed map[string]bool
+	pane   string
 }
 
 func (r *reapTmux) HasSession(name string) bool                                  { return r.live[name] }
@@ -28,6 +29,7 @@ func (r *reapTmux) KillSession(name string) error {
 	r.live[name] = false
 	return nil
 }
+func (r *reapTmux) CapturePane(string) (string, error) { return r.pane, nil }
 
 // reapFixture builds N live sessions with the given ages (seconds idle) and a
 // service whose tmux reports them all live and records closures.

@@ -95,3 +95,10 @@ func (c *Client) Paste(name, body string) error {
 	_, err := c.tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", name)
 	return err
 }
+
+// CapturePane returns the visible pane text of the session (tmux capture-pane
+// -p). Used to verify a cancel actually interrupted the turn (spec §3.2).
+func (c *Client) CapturePane(name string) (string, error) {
+	out, err := c.tmux("capture-pane", "-p", "-t", name)
+	return string(out), err
+}

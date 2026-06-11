@@ -16,6 +16,7 @@ type closeTmux struct {
 	pasted    []string
 	goneAfter int // HasSession returns false after this many HasSession calls
 	calls     int
+	pane      string // returned by CapturePane
 }
 
 func (c *closeTmux) HasSession(string) bool {
@@ -31,7 +32,8 @@ func (c *closeTmux) SendKeys(_ string, keys ...string) error {
 	return nil
 }
 func (c *closeTmux) Paste(_, body string) error { c.pasted = append(c.pasted, body); return nil }
-func (c *closeTmux) KillSession(string) error   { c.killed = true; return nil }
+func (c *closeTmux) KillSession(string) error                  { c.killed = true; return nil }
+func (c *closeTmux) CapturePane(string) (string, error)        { return c.pane, nil }
 
 func TestCancel_sendsEscape_resetsToReady(t *testing.T) {
 	ctx := context.Background()
