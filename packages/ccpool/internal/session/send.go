@@ -94,8 +94,8 @@ func (s *Service) deliverPrompt(tmuxName, prompt string) error {
 }
 
 // clearInput empties the prompt box so leftover text can't concatenate (spec §4).
-// NOTE: C-u is provisional — the Plan 3b §19 spike pins the correct keystroke
-// for the real TUI. Harmless to the fake-claude (no persistent buffer).
+// C-u is verified to clear the real TUI's INSERT-mode buffer (2026-06-11 live
+// run: planted text was wiped, no concatenation). Harmless to the fake-claude.
 func (s *Service) clearInput(tmuxName string) error {
 	return s.d.Tmux.SendKeys(tmuxName, "C-u")
 }
