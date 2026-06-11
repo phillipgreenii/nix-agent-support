@@ -20,6 +20,11 @@ let
     if vals == [ ] then 300 else lib.head vals;
 
   pkg = pkgs.ccpool;
+
+  # XDG_STATE_HOME default for the reap agent's launchd logs. The plist runs
+  # under the primary user; mirror pa-monitor's resolution via system.primaryUser.
+  primaryUser = config.system.primaryUser or null;
+  stateHome = if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/ccpool";
 in
 {
   config = lib.mkIf reapEnabledByAnyUser {
@@ -39,6 +44,12 @@ in
       healthCheck = false;
       serviceConfig = {
         StartInterval = interval; # the periodic re-trigger
+        # Surface runtime failures: the agent is keepAlive-off and health-check
+        # exempt, so without logs a crashing reap run would be silent. launchd
+        # creates the parent dir (~/.local/state/ccpool) if it is missing.
+        # Mirrors pa-monitor's stateHome logging pattern.
+        StandardErrorPath = "${stateHome}/ccpool/reap.err.log";
+        StandardOutPath = "${stateHome}/ccpool/reap.out.log";
       };
     };
   };
