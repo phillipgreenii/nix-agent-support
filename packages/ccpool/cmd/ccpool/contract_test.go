@@ -180,3 +180,33 @@ func TestContract_Attend_ZeroCandidates(t *testing.T) {
 func TestContract_Attend_NumberedAndFzfBranchSelection(t *testing.T) {
 	pending(t, "numbered/fzf TTY branch selection (stdinIsTerminal/LookPath)", "attend.go injection refactor for testable branch selection")
 }
+
+func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) {
+	sb := newSandbox(t)
+	if _, code := sb.ccp("new", "a"); code != 0 {
+		t.Fatalf("new failed")
+	}
+	const askPrompt = "Use the AskUserQuestion tool right now as your first action: ask 'CCPROBE which path?' with options 'Alpha' and 'Bravo'. Do nothing else first."
+	sb.ccp("reply", "a", askPrompt, "--no-wait")
+	// The AskUserQuestion gap: no Notification hook fires; ccpool detects it via the
+	// transcript only on a blocking wait. Here we just confirm the picker renders.
+	deadline := time.Now().Add(90 * time.Second)
+	seen := false
+	for time.Now().Before(deadline) {
+		if strings.Contains(sb.cap("a"), "Alpha") || strings.Contains(sb.cap("a"), "CCPROBE") {
+			seen = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !seen {
+		scaffoldFail(t, "AskUserQuestion picker never rendered (model may not have called the tool)")
+	}
+	liveAssert(t, "AskUserQuestion picker rendered", seen, true)
+	pending(t, "row reaches needs_input + the pending question text is queryable", "reconciled state + associated info (AskUserQuestion gap)")
+}
+
+func TestContract_Reap_EvictsOldestOverCap(t *testing.T) {
+	// new does NOT enforce max_sessions; only reap evicts oldest-by-last_activity.
+	pending(t, "reap evicts oldest-by-last_activity down to cap", "deterministic reap assertion (needs activity-time control / state query)")
+}
