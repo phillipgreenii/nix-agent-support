@@ -2,7 +2,9 @@
 
 **Goal that is still not confirmed met:** `/api/v1/dashboard` (`127.0.0.1:9818`) populates `mine`/`team` and `generated_at` advances. The daemon detects changed PRs fine but per-PR **refreshes were not completing**, so the dashboard stayed empty.
 
-**Status:** A stack of fixes is merged to `main` (UNPUSHED) but **not yet rebuilt/verified live**. The last live measurement (before the final dedup fix `b43de51`) still showed **0 completed refreshes** — that measurement predates the fix that targets the actual bottleneck. **Rebuild and re-measure is the immediate next action.**
+**Status (updated 2026-06-11, post-rebuild, VERIFIED LIVE):** The fix stack is deployed and **the dashboard now populates** (`mine=8`, `team=9`), 40 refreshes completed, `snapshot_present=1`, queue drained 8/13→0 — the original goal is met. **One remaining issue:** the team worker grinds `processFeedback`'s first-pass `ListFeedback(cycleID)` `O(F)` `isChildOf` scan, so `sync_pr_duration_count` plateaus (~40) and the team queue grows instead of draining. Fix is tracked in bead **`pg2-wyt8`** (route the first pass through the same `bd dep tree` call — same proven pattern as the dedup fix). `main` still UNPUSHED on both repos.
+
+> Correction: an earlier draft called `/Volumes` a "slow mount" — that was **never measured**; ignore it. The confirmed cost is the **`O(F)≈475` call count** per first-pass scan, independent of any per-call latency.
 
 ---
 
@@ -12,7 +14,7 @@ Per-PR refresh throughput collapsed under the bd/dolt backend. Root cause was fo
 
 1. The per-PR path dropped the bulk fetch → re-ran workspace-wide bd work per PR. (Fixed: async maintenance goroutine + fetch-enrichment-once + threaded bead id.)
 2. The **dominant** cost was `processFeedback`'s feedback **dedup**: per upstream event it called `findFeedbackForPR` → `ListChildrenOfPR` + per-cycle `ListFeedback`, and `ListFeedback(cycleID, …)` internally does a **per-bead `isChildOf` (`bd dep list`) scan over every feedback bead in the workspace** (`F = 475` live). So dedup was `O(events × cycles × F)` bd subprocesses per PR. (Fixed in two steps: hoisted dedup out of the per-event loop, then replaced it with a single scoped `bd dep tree <pr> --direction=up --json` via `beads.Client.PRFeedbackFingerprints`.)
-3. A concurrent change (`d33eb0b`, not ours) repointed beads off the slow `/Volumes/ziprecruiter/monorepo/.beads` mount onto the local nix dolt server (`127.0.0.1:25252`, `~/.local/share/beads-dolt`) — bd calls are now fast individually.
+3. A concurrent change (`d33eb0b`, not ours) repointed the beads **dolt server** to the local nix one (`127.0.0.1:25252`, `~/.local/share/beads-dolt`). Note bd's git metadata ops still run against `/Volumes/ziprecruiter/monorepo/.beads` (observed `git -C /Volumes/.../.beads rev-parse` per call) — whether that path is slow is **unverified and not the point**; the bottleneck is the per-first-pass-scan call COUNT (`O(F)`), not per-call latency.
 
 ### ⚠️ Most likely remaining bottleneck (check this first if still slow)
 
@@ -77,7 +79,7 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bd <cmd>   # env -u avoids .envrc leak; bd re
 ## Gotchas / workspace facts
 
 - **Two repos, both `main` unpushed:** `phillipgreenii-nix-agent-support` (the Go daemon) and `phillipgreenii-nix-support-apps` (the Grafana dashboard JSON). Branches here **auto-merge to `main`** on apply/deploy; this session merged each fix to `main` via ff after review.
-- **gascity background agents** hammer the bd/dolt backend continuously — every pg-pr `bd` call is contended. The `/Volumes`→local dolt repoint (`d33eb0b`) helped a lot; if `/Volumes/ziprecruiter/monorepo/.beads/dolt` shows up as a running `dolt sql-server` again, beads may have drifted back to the slow mount.
+- **gascity background agents** hammer the bd/dolt backend continuously — every pg-pr `bd` call is contended. The beads dolt server now runs locally (`127.0.0.1:25252`, repoint `d33eb0b`). Don't assume `/Volumes` is slow without measuring; the demonstrated problem is the **number** of `bd` subprocess calls (the `O(F)` first-pass scan), so the lever is cutting call count, not the mount.
 - **The expensive bd primitive:** `ListFeedback(cycleID, …)` with a non-empty `cycleID` runs `bd list --type=feedback [--all]` then a per-bead `isChildOf` = `bd dep list <fb>` for EVERY feedback bead in the workspace (`pkg/beads/feedback.go:202-228`, `pkg/beads/processingcycle.go:130`). Avoid it on the hot path; prefer the scoped `bd dep tree <pr> --direction=up --json` (one call, returns the subtree with per-node `metadata`). `PRFeedbackFingerprints` (`pkg/beads/deptree.go`) is the template.
 - **LSP diagnostics are frequently STALE** here (worse after worktree removal / branch switches) — they will report phantom "undefined method" / "wrong arg count". Trust `go build` / `go vet` / `go test`, never the diagnostics.
 - **pre-commit hook reformats:** committing markdown/Go often aborts the first attempt ("files were modified by this hook"); just re-`git add` the same files and `git commit` again.
