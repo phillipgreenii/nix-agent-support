@@ -218,12 +218,13 @@ nudge_text_feedback() {
 }
 
 # nudge_text_worker builds the worker's instruction line. The worker does all
-# git work itself (pr-pool stays git-free): resolve PR+branch bead-first, work in
-# an isolated worktree, commit but never push, record then swap labels, never
-# close. WORKTREE_DIR is expanded so the agent gets a concrete path.
+# git work itself (pr-pool stays git-free): resolve PR+branch bead-first, assert the
+# branch is phillipg.-prefixed and mine, work in a clean isolated worktree, commit,
+# push only when the bead instructs, then record + close (or hand back). It never
+# leaves the bead in_progress; on a hard block it adds the `human` label.
 nudge_text_worker() {
   local id="$1"
-  printf '%s' "Read $WORKER_SKILL_MD and implement work bead $id. Claim it (bd update $id --claim). Resolve its PR + head branch bead-first from the parent merge-request bead's metadata (repo, pr_number, branch — no gh needed) and assert metadata.author is me; if you cannot resolve the PR or it is not mine, abort WITHOUT editing anything and leave it for worker-stuck. Create or reuse an isolated git worktree for that branch under $WORKTREE_DIR, implement the change the bead describes, and commit it (do NOT push, do NOT force). Then record the worktree path + commit SHA on the bead with bd comment, and ONLY AFTER that swap labels atomically: bd update $id --add-label needs-push --remove-label worker-ready. Leave the bead claimed/in_progress; do NOT close it."
+  printf '%s' "Read $WORKER_SKILL_MD and implement work bead $id. Claim it (bd update $id --claim). Resolve its PR + head branch bead-first from the parent merge-request bead's metadata (repo, pr_number, branch — no gh needed); assert metadata.author is me AND the branch starts with 'phillipg.'. If you cannot resolve the PR, it is not mine, or the branch is not phillipg.-prefixed, make NO changes, comment why, and add the human label (bd update $id --add-label human). Otherwise work in a clean isolated git worktree for that branch under $WORKTREE_DIR (never start or leave it dirty), implement the change the bead describes, and commit it. Push ONLY if the bead's instructions say to (git push or git push --force-with-lease; NEVER git push --force). Record what you did with bd comment FIRST, then end by EITHER closing the bead (bd close $id — including when the work is already present at HEAD) OR, if handing it back, unclaiming it (bd update $id --status=open --assignee=\"\"). NEVER leave the bead in_progress; do not push by default."
 }
 
 # worker_label builds the claude conversation name for a work bead:

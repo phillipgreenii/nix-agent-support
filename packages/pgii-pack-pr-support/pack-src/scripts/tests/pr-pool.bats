@@ -477,7 +477,7 @@ esac'
   [ "$(role_max feedback-processor)" = "1" ]
 }
 
-@test "nudge_text_worker: worktree, commit-no-push, record-then-swap, abort-to-stuck" {
+@test "nudge_text_worker: phillipg-only, push-opt-in, close-or-handback, human-on-block" {
   export PR_POOL_WORKER_SKILL_MD="/abs/worker.md" PR_POOL_WORKTREE_DIR="/tmp/test-worktrees"
   load_script
   run nudge_text_worker zr-w1
@@ -485,11 +485,12 @@ esac'
   [[ "$output" == *"/abs/worker.md"* ]]
   [[ "$output" == *"zr-w1"* ]]
   [[ "$output" == *"worktree"* ]]
-  [[ "$output" == *"do NOT push"* ]]
-  [[ "$output" == *"needs-push"* ]]
-  [[ "$output" == *"worker-ready"* ]]
-  [[ "$output" == *"worker-stuck"* ]]
+  [[ "$output" == *"phillipg."* ]]
+  [[ "$output" == *"human"* ]]
+  [[ "$output" == *"close"* ]]
+  [[ "$output" == *"--force"* ]]
   [[ "$output" == *"/tmp/test-worktrees"* ]]
+  [[ "$output" != *"needs-push"* ]]
 }
 
 @test "worker_label: includes the work-bead id and the parent PR number" {
