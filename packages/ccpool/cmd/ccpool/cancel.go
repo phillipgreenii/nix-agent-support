@@ -66,6 +66,7 @@ func buildService() (*session.Service, *store.Store, int) {
 		ClaudeBin:  cfg.Claude.Bin,
 		NewUUID:    func() string { return uuid.NewString() },
 		Now:        time.Now,
+		Sleep:      time.Sleep,
 	})
 	return svc, st, 0
 }

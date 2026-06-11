@@ -86,6 +86,7 @@ type Deps struct {
 	ClaudeBin  string
 	NewUUID    func() string
 	Now        func() time.Time
+	Sleep      func(time.Duration) // injected delay for the cancel Escape burst (nil = no-op, for tests)
 }
 
 type Service struct{ d Deps }
@@ -219,6 +220,13 @@ func orDefault(v, def string) string {
 		return v
 	}
 	return def
+}
+
+// sleep is the injected delay; nil (tests) is a no-op so fakes need no wiring.
+func (s *Service) sleep(d time.Duration) {
+	if s.d.Sleep != nil {
+		s.d.Sleep(d)
+	}
 }
 
 // withLock runs fn while holding the per-name lock. A nil Locker (tests) is a

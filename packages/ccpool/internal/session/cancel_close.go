@@ -2,11 +2,34 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
+
+// ErrCancelUnconfirmed means the Escape burst did not visibly interrupt the
+// turn. cancelLocked leaves the row `working` and returns this so callers fail
+// safely (the CLI exits non-zero; send --interrupt aborts) rather than racing a
+// possibly-live turn (spec §3.2).
+var ErrCancelUnconfirmed = errors.New("cancel could not be confirmed (turn may still be running)")
+
+const (
+	escapeBurst   = 3                      // number of Escapes per cancel (spec §3.2; pinned §3.3)
+	escapeSpacing = 200 * time.Millisecond // gap between Escapes
+)
+
+// interruptLanded reports whether the captured pane shows the turn stopped.
+// "Interrupted" is the marker observed in the live 6/7 mid-turn run (spec §3.1).
+// "declined" is a HYPOTHESIS for the AskUserQuestion-cancel case, to confirm (or
+// drop/replace) against real Claude in Task 9 — the exact marker set is pinned
+// there (spec §3.3 / §19). Correctness comes from the burst; this only gates the
+// idle-vs-unconfirmed branch.
+func interruptLanded(pane string) bool {
+	return strings.Contains(pane, "Interrupted") || strings.Contains(pane, "declined")
+}
 
 // Cancel interrupts the current turn (Escape) and resets the session to idle.
 // No Stop hook fires on a user interrupt (spec §4/§8.5), so Cancel resets state
