@@ -179,6 +179,13 @@ type Engine struct {
 	// (via fingerprintTick), so no lock is needed. The daemon escalates a
 	// restart-to-refresh once it crosses maxAuthFailStreak.
 	authFailStreak int
+
+	// humanLabels is the per-repo set of bead IDs carrying the `human` label
+	// (repo -> set). Refreshed off the critical path by the daemon's
+	// maintenance goroutine (refreshHumanLabels) and read by workers in
+	// buildPRInput's cache-less branch. A *map is stored so the read is a
+	// single atomic load; the stored map is never mutated after Store.
+	humanLabels atomic.Pointer[map[string]map[string]bool]
 }
 
 // New constructs an Engine. Returns an error if required deps are missing.
@@ -623,6 +630,47 @@ type depTreeReader interface {
 	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
 	DepTreeUp(ctx context.Context, rootID string) ([]beads.DepNode, error)
 	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
+}
+
+// humanLabelReader is the narrow capability the maintenance goroutine needs to
+// pull the workspace's `human`-labeled bead set. The real *beads.Client
+// satisfies it; test-injected clients that don't are skipped.
+type humanLabelReader interface {
+	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
+}
+
+// humanLabelsFor returns the last-pulled `human`-label set for repo, or nil if
+// no pull has populated it yet. Safe to call from any goroutine.
+func (e *Engine) humanLabelsFor(repo string) map[string]bool {
+	m := e.humanLabels.Load()
+	if m == nil {
+		return nil
+	}
+	return (*m)[repo]
+}
+
+// refreshHumanLabels pulls the `human`-labeled bead set for every configured
+// repo and atomically publishes the result for workers to read. A per-repo
+// pull error preserves that repo's previous set (no flicker); a repo whose
+// client lacks HumanLabeledBeads (test injection) is skipped. Runs on the
+// maintenance goroutine only.
+func (e *Engine) refreshHumanLabels(ctx context.Context) {
+	out := map[string]map[string]bool{}
+	for _, rcfg := range e.cfg().Repos {
+		reader, ok := e.bdClientFor(rcfg).(humanLabelReader)
+		if !ok {
+			continue
+		}
+		set, err := reader.HumanLabeledBeads(ctx)
+		if err != nil {
+			if prev := e.humanLabelsFor(rcfg.Remote); prev != nil {
+				out[rcfg.Remote] = prev
+			}
+			continue
+		}
+		out[rcfg.Remote] = set
+	}
+	e.humanLabels.Store(&out)
 }
 
 // buildPRInput assembles the per-PR snapshot input for one observed PR:
