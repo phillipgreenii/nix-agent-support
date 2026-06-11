@@ -241,13 +241,13 @@ func (r *cannedRunner) Run(_ context.Context, args ...string) (string, error) {
 	return r.out, nil
 }
 
-func TestPRFeedbackFingerprints_FromDepTree(t *testing.T) {
+func TestPRFeedbackInSubtree_FromDepTree(t *testing.T) {
 	// Mimics `bd dep tree <pr> --direction=up --json`: a flat array whose
 	// nodes share the bd list node shape (id/issue_type/status/metadata).
 	fixture := `[
 	  {"id":"pr-1","issue_type":"merge-request","status":"open","metadata":{"repo":"o/r"}},
 	  {"id":"cyc-1","issue_type":"task","status":"open","metadata":null},
-	  {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread"}},
+	  {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread","external_id":"ext-1"}},
 	  {"id":"fb-2","issue_type":"feedback","status":"closed","metadata":{"fingerprint":"fp-bbb"}},
 	  {"id":"fb-3","issue_type":"feedback","status":"open","metadata":{}},
 	  {"id":"act-1","issue_type":"task","status":"open","metadata":null}
@@ -255,13 +255,29 @@ func TestPRFeedbackFingerprints_FromDepTree(t *testing.T) {
 	r := &cannedRunner{out: fixture}
 	c := NewClientWithRunner(r)
 
-	set, err := c.PRFeedbackFingerprints(context.Background(), "pr-1")
+	fbs, err := c.PRFeedbackInSubtree(context.Background(), "pr-1")
 	if err != nil {
-		t.Fatalf("PRFeedbackFingerprints: %v", err)
+		t.Fatalf("PRFeedbackInSubtree: %v", err)
 	}
 
-	if len(set) != 2 || !set["fp-aaa"] || !set["fp-bbb"] {
-		t.Fatalf("want {fp-aaa, fp-bbb}, got %v", set)
+	// All three feedback nodes returned (status-agnostic); non-feedback excluded.
+	if len(fbs) != 3 {
+		t.Fatalf("want 3 feedback nodes, got %d: %+v", len(fbs), fbs)
+	}
+	byID := map[string]Feedback{}
+	for _, fb := range fbs {
+		byID[fb.ID] = fb
+	}
+	if fb1, ok := byID["fb-1"]; !ok {
+		t.Fatal("fb-1 missing")
+	} else if fb1.Status != "open" || fb1.Fields.Fingerprint != "fp-aaa" || fb1.Fields.ExternalID != "ext-1" || fb1.Fields.Kind != "comment-thread" {
+		t.Fatalf("fb-1 parsed wrong: %+v", fb1)
+	}
+	if fb2, ok := byID["fb-2"]; !ok || fb2.Status != "closed" || fb2.Fields.Fingerprint != "fp-bbb" {
+		t.Fatalf("fb-2 parsed wrong: %+v / ok=%v", byID["fb-2"], ok)
+	}
+	if fb3, ok := byID["fb-3"]; !ok || fb3.Fields.Fingerprint != "" {
+		t.Fatalf("fb-3 should have empty fingerprint: %+v", byID["fb-3"])
 	}
 	if len(r.calls) != 1 {
 		t.Fatalf("want exactly 1 bd call, got %d: %v", len(r.calls), r.calls)
@@ -271,9 +287,9 @@ func TestPRFeedbackFingerprints_FromDepTree(t *testing.T) {
 	}
 }
 
-func TestPRFeedbackFingerprints_EmptyID(t *testing.T) {
+func TestPRFeedbackInSubtree_EmptyID(t *testing.T) {
 	c := NewClientWithRunner(&cannedRunner{})
-	if _, err := c.PRFeedbackFingerprints(context.Background(), "  "); err == nil {
+	if _, err := c.PRFeedbackInSubtree(context.Background(), "  "); err == nil {
 		t.Fatal("expected error for empty pr bead id")
 	}
 }

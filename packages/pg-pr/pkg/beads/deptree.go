@@ -147,40 +147,44 @@ func hasLabel(labels []string, want string) bool {
 	return false
 }
 
-// PRFeedbackFingerprints returns the set of feedback fingerprints present in
-// prBeadID's recursive parent-child subtree (MR -> processing-cycle -> feedback),
-// from a single `bd dep tree <pr> --direction=up --json` call. This avoids the
-// per-bead isChildOf scan that ListFeedback(cycleID) incurs, so the daemon's
-// per-PR feedback dedup costs O(1) bd calls regardless of workspace feedback
-// volume.
+// PRFeedbackInSubtree returns every feedback bead in prBeadID's recursive
+// parent-child subtree (MR -> processing-cycle -> feedback), from a single
+// `bd dep tree <pr> --direction=up --json` call. This avoids the per-bead
+// isChildOf scan that ListFeedback(cycleID) incurs, so the daemon's per-PR
+// feedback handling costs O(1) bd calls regardless of workspace feedback
+// volume. Includes feedback of all statuses (open + closed); callers filter
+// by Status as needed (the CI-success resolver wants open; the dedup wants all
+// fingerprints).
 //
-// The dep-tree node JSON is the same shape as `bd list --json`, so it is decoded
-// with parseBDList; only issue_type=="feedback" nodes contribute, via the same
-// feedbackFieldsFromMetadata parser ListFeedback uses. Includes feedback of all
-// statuses (open + closed), matching the prior FindFeedbackByFingerprint dedup.
-func (c *Client) PRFeedbackFingerprints(ctx context.Context, prBeadID string) (map[string]bool, error) {
+// The dep-tree node JSON is the same shape as `bd list --json`, so it is
+// decoded with parseBDList; only issue_type=="feedback" nodes contribute, via
+// the same feedbackFieldsFromMetadata parser ListFeedback uses.
+func (c *Client) PRFeedbackInSubtree(ctx context.Context, prBeadID string) ([]Feedback, error) {
 	if strings.TrimSpace(prBeadID) == "" {
-		return nil, fmt.Errorf("pr feedback fingerprints: pr bead id required")
+		return nil, fmt.Errorf("pr feedback subtree: pr bead id required")
 	}
 	out, err := c.Runner.Run(ctx, "dep", "tree", prBeadID, "--direction=up", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd dep tree --direction=up: %w", err)
 	}
-	set := map[string]bool{}
 	if strings.TrimSpace(out) == "" {
-		return set, nil
+		return nil, nil
 	}
 	issues, err := parseBDList(out)
 	if err != nil {
 		return nil, fmt.Errorf("decode bd dep tree json: %w", err)
 	}
+	fbs := make([]Feedback, 0, len(issues))
 	for _, iss := range issues {
 		if iss.Type != TypeFeedback {
 			continue
 		}
-		if fp := feedbackFieldsFromMetadata(iss.Metadata).Fingerprint; fp != "" {
-			set[fp] = true
-		}
+		fbs = append(fbs, Feedback{
+			ID:     iss.ID,
+			Title:  iss.Title,
+			Status: iss.Status,
+			Fields: feedbackFieldsFromMetadata(iss.Metadata),
+		})
 	}
-	return set, nil
+	return fbs, nil
 }
