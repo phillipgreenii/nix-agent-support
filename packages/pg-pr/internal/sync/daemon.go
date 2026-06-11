@@ -199,9 +199,10 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 
 	mineQ, teamQ := newRefreshQueue(), newRefreshQueue()
 	var wg stdsync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go e.runWorker(ctx, mineQ, "mine", updates, opts.Logger, &wg)
 	go e.runWorker(ctx, teamQ, "team", updates, opts.Logger, &wg)
+	go e.runMaintenance(ctx, opts.Interval, opts.Logger, &wg)
 
 	// maxAuthFailStreak is the number of consecutive auth-failing ticks the
 	// daemon tolerates before escalating a restart-to-refresh (exit non-nil →
@@ -323,6 +324,52 @@ func NewJSONLogger() *slog.Logger { return slog.New(NewJSONHandler()) }
 
 // NewTextLogger returns a slog.Logger writing human-readable text to stderr.
 func NewTextLogger() *slog.Logger { return slog.New(NewTextHandler()) }
+
+// maintenanceCycle runs one pass of the off-critical-path workspace work:
+// refresh the human-label set and drain queued reply drafts. Called by
+// runMaintenance each tick and directly by tests.
+func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
+	e.refreshHumanLabels(ctx)
+	e.drainReplies(ctx, log)
+}
+
+// drainReplies posts queued reply drafts for every configured repo. It uses a
+// throwaway Summary per repo and logs its errors/warnings, since daemon mode has
+// no aggregate Summary to return.
+func (e *Engine) drainReplies(ctx context.Context, log *slog.Logger) {
+	for _, rcfg := range e.cfg().Repos {
+		bdc := e.bdClientFor(rcfg)
+		summary := &Summary{}
+		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
+			log.Warn("reply drain failed", "repo", rcfg.Remote, "err", err.Error())
+		}
+		for _, se := range summary.Errors {
+			log.Warn("reply drain error", "repo", se.Repo, "msg", se.Message)
+		}
+		for _, se := range summary.Warnings {
+			log.Warn("reply drain warning", "repo", se.Repo, "msg", se.Message)
+		}
+	}
+}
+
+// runMaintenance runs maintenanceCycle on its own ticker until ctx is cancelled.
+// It pulls once immediately so the label set is populated as soon as possible.
+// A slow bd only delays this loop, never the detector/workers. wg-tracked so
+// shutdown waits for an in-flight cycle.
+func (e *Engine) runMaintenance(ctx context.Context, interval time.Duration, log *slog.Logger, wg *stdsync.WaitGroup) {
+	defer wg.Done()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		e.maintenanceCycle(ctx, log)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
 
 // startMetricsServer launches the Prometheus scrape endpoint in a
 // background goroutine and returns a shutdown closure. When
