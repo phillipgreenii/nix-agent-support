@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -223,4 +224,124 @@ func TestContract_Sandbox_FakeClaudeReachesReady(t *testing.T) {
 	if !strings.Contains(out, "alpha") || !strings.Contains(out, "ready") {
 		t.Fatalf("list missing alpha/ready: %s", out)
 	}
+}
+
+// --- Task 4: machine-distinguishable OUTCOME helpers -----------------------
+// go test only has PASS/FAIL/SKIP, so we emit OUTCOME= log lines a classifier
+// can bucket into live / baseline-drift / pending / scaffold.
+
+// liveAssert is an objective check that MUST hold; failing it is a real regression.
+func liveAssert(t *testing.T, desc string, got, want any) {
+	t.Helper()
+	if got != want {
+		t.Errorf("OUTCOME=live-fail test=%q desc=%q got=%v want=%v", t.Name(), desc, got, want)
+		return
+	}
+	t.Logf("OUTCOME=live test=%q desc=%q ok=%v", t.Name(), desc, got)
+}
+
+// baseline pins the CURRENTLY OBSERVED value (not the desired one). Any drift —
+// including a future fix — fails loudly. The baseline calls in code ARE the
+// expected-deferred manifest.
+func baseline(t *testing.T, bead, desc string, got, wantObserved any) {
+	t.Helper()
+	if got != wantObserved {
+		t.Errorf("OUTCOME=baseline-drift bead=%s test=%q desc=%q got=%v wasObserved=%v (re-triage: behaviour changed)",
+			bead, t.Name(), desc, got, wantObserved)
+		return
+	}
+	t.Logf("OUTCOME=baseline bead=%s test=%q desc=%q observed=%v", bead, t.Name(), desc, got)
+}
+
+// pending records a check we cannot make until observability exists, then SKIPS.
+// MUST be the last call in a test so it never short-circuits a live assert.
+func pending(t *testing.T, desc, obsNeeded string) {
+	t.Helper()
+	t.Skipf("OUTCOME=pending test=%q desc=%q needs=%q", t.Name(), desc, obsNeeded)
+}
+
+// scaffoldFail marks the harness's own driving as broken (e.g. pane-rendering
+// drift), NOT a verdict on the command under test.
+func scaffoldFail(t *testing.T, format string, a ...any) {
+	t.Helper()
+	t.Fatalf("OUTCOME=scaffold test=%q msg=%q", t.Name(), fmt.Sprintf(format, a...))
+}
+
+// --- Task 5: phase gates ---------------------------------------------------
+// CONTRACT-SENSITIVE patterns. When a Claude Code upgrade changes pane rendering,
+// these stop matching and the gates SCAFFOLD-FAIL — never used for correctness
+// assertions, only to DRIVE to a phase.
+var (
+	reThinking    = regexp.MustCompile(`thinking with|· ↓ \d+ tokens|\) +· +thinking`)
+	reStreaming   = regexp.MustCompile(`\b\w+ for \d+s\b|⏺`)
+	reInterrupted = regexp.MustCompile(`Interrupted`)
+)
+
+// thinkingPrompt reliably produces a multi-second high-effort thinking phase.
+const thinkingPrompt = "Think step by step in extensive detail, then write a thorough 1500-word essay on the internal architecture of Unix pipes."
+
+// active reports whether a turn is producing output: two captures 0.8s apart differ.
+func (sb *sandbox) active(name string) bool {
+	a := sb.cap(name)
+	time.Sleep(800 * time.Millisecond)
+	return a != sb.cap(name)
+}
+
+func (sb *sandbox) waitForThinking(name string, budget time.Duration) {
+	sb.t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if reThinking.MatchString(sb.cap(name)) {
+			return
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	scaffoldFail(sb.t, "thinking phase never observed for %q within %s", name, budget)
+}
+
+func (sb *sandbox) waitForStreaming(name string, budget time.Duration) {
+	sb.t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		p := sb.cap(name)
+		if reStreaming.MatchString(p) && !reThinking.MatchString(p) {
+			return
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	scaffoldFail(sb.t, "streaming phase never observed for %q within %s", name, budget)
+}
+
+func (sb *sandbox) waitForNeedsInput(name string, budget time.Duration) {
+	sb.t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if sb.rowState(name) == "needs_input" {
+			return
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	scaffoldFail(sb.t, "needs_input never reached for %q within %s", name, budget)
+}
+
+// rowState reads the cached store state for a session from `list --all`.
+func (sb *sandbox) rowState(name string) string {
+	out, _ := sb.ccp("list", "--all")
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == name {
+			return f[1]
+		}
+	}
+	return ""
+}
+
+func TestContract_PhaseGate_ThinkingObserved(t *testing.T) {
+	sb := newSandbox(t)
+	if _, code := sb.ccp("new", "p"); code != 0 {
+		t.Fatalf("new failed")
+	}
+	sb.ccp("reply", "p", thinkingPrompt, "--no-wait")
+	sb.waitForThinking("p", 30*time.Second) // scaffoldFails if not seen
+	liveAssert(t, "thinking observed", true, true)
 }
