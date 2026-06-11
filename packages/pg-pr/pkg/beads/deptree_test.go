@@ -228,3 +228,52 @@ func TestAllNonClosedHumanLabeled_NilInput(t *testing.T) {
 		t.Error("expected false on nil input (no non-closed deps)")
 	}
 }
+
+// cannedRunner is a scriptable Runner that records calls and returns a fixed
+// stdout — for unit-testing bd-JSON parsing without a real bd workspace.
+type cannedRunner struct {
+	calls [][]string
+	out   string
+}
+
+func (r *cannedRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	return r.out, nil
+}
+
+func TestPRFeedbackFingerprints_FromDepTree(t *testing.T) {
+	// Mimics `bd dep tree <pr> --direction=up --json`: a flat array whose
+	// nodes share the bd list node shape (id/issue_type/status/metadata).
+	fixture := `[
+	  {"id":"pr-1","issue_type":"merge-request","status":"open","metadata":{"repo":"o/r"}},
+	  {"id":"cyc-1","issue_type":"task","status":"open","metadata":null},
+	  {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread"}},
+	  {"id":"fb-2","issue_type":"feedback","status":"closed","metadata":{"fingerprint":"fp-bbb"}},
+	  {"id":"fb-3","issue_type":"feedback","status":"open","metadata":{}},
+	  {"id":"act-1","issue_type":"task","status":"open","metadata":null}
+	]`
+	r := &cannedRunner{out: fixture}
+	c := NewClientWithRunner(r)
+
+	set, err := c.PRFeedbackFingerprints(context.Background(), "pr-1")
+	if err != nil {
+		t.Fatalf("PRFeedbackFingerprints: %v", err)
+	}
+
+	if len(set) != 2 || !set["fp-aaa"] || !set["fp-bbb"] {
+		t.Fatalf("want {fp-aaa, fp-bbb}, got %v", set)
+	}
+	if len(r.calls) != 1 {
+		t.Fatalf("want exactly 1 bd call, got %d: %v", len(r.calls), r.calls)
+	}
+	if got, want := strings.Join(r.calls[0], " "), "dep tree pr-1 --direction=up --json"; got != want {
+		t.Fatalf("bd args: got %q want %q", got, want)
+	}
+}
+
+func TestPRFeedbackFingerprints_EmptyID(t *testing.T) {
+	c := NewClientWithRunner(&cannedRunner{})
+	if _, err := c.PRFeedbackFingerprints(context.Background(), "  "); err == nil {
+		t.Fatal("expected error for empty pr bead id")
+	}
+}
