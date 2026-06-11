@@ -68,6 +68,7 @@ func runNew(args []string) int {
 		ClaudeBin: cfg.Claude.Bin,
 		NewUUID:   func() string { return uuid.NewString() },
 		Now:       time.Now,
+		Sleep:     time.Sleep,
 	})
 
 	h, err := svc.Ensure(context.Background(), name, dir, m)
