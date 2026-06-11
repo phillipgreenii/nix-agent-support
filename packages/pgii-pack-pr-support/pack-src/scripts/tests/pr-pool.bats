@@ -98,7 +98,26 @@ esac'
   run discover
   [ "$status" -eq 0 ]
   [[ "$output" == *"worker	zr-w1"* ]]
-  grep -q -- "ready --label worker-ready" "$CALLS_LOG"
+  grep -q -- "ready --label worker-ready --exclude-label human" "$CALLS_LOG"
+}
+
+@test "discover: worker route excludes human-flagged beads" {
+  export SELF_LOGIN="me"
+  make_stub bd '
+case "$1" in
+  ready)
+    case "$*" in
+      *"--exclude-label human"*) echo "[]" ;;          # human-flagged bead filtered out by bd
+      *"--label worker-ready"*)  echo "[{\"id\":\"zr-w1\",\"title\":\"Fix X\",\"status\":\"open\",\"issue_type\":\"bug\"}]" ;;
+      *) echo "[]" ;;
+    esac ;;
+  *) echo "{}" ;;
+esac'
+  load_script
+  run discover
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"worker	zr-w1"* ]]
+  grep -q -- "ready --label worker-ready --exclude-label human" "$CALLS_LOG"
 }
 
 @test "wait_ready: returns 0 once the ready prompt appears" {

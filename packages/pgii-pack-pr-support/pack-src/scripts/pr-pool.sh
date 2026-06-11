@@ -89,11 +89,11 @@ discover_feedback() {
     done
 }
 
-# discover_worker prints "worker<TAB><bead-id>" for each worker-ready bead, using
-# bd ready's native label filter (the .labels field is null when unset, so a jq
-# label check is avoided here).
+# discover_worker prints "worker<TAB><bead-id>" for each worker-ready bead that is
+# not flagged `human`, using bd ready's native label filters (the .labels field is
+# null when unset, so a jq label check is avoided here).
 discover_worker() {
-  bd ready --label worker-ready --json --limit 0 2>/dev/null |
+  bd ready --label worker-ready --exclude-label human --json --limit 0 2>/dev/null |
     jq -r 'if type=="array" then . else [] end | .[].id' |
     while read -r id; do
       [ -n "$id" ] && printf 'worker\t%s\n' "$id"
