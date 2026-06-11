@@ -10,6 +10,21 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
+// attendCandidates returns the live sessions waiting on the human: needs_input
+// always, plus done when includeDone. Dead rows (no live tmux pane) are dropped
+// so the picker never selects a target runAttach can't attach to. Order is
+// preserved from the store (last_activity DESC).
+func attendCandidates(rows []store.Session, includeDone bool, liveFn func(socket, target string) bool, socket string) []store.Session {
+	var out []store.Session
+	for _, r := range rows {
+		match := r.State == store.NeedsInput || (includeDone && r.State == store.Done)
+		if match && liveFn(socket, r.TmuxSession) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func runAttend(args []string) int {
 	_ = args
 	cfg, err := config.Load()
