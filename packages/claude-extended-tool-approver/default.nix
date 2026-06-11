@@ -1,12 +1,10 @@
 {
   lib,
-  buildGoModule,
-  version ? "dev",
+  mkGoApp,
 }:
 
-buildGoModule {
+mkGoApp {
   pname = "claude-extended-tool-approver";
-  inherit version;
 
   src = lib.cleanSource ./.;
 
@@ -14,9 +12,8 @@ buildGoModule {
 
   vendorHash = "sha256-rsXM7oU8wPc2nQ8viBj+ppKJlEhRwjBoQqFlTA1NrOY=";
 
-  ldflags = [
-    "-X main.Version=${version}"
-  ];
+  # This package exports its version as `main.Version` (capitalised).
+  versionPath = "main.Version";
 
   postInstall = ''
     mkdir -p $out/share/claude-extended-tool-approver/skills

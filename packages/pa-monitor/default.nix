@@ -1,7 +1,7 @@
 {
   lib,
   stdenv,
-  buildGoModule,
+  mkGoApp,
   makeWrapper,
   ccusage,
   gh,
@@ -10,12 +10,10 @@
   # declared input + applied overlay). Defaulted to null so the package still
   # evaluates on non-darwin, where it is omitted from PATH below.
   cmux ? null,
-  version ? "dev",
 }:
 
-buildGoModule {
+mkGoApp {
   pname = "pa-monitor";
-  inherit version;
 
   src = lib.cleanSource ./.;
 
@@ -23,9 +21,8 @@ buildGoModule {
 
   vendorHash = "sha256-8d8iMOTN4dlgH5CwXhvy9JMRKQISWEiSvyY5QAOFY4E=";
 
-  ldflags = [
-    "-X main.version=${version}"
-  ];
+  # Binary version (`-X main.version`) is derived from this package's own
+  # source by mkGoApp; `main.version` (lowercase) is mkGoApp's default target.
 
   nativeBuildInputs = [ makeWrapper ];
 

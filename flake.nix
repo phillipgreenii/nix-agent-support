@@ -76,6 +76,11 @@
             inherit (final) lib;
             inherit self;
           };
+          goBuilders = phillipgreenii-nix-base.lib.mkGoBuilders {
+            pkgs = final;
+            inherit (final) lib;
+            inherit self;
+          };
         in
         {
           # packages added in later tasks
@@ -83,18 +88,20 @@
           inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           bash-scripting = final.callPackage ./packages/bash-scripting { };
           pg-pr = final.callPackage ./packages/pg-pr {
-            version = phillipgreenii-nix-base.lib.mkVersion self;
+            inherit (goBuilders) mkGoApp;
           };
           pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
-            version = phillipgreenii-nix-base.lib.mkVersion self;
+            inherit (goBuilders) mkGoApp;
           };
-          ccpool = final.callPackage ./packages/ccpool { };
+          ccpool = final.callPackage ./packages/ccpool {
+            inherit (goBuilders) mkGoApp;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
-            version = phillipgreenii-nix-base.lib.mkVersion self;
+            inherit (goBuilders) mkGoApp;
           };
           pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
-            version = phillipgreenii-nix-base.lib.mkVersion self;
+            inherit (goBuilders) mkGoApp;
           };
           pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
           pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };

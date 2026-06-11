@@ -1,14 +1,12 @@
 {
   lib,
-  buildGoModule,
+  mkGoApp,
   makeWrapper,
   tmux,
-  version ? "dev",
 }:
 
-buildGoModule {
+mkGoApp {
   pname = "ccpool";
-  inherit version;
 
   # The module uses a relative `replace ../claude-transcript`, so the build
   # sandbox must contain BOTH package dirs at their relative positions. Root the
@@ -22,9 +20,7 @@ buildGoModule {
   };
   modRoot = "ccpool";
 
-  vendorHash = "sha256-dP7Bg2smH6Z0BESIKwNJexltGfSkkAqtJx61/D5/g04=";
-
-  ldflags = [ "-X main.version=${version}" ];
+  vendorHash = "sha256-M6AYREbtZ+lIvuxofJQeyCgA5+8IYoVLTkw/841cg+w=";
 
   nativeBuildInputs = [ makeWrapper ];
 

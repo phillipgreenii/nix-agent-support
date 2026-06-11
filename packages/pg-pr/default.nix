@@ -1,22 +1,20 @@
 {
   pkgs,
   lib,
-  version ? "dev",
+  mkGoApp,
   ...
 }:
 
-pkgs.buildGoModule {
+mkGoApp {
   pname = "pg-pr";
-  inherit version;
   src = ./.;
 
   vendorHash = "sha256-6qpEixCKR3JZF8zeRxXsd2wBWZ+ASIIeRJEq/U1V43w=";
 
   subPackages = [ "cmd/pg-pr" ];
 
-  ldflags = [
-    "-X main.Version=${version}"
-  ];
+  # This package exports its version as `main.Version` (capitalised).
+  versionPath = "main.Version";
 
   nativeBuildInputs = [ pkgs.help2man ];
 
