@@ -103,6 +103,11 @@
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
+          pr-pool = final.callPackage ./packages/pr-pool {
+            inherit (goBuilders) mkGoApp;
+            # No top-level bd/beads overlay attr — source it like gascity (flake.nix:181).
+            bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
@@ -245,7 +250,7 @@
             extraHooks = {
               gofmt = {
                 enable = true;
-                files = "^packages/pg-pr/.*\\.go$";
+                files = "^packages/(pg-pr|pr-pool)/.*\\.go$";
               };
               golangci-lint = {
                 enable = true;
@@ -257,6 +262,18 @@
                   pkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
                     set -e
                     cd packages/pg-pr
+                    ${pkgs.golangci-lint}/bin/golangci-lint run ./...
+                  ''
+                );
+                pass_filenames = false;
+              };
+              golangci-lint-pr-pool = {
+                enable = true;
+                files = "^packages/pr-pool/.*\\.go$";
+                entry = toString (
+                  pkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
+                    set -e
+                    cd packages/pr-pool
                     ${pkgs.golangci-lint}/bin/golangci-lint run ./...
                   ''
                 );
@@ -591,6 +608,7 @@
             # "expected a set but found null").
             inherit (pkgs)
               ccpool
+              pr-pool
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-gc
