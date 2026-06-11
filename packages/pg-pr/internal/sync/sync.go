@@ -639,11 +639,12 @@ type humanLabelReader interface {
 	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
 }
 
-// feedbackFingerprinter is the narrow capability for reading a PR's existing
-// feedback fingerprints in one scoped bd call. The real *beads.Client satisfies
-// it; test fakes that don't are treated as "no existing feedback" (empty set).
-type feedbackFingerprinter interface {
-	PRFeedbackFingerprints(ctx context.Context, prBeadID string) (map[string]bool, error)
+// feedbackSubtreeReader is the narrow capability for reading every feedback
+// bead in a PR's recursive parent-child subtree in one scoped bd call. The
+// real *beads.Client satisfies it; test fakes that don't are treated as "no
+// existing feedback" (empty slice).
+type feedbackSubtreeReader interface {
+	PRFeedbackInSubtree(ctx context.Context, prBeadID string) ([]beads.Feedback, error)
 }
 
 // humanLabelsFor returns the last-pulled `human`-label set for repo, or nil if
@@ -1381,6 +1382,25 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 		}
 	}
 
+	// Read the PR's feedback subtree ONCE (cache-less path) — a single
+	// `bd dep tree <pr> --direction=up` — and serve BOTH the first-pass
+	// CI-success resolver and the second-pass dedup from it. This replaces the
+	// first pass's O(workspace-feedback) ListFeedback(cycleID) isChildOf scan;
+	// the cache path keeps reading from the in-memory TickCache.
+	var subtreeFeedback []beads.Feedback
+	if cache == nil {
+		var err error
+		subtreeFeedback, err = e.prFeedbackSubtree(ctx, bdc, prBeadID)
+		if err != nil {
+			// Can't read the PR's feedback — skip this tick rather than risk
+			// duplicate beads (second-pass concern) or mis-resolving CI
+			// feedback (first-pass concern). A later tick retries. (This
+			// unifies the two reads' prior error handling onto the more
+			// conservative skip-the-tick behavior.)
+			return nil
+		}
+	}
+
 	// First pass: handle CI events whose conclusion is success and close
 	// any matching prior ci-failure feedback (resolved-upstream).
 	if found {
@@ -1394,10 +1414,15 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 				}
 			}
 		} else {
-			var err error
-			open, err = bdc.ListFeedback(ctx, cycleID, false)
-			if err != nil {
-				open = nil
+			// Same Status!=closed filter, served from the single subtree read
+			// above instead of an O(F) ListFeedback(cycleID) scan. The source
+			// widens from one open cycle to the PR's whole subtree (all
+			// cycles) — safe by design: the resolver only closes on a unique CI
+			// ExternalID match and MarkFeedbackResolvedUpstream is idempotent.
+			for _, fb := range subtreeFeedback {
+				if fb.Status != "closed" {
+					open = append(open, fb)
+				}
 			}
 		}
 		{
@@ -1422,18 +1447,17 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 		}
 	}
 
-	// Build the PR's existing-feedback fingerprint set once (cache-less path)
-	// so the dedup in the second pass is an in-memory lookup, not an
-	// O(events x cycles) bd fan-out (the old per-event findFeedbackForPR).
+	// Build the PR's existing-feedback fingerprint set for the second-pass
+	// dedup. Cache-less path derives it from the single subtree read above (all
+	// statuses, non-empty fingerprints) — same contents the prior
+	// PRFeedbackFingerprints map produced, now with zero extra bd calls.
 	var seen map[string]bool
 	if cache == nil {
-		var err error
-		seen, err = e.existingFeedbackFingerprints(ctx, bdc, prBeadID)
-		if err != nil {
-			// Can't read existing feedback — skip creation this tick rather
-			// than risk duplicate beads (matches the prior per-event
-			// skip-on-error behavior of findFeedbackForPR).
-			return nil
+		seen = make(map[string]bool, len(subtreeFeedback))
+		for _, fb := range subtreeFeedback {
+			if fb.Fields.Fingerprint != "" {
+				seen[fb.Fields.Fingerprint] = true
+			}
 		}
 	}
 
@@ -1504,18 +1528,19 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 	return nil
 }
 
-// existingFeedbackFingerprints returns the set of feedback fingerprints already
-// present under prBeadID, in one scoped bd call (PRFeedbackFingerprints, a single
-// `bd dep tree --direction=up`). Built once per refresh so the per-event dedup in
-// processFeedback is an in-memory lookup. A bd client that doesn't implement the
-// capability (test fakes) yields an empty set (dedup disabled); the production
-// daemon client is *beads.Client, which does implement it.
-func (e *Engine) existingFeedbackFingerprints(ctx context.Context, bdc BeadClient, prBeadID string) (map[string]bool, error) {
-	fp, ok := bdc.(feedbackFingerprinter)
+// prFeedbackSubtree returns every feedback bead in prBeadID's recursive
+// parent-child subtree (MR -> processing-cycle -> feedback) in ONE scoped bd
+// call (PRFeedbackInSubtree, a single `bd dep tree --direction=up`). Built once
+// per refresh and consulted by both processFeedback passes: the CI-success
+// resolver (open feedback) and the dedup (fingerprints of all statuses). A bd
+// client that doesn't implement the capability (test fakes) yields an empty
+// slice; the production daemon client is *beads.Client, which does implement it.
+func (e *Engine) prFeedbackSubtree(ctx context.Context, bdc BeadClient, prBeadID string) ([]beads.Feedback, error) {
+	r, ok := bdc.(feedbackSubtreeReader)
 	if !ok {
-		return map[string]bool{}, nil
+		return nil, nil
 	}
-	return fp.PRFeedbackFingerprints(ctx, prBeadID)
+	return r.PRFeedbackInSubtree(ctx, prBeadID)
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs

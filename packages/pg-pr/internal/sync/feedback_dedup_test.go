@@ -9,29 +9,35 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
-// fpCountBeads embeds noopBeads and records how many times PRFeedbackFingerprints
-// is called (the dedup must consult the PR's feedback once per refresh, not per
-// event), plus the feedback it creates. `fingerprints` is the PR's existing
-// feedback fingerprint set.
+// fpCountBeads embeds noopBeads and records how many times PRFeedbackInSubtree
+// is called (both processFeedback passes must share a single subtree read per
+// refresh), the feedback it creates, and the feedback it resolves. `subtree` is
+// the PR's existing feedback (what the single dep-tree read returns).
 type fpCountBeads struct {
 	noopBeads
-	fpCalls      int
-	fingerprints map[string]bool
-	created      []beads.CreateFeedbackInput
+	fpCalls   int
+	subtree   []beads.Feedback
+	created   []beads.CreateFeedbackInput
+	closedIDs []string
 }
 
 func (f *fpCountBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
 	return "cycle-1", true, nil
 }
 
-func (f *fpCountBeads) PRFeedbackFingerprints(context.Context, string) (map[string]bool, error) {
+func (f *fpCountBeads) PRFeedbackInSubtree(context.Context, string) ([]beads.Feedback, error) {
 	f.fpCalls++
-	return f.fingerprints, nil
+	return f.subtree, nil
 }
 
 func (f *fpCountBeads) CreateFeedback(_ context.Context, in beads.CreateFeedbackInput) (string, error) {
 	f.created = append(f.created, in)
 	return "fb-new", nil
+}
+
+func (f *fpCountBeads) MarkFeedbackResolvedUpstream(_ context.Context, id string) error {
+	f.closedIDs = append(f.closedIDs, id)
+	return nil
 }
 
 // TestProcessFeedback_DedupIsHoistedOutOfEventLoop verifies the cache-less
@@ -49,7 +55,9 @@ func TestProcessFeedback_DedupIsHoistedOutOfEventLoop(t *testing.T) {
 	// The dup comment's fingerprint already exists under the PR's cycle.
 	dupFP := commentEvent(dup).fingerprint
 	bdc := &fpCountBeads{
-		fingerprints: map[string]bool{dupFP: true},
+		subtree: []beads.Feedback{
+			{ID: "fb-dup", Status: "hooked", Fields: beads.FeedbackFields{Fingerprint: dupFP}},
+		},
 	}
 
 	e := newRefreshEngine(t, "me", &refreshFakeBeads{}, api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"})
@@ -63,7 +71,7 @@ func TestProcessFeedback_DedupIsHoistedOutOfEventLoop(t *testing.T) {
 
 	// The PR's existing feedback is read exactly once per refresh, not per event.
 	if bdc.fpCalls != 1 {
-		t.Fatalf("PRFeedbackFingerprints should be called once per refresh, got %d", bdc.fpCalls)
+		t.Fatalf("PRFeedbackInSubtree should be called once per refresh, got %d", bdc.fpCalls)
 	}
 
 	// Dedup correctness preserved: the 3 fresh comments are created; the dup is not.
