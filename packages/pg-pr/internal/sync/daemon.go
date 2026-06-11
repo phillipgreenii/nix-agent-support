@@ -183,6 +183,11 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 	e.prevTeam = map[prKey]string{}
 	e.authFailStreak = 0
 
+	// 0-initialize the "healthy = flat zero" counter series so the Ops
+	// dashboard shows a zero line instead of "no data" before the first
+	// failure/truncation ever occurs.
+	e.seedDaemonMetricSeries()
+
 	// Workers always have a place to send snapshot deltas. When the dashboard
 	// is disabled this is a throwaway sink that's simply never served.
 	ownerStore := opts.Dashboard
@@ -275,6 +280,13 @@ func (e *Engine) runWorker(ctx context.Context, q *refreshQueue, group string, u
 		in, err := e.refreshPR(ctx, k.Repo, k.Number)
 		telemetry.SyncPRDuration.WithLabelValues(k.Repo, group).Observe(e.deps.Now().Sub(start).Seconds())
 		if err != nil {
+			// Surface daemon refresh failures on the Ops "Sync errors / sec"
+			// metric (parity with the full-Sync path, which is the only other
+			// place this counter moves). Skip errors caused by shutdown
+			// cancellation so a normal stop doesn't spike the health panel.
+			if ctx.Err() == nil {
+				telemetry.SyncErrorsTotal.WithLabelValues(k.Repo).Inc()
+			}
 			log.Warn("refresh failed", "group", group, "repo", k.Repo, "number", k.Number, "err", err.Error())
 			continue
 		}
@@ -368,6 +380,23 @@ func (e *Engine) runMaintenance(ctx context.Context, interval time.Duration, log
 			return
 		case <-time.After(interval):
 		}
+	}
+}
+
+// seedDaemonMetricSeries 0-initializes the labeled counter series that
+// otherwise would not appear in a scrape until their first event, so the Ops
+// dashboard renders a flat-zero ("healthy") line rather than "no data":
+//   - pg_pr_sync_errors_total{repo} — refresh failures (one per configured repo)
+//   - pg_pr_fingerprint_poll_truncated_total{group} — roster truncation (mine/team)
+//
+// Add(0) creates the series at zero without affecting its value once real
+// events arrive.
+func (e *Engine) seedDaemonMetricSeries() {
+	for _, group := range []string{"mine", "team"} {
+		telemetry.FingerprintPollTruncatedTotal.WithLabelValues(group).Add(0)
+	}
+	for _, rcfg := range e.cfg().Repos {
+		telemetry.SyncErrorsTotal.WithLabelValues(rcfg.Remote).Add(0)
 	}
 }
 

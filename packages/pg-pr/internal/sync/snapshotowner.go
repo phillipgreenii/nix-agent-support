@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 )
 
 // snapshotModel holds the authoritative per-PR inputs. Not concurrency-safe by
@@ -62,5 +63,9 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			Registry:            e.deps.AgentRegistry,
 			PRs:                 m.sortedInputs(),
 		}))
+		// A snapshot has been published for the dashboard. The retired
+		// full-Sync path set this; the daemon's per-PR owner must too, or the
+		// Ops "snapshot present" tile reads absent for the daemon's lifetime.
+		telemetry.SnapshotPresent.Set(1)
 	}
 }
