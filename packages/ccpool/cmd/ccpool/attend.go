@@ -78,7 +78,7 @@ func pickCandidate(cands []store.Session) (string, bool) {
 	if !stdinIsTerminal() {
 		fmt.Fprintln(os.Stderr, "sessions waiting on input (no TTY to pick):")
 		for _, c := range cands {
-			fmt.Println(" ", c.Name)
+			fmt.Fprintln(os.Stderr, " ", c.Name)
 		}
 		return "", false
 	}
