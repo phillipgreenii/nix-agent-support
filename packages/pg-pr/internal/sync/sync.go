@@ -687,9 +687,12 @@ func (e *Engine) refreshHumanLabels(ctx context.Context) {
 //     test fakes may inject it explicitly).
 //   - cache, when non-nil (full-sync path), answers the merge-request lookup,
 //     dep tree, and `human` label overlay from the per-tick bulk fetch. When
-//     nil (daemon per-PR refresh), buildPRInput fetches HumanLabeledBeads
-//     itself via the reader so the `human` overlay — and therefore
-//     WaitingOnMe — does not regress.
+//     nil (daemon per-PR refresh), the `human` overlay is read from the
+//     engine's atomic label set (e.humanLabelsFor) — refreshed off the hot
+//     path by the maintenance goroutine — so WaitingOnMe does not regress.
+//   - knownMRID, when non-empty, is the merge-request bead id the caller
+//     already holds; it short-circuits both the cache lookup and the live
+//     FindByRepoAndNumber. Pass "" when the id isn't known.
 //   - rcfg carries this PR's repo config; its Remote stamps pr.Repo when the
 //     VCS provider omitted it.
 func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.EnrichedPR, bdc BeadClient, cache *beads.TickCache, rcfg config.RepoConfig, knownMRID string) snapshot.PRInput {
