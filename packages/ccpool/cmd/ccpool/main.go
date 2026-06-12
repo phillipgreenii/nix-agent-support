@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 var version = "dev"
@@ -35,8 +36,43 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 	return "list", args[1:]
 }
 
+// stripPoolFlag removes a leading "--pool <dir>" (or "--pool=<dir>") that appears
+// BEFORE the subcommand, returning the cleaned argv + the pool dir. A --pool after
+// the subcommand, or a missing value, is an error (the subcommand flagsets are
+// ExitOnError and would mishandle it). Position contract: ccpool --pool <dir> <cmd>.
+func stripPoolFlag(argv []string) (clean []string, pool string, err error) {
+	if len(argv) < 2 {
+		return argv, "", nil
+	}
+	a := argv[1]
+	switch {
+	case a == "--pool":
+		if len(argv) < 3 {
+			return nil, "", fmt.Errorf("--pool requires a directory argument")
+		}
+		return append([]string{argv[0]}, argv[3:]...), argv[2], nil
+	case strings.HasPrefix(a, "--pool="):
+		return append([]string{argv[0]}, argv[2:]...), strings.TrimPrefix(a, "--pool="), nil
+	}
+	// reject a --pool anywhere after the subcommand
+	for _, x := range argv[1:] {
+		if x == "--pool" || strings.HasPrefix(x, "--pool=") {
+			return nil, "", fmt.Errorf("--pool must come before the subcommand: ccpool --pool <dir> <command>")
+		}
+	}
+	return argv, "", nil
+}
+
 func main() {
-	cmd, rest := pickSubcommand(os.Args)
+	argv, pool, err := stripPoolFlag(os.Args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if pool != "" {
+		_ = os.Setenv("CCPOOL_POOL", pool) // --pool overrides any inherited CCPOOL_POOL
+	}
+	cmd, rest := pickSubcommand(argv)
 	switch cmd {
 	case "attach":
 		os.Exit(runAttach(rest))
