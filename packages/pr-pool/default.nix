@@ -10,23 +10,23 @@
 mkGoApp {
   pname = "pr-pool";
 
+  # The module uses `replace ../claude-transcript`, so the build sandbox must
+  # contain BOTH package dirs at their relative positions (mirror ccpool).
   src = lib.fileset.toSource {
-    root = ./.;
+    root = ./..;
     fileset = lib.fileset.unions [
-      ./go.mod
-      ./cmd
-      (lib.fileset.maybeMissing ./internal)
+      ./.
+      ../claude-transcript
     ];
   };
+  modRoot = "pr-pool";
 
-  # Stdlib-only module: no vendored dependencies.
-  vendorHash = null;
+  # claude-transcript is itself stdlib-only; vendorHash MAY stay null. Determine
+  # empirically in Step 4 — if the build complains, set the printed hash.
+  vendorHash = "sha256-pCQ2i7Q5VEer9HmTUX30m9Rd4bvZ0D+vPawI/PrkqsM=";
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # pr-pool shells out to ccpool (session mechanics), bd (beads), and pg-pr
-  # (config show). Wrap them onto PATH so the binary works under launchd's
-  # minimal PATH.
   postInstall = ''
     wrapProgram $out/bin/pr-pool --prefix PATH : ${
       lib.makeBinPath [
