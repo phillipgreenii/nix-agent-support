@@ -32,6 +32,39 @@ func TestLoad_poolMode(t *testing.T) {
 	if c.Tmux.Socket == "ccpool" || c.Tmux.Socket == "" {
 		t.Errorf("pool-mode socket must be derived, got %q", c.Tmux.Socket)
 	}
+	if c.RuntimeDir != poolCanon {
+		t.Errorf("RuntimeDir = %q, want pool root (*.lock files live here)", c.RuntimeDir)
+	}
+}
+
+// TestLoad_poolMode_socketOverridesConfig asserts that the derived socket (based on
+// the pool dir path) overrides any [tmux] socket value written in a pool-local
+// config.toml. This is the most surprising behavior: a user writing socket = "custom"
+// inside the pool dir does NOT get that socket — the derived socket is always used.
+func TestLoad_poolMode_socketOverridesConfig(t *testing.T) {
+	pool := t.TempDir()
+	t.Setenv("CCPOOL_POOL", pool)
+	poolCanon, _ := filepath.EvalSymlinks(pool)
+
+	// Write a config.toml inside the pool with a custom socket and prefix.
+	body := "[tmux]\nsocket = \"custom\"\nprefix = \"zz-\"\n"
+	if err := os.WriteFile(filepath.Join(pool, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	wantSocket, _ := filepath.EvalSymlinks(poolCanon)
+	wantSocket = SocketFor(wantSocket)
+	if c.Tmux.Socket == "custom" || c.Tmux.Socket != wantSocket {
+		t.Errorf("Tmux.Socket = %q, want derived socket %q (not config.toml value)", c.Tmux.Socket, wantSocket)
+	}
+	if c.Tmux.Prefix != "cc-" {
+		t.Errorf("Tmux.Prefix = %q, want cc- (pool-mode constant, not config.toml zz-)", c.Tmux.Prefix)
+	}
 }
 
 func TestLoad_defaultsWhenNoFile(t *testing.T) {

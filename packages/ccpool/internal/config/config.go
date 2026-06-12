@@ -1,5 +1,5 @@
-// Package config loads ccpool configuration from $XDG_CONFIG_HOME/ccpool/config.toml,
-// applying defaults, and resolves the XDG data/state/runtime paths.
+// Package config resolves the active pool (CCPOOL_POOL), loads the pool or
+// XDG-based config.toml, and resolves the data/state/runtime path layout.
 package config
 
 import (

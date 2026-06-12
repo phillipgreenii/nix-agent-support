@@ -1,4 +1,4 @@
-// Package config — pool.go: resolve the active pool (CCPOOL_POOL) into paths.
+// pool.go: resolve the active pool (CCPOOL_POOL) into paths.
 package config
 
 import (
@@ -30,7 +30,7 @@ func resolvePaths(poolEnv string) PoolContext {
 		return PoolContext{
 			ConfigPath: filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "ccpool", "config.toml"),
 			DBPath:     filepath.Join(xdg("XDG_DATA_HOME", ".local/share"), "ccpool", "store.db"),
-			StateDir:   StateDirPath(),
+			StateDir:   filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "ccpool"),
 			RuntimeDir: defaultRuntimeDir(),
 		}
 	}
@@ -96,7 +96,7 @@ func poolFileOK(name string) bool {
 	switch {
 	case name == "config.toml", name == "hook.log":
 		return true
-	case strings.HasPrefix(name, "store.db"): // store.db, -wal, -shm, -journal
+	case name == "store.db" || name == "store.db-wal" || name == "store.db-shm" || name == "store.db-journal":
 		return true
 	case strings.HasSuffix(name, ".lock"): // per-session <name>.lock
 		return true
@@ -115,7 +115,7 @@ func ensurePoolDir(root string) error {
 		return os.Mkdir(root, 0o700)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("read pool dir %s: %w", root, err)
 	}
 	for _, e := range entries {
 		if e.IsDir() || !poolFileOK(e.Name()) {
