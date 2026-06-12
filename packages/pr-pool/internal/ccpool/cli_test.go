@@ -2,6 +2,8 @@ package ccpool
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -104,3 +106,29 @@ func TestCancelCloseList_argv(t *testing.T) {
 		t.Errorf("parsed session = %+v", sessions)
 	}
 }
+
+func TestCancel_unconfirmedExit6(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(args []string) ([]byte, error) {
+		return []byte("cancel may not have landed"), &fakeExit{code: 6}
+	}
+	err := cli.Cancel(context.Background(), "s")
+	if !errors.Is(err, ErrCancelUnconfirmed) {
+		t.Errorf("exit 6 should map to ErrCancelUnconfirmed, got %v", err)
+	}
+}
+
+func TestCancel_otherErrorNotUnconfirmed(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(args []string) ([]byte, error) { return nil, &fakeExit{code: 1} }
+	err := cli.Cancel(context.Background(), "s")
+	if err == nil || errors.Is(err, ErrCancelUnconfirmed) {
+		t.Errorf("exit 1 must not be ErrCancelUnconfirmed, got %v", err)
+	}
+}
+
+// fakeExit implements the bits of *exec.ExitError errors.As + ExitCode() need.
+type fakeExit struct{ code int }
+
+func (e *fakeExit) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e *fakeExit) ExitCode() int { return e.code }

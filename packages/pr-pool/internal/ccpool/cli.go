@@ -4,12 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
 )
+
+// ErrCancelUnconfirmed is returned by Cancel when `ccpool cancel` exits 6
+// (the interrupt could not be confirmed — the turn may still be running).
+var ErrCancelUnconfirmed = errors.New("ccpool cancel unconfirmed")
+
+// exitCoder is satisfied by *exec.ExitError (and test fakes).
+type exitCoder interface{ ExitCode() int }
 
 // CLIRunner is the Phase-1 Runner: it shells out to the `ccpool` binary on PATH.
 // run is injectable for tests (zero real processes), exactly like ccpool's
@@ -78,7 +86,14 @@ func (c *CLIRunner) Send(_ context.Context, name, prompt string, mode SendMode) 
 
 func (c *CLIRunner) Cancel(_ context.Context, name string) error {
 	_, err := c.ccpool("cancel", name)
-	return err
+	if err != nil {
+		var ec exitCoder
+		if errors.As(err, &ec) && ec.ExitCode() == 6 {
+			return fmt.Errorf("%w: %s", ErrCancelUnconfirmed, name)
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *CLIRunner) Close(_ context.Context, name string) error {
