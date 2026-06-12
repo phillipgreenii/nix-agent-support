@@ -21,9 +21,10 @@ mkGoApp {
   };
   modRoot = "pr-pool";
 
-  # claude-transcript is itself stdlib-only; vendorHash MAY stay null. Determine
-  # empirically in Step 4 — if the build complains, set the printed hash.
-  vendorHash = "sha256-pCQ2i7Q5VEer9HmTUX30m9Rd4bvZ0D+vPawI/PrkqsM=";
+  # claude-transcript is a local-replace dep present via the fileset + modRoot
+  # (mirrors ccpool). vendorHash captures `go mod vendor` over the full import
+  # graph (recomputed below).
+  vendorHash = "sha256-/+A6ymx3p397EAl5ifChDvw98DHDDxLDWvb7s4TPjZk=";
 
   nativeBuildInputs = [ makeWrapper ];
 
