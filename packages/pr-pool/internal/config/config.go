@@ -8,6 +8,9 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/budget"
+	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
 type Config struct {
@@ -26,6 +29,17 @@ type Config struct {
 	Model         string
 	Dangerous     bool
 	SessionPrefix string
+
+	// Budget watchdog (chunk B). Token/Cost <= 0 means unlimited.
+	BudgetTokens int64
+	BudgetCost   int64 // cents
+	BudgetTime   time.Duration
+	ReminderPct  float64
+	CancelPct    float64
+	HardPct      float64
+	LogDir       string
+	ReminderMsg  string
+	WrapUpMsg    string
 }
 
 // Default returns the built-in defaults (mirrors pr-pool.sh's ${VAR:-default}).
@@ -48,6 +62,15 @@ func Default() Config {
 		Model:         "",
 		Dangerous:     true,
 		SessionPrefix: "pr-pool-",
+		BudgetTokens:  0,                // unlimited until ccpool N3
+		BudgetCost:    0,                // unlimited until ccpool N3
+		BudgetTime:    25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:   0.725,
+		CancelPct:     0.90,
+		HardPct:       1.00,
+		LogDir:        state + "/pr-pool/log",
+		ReminderMsg:   "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
+		WrapUpMsg:     "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
 	}
 }
 
@@ -69,7 +92,24 @@ func Load() Config {
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
 	c.Dangerous = envBool("PR_POOL_DANGEROUS", c.Dangerous)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
+	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
+	c.BudgetCost = int64(envInt("PR_POOL_BUDGET_COST", int(c.BudgetCost)))
+	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)
+	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
 	return c
+}
+
+// WorkerBudget assembles the per-worker Budget from config scalars + the default
+// price table. Today one budget for all workers; future per-agent budgets are a
+// different constructor, no refactor.
+func (c Config) WorkerBudget() budget.Budget {
+	return budget.Budget{
+		Tokens:     budget.Limit(c.BudgetTokens),
+		Cost:       budget.Limit(c.BudgetCost),
+		Time:       c.BudgetTime,
+		Thresholds: budget.Thresholds{Reminder: c.ReminderPct, Cancel: c.CancelPct, Hard: c.HardPct},
+		Prices:     usage.DefaultPrices(),
+	}
 }
 
 func stateHome() string {

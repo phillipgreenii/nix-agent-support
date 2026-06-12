@@ -60,3 +60,28 @@ func TestLoad_badIntFallsBackToDefault(t *testing.T) {
 		t.Errorf("bad int should fall back to default 1, got %d", c.MaxWorker)
 	}
 }
+
+func TestWorkerBudget_defaults(t *testing.T) {
+	b := Default().WorkerBudget()
+	if !b.Tokens.Unlimited() || !b.Cost.Unlimited() {
+		t.Error("token/cost default must be unlimited")
+	}
+	if b.Time != 25*time.Minute {
+		t.Errorf("time default = %v, want 25m (< MaxWait 30m)", b.Time)
+	}
+	if b.Thresholds.Reminder != 0.725 || b.Thresholds.Cancel != 0.90 || b.Thresholds.Hard != 1.0 {
+		t.Errorf("thresholds = %+v", b.Thresholds)
+	}
+	if b.Time >= Default().MaxWait {
+		t.Errorf("budget time %v must be < MaxWait %v", b.Time, Default().MaxWait)
+	}
+}
+
+func TestWorkerBudget_envOverrides(t *testing.T) {
+	t.Setenv("PR_POOL_BUDGET_TOKENS", "1000000")
+	t.Setenv("PR_POOL_BUDGET_TIME", "600")
+	b := Load().WorkerBudget()
+	if int64(b.Tokens) != 1000000 || b.Time != 600*time.Second {
+		t.Errorf("env overrides not applied: %+v", b)
+	}
+}
