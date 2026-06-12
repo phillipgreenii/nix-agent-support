@@ -235,13 +235,18 @@ func (sb *sandbox) cap(name string) string {
 	return string(out)
 }
 
-// setState writes a store-row state directly (fixture).
-func (sb *sandbox) setState(name, state string) {
+// setMaxSessions rewrites the sandbox config's pool cap (default 6) so cap-based
+// reap eviction can be exercised with a small number of live sessions.
+func (sb *sandbox) setMaxSessions(n int) {
 	sb.t.Helper()
-	db := filepath.Join(sb.envGet("XDG_DATA_HOME"), "ccpool", "store.db")
-	q := fmt.Sprintf("update sessions set state='%s' where name='%s';", state, name)
-	if out, err := exec.Command("sqlite3", db, q).CombinedOutput(); err != nil {
-		sb.t.Fatalf("setState: %v\n%s", err, out)
+	cfgPath := filepath.Join(sb.envGet("XDG_CONFIG_HOME"), "ccpool", "config.toml")
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		sb.t.Fatalf("setMaxSessions read: %v", err)
+	}
+	out := strings.Replace(string(b), "max_sessions = 6", fmt.Sprintf("max_sessions = %d", n), 1)
+	if err := os.WriteFile(cfgPath, []byte(out), 0o600); err != nil {
+		sb.t.Fatalf("setMaxSessions write: %v", err)
 	}
 }
 

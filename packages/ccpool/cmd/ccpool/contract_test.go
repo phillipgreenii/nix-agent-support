@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+// SCOPE POLICY (pg2-tnmb): every test in this file MUST make at least one
+// observation that depends on REAL Claude Code behaving a specific way — that is
+// what "contract" means: pin the Claude TUI/runtime contract so a Claude Code
+// upgrade localizes drift here. Tests that would pass against a dummy/stub claude
+// (pure CLI arg handling, store-state filtering with injected states, generic
+// eviction/purge math) are NOT contract tests; they live as plain unit/integration
+// tests and were removed from this suite. Specifically relocated, with their
+// coverage preserved elsewhere:
+//   - Cancel of a nonexistent/not-live session -> session.TestCancel_notLiveErrors
+//     (+ cmd TestCancelExitCode for the exit-code mapping).
+//   - Cancel of an idle (ready) session is a no-op success ->
+//     session.TestCancel_idleNormalizesToReady.
+//   - attend candidate filtering (needs_input-only, dead-pane filtered,
+//     --include-done) -> cmd TestAttendCandidates + TestPickCandidate_* /
+//     TestPickNumbered_Parse.
+//   - reap oldest-by-last_activity SELECTION -> session.TestReap_overCapClosesOldestFirst
+//     and cmd TestReap_closesOverCap (fake-claude + real tmux).
+//   - close --purge removes the store row -> session.TestClose_purgeDeletesRow +
+//     cmd TestClose_endsTheSession.
+// What stays here is only what real claude alone can verify.
+
 // sessionLineHas reports whether the doctor/list line naming `session` also
 // contains `marker`. Matching on the SAME line avoids a false positive where
 // one row names the session and an unrelated row carries the marker.
@@ -45,16 +66,6 @@ func TestContract_Lifecycle_CloseEndsSession(t *testing.T) {
 	liveAssert(t, "alpha not live after close", sessionLineHas(out, "alpha", "live=true"), false)
 }
 
-func TestContract_Lifecycle_ClosePurgeRemovesRow(t *testing.T) {
-	sb := newSandbox(t)
-	sb.mustNew("alpha")
-	if _, code := sb.ccp("close", "alpha", "--purge"); code != 0 {
-		t.Fatalf("close --purge failed")
-	}
-	out, _ := sb.ccp("list", "--all")
-	liveAssert(t, "alpha purged from list", strings.Contains(out, "alpha"), false)
-}
-
 func TestContract_Cancel_StreamingInterrupts(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("s")
@@ -81,19 +92,6 @@ func TestContract_Cancel_ThinkingInterrupts(t *testing.T) {
 	liveAssert(t, "cancel during thinking exits 0", code, 0)
 	out, _ := sb.ccp("state", "k")
 	liveAssert(t, "reconciled idle after cancel", strings.Contains(out, "state=idle"), true)
-}
-
-func TestContract_Cancel_IdleNormalizes(t *testing.T) {
-	sb := newSandbox(t)
-	sb.mustNew("i")
-	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "i") // ready/idle session
-	liveAssert(t, "cancel on idle exits 0", code, 0)
-}
-
-func TestContract_Cancel_NonexistentErrors(t *testing.T) {
-	sb := newSandbox(t)
-	_, code := sb.ccp("cancel", "ghost")
-	liveAssert(t, "cancel nonexistent is non-zero", code != 0, true)
 }
 
 func TestContract_Cancel_StaleMarkerIgnored(t *testing.T) {
@@ -160,47 +158,6 @@ func TestContract_Interrupt_ThinkingCancelsAndDelivers(t *testing.T) {
 	_ = out
 }
 
-// attendFixture stands up N live sessions and sets their store states.
-func attendFixture(t *testing.T, sb *sandbox, states map[string]string) {
-	t.Helper()
-	for name := range states {
-		sb.mustNew(name)
-	}
-	for name, st := range states {
-		sb.setState(name, st) // both a row AND a live pane (filter drops paneless rows)
-	}
-}
-
-func TestContract_Attend_NoTTYListsCandidates(t *testing.T) {
-	sb := newSandbox(t)
-	attendFixture(t, sb, map[string]string{"q1": "needs_input", "q2": "needs_input", "q3": "done"})
-	out, code := sb.ccp("attend") // stdin is not a TTY under go test
-	liveAssert(t, "attend no-TTY exit 0", code, 0)
-	liveAssert(t, "lists q1", strings.Contains(out, "q1"), true)
-	liveAssert(t, "lists q2", strings.Contains(out, "q2"), true)
-	liveAssert(t, "excludes done q3", strings.Contains(out, "q3"), false)
-}
-
-func TestContract_Attend_IncludeDone(t *testing.T) {
-	sb := newSandbox(t)
-	attendFixture(t, sb, map[string]string{"q1": "needs_input", "q3": "done"})
-	out, code := sb.ccp("attend", "--include-done")
-	liveAssert(t, "attend --include-done exit 0", code, 0)
-	liveAssert(t, "includes done q3", strings.Contains(out, "q3"), true)
-}
-
-func TestContract_Attend_ZeroCandidates(t *testing.T) {
-	sb := newSandbox(t)
-	attendFixture(t, sb, map[string]string{"r1": "ready"})
-	out, code := sb.ccp("attend")
-	liveAssert(t, "attend zero exit 0", code, 0)
-	liveAssert(t, "says none waiting", strings.Contains(out, "no sessions waiting"), true)
-}
-
-func TestContract_Attend_NumberedAndFzfBranchSelection(t *testing.T) {
-	pending(t, "attend branch selection (no-TTY/fzf/numbered) + numbered-index parse now covered by plain unit tests in attend_test.go (TestPickCandidate_*, TestPickNumbered_Parse)", "nothing further here; only the live fzf subprocess exec stays out of contract scope (real process)")
-}
-
 func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("a")
@@ -232,7 +189,28 @@ func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) 
 		"live picker pane marker (transcript persists no assistant event while paused) — see pg2-7a5b")
 }
 
-func TestContract_Reap_EvictsOldestOverCap(t *testing.T) {
-	// new does NOT enforce max_sessions; only reap evicts oldest-by-last_activity.
-	pending(t, "reap evicts oldest-by-last_activity down to cap", "deterministic reap assertion (needs activity-time control / state query)")
+// TestContract_Reap_EvictsLiveClaudeSafely pins the REAL-claude concern reap exists
+// for: tearing down a LIVE running claude under the pool cap is clean. The
+// oldest-by-last_activity SELECTION is generic and covered elsewhere (see SCOPE
+// POLICY) — including TestReap_closesOverCap, which already does this against
+// fake-claude. What only real claude verifies is that reap actually terminates a
+// heavyweight claude process (tmux session gone, no orphan) while a fresher
+// session survives; a stub that exits on /exit cannot stand in for that.
+func TestContract_Reap_EvictsLiveClaudeSafely(t *testing.T) {
+	sb := newSandbox(t)
+	sb.setMaxSessions(1) // cap=1: a second live session is over-cap → the LRU is reaped
+	sb.mustNew("victim")
+	// A distinct last_activity_at SECOND makes "victim" unambiguously the LRU
+	// (last_activity_at is epoch seconds; sort is not stable on ties). Both sessions
+	// stay far inside idle_ttl (30m), so this exercises CAP eviction, not TTL.
+	time.Sleep(1100 * time.Millisecond)
+	sb.mustNew("survivor")
+	_, code, _ := sb.ccpTimed(60*time.Second, "reap")
+	liveAssert(t, "reap exits 0", code, 0)
+	// doctor liveness derives from tmux has-session, so live=false ⟺ the real claude
+	// was actually torn down. (victim may remain as a non-live row OR be absent —
+	// either way it is no longer live.)
+	out, _ := sb.ccp("doctor")
+	liveAssert(t, "reaped victim's live claude is gone", sessionLineHas(out, "victim", "live=true"), false)
+	liveAssert(t, "fresher survivor stays live", sessionLineHas(out, "survivor", "live=true"), true)
 }
