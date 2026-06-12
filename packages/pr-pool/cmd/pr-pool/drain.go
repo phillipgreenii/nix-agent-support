@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -95,25 +94,27 @@ func parseSelfLogin(b []byte) (string, error) {
 	return cfg.SelfLogin, nil
 }
 
-// precheck asserts the bead store is the expected one and bd is reachable.
+// precheck asserts bd is reachable from RepoRoot and resolves the expected
+// store. It does NOT require a local .beads dir at RepoRoot: bd is
+// git-worktree-aware (it resolves the store from the cwd, the git common dir, or
+// the Dolt server), so RepoRoot may be a monorepo worktree/slot with no local
+// .beads — which is the normal case for workers. Everything is verified through
+// bd itself rather than by stat-ing a path.
 func precheck(ctx context.Context, cfg config.Config, br beads.Runner) error {
-	if _, err := os.Stat(cfg.RepoRoot + "/.beads"); err != nil {
-		return fmt.Errorf("no .beads under %s", cfg.RepoRoot)
-	}
-	if err := precheckPrefix(cfg.RepoRoot, cfg.BeadsPrefix); err != nil {
-		return err
-	}
 	if _, err := br.Run(ctx, "list", "--limit", "1", "--json"); err != nil {
-		return fmt.Errorf("bd unreachable: %w", err)
+		return fmt.Errorf("bd unreachable from %s: %w", cfg.RepoRoot, err)
+	}
+	if err := precheckPrefix(ctx, br, cfg.BeadsPrefix); err != nil {
+		return err
 	}
 	return nil
 }
 
-// precheckPrefix reads the beads prefix from <repoRoot>/.beads/config.yaml and
-// asserts it equals want. This is a genuine, testable seam: tests set up a temp
-// dir with a real config.yaml and call this directly.
-func precheckPrefix(repoRoot, want string) error {
-	got, err := readBeadsPrefix(repoRoot)
+// precheckPrefix asserts the store bd resolves carries the expected issue
+// prefix (a guard against pointing at the wrong store). Testable seam: tests
+// pass a fake runner returning the prefix.
+func precheckPrefix(ctx context.Context, br beads.Runner, want string) error {
+	got, err := readBeadsPrefix(ctx, br)
 	if err != nil {
 		return err
 	}
@@ -123,22 +124,18 @@ func precheckPrefix(repoRoot, want string) error {
 	return nil
 }
 
-// readBeadsPrefix reads issue_prefix from <repoRoot>/.beads/config.yaml.
-func readBeadsPrefix(repoRoot string) (string, error) {
-	f, err := os.Open(repoRoot + "/.beads/config.yaml")
+// readBeadsPrefix asks bd for the resolved issue prefix (`bd config get
+// issue_prefix`). This works in a monorepo worktree where there is no local
+// .beads/config.yaml — bd resolves it git-aware, exactly as every other bd call
+// here does.
+func readBeadsPrefix(ctx context.Context, br beads.Runner) (string, error) {
+	out, err := br.Run(ctx, "config", "get", "issue_prefix")
 	if err != nil {
-		return "", fmt.Errorf("open beads config: %w", err)
+		return "", fmt.Errorf("bd config get issue_prefix: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if strings.HasPrefix(line, "issue_prefix:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "issue_prefix:")), nil
-		}
+	prefix := strings.TrimSpace(out)
+	if prefix == "" {
+		return "", fmt.Errorf("bd config get issue_prefix returned no prefix")
 	}
-	if err := sc.Err(); err != nil {
-		return "", fmt.Errorf("read beads config: %w", err)
-	}
-	return "", fmt.Errorf("issue_prefix not found in .beads/config.yaml")
+	return prefix, nil
 }

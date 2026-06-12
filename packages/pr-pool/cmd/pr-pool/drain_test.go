@@ -1,9 +1,12 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/pr-pool/internal/config"
 )
 
 func TestParseSelfLogin(t *testing.T) {
@@ -19,65 +22,69 @@ func TestParseSelfLogin_empty(t *testing.T) {
 	}
 }
 
-func TestReadBeadsPrefix_parsesIssuePrefix(t *testing.T) {
-	dir := t.TempDir()
-	beadsDir := filepath.Join(dir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
-		t.Fatal(err)
+// fakeBR is a fake beads.Runner: it returns canned output keyed by joined args,
+// or a single error for every call.
+type fakeBR struct {
+	out map[string]string
+	err error
+}
+
+func (f fakeBR) Run(_ context.Context, args ...string) (string, error) {
+	if f.err != nil {
+		return "", f.err
 	}
-	cfgPath := filepath.Join(beadsDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("issue_prefix: zr\nsome_other: value\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := readBeadsPrefix(dir)
+	return f.out[strings.Join(args, " ")], nil
+}
+
+func TestReadBeadsPrefix_fromBd(t *testing.T) {
+	br := fakeBR{out: map[string]string{"config get issue_prefix": "zr\n"}}
+	got, err := readBeadsPrefix(context.Background(), br)
 	if err != nil {
 		t.Fatalf("readBeadsPrefix error: %v", err)
 	}
 	if got != "zr" {
-		t.Errorf("readBeadsPrefix = %q, want %q", got, "zr")
+		t.Errorf("readBeadsPrefix = %q, want zr", got)
 	}
 }
 
-func TestReadBeadsPrefix_missingFile(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := readBeadsPrefix(dir); err == nil {
-		t.Error("missing config.yaml should error")
+func TestReadBeadsPrefix_bdError(t *testing.T) {
+	if _, err := readBeadsPrefix(context.Background(), fakeBR{err: errors.New("bd boom")}); err == nil {
+		t.Error("bd error should propagate")
 	}
 }
 
-func TestReadBeadsPrefix_missingKey(t *testing.T) {
-	dir := t.TempDir()
-	beadsDir := filepath.Join(dir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfgPath := filepath.Join(beadsDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("some_other: value\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readBeadsPrefix(dir); err == nil {
-		t.Error("missing issue_prefix key should error")
+func TestReadBeadsPrefix_emptyOutput(t *testing.T) {
+	if _, err := readBeadsPrefix(context.Background(), fakeBR{out: map[string]string{}}); err == nil {
+		t.Error("empty prefix should error")
 	}
 }
 
-func TestPrecheck_prefixMismatch(t *testing.T) {
-	// Set up a temp repo root with .beads/config.yaml containing prefix "wrong"
-	dir := t.TempDir()
-	beadsDir := filepath.Join(dir, ".beads")
-	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfgPath := filepath.Join(beadsDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("issue_prefix: wrong\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// mismatch: config says "wrong" but we want "zr"
-	if err := precheckPrefix(dir, "zr"); err == nil {
-		t.Error("prefix mismatch should fail precheck")
-	}
-	// match: config says "wrong" and we want "wrong"
-	if err := precheckPrefix(dir, "wrong"); err != nil {
+func TestPrecheckPrefix_matchAndMismatch(t *testing.T) {
+	br := fakeBR{out: map[string]string{"config get issue_prefix": "zr"}}
+	if err := precheckPrefix(context.Background(), br, "zr"); err != nil {
 		t.Errorf("matching prefix should pass, got %v", err)
+	}
+	if err := precheckPrefix(context.Background(), br, "wrong"); err == nil {
+		t.Error("prefix mismatch should fail")
+	}
+}
+
+// Regression for pg2-hc67: precheck must pass from a monorepo worktree/slot that
+// has NO local .beads dir, as long as bd resolves the store there.
+func TestPrecheck_passesWithoutLocalBeadsDir(t *testing.T) {
+	br := fakeBR{out: map[string]string{
+		"list --limit 1 --json":   "[]",
+		"config get issue_prefix": "zr",
+	}}
+	cfg := config.Config{RepoRoot: "/Volumes/ziprecruiter/slot-a", BeadsPrefix: "zr"}
+	if err := precheck(context.Background(), cfg, br); err != nil {
+		t.Errorf("precheck should pass without a local .beads dir; got %v", err)
+	}
+}
+
+func TestPrecheck_bdUnreachable(t *testing.T) {
+	cfg := config.Config{RepoRoot: "/x", BeadsPrefix: "zr"}
+	if err := precheck(context.Background(), cfg, fakeBR{err: errors.New("bd down")}); err == nil {
+		t.Error("unreachable bd should fail precheck")
 	}
 }
