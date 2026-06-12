@@ -8,13 +8,25 @@ import (
 	"time"
 )
 
+// sessionLineHas reports whether the doctor/list line naming `session` also
+// contains `marker`. Matching on the SAME line avoids a false positive where
+// one row names the session and an unrelated row carries the marker.
+func sessionLineHas(out, session, marker string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, session) && strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestContract_Lifecycle_NewReachesReadyAndLive(t *testing.T) {
 	sb := newSandbox(t)
 	out, code, _ := sb.ccpTimed(90*time.Second, "new", "alpha")
 	liveAssert(t, "new exit code", code, 0)
 	liveAssert(t, "new reports ready", strings.Contains(out, "ready"), true)
 	out, _ = sb.ccp("doctor")
-	liveAssert(t, "doctor shows alpha live", strings.Contains(out, "alpha") && strings.Contains(out, "live=true"), true)
+	liveAssert(t, "doctor shows alpha live", sessionLineHas(out, "alpha", "live=true"), true)
 	pending(t, "state is RECONCILED ready (doctor state= is cached)", "reconciled state query")
 }
 
@@ -27,7 +39,7 @@ func TestContract_Lifecycle_CloseEndsSession(t *testing.T) {
 	liveAssert(t, "close exit code", code, 0)
 	// Objective: the tmux session is gone.
 	out, _ := sb.ccp("doctor")
-	liveAssert(t, "alpha not live after close", strings.Contains(out, "alpha") && strings.Contains(out, "live=true"), false)
+	liveAssert(t, "alpha not live after close", sessionLineHas(out, "alpha", "live=true"), false)
 }
 
 func TestContract_Lifecycle_ClosePurgeRemovesRow(t *testing.T) {
@@ -95,6 +107,14 @@ func TestContract_Cancel_StaleMarkerFalsePositive(t *testing.T) {
 	// Start a fresh thinking turn; force the row to working so cancel bursts.
 	sb.ccp("reply", "m", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("m", 30*time.Second)
+	// Precondition: the false-positive case requires the stale "Interrupted"
+	// marker to STILL be visible in the pane (tmux capture-pane has no
+	// scrollback). If a fresh thinking turn scrolled it out, interruptLanded
+	// would return false -> exit 6, falsely signalling the pg2-33gl bug got
+	// fixed. That is a setup failure, not a contract change.
+	if !reInterrupted.MatchString(sb.cap("m")) {
+		scaffoldFail(t, "stale Interrupted marker scrolled out of the visible pane; cannot set up the false-positive case")
+	}
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "m")
 	// BASELINE: the stale "Interrupted" line false-positives interruptLanded ->
 	// thinking-cancel wrongly exits 0. Expected to FLIP to 6 (or idle) once fixed.

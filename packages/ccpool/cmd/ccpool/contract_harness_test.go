@@ -99,7 +99,10 @@ func newSandbox(t *testing.T) *sandbox {
 		t.Fatalf("symlink ccpool onto PATH: %v", err)
 	}
 
-	socket := "cc-contract-" + filepath.Base(base)
+	// base = t.TempDir() = /tmp/<TestName><rand>/NNN, where NNN is "001" for the
+	// FIRST TempDir of every test. Using only filepath.Base(base) collides across
+	// tests; incorporate the unique per-test parent dir for a distinct socket.
+	socket := "cc-contract-" + filepath.Base(filepath.Dir(base)) + "-" + filepath.Base(base)
 	prefix := "cct-"
 
 	repoRoot, err := filepath.Abs("../..") // cmd/ccpool -> packages/ccpool
@@ -183,20 +186,40 @@ func (sb *sandbox) ccp(args ...string) (string, int) {
 	return string(out), code
 }
 
-// ccpTimed runs ccp but fails the test if it does not return within budget.
+// ccpTimed runs the binary-under-test (mirroring ccp) but fails the test if it
+// does not return within budget. It owns its *exec.Cmd so that, on timeout, it
+// can Kill the spawned child (CombinedOutput would otherwise block forever) and
+// report the failure on the MAIN goroutine — calling t.Fatal* off the test
+// goroutine is a Go testing violation.
 func (sb *sandbox) ccpTimed(budget time.Duration, args ...string) (string, int, time.Duration) {
 	sb.t.Helper()
 	type res struct {
 		out  string
 		code int
+		err  error
 	}
+	cmd := exec.Command(sb.bin, args...)
+	cmd.Env = sb.env
+	cmd.Dir = sb.cwd
+	cmd.Stdin = strings.NewReader("") // non-TTY stdin; see ccp for rationale
 	ch := make(chan res, 1)
 	start := time.Now()
-	go func() { o, c := sb.ccp(args...); ch <- res{o, c} }()
+	go func() {
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code, err = ee.ExitCode(), nil
+		}
+		ch <- res{string(out), code, err}
+	}()
 	select {
 	case r := <-ch:
+		if r.err != nil {
+			sb.t.Fatalf("ccp %v: %v\n%s", args, r.err, r.out)
+		}
 		return r.out, r.code, time.Since(start)
 	case <-time.After(budget):
+		_ = cmd.Process.Kill()
 		sb.t.Fatalf("ccp %v did not return within %s (hang)", args, budget)
 		return "", 0, 0
 	}
@@ -286,13 +309,6 @@ var (
 // thinkingPrompt reliably produces a multi-second high-effort thinking phase.
 const thinkingPrompt = "Think step by step in extensive detail, then write a thorough 1500-word essay on the internal architecture of Unix pipes."
 
-// active reports whether a turn is producing output: two captures 0.8s apart differ.
-func (sb *sandbox) active(name string) bool {
-	a := sb.cap(name)
-	time.Sleep(800 * time.Millisecond)
-	return a != sb.cap(name)
-}
-
 func (sb *sandbox) waitForThinking(name string, budget time.Duration) {
 	sb.t.Helper()
 	deadline := time.Now().Add(budget)
@@ -316,30 +332,6 @@ func (sb *sandbox) waitForStreaming(name string, budget time.Duration) {
 		time.Sleep(400 * time.Millisecond)
 	}
 	scaffoldFail(sb.t, "streaming phase never observed for %q within %s", name, budget)
-}
-
-func (sb *sandbox) waitForNeedsInput(name string, budget time.Duration) {
-	sb.t.Helper()
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		if sb.rowState(name) == "needs_input" {
-			return
-		}
-		time.Sleep(400 * time.Millisecond)
-	}
-	scaffoldFail(sb.t, "needs_input never reached for %q within %s", name, budget)
-}
-
-// rowState reads the cached store state for a session from `list --all`.
-func (sb *sandbox) rowState(name string) string {
-	out, _ := sb.ccp("list", "--all")
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 2 && f[0] == name {
-			return f[1]
-		}
-	}
-	return ""
 }
 
 func TestContract_PhaseGate_ThinkingObserved(t *testing.T) {
