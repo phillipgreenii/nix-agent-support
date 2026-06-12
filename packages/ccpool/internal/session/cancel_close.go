@@ -132,6 +132,19 @@ func (s *Service) Close(ctx context.Context, name string, purge bool) error {
 		if purge {
 			return s.d.Store.Delete(ctx, name)
 		}
+		// Non-purge close keeps the row (the conversation stays resumable), but a
+		// row left in a non-terminal state with live=false lingers in `list`
+		// forever — retention only sweeps terminal rows (pg2-4f0y). Reconcile a
+		// non-terminal row to a terminal state so retention can age it out;
+		// preserve an already-terminal outcome (don't clobber Failed with Done).
+		row, ok, err := s.d.Store.GetByName(ctx, name)
+		if err != nil {
+			return err
+		}
+		if ok && !row.State.Terminal() {
+			_, err = s.d.Store.Transition(ctx, name, store.Done, "", "")
+			return err
+		}
 		return nil
 	})
 }

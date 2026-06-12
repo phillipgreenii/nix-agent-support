@@ -160,6 +160,46 @@ func TestSendInterrupt_abortsOnUnconfirmedCancel(t *testing.T) {
 	}
 }
 
+// TestCancel_notLiveErrors covers the not-live guard (cancelLocked: HasSession
+// false -> error). Relocated from the contract suite (Cancel_NonexistentErrors):
+// a missing/dead session is pure tmux-lookup logic, not a Claude contract.
+func TestCancel_notLiveErrors(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: false} // no live tmux session
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Cancel(ctx, "a"); err == nil {
+		t.Fatal("Cancel on a non-live session must error")
+	}
+	if tm.killed {
+		t.Error("Cancel must not kill anything when the session is not live")
+	}
+}
+
+// TestCancel_idleNormalizesToReady covers the idle short-circuit (cancelLocked:
+// state Ready/Done -> normalize to ready, no Escape burst, no confirm). Relocated
+// from the contract suite (Cancel_IdleNormalizes): cancelling an idle session is a
+// store-state no-op, identical against any claude.
+func TestCancel_idleNormalizesToReady(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: true} // live but idle (state Ready)
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Cancel(ctx, "a"); err != nil {
+		t.Fatalf("Cancel on an idle session must be a no-op success, got %v", err)
+	}
+	if len(tm.keys) != 0 {
+		t.Errorf("idle cancel sent keys %v; want none (no Escape burst)", tm.keys)
+	}
+	if row, _, _ := st.GetByName(ctx, "a"); row.State != store.Ready {
+		t.Errorf("state = %s, want ready", row.State)
+	}
+}
+
 func TestClose_graceful(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
@@ -212,5 +252,46 @@ func TestClose_purgeDeletesRow(t *testing.T) {
 	}
 	if _, ok, _ := st.GetByName(ctx, "a"); ok {
 		t.Error("--purge should delete the store row")
+	}
+}
+
+// TestClose_reconcilesNonTerminalRowToDone covers pg2-4f0y: a non-purge close
+// KEEPS the row (resumable) but reconciles a non-terminal row to a terminal state
+// (Done) so list retention can sweep it. Otherwise a dead session left as
+// `working|live=false` / `ready|live=false` lingers in `list` forever (retention
+// only hides terminal rows), accumulating across pr-pool drains.
+func TestClose_reconcilesNonTerminalRowToDone(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: false} // session already dead (worker's claude exited)
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Close(ctx, "a", false); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	row, ok, _ := st.GetByName(ctx, "a")
+	if !ok {
+		t.Fatal("non-purge close must KEEP the row (resumable)")
+	}
+	if row.State != store.Done {
+		t.Errorf("state = %s, want done (reconciled so retention can sweep it)", row.State)
+	}
+}
+
+// TestClose_preservesTerminalOutcome: close must NOT clobber an already-terminal
+// outcome — a Failed session stays Failed (not silently reconciled to Done).
+func TestClose_preservesTerminalOutcome(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Failed, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: false}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Close(ctx, "a", false); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if row, _, _ := st.GetByName(ctx, "a"); row.State != store.Failed {
+		t.Errorf("state = %s, want failed (close must not overwrite a terminal outcome)", row.State)
 	}
 }
