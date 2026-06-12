@@ -113,9 +113,29 @@ func join(a []string) string {
 	return out
 }
 
+// manualClock advances only when the test ticks it, so waitDone polling is
+// deterministic and instant.
+type manualClock struct{ t time.Time }
+
+func (c *manualClock) now() time.Time { return c.t }
+
+// tickAdvancing returns a tick func that advances the clock by d each poll, so a
+// finite-deadline loop terminates without real sleeping.
+func (c *manualClock) tickAdvancing() func(context.Context, time.Duration) error {
+	return func(ctx context.Context, d time.Duration) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c.t = c.t.Add(d)
+		return nil
+	}
+}
+
 func newOrch(cc ccpool.Runner, bd *scriptBD, cfg config.Config) *Orchestrator {
 	o := &Orchestrator{CC: cc, BD: bd, Reg: roles.NewRegistry(cfg), Cfg: cfg}
-	o.sleep = func(time.Duration) {} // instant polling in tests
+	clk := &manualClock{t: time.Unix(0, 0)}
+	o.now = clk.now
+	o.tick = clk.tickAdvancing()
 	return o
 }
 
@@ -356,6 +376,22 @@ func TestWaitDone_transientStatusErrorKeepsPolling(t *testing.T) {
 	}
 	if len(bd.updates) != 0 {
 		t.Errorf("transient error must not trigger human/unclaim; updates=%v", bd.updates)
+	}
+}
+
+func TestWaitDone_ctxCancelDoesNotFail(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true}}}}
+	o := newOrch(cc, bd, fastCfg())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	err := o.waitDone(ctx, d, "pr-pool-worker-zr-w")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("cancellation must NOT run a failure action; updates=%v", bd.updates)
 	}
 }
 

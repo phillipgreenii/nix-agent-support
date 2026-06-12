@@ -20,19 +20,32 @@ import (
 )
 
 type Orchestrator struct {
-	CC    ccpool.Runner
-	BD    beads.Runner
-	Reg   roles.Registry
-	Cfg   config.Config
-	sleep func(time.Duration) // injectable for instant tests; nil ⇒ time.Sleep
+	CC   ccpool.Runner
+	BD   beads.Runner
+	Reg  roles.Registry
+	Cfg  config.Config
+	now  func() time.Time                           // clock seam (default time.Now)
+	tick func(context.Context, time.Duration) error // cancellable wait (default below)
 }
 
-func (o *Orchestrator) nap(d time.Duration) {
-	if o.sleep != nil {
-		o.sleep(d)
-		return
+func (o *Orchestrator) clock() time.Time {
+	if o.now != nil {
+		return o.now()
 	}
-	time.Sleep(d)
+	return time.Now()
+}
+
+// waitPoll blocks for d or until ctx is cancelled; returns ctx.Err() if cancelled.
+func (o *Orchestrator) waitPoll(ctx context.Context, d time.Duration) error {
+	if o.tick != nil {
+		return o.tick(ctx, d)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // DrainOnce runs one pass: gate check, discover, drain each role up to its cap,
@@ -103,10 +116,12 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 // elapses / the session dies (failure). On detecting death it re-reads the bead
 // status once more before failing (a bead that closed in the same instant the
 // session ended is a success). On failure it applies the role's OnFailure.
+// On ctx cancellation it returns ctx.Err() WITHOUT calling o.fail (the watchdog
+// owns the terminal outcome in that case — single-terminal guarantee).
 func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name string) error {
-	deadline := time.Now().Add(o.Cfg.MaxWait)
+	deadline := o.clock().Add(o.Cfg.MaxWait)
 	seenClaimed := false
-	for time.Now().Before(deadline) {
+	for {
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
 		status, _ := beads.Status(ctx, o.BD, d.BeadID)
 		if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
@@ -123,14 +138,20 @@ func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name s
 			}
 			return o.fail(ctx, d, "session exited before completing")
 		}
-		o.nap(o.Cfg.PollInterval)
+		if !o.clock().Before(deadline) {
+			// final status check after the deadline.
+			status, _ = beads.Status(ctx, o.BD, d.BeadID)
+			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
+				return nil
+			}
+			return o.fail(ctx, d, fmt.Sprintf("not complete within %s", o.Cfg.MaxWait))
+		}
+		// cancellable wait — on cancellation return ctx.Err() and DO NOT fail
+		// (the watchdog won the race and owns the terminal outcome).
+		if err := o.waitPoll(ctx, o.Cfg.PollInterval); err != nil {
+			return err
+		}
 	}
-	// final status check after the deadline.
-	status, _ := beads.Status(ctx, o.BD, d.BeadID)
-	if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
-		return nil
-	}
-	return o.fail(ctx, d, fmt.Sprintf("not complete within %s", o.Cfg.MaxWait))
 }
 
 func (o *Orchestrator) fail(ctx context.Context, d discover.Dispatch, reason string) error {
