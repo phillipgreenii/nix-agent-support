@@ -23,6 +23,7 @@
     ./programs/claude-activity
     ./programs/pa-monitor
     ./programs/ccpool
+    ./programs/pr-pool
     ./programs/gc-dolt-maintenance
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
