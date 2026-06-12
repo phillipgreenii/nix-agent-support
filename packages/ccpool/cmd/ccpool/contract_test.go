@@ -178,7 +178,7 @@ func TestContract_Attend_ZeroCandidates(t *testing.T) {
 }
 
 func TestContract_Attend_NumberedAndFzfBranchSelection(t *testing.T) {
-	pending(t, "numbered/fzf TTY branch selection (stdinIsTerminal/LookPath)", "attend.go injection refactor for testable branch selection")
+	pending(t, "attend branch selection (no-TTY/fzf/numbered) + numbered-index parse now covered by plain unit tests in attend_test.go (TestPickCandidate_*, TestPickNumbered_Parse)", "nothing further here; only the live fzf subprocess exec stays out of contract scope (real process)")
 }
 
 func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) {

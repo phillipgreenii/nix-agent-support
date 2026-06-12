@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -62,7 +63,7 @@ func runAttend(args []string) int {
 	case 1:
 		return runAttach([]string{cands[0].Name})
 	default:
-		name, ok := pickCandidate(cands)
+		name, ok := realPicker().pickCandidate(cands)
 		if !ok {
 			return 0
 		}
@@ -70,22 +71,49 @@ func runAttend(args []string) int {
 	}
 }
 
-// pickCandidate prompts the user to choose one waiting session. Uses fzf when
-// present, else a numbered stdin prompt. When stdin is not an interactive
-// terminal it cannot prompt: it lists the names and returns ("", false),
-// preserving the pre-picker scriptable behavior.
-func pickCandidate(cands []store.Session) (string, bool) {
-	if !stdinIsTerminal() {
-		fmt.Fprintln(os.Stderr, "sessions waiting on input (no TTY to pick):")
+// picker bundles the environment-sensitive dependencies pickCandidate needs, so
+// the three-way branch and the numbered-index parse are unit-testable without a
+// real TTY, without fzf on PATH, and without touching os.Stdin. Matches the
+// explicit-dependency idiom used by attendCandidates (liveFn) and handleHook
+// (stdin io.Reader).
+type picker struct {
+	isTerminal func() bool                                // replaces the direct stdinIsTerminal() call
+	hasFzf     func() bool                                // replaces the direct exec.LookPath("fzf") probe
+	pickFzfFn  func(cands []store.Session) (string, bool) // replaces the direct pickFzf call (kept exec'd subprocess out of test scope)
+	in         io.Reader                                  // replaces the direct os.Stdin read in pickNumbered
+	out        io.Writer                                  // user-facing prompts/listing (was os.Stderr)
+}
+
+// realPicker wires the production picker: real TTY check, real PATH probe, real
+// pickFzf, real stdin, and stderr for prompts (preserving the current behavior,
+// which writes the listing and the pick> prompt to stderr).
+func realPicker() picker {
+	return picker{
+		isTerminal: stdinIsTerminal,
+		hasFzf:     func() bool { _, err := exec.LookPath("fzf"); return err == nil },
+		pickFzfFn:  pickFzf,
+		in:         os.Stdin,
+		out:        os.Stderr,
+	}
+}
+
+// pickCandidate prompts the user to choose one waiting session, using the
+// injected picker environment. Uses fzf when present, else a numbered stdin
+// prompt. When stdin is not an interactive terminal it cannot prompt: it lists
+// the names and returns ("", false), preserving the pre-picker scriptable
+// behavior.
+func (p picker) pickCandidate(cands []store.Session) (string, bool) {
+	if !p.isTerminal() {
+		fmt.Fprintln(p.out, "sessions waiting on input (no TTY to pick):")
 		for _, c := range cands {
-			fmt.Fprintln(os.Stderr, " ", c.Name)
+			fmt.Fprintln(p.out, " ", c.Name)
 		}
 		return "", false
 	}
-	if _, err := exec.LookPath("fzf"); err == nil {
-		return pickFzf(cands)
+	if p.hasFzf() {
+		return p.pickFzfFn(cands)
 	}
-	return pickNumbered(cands)
+	return p.pickNumbered(cands)
 }
 
 func candidateLine(c store.Session) string {
@@ -116,14 +144,15 @@ func pickFzf(cands []store.Session) (string, bool) {
 	return name, name != ""
 }
 
-// pickNumbered prints a numbered list and reads one line (the index) from stdin.
-func pickNumbered(cands []store.Session) (string, bool) {
-	fmt.Fprintln(os.Stderr, "sessions waiting on input:")
+// pickNumbered prints a numbered list to p.out and reads one line (the index)
+// from p.in.
+func (p picker) pickNumbered(cands []store.Session) (string, bool) {
+	fmt.Fprintln(p.out, "sessions waiting on input:")
 	for i, c := range cands {
-		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, candidateLine(c))
+		fmt.Fprintf(p.out, "  %d) %s\n", i+1, candidateLine(c))
 	}
-	fmt.Fprint(os.Stderr, "pick> ")
-	r := bufio.NewReader(os.Stdin)
+	fmt.Fprint(p.out, "pick> ")
+	r := bufio.NewReader(p.in)
 	line, err := r.ReadString('\n')
 	if err != nil && line == "" {
 		return "", false
