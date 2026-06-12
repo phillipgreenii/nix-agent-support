@@ -8,12 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Writer is a JSONL event log writer. Safe for concurrent use.
 type Writer struct {
 	mu sync.Mutex
 	f  *os.File
+	// Now is an injectable clock seam (mirrors watchdog.Watchdog.Now); New
+	// defaults it to time.Now. Each emitted record is stamped with it.
+	Now func() time.Time
 }
 
 // New opens (creating parent dirs) the JSONL log at path in append mode.
@@ -25,18 +29,27 @@ func New(path string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Writer{f: f}, nil
+	return &Writer{f: f, Now: time.Now}, nil
 }
 
-// Emit writes one JSON object as a line. `kind` is always present; fields are
-// merged in (fields named "kind" are ignored).
+func (w *Writer) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
+}
+
+// Emit writes one JSON object as a line. `ts` (RFC3339Nano, UTC) and `kind` are
+// always stamped by Emit; fields are merged in but fields named "ts" or "kind"
+// are ignored so they cannot override the stamped values.
 func (w *Writer) Emit(kind string, fields map[string]any) error {
-	rec := make(map[string]any, len(fields)+1)
+	rec := make(map[string]any, len(fields)+2)
 	for k, v := range fields {
-		if k != "kind" {
+		if k != "kind" && k != "ts" {
 			rec[k] = v
 		}
 	}
+	rec["ts"] = w.now().UTC().Format(time.RFC3339Nano)
 	rec["kind"] = kind
 	b, err := json.Marshal(rec)
 	if err != nil {
