@@ -14,6 +14,16 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/trust"
 )
 
+// doctorPoolHeader renders the active pool's context for `ccpool doctor`.
+func doctorPoolHeader(cfg config.Config) string {
+	root := cfg.PoolRoot
+	if root == "" {
+		root = "default (XDG)"
+	}
+	return fmt.Sprintf("pool: %s\n  db:     %s\n  socket: %s\n  hook.log: %s\n",
+		root, cfg.DBPath, cfg.Tmux.Socket, filepath.Join(cfg.StateDir, "hook.log"))
+}
+
 func runDoctor(args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	_ = fs.Parse(args)
@@ -22,6 +32,7 @@ func runDoctor(args []string) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
+	fmt.Print(doctorPoolHeader(cfg))
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)
