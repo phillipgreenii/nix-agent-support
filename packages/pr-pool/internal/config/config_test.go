@@ -28,6 +28,9 @@ func TestDefault(t *testing.T) {
 	if d.SessionPrefix != "pr-pool-" {
 		t.Errorf("SessionPrefix = %q, want pr-pool-", d.SessionPrefix)
 	}
+	if !d.FeedbackEnabled || !d.WorkerEnabled {
+		t.Error("roles should default enabled")
+	}
 }
 
 func TestLoad_envOverrides(t *testing.T) {
@@ -36,6 +39,7 @@ func TestLoad_envOverrides(t *testing.T) {
 	t.Setenv("PR_POOL_BEADS_PREFIX", "pg2")
 	t.Setenv("PR_POOL_MODEL", "claude-opus-4-8")
 	t.Setenv("PR_POOL_DANGEROUS", "0")
+	t.Setenv("PR_POOL_WORKER_ENABLED", "0")
 	c := Load()
 	if c.MaxWorker != 3 {
 		t.Errorf("MaxWorker = %d, want 3", c.MaxWorker)
@@ -51,6 +55,12 @@ func TestLoad_envOverrides(t *testing.T) {
 	}
 	if c.Dangerous {
 		t.Error("PR_POOL_DANGEROUS=0 should disable Dangerous")
+	}
+	if c.WorkerEnabled {
+		t.Error("PR_POOL_WORKER_ENABLED=0 should disable worker role")
+	}
+	if !c.FeedbackEnabled {
+		t.Error("feedback role should stay enabled (default) when only worker is disabled")
 	}
 }
 

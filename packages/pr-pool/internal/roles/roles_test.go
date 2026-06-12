@@ -28,6 +28,21 @@ func TestNewRegistry_fromConfig(t *testing.T) {
 	if reg.Feedback.Kind != Feedback || reg.Worker.Kind != Worker {
 		t.Error("kinds wrong")
 	}
+	if !reg.Feedback.Enabled || !reg.Worker.Enabled {
+		t.Error("roles should be enabled by default")
+	}
+}
+
+func TestNewRegistry_enabledFlags(t *testing.T) {
+	cfg := config.Default()
+	cfg.WorkerEnabled = false
+	reg := NewRegistry(cfg)
+	if !reg.Feedback.Enabled {
+		t.Error("feedback should stay enabled")
+	}
+	if reg.Worker.Enabled {
+		t.Error("worker should be disabled when cfg.WorkerEnabled is false")
+	}
 }
 
 func TestSessionName(t *testing.T) {
@@ -60,7 +75,7 @@ func TestWorkerNudge_contract(t *testing.T) {
 func TestFeedbackNudge_contract(t *testing.T) {
 	reg := NewRegistry(withSkills(config.Default(), "/fb.md", "/wk.md"))
 	n := reg.Feedback.Nudge("zr-c1", "/ignored")
-	for _, sub := range []string{"/fb.md", "zr-c1", "open work bead", "child of the PR bead", "Close each feedback"} {
+	for _, sub := range []string{"/fb.md", "zr-c1", "open work bead", "child of the PR bead", "worker-ready", "Close each feedback"} {
 		if !strings.Contains(n, sub) {
 			t.Errorf("feedback nudge missing %q\n---\n%s", sub, n)
 		}

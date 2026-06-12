@@ -26,16 +26,24 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 		return nil, fmt.Errorf("discover: empty self_login (cannot resolve feedback ownership)")
 	}
 	var out []Dispatch
-	fb, err := discoverFeedback(ctx, br, reg.Feedback, selfLogin)
-	if err != nil {
-		return nil, err
+	if reg.Feedback.Enabled {
+		fb, err := discoverFeedback(ctx, br, reg.Feedback, selfLogin)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fb...)
+	} else {
+		slog.Info("role disabled; skipping discovery", "role", reg.Feedback.Name)
 	}
-	out = append(out, fb...)
-	wk, err := discoverWorker(ctx, br, reg.Worker)
-	if err != nil {
-		return nil, err
+	if reg.Worker.Enabled {
+		wk, err := discoverWorker(ctx, br, reg.Worker)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, wk...)
+	} else {
+		slog.Info("role disabled; skipping discovery", "role", reg.Worker.Name)
 	}
-	out = append(out, wk...)
 	return out, nil
 }
 

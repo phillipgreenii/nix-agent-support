@@ -30,6 +30,13 @@ type Config struct {
 	Dangerous     bool
 	SessionPrefix string
 
+	// Per-role enable flags. A disabled role is skipped at discovery (no
+	// dispatches). Both default true. Env: PR_POOL_FEEDBACK_ENABLED /
+	// PR_POOL_WORKER_ENABLED. (Maps to feedback.enabled / worker.enabled if/when
+	// the TOML loader lands — the deliberate future seam noted above.)
+	FeedbackEnabled bool
+	WorkerEnabled   bool
+
 	// Budget watchdog (chunk B). Token/Cost <= 0 means unlimited.
 	BudgetTokens int64
 	BudgetCost   int64 // cents
@@ -47,30 +54,32 @@ func Default() Config {
 	cwd, _ := os.Getwd()
 	state := stateHome()
 	return Config{
-		RepoRoot:      cwd,
-		BeadsPrefix:   "zr",
-		WorktreeDir:   state + "/pr-pool/worktrees",
-		SkillMD:       "",
-		WorkerSkillMD: "",
-		MaxFeedback:   1,
-		MaxWorker:     1,
-		MaxWait:       1800 * time.Second,
-		PollInterval:  10 * time.Second,
-		QuotaPaused:   "",
-		CICDDown:      "",
-		Effort:        "max",
-		Model:         "",
-		Dangerous:     true,
-		SessionPrefix: "pr-pool-",
-		BudgetTokens:  0,                // unlimited until ccpool N3
-		BudgetCost:    0,                // unlimited until ccpool N3
-		BudgetTime:    25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:   0.725,
-		CancelPct:     0.90,
-		HardPct:       1.00,
-		LogDir:        state + "/pr-pool/log",
-		ReminderMsg:   "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
-		WrapUpMsg:     "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
+		RepoRoot:        cwd,
+		BeadsPrefix:     "zr",
+		WorktreeDir:     state + "/pr-pool/worktrees",
+		SkillMD:         "",
+		WorkerSkillMD:   "",
+		MaxFeedback:     1,
+		MaxWorker:       1,
+		MaxWait:         1800 * time.Second,
+		PollInterval:    10 * time.Second,
+		QuotaPaused:     "",
+		CICDDown:        "",
+		Effort:          "max",
+		Model:           "",
+		Dangerous:       true,
+		SessionPrefix:   "pr-pool-",
+		FeedbackEnabled: true,
+		WorkerEnabled:   true,
+		BudgetTokens:    0,                // unlimited until ccpool N3
+		BudgetCost:      0,                // unlimited until ccpool N3
+		BudgetTime:      25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:     0.725,
+		CancelPct:       0.90,
+		HardPct:         1.00,
+		LogDir:          state + "/pr-pool/log",
+		ReminderMsg:     "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
+		WrapUpMsg:       "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
 	}
 }
 
@@ -92,6 +101,8 @@ func Load() Config {
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
 	c.Dangerous = envBool("PR_POOL_DANGEROUS", c.Dangerous)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
+	c.FeedbackEnabled = envBool("PR_POOL_FEEDBACK_ENABLED", c.FeedbackEnabled)
+	c.WorkerEnabled = envBool("PR_POOL_WORKER_ENABLED", c.WorkerEnabled)
 	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PR_POOL_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)

@@ -98,6 +98,32 @@ func TestDiscover_workerLabelFilter(t *testing.T) {
 	}
 }
 
+func TestDiscover_skipsDisabledRole(t *testing.T) {
+	rr := &routingRunner{
+		readyFeedback: `[{"id":"zr-mine","issue_type":"task","title":"process-feedback: A","parent":"zr-prA"}]`,
+		readyWorker:   `[{"id":"zr-w1"}]`,
+		show:          map[string]string{"zr-prA": `{"id":"zr-prA","metadata":{"author":"phillipg"}}`},
+	}
+	cfg := config.Default()
+	cfg.WorkerEnabled = false // worker disabled: its ready bead must be skipped
+	reg := roles.NewRegistry(cfg)
+	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got {
+		if d.Role.Kind == roles.Worker {
+			t.Errorf("disabled worker role should yield no dispatches; got %+v", got)
+		}
+	}
+	if len(got) != 1 || got[0].BeadID != "zr-mine" {
+		t.Fatalf("expected only the feedback dispatch; got %+v", got)
+	}
+	if rr.sawWorkerArgs != nil {
+		t.Errorf("disabled worker role must not even query bd ready; saw %v", rr.sawWorkerArgs)
+	}
+}
+
 func TestDiscover_orderFeedbackThenWorker(t *testing.T) {
 	rr := &routingRunner{
 		readyFeedback: `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x","parent":"zr-p"}]`,
