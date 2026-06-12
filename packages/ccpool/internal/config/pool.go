@@ -4,8 +4,10 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // PoolContext is the resolved location of the active pool. In default mode Root
@@ -70,5 +72,55 @@ func SocketFor(canonicalRoot string) string {
 	return "cc-" + hex.EncodeToString(sum[:8])
 }
 
-func canonicalize(p string) string { abs, _ := filepath.Abs(p); return filepath.Clean(abs) }
-func ensurePoolDir(root string) error { return nil }
+// canonicalize resolves symlinks + makes absolute + cleans. EvalSymlinks errors on
+// a non-existent leaf, so fall back to canonicalizing the PARENT and rejoining the
+// leaf (the dir may not exist yet — it is created by ensurePoolDir).
+func canonicalize(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	parent, leaf := filepath.Split(abs)
+	if rp, err := filepath.EvalSymlinks(filepath.Clean(parent)); err == nil {
+		return filepath.Join(rp, leaf)
+	}
+	return abs
+}
+
+// poolFileOK reports whether a dir entry name is one ccpool writes.
+func poolFileOK(name string) bool {
+	switch {
+	case name == "config.toml", name == "hook.log":
+		return true
+	case strings.HasPrefix(name, "store.db"): // store.db, -wal, -shm, -journal
+		return true
+	case strings.HasSuffix(name, ".lock"): // per-session <name>.lock
+		return true
+	}
+	return false
+}
+
+// ensurePoolDir validates an existing pool dir's contents against the allowlist, or
+// creates a missing leaf (parent must exist; mode 0700; never mkdir -p).
+func ensurePoolDir(root string) error {
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		if _, perr := os.Stat(filepath.Dir(root)); perr != nil {
+			return fmt.Errorf("pool parent does not exist: %s", filepath.Dir(root))
+		}
+		return os.Mkdir(root, 0o700)
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !poolFileOK(e.Name()) {
+			return fmt.Errorf("not a ccpool pool dir: %s contains %s", root, e.Name())
+		}
+	}
+	return nil
+}

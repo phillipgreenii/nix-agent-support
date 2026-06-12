@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -52,5 +53,69 @@ func TestResolvePool_defaultMode(t *testing.T) {
 	}
 	if pc.Socket != "" {
 		t.Errorf("default mode Socket = %q, want empty (config.toml supplies it)", pc.Socket)
+	}
+}
+
+func TestEnsurePoolDir_allowlist(t *testing.T) {
+	dir := t.TempDir()
+	// allowlist-only contents → OK
+	for _, f := range []string{"config.toml", "store.db", "store.db-wal", "store.db-shm", "store.db-journal", "alpha.lock", "beta.lock", "hook.log"} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ensurePoolDir(dir); err != nil {
+		t.Fatalf("allowlist-only dir must be accepted: %v", err)
+	}
+	// a foreign file → refuse
+	foreign := filepath.Join(dir, "README.md")
+	_ = os.WriteFile(foreign, nil, 0o600)
+	if err := ensurePoolDir(dir); err == nil {
+		t.Error("foreign file must be refused")
+	}
+	_ = os.Remove(foreign)
+	// a foreign subdirectory → refuse
+	_ = os.Mkdir(filepath.Join(dir, "src"), 0o700)
+	if err := ensurePoolDir(dir); err == nil {
+		t.Error("foreign subdirectory must be refused")
+	}
+}
+
+func TestEnsurePoolDir_create(t *testing.T) {
+	parent := t.TempDir()
+	leaf := filepath.Join(parent, "newpool")
+	if err := ensurePoolDir(leaf); err != nil {
+		t.Fatalf("leaf with existing parent must be created: %v", err)
+	}
+	info, err := os.Stat(leaf)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("leaf not created: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("leaf mode = %o, want 0700", info.Mode().Perm())
+	}
+	// missing parent → error (no mkdir -p)
+	if err := ensurePoolDir(filepath.Join(parent, "missing", "deep")); err == nil {
+		t.Error("missing parent must error (no mkdir -p)")
+	}
+}
+
+func TestResolvePool_canonicalIdentity(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "")
+	parent := t.TempDir()
+	real := filepath.Join(parent, "pool")
+	_ = os.Mkdir(real, 0o700)
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	a, _ := ResolvePool(real)
+	b, _ := ResolvePool(link)       // via symlink
+	c, _ := ResolvePool(real + "/") // trailing slash
+	if a.Root != b.Root || a.Root != c.Root {
+		t.Errorf("same dir mapped to different roots: %q %q %q", a.Root, b.Root, c.Root)
+	}
+	if a.Socket != b.Socket {
+		t.Errorf("same dir mapped to different sockets: %q %q", a.Socket, b.Socket)
 	}
 }
