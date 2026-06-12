@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,9 +24,11 @@ func runNew(args []string) int {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
 	cwd := fs.String("cwd", "", "project dir (default: current dir)")
 	model := fs.String("model", "", "claude model")
+	env := envFlag{}
+	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional name
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...]")
 		return 2
 	}
 	name := pos[0]
@@ -71,13 +74,28 @@ func runNew(args []string) int {
 		Sleep:     time.Sleep,
 	})
 
-	h, err := svc.Ensure(context.Background(), name, dir, m)
+	h, err := svc.Ensure(context.Background(), name, dir, m, session.EnsureOpts{Env: env})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new:", err)
 		return 1
 	}
 	fmt.Printf("%s\t%s\t%s\n", h.Name, h.State, shortUUID(h.UUID))
 	return 0
+}
+
+// envFlag collects repeated `--env KEY=VAL` into a map. Implements flag.Value so
+// `ccpool new` can take --env any number of times (pr-pool injects one per key).
+type envFlag map[string]string
+
+func (e envFlag) String() string { return "" }
+
+func (e envFlag) Set(kv string) error {
+	k, v, ok := strings.Cut(kv, "=")
+	if !ok {
+		return fmt.Errorf("invalid --env %q, want KEY=VAL", kv)
+	}
+	e[k] = v
+	return nil
 }
 
 // truster adapts trust.EnsureTrusted to session.Truster (binds the path).

@@ -75,7 +75,7 @@ func runReply(args []string) int {
 		cwd, _ = os.Getwd()
 	}
 	// Resume if cold, then send.
-	if _, err := svc.Ensure(context.Background(), name, cwd, cfg.Claude.DefaultModel); err != nil {
+	if _, err := svc.Ensure(context.Background(), name, cwd, cfg.Claude.DefaultModel, session.EnsureOpts{}); err != nil {
 		fmt.Fprintln(os.Stderr, "ensure:", err)
 		return 1
 	}

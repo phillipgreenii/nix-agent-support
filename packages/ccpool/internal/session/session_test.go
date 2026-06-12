@@ -58,7 +58,7 @@ func TestEnsure_new_insertsBeforeLaunch_waitsReady(t *testing.T) {
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
 
-	h, err := s.Ensure(ctx, "alpha", "/tmp/proj", "")
+	h, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{})
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -91,6 +91,68 @@ func TestEnsure_new_insertsBeforeLaunch_waitsReady(t *testing.T) {
 	}
 }
 
+// TestEnsure_mergesCallerEnv asserts that EnsureOpts.Env is injected into the
+// session at launch alongside ccpool's own correlation markers (the pool worker
+// stalls without BEADS_ACTOR/BEADS_DIR/WORKSPACE_ROOT). Merge policy: ccpool's
+// reserved markers (CCPOOL_NAME/CCPOOL_UUID/PA_MONITOR_NO_NUDGE) are
+// authoritative and win over a colliding caller key — hooks correlate the store
+// row off those markers, so a caller must never be able to clobber them.
+func TestEnsure_mergesCallerEnv(t *testing.T) {
+	tests := []struct {
+		name      string
+		callerEnv map[string]string
+		wantEnv   map[string]string // subset assertions against the launched env
+	}{
+		{
+			name:      "caller env injected alongside markers",
+			callerEnv: map[string]string{"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo"},
+			wantEnv: map[string]string{
+				"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo",
+				"CCPOOL_NAME": "alpha", "CCPOOL_UUID": "uuid-1", "PA_MONITOR_NO_NUDGE": "1",
+			},
+		},
+		{
+			name:      "reserved ccpool markers win over caller override attempts",
+			callerEnv: map[string]string{"CCPOOL_UUID": "hijack", "CCPOOL_NAME": "hijack", "BEADS_DIR": "/repo/.beads"},
+			wantEnv:   map[string]string{"CCPOOL_UUID": "uuid-1", "CCPOOL_NAME": "alpha", "BEADS_DIR": "/repo/.beads"},
+		},
+		{
+			name:      "nil caller env keeps only the hardcoded markers",
+			callerEnv: nil,
+			wantEnv:   map[string]string{"CCPOOL_NAME": "alpha", "CCPOOL_UUID": "uuid-1", "PA_MONITOR_NO_NUDGE": "1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := newMemStore(t)
+			ft := &fakeTmux{live: map[string]bool{}}
+			waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
+				_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+				return wait.Outcome{State: store.Ready}, nil
+			})
+			s := New(Deps{
+				Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+				Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+				NewUUID: func() string { return "uuid-1" },
+				Now:     func() time.Time { return time.Unix(100, 0) },
+			})
+			if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{Env: tt.callerEnv}); err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			if len(ft.newCalls) != 1 {
+				t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+			}
+			got := ft.newCalls[0].env
+			for k, want := range tt.wantEnv {
+				if got[k] != want {
+					t.Errorf("env[%q] = %q, want %q (full env: %v)", k, got[k], want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestEnsure_liveSessionReused_noLaunch(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
@@ -102,7 +164,7 @@ func TestEnsure_liveSessionReused_noLaunch(t *testing.T) {
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
 		NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", ""); err != nil {
+	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(ft.newCalls) != 0 {
@@ -149,7 +211,7 @@ func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
 		Now:     func() time.Time { return time.Unix(1, 0) },
 	})
 
-	h, err := s.Ensure(ctx, "beta", "/tmp/proj", "")
+	h, err := s.Ensure(ctx, "beta", "/tmp/proj", "", EnsureOpts{})
 	if err != nil {
 		t.Fatalf("Ensure resume: %v", err)
 	}

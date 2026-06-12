@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"time"
 
@@ -100,18 +101,29 @@ type Handle struct {
 	State       store.State
 }
 
+// EnsureOpts carries the per-call launch extras threaded into a launched or
+// resumed session. The zero value is a valid "no extras" launch, so callers
+// that only need resume-or-reuse (e.g. reply) can pass EnsureOpts{}.
+type EnsureOpts struct {
+	// Env is caller-supplied environment injected into the session at launch
+	// (e.g. BEADS_ACTOR/BEADS_DIR/WORKSPACE_ROOT for pool workers). It is merged
+	// with ccpool's own correlation markers at launch time; see launchAndWait for
+	// the merge policy (ccpool's markers are authoritative on conflict).
+	Env map[string]string
+}
+
 // Ensure returns a live, ready handle for name, launching or resuming as needed.
-func (s *Service) Ensure(ctx context.Context, name, cwd, model string) (Handle, error) {
+func (s *Service) Ensure(ctx context.Context, name, cwd, model string, opts EnsureOpts) (Handle, error) {
 	var h Handle
 	err := s.withLock(name, func() error {
 		var e error
-		h, e = s.ensureLocked(ctx, name, cwd, model)
+		h, e = s.ensureLocked(ctx, name, cwd, model, opts)
 		return e
 	})
 	return h, err
 }
 
-func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Handle, error) {
+func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string, opts EnsureOpts) (Handle, error) {
 	tmuxName := s.d.Prefix + name
 	row, exists, err := s.d.Store.GetByName(ctx, name)
 	if err != nil {
@@ -147,7 +159,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Ha
 			return Handle{}, err
 		}
 		argv := launch.BuildResume(launch.Spec{ClaudeBin: s.d.ClaudeBin, Name: name, PluginDir: s.d.PluginDir, Model: orDefault(model, row.Model)})
-		return s.launchAndWait(ctx, name, tmuxName, row.UUID, row.CWD, since, argv)
+		return s.launchAndWait(ctx, name, tmuxName, row.UUID, row.CWD, since, argv, opts.Env)
 	}
 
 	// Brand new.
@@ -165,7 +177,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string) (Ha
 		return Handle{}, err
 	}
 	argv := launch.BuildNew(launch.Spec{ClaudeBin: s.d.ClaudeBin, UUID: uuid, Name: name, PluginDir: s.d.PluginDir, Model: model})
-	return s.launchAndWait(ctx, name, tmuxName, uuid, cwd, since, argv)
+	return s.launchAndWait(ctx, name, tmuxName, uuid, cwd, since, argv, opts.Env)
 }
 
 // currentGeneration reads the row's current generation (the wait baseline).
@@ -181,12 +193,15 @@ func (s *Service) currentGeneration(ctx context.Context, name string) (int64, er
 }
 
 // launchAndWait starts the tmux session (in cwd) and blocks until generation > since.
-func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid, cwd string, since int64, argv []string) (Handle, error) {
-	env := map[string]string{
-		"CCPOOL_NAME":         name,
-		"CCPOOL_UUID":         uuid,
-		"PA_MONITOR_NO_NUDGE": "1",
-	}
+// extraEnv (caller-supplied) is injected first; ccpool's own correlation markers
+// are written last so they are authoritative — hooks key the store row off
+// CCPOOL_NAME/CCPOOL_UUID, so a caller must never be able to clobber them.
+func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid, cwd string, since int64, argv []string, extraEnv map[string]string) (Handle, error) {
+	env := make(map[string]string, len(extraEnv)+3)
+	maps.Copy(env, extraEnv)
+	env["CCPOOL_NAME"] = name
+	env["CCPOOL_UUID"] = uuid
+	env["PA_MONITOR_NO_NUDGE"] = "1"
 	if err := s.d.Tmux.NewSession(tmuxName, cwd, env, argv); err != nil {
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)
 	}
