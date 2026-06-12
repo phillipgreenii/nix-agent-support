@@ -17,15 +17,25 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/pr-pool/internal/usage"
+	"github.com/phillipgreenii/pr-pool/internal/watchdog"
 )
 
 type Orchestrator struct {
-	CC   ccpool.Runner
-	BD   beads.Runner
-	Reg  roles.Registry
-	Cfg  config.Config
-	now  func() time.Time                           // clock seam (default time.Now)
-	tick func(context.Context, time.Duration) error // cancellable wait (default below)
+	CC          ccpool.Runner
+	BD          beads.Runner
+	Reg         roles.Registry
+	Cfg         config.Config
+	now         func() time.Time                           // clock seam (default time.Now)
+	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
+	usageReader usage.Reader                               // default usage.NewTranscriptReader()
+}
+
+func (o *Orchestrator) reader() usage.Reader {
+	if o.usageReader != nil {
+		return o.usageReader
+	}
+	return usage.NewTranscriptReader()
 }
 
 func (o *Orchestrator) clock() time.Time {
@@ -87,6 +97,8 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 // workOne dispatches a single bead: Ensure a fresh per-bead session, Send the
 // nudge (async), then wait for completion. The session is torn down by the
 // pass-level teardownAll, not here (so strays are reaped uniformly).
+// For worker dispatches the nudge includes the budget prompt line and completion
+// races against the budget watchdog. Feedback dispatches keep the prior behavior.
 func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
 	env := map[string]string{
@@ -102,6 +114,9 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 		return fmt.Errorf("ensure %s: %w", name, err)
 	}
 	nudge := d.Role.Nudge(d.BeadID, o.Cfg.WorktreeDir)
+	if d.Role.Kind == roles.Worker {
+		nudge += o.Cfg.WorkerBudget().PromptLine()
+	}
 	if err := o.CC.Send(ctx, name, nudge, ccpool.ModeNoWait); err != nil {
 		// J-dispatch-fail: feedback unclaims; worker is left for human inspection.
 		if d.Role.Kind == roles.Feedback {
@@ -109,7 +124,43 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 		}
 		return fmt.Errorf("send %s: %w", name, err)
 	}
-	return o.waitDone(ctx, d, name)
+	if d.Role.Kind != roles.Worker {
+		return o.waitDone(ctx, d, name) // feedback: no watchdog (unchanged behavior)
+	}
+	return o.workerWaitWithWatchdog(ctx, d, name)
+}
+
+// workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.
+// First to return a terminal result wins and cancels the other. The cancelled
+// loser returns ctx.Err() (waitDone skips its failure action by design), so only
+// the winner's outcome takes effect.
+func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Dispatch, name string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	wd := &watchdog.Watchdog{
+		Reader:      o.reader(),
+		CC:          o.CC,
+		BD:          o.BD,
+		Budget:      o.Cfg.WorkerBudget(),
+		RepoRoot:    o.Cfg.RepoRoot,
+		WorktreeDir: o.Cfg.WorktreeDir,
+		ReminderMsg: o.Cfg.ReminderMsg,
+		WrapUpMsg:   o.Cfg.WrapUpMsg,
+		Git:         watchdog.OSGit{},
+		Now:         o.now,
+		Poll:        o.Cfg.PollInterval,
+	}
+
+	type res struct{ err error }
+	done := make(chan res, 2) // buffered 2: both goroutines can send without blocking
+	go func() { done <- res{o.waitDone(ctx, d, name)} }()
+	go func() { done <- res{wd.Run(ctx, name, d.BeadID)} }()
+
+	first := <-done // first terminal result wins
+	cancel()        // stop the loser
+	<-done          // drain the loser (it returns ctx.Err(), no terminal action)
+	return first.err
 }
 
 // waitDone polls the bead status until DoneSignal fires (success) or MAX_WAIT

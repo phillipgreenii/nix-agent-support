@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,10 +12,30 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
+// rampReader is a fake usage.Reader that serves a fixed sequence of Snapshots
+// (last entry repeats once exhausted). Used to inject a usage ramp into tests.
+// Mutex-guarded so it is safe for concurrent use (watchdog goroutine).
+type rampReader struct {
+	mu  sync.Mutex
+	seq []usage.Snapshot
+	i   int
+}
+
+func (r *rampReader) Read(_ context.Context, _ string) (usage.Snapshot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.seq[min(r.i, len(r.seq)-1)]
+	r.i++
+	return s, nil
+}
+
 // fakeCC records calls and serves scripted List results.
+// mu guards listIdx so List is safe for concurrent goroutines (workerWaitWithWatchdog).
 type fakeCC struct {
+	mu      sync.Mutex
 	ensured []string
 	sent    []string
 	closed  []string
@@ -37,6 +58,8 @@ func (f *fakeCC) Close(_ context.Context, name string) error {
 	return nil
 }
 func (f *fakeCC) List(_ context.Context) ([]ccpool.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if len(f.listSeq) == 0 {
 		return nil, nil
 	}
@@ -49,7 +72,10 @@ func (f *fakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 }
 
 // scriptBD serves a status sequence per bead id and records update calls.
+// mu guards shared state so Run is safe for concurrent goroutines
+// (workerWaitWithWatchdog runs waitDone + watchdog in parallel; both call BD.Run).
 type scriptBD struct {
+	mu          sync.Mutex
 	statusSeq   map[string][]string
 	idx         map[string]int
 	updates     []string
@@ -59,6 +85,8 @@ type scriptBD struct {
 }
 
 func (s *scriptBD) Run(_ context.Context, args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	switch args[0] {
 	case "ready":
 		if contains(args, "--label") {
@@ -115,9 +143,19 @@ func join(a []string) string {
 
 // manualClock advances only when the test ticks it, so waitDone polling is
 // deterministic and instant.
-type manualClock struct{ t time.Time }
+// mu guards t so it is safe for concurrent use when workerWaitWithWatchdog runs
+// waitDone (which advances via tick) and the watchdog (which reads via Now)
+// in parallel goroutines.
+type manualClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
 
-func (c *manualClock) now() time.Time { return c.t }
+func (c *manualClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
 
 // tickAdvancing returns a tick func that advances the clock by d each poll, so a
 // finite-deadline loop terminates without real sleeping.
@@ -126,7 +164,9 @@ func (c *manualClock) tickAdvancing() func(context.Context, time.Duration) error
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		c.mu.Lock()
 		c.t = c.t.Add(d)
+		c.mu.Unlock()
 		return nil
 	}
 }
@@ -410,5 +450,28 @@ func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
 	}
 	if !contains(cc.closed, "pr-pool-worker-zr-stray") {
 		t.Errorf("teardown must run even on discover error; closed=%v", cc.closed)
+	}
+}
+
+// TestWorkOne_workerBudgetHardStopUnclaimsNoHuman verifies that when the budget
+// watchdog fires a hard stop for a worker dispatch: workOne returns a budget
+// error, the bead is left open+unclaimed, and the human label is NOT added.
+func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
+	cfg := fastCfg()
+	cfg.BudgetTokens = 1000                                                  // finite token cap so the ramp can trip it
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}} // never completes on its own
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
+	o := newOrch(cc, bd, cfg)
+	o.usageReader = &rampReader{seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately over 100%
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	err := o.workOne(context.Background(), d)
+	if err == nil {
+		t.Fatal("expected a budget error")
+	}
+	if !hasUpdate(bd, "update zr-w --status=open --assignee=") {
+		t.Errorf("hard stop must unclaim; updates=%v", bd.updates)
+	}
+	if hasUpdate(bd, "update zr-w --add-label human") {
+		t.Error("hard stop must NOT add human")
 	}
 }
