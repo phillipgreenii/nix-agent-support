@@ -81,6 +81,15 @@ func decodeOne(b []byte) (Issue, error) {
 	return one, nil
 }
 
+// Comment adds a comment to a bead: `bd comment <id> <text>`.
+func Comment(ctx context.Context, r Runner, id, text string) error {
+	_, err := r.Run(ctx, "comment", id, text)
+	if err != nil {
+		return fmt.Errorf("comment %s: %w", id, err)
+	}
+	return nil
+}
+
 func decodeMany(b []byte) []Issue {
 	var arr []Issue
 	if err := json.Unmarshal(b, &arr); err == nil {

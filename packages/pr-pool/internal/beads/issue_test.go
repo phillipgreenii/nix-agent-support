@@ -95,3 +95,14 @@ func joinArgs(a []string) string {
 	}
 	return s
 }
+
+func TestComment_argv(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := Comment(context.Background(), fr, "zr-1", "interrupted — budget"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"comment", "zr-1", "interrupted — budget"}
+	if joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	}
+}
