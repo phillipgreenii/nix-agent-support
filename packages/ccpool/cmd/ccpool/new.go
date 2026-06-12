@@ -71,6 +71,7 @@ func runNew(args []string) int {
 		Prefix:    cfg.Tmux.Prefix,
 		PluginDir: cfg.Claude.PluginDir,
 		ClaudeBin: cfg.Claude.Bin,
+		PoolPath:  cfg.PoolRoot,
 		NewUUID:   func() string { return uuid.NewString() },
 		Now:       time.Now,
 		Sleep:     time.Sleep,

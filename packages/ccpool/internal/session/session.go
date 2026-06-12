@@ -83,6 +83,7 @@ type Deps struct {
 	NotifyOn   []string        // states that trigger a notification
 	Socket     string
 	Prefix     string
+	PoolPath   string // canonical pool dir; injected as CCPOOL_POOL into sessions; "" = default mode
 	PluginDir  string
 	ClaudeBin  string
 	NewUUID    func() string
@@ -215,6 +216,9 @@ func (s *Service) launchAndWait(ctx context.Context, name, tmuxName, uuid, cwd s
 	env["CCPOOL_NAME"] = name
 	env["CCPOOL_UUID"] = uuid
 	env["PA_MONITOR_NO_NUDGE"] = "1"
+	if s.d.PoolPath != "" {
+		env["CCPOOL_POOL"] = s.d.PoolPath
+	}
 	if err := s.d.Tmux.NewSession(tmuxName, cwd, env, argv); err != nil {
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)
 	}
