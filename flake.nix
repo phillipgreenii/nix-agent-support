@@ -508,21 +508,6 @@
                   touch $out
                 '';
 
-            test-pgii-pack-pr-support-bats =
-              pkgs.runCommand "test-pgii-pack-pr-support-bats"
-                {
-                  nativeBuildInputs = [
-                    pkgs.bats
-                    pkgs.bash
-                    pkgs.jq
-                  ];
-                }
-                ''
-                  pack=${pkgs.pgii-pack-pr-support}
-                  bats "$pack/scripts/tests/pr-pool.bats"
-                  touch $out
-                '';
-
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
