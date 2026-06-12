@@ -629,6 +629,27 @@
                 exec ./scripts/gen-proto.sh
               '';
             };
+            # ccpool-contract runs the on-demand, build-tagged (//go:build contract)
+            # Claude Code contract suite and prints the per-OUTCOME bucket tally via
+            # contract/classify.jq. It drives the REAL claude binary (uses the user's
+            # ambient $HOME/$PATH for OAuth, tmux, sqlite3), spends tokens (~8-12 min),
+            # and is deliberately NOT a flake check / not in CI. See
+            # packages/ccpool/contract/README.md.
+            ccpool-contract = pkgs.writeShellApplication {
+              name = "ccpool-contract";
+              runtimeInputs = [
+                pkgs.go
+                pkgs.jq
+                pkgs.coreutils
+              ];
+              text = ''
+                cd "''${1:-packages/ccpool}"
+                go test -tags contract -timeout=0 -p 1 -json ./cmd/ccpool/... \
+                  | tee /tmp/ccpool-contract.json \
+                  | jq -r -f contract/classify.jq \
+                  | sort | uniq -c
+              '';
+            };
           };
 
           devShells.default = phillipgreenii-nix-base.lib.mkDevShell {
