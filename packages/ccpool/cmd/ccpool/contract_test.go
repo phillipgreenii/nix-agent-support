@@ -27,7 +27,11 @@ func TestContract_Lifecycle_NewReachesReadyAndLive(t *testing.T) {
 	liveAssert(t, "new reports ready", strings.Contains(out, "ready"), true)
 	out, _ = sb.ccp("doctor")
 	liveAssert(t, "doctor shows alpha live", sessionLineHas(out, "alpha", "live=true"), true)
-	pending(t, "state is RECONCILED ready (doctor state= is cached)", "reconciled state query")
+	// Reconciled (Unit B): a freshly-ready session is `idle` in the reconciled
+	// vocabulary (the cached doctor state= is `ready`; the two are intentionally
+	// distinct — see the Unit B design).
+	out, _ = sb.ccp("state", "alpha")
+	liveAssert(t, "reconciled state is idle after new", strings.Contains(out, "state=idle"), true)
 }
 
 func TestContract_Lifecycle_CloseEndsSession(t *testing.T) {
@@ -60,7 +64,8 @@ func TestContract_Cancel_StreamingInterrupts(t *testing.T) {
 	// the pane is STATIC (prose stops, "Interrupted" shown, nothing animates), so
 	// it confirms regardless of the persistent "Thought for Ns"/⏺ markers it retains.
 	liveAssert(t, "cancel during streaming exits 0", code, 0)
-	pending(t, "session reaches reconciled idle after cancel", "reconciled state query (Unit B)")
+	out, _ := sb.ccp("state", "s")
+	liveAssert(t, "reconciled idle after cancel", strings.Contains(out, "state=idle"), true)
 }
 
 func TestContract_Cancel_ThinkingInterrupts(t *testing.T) {
@@ -73,7 +78,8 @@ func TestContract_Cancel_ThinkingInterrupts(t *testing.T) {
 	// (the spinner stops animating) even though no "Interrupted" marker prints in
 	// the thinking-rewind path -> exit 0. Was baseline 6 before the fix.
 	liveAssert(t, "cancel during thinking exits 0", code, 0)
-	pending(t, "session reaches reconciled idle after cancel", "reconciled state query (Unit B)")
+	out, _ := sb.ccp("state", "k")
+	liveAssert(t, "reconciled idle after cancel", strings.Contains(out, "state=idle"), true)
 }
 
 func TestContract_Cancel_IdleNormalizes(t *testing.T) {
@@ -128,7 +134,13 @@ func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {
 	_, code, elapsed := sb.ccpTimed(20*time.Second, "reply", "n", thinkingPrompt, "--no-wait")
 	liveAssert(t, "--no-wait exit 0", code, 0)
 	liveAssert(t, "--no-wait returns under 15s (does not block on the turn)", elapsed < 15*time.Second, true)
-	pending(t, "row is 'working' after --no-wait", "reconciled state query")
+	// Gate on the thinking phase before reading state: the --no-wait returned
+	// while the turn is in flight, but the reconciled query needs the pane to be
+	// visibly animating (else it can flake to idle in the launch gap). Assert only
+	// state=working, not the sub (thinking vs streaming is a phase race).
+	sb.waitForThinking("n", 30*time.Second)
+	out, _ := sb.ccp("state", "n")
+	liveAssert(t, "reconciled working after --no-wait", strings.Contains(out, "state=working"), true)
 }
 
 func TestContract_Interrupt_ThinkingCancelsAndDelivers(t *testing.T) {
@@ -208,7 +220,13 @@ func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) 
 		scaffoldFail(t, "AskUserQuestion picker never rendered (model may not have called the tool)")
 	}
 	liveAssert(t, "AskUserQuestion picker rendered", seen, true)
-	pending(t, "row reaches needs_input + the pending question text is queryable", "reconciled state + associated info (AskUserQuestion gap)")
+	// Reconciled (Unit B): a dangling AskUserQuestion reads waiting-for-human via
+	// the transcript IsAwaitingInput signal — the gap the --no-wait send leaves
+	// (no Notification hook, no needs_input written to the row) is reconciled here.
+	out, _ := sb.ccp("state", "a")
+	liveAssert(t, "reconciled waiting-for-human", strings.Contains(out, "state=waiting-for-human"), true)
+	// The pending question TEXT is associated info — DEFERRED to a later unit.
+	pending(t, "pending question TEXT is queryable", "associated info (deferred)")
 }
 
 func TestContract_Reap_EvictsOldestOverCap(t *testing.T) {

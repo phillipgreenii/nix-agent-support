@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"summarize Unix pipes"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"A pipe connects one process's stdout to another's stdin."}]}}
+{"type":"last-prompt","prompt":"summarize Unix pipes"}
+{"type":"ai-title","title":"Unix pipes summary"}
+{"type":"mode","mode":"default","sessionId":"x"}

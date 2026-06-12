@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 
+	"github.com/phillipgreenii/ccpool/internal/pane"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -31,14 +31,6 @@ const (
 	cancelStableRun      = 4                      // identical consecutive reads to confirm (K)
 	cancelMaxSamples     = 16                     // total captures before giving up (N) ≈ 6s budget
 )
-
-// reLiveCounter matches the live spinner's elapsed-seconds counter, e.g.
-// "(5s · ↓ 13 tokens · thinking…" — present ONLY mid-turn (it ticks each ~1s).
-// Used only as a defense-in-depth guard on the confirming pane: it rejects a
-// pathological frozen-but-byte-stable counter render. It is NOT the primary
-// signal (pane-stability is) and does NOT cover a counter-less phase such as a
-// long tool call — see the design's tool-call residual.
-var reLiveCounter = regexp.MustCompile(`\(\d+s · `)
 
 // confirmStable polls the pane until it is STATIC — cancelStableRun consecutive
 // CapturePane reads are byte-identical — meaning the turn stopped animating, and
@@ -66,7 +58,7 @@ func (s *Service) confirmStable(tmuxName string) (bool, error) {
 			run = 1
 			prev = cur
 		}
-		if run >= cancelStableRun && !reLiveCounter.MatchString(cur) {
+		if run >= cancelStableRun && !pane.ReLiveCounter.MatchString(cur) {
 			return true, nil
 		}
 	}

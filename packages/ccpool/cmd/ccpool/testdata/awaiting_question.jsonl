@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"which path?"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me ask."},{"type":"tool_use","id":"toolu_abc","name":"AskUserQuestion"}]}}
+{"type":"mode","mode":"default","sessionId":"x"}
