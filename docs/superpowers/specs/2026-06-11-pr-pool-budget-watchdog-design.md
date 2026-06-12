@@ -62,8 +62,9 @@ lands.
    signal ("later we might do more"). It propagates up `workOne` and is logged by
    the drain loop.
 9. **Hard stop is also recorded as a structured JSONL event** in **pr-pool's own
-   per-run session-event log** (formalizing A's "structured log under XDG" seam).
-   This is pr-pool's log — B never writes to Claude's transcript (it only reads it).
+   per-run session-event log** — a **net-new component** (A has no structured-log
+   seam today, only `slog` to the default logger; `LogDir` + `PR_POOL_LOG_DIR` are
+   new). This is pr-pool's log — B never writes to Claude's transcript (read-only).
 10. **Worktree path comes from ccpool** (the session's working path), not the
     fragile `<WORKTREE_DIR>/<slug>-pr<n>` naming convention — with a hard safety
     guard (below).
@@ -89,9 +90,9 @@ internal/
     watchdog.go          #   Watchdog{Reader, CC, BD, Log, Budget, ...}; Run(ctx, sess) -> error
     terminal.go          #   the 100% sequence (guarded reset, note, unclaim, close)
     *_test.go
-  eventlog/              # B-owned structured JSONL session-event log
-    eventlog.go          #   Writer.Emit(event); JSONL line per event under LOG_DIR
-    eventlog_test.go
+  eventlog/              # B-owned structured JSONL session-event log (NET-NEW)
+    eventlog.go          #   Writer.Emit(event): sync.Mutex around marshal+O_APPEND write
+    eventlog_test.go     #   (one writer, many worker watchdogs at cap>1 => mutex required)
 ```
 
 Changes to A's packages (some additive, some NOT — see **Prerequisites**):
@@ -106,9 +107,11 @@ Changes to A's packages (some additive, some NOT — see **Prerequisites**):
   `MaxWait` (30m)**, e.g. `25m` — see Prerequisite P1/I3), threshold fractions,
   the price table, the reminder/wrap-up message templates, and `LogDir`. All
   `PR_POOL_*`-overridable.
-- `internal/roles`: the worker `Nudge` gains a budget argument/line. **Not purely
-  additive** — it changes `Worker.Nudge`'s signature, so A's call site
-  (`orchestrator.workOne`) and `TestWorkerNudge_contract` must be updated.
+- `internal/roles`: add a `BudgetLine(budget) string` helper (returns the budget
+  sentence, "" when fully unlimited). **Keep `Worker.Nudge`'s signature unchanged**
+  — the orchestrator appends `BudgetLine` to the worker nudge for worker dispatches
+  only. This keeps the blast radius to a pure addition (no edit to `Nudge`,
+  `TestWorkerNudge_contract`, or `TestFeedbackNudge_contract`).
 - `internal/orchestrator`: `workOne` runs the watchdog **concurrently** with
   `waitDone` for worker dispatches (§Integration) — which requires reworking
   `waitDone` to honor context cancellation (Prerequisite P1).
@@ -122,16 +125,27 @@ beads, roles, config}. `orchestrator` → +watchdog.
 An adversarial review against A's shipped code surfaced four prerequisites the
 plan MUST front-load before the watchdog itself:
 
-- **P1 — `waitDone` must honor context cancellation.** A's `waitDone`
-  (`orchestrator.go`) loops purely on `time.Now().Before(deadline)` and never
-  reads its `ctx`. The watchdog/`waitDone` race (§Integration) is impossible until
-  `waitDone` is reworked to `select` on `ctx.Done()` vs a poll ticker. This edits
-  A's code and its existing `waitDone` tests — in the blast radius, not additive.
-  Coupled with **I3**: the watchdog's Time default (e.g. 25m) MUST be strictly
-  below A's `MaxWait` (30m default) so the 100% hard stop reliably precedes
-  `waitDone`'s timeout; combined with P1 (watchdog cancels `waitDone`), this
-  prevents the double-handling where the watchdog unclaims **and** `waitDone`'s
-  worker-timeout adds `human` on the same bead.
+- **P1 — `waitDone` must honor context cancellation _and_ get a clock seam.** A's
+  `waitDone` (`orchestrator.go:106`) loops on `time.Now().Before(deadline)` and
+  never reads `ctx`. Rework it to `select` on `ctx.Done()` vs a poll tick. **Two
+  non-obvious sub-requirements:**
+  - **Clock seam (was missed):** the deadline itself uses real wall-clock
+    (`time.Now()`), and A's existing timeout tests rely on a real `MaxWait=50ms`
+    deadline with a no-op `o.sleep` (orchestrator_test.go:119,126). A bare ticker
+    rework leaves the deadline timing-coupled/flaky. Add an injectable
+    `now func() time.Time` (or drive the deadline from `context.WithDeadline`) so
+    both `waitDone` and the watchdog poll instantly under test. **Tests to
+    re-verify/rewrite:** `TestWaitDone_workerTimeoutAddsHumanNoUnclaim`,
+    `TestWaitDone_feedbackTimeoutUnclaims`, `TestWaitDone_paneDiesStillInProgress_failure`.
+  - **Structural single-terminal guarantee (not ordering alone):** on `ctx`
+    cancellation `waitDone` MUST return `ctx.Err()` and **NOT** call `o.fail`
+    (which would `AddHuman`). Run `waitDone` + watchdog under an `errgroup`/
+    `context.WithCancel` where the first to reach a terminal result cancels the
+    other and **the loser, seeing `ctx.Err() != nil`, returns it without running
+    any failure action.** Ordering (**I3:** Time default 25m < `MaxWait` 30m)
+    only makes the watchdog _usually_ win first — it does not eliminate the race
+    where a just-cancelled `waitDone` iteration still fires `AddHuman` alongside
+    the watchdog's unclaim. The skip-action-on-cancel rule is what eliminates it.
 - **P2 — importing `claude-transcript` ends pr-pool's stdlib-only/`vendorHash=null`
   status.** Add `require` + `replace github.com/phillipgreenii/claude-transcript
 => ../claude-transcript` to `go.mod`, and rewrite `default.nix` to mirror ccpool:
@@ -141,11 +155,13 @@ plan MUST front-load before the watchdog itself:
 - **P3 — `beads.Comment` does not exist.** Add it (`r.Run(ctx, "comment", id,
 text)`) before the terminal sequence can note the bead.
 - **P4 — `session.ErrCancelUnconfirmed` is ccpool-internal**, unreachable across
-  pr-pool's CLI seam. Either define a pr-pool-side `ccpool.ErrCancelUnconfirmed`
-  that `CLIRunner.Cancel` returns when `ccpool cancel` exits **6** (requires
-  capturing the exit code, not just `CombinedOutput`'s generic error), OR retry
-  Cancel once on **any** error (simpler; Cancel is idempotent/safe). The plan
-  picks one; the typed-retry in §Watchdog/§Terminal is not buildable until then.
+  pr-pool's CLI seam. Define a pr-pool-side `ccpool.ErrCancelUnconfirmed` that
+  `CLIRunner.Cancel` returns when `ccpool cancel` exits **6**. This is **cheap, no
+  runner restructuring**: `CombinedOutput()` already returns `*exec.ExitError`
+  wrapped with `%w` (cli.go), so `Cancel` adds `errors.As(err, &exitErr) &&
+exitErr.ExitCode() == 6` (the same pattern beads/runner.go already uses). (A
+  retry-once-on-any-error fallback is acceptable but unnecessary given how cheap
+  the typed path is.)
 
 ## The `usage.Reader` interface (anti-corruption boundary)
 
@@ -185,9 +201,13 @@ type Reader interface {
 exposes **no event-iterator / parse function** (only `LastAssistantText` /
 `IsAwaitingInput`), so B hand-rolls the JSONL scan itself — a `bufio.Scanner` with
 a large buffer (`scanner.Buffer(make([]byte, 1<<20), 1<<24)`; transcript lines are
-huge), `json.Unmarshal` per line into `claudetranscript.Event`, summing each
-event's `Usage` components and taking the last non-empty `Model`. B owns the
-aggregation and depends only on the exported types, not on pa-monitor.
+huge), `json.Unmarshal` per line into `claudetranscript.Event`, summing the
+`Usage` of **`Event.Type == "assistant"` events only** (decision 2 = "over
+assistant turns"; user/system/synthetic lines must be excluded or cache_read
+double-counts — mirror `LastAssistantText`'s own assistant filter) and taking the
+last non-empty assistant `Model`. The testdata fixture MUST include a non-assistant
+line carrying a stray `usage` to prove it is excluded. B owns the aggregation and
+depends only on the exported types, not on pa-monitor.
 
 ## Cost estimation
 
@@ -196,10 +216,14 @@ aggregation and depends only on the exported types, not on pa-monitor.
 type ModelPrice struct{ InputPerMTok, OutputPerMTok, CacheWritePerMTok, CacheReadPerMTok float64 }
 type PriceTable map[string]ModelPrice
 
-// EstimateCents returns the estimated cost in integer cents for a Snapshot.
-// Unknown model -> falls back to a configured default price (and the event log
-// notes the fallback) so a new model id never silently reads as $0.
-func EstimateCents(s Snapshot, t PriceTable) int
+// EstimateCents returns the estimated cost in integer cents (int64, matching
+// budget.Limit) for a Snapshot. Rounding is explicit (truncate toward zero after
+// summing per-component float costs). int64 avoids 32-bit overflow at the
+// tens-of-millions-of-tokens magnitudes cache_read reaches. Unknown model ->
+// falls back to a configured default price (and the eventlog notes the fallback)
+// so a new model id never silently reads as $0. A unit test locks the arithmetic
+// at a ~50M-token magnitude.
+func EstimateCents(s Snapshot, t PriceTable) int64
 ```
 
 The default `PriceTable` is a **fresh small literal in `cost.go`** authored from
@@ -329,12 +353,13 @@ guarantees safety regardless of which ccpool provides.
 
 ## Worker nudge budget line
 
-`roles.Worker.Nudge` is extended to append a budget sentence so the agent knows
-its limits (J9): e.g. _"You have a budget of up to N tokens / $X / Tm minutes for
-this bead; if you receive a 'wrap up' message, commit your notes and finish
-promptly."_ Unlimited dimensions are omitted from the sentence. The feedback nudge
-is unchanged. (This changes `Worker.Nudge`'s inputs to include the `Budget`;
-update A's call site + tests accordingly.)
+`roles.BudgetLine(budget) string` returns a budget sentence so the agent knows its
+limits (J9): e.g. _"You have a budget of up to N tokens / $X / Tm minutes for this
+bead; if you receive a 'wrap up' message, commit your notes and finish promptly."_
+Unlimited dimensions are omitted; a fully-unlimited budget yields `""`. The
+**orchestrator appends `BudgetLine(budget)` to the worker nudge** for worker
+dispatches (a pure concatenation at the call site) — `Worker.Nudge`'s signature
+and the feedback nudge are untouched (no test blast radius).
 
 ## ccpool contract additions (we own ccpool)
 
@@ -390,6 +415,12 @@ All with injected fakes — no live processes, no real transcripts:
 ## Out of scope
 
 - Live verification (blocked on N3) and any change to A's bash retirement.
+- **The worktree reset firing in v1.** It is built + guarded + tested, but because
+  A launches sessions with `--cwd REPO_ROOT` and the guard fails closed when the
+  reported path == `RepoRoot`, the reset is a guaranteed **no-op until ccpool
+  reports the live session cwd** (an N3-adjacent capability). So v1 effectively
+  ships cancel + note + unclaim + close + eventlog at the hard stop; the reset
+  activates later. The plan must not present worktree-reset as a working v1 action.
 - Per-agent / per-session distinct budgets (the object supports it; not wired).
 - Pausing/resuming a session under budget pressure beyond the J9 ladder.
 - Reacting to the emitted `ErrBudgetExceeded` beyond logging + unclaim ("later we
