@@ -26,9 +26,11 @@ func runNew(args []string) int {
 	model := fs.String("model", "", "claude model")
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
+	skipPerms := fs.Bool("dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to claude (required for non-interactive workers)")
+	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional name
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...] [--dangerously-skip-permissions] [--effort v]")
 		return 2
 	}
 	name := pos[0]
@@ -74,7 +76,11 @@ func runNew(args []string) int {
 		Sleep:     time.Sleep,
 	})
 
-	h, err := svc.Ensure(context.Background(), name, dir, m, session.EnsureOpts{Env: env})
+	h, err := svc.Ensure(context.Background(), name, dir, m, session.EnsureOpts{
+		Env:                        env,
+		DangerouslySkipPermissions: *skipPerms,
+		Effort:                     *effort,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new:", err)
 		return 1

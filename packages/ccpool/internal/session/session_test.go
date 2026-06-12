@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,39 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEnsure_threadsLaunchFlagsToArgv asserts that EnsureOpts launch flags reach
+// the claude argv that ensureLocked hands to tmux — the glue between the CLI
+// flags and launch.BuildNew. Without --dangerously-skip-permissions a dispatched
+// worker stalls on the first tool prompt.
+func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "uuid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{DangerouslySkipPermissions: true, Effort: "max"}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	joined := strings.Join(ft.newCalls[0].argv, " ")
+	if !strings.Contains(joined, "--dangerously-skip-permissions") {
+		t.Errorf("argv missing --dangerously-skip-permissions: %q", joined)
+	}
+	if !strings.Contains(joined, "--effort max") {
+		t.Errorf("argv missing --effort max: %q", joined)
 	}
 }
 
