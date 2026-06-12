@@ -23,6 +23,7 @@ type Config struct {
 	DBPath     string `toml:"-"`
 	StateDir   string `toml:"-"`
 	RuntimeDir string `toml:"-"`
+	PoolRoot   string `toml:"-"` // canonical pool dir; "" in default mode
 }
 
 type Notify struct {
@@ -84,33 +85,38 @@ func xdg(envVar, fallbackRel string) string {
 	return filepath.Join(home, fallbackRel)
 }
 
-// StateDirPath resolves $XDG_STATE_HOME/ccpool (or ~/.local/state/ccpool) using
-// only env/home — no config.toml read — so diagnostics logging works even when
-// Load() itself fails on a malformed config.
+// StateDirPath resolves the active pool's state dir (holding hook.log) from
+// CCPOOL_POOL using only env/fs — no config.toml read — so diagnostics logging
+// survives a malformed config. Default mode → $XDG_STATE_HOME/ccpool.
 func StateDirPath() string {
+	if pool := os.Getenv("CCPOOL_POOL"); pool != "" {
+		return canonicalize(pool)
+	}
 	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "ccpool")
 }
 
-// Load reads config.toml (if present) over the defaults and resolves paths.
+// Load reads the active pool's config.toml (if present) over the defaults and
+// resolves paths. The active pool comes from CCPOOL_POOL (set by --pool in main).
 func Load() (Config, error) {
+	pc, err := ResolvePool(os.Getenv("CCPOOL_POOL"))
+	if err != nil {
+		return Config{}, err
+	}
 	c := defaults()
-	cfgHome := xdg("XDG_CONFIG_HOME", ".config")
-	cfgFile := filepath.Join(cfgHome, "ccpool", "config.toml")
-	if _, err := os.Stat(cfgFile); err == nil {
-		if _, err := toml.DecodeFile(cfgFile, &c); err != nil {
-			return Config{}, fmt.Errorf("decode %s: %w", cfgFile, err)
+	if _, err := os.Stat(pc.ConfigPath); err == nil {
+		if _, err := toml.DecodeFile(pc.ConfigPath, &c); err != nil {
+			return Config{}, fmt.Errorf("decode %s: %w", pc.ConfigPath, err)
 		}
 	} else if !os.IsNotExist(err) {
-		return Config{}, fmt.Errorf("stat %s: %w", cfgFile, err)
+		return Config{}, fmt.Errorf("stat %s: %w", pc.ConfigPath, err)
 	}
-
-	dataHome := xdg("XDG_DATA_HOME", ".local/share")
-	c.DBPath = filepath.Join(dataHome, "ccpool", "store.db")
-	c.StateDir = StateDirPath()
-	if rt := os.Getenv("XDG_RUNTIME_DIR"); rt != "" {
-		c.RuntimeDir = filepath.Join(rt, "ccpool")
-	} else {
-		c.RuntimeDir = filepath.Join(os.TempDir(), "ccpool")
+	c.DBPath = pc.DBPath
+	c.StateDir = pc.StateDir
+	c.RuntimeDir = pc.RuntimeDir
+	c.PoolRoot = pc.Root
+	if pc.Root != "" { // pool-dir mode: derived socket + constant prefix override config
+		c.Tmux.Socket = pc.Socket
+		c.Tmux.Prefix = pc.Prefix
 	}
 	return c, nil
 }

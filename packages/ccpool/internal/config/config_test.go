@@ -7,6 +7,33 @@ import (
 	"time"
 )
 
+func TestLoad_poolMode(t *testing.T) {
+	pool := t.TempDir()
+	t.Setenv("CCPOOL_POOL", pool)
+	// canonicalize expected path to match resolver output (macOS /var → /private/var symlink)
+	poolCanon, _ := filepath.EvalSymlinks(pool)
+	// no config.toml in the pool → built-in defaults
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.PoolRoot != poolCanon {
+		t.Errorf("PoolRoot = %q, want %q", c.PoolRoot, poolCanon)
+	}
+	if c.DBPath != filepath.Join(poolCanon, "store.db") {
+		t.Errorf("DBPath = %q", c.DBPath)
+	}
+	if c.StateDir != poolCanon {
+		t.Errorf("StateDir = %q, want pool root (hook.log lives here)", c.StateDir)
+	}
+	if c.Pool.MaxSessions != 6 || c.Tmux.Prefix != "cc-" {
+		t.Errorf("no-config pool must use built-in defaults: max=%d prefix=%q", c.Pool.MaxSessions, c.Tmux.Prefix)
+	}
+	if c.Tmux.Socket == "ccpool" || c.Tmux.Socket == "" {
+		t.Errorf("pool-mode socket must be derived, got %q", c.Tmux.Socket)
+	}
+}
+
 func TestLoad_defaultsWhenNoFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
