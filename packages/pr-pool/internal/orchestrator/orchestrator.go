@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/complete"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
+	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
@@ -26,6 +27,7 @@ type Orchestrator struct {
 	BD          beads.Runner
 	Reg         roles.Registry
 	Cfg         config.Config
+	Log         *eventlog.Writer                           // may be nil (no-op); threaded onto Watchdog
 	now         func() time.Time                           // clock seam (default time.Now)
 	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
 	usageReader usage.Reader                               // default usage.NewTranscriptReader()
@@ -142,6 +144,7 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 		Reader:      o.reader(),
 		CC:          o.CC,
 		BD:          o.BD,
+		Log:         o.Log,
 		Budget:      o.Cfg.WorkerBudget(),
 		RepoRoot:    o.Cfg.RepoRoot,
 		WorktreeDir: o.Cfg.WorktreeDir,
@@ -187,6 +190,9 @@ func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name s
 			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
 				return nil
 			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return o.fail(ctx, d, "session exited before completing")
 		}
 		if !o.clock().Before(deadline) {
@@ -194,6 +200,9 @@ func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name s
 			status, _ = beads.Status(ctx, o.BD, d.BeadID)
 			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
 				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
 			return o.fail(ctx, d, fmt.Sprintf("not complete within %s", o.Cfg.MaxWait))
 		}

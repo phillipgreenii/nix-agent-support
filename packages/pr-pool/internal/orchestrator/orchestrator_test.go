@@ -435,6 +435,29 @@ func TestWaitDone_ctxCancelDoesNotFail(t *testing.T) {
 	}
 }
 
+// TestWaitDone_ctxCancelledBeforeDeathPathNoFail covers the structural
+// single-terminal guard (Fix 2): when ctx is already cancelled AND the session
+// is reported NOT live AND bead status is in_progress (the death path), waitDone
+// must return ctx.Err() and run NO failure action (no bead update).
+func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
+	// Session is not live on the very first List call — the death path triggers.
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateFailed}},
+	}}
+	o := newOrch(cc, bd, fastCfg())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before waitDone is called (watchdog already won)
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	err := o.waitDone(ctx, d, "pr-pool-worker-zr-w")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled on cancelled-ctx death path, got %v", err)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("cancelled-ctx death path must NOT run o.fail; updates=%v", bd.updates)
+	}
+}
+
 func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
 	cfg := fastCfg()
 	// empty selfLogin causes Discover to return an error (real precondition check)

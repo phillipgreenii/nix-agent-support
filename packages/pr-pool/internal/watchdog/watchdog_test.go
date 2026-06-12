@@ -1,13 +1,17 @@
 package watchdog
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
+	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
@@ -134,4 +138,63 @@ func hasPrefix(calls []string, p string) bool {
 		}
 	}
 	return false
+}
+
+// TestRun_emitsEventsWhenLogSet verifies that when a Watchdog has Log set, the
+// reminder, cancel, and hard_stop events are actually written to the JSONL file.
+// Prior to this fix no test set Log, so the emit path was untested end-to-end.
+func TestRun_emitsEventsWhenLogSet(t *testing.T) {
+	// token ramp: crosses 72.5% -> 90% -> 100%
+	r := &fakeReader{seq: []usage.Snapshot{
+		{OutputTokens: 730},
+		{OutputTokens: 920},
+		{OutputTokens: 1000},
+	}}
+	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+
+	logPath := t.TempDir() + "/events.jsonl"
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatalf("eventlog.New: %v", err)
+	}
+	defer func() { _ = lw.Close() }()
+
+	wd := newWD(r, cc, bd, tokBudget(1000))
+	wd.Git = noopGit{}
+	wd.Log = lw
+
+	runErr := wd.Run(context.Background(), "s", "zr-1")
+	if !errors.Is(runErr, ErrBudgetExceeded) {
+		t.Fatalf("want ErrBudgetExceeded, got %v", runErr)
+	}
+	_ = lw.Close()
+
+	// parse all JSONL lines and collect event kinds
+	f, err := os.Open(logPath)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	kinds := map[string]int{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var rec map[string]any
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			t.Fatalf("bad JSON line %q: %v", sc.Text(), err)
+		}
+		if k, ok := rec["kind"].(string); ok {
+			kinds[k]++
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	for _, want := range []string{"reminder", "cancel", "hard_stop"} {
+		if kinds[want] == 0 {
+			t.Errorf("expected %q event in log; got kinds=%v", want, kinds)
+		}
+	}
 }

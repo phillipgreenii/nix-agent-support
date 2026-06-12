@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
+	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
@@ -55,6 +58,12 @@ func runDrain(args []string) int {
 		BD:  br,
 		Reg: roles.NewRegistry(cfg),
 		Cfg: cfg,
+	}
+	if lw, err := eventlog.New(filepath.Join(cfg.LogDir, "events.jsonl")); err != nil {
+		slog.Warn("eventlog unavailable; watchdog events will not be written", "err", err)
+	} else {
+		defer func() { _ = lw.Close() }()
+		o.Log = lw
 	}
 	if err := o.DrainOnce(ctx, selfLogin); err != nil {
 		fmt.Fprintln(os.Stderr, "drain:", err)
