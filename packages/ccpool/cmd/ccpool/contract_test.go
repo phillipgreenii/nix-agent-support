@@ -32,9 +32,7 @@ func TestContract_Lifecycle_NewReachesReadyAndLive(t *testing.T) {
 
 func TestContract_Lifecycle_CloseEndsSession(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "alpha"); code != 0 {
-		t.Fatalf("setup new failed")
-	}
+	sb.mustNew("alpha")
 	_, code, _ := sb.ccpTimed(20*time.Second, "close", "alpha")
 	liveAssert(t, "close exit code", code, 0)
 	// Objective: the tmux session is gone.
@@ -44,9 +42,7 @@ func TestContract_Lifecycle_CloseEndsSession(t *testing.T) {
 
 func TestContract_Lifecycle_ClosePurgeRemovesRow(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "alpha"); code != 0 {
-		t.Fatalf("setup new failed")
-	}
+	sb.mustNew("alpha")
 	if _, code := sb.ccp("close", "alpha", "--purge"); code != 0 {
 		t.Fatalf("close --purge failed")
 	}
@@ -56,9 +52,7 @@ func TestContract_Lifecycle_ClosePurgeRemovesRow(t *testing.T) {
 
 func TestContract_Cancel_StreamingInterrupts(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "s"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("s")
 	sb.ccp("reply", "s", thinkingPrompt, "--no-wait")
 	sb.waitForStreaming("s", 90*time.Second) // scaffoldFails if streaming never starts
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "s")
@@ -68,9 +62,7 @@ func TestContract_Cancel_StreamingInterrupts(t *testing.T) {
 
 func TestContract_Cancel_ThinkingIsUnconfirmed(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "k"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("k")
 	sb.ccp("reply", "k", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("k", 30*time.Second)
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "k")
@@ -82,9 +74,7 @@ func TestContract_Cancel_ThinkingIsUnconfirmed(t *testing.T) {
 
 func TestContract_Cancel_IdleNormalizes(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "i"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("i")
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "i") // ready/idle session
 	liveAssert(t, "cancel on idle exits 0", code, 0)
 }
@@ -97,9 +87,7 @@ func TestContract_Cancel_NonexistentErrors(t *testing.T) {
 
 func TestContract_Cancel_StaleMarkerFalsePositive(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "m"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("m")
 	// Produce a real streaming interrupt so the pane retains "Interrupted".
 	sb.ccp("reply", "m", thinkingPrompt, "--no-wait")
 	sb.waitForStreaming("m", 90*time.Second)
@@ -123,9 +111,7 @@ func TestContract_Cancel_StaleMarkerFalsePositive(t *testing.T) {
 
 func TestContract_Send_BusyRefused(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "b"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("b")
 	sb.ccp("reply", "b", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("b", 30*time.Second)
 	_, code := sb.ccp("reply", "b", "second message") // no flags -> ModeRefuseIfBusy
@@ -134,9 +120,7 @@ func TestContract_Send_BusyRefused(t *testing.T) {
 
 func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "n"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("n")
 	_, code, elapsed := sb.ccpTimed(20*time.Second, "reply", "n", thinkingPrompt, "--no-wait")
 	liveAssert(t, "--no-wait exit 0", code, 0)
 	liveAssert(t, "--no-wait returns under 15s (does not block on the turn)", elapsed < 15*time.Second, true)
@@ -145,9 +129,7 @@ func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {
 
 func TestContract_Interrupt_ThinkingAborts(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "x"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("x")
 	sb.ccp("reply", "x", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("x", 30*time.Second)
 	out, code, _ := sb.ccpTimed(20*time.Second, "reply", "x", "PROBE_MUST_NOT_DELIVER", "--interrupt")
@@ -162,9 +144,7 @@ func TestContract_Interrupt_ThinkingAborts(t *testing.T) {
 func attendFixture(t *testing.T, sb *sandbox, states map[string]string) {
 	t.Helper()
 	for name := range states {
-		if _, code := sb.ccp("new", name); code != 0 {
-			t.Fatalf("fixture new %q failed", name)
-		}
+		sb.mustNew(name)
 	}
 	for name, st := range states {
 		sb.setState(name, st) // both a row AND a live pane (filter drops paneless rows)
@@ -203,9 +183,7 @@ func TestContract_Attend_NumberedAndFzfBranchSelection(t *testing.T) {
 
 func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "a"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("a")
 	const askPrompt = "Use the AskUserQuestion tool right now as your first action: ask 'CCPROBE which path?' with options 'Alpha' and 'Bravo'. Do nothing else first."
 	sb.ccp("reply", "a", askPrompt, "--no-wait")
 	// The AskUserQuestion gap: no Notification hook fires; ccpool detects it via the

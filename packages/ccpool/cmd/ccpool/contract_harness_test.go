@@ -334,11 +334,26 @@ func (sb *sandbox) waitForStreaming(name string, budget time.Duration) {
 	scaffoldFail(sb.t, "streaming phase never observed for %q within %s", name, budget)
 }
 
+// mustNew ensures a session exists, retrying once on a transient launch failure
+// (real claude can hiccup — rate/usage limits, slow start — under load). A
+// persistent failure is an ENV/HARNESS problem, not a contract verdict, so it
+// scaffoldFails (classified) rather than failing opaquely.
+func (sb *sandbox) mustNew(name string) {
+	sb.t.Helper()
+	out, code := sb.ccp("new", name)
+	if code == 0 {
+		return
+	}
+	time.Sleep(2 * time.Second)
+	out, code = sb.ccp("new", name)
+	if code != 0 {
+		scaffoldFail(sb.t, "new %q failed twice (transient real-claude/env issue, e.g. rate/usage limit): exit=%d %s", name, code, out)
+	}
+}
+
 func TestContract_PhaseGate_ThinkingObserved(t *testing.T) {
 	sb := newSandbox(t)
-	if _, code := sb.ccp("new", "p"); code != 0 {
-		t.Fatalf("new failed")
-	}
+	sb.mustNew("p")
 	sb.ccp("reply", "p", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("p", 30*time.Second) // scaffoldFails if not seen
 	liveAssert(t, "thinking observed", true, true)
