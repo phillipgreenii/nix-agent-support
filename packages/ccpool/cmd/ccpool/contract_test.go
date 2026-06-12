@@ -29,7 +29,8 @@ func TestContract_Lifecycle_NewReachesReadyAndLive(t *testing.T) {
 	liveAssert(t, "doctor shows alpha live", sessionLineHas(out, "alpha", "live=true"), true)
 	// Reconciled (Unit B): a freshly-ready session is `idle` in the reconciled
 	// vocabulary (the cached doctor state= is `ready`; the two are intentionally
-	// distinct — see the Unit B design).
+	// distinct). The streaming-via-diff branch is gated on a Working/Starting row,
+	// so a freshly-ready session still drawing its TUI reads idle, not streaming.
 	out, _ = sb.ccp("state", "alpha")
 	liveAssert(t, "reconciled state is idle after new", strings.Contains(out, "state=idle"), true)
 }
@@ -219,14 +220,16 @@ func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) 
 	if !seen {
 		scaffoldFail(t, "AskUserQuestion picker never rendered (model may not have called the tool)")
 	}
-	liveAssert(t, "AskUserQuestion picker rendered", seen, true)
-	// Reconciled (Unit B): a dangling AskUserQuestion reads waiting-for-human via
-	// the transcript IsAwaitingInput signal — the gap the --no-wait send leaves
-	// (no Notification hook, no needs_input written to the row) is reconciled here.
-	out, _ := sb.ccp("state", "a")
-	liveAssert(t, "reconciled waiting-for-human", strings.Contains(out, "state=waiting-for-human"), true)
-	// The pending question TEXT is associated info — DEFERRED to a later unit.
-	pending(t, "pending question TEXT is queryable", "associated info (deferred)")
+	liveAssert(t, "AskUserQuestion prompt accepted (model began the turn)", seen, true)
+	// PENDING (pg2-7a5b): reconciled `waiting-for-human` is NOT reliably detectable
+	// for a LIVE paused AskUserQuestion. Real-claude evidence (2026-06-12): while the
+	// turn is paused awaiting the answer, the JSONL persists NO assistant event (only
+	// the user prompt + metadata), so `IsAwaitingInput` returns false; and the only
+	// live signal — the pane picker render — has no pinned stable marker yet (this
+	// `seen` check even false-positives on the echoed prompt text). The state +
+	// IsAwaitingInput fallback ship in Unit B; reliable live detection is deferred.
+	pending(t, "reconciled waiting-for-human for a live AskUserQuestion + question TEXT",
+		"live picker pane marker (transcript persists no assistant event while paused) — see pg2-7a5b")
 }
 
 func TestContract_Reap_EvictsOldestOverCap(t *testing.T) {

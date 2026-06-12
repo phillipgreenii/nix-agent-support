@@ -26,6 +26,21 @@
 >   (Unit A's `confirmStable`) and `internal/state` import `internal/pane`. One source of truth, no
 >   backwards dependency.
 
+> **REAL-CLAUDE VALIDATION (2026-06-12) — two findings folded in:**
+>
+> - **Startup-draw gate (fix).** A freshly-launched session still DRAWING its TUI churns the pane,
+>   which the counter-less 3-frame diff misread as `streaming/working` (intermittently failing the
+>   `Lifecycle_New → idle` assertion). Fix: the streaming-via-diff branch is now gated on the store
+>   row corroborating a turn (`Working`/`Starting`); the thinking-counter path stays ungated. A
+>   freshly-`Ready` session with an animating pane now reads `idle` (validated deterministically).
+> - **`waiting-for-human` live-detection is DEFERRED (`pg2-7a5b`).** A LIVE paused AskUserQuestion
+>   persists NO `assistant` event to the JSONL (only the user prompt + metadata), so `IsAwaitingInput`
+>   returns false and the picker reads `idle`. The state vocabulary + the `IsAwaitingInput` fallback
+>   (correct when a dangling question IS persisted) ship in Unit B, but reliable LIVE detection needs
+>   a pane picker marker (not yet pinned) and is tracked in `pg2-7a5b`. The `NeedsInput` contract
+>   assertion is therefore a `pending`, not a live assert. The other four states
+>   (`idle`/`working`(`thinking`|`streaming`)/`error`/`not-live`) are real-claude validated.
+
 ## Context
 
 `ccpool doctor <name>` prints `state=<store.State>` straight from the SQLite row

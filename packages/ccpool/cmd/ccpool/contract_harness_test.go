@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -99,10 +101,11 @@ func newSandbox(t *testing.T) *sandbox {
 		t.Fatalf("symlink ccpool onto PATH: %v", err)
 	}
 
-	// base = t.TempDir() = /tmp/<TestName><rand>/NNN, where NNN is "001" for the
-	// FIRST TempDir of every test. Using only filepath.Base(base) collides across
-	// tests; incorporate the unique per-test parent dir for a distinct socket.
-	socket := "cc-contract-" + filepath.Base(filepath.Dir(base)) + "-" + filepath.Base(base)
+	// base = t.TempDir() (unique per test). Derive a SHORT socket name from a hash
+	// of it: a literal "cc-contract-<TestName>-001" overflows the ~104-char Unix
+	// socket path limit for long test names (tmux: "File name too long"). The hash
+	// is per-test-unique (base carries the random suffix) and fixed-length.
+	socket := "ccc-" + hex.EncodeToString(func() []byte { h := sha256.Sum256([]byte(base)); return h[:8] }())
 	prefix := "cct-"
 
 	repoRoot, err := filepath.Abs("../..") // cmd/ccpool -> packages/ccpool

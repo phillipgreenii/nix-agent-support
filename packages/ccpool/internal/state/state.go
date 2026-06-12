@@ -139,9 +139,17 @@ func Classify(in Inputs) Result {
 	}
 	v := ClassifyFrame(in.Frame1, in.Frame2, in.Frame3, in.NumFrames)
 	if v.InFlight {
-		res.State = Working
-		res.SubState = v.Sub
-		return res
+		// The thinking COUNTER is a reliable turn signal (a freshly-launched session
+		// never renders `(Ns · `), so trust it unconditionally. Counter-less pane
+		// animation (streaming detected via frame-diff) is AMBIGUOUS with a session
+		// still DRAWING its TUI at launch, so only treat it as a turn when the store
+		// row corroborates one is underway (Working/Starting). Otherwise fall through
+		// to the settled branches — a freshly-ready session reads idle, not streaming.
+		if v.Sub == SubThinking || in.Row.State == store.Working || in.Row.State == store.Starting {
+			res.State = Working
+			res.SubState = v.Sub
+			return res
+		}
 	}
 	// Settled.
 	if in.Awaiting {

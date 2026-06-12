@@ -97,6 +97,28 @@ func TestClassify(t *testing.T) {
 			want:   Idle,
 			wantLK: store.Ready,
 		},
+		{
+			// GATE: counter-less animation on a NON-working row is NOT a streaming
+			// turn — a freshly-launched session still DRAWING its TUI churns the pane
+			// at startup, which the pane-diff cannot distinguish from prose streaming.
+			// So the streaming-via-diff branch is gated on the row corroborating a
+			// turn (Working/Starting); a Ready row settles to idle.
+			name:    "animating_but_ready_row_is_idle_not_streaming",
+			in:      Inputs{Name: "a", Live: true, Frame1: proseA, Frame2: proseB, Frame3: proseB, NumFrames: 3, Row: store.Session{State: store.Ready}},
+			want:    Idle,
+			wantSub: SubNone,
+			wantLK:  store.Ready,
+		},
+		{
+			// The thinking COUNTER is a reliable turn signal (startup draw never
+			// renders it), so the counter path is NOT gated: a counter on a Ready row
+			// still classifies working/thinking.
+			name:    "counter_on_ready_row_still_working",
+			in:      Inputs{Name: "a", Live: true, Frame1: counter, NumFrames: 1, Row: store.Session{State: store.Ready}},
+			want:    Working,
+			wantSub: SubThinking,
+			wantLK:  store.Ready,
+		},
 	}
 
 	for _, tc := range cases {
