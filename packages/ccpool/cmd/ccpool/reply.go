@@ -91,10 +91,7 @@ func runReply(args []string) int {
 	res, err := svc.Send(context.Background(), name, prompt, mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "reply:", err)
-		if errors.Is(err, session.ErrBusy) {
-			return 5 // dedicated "busy" exit code (spec §12/§20)
-		}
-		return 1
+		return replyExitCode(err)
 	}
 	switch res.State {
 	case store.Done:
@@ -112,4 +109,20 @@ func runReply(args []string) int {
 		return 4
 	}
 	return 0
+}
+
+// replyExitCode maps a Send error to reply's CLI exit code. ErrBusy -> 5;
+// ErrCancelUnconfirmed -> 6 (the `--interrupt`-could-not-confirm case — sendLocked
+// wraps it as "interrupt: %w", so errors.Is sees through the wrap). 1 stays the
+// generic catch-all: exit code 1 must not carry a specific meaning, so a
+// distinguishable outcome gets its own code >=2 (mirrors standalone cancel's 6).
+func replyExitCode(err error) int {
+	switch {
+	case errors.Is(err, session.ErrBusy):
+		return 5
+	case errors.Is(err, session.ErrCancelUnconfirmed):
+		return 6
+	default:
+		return 1
+	}
 }

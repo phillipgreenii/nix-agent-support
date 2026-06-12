@@ -56,20 +56,24 @@ func TestContract_Cancel_StreamingInterrupts(t *testing.T) {
 	sb.ccp("reply", "s", thinkingPrompt, "--no-wait")
 	sb.waitForStreaming("s", 90*time.Second) // scaffoldFails if streaming never starts
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "s")
+	// Unchanged: still exit 0. Now justified by pane-stability — after the cancel
+	// the pane is STATIC (prose stops, "Interrupted" shown, nothing animates), so
+	// it confirms regardless of the persistent "Thought for Ns"/⏺ markers it retains.
 	liveAssert(t, "cancel during streaming exits 0", code, 0)
-	pending(t, "session reaches reconciled idle after cancel", "reconciled state query")
+	pending(t, "session reaches reconciled idle after cancel", "reconciled state query (Unit B)")
 }
 
-func TestContract_Cancel_ThinkingIsUnconfirmed(t *testing.T) {
+func TestContract_Cancel_ThinkingInterrupts(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("k")
 	sb.ccp("reply", "k", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("k", 30*time.Second)
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "k")
-	// BASELINE: today thinking-cancel cannot be confirmed -> exit 6. Pinning the
-	// observed value means a future fix (exit 0) trips this and forces re-triage.
-	baseline(t, "pg2-33gl", "cancel during thinking exit code", code, 6)
-	pending(t, "thinking cancel should reach idle + exit 0", "reconciled state query / cancel fix")
+	// LIVE (pg2-33gl fixed): pane-stability confirms the thinking turn stopped
+	// (the spinner stops animating) even though no "Interrupted" marker prints in
+	// the thinking-rewind path -> exit 0. Was baseline 6 before the fix.
+	liveAssert(t, "cancel during thinking exits 0", code, 0)
+	pending(t, "session reaches reconciled idle after cancel", "reconciled state query (Unit B)")
 }
 
 func TestContract_Cancel_IdleNormalizes(t *testing.T) {
@@ -85,28 +89,28 @@ func TestContract_Cancel_NonexistentErrors(t *testing.T) {
 	liveAssert(t, "cancel nonexistent is non-zero", code != 0, true)
 }
 
-func TestContract_Cancel_StaleMarkerFalsePositive(t *testing.T) {
+func TestContract_Cancel_StaleMarkerIgnored(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("m")
-	// Produce a real streaming interrupt so the pane retains "Interrupted".
+	// Produce a real streaming interrupt so the pane retains a stale "Interrupted"
+	// (+ "Thought for Ns" / ⏺) marker in the visible pane.
 	sb.ccp("reply", "m", thinkingPrompt, "--no-wait")
 	sb.waitForStreaming("m", 90*time.Second)
-	sb.ccp("cancel", "m") // pane now shows "Interrupted"
-	// Start a fresh thinking turn; force the row to working so cancel bursts.
+	sb.ccp("cancel", "m") // pane now shows a stale "Interrupted"
+	// Start a fresh thinking turn and cancel it.
 	sb.ccp("reply", "m", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("m", 30*time.Second)
-	// Precondition: the false-positive case requires the stale "Interrupted"
-	// marker to STILL be visible in the pane (tmux capture-pane has no
-	// scrollback). If a fresh thinking turn scrolled it out, interruptLanded
-	// would return false -> exit 6, falsely signalling the pg2-33gl bug got
-	// fixed. That is a setup failure, not a contract change.
-	if !reInterrupted.MatchString(sb.cap("m")) {
-		scaffoldFail(t, "stale Interrupted marker scrolled out of the visible pane; cannot set up the false-positive case")
-	}
+	// Diagnostic: whether the stale marker is still visible. Under pane-stability
+	// it does NOT matter (static text never affects the change-detection), so this
+	// is logged, not gated — the cancel must succeed either way. (Contrast the old
+	// marker-grep, which this stale line false-positived.)
+	staleMarkerPresent := reInterrupted.MatchString(sb.cap("m"))
 	_, code, _ := sb.ccpTimed(15*time.Second, "cancel", "m")
-	// BASELINE: the stale "Interrupted" line false-positives interruptLanded ->
-	// thinking-cancel wrongly exits 0. Expected to FLIP to 6 (or idle) once fixed.
-	baseline(t, "pg2-33gl", "stale-marker thinking cancel (false positive) exit code", code, 0)
+	// LIVE (pg2-33gl fixed): pane-stability ignores the stale static marker and
+	// confirms the FRESH thinking turn's cancel -> exit 0 (a correct 0, where the
+	// old code's 0 here was a false positive off the stale marker).
+	liveAssert(t, "cancel of fresh thinking turn exits 0 despite a stale Interrupted marker", code, 0)
+	t.Logf("OUTCOME=info test=%q stale marker present at cancel time: %v", t.Name(), staleMarkerPresent)
 }
 
 func TestContract_Send_BusyRefused(t *testing.T) {
@@ -127,17 +131,20 @@ func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {
 	pending(t, "row is 'working' after --no-wait", "reconciled state query")
 }
 
-func TestContract_Interrupt_ThinkingAborts(t *testing.T) {
+func TestContract_Interrupt_ThinkingCancelsAndDelivers(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("x")
 	sb.ccp("reply", "x", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("x", 30*time.Second)
-	out, code, _ := sb.ccpTimed(20*time.Second, "reply", "x", "PROBE_MUST_NOT_DELIVER", "--interrupt")
-	// BASELINE: interrupt during thinking cannot confirm the cancel -> aborts -> exit 1.
-	baseline(t, "pg2-33gl", "reply --interrupt during thinking exit code", code, 1)
-	liveAssert(t, "interrupt abort does not paste the probe", strings.Contains(sb.cap("x"), "PROBE_MUST_NOT_DELIVER"), false)
+	out, code, _ := sb.ccpTimed(60*time.Second, "reply", "x", "PROBE_SHOULD_DELIVER", "--interrupt")
+	// LIVE (pg2-33gl fixed, INVERTED from the old abort baseline): interrupt during
+	// thinking now cancels the turn (pane-stability confirms) and DELIVERS the new
+	// prompt -> exit 0, and the probe IS pasted/answered. The distinct exit code 6
+	// only fires when the cancel genuinely cannot be confirmed (covered by the
+	// fake-driven unit test TestSendInterrupt_abortsOnUnconfirmedCancel).
+	liveAssert(t, "interrupt during thinking exits 0", code, 0)
+	liveAssert(t, "interrupt delivers the probe after cancelling", strings.Contains(sb.cap("x"), "PROBE_SHOULD_DELIVER"), true)
 	_ = out
-	pending(t, "interrupt should carry a distinct exit code, not generic 1", "distinct interrupt exit code (exit-code-1-is-general-error)")
 }
 
 // attendFixture stands up N live sessions and sets their store states.

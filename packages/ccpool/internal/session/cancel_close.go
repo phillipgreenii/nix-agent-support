@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
@@ -19,16 +19,58 @@ var ErrCancelUnconfirmed = errors.New("cancel could not be confirmed (turn may s
 const (
 	escapeBurst   = 3                      // number of Escapes per cancel (spec §3.2; pinned §3.3)
 	escapeSpacing = 200 * time.Millisecond // gap between Escapes
+
+	// Pane-stability confirmation tunables (pg2-33gl fix). cancelLocked confirms a
+	// cancel landed when cancelStableRun consecutive CapturePane reads are
+	// byte-identical (the turn stopped animating), giving up after cancelMaxSamples
+	// total reads. The stability window (cancelStableRun-1)*cancelStableInterval =
+	// 1.2s exceeds the ~1s thinking-counter tick, so a LIVE turn (whose counter
+	// ticks ≥1/s and whose glyph animates, or whose prose appends) can never
+	// accumulate K identical reads; a stopped/rewound/idle pane is static and does.
+	cancelStableInterval = 400 * time.Millisecond // gap between captures (I)
+	cancelStableRun      = 4                      // identical consecutive reads to confirm (K)
+	cancelMaxSamples     = 16                     // total captures before giving up (N) ≈ 6s budget
 )
 
-// interruptLanded reports whether the captured pane shows the turn stopped.
-// "Interrupted" is the marker observed in the live 6/7 mid-turn run (spec §3.1).
-// "declined" is a HYPOTHESIS for the AskUserQuestion-cancel case, to confirm (or
-// drop/replace) against real Claude in Task 9 — the exact marker set is pinned
-// there (spec §3.3 / §19). Correctness comes from the burst; this only gates the
-// idle-vs-unconfirmed branch.
-func interruptLanded(pane string) bool {
-	return strings.Contains(pane, "Interrupted") || strings.Contains(pane, "declined")
+// reLiveCounter matches the live spinner's elapsed-seconds counter, e.g.
+// "(5s · ↓ 13 tokens · thinking…" — present ONLY mid-turn (it ticks each ~1s).
+// Used only as a defense-in-depth guard on the confirming pane: it rejects a
+// pathological frozen-but-byte-stable counter render. It is NOT the primary
+// signal (pane-stability is) and does NOT cover a counter-less phase such as a
+// long tool call — see the design's tool-call residual.
+var reLiveCounter = regexp.MustCompile(`\(\d+s · `)
+
+// confirmStable polls the pane until it is STATIC — cancelStableRun consecutive
+// CapturePane reads are byte-identical — meaning the turn stopped animating, and
+// the latest pane carries no live counter. It is render-independent: it does NOT
+// look for "Interrupted", "⏺", "Thought for Ns", or any affordance string, so it
+// works in BOTH the thinking-rewind path and the streaming-interrupt path (whose
+// panes RETAIN those markers as static text) and is immune to a stale "Interrupted"
+// line. Count-bounded (cancelMaxSamples), NOT clock-bounded: the loop never reads
+// the clock, so it is deterministic under the frozen-Now / no-op-sleep test fakes.
+func (s *Service) confirmStable(tmuxName string) (bool, error) {
+	prev, err := s.d.Tmux.CapturePane(tmuxName)
+	if err != nil {
+		return false, fmt.Errorf("verify cancel: %w", err)
+	}
+	run := 1 // one sample so far
+	for i := 1; i < cancelMaxSamples; i++ {
+		s.sleep(cancelStableInterval) // nil-safe no-op in tests
+		cur, err := s.d.Tmux.CapturePane(tmuxName)
+		if err != nil {
+			return false, fmt.Errorf("verify cancel: %w", err)
+		}
+		if cur == prev {
+			run++
+		} else {
+			run = 1
+			prev = cur
+		}
+		if run >= cancelStableRun && !reLiveCounter.MatchString(cur) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Cancel interrupts the current turn (Escape) and resets the session to idle.
@@ -63,12 +105,15 @@ func (s *Service) cancelLocked(ctx context.Context, name string) error {
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
-	// Verify the interrupt landed; do NOT falsely report idle on a miss.
-	pane, err := s.d.Tmux.CapturePane(tmuxName)
+	// Confirm the turn actually stopped by polling until the pane goes STATIC
+	// (pane-stability), instead of grepping for an "Interrupted" marker that the
+	// thinking-rewind path never prints and that stale scrollback false-matches.
+	// Do NOT falsely report idle on a miss.
+	confirmed, err := s.confirmStable(tmuxName)
 	if err != nil {
-		return fmt.Errorf("verify cancel: %w", err)
+		return err
 	}
-	if !interruptLanded(pane) {
+	if !confirmed {
 		return ErrCancelUnconfirmed // row left as-is (working); caller fails safely
 	}
 	_, err = s.d.Store.Transition(ctx, name, store.Ready, "", "")
