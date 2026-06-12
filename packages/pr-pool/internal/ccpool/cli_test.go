@@ -127,6 +127,18 @@ func TestCancel_otherErrorNotUnconfirmed(t *testing.T) {
 	}
 }
 
+func TestList_parsesCWD(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"name":"s","state":"working","live":true,"transcript_path":"/t.jsonl","cwd":"/wt/repo-pr1"}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].CWD != "/wt/repo-pr1" {
+		t.Errorf("CWD = %q, want /wt/repo-pr1", got[0].CWD)
+	}
+}
+
 // fakeExit implements the bits of *exec.ExitError errors.As + ExitCode() need.
 type fakeExit struct{ code int }
 

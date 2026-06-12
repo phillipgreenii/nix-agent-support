@@ -24,6 +24,7 @@ type Session struct {
 	State          SessionState `json:"state"`
 	Live           bool         `json:"live"`            // tmux has-session (liveness, NOT a store state)
 	TranscriptPath string       `json:"transcript_path"` // consumed by chunk B (token observation)
+	CWD            string       `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
 }
 
 type SendMode int
