@@ -213,17 +213,16 @@ func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), t
 		in.Frame2, in.Frame3, in.NumFrames = f2, f3, 3
 	}
 
-	// Resolve the transcript signal only when we might land in a settled branch;
-	// an in-flight verdict ignores it. Computing it unconditionally here is fine
-	// (Classify ignores Awaiting for the in-flight/not-live branches) and keeps
-	// Gather simple, but skip it on the fast path where we already know we are
-	// in-flight to avoid a needless transcript read.
-	if !ClassifyFrame(in.Frame1, in.Frame2, in.Frame3, in.NumFrames).InFlight {
-		a, aerr := awaiting()
-		if aerr == nil {
-			in.Awaiting = a
-		}
-		// aerr is tolerated: leave Awaiting=false and fall through.
+	// Resolve the transcript awaiting signal whenever the session is live. We do
+	// NOT gate this on ClassifyFrame().InFlight: the startup-draw gate in Classify
+	// can DEMOTE an in-flight streaming verdict (counter-less frame-diff on a
+	// non-Working/Starting row) to a settled branch that consults Awaiting — so a
+	// ClassifyFrame-only gate would wrongly skip the read on that path. The read is
+	// cheap relative to the pane captures and error-tolerant (a missing/half-written
+	// transcript leaves Awaiting=false), and Classify ignores Awaiting on the
+	// branches where it genuinely is in-flight, so always reading it is correct.
+	if a, aerr := awaiting(); aerr == nil {
+		in.Awaiting = a
 	}
 	return Classify(in), nil
 }

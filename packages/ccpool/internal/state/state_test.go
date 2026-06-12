@@ -287,6 +287,25 @@ func TestGather_awaitingWaitsForHuman(t *testing.T) {
 	}
 }
 
+func TestGather_awaitingReadDespiteStreamingDiffOnNonWorkingRow(t *testing.T) {
+	// Gating contract: 3 distinct counter-less frames give an in-flight STREAMING
+	// verdict, but a Ready row demotes it (the startup-draw gate) to the settled
+	// branch — which consults Awaiting. Gather must compute awaiting() on this path
+	// (not skip it just because ClassifyFrame said in-flight), else a genuinely
+	// awaiting session would misreport idle.
+	p := &fakePaner{live: true, panes: []string{"a", "b", "c"}}
+	sl := &recordingSleep{}
+	row := store.Session{Name: "q", State: store.Ready} // not Working/Starting
+
+	res, err := Gather(p, sl.Sleep, staticAwaiting(true), "cc-q", "q", row)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.State != WaitingForHuman {
+		t.Errorf("State = %s, want waiting-for-human (awaiting must be read even when a streaming verdict is gated off)", res.State)
+	}
+}
+
 func TestGather_notLiveSkipsCapture(t *testing.T) {
 	p := &fakePaner{live: false, panes: []string{"unused"}}
 	sl := &recordingSleep{}
