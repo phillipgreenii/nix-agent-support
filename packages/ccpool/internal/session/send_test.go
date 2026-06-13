@@ -26,9 +26,9 @@ func (s *sendTmux) SendKeys(_ string, keys ...string) error {
 	s.keys = append(s.keys, keys)
 	return nil
 }
-func (s *sendTmux) Paste(_, body string) error { s.pasted = append(s.pasted, body); return nil }
-func (s *sendTmux) KillSession(string) error                { return nil }
-func (s *sendTmux) CapturePane(string) (string, error)      { return s.pane, nil }
+func (s *sendTmux) Paste(_, body string) error         { s.pasted = append(s.pasted, body); return nil }
+func (s *sendTmux) KillSession(string) error           { return nil }
+func (s *sendTmux) CapturePane(string) (string, error) { return s.pane, nil }
 
 type fakeTranscript struct {
 	reply    string

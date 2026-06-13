@@ -29,10 +29,10 @@ func (f *fakeTmux) NewSession(name, cwd string, env map[string]string, argv []st
 	f.live[name] = true
 	return nil
 }
-func (f *fakeTmux) SendKeys(string, ...string) error           { return nil }
-func (f *fakeTmux) Paste(string, string) error                 { return nil }
-func (f *fakeTmux) KillSession(string) error                   { return nil }
-func (f *fakeTmux) CapturePane(string) (string, error)         { return f.pane, nil }
+func (f *fakeTmux) SendKeys(string, ...string) error   { return nil }
+func (f *fakeTmux) Paste(string, string) error         { return nil }
+func (f *fakeTmux) KillSession(string) error           { return nil }
+func (f *fakeTmux) CapturePane(string) (string, error) { return f.pane, nil }
 
 type fakeTrust struct{ trusted []string }
 
