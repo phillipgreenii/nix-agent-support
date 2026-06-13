@@ -10,6 +10,7 @@
     ./programs/pgii-packs
     ./programs/agent-rules
     ./programs/bash-scripting
+    ./programs/bead-grooming
     ./programs/agentsview
     ./programs/ccusage
     ./programs/ollama
