@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/phillipgreenii/ccpool/internal/config"
 )
 
 var version = "dev"
@@ -70,7 +72,16 @@ func main() {
 		os.Exit(2)
 	}
 	if pool != "" {
-		_ = os.Setenv("CCPOOL_POOL", pool) // --pool overrides any inherited CCPOOL_POOL
+		// Validate (and create-on-demand) the pool dir up front so a bad --pool fails
+		// as a usage error (exit 2) before any subcommand runs, rather than surfacing
+		// later as a generic config-load error. The canonical root becomes CCPOOL_POOL,
+		// overriding any inherited value.
+		pc, perr := config.ResolvePool(pool)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, perr)
+			os.Exit(2)
+		}
+		_ = os.Setenv("CCPOOL_POOL", pc.Root)
 	}
 	cmd, rest := pickSubcommand(argv)
 	switch cmd {
