@@ -2,8 +2,8 @@
 
 > Assembled by the orchestrator from six parallel fable sub-agent reviews after the
 > dispatching agent hit the org monthly spend limit mid-assembly. Each finding retains
-> its `file:line` references. **One tool — `pg-pr` — was not reviewed** (its sub-agent
-> was the one killed by the spend limit). See Scope & Coverage.
+> its `file:line` references. The one tool initially skipped — `pg-pr` — was completed
+> on 2026-06-12 (security-focused pass); see its dedicated section near the end.
 
 ## Scope & Coverage
 
@@ -22,7 +22,7 @@ that support AI coding agents. Coverage by area:
 | Shell packs (`pgii-pack-*`, `git-tools`, `gc-dolt-maintenance`, activation scripts)     | **Deep**         | ~40 scripts read                                                                                                                   |
 | `lib/` nix builders (`mkPgiiPack`, `python-package`, `agent-script`)                    | **Deep**         |                                                                                                                                    |
 | nix build plumbing (`flake.nix`, buildGoModule coupling, pre-commit, `update-locks.sh`) | **Medium**       |                                                                                                                                    |
-| **`packages/pg-pr` (Go)**                                                               | **NOT REVIEWED** | Sub-agent killed by spend limit. PR-automation tool that shells out to `gh`/`git`/Jira — security-relevant and still needs a pass. |
+| **`packages/pg-pr` (Go)**                                                               | **Deep (security)** | Completed 2026-06-12 — see the dedicated pg-pr section near the end. Security surfaces deep-read; sync-daemon internals + bulk business logic skimmed. |
 | `internal/tui`, `internal/render` (pa-monitor)                                          | Skipped          | Per reviewer scope                                                                                                                 |
 | Generated `*.pb.go`, `go.sum`                                                           | Skipped          |                                                                                                                                    |
 
@@ -182,4 +182,115 @@ that support AI coding agents. Coverage by area:
 | 17  | **Med**      | Add bats for all destructive/critical scripts + 12 doctor checks; fix temp-file/log litter traps                                            | shell packs                                                                      |
 | 18  | **Med**      | Collapse 4× `update-deps.sh`; extend `update-locks.sh` to ccpool/pr-pool/decorator; evaluate `gomod2nix`/`uv2nix`                           | repo-level                                                                       |
 | 19  | **Low**      | Delete dead Gas City modules (`pa-monitor-decorator-gc`, `gc`-rooted defaults) per ADR 0043                                                 | `packages/`, `lib/`, `home/`                                                     |
-| 20  | **Open**     | **Review `pg-pr` Go tool** — not covered this pass (spend limit); it shells out to gh/git/Jira                                              | `packages/pg-pr`                                                                 |
+| 20  | **Done**     | `pg-pr` reviewed 2026-06-12 — strongest security posture of the Go fleet; see dedicated section. Main follow-ups: M1/M2 below                                              | `packages/pg-pr`                                                                 |
+
+---
+
+## pg-pr (Go PR-automation tool) — completed review (2026-06-12)
+
+> Added after the initial pass (the original pg-pr sub-agent was killed by the org spend
+> limit). This is a **security-focused** completion done in the main session, not a full
+> architectural deepdive — see coverage.
+
+### Scope & Coverage
+
+`pg-pr` is the largest tool here (~118 Go files / ~26k LOC) under `cmd/pg-pr/` (auth, branch,
+changes, ci, config, issue, pr, pr_write, review, sync, worktree), `internal/` (sync daemon,
+httpapi, worktree, auth, marker, snapshot, gitlocal, telemetry), and `pkg/` (provider/vcs/github,
+provider/issues/{jira,githubissues}, provider/cicd/ghactions, plugin/scriptout, beads, api).
+
+- **Deep-read:** every `exec.*` call site (grep-confirmed), `internal/httpapi/dashboard.go`,
+  `internal/sync/daemon.go` (metrics/dashboard HTTP server), `pkg/provider/vcs/github/{github,token}.go`
+  (token handling), `cmd/pg-pr/pr_write.go` (agent-CLI invocation), `internal/snapshot/store.go`.
+- **Skimmed:** the sync daemon architecture (queue/detector/refresh/snapshotowner, the
+  "escalation" semantics).
+- **Skipped:** the bulk of `cmd/` subcommand business logic, `pkg/beads/*`, `pkg/provider/*`
+  internals, `internal/sync` internals. A future pass should cover daemon concurrency/races.
+
+**Headline: pg-pr is the best-engineered tool in this repo, security-wise** — none of the
+ceta/ccpool/pr-pool–class problems are present. Findings are correspondingly modest.
+
+### Security
+
+- *(Cleared)* **No shell injection.** Every external command uses `exec.CommandContext` with an
+  argv slice — `git` (`internal/gitlocal/gitlocal.go:49`, `internal/branch/branch.go:148`,
+  `internal/worktree/git.go:147`), `gh` (`pkg/provider/vcs/github/github.go:89`,
+  `internal/worktree/gh.go:36`, `internal/auth/auth.go:212`), `bd` (`pkg/beads/runner.go:50`).
+  No `sh -c`/`bash -c`, no string-built commands.
+- *(Cleared)* **Token handling is deliberate.** `pkg/provider/vcs/github/token.go`: the resolved
+  GH token is injected into the child env (`cmd.Env = envWithGHToken(...)`, `github.go:90`), never
+  placed on argv; `gh auth token` is run with GH_TOKEN/GITHUB_TOKEN *stripped* from the child env
+  (`token.go:38-39`) so it can't echo itself; resolution is lazy + success-cached. The token is
+  never logged. Jira token (via the `pg-pr-zr` wrapper) is read from a runtime file off the nix
+  store and exported as env.
+- **[Low] Dashboard exposes the full snapshot, unauthenticated, to any local process** —
+  `internal/sync/daemon.go:423-426` mounts `/metrics` and `/api/v1/dashboard` on the metrics server;
+  `internal/httpapi/dashboard.go:13-22` serves the snapshot JSON with no auth. Bound to
+  `127.0.0.1:9818` (`daemon.go:51`) so it's not network-exposed, but on a shared host or via any
+  local process the work PR/branch/issue/CI state is readable. Document the trust boundary; if the
+  snapshot ever carries anything sensitive, add a loopback token.
+- **[Low] Metrics HTTP server sets only `ReadHeaderTimeout`** — `daemon.go:428-431` omits
+  `ReadTimeout`/`WriteTimeout`/`IdleTimeout`. Localhost, so low impact, but add them for slowloris
+  completeness.
+- **[Medium, uncertain] Prompt-injection via the agent-CLI description generator** —
+  `cmd/pg-pr/pr_write.go:148-162`: `generateDescription` pipes `SKILL.md` into the configured agent
+  CLI, and the SKILL instructs the agent to call back into `pg-pr` for diff/PR context — so
+  untrusted PR diff / issue / reviewer text reaches the LLM, and the generated text becomes the PR
+  body. If the resolved agent CLI (`zr-agent`, the multi-provider wrapper, `pr_write.go:resolveAgentCLI`)
+  runs with tool permissions, an injected instruction in a diff/comment could drive unintended
+  actions. Severity hinges on `zr-agent`'s permission posture. **Fix:** invoke the agent in a
+  description-only / no-tools mode, and treat the generated body as untrusted output.
+- **[Low, verify] Jira token transport** — confirm `pkg/provider/issues/jira/jira.go` sends the
+  token as an `Authorization` header (not on a command argv visible in `ps`). A keyword grep didn't
+  locate the usage; verify the actual field name.
+- **[Low] `gh` stderr is folded into error strings** (e.g. `github.go`, `pr_write.go:158` `stderr=%s`).
+  `gh` doesn't normally print the token, but a future gh error path that did would land in logs.
+
+### Architecture
+
+- The sync daemon enforces a single instance per user (lock), uses an internal cancelable context,
+  and treats "escalation" as **benign**: a *restart-to-refresh* when gh-auth fails for a sustained
+  streak (`internal/sync/detector.go:167-243`, `daemon.go:104,252`) and a `bd human` handoff when CI
+  loops stall (`sync.go:14-16`). This is not privilege escalation — earlier concern retracted.
+- Not audited: race safety across queue/detector/snapshotowner under concurrent ticks (skimmed only).
+
+### Best Practices / Code Quality
+
+- Idiomatic: `exec.CommandContext` (honors ctx — unlike pr-pool's CLIRunner), `slog`-style logger
+  injected into the daemon, error wrapping with `%w`, a `var generateDescription`/`execCmdFactory`
+  seam for test injection (`pr_write.go`, `pkg/plugin/scriptout/exec.go:32`).
+- Minor: the dashboard handler ignores the `Encode` error (`dashboard.go:21` `_ =`) — fine for a
+  best-effort endpoint but worth logging.
+
+### Testing
+
+- **Best-tested Go tool in the repo** — nearly every source file has a `_test.go`, including
+  security-relevant seams: `internal/sync/auth_escalation_test.go`, `feedback_dedup_test.go`,
+  `observability_test.go`, `pr_write_test.go` (exercises the agent-CLI exec path by pointing
+  `--agent-cli` at `/bin/cat`).
+- **Caveat (cross-cutting):** the nix `checkPhase` is `subPackages`-scoped to `cmd/` (see the repo's
+  Testing section), so the rich `internal/` + `pkg/` tests may not run under `nix build .#pg-pr`.
+  Verify they execute in CI, not just via `go test` locally.
+
+### UX / DX
+
+- Clean agent-CLI resolution chain (`--agent-cli` → `PG_PR_AGENT_CLI` → `zr-agent` on PATH), with an
+  empty result turned into an error that names the SKILL path. No issues found.
+
+### Modernization & Alternatives
+
+- Consider an explicit allowed-tools / sandbox flag when invoking the agent CLI for description
+  generation (defense against the prompt-injection vector above).
+- If the dashboard grows write endpoints, add a loopback auth token now while it's read-only.
+- Same `gomod2nix` recommendation as the rest of the fleet to de-risk vendorHash drift.
+
+### pg-pr Action List (severity-ranked)
+
+| #   | Sev          | Action                                                                                          | Where                               |
+| --- | ------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| M1  | **Medium**   | Invoke the description agent in a no-tools/description-only mode; treat generated body as untrusted | `cmd/pg-pr/pr_write.go:148-162`     |
+| M2  | **Low**      | Document the localhost dashboard trust boundary; add loopback auth if snapshot gains sensitive data | `internal/httpapi/dashboard.go`, `daemon.go:423` |
+| M3  | **Low**      | Add `ReadTimeout`/`WriteTimeout`/`IdleTimeout` to the metrics server                            | `internal/sync/daemon.go:428`       |
+| M4  | **Low**      | Verify Jira token is sent as a header, not on argv                                              | `pkg/provider/issues/jira/jira.go`  |
+| M5  | **Low**      | Ensure `internal/` + `pkg/` tests actually run under `nix build` (subPackages caveat)           | `default.nix` / builders            |
+| —   | **Open**     | Daemon concurrency/race audit (queue/detector/snapshotowner) — not covered this pass            | `internal/sync/`                    |
