@@ -218,7 +218,7 @@ func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, 
 		if d.Role.Kind == roles.Worker && status == "in_progress" {
 			seenClaimed = true
 		}
-		if !o.live(ctx, name) {
+		if !o.active(ctx, name) {
 			// re-check-after-death: the bead may have closed as the session ended.
 			status, _ = beads.Status(ctx, o.BD, d.BeadID)
 			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
@@ -259,18 +259,20 @@ func (o *Orchestrator) fail(ctx context.Context, d discover.Dispatch, reason str
 	return fmt.Errorf("%s: %s", d.BeadID, reason)
 }
 
-// live reports whether the named session is still alive per ccpool. A session
-// that is not Live, or whose store state is "failed", counts as dead. ccpool
-// store states done/needs_input (a finished/paused TURN) are normal multi-turn
-// operation, NOT death.
-func (o *Orchestrator) live(ctx context.Context, name string) bool {
+// active reports whether it is still worth waiting on the named session. A session
+// is active while it can still make progress: starting/ready/working, and
+// needs_input (paused awaiting a human who may attach and move it along — still
+// bounded by MaxWait). It is NOT active once it reaches done (the agent finished its
+// turn and nothing re-nudges it) or failed, or once it is absent from ccpool list.
+// A list error is treated as active (can't tell ⇒ keep waiting; MaxWait bounds us).
+func (o *Orchestrator) active(ctx context.Context, name string) bool {
 	sessions, err := o.CC.List(ctx)
 	if err != nil {
-		return true // can't tell ⇒ assume alive; the deadline still bounds us
+		return true // can't tell ⇒ assume active; the deadline still bounds us
 	}
 	for _, s := range sessions {
 		if s.Name == name {
-			return s.Live && s.State != ccpool.StateFailed
+			return s.Live && s.State != ccpool.StateFailed && s.State != ccpool.StateDone
 		}
 	}
 	return false // absent ⇒ gone

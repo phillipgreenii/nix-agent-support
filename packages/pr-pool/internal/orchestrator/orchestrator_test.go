@@ -570,3 +570,93 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 		t.Error("hard stop must NOT add human")
 	}
 }
+
+func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateDone}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
+		t.Fatal("done + not-closed should fail")
+	}
+	if !hasUpdate(bd, "update zr-w --add-label human") {
+		t.Errorf("worker done-without-close must add human; updates=%v", bd.updates)
+	}
+	// active() is the ONLY List caller in waitDone, so a single List call proves
+	// the loop stopped on the first check instead of polling to MaxWait.
+	if cc.listIdx != 1 {
+		t.Errorf("done must stop on first check (listIdx=1), got %d (looped to MaxWait?)", cc.listIdx)
+	}
+}
+
+func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.Dispatch{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
+		t.Fatal("done + not-closed should fail")
+	}
+	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
+		t.Errorf("feedback done-without-close must unclaim; updates=%v", bd.updates)
+	}
+	if cc.listIdx != 1 {
+		t.Errorf("done must stop on first check (listIdx=1), got %d", cc.listIdx)
+	}
+}
+
+// Regression guard (passes before AND after the fix): a session that reaches done
+// in the same instant its bead closes must still be a SUCCESS via the re-check.
+func TestWaitDone_doneStopsFast_successRace(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.Dispatch{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err != nil {
+		t.Fatalf("bead closed as the turn ended = success, got %v", err)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("success must not unclaim/flag; updates=%v", bd.updates)
+	}
+}
+
+// Lock-in (passes before AND after): needs_input is NOT terminal — a human may
+// attach. The loop must keep waiting to MaxWait, then time out and apply OnFailure.
+func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.Dispatch{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
+		t.Fatal("needs_input that never resolves should time out (failure)")
+	}
+	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
+		t.Errorf("needs_input timeout must apply OnFailure (feedback unclaim); updates=%v", bd.updates)
+	}
+	if cc.listIdx < 10 {
+		t.Errorf("needs_input must keep waiting to MaxWait; listIdx=%d (stopped early?)", cc.listIdx)
+	}
+}
+
+func TestActive_stateMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		sess []ccpool.Session
+		want bool
+	}{
+		{"working-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateWorking}}, true},
+		{"needs_input-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateNeedsInput}}, true},
+		{"done-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateDone}}, false},
+		{"failed-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateFailed}}, false},
+		{"working-not-live", []ccpool.Session{{Name: "s", Live: false, State: ccpool.StateWorking}}, false},
+		{"absent", []ccpool.Session{{Name: "other", Live: true, State: ccpool.StateWorking}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOrch(&fakeCC{listSeq: [][]ccpool.Session{tc.sess}}, &scriptBD{}, fastCfg())
+			if got := o.active(context.Background(), "s"); got != tc.want {
+				t.Errorf("active(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
