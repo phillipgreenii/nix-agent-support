@@ -13,19 +13,37 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// Dispatch is a ready bead assigned to a specific role.
-type Dispatch struct {
+// DispatchContext is everything one dispatch needs. Today: role + bead. It is the
+// explicit growth point for future fields (repo, self_login, template variables);
+// keeping it a struct keeps run-role's call shape stable as it accretes fields.
+type DispatchContext struct {
 	Role   roles.Role
 	BeadID string
 }
 
+// Validate reports every required field that is missing in a single error, so callers
+// (run-role) get a complete diagnostic rather than dispatching a half-filled context.
+func (d DispatchContext) Validate() error {
+	var missing []string
+	if d.Role.Name == "" { // every real role has a Name; Kind 0 is a valid kind, so it can't signal "unset"
+		missing = append(missing, "role")
+	}
+	if d.BeadID == "" {
+		missing = append(missing, "bead")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("dispatch context missing required field(s): %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 // Discover returns feedback dispatches (owned by selfLogin) then worker
 // dispatches, in priority order. selfLogin must be non-empty.
-func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogin string) ([]Dispatch, error) {
+func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogin string) ([]DispatchContext, error) {
 	if selfLogin == "" {
 		return nil, fmt.Errorf("discover: empty self_login (cannot resolve feedback ownership)")
 	}
-	var out []Dispatch
+	var out []DispatchContext
 	if reg.Feedback.Enabled {
 		fb, err := discoverFeedback(ctx, br, reg.Feedback, selfLogin)
 		if err != nil {
@@ -47,7 +65,7 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 	return out, nil
 }
 
-func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]Dispatch, error) {
+func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]DispatchContext, error) {
 	issues, err := beads.Ready(ctx, br) // bd ready --json --limit 0
 	if err != nil {
 		// Propagate: a bd failure must NOT masquerade as "no ready work", or the
@@ -55,7 +73,7 @@ func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, sel
 		// means no work. (pg2-qq9v)
 		return nil, fmt.Errorf("discover feedback: bd ready: %w", err)
 	}
-	var out []Dispatch
+	var out []DispatchContext
 	for _, iss := range issues {
 		if iss.Type != "task" || !strings.HasPrefix(iss.Title, "process-feedback:") {
 			continue
@@ -69,21 +87,21 @@ func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, sel
 			continue
 		}
 		if author, _ := parent.Metadata["author"].(string); author == selfLogin {
-			out = append(out, Dispatch{Role: role, BeadID: iss.ID})
+			out = append(out, DispatchContext{Role: role, BeadID: iss.ID})
 		}
 	}
 	return out, nil
 }
 
-func discoverWorker(ctx context.Context, br beads.Runner, role roles.Role) ([]Dispatch, error) {
+func discoverWorker(ctx context.Context, br beads.Runner, role roles.Role) ([]DispatchContext, error) {
 	issues, err := beads.Ready(ctx, br, "--label", "worker-ready", "--exclude-label", "human")
 	if err != nil {
 		// Propagate rather than returning nil,nil — see discoverFeedback. (pg2-qq9v)
 		return nil, fmt.Errorf("discover worker: bd ready: %w", err)
 	}
-	var out []Dispatch
+	var out []DispatchContext
 	for _, iss := range issues {
-		out = append(out, Dispatch{Role: role, BeadID: iss.ID})
+		out = append(out, DispatchContext{Role: role, BeadID: iss.ID})
 	}
 	return out, nil
 }

@@ -200,3 +200,31 @@ func TestDiscover_skipsBeadOnParentShowError(t *testing.T) {
 		t.Fatalf("only zr-good should be returned (zr-bad's parent errored); got %v", got)
 	}
 }
+
+func TestDispatchContext_Validate(t *testing.T) {
+	reg := roles.NewRegistry(config.Default())
+	cases := []struct {
+		name     string
+		d        DispatchContext
+		wantErr  bool
+		wantSubs []string
+	}{
+		{"valid", DispatchContext{Role: reg.Worker, BeadID: "zr-1"}, false, nil},
+		{"missing-bead", DispatchContext{Role: reg.Worker}, true, []string{"bead"}},
+		{"missing-role", DispatchContext{BeadID: "zr-1"}, true, []string{"role"}},
+		{"missing-both", DispatchContext{}, true, []string{"role", "bead"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.d.Validate()
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("Validate() err=%v, wantErr=%v", err, tc.wantErr)
+			}
+			for _, sub := range tc.wantSubs {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("err %q should mention %q", err, sub)
+				}
+			}
+		})
+	}
+}

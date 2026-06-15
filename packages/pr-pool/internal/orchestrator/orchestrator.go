@@ -79,7 +79,7 @@ func (o *Orchestrator) DrainOnce(ctx context.Context, selfLogin string) error {
 	return nil
 }
 
-func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.Dispatch) {
+func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) {
 	worked := 0
 	for _, d := range all {
 		if d.Role.Kind != role.Kind {
@@ -102,7 +102,7 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 // pass-level teardownAll, not here (so strays are reaped uniformly).
 // For worker dispatches the nudge includes the budget prompt line and completion
 // races against the budget watchdog. Feedback dispatches keep the prior behavior.
-func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
+func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext) error {
 	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
 	env := map[string]string{
 		"BEADS_ACTOR":    d.Role.Actor,
@@ -146,7 +146,7 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 // and waitDone's add-human could both fire (bead ends open AND human), or the
 // watchdog's unclaim could be misread by waitDone as a successful hand-back
 // (a budget hard-stop reported as success). (pg2-c1vp)
-func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Dispatch, name string) error {
+func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.DispatchContext, name string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -191,7 +191,7 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 // bead mutation and waits for the orchestrator to cancel ctx. A nil claimTerminal
 // means no watchdog is racing (feedback dispatches / direct tests) — always own.
 // (pg2-c1vp)
-func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, d discover.Dispatch, name string) error {
+func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, d discover.DispatchContext, name string) error {
 	deadline := o.clock().Add(o.Cfg.MaxWait)
 	seenClaimed := false
 	// won reports whether this loop owns the single terminal outcome.
@@ -254,7 +254,7 @@ func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, 
 	}
 }
 
-func (o *Orchestrator) fail(ctx context.Context, d discover.Dispatch, reason string) error {
+func (o *Orchestrator) fail(ctx context.Context, d discover.DispatchContext, reason string) error {
 	_ = complete.OnFailure(ctx, o.BD, d.Role, d.BeadID)
 	return fmt.Errorf("%s: %s", d.BeadID, reason)
 }
