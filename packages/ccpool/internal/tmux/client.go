@@ -78,8 +78,14 @@ func (c *Client) KillSession(name string) error {
 	return err
 }
 
-// HasSession reports liveness on this client's socket.
+// HasSession reports liveness on this client's socket. An empty target is never
+// live: `tmux has-session -t ""` matches the first/any session on the socket, so
+// querying it would falsely report live whenever any session exists (e.g. a
+// hook-created row whose TmuxSession is still empty). Short-circuit instead.
 func (c *Client) HasSession(name string) bool {
+	if name == "" {
+		return false
+	}
 	_, err := c.tmux("has-session", "-t", name)
 	return err == nil
 }

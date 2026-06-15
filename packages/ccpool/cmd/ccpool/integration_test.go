@@ -54,6 +54,21 @@ func TestEndToEnd_hookLifecycleReflectedInList(t *testing.T) {
 	data := filepath.Join(base, "data")
 	state := filepath.Join(base, "state")
 
+	// Isolate liveness onto a dedicated tmux socket (mirrors TestReap_closesOverCap)
+	// so a real ccpool session on the shared default "ccpool" socket can never bleed
+	// into this test's has-session checks (nas-a95.5). runCC points XDG_CONFIG_HOME
+	// at <base>/cfg, so the override lives at <base>/cfg/ccpool/config.toml.
+	const socket = "ccpool-hooktest"
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	cfgDir := filepath.Join(base, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("[tmux]\nsocket = \""+socket+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	const start = `{"session_id":"11111111-1111-1111-1111-111111111111","transcript_path":"/p/x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
 	const stop = `{"session_id":"11111111-1111-1111-1111-111111111111","transcript_path":"/p/x.jsonl","hook_event_name":"Stop"}`
 

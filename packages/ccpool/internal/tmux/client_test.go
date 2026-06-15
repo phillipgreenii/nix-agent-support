@@ -40,6 +40,24 @@ func TestClient_NewSession_omitsCwdWhenEmpty(t *testing.T) {
 	}
 }
 
+// An empty target must never read as live. `tmux has-session -t ""` matches the
+// first/any session on the socket (exit 0), so a hook-created row with an empty
+// TmuxSession would falsely read live whenever any session exists on the socket
+// (nas-a95.5). HasSession must short-circuit on "" and never shell out.
+func TestClient_HasSession_emptyTargetNeverLive(t *testing.T) {
+	called := false
+	c := &Client{Socket: "ccpool", run: func(_ ...string) ([]byte, error) {
+		called = true
+		return nil, nil // simulate tmux matching any session (exit 0)
+	}}
+	if c.HasSession("") {
+		t.Error(`HasSession("") = true, want false (empty target must never be live)`)
+	}
+	if called {
+		t.Error(`HasSession("") shelled out to tmux; want short-circuit without querying`)
+	}
+}
+
 func TestClient_SendKeys_argv(t *testing.T) {
 	var got [][]string
 	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) { got = append(got, args); return nil, nil }}
