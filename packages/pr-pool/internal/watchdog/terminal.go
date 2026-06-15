@@ -5,9 +5,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 )
+
+// gitCallTimeout bounds the read-only `git rev-parse` probe so a wedged git can
+// neither hang the hard-stop sequence nor defeat ctx cancellation (pg2-yy42).
+const gitCallTimeout = 10 * time.Second
 
 // terminal runs the 100% hard-stop sequence: 2nd cancel, guarded worktree reset,
 // budget note, unclaim, eventlog. (Session close is done by the orchestrator's
@@ -17,7 +22,7 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 
 	wt := w.sessionCWD(ctx, sessionName)
 	didReset := false
-	if safeToReset(wt, w.RepoRoot, w.WorktreeDir) {
+	if safeToReset(ctx, wt, w.RepoRoot, w.WorktreeDir) {
 		if err := w.Git.Run(ctx, wt, "reset", "--hard"); err == nil {
 			_ = w.Git.Run(ctx, wt, "clean", "-fd")
 			didReset = true
@@ -45,7 +50,7 @@ func (w *Watchdog) sessionCWD(ctx context.Context, name string) string {
 // safeToReset returns true only when path is a real git worktree root, distinct
 // from repoRoot, inside worktreeDir. Symlink-resolved, boundary-checked (never a
 // prefix-string match). On ANY uncertainty it returns false (no-op = safe).
-func safeToReset(path, repoRoot, worktreeDir string) bool {
+func safeToReset(ctx context.Context, path, repoRoot, worktreeDir string) bool {
 	if path == "" {
 		return false
 	}
@@ -66,7 +71,7 @@ func safeToReset(path, repoRoot, worktreeDir string) bool {
 		return false // outside worktreeDir
 	}
 	// backstop: must be a worktree ROOT (toplevel == path), not REPO_ROOT.
-	tl, err := gitToplevel(rp)
+	tl, err := gitToplevel(ctx, rp)
 	if err != nil || tl != rp {
 		return false
 	}
@@ -74,8 +79,8 @@ func safeToReset(path, repoRoot, worktreeDir string) bool {
 }
 
 // gitToplevel returns `git -C path rev-parse --show-toplevel` (EvalSymlinks'd).
-func gitToplevel(path string) (string, error) {
-	out, err := execGit(path, "rev-parse", "--show-toplevel")
+func gitToplevel(ctx context.Context, path string) (string, error) {
+	out, err := execGit(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
@@ -86,8 +91,12 @@ func gitToplevel(path string) (string, error) {
 	return tl, nil
 }
 
-func execGit(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+// execGit runs `git -C dir args...` under ctx with a bounded timeout, so the
+// probe honors cancellation and can't wedge the hard-stop sequence (pg2-yy42).
+func execGit(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitCallTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
 	return string(out), err
 }
 

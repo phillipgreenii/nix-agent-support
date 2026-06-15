@@ -50,8 +50,10 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]Dispatch, error) {
 	issues, err := beads.Ready(ctx, br) // bd ready --json --limit 0
 	if err != nil {
-		slog.Warn("discover feedback: bd ready failed", "err", err)
-		return nil, nil
+		// Propagate: a bd failure must NOT masquerade as "no ready work", or the
+		// pool silently idles on infra failure. Only an empty successful query
+		// means no work. (pg2-qq9v)
+		return nil, fmt.Errorf("discover feedback: bd ready: %w", err)
 	}
 	var out []Dispatch
 	for _, iss := range issues {
@@ -76,8 +78,8 @@ func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, sel
 func discoverWorker(ctx context.Context, br beads.Runner, role roles.Role) ([]Dispatch, error) {
 	issues, err := beads.Ready(ctx, br, "--label", "worker-ready", "--exclude-label", "human")
 	if err != nil {
-		slog.Warn("discover worker: bd ready failed", "err", err)
-		return nil, nil
+		// Propagate rather than returning nil,nil — see discoverFeedback. (pg2-qq9v)
+		return nil, fmt.Errorf("discover worker: bd ready: %w", err)
 	}
 	var out []Dispatch
 	for _, iss := range issues {

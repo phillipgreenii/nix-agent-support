@@ -18,17 +18,18 @@ func (g *recGit) Run(_ context.Context, dir string, args ...string) error {
 }
 
 func TestSafeToReset_guard(t *testing.T) {
+	ctx := context.Background()
 	repo := t.TempDir()
 	// path == repoRoot -> never
-	if safeToReset(repo, repo, repo) {
+	if safeToReset(ctx, repo, repo, repo) {
 		t.Error("must refuse to reset repoRoot")
 	}
 	// outside worktreeDir -> never
-	if safeToReset("/somewhere/else", repo, filepath.Join(repo, "wt")) {
+	if safeToReset(ctx, "/somewhere/else", repo, filepath.Join(repo, "wt")) {
 		t.Error("must refuse a path outside WorktreeDir")
 	}
 	// non-existent / not-a-worktree -> never (safe no-op)
-	if safeToReset(filepath.Join(repo, "wt", "ghost"), repo, filepath.Join(repo, "wt")) {
+	if safeToReset(ctx, filepath.Join(repo, "wt", "ghost"), repo, filepath.Join(repo, "wt")) {
 		t.Error("must refuse a non-worktree path")
 	}
 }

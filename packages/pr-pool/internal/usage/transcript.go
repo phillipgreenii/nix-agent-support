@@ -27,6 +27,7 @@ func (transcriptReader) Read(_ context.Context, path string) (Snapshot, error) {
 	defer func() { _ = f.Close() }()
 
 	var s Snapshot
+	seen := make(map[string]bool) // assistant message ids already counted (pg2-u2sv)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<24) // transcript lines are huge
 	for sc.Scan() {
@@ -36,6 +37,17 @@ func (transcriptReader) Read(_ context.Context, path string) (Snapshot, error) {
 		}
 		if ev.Type != "assistant" { // decision 2: assistant turns only
 			continue
+		}
+		// One assistant turn is written as several JSONL lines (one per content
+		// block) that all carry the SAME message id and REPEAT the same
+		// cumulative usage. Count each non-empty id once, else we over-count the
+		// turn N-fold and trip budgets early. Lines with no id (older
+		// transcripts) are always counted, preserving per-turn summing. (pg2-u2sv)
+		if id := ev.Message.ID; id != "" {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 		}
 		u := ev.Message.Usage
 		s.InputTokens += u.InputTokens

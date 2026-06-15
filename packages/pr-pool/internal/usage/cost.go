@@ -1,5 +1,7 @@
 package usage
 
+import "strings"
+
 // ModelPrice is per-MTok USD pricing for one model.
 type ModelPrice struct {
 	InputPerMTok      float64
@@ -23,13 +25,33 @@ func DefaultPrices() PriceTable {
 	}
 }
 
-// EstimateCents estimates a Snapshot's cost in integer cents (truncated toward
-// zero). Unknown model falls back to the "_default" price.
-func EstimateCents(s Snapshot, t PriceTable) int64 {
-	p, ok := t[s.Model]
-	if !ok {
-		p = t["_default"]
+// priceFor resolves the price for a model id. Transcript model ids may carry a
+// date suffix (e.g. "claude-haiku-4-5-20251001"); an exact-match lookup misses
+// those and silently falls through to "_default" (opus 15/75), over-charging
+// cheaper models many-fold. So match the LONGEST table key that is a prefix of
+// the model id (an exact id is its own prefix), falling back to "_default" only
+// when nothing matches. (pg2-u2sv)
+func priceFor(model string, t PriceTable) ModelPrice {
+	best := ""
+	for k := range t {
+		if k == "_default" {
+			continue
+		}
+		if strings.HasPrefix(model, k) && len(k) > len(best) {
+			best = k
+		}
 	}
+	if best != "" {
+		return t[best]
+	}
+	return t["_default"]
+}
+
+// EstimateCents estimates a Snapshot's cost in integer cents (truncated toward
+// zero). The model price is resolved by longest-prefix match (see priceFor); a
+// model matching no key falls back to "_default".
+func EstimateCents(s Snapshot, t PriceTable) int64 {
+	p := priceFor(s.Model, t)
 	dollars := float64(s.InputTokens)/1e6*p.InputPerMTok +
 		float64(s.OutputTokens)/1e6*p.OutputPerMTok +
 		float64(s.CacheCreationTokens)/1e6*p.CacheWritePerMTok +

@@ -24,7 +24,7 @@ mkGoApp {
   # claude-transcript is a local-replace dep present via the fileset + modRoot
   # (mirrors ccpool). vendorHash captures `go mod vendor` over the full import
   # graph (recomputed below).
-  vendorHash = "sha256-/+A6ymx3p397EAl5ifChDvw98DHDDxLDWvb7s4TPjZk=";
+  vendorHash = "sha256-sPYJ2JzJnQZD3naajZXbwzhzSVa6T2YN2pkVZIKJkHc=";
 
   nativeBuildInputs = [ makeWrapper ];
 

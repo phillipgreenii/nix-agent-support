@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,12 +27,15 @@ const (
 )
 
 func runDrain(args []string) int {
-	// parseInterspersed allows flags to follow positionals; collect non-flag args.
-	// For the drain subcommand no positional args are expected.
-	fs := flag.NewFlagSet("drain", flag.ContinueOnError)
-	pos := parseInterspersed(fs, args)
-	if len(pos) > 0 {
-		fmt.Fprintln(os.Stderr, "usage: pr-pool [drain]")
+	// Parse first, with NO side effects: a help request or any parse error must
+	// short-circuit here so we never dispatch Claude sessions or tear down
+	// pr-pool-* tmux sessions on a bad invocation (pg2-52rn).
+	switch p := parseDrainArgs(args); p.kind {
+	case routeHelp:
+		fmt.Println(helpText)
+		return exitOK
+	case routeUsageErr:
+		printUsageErr(p.msg)
 		return exitUsage
 	}
 

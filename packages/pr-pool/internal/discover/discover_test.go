@@ -145,17 +145,35 @@ func TestDiscover_emptySelfLoginErrors(t *testing.T) {
 	}
 }
 
-func TestDiscover_toleratesReadyError(t *testing.T) {
-	rr := &routingRunner{
-		readyErr: errors.New("bd: connection refused"),
-	}
+// pg2-qq9v: a bd query failure must NOT look like "no ready work". Returning
+// nil,nil there made the pool silently idle on infra failure. The error must
+// propagate so the drain fails loudly instead of doing nothing.
+func TestDiscover_propagatesReadyError(t *testing.T) {
+	sentinel := errors.New("bd: connection refused")
+	rr := &routingRunner{readyErr: sentinel}
 	reg := roles.NewRegistry(config.Default())
 	got, err := Discover(context.Background(), rr, reg, "phillipg")
-	if err != nil {
-		t.Fatalf("transient bd ready error should be swallowed, got err=%v", err)
+	if err == nil {
+		t.Fatal("bd ready failure must propagate, not be swallowed as 'no work'")
 	}
-	if len(got) != 0 {
-		t.Fatalf("transient bd ready error should yield empty dispatches, got %v", got)
+	if !errors.Is(err, sentinel) {
+		t.Errorf("propagated error should wrap the bd error; got %v", err)
+	}
+	if got != nil {
+		t.Errorf("on error, dispatches must be nil; got %v", got)
+	}
+}
+
+// The worker query failing must likewise propagate (feedback disabled so the
+// worker branch is the one that errors).
+func TestDiscover_propagatesWorkerReadyError(t *testing.T) {
+	sentinel := errors.New("bd: store offline")
+	rr := &routingRunner{readyErr: sentinel}
+	cfg := config.Default()
+	cfg.FeedbackEnabled = false // skip feedback so the worker branch hits the error
+	reg := roles.NewRegistry(cfg)
+	if _, err := Discover(context.Background(), rr, reg, "phillipg"); !errors.Is(err, sentinel) {
+		t.Fatalf("worker bd ready failure must propagate; got %v", err)
 	}
 }
 

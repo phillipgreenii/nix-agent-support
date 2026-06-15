@@ -7,27 +7,25 @@ import (
 
 var version = "dev"
 
-// pickSubcommand returns the subcommand and remaining args. No subcommand ⇒ "drain".
-func pickSubcommand(args []string) (cmd string, rest []string) {
-	known := map[string]bool{"drain": true, "version": true}
-	if len(args) < 2 {
-		return "drain", nil
+func main() {
+	r := route(os.Args)
+	switch r.kind {
+	case routeVersion:
+		fmt.Println(version)
+	case routeHelp:
+		fmt.Println(helpText)
+	case routeUsageErr:
+		printUsageErr(r.msg)
+		os.Exit(exitUsage)
+	case routeDrain:
+		os.Exit(runDrain(r.rest))
 	}
-	if known[args[1]] {
-		return args[1], args[2:]
-	}
-	return "drain", args[1:]
 }
 
-func main() {
-	cmd, rest := pickSubcommand(os.Args)
-	switch cmd {
-	case "drain":
-		os.Exit(runDrain(rest))
-	case "version":
-		fmt.Println(version)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
-		os.Exit(2)
-	}
+// printUsageErr writes a usage diagnostic and the short usage line to stderr.
+// Shared by main (top-level parse) and runDrain (drain-subcommand parse) so the
+// two usage-error paths can't drift in format.
+func printUsageErr(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	fmt.Fprintln(os.Stderr, usageLine)
 }

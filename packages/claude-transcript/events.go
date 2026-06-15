@@ -10,6 +10,10 @@ type Event struct {
 }
 
 type Message struct {
+	// ID is the Anthropic message id (e.g. "msg_…"). A single assistant turn is
+	// written as one JSONL line per content block, all sharing this id and
+	// repeating the same usage — consumers dedupe on it to avoid over-counting.
+	ID      string      `json:"id,omitempty"`
 	Model   string      `json:"model"`
 	Role    string      `json:"role"`
 	Content ContentList `json:"content"`

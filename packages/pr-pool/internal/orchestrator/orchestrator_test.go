@@ -193,7 +193,7 @@ func TestWaitDone_workerCloses(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err != nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("expected success, got %v; updates=%v", err, bd.updates)
 	}
 	if len(bd.updates) != 0 {
@@ -206,7 +206,7 @@ func TestWaitDone_workerHandbackToOpen(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err != nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("handback after seen_claimed should be success, got %v", err)
 	}
 }
@@ -216,7 +216,7 @@ func TestWaitDone_workerTimeoutAddsHumanNoUnclaim(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err == nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
 		t.Fatal("timeout should be failure")
 	}
 	if !hasUpdate(bd, "update zr-w --add-label human") || hasUpdate(bd, "--status=open") {
@@ -233,7 +233,7 @@ func TestWaitDone_paneDiesAsBeadCloses_success(t *testing.T) {
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err != nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("bead closed as pane died = success, got %v", err)
 	}
 	if len(bd.updates) != 0 {
@@ -248,7 +248,7 @@ func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err == nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
 		t.Fatal("dead session + in_progress = failure")
 	}
 	if !hasUpdate(bd, "update zr-w --add-label human") {
@@ -261,7 +261,7 @@ func TestWaitDone_feedbackTimeoutUnclaims(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Feedback, BeadID: "zr-c"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-feedback-processor-zr-c"); err == nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
 		t.Fatal("timeout should fail")
 	}
 	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
@@ -380,6 +380,27 @@ func TestWorkOne_sendFailWorkerNotUnclaimed(t *testing.T) {
 	}
 }
 
+// pg2-c1vp / review follow-up: a worker that completes successfully while the
+// budget watchdog is armed (but never trips) must return success with NO bead
+// mutation — waitDone wins the terminal claim and the watchdog is the loser via
+// cancellation, touching nothing. Exercises the workerWaitWithWatchdog happy
+// path (the prior watchdog test only covered the watchdog-WINS case).
+func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
+	cfg := fastCfg()
+	cfg.BudgetTokens = 1_000_000 // armed, but usage stays far below the cap
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking, TranscriptPath: "/t"}}}}
+	o := newOrch(cc, bd, cfg)
+	o.usageReader = &rampReader{seq: []usage.Snapshot{{OutputTokens: 10}}} // nowhere near 1,000,000
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	if err := o.workOne(context.Background(), d); err != nil {
+		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.updates)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("success must not unclaim/human/comment; updates=%v", bd.updates)
+	}
+}
+
 func hasUpdate(bd *scriptBD, sub string) bool {
 	for _, u := range bd.updates {
 		if u == sub {
@@ -411,7 +432,7 @@ func TestWaitDone_transientStatusErrorKeepsPolling(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	if err := o.waitDone(context.Background(), d, "pr-pool-worker-zr-w"); err != nil {
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("transient status error should not flag bead; got err=%v; updates=%v", err, bd.updates)
 	}
 	if len(bd.updates) != 0 {
@@ -426,7 +447,7 @@ func TestWaitDone_ctxCancelDoesNotFail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	err := o.waitDone(ctx, d, "pr-pool-worker-zr-w")
+	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
 	}
@@ -449,12 +470,63 @@ func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before waitDone is called (watchdog already won)
 	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
-	err := o.waitDone(ctx, d, "pr-pool-worker-zr-w")
+	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled on cancelled-ctx death path, got %v", err)
 	}
 	if len(bd.updates) != 0 {
 		t.Errorf("cancelled-ctx death path must NOT run o.fail; updates=%v", bd.updates)
+	}
+}
+
+// pg2-c1vp: when the watchdog wins the single-terminal race, waitDone (the
+// loser) must run NO failure action — otherwise the bead ends up both unclaimed
+// (watchdog) AND human-labeled (waitDone). An injected claimTerminal that always
+// loses drives the death path; it must mutate nothing and exit with ctx.Err().
+func TestWaitDone_lostRace_deathPathNoFail(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateFailed}},
+	}}
+	o := newOrch(cc, bd, fastCfg())
+	ctx, cancel := context.WithCancel(context.Background())
+	claimed := make(chan struct{}, 1)
+	claim := func() bool { claimed <- struct{}{}; return false } // always lose the claim
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	resCh := make(chan error, 1)
+	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
+	<-claimed // waitDone reached its terminal decision and lost
+	cancel()  // release the loser
+	if err := <-resCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("loser should return ctx.Err(), got %v", err)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("loser must not mutate the bead; updates=%v", bd.updates)
+	}
+}
+
+// pg2-c1vp: the watchdog's terminal unclaim sets the bead to open; waitDone must
+// NOT misread that as a successful "open" hand-back when it lost the race (else a
+// budget hard-stop is reported as success). A lost "open" must yield ctx.Err().
+func TestWaitDone_lostRace_openNotReportedSuccess(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	o := newOrch(cc, bd, fastCfg())
+	ctx, cancel := context.WithCancel(context.Background())
+	claimed := make(chan struct{}, 1)
+	claim := func() bool { claimed <- struct{}{}; return false }
+	d := discover.Dispatch{Role: o.Reg.Worker, BeadID: "zr-w"}
+	resCh := make(chan error, 1)
+	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
+	<-claimed
+	cancel()
+	if err := <-resCh; err == nil {
+		t.Fatal("a lost 'open' hand-back must NOT be reported as success (nil)")
+	} else if !errors.Is(err, context.Canceled) {
+		t.Fatalf("loser should return ctx.Err(), got %v", err)
+	}
+	if len(bd.updates) != 0 {
+		t.Errorf("loser must not mutate the bead; updates=%v", bd.updates)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
@@ -127,41 +128,54 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.Dispatch) error {
 		return fmt.Errorf("send %s: %w", name, err)
 	}
 	if d.Role.Kind != roles.Worker {
-		return o.waitDone(ctx, d, name) // feedback: no watchdog (unchanged behavior)
+		return o.waitDone(ctx, nil, d, name) // feedback: no watchdog, so no race; always own the outcome
 	}
 	return o.workerWaitWithWatchdog(ctx, d, name)
 }
 
 // workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.
 // First to return a terminal result wins and cancels the other. The cancelled
-// loser returns ctx.Err() (waitDone skips its failure action by design), so only
+// loser returns ctx.Err() (and skips its terminal action by design), so only
 // the winner's outcome takes effect.
+//
+// The single-terminal guarantee is enforced by an atomic owner claim, NOT by
+// cancel() timing: cancel() only fires after the winner returns, which is too
+// late to stop a loser already mid terminal bead mutation. So whichever of
+// {waitDone, watchdog} reaches its terminal bead mutation first claims ownership;
+// the loser then performs NO bead mutation. Without this the watchdog's unclaim
+// and waitDone's add-human could both fire (bead ends open AND human), or the
+// watchdog's unclaim could be misread by waitDone as a successful hand-back
+// (a budget hard-stop reported as success). (pg2-c1vp)
 func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Dispatch, name string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var owner atomic.Bool
+	claimTerminal := func() bool { return owner.CompareAndSwap(false, true) }
+
 	wd := &watchdog.Watchdog{
-		Reader:      o.reader(),
-		CC:          o.CC,
-		BD:          o.BD,
-		Log:         o.Log,
-		Budget:      o.Cfg.WorkerBudget(),
-		RepoRoot:    o.Cfg.RepoRoot,
-		WorktreeDir: o.Cfg.WorktreeDir,
-		ReminderMsg: o.Cfg.ReminderMsg,
-		WrapUpMsg:   o.Cfg.WrapUpMsg,
-		Git:         watchdog.OSGit{},
-		Now:         o.now,
-		Poll:        o.Cfg.PollInterval,
+		Reader:        o.reader(),
+		CC:            o.CC,
+		BD:            o.BD,
+		Log:           o.Log,
+		Budget:        o.Cfg.WorkerBudget(),
+		RepoRoot:      o.Cfg.RepoRoot,
+		WorktreeDir:   o.Cfg.WorktreeDir,
+		ReminderMsg:   o.Cfg.ReminderMsg,
+		WrapUpMsg:     o.Cfg.WrapUpMsg,
+		Git:           watchdog.OSGit{},
+		Now:           o.now,
+		Poll:          o.Cfg.PollInterval,
+		ClaimTerminal: claimTerminal,
 	}
 
 	type res struct{ err error }
 	done := make(chan res, 2) // buffered 2: both goroutines can send without blocking
-	go func() { done <- res{o.waitDone(ctx, d, name)} }()
+	go func() { done <- res{o.waitDone(ctx, claimTerminal, d, name)} }()
 	go func() { done <- res{wd.Run(ctx, name, d.BeadID)} }()
 
-	first := <-done // first terminal result wins
-	cancel()        // stop the loser
+	first := <-done // the winner's terminal result (the loser blocks until cancel)
+	cancel()        // release the loser
 	<-done          // drain the loser (it returns ctx.Err(), no terminal action)
 	return first.err
 }
@@ -170,16 +184,36 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 // elapses / the session dies (failure). On detecting death it re-reads the bead
 // status once more before failing (a bead that closed in the same instant the
 // session ended is a success). On failure it applies the role's OnFailure.
-// On ctx cancellation it returns ctx.Err() WITHOUT calling o.fail (the watchdog
-// owns the terminal outcome in that case — single-terminal guarantee).
-func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name string) error {
+//
+// claimTerminal arbitrates the single-terminal race with the budget watchdog:
+// EVERY terminal outcome (success or failure) is gated through it, so exactly
+// one of {waitDone, watchdog} owns the bead's final state. The loser performs no
+// bead mutation and waits for the orchestrator to cancel ctx. A nil claimTerminal
+// means no watchdog is racing (feedback dispatches / direct tests) — always own.
+// (pg2-c1vp)
+func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, d discover.Dispatch, name string) error {
 	deadline := o.clock().Add(o.Cfg.MaxWait)
 	seenClaimed := false
+	// won reports whether this loop owns the single terminal outcome.
+	won := func() bool { return claimTerminal == nil || claimTerminal() }
+	// lose is the loser's exit: take NO bead action, wait for the orchestrator to
+	// cancel the shared ctx, then return ctx.Err() (so the winner's result, not
+	// this one, is reported by workerWaitWithWatchdog).
+	lose := func() error { <-ctx.Done(); return ctx.Err() }
 	for {
+		// If ctx is already cancelled the watchdog won (or we're shutting down):
+		// do not trust a fresh status read as completion (the watchdog's unclaim
+		// would look like an "open" hand-back), and run no failure action.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
 		status, _ := beads.Status(ctx, o.BD, d.BeadID)
 		if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
-			return nil
+			if won() {
+				return nil
+			}
+			return lose()
 		}
 		if d.Role.Kind == roles.Worker && status == "in_progress" {
 			seenClaimed = true
@@ -188,23 +222,29 @@ func (o *Orchestrator) waitDone(ctx context.Context, d discover.Dispatch, name s
 			// re-check-after-death: the bead may have closed as the session ended.
 			status, _ = beads.Status(ctx, o.BD, d.BeadID)
 			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
-				return nil
+				if won() {
+					return nil
+				}
+				return lose()
 			}
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if won() {
+				return o.fail(ctx, d, "session exited before completing")
 			}
-			return o.fail(ctx, d, "session exited before completing")
+			return lose()
 		}
 		if !o.clock().Before(deadline) {
 			// final status check after the deadline.
 			status, _ = beads.Status(ctx, o.BD, d.BeadID)
 			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
-				return nil
+				if won() {
+					return nil
+				}
+				return lose()
 			}
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if won() {
+				return o.fail(ctx, d, fmt.Sprintf("not complete within %s", o.Cfg.MaxWait))
 			}
-			return o.fail(ctx, d, fmt.Sprintf("not complete within %s", o.Cfg.MaxWait))
+			return lose()
 		}
 		// cancellable wait — on cancellation return ctx.Err() and DO NOT fail
 		// (the watchdog won the race and owns the terminal outcome).

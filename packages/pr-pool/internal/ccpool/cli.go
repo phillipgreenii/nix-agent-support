@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
 )
@@ -19,6 +21,17 @@ var ErrCancelUnconfirmed = errors.New("ccpool cancel unconfirmed")
 // exitCoder is satisfied by *exec.ExitError (and test fakes).
 type exitCoder interface{ ExitCode() int }
 
+// Per-call timeouts backstop ctx cancellation: even if the orchestrator never
+// cancels, a wedged ccpool must not hang the pool forever (pg2-yy42).
+const (
+	// quickCallTimeout bounds the fast calls (list/reply/cancel/close).
+	quickCallTimeout = 60 * time.Second
+	// ensureTimeout bounds `ccpool new`, which blocks until the session reaches
+	// ready. ccpool's own wait default is 10m, so this sits comfortably above it
+	// to avoid killing a legitimately-slow launch while still bounding a wedge.
+	ensureTimeout = 12 * time.Minute
+)
+
 // CLIRunner is the Phase-1 Runner: it shells out to the `ccpool` binary on PATH.
 // run is injectable for tests (zero real processes), exactly like ccpool's
 // tmux.Client. The launch-flag fields come from config and are emitted on
@@ -27,28 +40,73 @@ type CLIRunner struct {
 	Effort    string
 	Model     string
 	Dangerous bool
-	run       func(args []string) ([]byte, error)
+	bin       string // ccpool binary name/path (resolved on PATH by execCmd)
+	// run executes `bin args...` under ctx and returns stdout and stderr in
+	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
+	// pg2-x6ef) plus the run error.
+	run func(ctx context.Context, args []string) (stdout, stderr []byte, err error)
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, Dangerous: cfg.Dangerous}
-	c.run = func(args []string) ([]byte, error) {
-		return exec.Command("ccpool", args...).CombinedOutput()
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, Dangerous: cfg.Dangerous, bin: "ccpool"}
+	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
+		return execCmd(ctx, c.bin, args)
 	}
 	return c
 }
 
-func (c *CLIRunner) ccpool(args ...string) ([]byte, error) {
-	out, err := c.run(args)
-	if err != nil {
-		return out, fmt.Errorf("ccpool %v: %w (%s)", args, err, bytes.TrimSpace(out))
+// execCmd runs `bin args...`, capturing stdout and stderr into separate buffers
+// (pg2-x6ef) via exec.CommandContext so a cancelled or expired ctx actually
+// kills the child rather than hanging the orchestrator/watchdog (pg2-yy42).
+func execCmd(ctx context.Context, bin string, args []string) (stdout, stderr []byte, err error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	var so, se bytes.Buffer
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	err = cmd.Run()
+	return so.Bytes(), se.Bytes(), err
+}
+
+// ccpool runs a ccpool subcommand under a per-call timeout and returns stdout
+// only; on failure the wrapped error carries the (trimmed) stderr for context.
+func (c *CLIRunner) ccpool(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	stdout, stderr, err := c.run(tctx, args)
+	if err == nil {
+		return stdout, nil
 	}
-	return out, nil
+	// A wedged ccpool that blew the per-call timeout is the common operator
+	// failure; name the timeout rather than leak a bare "context deadline
+	// exceeded". tctx (not the parent ctx) carries the WithTimeout deadline.
+	if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+		return stdout, fmt.Errorf("ccpool %s timed out after %s: %w", argSummary(args), timeout, err)
+	}
+	if se := bytes.TrimSpace(stderr); len(se) > 0 {
+		return stdout, fmt.Errorf("ccpool %s: %w (%s)", argSummary(args), err, se)
+	}
+	return stdout, fmt.Errorf("ccpool %s: %w", argSummary(args), err)
+}
+
+// argSummary renders ccpool args for an error message, eliding long positionals
+// (e.g. the full reply prompt, which is the entire skill markdown) so the real
+// diagnostic isn't buried under thousands of characters.
+func argSummary(args []string) string {
+	const maxArg = 48
+	parts := make([]string, len(args))
+	for i, a := range args {
+		if len(a) > maxArg {
+			parts[i] = fmt.Sprintf("<%d bytes>", len(a))
+		} else {
+			parts[i] = a
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // Ensure: ccpool new <name> --cwd <cwd> --env K=V… --dangerously-skip-permissions
 // --effort <effort> [--model <model>]. env keys sorted for deterministic argv.
-func (c *CLIRunner) Ensure(_ context.Context, name, cwd string, env map[string]string) error {
+func (c *CLIRunner) Ensure(ctx context.Context, name, cwd string, env map[string]string) error {
 	args := []string{"new", name, "--cwd", cwd}
 	keys := make([]string, 0, len(env))
 	for k := range env {
@@ -67,12 +125,12 @@ func (c *CLIRunner) Ensure(_ context.Context, name, cwd string, env map[string]s
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
-	_, err := c.ccpool(args...)
+	_, err := c.ccpool(ctx, ensureTimeout, args...)
 	return err
 }
 
 // Send: ccpool reply <name> <prompt> <mode-flag>.
-func (c *CLIRunner) Send(_ context.Context, name, prompt string, mode SendMode) error {
+func (c *CLIRunner) Send(ctx context.Context, name, prompt string, mode SendMode) error {
 	flag := "--no-wait"
 	switch mode {
 	case ModeInterrupt:
@@ -80,12 +138,12 @@ func (c *CLIRunner) Send(_ context.Context, name, prompt string, mode SendMode) 
 	case ModeQueue:
 		flag = "--queue-message"
 	}
-	_, err := c.ccpool("reply", name, prompt, flag)
+	_, err := c.ccpool(ctx, quickCallTimeout, "reply", name, prompt, flag)
 	return err
 }
 
-func (c *CLIRunner) Cancel(_ context.Context, name string) error {
-	_, err := c.ccpool("cancel", name)
+func (c *CLIRunner) Cancel(ctx context.Context, name string) error {
+	_, err := c.ccpool(ctx, quickCallTimeout, "cancel", name)
 	if err != nil {
 		var ec exitCoder
 		if errors.As(err, &ec) && ec.ExitCode() == 6 {
@@ -96,14 +154,14 @@ func (c *CLIRunner) Cancel(_ context.Context, name string) error {
 	return nil
 }
 
-func (c *CLIRunner) Close(_ context.Context, name string) error {
-	_, err := c.ccpool("close", name)
+func (c *CLIRunner) Close(ctx context.Context, name string) error {
+	_, err := c.ccpool(ctx, quickCallTimeout, "close", name)
 	return err
 }
 
 // List: ccpool list --all --json.
-func (c *CLIRunner) List(_ context.Context) ([]Session, error) {
-	out, err := c.ccpool("list", "--all", "--json")
+func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
+	out, err := c.ccpool(ctx, quickCallTimeout, "list", "--all", "--json")
 	if err != nil {
 		return nil, err
 	}

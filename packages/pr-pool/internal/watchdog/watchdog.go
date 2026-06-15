@@ -33,6 +33,14 @@ type Watchdog struct {
 	Git                    GitRunner
 	Now                    func() time.Time
 	Poll                   time.Duration
+
+	// ClaimTerminal, if set, is called once the hard stop fires, BEFORE the
+	// terminal bead mutations. It must return true to exactly one racer across
+	// all parties competing for the single terminal outcome (here: this watchdog
+	// vs the orchestrator's bead-poll). A false return means the bead-poll
+	// already owns the outcome, so Run skips its mutations and waits for ctx
+	// cancellation. nil ⇒ no racer ⇒ always own (standalone use / tests). (pg2-c1vp)
+	ClaimTerminal func() bool
 }
 
 func (w *Watchdog) now() time.Time {
@@ -68,8 +76,14 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 				_ = w.CC.Send(ctx, sessionName, w.WrapUpMsg, ccpool.ModeQueue)
 				w.emit("cancel", map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Hard:
-				w.terminal(ctx, sessionName, beadID)
-				return ErrBudgetExceeded
+				if w.ClaimTerminal == nil || w.ClaimTerminal() {
+					w.terminal(ctx, sessionName, beadID)
+					return ErrBudgetExceeded
+				}
+				// Lost the terminal race: the bead-poll owns the outcome. Touch
+				// nothing; wait for the orchestrator to cancel, then exit. (pg2-c1vp)
+				<-ctx.Done()
+				return ctx.Err()
 			}
 		}
 		select {

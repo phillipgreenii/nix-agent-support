@@ -131,6 +131,32 @@ func TestRun_ctxCancelReturnsCtxErr(t *testing.T) {
 	}
 }
 
+// pg2-c1vp / review follow-up: when the hard stop fires but ClaimTerminal reports
+// the bead-poll already owns the outcome, Run must run NO terminal bead mutation
+// and exit with ctx.Err() once cancelled — the mirror of the orchestrator's
+// TestWaitDone_lostRace_* tests for the watchdog side of the race.
+func TestRun_lostClaimSkipsTerminal(t *testing.T) {
+	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 5000}}} // immediately >100% of a 1000 cap
+	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+	wd := newWD(r, cc, bd, tokBudget(1000))
+	wd.ClaimTerminal = func() bool { return false } // bead-poll already owns the terminal outcome
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- wd.Run(ctx, "s", "zr-1") }()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost-claim Run should return ctx.Err(), got %v", err)
+	}
+	if hasPrefix(bd.calls, "update zr-1 --status=open") || hasPrefix(bd.calls, "comment zr-1") {
+		t.Errorf("lost claim must NOT mutate the bead; calls=%v", bd.calls)
+	}
+	if cc.cancels != 0 || len(cc.closed) != 0 {
+		t.Errorf("lost claim must NOT run the terminal ccpool sequence; cancels=%d closed=%v", cc.cancels, cc.closed)
+	}
+}
+
 func hasPrefix(calls []string, p string) bool {
 	for _, c := range calls {
 		if len(c) >= len(p) && c[:len(p)] == p {

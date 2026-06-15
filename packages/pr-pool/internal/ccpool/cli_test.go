@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
 )
@@ -16,9 +18,9 @@ func newSpy() (*CLIRunner, *[][]string, func(out []byte)) {
 	var got [][]string
 	var canned []byte
 	cli := NewCLIRunner(config.Default())
-	cli.run = func(args []string) ([]byte, error) {
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
 		got = append(got, args)
-		return canned, nil
+		return canned, nil, nil
 	}
 	setOut := func(out []byte) { canned = out }
 	return cli, &got, setOut
@@ -51,7 +53,10 @@ func TestEnsure_argv_withModel_noDangerous(t *testing.T) {
 	cfg.Dangerous = false
 	cfg.Effort = "high"
 	cli := NewCLIRunner(cfg)
-	cli.run = func(args []string) ([]byte, error) { got = append(got, args); return nil, nil }
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
 	if err := cli.Ensure(context.Background(), "s", "/r", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +114,8 @@ func TestCancelCloseList_argv(t *testing.T) {
 
 func TestCancel_unconfirmedExit6(t *testing.T) {
 	cli := NewCLIRunner(config.Default())
-	cli.run = func(args []string) ([]byte, error) {
-		return []byte("cancel may not have landed"), &fakeExit{code: 6}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		return nil, []byte("cancel may not have landed"), &fakeExit{code: 6}
 	}
 	err := cli.Cancel(context.Background(), "s")
 	if !errors.Is(err, ErrCancelUnconfirmed) {
@@ -120,7 +125,7 @@ func TestCancel_unconfirmedExit6(t *testing.T) {
 
 func TestCancel_otherErrorNotUnconfirmed(t *testing.T) {
 	cli := NewCLIRunner(config.Default())
-	cli.run = func(args []string) ([]byte, error) { return nil, &fakeExit{code: 1} }
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) { return nil, nil, &fakeExit{code: 1} }
 	err := cli.Cancel(context.Background(), "s")
 	if err == nil || errors.Is(err, ErrCancelUnconfirmed) {
 		t.Errorf("exit 1 must not be ErrCancelUnconfirmed, got %v", err)
@@ -136,6 +141,90 @@ func TestList_parsesCWD(t *testing.T) {
 	}
 	if got[0].CWD != "/wt/repo-pr1" {
 		t.Errorf("CWD = %q, want /wt/repo-pr1", got[0].CWD)
+	}
+}
+
+// pg2-x6ef: stderr noise emitted alongside the list JSON must not reach the
+// parser. run returns stdout and stderr separately; List reads stdout only.
+func TestList_stderrDoesNotCorruptJSON(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return []byte(`[{"name":"s","state":"working","live":true}]`), []byte("WARN: deprecated flag\n"), nil
+	}
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatalf("stderr must not corrupt list --json: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "s" {
+		t.Errorf("parsed = %+v, want one session named s", got)
+	}
+}
+
+// pg2-x6ef: execCmd must capture stdout and stderr into SEPARATE buffers so a
+// command that writes to both yields clean stdout and surfaces stderr on error.
+func TestExecCmd_separatesStreams(t *testing.T) {
+	stdout, stderr, err := execCmd(context.Background(), "sh", []string{"-c", "printf '[]'; echo noise 1>&2; exit 7"})
+	if string(stdout) != "[]" {
+		t.Errorf("stdout = %q, want %q", stdout, "[]")
+	}
+	if !strings.Contains(string(stderr), "noise") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "noise")
+	}
+	var ec exitCoder
+	if !errors.As(err, &ec) || ec.ExitCode() != 7 {
+		t.Errorf("err = %v, want exit-status 7", err)
+	}
+}
+
+func TestExecCmd_success(t *testing.T) {
+	stdout, stderr, err := execCmd(context.Background(), "sh", []string{"-c", "printf 'ok'"})
+	if err != nil || string(stdout) != "ok" || len(stderr) != 0 {
+		t.Errorf("stdout=%q stderr=%q err=%v", stdout, stderr, err)
+	}
+}
+
+// pg2-yy42: execCmd uses exec.CommandContext, so a cancelled/expired ctx kills
+// the child instead of hanging the orchestrator/watchdog.
+func TestExecCmd_honorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _, err := execCmd(ctx, "sh", []string{"-c", "sleep 5"})
+	if err == nil {
+		t.Fatal("a sleeping command under an expired ctx must error")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("ctx cancellation did not kill the child promptly: took %s", elapsed)
+	}
+}
+
+// review follow-up: a per-call timeout must name the timeout in the error, not
+// leak a bare "context deadline exceeded".
+func TestCCpool_timeoutNamesTheTimeout(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+		<-ctx.Done() // a wedged ccpool that only returns once the deadline fires
+		return nil, nil, ctx.Err()
+	}
+	_, err := cli.ccpool(context.Background(), 10*time.Millisecond, "list", "--all", "--json")
+	if err == nil || !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("timeout should be named in the error, got %v", err)
+	}
+}
+
+// review follow-up: long positionals (the full reply prompt) must be elided in
+// error messages so the real diagnostic isn't buried.
+func TestArgSummary_elidesLongArgs(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	got := argSummary([]string{"reply", "sess", long, "--queue-message"})
+	if strings.Contains(got, long) {
+		t.Errorf("long arg must be elided; got %q", got)
+	}
+	if !strings.Contains(got, "reply sess ") || !strings.Contains(got, "--queue-message") {
+		t.Errorf("short args must be preserved; got %q", got)
+	}
+	if !strings.Contains(got, "<5000 bytes>") {
+		t.Errorf("elision should show the byte count; got %q", got)
 	}
 }
 
