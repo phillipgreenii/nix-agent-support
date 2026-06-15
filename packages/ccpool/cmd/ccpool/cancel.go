@@ -55,14 +55,21 @@ func cancelExitCode(err error) int {
 	}
 }
 
-// buildService constructs a session.Service wired with real adapters + lock.
-// Shared by cancel/close (and usable by new/reply if refactored later).
+// buildService constructs a session.Service for the active pool (config.Load reads
+// CCPOOL_POOL). Shared by cancel/close/reap.
 func buildService() (*session.Service, *store.Store, int) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return nil, nil, 1
 	}
+	return buildServiceFor(cfg)
+}
+
+// buildServiceFor wires a session.Service from an explicit Config, so reap-all can
+// govern many pools in one process — loading each pool's Config via
+// config.LoadForPool and building its service without mutating CCPOOL_POOL.
+func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)

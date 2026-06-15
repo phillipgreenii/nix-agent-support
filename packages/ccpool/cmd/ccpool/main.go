@@ -14,20 +14,21 @@ var version = "dev"
 // With no subcommand, defaults to "list".
 func pickSubcommand(args []string) (cmd string, rest []string) {
 	known := map[string]bool{
-		"attach":  true,
-		"attend":  true,
-		"cancel":  true,
-		"close":   true,
-		"doctor":  true,
-		"hook":    true,
-		"list":    true,
-		"new":     true,
-		"reap":    true,
-		"reply":   true,
-		"state":   true,
-		"tail":    true,
-		"trust":   true,
-		"version": true,
+		"attach":   true,
+		"attend":   true,
+		"cancel":   true,
+		"close":    true,
+		"doctor":   true,
+		"hook":     true,
+		"list":     true,
+		"new":      true,
+		"reap":     true,
+		"reap-all": true,
+		"reply":    true,
+		"state":    true,
+		"tail":     true,
+		"trust":    true,
+		"version":  true,
 	}
 	if len(args) < 2 {
 		return "list", nil
@@ -103,6 +104,8 @@ func main() {
 		os.Exit(runNew(rest))
 	case "reap":
 		os.Exit(runReap(rest))
+	case "reap-all":
+		os.Exit(runReapAll(rest))
 	case "reply":
 		os.Exit(runReply(rest))
 	case "state":

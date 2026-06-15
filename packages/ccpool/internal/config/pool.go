@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/phillipgreenii/ccpool/internal/registry"
 )
 
 // PoolContext is the resolved location of the active pool. In default mode Root
@@ -104,16 +106,12 @@ func poolFileOK(name string) bool {
 	return false
 }
 
-// ensurePoolDir validates an existing pool dir's contents against the allowlist, or
-// creates a missing leaf (parent must exist; mode 0700; never mkdir -p).
-func ensurePoolDir(root string) error {
+// ValidatePoolDir checks an EXISTING dir's contents against the allowlist WITHOUT
+// creating anything. A missing dir (ReadDir → ENOENT) is reported as an error, which
+// is exactly what reap-all's GC wants: a dangling registry symlink or a dir gone
+// foreign both fail this check and mark the link for removal.
+func ValidatePoolDir(root string) error {
 	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		if _, perr := os.Stat(filepath.Dir(root)); perr != nil {
-			return fmt.Errorf("pool parent does not exist: %s", filepath.Dir(root))
-		}
-		return os.Mkdir(root, 0o700)
-	}
 	if err != nil {
 		return fmt.Errorf("read pool dir %s: %w", root, err)
 	}
@@ -123,4 +121,28 @@ func ensurePoolDir(root string) error {
 		}
 	}
 	return nil
+}
+
+// ensurePoolDir validates an existing pool dir's contents against the allowlist, or
+// creates a missing leaf (parent must exist; mode 0700; never mkdir -p). Creating a
+// new leaf is the ONLY moment a pool enrolls in the reap-all registry: subsequent
+// resolves take the validate branch and stay registry-side-effect-free, so read-only
+// commands never enroll a pool in auto-reaping.
+func ensurePoolDir(root string) error {
+	if _, err := os.ReadDir(root); os.IsNotExist(err) {
+		if _, perr := os.Stat(filepath.Dir(root)); perr != nil {
+			return fmt.Errorf("pool parent does not exist: %s", filepath.Dir(root))
+		}
+		if err := os.Mkdir(root, 0o700); err != nil {
+			return err
+		}
+		// Register on creation only. A registry failure must not break pool use
+		// (the pool is created and usable); reap-all just won't sweep it until the
+		// next create. Best-effort, mirroring the trust-write activation pattern.
+		_ = registry.Ensure(SocketFor(root), root)
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("read pool dir %s: %w", root, err)
+	}
+	return ValidatePoolDir(root)
 }

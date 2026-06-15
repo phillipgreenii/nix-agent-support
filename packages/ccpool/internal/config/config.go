@@ -35,6 +35,11 @@ type Notify struct {
 type Pool struct {
 	MaxSessions int      `toml:"max_sessions"`
 	IdleTTL     Duration `toml:"idle_ttl"`
+	// AutoReap, default true, gates ONLY the reap-all sweep: false opts this pool
+	// out of the timer-driven reap entirely (idle AND over-cap), while a manual
+	// `ccpool reap` still reaps it and it stays registered. Distinct from
+	// idle_ttl = 0, which disables only TTL closures but still enforces the cap.
+	AutoReap bool `toml:"auto_reap"`
 }
 type Tmux struct {
 	Socket string `toml:"socket"`
@@ -68,7 +73,7 @@ func (d *Duration) UnmarshalText(text []byte) error {
 
 func defaults() Config {
 	return Config{
-		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute)},
+		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute), AutoReap: true},
 		Tmux:   Tmux{Socket: "ccpool", Prefix: "cc-"},
 		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
@@ -96,12 +101,27 @@ func StateDirPath() string {
 }
 
 // Load reads the active pool's config.toml (if present) over the defaults and
-// resolves paths. The active pool comes from CCPOOL_POOL (set by --pool in main).
+// resolves paths. The active pool comes from CCPOOL_POOL (set by --pool in main),
+// and the pool dir is validated/created (and registered on first create).
 func Load() (Config, error) {
 	pc, err := ResolvePool(os.Getenv("CCPOOL_POOL"))
 	if err != nil {
 		return Config{}, err
 	}
+	return loadFrom(pc)
+}
+
+// LoadForPool loads a SPECIFIC pool's config from its root, ignoring CCPOOL_POOL and
+// without validating/creating/registering the dir (reap-all's GC has already
+// validated it). An empty root loads the default (XDG) pool. This is the seam
+// reap-all uses to govern every registered pool in-process — no per-iteration
+// os.Setenv, so a panic mid-sweep can never leave a wrong env behind.
+func LoadForPool(root string) (Config, error) {
+	return loadFrom(resolvePaths(root))
+}
+
+// loadFrom decodes config.toml over the defaults and stamps in the resolved paths.
+func loadFrom(pc PoolContext) (Config, error) {
 	c := defaults()
 	if _, err := os.Stat(pc.ConfigPath); err == nil {
 		if _, err := toml.DecodeFile(pc.ConfigPath, &c); err != nil {

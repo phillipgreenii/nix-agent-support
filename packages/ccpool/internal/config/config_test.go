@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/ccpool/internal/registry"
 )
 
 func TestLoad_poolMode(t *testing.T) {
@@ -90,6 +92,107 @@ func TestLoad_defaultsWhenNoFile(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "data", "ccpool", "store.db"); c.DBPath != want {
 		t.Errorf("DBPath = %q, want %q", c.DBPath, want)
+	}
+}
+
+// TestLoad_autoReapDefaultsTrue: a pool with no (or no [pool].auto_reap) config is
+// governed by reap-all — auto_reap defaults to true.
+func TestLoad_autoReapDefaultsTrue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !c.Pool.AutoReap {
+		t.Error("Pool.AutoReap must default to true")
+	}
+}
+
+// TestLoad_autoReapOptOut: auto_reap = false opts the pool out of reap-all.
+func TestLoad_autoReapOptOut(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("[pool]\nauto_reap = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Pool.AutoReap {
+		t.Error("Pool.AutoReap must be false when config sets auto_reap = false")
+	}
+}
+
+// TestLoadForPool_namedPool: LoadForPool reads a specific pool's config WITHOUT
+// consulting CCPOOL_POOL — this is the seam reap-all uses to load each registered
+// pool's config in-process (no per-iteration os.Setenv).
+func TestLoadForPool_namedPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/some/other/pool") // must be ignored by LoadForPool
+	t.Setenv("CCPOOL_REGISTRY_DIR", t.TempDir())
+	pool := t.TempDir()
+	poolCanon, _ := filepath.EvalSymlinks(pool)
+	if err := os.WriteFile(filepath.Join(pool, "config.toml"), []byte("[pool]\nauto_reap = false\nmax_sessions = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadForPool(pool)
+	if err != nil {
+		t.Fatalf("LoadForPool: %v", err)
+	}
+	if c.PoolRoot != poolCanon {
+		t.Errorf("PoolRoot = %q, want %q (not CCPOOL_POOL)", c.PoolRoot, poolCanon)
+	}
+	if c.Pool.AutoReap {
+		t.Error("auto_reap=false must be parsed")
+	}
+	if c.Pool.MaxSessions != 2 {
+		t.Errorf("MaxSessions = %d, want 2", c.Pool.MaxSessions)
+	}
+	if c.Tmux.Socket != SocketFor(poolCanon) {
+		t.Errorf("Socket = %q, want derived %q", c.Tmux.Socket, SocketFor(poolCanon))
+	}
+}
+
+// TestLoadForPool_emptyIsDefault: LoadForPool("") loads the default (XDG) pool,
+// which is exactly how reap-all reaps the default pool regardless of env.
+func TestLoadForPool_emptyIsDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CCPOOL_POOL", "/ignored")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := LoadForPool("")
+	if err != nil {
+		t.Fatalf("LoadForPool(\"\"): %v", err)
+	}
+	if c.PoolRoot != "" {
+		t.Errorf("PoolRoot = %q, want empty (default mode)", c.PoolRoot)
+	}
+	if c.Tmux.Socket != "ccpool" {
+		t.Errorf("Socket = %q, want ccpool (default)", c.Tmux.Socket)
+	}
+}
+
+// TestLoadForPool_doesNotRegister: loading a pool's config is a read; it must not
+// enroll the pool in the registry.
+func TestLoadForPool_doesNotRegister(t *testing.T) {
+	t.Setenv("CCPOOL_REGISTRY_DIR", t.TempDir())
+	pool := t.TempDir()
+	if _, err := LoadForPool(pool); err != nil {
+		t.Fatalf("LoadForPool: %v", err)
+	}
+	entries, err := registry.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("LoadForPool must not register, got %d entries", len(entries))
 	}
 }
 

@@ -31,10 +31,10 @@ in
     phillipgreenii.system.launchdServices.userAgents.ccpool-reap = {
       label = "com.phillipg.ccpool-reap";
       script = ''
-        exec ${pkg}/bin/ccpool reap
+        exec ${pkg}/bin/ccpool reap-all
       '';
       runAtLoad = true;
-      # `ccpool reap` is a periodic short task (StartInterval), not a long-running
+      # `ccpool reap-all` is a periodic short task (StartInterval), not a long-running
       # daemon — it does its work and exits. keepAlive defaults to true in the
       # helper, which would make launchd RESTART it on every exit (a ~10s respawn
       # loop). Disable keepAlive so StartInterval is the only re-trigger (runs at

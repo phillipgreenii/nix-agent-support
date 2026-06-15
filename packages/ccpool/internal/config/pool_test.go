@@ -4,7 +4,71 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/phillipgreenii/ccpool/internal/registry"
 )
+
+// TestResolvePool_registersOnCreate: the moment a named pool dir is first created,
+// a registry symlink (named by the pool's socket hash, pointing at the canonical
+// root) is written exactly once.
+func TestResolvePool_registersOnCreate(t *testing.T) {
+	t.Setenv("CCPOOL_REGISTRY_DIR", t.TempDir())
+	parent := t.TempDir()
+	leaf := filepath.Join(parent, "newpool")
+
+	pc, err := ResolvePool(leaf)
+	if err != nil {
+		t.Fatalf("ResolvePool: %v", err)
+	}
+	entries, err := registry.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("creating a named pool must register exactly one symlink, got %d", len(entries))
+	}
+	if entries[0].Name != SocketFor(pc.Root) {
+		t.Errorf("symlink name = %q, want SocketFor(root) %q", entries[0].Name, SocketFor(pc.Root))
+	}
+	if entries[0].Target != pc.Root {
+		t.Errorf("symlink target = %q, want canonical root %q", entries[0].Target, pc.Root)
+	}
+}
+
+// TestResolvePool_existingPoolDoesNotRegister: resolving an ALREADY-existing pool
+// takes the validate branch and must not write to the registry (read-verb purity —
+// `--pool P list`/`state`/`doctor` never enroll P in auto-reaping).
+func TestResolvePool_existingPoolDoesNotRegister(t *testing.T) {
+	t.Setenv("CCPOOL_REGISTRY_DIR", t.TempDir())
+	pool := t.TempDir() // already exists
+	if _, err := ResolvePool(pool); err != nil {
+		t.Fatalf("ResolvePool: %v", err)
+	}
+	entries, err := registry.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("resolving an existing pool must NOT register, got %d entries", len(entries))
+	}
+}
+
+// TestResolvePool_defaultNeverRegisters: the default (XDG) pool early-returns before
+// ensurePoolDir, so it can never self-register — this is what keeps reap-all's
+// separate default-pool reap from double-reaping.
+func TestResolvePool_defaultNeverRegisters(t *testing.T) {
+	t.Setenv("CCPOOL_REGISTRY_DIR", t.TempDir())
+	if _, err := ResolvePool(""); err != nil {
+		t.Fatalf("ResolvePool(\"\"): %v", err)
+	}
+	entries, err := registry.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("default pool must never self-register, got %d entries", len(entries))
+	}
+}
 
 func TestSocketFor(t *testing.T) {
 	a := SocketFor("/Users/x/pools/alpha")
@@ -97,6 +161,38 @@ func TestEnsurePoolDir_create(t *testing.T) {
 	// missing parent → error (no mkdir -p)
 	if err := ensurePoolDir(filepath.Join(parent, "missing", "deep")); err == nil {
 		t.Error("missing parent must error (no mkdir -p)")
+	}
+}
+
+// TestValidatePoolDir covers the read-only validator GC calls: it must NOT create
+// the dir, must reject a missing dir (dangling target) and foreign content, and must
+// accept an allowlist-only dir.
+func TestValidatePoolDir(t *testing.T) {
+	parent := t.TempDir()
+	// non-existent dir → invalid (dangling), and must NOT be created
+	missing := filepath.Join(parent, "nope")
+	if err := ValidatePoolDir(missing); err == nil {
+		t.Error("non-existent dir must be invalid")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Error("ValidatePoolDir must not create the dir")
+	}
+	// allowlist-only → ok
+	dir := t.TempDir()
+	for _, f := range []string{"config.toml", "store.db", "store.db-wal", "alpha.lock", "hook.log"} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidatePoolDir(dir); err != nil {
+		t.Errorf("allowlist-only dir must validate: %v", err)
+	}
+	// a foreign file → refuse
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePoolDir(dir); err == nil {
+		t.Error("foreign file must be refused")
 	}
 }
 

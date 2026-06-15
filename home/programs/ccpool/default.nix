@@ -17,14 +17,15 @@ in
 
     reap.enable = lib.mkEnableOption ''
       the ccpool-reap timer (LaunchAgent on darwin / systemd user timer on
-      linux) that runs `ccpool reap` periodically. The unit itself is
-      registered by the parallel darwin/nixos module (per ADR 0049); this is
-      the public-facing enable flag.
+      linux) that runs `ccpool reap-all` periodically — governing the default
+      pool plus every registered named pool in one pass, not just the default.
+      The unit itself is registered by the parallel darwin/nixos module (per
+      ADR 0049); this is the public-facing enable flag.
     '';
     reap.intervalSeconds = lib.mkOption {
       type = lib.types.int;
       default = 300;
-      description = "How often (seconds) to run `ccpool reap`.";
+      description = "How often (seconds) to run `ccpool reap-all`.";
     };
 
     settings = lib.mkOption {

@@ -20,14 +20,14 @@ in
 {
   config = lib.mkIf reapEnabledByAnyUser {
     systemd.user.services.ccpool-reap = {
-      description = "ccpool reap idle/over-cap sessions";
+      description = "ccpool reap idle/over-cap sessions across all registered pools";
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${pkgs.ccpool}/bin/ccpool reap";
+        ExecStart = "${pkgs.ccpool}/bin/ccpool reap-all";
       };
     };
     systemd.user.timers.ccpool-reap = {
-      description = "Run ccpool reap periodically";
+      description = "Run ccpool reap-all periodically";
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnUnitActiveSec = interval;

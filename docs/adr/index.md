@@ -16,3 +16,4 @@
 | [0011](0011-pa-monitor-daemon-otel-split.md)                     | pa-monitor Daemon + OTel Split                                | Accepted | 2026-05-20 |
 | [0012](0012-pg-pr-fingerprint-driven-daemon-sync.md)             | pg-pr fingerprint-driven daemon sync                          | Accepted | 2026-06-09 |
 | [0013](0013-pg-pr-otlp-logs-via-otelslog.md)                     | pg-pr daemon OTLP logs via the otelslog bridge                | Accepted | 2026-06-09 |
+| [0014](0014-ccpool-reap-all-pool-registry.md)                    | ccpool reap-all over a permanent pool registry                | Accepted | 2026-06-15 |

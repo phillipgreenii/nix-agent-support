@@ -44,6 +44,14 @@ expressible today.
 
 ## Known v1 limitation: the reap timer only governs the default pool
 
+> **RESOLVED (post-v1, bead pg2-4zvg).** The timer now runs `ccpool reap-all`, which
+> reaps the default pool **and** every pool in a permanent symlink registry
+> (`$XDG_STATE_HOME/ccpool/pools.d/`). Pools self-register the moment `ccpool` first
+> creates their dir; `reap-all` GCs dangling/foreign registry links (symlink only,
+> never the data) and honors a per-pool `auto_reap = false` opt-out. This reintroduces
+> a pool registry that v1 deliberately avoided — see ADR 0014. The v1 limitation below
+> is retained for historical context.
+
 `reap` runs from a launchd/systemd timer as bare `ccpool reap` with no `--pool`
 (`darwin/modules/ccpool/default.nix`, the nixos mirror, interval in
 `home/programs/ccpool/default.nix`). With no flag/env it resolves the **default**
@@ -300,4 +308,5 @@ None outstanding. Confirmed during brainstorm + review:
 3. Move/destroy/cross-pool-views deferred. ✔
 4. `hook.log` is per-pool (hook resolves `CCPOOL_POOL` without `config.Load`). ✔
 5. Reap timer governs only the default pool in v1 (documented limitation +
-   follow-up bead); `reap` itself honors `--pool`. ✔
+   follow-up bead); `reap` itself honors `--pool`. ✔ — RESOLVED post-v1 by
+   `ccpool reap-all` + the pool registry (pg2-4zvg, ADR 0014).
