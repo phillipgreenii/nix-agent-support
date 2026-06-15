@@ -2,8 +2,7 @@
 #
 # When enabled, this module:
 #   1. Generates ~/.claude/themes/stylix.json with a full base16 token mapping.
-#   2. Sets the theme preference in ~/.claude/settings.json to "custom:stylix"
-#      (or "dark-ansi" when ansiTheme = true; see below).
+#   2. Sets the theme preference in ~/.claude/settings.json to "custom:stylix".
 #   3. Injects Stylix 24-bit truecolor escapes into the status-line segment scripts.
 #
 # All color values are resolved at nix eval time, consistent with how Stylix
@@ -12,16 +11,6 @@
 # home.file creates a symlink into the nix store, so the theme file is read-only.
 # Claude Code's interactive theme editor (Ctrl+E in /theme) cannot modify it.
 # This is intentional — the file is declaratively managed.
-#
-# ansiTheme workaround (see option docs below):
-#   Claude Code has no selectionBackground theme token (upstream issue #39369).
-#   With "custom:stylix", list selection only changes text color (white→blue),
-#   which can be hard to see. The "dark-ansi" built-in theme uses ANSI palette
-#   indices instead of hardcoded RGB; Stylix configures those palette entries to
-#   Catppuccin Mocha colors, so ANSI inverse (FG↔BG swap) gives a clear visual
-#   selection indicator. Trade-off: shimmer gradient tokens, rate-limit bar colors,
-#   and other fine-grained RGB values are replaced by palette approximations.
-#   Remove ansiTheme = true once upstream ships a selectionBackground token.
 #
 # Requires: stylix.enable = true (enforced via assertion).
 {
@@ -88,24 +77,6 @@ in
 {
   options.phillipgreenii.programs.claude.theme = {
     enable = lib.mkEnableOption "Stylix-aligned Claude Code theme";
-
-    ansiTheme = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Workaround for missing selectionBackground token (upstream #39369).
-
-        When false (default): uses "custom:stylix" — full base16 RGB token mapping,
-        list selection indicated by text color change (white→blue), may be hard to see.
-
-        When true: uses "dark-ansi" — ANSI 16-color palette indices. Stylix sets
-        those palette entries to Catppuccin Mocha, so ANSI inverse gives a clear
-        FG↔BG swap for selection. Loses shimmer/rate-limit/mascot RGB precision.
-
-        Set to true until upstream Claude Code ships a selectionBackground token.
-        Tracked: tmp_i3vS0PSIlW-85h (beads), https://github.com/anthropics/claude-code/issues/39369
-      '';
-    };
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
@@ -130,10 +101,7 @@ in
 
     # Set theme preference in ~/.claude/settings.json.
     # "custom:stylix" selects ~/.claude/themes/stylix.json.
-    # "dark-ansi" uses terminal ANSI palette (set by Stylix) with proper inverse-video
-    # selection highlighting. See ansiTheme option for trade-offs.
-    phillipgreenii.programs.claude.settings.theme =
-      if cfg.ansiTheme then "dark-ansi" else "custom:stylix";
+    phillipgreenii.programs.claude.settings.theme = "custom:stylix";
 
     # Inject Stylix 24-bit truecolor escapes into the status-line segment scripts.
     # Keys match the named colors used in scripts.nix (yellow, green, red, cyan, magenta).
