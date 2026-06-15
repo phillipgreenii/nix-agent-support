@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead>]"
 
 // helpText is the full help printed to stdout for --help/help. pr-pool takes no
 // config flags — its entire configuration surface is PR_POOL_* environment
@@ -21,9 +21,11 @@ completion, then tears down every pr-pool-* tmux session. Bare "pr-pool" is
 equivalent to "pr-pool drain".
 
 Subcommands:
-  drain              run one drain pass (the default when omitted)
-  version            print the version and exit
-  help               print this help and exit
+  drain                   run one drain pass (the default when omitted)
+  run-query <role>        run a role's discovery query and print matches (read-only)
+  run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
+  version                 print the version and exit
+  help                    print this help and exit
 
 Configuration is via PR_POOL_* environment variables (there are no flags).
 Common ones (see internal/config for the full set and defaults):
@@ -50,12 +52,16 @@ const (
 	routeVersion                   // print the version and exit 0
 	routeHelp                      // print usage and exit 0
 	routeUsageErr                  // print .msg + usage to stderr and exit 2
+	routeRunRole                   // dispatch one bead through a role (.role, .bead)
+	routeRunQuery                  // run a role's discovery query read-only (.role)
 )
 
 type routeResult struct {
 	kind routeKind
 	rest []string // drain subcommand args (routeDrain only)
 	msg  string   // diagnostic for routeUsageErr
+	role string   // run-role / run-query role name
+	bead string   // run-role bead id
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -81,6 +87,10 @@ func route(argv []string) routeResult {
 		return routeResult{kind: routeHelp}
 	case "drain":
 		return routeResult{kind: routeDrain, rest: args[1:]}
+	case "run-role":
+		return parseRunRoleArgs(args[1:])
+	case "run-query":
+		return parseRunQueryArgs(args[1:])
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -110,6 +120,41 @@ func parseDrainArgs(args []string) routeResult {
 		return routeResult{kind: routeUsageErr, msg: "unexpected argument: " + pos[0]}
 	}
 	return routeResult{kind: routeDrain}
+}
+
+// knownRoles is the set of role names run-query/run-role accept. Today it is the
+// fixed feedback/worker set; under the planned TOML extraction it becomes the set of
+// configured role names. Kept here so arg parsing stays pure (no config load), per
+// the pg2-52rn "no fall-through to a real dispatch on bad input" guarantee.
+// These are CLI short-tokens, not roles.Role.Name values (which are
+// "feedback-processor"/"worker"); the run-role/run-query handler maps them to
+// registry roles.
+var knownRoles = map[string]bool{"feedback": true, "worker": true}
+
+// parseRunRoleArgs validates `run-role <role> <bead>`. Pure: a missing/unknown role
+// or missing bead yields routeUsageErr (exit 2) before any config load or dispatch.
+func parseRunRoleArgs(args []string) routeResult {
+	if len(args) < 1 || !knownRoles[args[0]] {
+		return routeResult{kind: routeUsageErr, msg: "run-role: unknown or missing role (want: feedback|worker)"}
+	}
+	if len(args) < 2 || args[1] == "" {
+		return routeResult{kind: routeUsageErr, msg: "run-role: missing bead id"}
+	}
+	if len(args) > 2 {
+		return routeResult{kind: routeUsageErr, msg: "run-role: unexpected argument: " + args[2]}
+	}
+	return routeResult{kind: routeRunRole, role: args[0], bead: args[1]}
+}
+
+// parseRunQueryArgs validates `run-query <role>`. Pure, same fail-fast contract.
+func parseRunQueryArgs(args []string) routeResult {
+	if len(args) < 1 || !knownRoles[args[0]] {
+		return routeResult{kind: routeUsageErr, msg: "run-query: unknown or missing role (want: feedback|worker)"}
+	}
+	if len(args) > 1 {
+		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + args[1]}
+	}
+	return routeResult{kind: routeRunQuery, role: args[0]}
 }
 
 // firstFlag returns the first dash-prefixed token in args (the offending flag on

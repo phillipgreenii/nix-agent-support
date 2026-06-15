@@ -152,3 +152,41 @@ func TestParseDrainArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestRoute_runSubcommands(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want routeKind
+	}{
+		{"run-role-ok", []string{"pr-pool", "run-role", "feedback", "zr-1"}, routeRunRole},
+		{"run-role-missing-bead", []string{"pr-pool", "run-role", "feedback"}, routeUsageErr},
+		{"run-role-unknown-role", []string{"pr-pool", "run-role", "bogus", "zr-1"}, routeUsageErr},
+		{"run-role-extra-arg", []string{"pr-pool", "run-role", "feedback", "zr-1", "x"}, routeUsageErr},
+		{"run-query-ok", []string{"pr-pool", "run-query", "worker"}, routeRunQuery},
+		{"run-query-missing-role", []string{"pr-pool", "run-query"}, routeUsageErr},
+		{"run-query-unknown-role", []string{"pr-pool", "run-query", "bogus"}, routeUsageErr},
+		{"run-query-extra-arg", []string{"pr-pool", "run-query", "worker", "extra"}, routeUsageErr},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := route(tc.argv).kind; got != tc.want {
+				t.Errorf("route(%v).kind = %v, want %v", tc.argv, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseRunRoleArgs_carriesRoleAndBead(t *testing.T) {
+	r := parseRunRoleArgs([]string{"worker", "zr-9"})
+	if r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-9" {
+		t.Errorf("parseRunRoleArgs = %+v, want routeRunRole role=worker bead=zr-9", r)
+	}
+}
+
+func TestParseRunQueryArgs_carriesRole(t *testing.T) {
+	r := parseRunQueryArgs([]string{"feedback"})
+	if r.kind != routeRunQuery || r.role != "feedback" || r.bead != "" {
+		t.Errorf("parseRunQueryArgs = %+v, want routeRunQuery role=feedback bead empty", r)
+	}
+}
