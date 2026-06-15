@@ -79,6 +79,22 @@ func (o *Orchestrator) DrainOnce(ctx context.Context, selfLogin string) error {
 	return nil
 }
 
+// RunOne dispatches a single DispatchContext through the full workOne path and then
+// closes that one session (the drain's pass-level teardownAll is not involved). It is
+// the single-bead entry behind `pr-pool run-role`: smoke-test one role against one
+// bead without running discovery. Unlike DrainOnce it does NOT consult the quota/CICD
+// gates and does NOT reap stray pr-pool-* sessions — it is a manual, intentional
+// single dispatch where the operator is in control.
+func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
+	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
+	defer func() {
+		if err := o.CC.Close(ctx, name); err != nil {
+			slog.Warn("run-one teardown close failed", "session", name, "err", err)
+		}
+	}()
+	return o.workOne(ctx, d)
+}
+
 func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) {
 	worked := 0
 	for _, d := range all {

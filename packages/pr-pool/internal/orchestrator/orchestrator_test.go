@@ -638,6 +638,38 @@ func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
 	}
 }
 
+func TestRunOne_feedbackClosesSession(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"closed"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateWorking}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	if err := o.RunOne(context.Background(), d); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !contains(cc.ensured, "pr-pool-feedback-processor-zr-c") {
+		t.Errorf("RunOne must Ensure the session; ensured=%v", cc.ensured)
+	}
+	if !contains(cc.closed, "pr-pool-feedback-processor-zr-c") {
+		t.Errorf("RunOne must close its one session; closed=%v", cc.closed)
+	}
+}
+
+func TestRunOne_doneWithoutCloseFlagsAndCloses(t *testing.T) {
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	if err := o.RunOne(context.Background(), d); err == nil {
+		t.Fatal("done-without-close should fail")
+	}
+	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
+		t.Errorf("feedback failure must unclaim; updates=%v", bd.updates)
+	}
+	if !contains(cc.closed, "pr-pool-feedback-processor-zr-c") {
+		t.Errorf("RunOne must still close its session on failure; closed=%v", cc.closed)
+	}
+}
+
 func TestActive_stateMapping(t *testing.T) {
 	cases := []struct {
 		name string

@@ -19,6 +19,10 @@ func main() {
 		os.Exit(exitUsage)
 	case routeDrain:
 		os.Exit(runDrain(r.rest))
+	case routeRunRole:
+		os.Exit(runRunRole(r.role, r.bead))
+	case routeRunQuery:
+		os.Exit(runRunQuery(r.role))
 	}
 }
 
