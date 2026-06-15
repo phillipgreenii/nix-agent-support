@@ -546,4 +546,3 @@ func TestServerSetAutoResumePersistsToToggleStore(t *testing.T) {
 		t.Error("auto_resume_enabled = false in ToggleStore, want true")
 	}
 }
-

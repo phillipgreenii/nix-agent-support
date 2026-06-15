@@ -11,20 +11,20 @@ This is the largest repo in the workspace (~975 tracked files: 543 Go, 149 md, 8
 49 sh, 30 bats, 28 toml). It packages a fleet of Go tools + nix glue + shell "packs"
 that support AI coding agents. Coverage by area:
 
-| Area                                                                                    | Depth            | Notes                                                                                                                              |
-| --------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/claude-extended-tool-approver` (Go)                                           | **Deep**         | Findings empirically confirmed by building the binary and feeding crafted PreToolUse JSON                                          |
-| `packages/ccpool` (Go)                                                                  | **Deep**         | All `cmd/` + `internal/` read line-by-line                                                                                         |
-| `packages/pa-monitor` (Go)                                                              | **Deep**         | Daemon/server/store/nudger read; TUI + render skipped                                                                              |
-| `packages/pr-pool` (Go)                                                                 | **Deep**         | All 35 `.go` files                                                                                                                 |
-| `packages/claude-transcript` (Go shared lib)                                            | **Deep**         | Fans out to ccpool, pa-monitor, pr-pool                                                                                            |
-| `packages/pa-monitor-decorator-gc` (Go)                                                 | **Deep**         | Small stub                                                                                                                         |
-| Shell packs (`pgii-pack-*`, `git-tools`, `gc-dolt-maintenance`, activation scripts)     | **Deep**         | ~40 scripts read                                                                                                                   |
-| `lib/` nix builders (`mkPgiiPack`, `python-package`, `agent-script`)                    | **Deep**         |                                                                                                                                    |
-| nix build plumbing (`flake.nix`, buildGoModule coupling, pre-commit, `update-locks.sh`) | **Medium**       |                                                                                                                                    |
+| Area                                                                                    | Depth               | Notes                                                                                                                                                  |
+| --------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/claude-extended-tool-approver` (Go)                                           | **Deep**            | Findings empirically confirmed by building the binary and feeding crafted PreToolUse JSON                                                              |
+| `packages/ccpool` (Go)                                                                  | **Deep**            | All `cmd/` + `internal/` read line-by-line                                                                                                             |
+| `packages/pa-monitor` (Go)                                                              | **Deep**            | Daemon/server/store/nudger read; TUI + render skipped                                                                                                  |
+| `packages/pr-pool` (Go)                                                                 | **Deep**            | All 35 `.go` files                                                                                                                                     |
+| `packages/claude-transcript` (Go shared lib)                                            | **Deep**            | Fans out to ccpool, pa-monitor, pr-pool                                                                                                                |
+| `packages/pa-monitor-decorator-gc` (Go)                                                 | **Deep**            | Small stub                                                                                                                                             |
+| Shell packs (`pgii-pack-*`, `git-tools`, `gc-dolt-maintenance`, activation scripts)     | **Deep**            | ~40 scripts read                                                                                                                                       |
+| `lib/` nix builders (`mkPgiiPack`, `python-package`, `agent-script`)                    | **Deep**            |                                                                                                                                                        |
+| nix build plumbing (`flake.nix`, buildGoModule coupling, pre-commit, `update-locks.sh`) | **Medium**          |                                                                                                                                                        |
 | **`packages/pg-pr` (Go)**                                                               | **Deep (security)** | Completed 2026-06-12 — see the dedicated pg-pr section near the end. Security surfaces deep-read; sync-daemon internals + bulk business logic skimmed. |
-| `internal/tui`, `internal/render` (pa-monitor)                                          | Skipped          | Per reviewer scope                                                                                                                 |
-| Generated `*.pb.go`, `go.sum`                                                           | Skipped          |                                                                                                                                    |
+| `internal/tui`, `internal/render` (pa-monitor)                                          | Skipped             | Per reviewer scope                                                                                                                                     |
+| Generated `*.pb.go`, `go.sum`                                                           | Skipped             |                                                                                                                                                        |
 
 ## Inventory
 
@@ -182,7 +182,7 @@ that support AI coding agents. Coverage by area:
 | 17  | **Med**      | Add bats for all destructive/critical scripts + 12 doctor checks; fix temp-file/log litter traps                                            | shell packs                                                                      |
 | 18  | **Med**      | Collapse 4× `update-deps.sh`; extend `update-locks.sh` to ccpool/pr-pool/decorator; evaluate `gomod2nix`/`uv2nix`                           | repo-level                                                                       |
 | 19  | **Low**      | Delete dead Gas City modules (`pa-monitor-decorator-gc`, `gc`-rooted defaults) per ADR 0043                                                 | `packages/`, `lib/`, `home/`                                                     |
-| 20  | **Done**     | `pg-pr` reviewed 2026-06-12 — strongest security posture of the Go fleet; see dedicated section. Main follow-ups: M1/M2 below                                              | `packages/pg-pr`                                                                 |
+| 20  | **Done**     | `pg-pr` reviewed 2026-06-12 — strongest security posture of the Go fleet; see dedicated section. Main follow-ups: M1/M2 below               | `packages/pg-pr`                                                                 |
 
 ---
 
@@ -212,14 +212,14 @@ ceta/ccpool/pr-pool–class problems are present. Findings are correspondingly m
 
 ### Security
 
-- *(Cleared)* **No shell injection.** Every external command uses `exec.CommandContext` with an
+- _(Cleared)_ **No shell injection.** Every external command uses `exec.CommandContext` with an
   argv slice — `git` (`internal/gitlocal/gitlocal.go:49`, `internal/branch/branch.go:148`,
   `internal/worktree/git.go:147`), `gh` (`pkg/provider/vcs/github/github.go:89`,
   `internal/worktree/gh.go:36`, `internal/auth/auth.go:212`), `bd` (`pkg/beads/runner.go:50`).
   No `sh -c`/`bash -c`, no string-built commands.
-- *(Cleared)* **Token handling is deliberate.** `pkg/provider/vcs/github/token.go`: the resolved
+- _(Cleared)_ **Token handling is deliberate.** `pkg/provider/vcs/github/token.go`: the resolved
   GH token is injected into the child env (`cmd.Env = envWithGHToken(...)`, `github.go:90`), never
-  placed on argv; `gh auth token` is run with GH_TOKEN/GITHUB_TOKEN *stripped* from the child env
+  placed on argv; `gh auth token` is run with GH*TOKEN/GITHUB_TOKEN \_stripped* from the child env
   (`token.go:38-39`) so it can't echo itself; resolution is lazy + success-cached. The token is
   never logged. Jira token (via the `pg-pr-zr` wrapper) is read from a runtime file off the nix
   store and exported as env.
@@ -249,7 +249,7 @@ ceta/ccpool/pr-pool–class problems are present. Findings are correspondingly m
 ### Architecture
 
 - The sync daemon enforces a single instance per user (lock), uses an internal cancelable context,
-  and treats "escalation" as **benign**: a *restart-to-refresh* when gh-auth fails for a sustained
+  and treats "escalation" as **benign**: a _restart-to-refresh_ when gh-auth fails for a sustained
   streak (`internal/sync/detector.go:167-243`, `daemon.go:104,252`) and a `bd human` handoff when CI
   loops stall (`sync.go:14-16`). This is not privilege escalation — earlier concern retracted.
 - Not audited: race safety across queue/detector/snapshotowner under concurrent ticks (skimmed only).
@@ -286,11 +286,11 @@ ceta/ccpool/pr-pool–class problems are present. Findings are correspondingly m
 
 ### pg-pr Action List (severity-ranked)
 
-| #   | Sev          | Action                                                                                          | Where                               |
-| --- | ------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
-| M1  | **Medium**   | Invoke the description agent in a no-tools/description-only mode; treat generated body as untrusted | `cmd/pg-pr/pr_write.go:148-162`     |
-| M2  | **Low**      | Document the localhost dashboard trust boundary; add loopback auth if snapshot gains sensitive data | `internal/httpapi/dashboard.go`, `daemon.go:423` |
-| M3  | **Low**      | Add `ReadTimeout`/`WriteTimeout`/`IdleTimeout` to the metrics server                            | `internal/sync/daemon.go:428`       |
-| M4  | **Low**      | Verify Jira token is sent as a header, not on argv                                              | `pkg/provider/issues/jira/jira.go`  |
-| M5  | **Low**      | Ensure `internal/` + `pkg/` tests actually run under `nix build` (subPackages caveat)           | `default.nix` / builders            |
-| —   | **Open**     | Daemon concurrency/race audit (queue/detector/snapshotowner) — not covered this pass            | `internal/sync/`                    |
+| #   | Sev        | Action                                                                                              | Where                                            |
+| --- | ---------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| M1  | **Medium** | Invoke the description agent in a no-tools/description-only mode; treat generated body as untrusted | `cmd/pg-pr/pr_write.go:148-162`                  |
+| M2  | **Low**    | Document the localhost dashboard trust boundary; add loopback auth if snapshot gains sensitive data | `internal/httpapi/dashboard.go`, `daemon.go:423` |
+| M3  | **Low**    | Add `ReadTimeout`/`WriteTimeout`/`IdleTimeout` to the metrics server                                | `internal/sync/daemon.go:428`                    |
+| M4  | **Low**    | Verify Jira token is sent as a header, not on argv                                                  | `pkg/provider/issues/jira/jira.go`               |
+| M5  | **Low**    | Ensure `internal/` + `pkg/` tests actually run under `nix build` (subPackages caveat)               | `default.nix` / builders                         |
+| —   | **Open**   | Daemon concurrency/race audit (queue/detector/snapshotowner) — not covered this pass                | `internal/sync/`                                 |

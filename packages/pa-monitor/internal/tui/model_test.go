@@ -393,4 +393,3 @@ func TestDaemonConnectedReflectedInView(t *testing.T) {
 		t.Errorf("connected and offline views must differ to signal daemon state, got identical:\n%s", connectedView)
 	}
 }
-
