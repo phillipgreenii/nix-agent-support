@@ -43,7 +43,17 @@
   # base03 = Comments/Invisibles — the canonical "dimmed" slot in base16 editors.
   inactive = "#${colors.base03}";
   subtle = "#${colors.base04}"; # Dark Foreground — secondary text, status bars
-  suggestion = "#${colors.base03}"; # Hints are as secondary as code comments
+  # `suggestion` is dual-purpose: per Claude Code docs it colors BOTH autocomplete
+  # ghost-text AND the highlighted row in list pickers (e.g. the /theme selector).
+  # Mapping it to base03 (the dimmed comment slot) rendered the selected picker row
+  # *dimmer* than the unselected base05-white rows, so selection read as faded rather
+  # than highlighted — the "invisible selection" bug (pg2-71o). Outside fullscreen
+  # there is no row-background fill, so a hue (not another grey) is required for the
+  # selected row to look more prominent than the surrounding white text. base0D (blue)
+  # is chosen over the base0E accent so selection stays distinct from claude/
+  # promptBorder/remember. Trade-off: ghost-text hints are now blue rather than grey.
+  # Docs: https://code.claude.com/docs/en/terminal-config (Color token reference).
+  suggestion = "#${colors.base0D}";
   # Memory highlights use the primary accent for visual consistency with the
   # Claude brand color.
   remember = "#${colors.base0E}";
