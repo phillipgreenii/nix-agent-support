@@ -201,6 +201,65 @@ func TestDiscover_skipsBeadOnParentShowError(t *testing.T) {
 	}
 }
 
+func TestForRole_feedbackOwnershipBypassesEnabled(t *testing.T) {
+	rr := &routingRunner{
+		readyFeedback: `[{"id":"zr-mine","issue_type":"task","title":"process-feedback: A","parent":"zr-prA"}]`,
+		readyWorker:   `[]`,
+		show:          map[string]string{"zr-prA": `{"id":"zr-prA","metadata":{"author":"phillipg"}}`},
+	}
+	cfg := config.Default()
+	cfg.FeedbackEnabled = false // ForRole must run the query anyway (Enabled is bypassed)
+	reg := roles.NewRegistry(cfg)
+	got, err := ForRole(context.Background(), rr, reg.Feedback, "phillipg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].BeadID != "zr-mine" || got[0].Role.Kind != roles.Feedback {
+		t.Fatalf("ForRole(feedback) = %+v (want only zr-mine)", got)
+	}
+}
+
+func TestForRole_workerIgnoresSelfLogin(t *testing.T) {
+	rr := &routingRunner{readyFeedback: `[]`, readyWorker: `[{"id":"zr-w1"},{"id":"zr-w2"}]`}
+	reg := roles.NewRegistry(config.Default())
+	got, err := ForRole(context.Background(), rr, reg.Worker, "") // empty selfLogin is fine for worker
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Role.Kind != roles.Worker {
+		t.Fatalf("ForRole(worker) = %+v", got)
+	}
+}
+
+func TestForRole_feedbackEmptySelfLoginErrors(t *testing.T) {
+	rr := &routingRunner{readyFeedback: `[]`, readyWorker: `[]`}
+	reg := roles.NewRegistry(config.Default())
+	if _, err := ForRole(context.Background(), rr, reg.Feedback, ""); err == nil {
+		t.Error("ForRole(feedback) with empty selfLogin must error (cannot resolve ownership)")
+	}
+}
+
+func TestDiscover_feedbackDisabled_emptySelfLoginOK(t *testing.T) {
+	cfg := config.Default()
+	cfg.FeedbackEnabled = false
+	rr := &routingRunner{readyWorker: `[{"id":"zr-w1"}]`}
+	reg := roles.NewRegistry(cfg)
+	got, err := Discover(context.Background(), rr, reg, "")
+	if err != nil {
+		t.Fatalf("feedback disabled => empty selfLogin must not error; got %v", err)
+	}
+	if len(got) != 1 || got[0].BeadID != "zr-w1" {
+		t.Fatalf("expected only the worker dispatch; got %+v", got)
+	}
+}
+
+func TestForRole_unknownKindErrors(t *testing.T) {
+	rr := &routingRunner{}
+	if _, err := ForRole(context.Background(), rr, roles.Role{Kind: roles.RoleKind(99)}, "x"); err == nil {
+		t.Error("unknown role kind must error")
+	}
+}
+
 func TestDispatchContext_Validate(t *testing.T) {
 	reg := roles.NewRegistry(config.Default())
 	cases := []struct {

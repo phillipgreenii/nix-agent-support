@@ -37,15 +37,14 @@ func (d DispatchContext) Validate() error {
 	return nil
 }
 
-// Discover returns feedback dispatches (owned by selfLogin) then worker
-// dispatches, in priority order. selfLogin must be non-empty.
+// Discover returns feedback dispatches (owned by selfLogin) then worker dispatches,
+// in priority order, honoring each role's Enabled flag. An empty selfLogin is an
+// error only when the feedback role is enabled (it needs selfLogin for the ownership
+// join); a worker-only pass with feedback disabled does not require it.
 func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogin string) ([]DispatchContext, error) {
-	if selfLogin == "" {
-		return nil, fmt.Errorf("discover: empty self_login (cannot resolve feedback ownership)")
-	}
 	var out []DispatchContext
 	if reg.Feedback.Enabled {
-		fb, err := discoverFeedback(ctx, br, reg.Feedback, selfLogin)
+		fb, err := ForRole(ctx, br, reg.Feedback, selfLogin)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +53,7 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 		slog.Info("role disabled; skipping discovery", "role", reg.Feedback.Name)
 	}
 	if reg.Worker.Enabled {
-		wk, err := discoverWorker(ctx, br, reg.Worker)
+		wk, err := ForRole(ctx, br, reg.Worker, selfLogin)
 		if err != nil {
 			return nil, err
 		}
@@ -63,6 +62,24 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 		slog.Info("role disabled; skipping discovery", "role", reg.Worker.Name)
 	}
 	return out, nil
+}
+
+// ForRole runs ONE role's discovery query, regardless of the role's Enabled flag
+// (the smoke harness must be able to query a role disabled in config). The feedback
+// path requires a non-empty selfLogin for the parent-author ownership join; the
+// worker path ignores it.
+func ForRole(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]DispatchContext, error) {
+	switch role.Kind {
+	case roles.Feedback:
+		if selfLogin == "" {
+			return nil, fmt.Errorf("discover: empty self_login (cannot resolve feedback ownership)")
+		}
+		return discoverFeedback(ctx, br, role, selfLogin)
+	case roles.Worker:
+		return discoverWorker(ctx, br, role)
+	default:
+		return nil, fmt.Errorf("discover: unknown role kind %v", role.Kind)
+	}
 }
 
 func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]DispatchContext, error) {
