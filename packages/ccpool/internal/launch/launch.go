@@ -4,6 +4,42 @@
 // launch argument; prompts are delivered by send (Plan 3).
 package launch
 
+// PermissionMode is claude's --permission-mode value. The valid set is fixed by
+// Claude Code (https://code.claude.com/docs/en/permission-modes.md). The zero
+// value ("") means "no --permission-mode flag", preserving claude's own default
+// for an interactive, no-flag launch. bypassPermissions is the synonym for the
+// old --dangerously-skip-permissions and is REQUIRED for dispatched
+// (non-interactive) workers: without it claude stalls on the first
+// tool-permission prompt that no human will answer.
+type PermissionMode string
+
+const (
+	ModeDefault           PermissionMode = "default"
+	ModeAcceptEdits       PermissionMode = "acceptEdits"
+	ModePlan              PermissionMode = "plan"
+	ModeAuto              PermissionMode = "auto"
+	ModeDontAsk           PermissionMode = "dontAsk"
+	ModeBypassPermissions PermissionMode = "bypassPermissions"
+)
+
+// ValidPermissionModes returns the documented --permission-mode values, in docs
+// order. Callers validate user input against this set.
+func ValidPermissionModes() []PermissionMode {
+	return []PermissionMode{ModeDefault, ModeAcceptEdits, ModePlan, ModeAuto, ModeDontAsk, ModeBypassPermissions}
+}
+
+// Valid reports whether m is one of the documented --permission-mode values. The
+// empty string (zero value) is NOT valid — it is the "omit the flag" sentinel,
+// distinct from an explicit, unknown value a caller must reject.
+func (m PermissionMode) Valid() bool {
+	for _, v := range ValidPermissionModes() {
+		if m == v {
+			return true
+		}
+	}
+	return false
+}
+
 // Spec carries everything needed to build a launch command.
 type Spec struct {
 	ClaudeBin string // resolved path to the claude binary (or a fake-claude stub in tests)
@@ -12,10 +48,9 @@ type Spec struct {
 	PluginDir string // ccpool-plugin store path; ALWAYS appended
 	Model     string // optional
 
-	// DangerouslySkipPermissions emits --dangerously-skip-permissions. REQUIRED
-	// for dispatched (non-interactive) workers: without it claude stalls on the
-	// first tool-permission prompt that no human will answer.
-	DangerouslySkipPermissions bool
+	// PermissionMode emits --permission-mode <value> when non-empty; the zero
+	// value omits the flag.
+	PermissionMode PermissionMode
 	// Effort emits --effort <value> (e.g. "max") when non-empty.
 	Effort string
 }
@@ -33,11 +68,11 @@ func BuildResume(s Spec) []string {
 }
 
 // appendFlags appends the optional claude launch flags shared by new and resume,
-// in a fixed order: --dangerously-skip-permissions, --effort <value>, --model
-// <value>. Each is omitted when unset (false / empty string).
+// in a fixed order: --permission-mode <value>, --effort <value>, --model
+// <value>. Each is omitted when unset (empty string).
 func appendFlags(args []string, s Spec) []string {
-	if s.DangerouslySkipPermissions {
-		args = append(args, "--dangerously-skip-permissions")
+	if s.PermissionMode != "" {
+		args = append(args, "--permission-mode", string(s.PermissionMode))
 	}
 	if s.Effort != "" {
 		args = append(args, "--effort", s.Effort)

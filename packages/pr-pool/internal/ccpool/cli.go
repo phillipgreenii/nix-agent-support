@@ -37,10 +37,10 @@ const (
 // tmux.Client. The launch-flag fields come from config and are emitted on
 // `ccpool new` per the agreed contract (ccpool N2 — see pg2-7mnq.3).
 type CLIRunner struct {
-	Effort    string
-	Model     string
-	Dangerous bool
-	bin       string // ccpool binary name/path (resolved on PATH by execCmd)
+	Effort         string
+	Model          string
+	PermissionMode string // claude --permission-mode; emitted on `ccpool new` when non-empty
+	bin            string // ccpool binary name/path (resolved on PATH by execCmd)
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
 	// pg2-x6ef) plus the run error.
@@ -48,7 +48,7 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, Dangerous: cfg.Dangerous, bin: "ccpool"}
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, bin: "ccpool"}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
 		return execCmd(ctx, c.bin, args)
 	}
@@ -104,7 +104,7 @@ func argSummary(args []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Ensure: ccpool new <name> --cwd <cwd> --env K=V… --dangerously-skip-permissions
+// Ensure: ccpool new <name> --cwd <cwd> --env K=V… --permission-mode <mode>
 // --effort <effort> [--model <model>]. env keys sorted for deterministic argv.
 func (c *CLIRunner) Ensure(ctx context.Context, name, cwd string, env map[string]string) error {
 	args := []string{"new", name, "--cwd", cwd}
@@ -116,8 +116,8 @@ func (c *CLIRunner) Ensure(ctx context.Context, name, cwd string, env map[string
 	for _, k := range keys {
 		args = append(args, "--env", k+"="+env[k])
 	}
-	if c.Dangerous {
-		args = append(args, "--dangerously-skip-permissions")
+	if c.PermissionMode != "" {
+		args = append(args, "--permission-mode", c.PermissionMode)
 	}
 	if c.Effort != "" {
 		args = append(args, "--effort", c.Effort)

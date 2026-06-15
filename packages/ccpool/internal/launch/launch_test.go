@@ -32,10 +32,11 @@ func TestBuildResume_resumesByName_alwaysHasPluginDir(t *testing.T) {
 }
 
 // TestBuildLaunchFlags pins the claude launch-flag passthrough (N2). When set,
-// the flags must appear in the contract order: --dangerously-skip-permissions,
+// the flags must appear in the contract order: --permission-mode <value>,
 // then --effort <value>, then --model <value>; when unset they are omitted.
-// Without --dangerously-skip-permissions the dispatched worker stalls on the
-// first tool prompt, so this is correctness, not polish.
+// Without a permission mode that bypasses prompts (bypassPermissions) the
+// dispatched worker stalls on the first tool prompt, so this is correctness,
+// not polish.
 func TestBuildLaunchFlags(t *testing.T) {
 	tests := []struct {
 		name string
@@ -44,16 +45,16 @@ func TestBuildLaunchFlags(t *testing.T) {
 	}{
 		{
 			name: "new with all launch flags in contract order",
-			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", DangerouslySkipPermissions: true, Effort: "max", Model: "opus"},
-			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--dangerously-skip-permissions", "--effort", "max", "--model", "opus"},
+			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"},
+			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", "bypassPermissions", "--effort", "max", "--model", "opus"},
 		},
 		{
-			name: "new with skip+effort but no model",
-			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", DangerouslySkipPermissions: true, Effort: "max"},
-			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--dangerously-skip-permissions", "--effort", "max"},
+			name: "new with mode+effort but no model",
+			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModePlan, Effort: "max"},
+			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", "plan", "--effort", "max"},
 		},
 		{
-			name: "new omits skip when false and effort when empty",
+			name: "new omits permission-mode when empty and effort when empty",
 			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", Model: "opus"},
 			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--model", "opus"},
 		},
@@ -67,10 +68,38 @@ func TestBuildLaunchFlags(t *testing.T) {
 	}
 }
 
+// TestBuildNew_emitsEachPermissionMode pins that every valid mode is emitted
+// verbatim as its --permission-mode <value> argument.
+func TestBuildNew_emitsEachPermissionMode(t *testing.T) {
+	for _, mode := range ValidPermissionModes() {
+		t.Run(string(mode), func(t *testing.T) {
+			got := BuildNew(Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: mode})
+			want := []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", string(mode)}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("BuildNew(%q) = %v\nwant %v", mode, got, want)
+			}
+		})
+	}
+}
+
 func TestBuildResume_includesLaunchFlags(t *testing.T) {
-	got := BuildResume(Spec{ClaudeBin: "claude", Name: "alpha", PluginDir: "/p", DangerouslySkipPermissions: true, Effort: "max", Model: "opus"})
-	want := []string{"claude", "--resume", "alpha", "--plugin-dir", "/p", "--dangerously-skip-permissions", "--effort", "max", "--model", "opus"}
+	got := BuildResume(Spec{ClaudeBin: "claude", Name: "alpha", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"})
+	want := []string{"claude", "--resume", "alpha", "--plugin-dir", "/p", "--permission-mode", "bypassPermissions", "--effort", "max", "--model", "opus"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("BuildResume = %v\nwant %v", got, want)
+	}
+}
+
+func TestPermissionMode_Valid(t *testing.T) {
+	for _, mode := range ValidPermissionModes() {
+		if !mode.Valid() {
+			t.Errorf("%q should be a valid permission mode", mode)
+		}
+	}
+	if PermissionMode("").Valid() {
+		t.Error("empty permission mode should not be reported valid")
+	}
+	if PermissionMode("nope").Valid() {
+		t.Error("unknown permission mode should not be reported valid")
 	}
 }

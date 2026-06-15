@@ -36,7 +36,7 @@ Common ones (see internal/config for the full set and defaults):
   PR_POOL_BUDGET_TIME      per-worker wall-clock budget in seconds (default 1500)
   PR_POOL_MODEL            claude model override (default: ccpool's default)
   PR_POOL_EFFORT           claude --effort value (default max)
-  PR_POOL_DANGEROUS        run workers with --dangerously-skip-permissions (default on)
+  PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default bypassPermissions)
   PR_POOL_REPO_ROOT        monorepo root the drain operates in (default: cwd)
   PR_POOL_BEADS_PREFIX     expected bead prefix, asserted at precheck (default zr)`
 

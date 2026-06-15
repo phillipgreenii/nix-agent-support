@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -156,8 +157,8 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 
 // TestEnsure_threadsLaunchFlagsToArgv asserts that EnsureOpts launch flags reach
 // the claude argv that ensureLocked hands to tmux — the glue between the CLI
-// flags and launch.BuildNew. Without --dangerously-skip-permissions a dispatched
-// worker stalls on the first tool prompt.
+// flags and launch.BuildNew. Without a permission mode that bypasses prompts a
+// dispatched worker stalls on the first tool prompt.
 func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
@@ -172,18 +173,54 @@ func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
 		NewUUID: func() string { return "uuid-1" },
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
-	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{DangerouslySkipPermissions: true, Effort: "max"}); err != nil {
+	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	if len(ft.newCalls) != 1 {
 		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
 	}
 	joined := strings.Join(ft.newCalls[0].argv, " ")
-	if !strings.Contains(joined, "--dangerously-skip-permissions") {
-		t.Errorf("argv missing --dangerously-skip-permissions: %q", joined)
+	if !strings.Contains(joined, "--permission-mode bypassPermissions") {
+		t.Errorf("argv missing --permission-mode bypassPermissions: %q", joined)
 	}
 	if !strings.Contains(joined, "--effort max") {
 		t.Errorf("argv missing --effort max: %q", joined)
+	}
+}
+
+// TestEnsure_threadsPermissionModeToResumeArgv closes the resume-path gap: a
+// cold (existing) row resumes by name, and the permission mode must still reach
+// the claude argv via launch.BuildResume.
+func TestEnsure_threadsPermissionModeToResumeArgv(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	// Seed a cold row so ensureLocked takes the resume branch.
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "uuid-1", CWD: "/tmp/proj", State: store.Done, TmuxSession: "cc-alpha"}); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	ft := &fakeTmux{live: map[string]bool{}} // not live → resume path
+	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "uuid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	joined := strings.Join(ft.newCalls[0].argv, " ")
+	if !strings.Contains(joined, "--resume alpha") {
+		t.Errorf("resume argv expected; got %q", joined)
+	}
+	if !strings.Contains(joined, "--permission-mode bypassPermissions") {
+		t.Errorf("resume argv missing --permission-mode bypassPermissions: %q", joined)
 	}
 }
 

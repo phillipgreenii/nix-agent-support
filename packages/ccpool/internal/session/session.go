@@ -112,12 +112,12 @@ type EnsureOpts struct {
 	// the merge policy (ccpool's markers are authoritative on conflict).
 	Env map[string]string
 
-	// DangerouslySkipPermissions and Effort are claude launch flags passed through
-	// to launch.BuildNew/BuildResume (see launch.Spec). Workers dispatched
-	// non-interactively need DangerouslySkipPermissions, else claude stalls on the
-	// first tool-permission prompt.
-	DangerouslySkipPermissions bool
-	Effort                     string
+	// PermissionMode and Effort are claude launch flags passed through to
+	// launch.BuildNew/BuildResume (see launch.Spec). Workers dispatched
+	// non-interactively need a bypassing PermissionMode (bypassPermissions),
+	// else claude stalls on the first tool-permission prompt.
+	PermissionMode launch.PermissionMode
+	Effort         string
 }
 
 // Ensure returns a live, ready handle for name, launching or resuming as needed.
@@ -168,7 +168,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string, opt
 		}
 		argv := launch.BuildResume(launch.Spec{
 			ClaudeBin: s.d.ClaudeBin, Name: name, PluginDir: s.d.PluginDir, Model: orDefault(model, row.Model),
-			DangerouslySkipPermissions: opts.DangerouslySkipPermissions, Effort: opts.Effort,
+			PermissionMode: opts.PermissionMode, Effort: opts.Effort,
 		})
 		return s.launchAndWait(ctx, name, tmuxName, row.UUID, row.CWD, since, argv, opts.Env)
 	}
@@ -189,7 +189,7 @@ func (s *Service) ensureLocked(ctx context.Context, name, cwd, model string, opt
 	}
 	argv := launch.BuildNew(launch.Spec{
 		ClaudeBin: s.d.ClaudeBin, UUID: uuid, Name: name, PluginDir: s.d.PluginDir, Model: model,
-		DangerouslySkipPermissions: opts.DangerouslySkipPermissions, Effort: opts.Effort,
+		PermissionMode: opts.PermissionMode, Effort: opts.Effort,
 	})
 	return s.launchAndWait(ctx, name, tmuxName, uuid, cwd, since, argv, opts.Env)
 }

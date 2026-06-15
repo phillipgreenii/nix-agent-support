@@ -14,21 +14,21 @@ import (
 )
 
 type Config struct {
-	RepoRoot      string
-	BeadsPrefix   string
-	WorktreeDir   string
-	SkillMD       string
-	WorkerSkillMD string
-	MaxFeedback   int
-	MaxWorker     int
-	MaxWait       time.Duration
-	PollInterval  time.Duration
-	QuotaPaused   string
-	CICDDown      string
-	Effort        string
-	Model         string
-	Dangerous     bool
-	SessionPrefix string
+	RepoRoot       string
+	BeadsPrefix    string
+	WorktreeDir    string
+	SkillMD        string
+	WorkerSkillMD  string
+	MaxFeedback    int
+	MaxWorker      int
+	MaxWait        time.Duration
+	PollInterval   time.Duration
+	QuotaPaused    string
+	CICDDown       string
+	Effort         string
+	Model          string
+	PermissionMode string
+	SessionPrefix  string
 
 	// Per-role enable flags. A disabled role is skipped at discovery (no
 	// dispatches). Both default true. Env: PR_POOL_FEEDBACK_ENABLED /
@@ -67,7 +67,7 @@ func Default() Config {
 		CICDDown:        "",
 		Effort:          "max",
 		Model:           "",
-		Dangerous:       true,
+		PermissionMode:  "bypassPermissions",
 		SessionPrefix:   "pr-pool-",
 		FeedbackEnabled: true,
 		WorkerEnabled:   true,
@@ -99,7 +99,7 @@ func Load() Config {
 	c.CICDDown = envStr("PR_POOL_CICD_DOWN", c.CICDDown)
 	c.Effort = envStr("PR_POOL_EFFORT", c.Effort)
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
-	c.Dangerous = envBool("PR_POOL_DANGEROUS", c.Dangerous)
+	c.PermissionMode = envStr("PR_POOL_PERMISSION_MODE", c.PermissionMode)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
 	c.FeedbackEnabled = envBool("PR_POOL_FEEDBACK_ENABLED", c.FeedbackEnabled)
 	c.WorkerEnabled = envBool("PR_POOL_WORKER_ENABLED", c.WorkerEnabled)

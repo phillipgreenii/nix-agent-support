@@ -22,8 +22,8 @@ func TestDefault(t *testing.T) {
 	if d.Effort != "max" {
 		t.Errorf("Effort = %q, want max", d.Effort)
 	}
-	if !d.Dangerous {
-		t.Error("Dangerous should default true")
+	if d.PermissionMode != "bypassPermissions" {
+		t.Errorf("PermissionMode = %q, want bypassPermissions (preserves worker bypass behavior)", d.PermissionMode)
 	}
 	if d.SessionPrefix != "pr-pool-" {
 		t.Errorf("SessionPrefix = %q, want pr-pool-", d.SessionPrefix)
@@ -38,7 +38,7 @@ func TestLoad_envOverrides(t *testing.T) {
 	t.Setenv("PR_POOL_MAX_WAIT", "60")
 	t.Setenv("PR_POOL_BEADS_PREFIX", "pg2")
 	t.Setenv("PR_POOL_MODEL", "claude-opus-4-8")
-	t.Setenv("PR_POOL_DANGEROUS", "0")
+	t.Setenv("PR_POOL_PERMISSION_MODE", "plan")
 	t.Setenv("PR_POOL_WORKER_ENABLED", "0")
 	c := Load()
 	if c.MaxWorker != 3 {
@@ -53,8 +53,8 @@ func TestLoad_envOverrides(t *testing.T) {
 	if c.Model != "claude-opus-4-8" {
 		t.Errorf("Model = %q", c.Model)
 	}
-	if c.Dangerous {
-		t.Error("PR_POOL_DANGEROUS=0 should disable Dangerous")
+	if c.PermissionMode != "plan" {
+		t.Errorf("PR_POOL_PERMISSION_MODE = %q, want plan", c.PermissionMode)
 	}
 	if c.WorkerEnabled {
 		t.Error("PR_POOL_WORKER_ENABLED=0 should disable worker role")

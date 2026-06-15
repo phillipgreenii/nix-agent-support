@@ -39,18 +39,18 @@ func TestEnsure_argv(t *testing.T) {
 		"--env", "BEADS_ACTOR=pgii-pool__worker",
 		"--env", "BEADS_DIR=/repo/.beads",
 		"--env", "WORKSPACE_ROOT=/repo",
-		"--dangerously-skip-permissions", "--effort", "max",
+		"--permission-mode", "bypassPermissions", "--effort", "max",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
 		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
 	}
 }
 
-func TestEnsure_argv_withModel_noDangerous(t *testing.T) {
+func TestEnsure_argv_withModel_noPermissionMode(t *testing.T) {
 	var got [][]string
 	cfg := config.Default()
 	cfg.Model = "claude-opus-4-8"
-	cfg.Dangerous = false
+	cfg.PermissionMode = ""
 	cfg.Effort = "high"
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {

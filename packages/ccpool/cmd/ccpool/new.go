@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/lock"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
@@ -26,14 +27,22 @@ func runNew(args []string) int {
 	model := fs.String("model", "", "claude model")
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
-	skipPerms := fs.Bool("dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to claude (required for non-interactive workers)")
+	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional name
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...] [--dangerously-skip-permissions] [--effort v]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--effort v]")
 		return 2
 	}
 	name := pos[0]
+
+	// Validate --permission-mode against the documented set BEFORE any I/O. Empty
+	// is allowed (omit the flag); an explicit unknown value is a usage error (2),
+	// consistent with the other usage failures above.
+	if *permMode != "" && !launch.PermissionMode(*permMode).Valid() {
+		fmt.Fprintf(os.Stderr, "ccpool new: invalid --permission-mode %q (want one of: default acceptEdits plan auto dontAsk bypassPermissions)\n", *permMode)
+		return 2
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -78,9 +87,9 @@ func runNew(args []string) int {
 	})
 
 	h, err := svc.Ensure(context.Background(), name, dir, m, session.EnsureOpts{
-		Env:                        env,
-		DangerouslySkipPermissions: *skipPerms,
-		Effort:                     *effort,
+		Env:            env,
+		PermissionMode: launch.PermissionMode(*permMode),
+		Effort:         *effort,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new:", err)
