@@ -14,6 +14,12 @@
         "matcher": "permission_prompt|idle_prompt",
         "hooks": [{ "type": "command", "command": "ccpool hook notify" }]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [{ "type": "command", "command": "ccpool hook ask" }]
+      }
     ]
   }
 }

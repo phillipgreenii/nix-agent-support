@@ -51,6 +51,11 @@ type Result struct {
 	// Empty for every other state — Gather does not read the transcript for them.
 	// Classify never sets this (it is pure); see Gather's lastText resolver.
 	LastText string
+	// Question is the AskUserQuestion text, populated ONLY when State is
+	// WaitingForHuman. Unlike LastText it comes straight from the row
+	// (Row.PendingQuestion, set by the `ask` hook) — no resolver/IO — so Classify
+	// sets it directly and it stays pure (pg2-7a5b).
+	Question string
 }
 
 // Paner is the minimal pane port (a subset of session.Tmux). The cmd layer
@@ -132,10 +137,11 @@ func ClassifyFrame(f1, f2, f3 string, nFrames int) PaneVerdict {
 // Precedence (first match wins):
 //  1. !Live                         -> not-live (carry LastKnown = row state)
 //  2. in-flight (pane)              -> working + sub (thinking|streaming)
-//  3. settled + Awaiting            -> waiting-for-human
-//  4. settled + row Failed          -> error
-//  5. settled + row Starting        -> working/thinking (launching; direct row check)
-//  6. else                          -> idle
+//  3. settled + row NeedsInput      -> waiting-for-human (hook-set; PRIMARY signal)
+//  4. settled + Awaiting            -> waiting-for-human (transcript FALLBACK)
+//  5. settled + row Failed          -> error
+//  6. settled + row Starting        -> working/thinking (launching; direct row check)
+//  7. else                          -> idle
 func Classify(in Inputs) Result {
 	res := Result{Name: in.Name, Live: in.Live, LastKnown: in.Row.State}
 	if !in.Live {
@@ -156,9 +162,20 @@ func Classify(in Inputs) Result {
 			return res
 		}
 	}
-	// Settled.
+	// Settled. The hook-set row signal is PRIMARY: the `ask` PreToolUse hook flips
+	// the row to NeedsInput the instant AskUserQuestion is invoked, so a settled
+	// NeedsInput row is a deterministic waiting-for-human. Surface the row's
+	// pending question directly (no IO — it was persisted by the hook, pg2-7a5b).
+	if in.Row.State == store.NeedsInput {
+		res.State = WaitingForHuman
+		res.Question = in.Row.PendingQuestion
+		return res
+	}
+	// FALLBACK (defense-in-depth): the transcript Awaiting signal still classifies
+	// waiting-for-human when the row is NOT NeedsInput (e.g. the hook never fired).
 	if in.Awaiting {
 		res.State = WaitingForHuman
+		res.Question = in.Row.PendingQuestion
 		return res
 	}
 	if in.Row.State == store.Failed {

@@ -48,6 +48,60 @@ func TestTransition_emptyTranscriptLeavesItUnchanged(t *testing.T) {
 	}
 }
 
+// TestSetPendingQuestion_roundTrips proves the hook-set question text persists on
+// the row and is readable back via GetByName (pg2-7a5b).
+func TestSetPendingQuestion_roundTrips(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	mustInsert(t, st, "a", "u-a")
+
+	if err := st.SetPendingQuestion(ctx, "a", "Which path? Alpha or Bravo"); err != nil {
+		t.Fatalf("SetPendingQuestion: %v", err)
+	}
+	got, _, _ := st.GetByName(ctx, "a")
+	if got.PendingQuestion != "Which path? Alpha or Bravo" {
+		t.Errorf("PendingQuestion = %q, want round-tripped text", got.PendingQuestion)
+	}
+}
+
+// TestTransition_clearsPendingQuestionExceptNeedsInput proves Transition wipes a
+// stale pending_question whenever it moves to a state OTHER than NeedsInput, but
+// leaves it intact when moving INTO NeedsInput (so the ask handler's subsequent
+// SetPendingQuestion survives) (pg2-7a5b).
+func TestTransition_clearsPendingQuestionExceptNeedsInput(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name      string
+		to        State
+		wantClear bool // true => question must be wiped to ""
+	}{
+		{"to_working_clears", Working, true},
+		{"to_done_clears", Done, true},
+		{"to_ready_clears", Ready, true},
+		{"to_failed_clears", Failed, true},
+		{"to_needs_input_preserves", NeedsInput, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newTestStore(t)
+			mustInsert(t, st, "a", "u-a")
+			if err := st.SetPendingQuestion(ctx, "a", "stale question"); err != nil {
+				t.Fatalf("SetPendingQuestion: %v", err)
+			}
+			if _, err := st.Transition(ctx, "a", tc.to, "u-a", ""); err != nil {
+				t.Fatalf("Transition: %v", err)
+			}
+			got, _, _ := st.GetByName(ctx, "a")
+			if tc.wantClear && got.PendingQuestion != "" {
+				t.Errorf("PendingQuestion = %q, want cleared on transition to %s", got.PendingQuestion, tc.to)
+			}
+			if !tc.wantClear && got.PendingQuestion != "stale question" {
+				t.Errorf("PendingQuestion = %q, want preserved on transition to %s", got.PendingQuestion, tc.to)
+			}
+		})
+	}
+}
+
 func TestDelete_removesRow(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

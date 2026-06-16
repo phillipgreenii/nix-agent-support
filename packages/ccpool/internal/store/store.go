@@ -42,6 +42,10 @@ type Session struct {
 	TmuxSession    string
 	Model          string
 	Flags          string
+	// PendingQuestion is the AskUserQuestion text recorded by the `ask` hook while
+	// the row is NeedsInput. Transition clears it whenever the row moves to any
+	// other state, so it never lingers stale past the turn (pg2-7a5b).
+	PendingQuestion string
 }
 
 // TurnStatus is a fire-and-forget turn's lifecycle: pending at emit, resolved

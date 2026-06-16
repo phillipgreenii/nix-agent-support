@@ -27,6 +27,22 @@ func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
 	}
 }
 
+// TestHook_ask_firesNotifierOnEdgeIntoNeedsInput proves the `ask` event drives the
+// notifier on the working→needs_input edge exactly like the `notify` event does
+// (the AskUserQuestion hook is the deterministic source of that edge, pg2-7a5b).
+func TestHook_ask_firesNotifierOnEdgeIntoNeedsInput(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working})
+	rn := &recordNotifier{}
+	if err := handleHookN("ask", strings.NewReader(askPayload), st, "", rn, []string{"needs_input", "failed"}); err != nil {
+		t.Fatalf("handleHookN ask: %v", err)
+	}
+	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "alpha" {
+		t.Errorf("expected one needs_input event, got %+v", rn.events)
+	}
+}
+
 func TestHook_notify_noEdgeNoFire(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()

@@ -6,13 +6,13 @@ import (
 	"fmt"
 )
 
-const cols = `name, uuid, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags`
+const cols = `name, uuid, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags, pending_question`
 
 func scanRow(sc interface{ Scan(...any) error }) (Session, error) {
 	var s Session
 	var uuid sql.NullString
 	err := sc.Scan(&s.Name, &uuid, &s.CWD, &s.TranscriptPath, &s.State, &s.Generation,
-		&s.CreatedAt, &s.LastActivityAt, &s.TmuxSession, &s.Model, &s.Flags)
+		&s.CreatedAt, &s.LastActivityAt, &s.TmuxSession, &s.Model, &s.Flags, &s.PendingQuestion)
 	s.UUID = uuid.String
 	return s, err
 }
@@ -35,9 +35,9 @@ func (s *Store) Insert(ctx context.Context, in Session) error {
 		uuid = in.UUID
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.Name, uuid, in.CWD, in.TranscriptPath, in.State, in.Generation,
-		in.CreatedAt, in.LastActivityAt, in.TmuxSession, in.Model, in.Flags)
+		in.CreatedAt, in.LastActivityAt, in.TmuxSession, in.Model, in.Flags, in.PendingQuestion)
 	if err != nil {
 		return fmt.Errorf("insert %q: %w", in.Name, err)
 	}
@@ -100,6 +100,11 @@ func (s *Store) Transition(ctx context.Context, name string, to State, uuid, tra
 		return "", fmt.Errorf("transition: load %q: %w", name, err)
 	}
 	now := s.clock.Now().Unix()
+	// CLEAR a stale pending_question whenever the turn moves OFF needs_input, so a
+	// question never lingers past the turn (pg2-7a5b). When moving INTO NeedsInput
+	// we leave it untouched so the `ask` hook's subsequent SetPendingQuestion (which
+	// runs after this transition) survives.
+	clearQuestion := to != NeedsInput
 	// All bind params positional; uuid/transcriptPath are passed twice so the
 	// CASE-WHEN guard and the assignment share one value.
 	_, err = tx.ExecContext(ctx, `
@@ -108,9 +113,10 @@ func (s *Store) Transition(ctx context.Context, name string, to State, uuid, tra
 			generation = generation + 1,
 			last_activity_at = ?,
 			uuid = CASE WHEN ? <> '' THEN ? ELSE uuid END,
-			transcript_path = CASE WHEN ? <> '' THEN ? ELSE transcript_path END
+			transcript_path = CASE WHEN ? <> '' THEN ? ELSE transcript_path END,
+			pending_question = CASE WHEN ? THEN '' ELSE pending_question END
 		WHERE name = ?`,
-		to, now, uuid, uuid, transcriptPath, transcriptPath, name)
+		to, now, uuid, uuid, transcriptPath, transcriptPath, clearQuestion, name)
 	if err != nil {
 		return "", fmt.Errorf("transition %q: %w", name, err)
 	}
@@ -122,6 +128,21 @@ func (s *Store) Transition(ctx context.Context, name string, to State, uuid, tra
 	// deterministic ts; transcriptPath is the optional claude-session line ref.
 	_ = s.events.Transition(s.clock.Now(), name, string(prior), string(to), uuid, transcriptPath)
 	return prior, nil
+}
+
+// SetPendingQuestion records the AskUserQuestion text on the row named `name`.
+// Bumps last_activity_at from the injected clock (so a fresh question counts as
+// activity). Called by the `ask` hook right after it transitions the row to
+// NeedsInput (pg2-7a5b).
+func (s *Store) SetPendingQuestion(ctx context.Context, name, q string) error {
+	now := s.clock.Now().Unix()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET pending_question = ?, last_activity_at = ? WHERE name = ?`,
+		q, now, name)
+	if err != nil {
+		return fmt.Errorf("set pending_question %q: %w", name, err)
+	}
+	return nil
 }
 
 // Poll returns the row's current generation and state (implements wait.Poller).

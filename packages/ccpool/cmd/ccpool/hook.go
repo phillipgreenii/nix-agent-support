@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
@@ -19,6 +20,24 @@ type hookPayload struct {
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
 	HookEventName  string `json:"hook_event_name"`
+	// ToolName/ToolInput are populated for the PreToolUse `ask` event
+	// (tool_name=="AskUserQuestion"); empty/absent for the other hook events.
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// askToolInput is the AskUserQuestion tool_input shape (claude 2.1.177): a list of
+// questions, each carrying the prompt text we surface as the pending question.
+type askToolInput struct {
+	Questions []struct {
+		Question    string `json:"question"`
+		Header      string `json:"header"`
+		MultiSelect bool   `json:"multiSelect"`
+		Options     []struct {
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	} `json:"questions"`
 }
 
 // eventState maps the hook subcommand to the state it records.
@@ -72,6 +91,11 @@ func handleHook(event string, stdin io.Reader, st *store.Store, envName string) 
 // handleHookN parses the payload, resolves the row, transitions, and fires the
 // notifier on an edge into an On state (spec §9/§10).
 func handleHookN(event string, stdin io.Reader, st *store.Store, envName string, n notify.Notifier, on []string) error {
+	// The `ask` event (PreToolUse/AskUserQuestion) is NOT a plain eventState entry —
+	// it must additionally parse the question text — so it is handled separately.
+	if event == "ask" {
+		return handleAskHook(stdin, st, envName, n, on)
+	}
 	to, ok := eventState[event]
 	if !ok {
 		return fmt.Errorf("unknown hook event %q", event)
@@ -113,6 +137,63 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(to), CWD: p.CWD})
 	}
 	return nil
+}
+
+// handleAskHook handles the PreToolUse/AskUserQuestion `ask` event: it records the
+// deterministic needs_input edge the instant the model invokes the tool (claude
+// 2.1.177), persists the question text, and fires the notifier on the edge — all
+// NON-BLOCKING (the caller exits 0) so the picker still renders for a human to
+// attend (pg2-7a5b, pg2-r0zz). It resolves the session the same way the other
+// events do (by session_id, else CCPOOL_NAME).
+func handleAskHook(stdin io.Reader, st *store.Store, envName string, n notify.Notifier, on []string) error {
+	var p hookPayload
+	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+	ctx := context.Background()
+	name, ok, err := resolveName(ctx, st, p.SessionID, envName)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	// Record the deterministic needs_input edge. Transition leaves pending_question
+	// untouched on the way INTO NeedsInput, so the SetPendingQuestion below survives.
+	prior, err := st.Transition(ctx, name, store.NeedsInput, p.SessionID, p.TranscriptPath)
+	if err != nil {
+		return fmt.Errorf("transition %q: %w", name, err)
+	}
+	if err := st.SetPendingQuestion(ctx, name, askQuestionText(p.ToolInput)); err != nil {
+		return fmt.Errorf("set pending question %q: %w", name, err)
+	}
+	// Fire the notifier on the working→needs_input edge, exactly like the existing
+	// needs_input path (spec §10).
+	if notify.ShouldNotify(on, string(prior), string(store.NeedsInput)) {
+		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(store.NeedsInput), CWD: p.CWD})
+	}
+	return nil
+}
+
+// askQuestionText extracts the human-facing question text from an AskUserQuestion
+// tool_input. It uses questions[0].question; when there are multiple questions it
+// joins their text with "; ". A malformed/empty input yields "" (best-effort —
+// the never-fail policy means a parse miss must not block the picker).
+func askQuestionText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var in askToolInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(in.Questions))
+	for _, q := range in.Questions {
+		if q.Question != "" {
+			parts = append(parts, q.Question)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // resolveName finds the row's name by uuid==session_id, else by the launch-env

@@ -22,6 +22,7 @@ func TestClassify(t *testing.T) {
 		want    State
 		wantSub SubState
 		wantLK  store.State // LastKnown
+		wantQ   string      // expected Result.Question
 	}{
 		{
 			// precedence 1: not live -> not-live, carry row state
@@ -55,8 +56,19 @@ func TestClassify(t *testing.T) {
 			wantLK:  store.Working,
 		},
 		{
-			// precedence 3: settled + awaiting -> waiting-for-human
-			name:   "settled_waiting_for_human",
+			// settled + row NeedsInput (the hook-set signal) -> waiting-for-human,
+			// carrying the row's pending question text. This is the PRIMARY path.
+			name:   "settled_needs_input_row_waiting_with_question",
+			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Row: store.Session{State: store.NeedsInput, PendingQuestion: "Which path? Alpha or Bravo"}},
+			want:   WaitingForHuman,
+			wantLK: store.NeedsInput,
+			wantQ:  "Which path? Alpha or Bravo",
+		},
+		{
+			// FALLBACK: the transcript Awaiting branch still classifies waiting-for-human
+			// even when the row is NOT NeedsInput (defense-in-depth). No row question, so
+			// Question is empty.
+			name:   "settled_awaiting_fallback_waiting_for_human",
 			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Awaiting: true, Row: store.Session{State: store.Working}},
 			want:   WaitingForHuman,
 			wantLK: store.Working,
@@ -132,6 +144,9 @@ func TestClassify(t *testing.T) {
 			}
 			if got.LastKnown != tc.wantLK {
 				t.Errorf("LastKnown = %q, want %q", got.LastKnown, tc.wantLK)
+			}
+			if got.Question != tc.wantQ {
+				t.Errorf("Question = %q, want %q", got.Question, tc.wantQ)
 			}
 			if got.Live != tc.in.Live {
 				t.Errorf("Live = %v, want %v", got.Live, tc.in.Live)
@@ -303,6 +318,30 @@ func TestGather_awaitingWaitsForHuman(t *testing.T) {
 	}
 	if res.State != WaitingForHuman {
 		t.Errorf("State = %s, want waiting-for-human", res.State)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (waiting-for-human is not idle/error)", res.LastText)
+	}
+}
+
+func TestGather_needsInputRowWaitsForHumanWithQuestion(t *testing.T) {
+	// The hook-set signal: a settled live session whose row is NeedsInput reads
+	// waiting-for-human and surfaces the row's pending question — no transcript read
+	// needed (awaiting stays false). This is the PRIMARY detection path (pg2-7a5b).
+	const staticPane = "[picker] Alpha / Bravo"
+	p := &fakePaner{live: true, panes: []string{staticPane}}
+	sl := &recordingSleep{}
+	row := store.Session{Name: "q", State: store.NeedsInput, PendingQuestion: "Which path? Alpha or Bravo"}
+
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-q", "q", row)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.State != WaitingForHuman {
+		t.Errorf("State = %s, want waiting-for-human (hook-set NeedsInput row)", res.State)
+	}
+	if res.Question != "Which path? Alpha or Bravo" {
+		t.Errorf("Question = %q, want the row's pending question", res.Question)
 	}
 	if res.LastText != "" {
 		t.Errorf("LastText = %q, want empty (waiting-for-human is not idle/error)", res.LastText)

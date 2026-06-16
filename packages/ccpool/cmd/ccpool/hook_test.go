@@ -103,6 +103,46 @@ func TestHook_stop_resolvesPendingTurn(t *testing.T) {
 	}
 }
 
+// askPayload is a PreToolUse/AskUserQuestion payload (claude 2.1.177 shape):
+// tool_name + tool_input.questions carry the prompt text the model just invoked.
+const askPayload = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","cwd":"/x","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"tu-1","tool_input":{"questions":[{"question":"Which path? Alpha or Bravo","header":"Path","options":[{"label":"Alpha","description":"a"},{"label":"Bravo","description":"b"}],"multiSelect":false}]}}`
+
+// askPayloadMulti carries two questions; the handler joins their text with "; ".
+const askPayloadMulti = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","cwd":"/x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"First?","header":"H1","options":[],"multiSelect":false},{"question":"Second?","header":"H2","options":[],"multiSelect":false}]}}`
+
+func TestHook_ask_transitionsToNeedsInputAndRecordsQuestion(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleHook("ask", strings.NewReader(askPayload), st, ""); err != nil {
+		t.Fatalf("handleHook ask: %v", err)
+	}
+	got, _, _ := st.GetByName(ctx, "alpha")
+	if got.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input", got.State)
+	}
+	if got.PendingQuestion != "Which path? Alpha or Bravo" {
+		t.Errorf("PendingQuestion = %q, want the question text", got.PendingQuestion)
+	}
+}
+
+func TestHook_ask_joinsMultipleQuestions(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleHook("ask", strings.NewReader(askPayloadMulti), st, ""); err != nil {
+		t.Fatalf("handleHook ask: %v", err)
+	}
+	got, _, _ := st.GetByName(ctx, "alpha")
+	if got.PendingQuestion != "First?; Second?" {
+		t.Errorf("PendingQuestion = %q, want %q", got.PendingQuestion, "First?; Second?")
+	}
+}
+
 func TestHook_unresolvable_isNoErrorNoRow(t *testing.T) {
 	st, _ := openTestStore(t)
 	// session_id matches nothing and no CCPOOL_NAME → log + succeed (exit 0).

@@ -91,8 +91,9 @@ func runState(args []string) int {
 
 // renderState is the pure human-line renderer (mirrors doctor.go's
 // `name= state= live=` style). `sub=` is appended only when present; for
-// not-live `last_known=` is appended. For idle/error the last reply/error text
-// is appended (`last_reply=`/`last_error=`), collapsed to its first line so the
+// not-live `last_known=` is appended. For waiting-for-human the AskUserQuestion
+// text is appended (`question=`); for idle/error the last reply/error text is
+// appended (`last_reply=`/`last_error=`), each collapsed to its first line so the
 // renderer stays one-line. Returns a trailing newline.
 func renderState(res state.Result) string {
 	var b strings.Builder
@@ -102,6 +103,11 @@ func renderState(res state.Result) string {
 	}
 	if res.State == state.NotLive {
 		fmt.Fprintf(&b, " last_known=%s", res.LastKnown)
+	}
+	// waiting-for-human surfaces the AskUserQuestion text (hook-set, pg2-7a5b),
+	// collapsed to its first line so the human line stays one-line.
+	if res.State == state.WaitingForHuman && res.Question != "" {
+		fmt.Fprintf(&b, " question=%s", firstLine(res.Question))
 	}
 	// Single source field (res.LastText), state-appropriate key. For error the
 	// text is the best-available last assistant message — there is no structured
@@ -139,6 +145,9 @@ type stateJSON struct {
 	LastKnown string `json:"last_known,omitempty"`
 	LastReply string `json:"last_reply,omitempty"`
 	LastError string `json:"last_error,omitempty"`
+	// Question is the AskUserQuestion text; emitted only for waiting-for-human
+	// (the hook-set signal, pg2-7a5b).
+	Question string `json:"question,omitempty"`
 }
 
 // renderStateJSON is the pure JSON renderer. last_known is emitted only for
@@ -162,6 +171,8 @@ func renderStateJSON(res state.Result) ([]byte, error) {
 		v.LastReply = res.LastText
 	case state.Error:
 		v.LastError = res.LastText
+	case state.WaitingForHuman:
+		v.Question = res.Question
 	}
 	return json.Marshal(v)
 }

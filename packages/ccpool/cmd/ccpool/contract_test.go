@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,35 +164,44 @@ func TestContract_Interrupt_ThinkingCancelsAndDelivers(t *testing.T) {
 	_ = out
 }
 
-func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) {
+// TestContract_NeedsInput_AskUserQuestionViaHook pins the deterministic, hook-driven
+// needs_input detection (pg2-7a5b, pg2-r0zz). The PreToolUse/AskUserQuestion hook
+// fires the instant the model invokes the tool — even in -p — flipping the row to
+// needs_input and recording the question text, NON-BLOCKING so the picker still
+// renders. We drive a REAL turn that calls AskUserQuestion, then poll `state --json`
+// until the reconciled state is waiting-for-human and assert the question field
+// carries the probe text (parsed from JSON — never a raw-pane substring, which the
+// old transcript-fallback scenario false-positived on echoed prompt text).
+func TestContract_NeedsInput_AskUserQuestionViaHook(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("a")
-	const askPrompt = "Use the AskUserQuestion tool right now as your first action: ask 'CCPROBE which path?' with options 'Alpha' and 'Bravo'. Do nothing else first."
+	const probe = "CCPROBE which path"
+	const askPrompt = "Use the AskUserQuestion tool right now as your first action: ask '" + probe + "?' with options 'Alpha' and 'Bravo'. Do nothing else first."
 	sb.ccp("reply", "a", askPrompt, "--no-wait")
-	// The AskUserQuestion gap: no Notification hook fires; ccpool detects it via the
-	// transcript only on a blocking wait. Here we just confirm the picker renders.
+
+	// Poll the reconciled state JSON until the hook has flipped the row to
+	// waiting-for-human. A generous deadline; a turn that never starts is a
+	// real-claude/env issue, not a ccpool verdict -> scaffoldFail.
 	deadline := time.Now().Add(90 * time.Second)
-	seen := false
+	var sj stateJSON
+	waiting := false
 	for time.Now().Before(deadline) {
-		if strings.Contains(sb.cap("a"), "Alpha") || strings.Contains(sb.cap("a"), "CCPROBE") {
-			seen = true
+		out, _ := sb.ccp("state", "a", "--json")
+		var got stateJSON
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &got); err == nil && got.State == "waiting-for-human" {
+			sj = got
+			waiting = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if !seen {
-		scaffoldFail(t, "AskUserQuestion picker never rendered (model may not have called the tool)")
+	if !waiting {
+		scaffoldFail(t, "state never reached waiting-for-human via the AskUserQuestion hook (model may not have called the tool, or the turn never started)")
 	}
-	liveAssert(t, "AskUserQuestion prompt accepted (model began the turn)", seen, true)
-	// PENDING (pg2-7a5b): reconciled `waiting-for-human` is NOT reliably detectable
-	// for a LIVE paused AskUserQuestion. Real-claude evidence (2026-06-12): while the
-	// turn is paused awaiting the answer, the JSONL persists NO assistant event (only
-	// the user prompt + metadata), so `IsAwaitingInput` returns false; and the only
-	// live signal — the pane picker render — has no pinned stable marker yet (this
-	// `seen` check even false-positives on the echoed prompt text). The state +
-	// IsAwaitingInput fallback ship in Unit B; reliable live detection is deferred.
-	pending(t, "reconciled waiting-for-human for a live AskUserQuestion + question TEXT",
-		"live picker pane marker (transcript persists no assistant event while paused) — see pg2-7a5b")
+	liveAssert(t, "reconciled waiting-for-human (hook-driven)", true, true)
+	// The question field is the hook-recorded AskUserQuestion text; assert it carries
+	// the probe (parsed from JSON, not a raw-pane substring).
+	liveAssert(t, "state JSON question field carries the probe question text", strings.Contains(sj.Question, probe), true)
 }
 
 // TestContract_Canary_GoldenMarkerRendersInPane is the SINGLE intentional pane
