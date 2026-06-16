@@ -9,7 +9,7 @@ import (
 // cols is the non-id column order shared by Insert and the scanRow projection.
 // id is auto-assigned by SQLite, so it is read back separately (SELECT prepends
 // it) and never written by Insert.
-const cols = `external_id, claude_session_id, name, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags, pending_question`
+const cols = `external_id, claude_session_id, name, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags, pending_question, retry_count, retry_window_started_at`
 
 // selectCols prepends the surrogate id so scanRow can populate Session.ID.
 const selectCols = `id, ` + cols
@@ -19,7 +19,8 @@ func scanRow(sc interface{ Scan(...any) error }) (Session, error) {
 	var csid sql.NullString
 	var name sql.NullString
 	err := sc.Scan(&s.ID, &s.ExternalID, &csid, &name, &s.CWD, &s.TranscriptPath, &s.State, &s.Generation,
-		&s.CreatedAt, &s.LastActivityAt, &s.TmuxSession, &s.Model, &s.Flags, &s.PendingQuestion)
+		&s.CreatedAt, &s.LastActivityAt, &s.TmuxSession, &s.Model, &s.Flags, &s.PendingQuestion,
+		&s.RetryCount, &s.RetryWindowStartedAt)
 	s.ClaudeSessionID = csid.String
 	s.Name = name.String
 	return s, err
@@ -45,9 +46,10 @@ func (s *Store) Insert(ctx context.Context, in Session) error {
 	// claude_session_id and name are nullable; bind NULL when empty so the UNIQUE
 	// constraint on claude_session_id does not collide across rows that have none.
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ExternalID, nullString(in.ClaudeSessionID), nullString(in.Name), in.CWD, in.TranscriptPath, in.State, in.Generation,
-		in.CreatedAt, in.LastActivityAt, in.TmuxSession, in.Model, in.Flags, in.PendingQuestion)
+		in.CreatedAt, in.LastActivityAt, in.TmuxSession, in.Model, in.Flags, in.PendingQuestion,
+		in.RetryCount, in.RetryWindowStartedAt)
 	if err != nil {
 		return fmt.Errorf("insert %q: %w", in.ExternalID, err)
 	}
@@ -150,6 +152,39 @@ func (s *Store) Transition(ctx context.Context, externalID string, to State, cla
 	// deterministic ts; transcriptPath is the optional claude-session line ref.
 	_ = s.events.Transition(s.clock.Now(), externalID, string(prior), string(to), claudeSessionID, transcriptPath)
 	return prior, nil
+}
+
+// BumpRetry records one in-place transient-error retry attempt for external_id:
+// it increments retry_count and, on the FIRST retry of a window (when
+// retry_window_started_at is still 0), anchors the window to the injected
+// clock's now. The window start is left untouched on subsequent retries so the
+// overall retry-timeout measures from the first attempt. last_activity_at is
+// NOT bumped (a retry is ccpool actuation, not observed session activity).
+func (s *Store) BumpRetry(ctx context.Context, externalID string) error {
+	now := s.clock.Now().Unix()
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET
+			retry_count = retry_count + 1,
+			retry_window_started_at = CASE WHEN retry_window_started_at = 0 THEN ? ELSE retry_window_started_at END
+		WHERE external_id = ?`,
+		now, externalID)
+	if err != nil {
+		return fmt.Errorf("bump retry %q: %w", externalID, err)
+	}
+	return nil
+}
+
+// ResetRetry clears the retry budget for external_id (retry_count and
+// retry_window_started_at to 0) so a later, unrelated transient error gets a
+// fresh budget rather than inheriting an old count. Called on a successful turn.
+func (s *Store) ResetRetry(ctx context.Context, externalID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET retry_count = 0, retry_window_started_at = 0 WHERE external_id = ?`,
+		externalID)
+	if err != nil {
+		return fmt.Errorf("reset retry %q: %w", externalID, err)
+	}
+	return nil
 }
 
 // SetPendingQuestion records the AskUserQuestion text on the row with external_id.

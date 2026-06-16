@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN retry_window_started_at INTEGER NOT NULL DEFAULT 0;

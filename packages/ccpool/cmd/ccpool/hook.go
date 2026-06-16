@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
@@ -78,7 +79,17 @@ func runHook(args []string) int {
 	defer st.Close()
 
 	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)
-	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On); err != nil {
+	// Build the transient-retry actuator (StopFailure in-place retry). It is
+	// best-effort: a nil actuator (or any retry-path error) falls back to today's
+	// `errored` transition (never-fail policy, spec §9/§15).
+	ra := &retryActuator{
+		cfg:    cfg.Retry,
+		store:  st,
+		nudger: newTmuxNudger(cfg.Tmux.Socket),
+		now:    time.Now,
+		sleep:  time.Sleep,
+	}
+	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On, ra); err != nil {
 		logHook(stateDir, fmt.Sprintf("hook %s: %v", event, err))
 	}
 	return 0
@@ -88,13 +99,13 @@ func runHook(args []string) int {
 // existing tests calling handleHook still compile. envExternalID is the
 // launch-injected CCPOOL_EXTERNAL_ID fallback (ADR 0015).
 func handleHook(event string, stdin io.Reader, st *store.Store, envExternalID string) error {
-	return handleHookN(event, stdin, st, envExternalID, notify.None{}, nil)
+	return handleHookN(event, stdin, st, envExternalID, notify.None{}, nil, nil)
 }
 
 // handleHookN parses the payload, resolves the row by claude_session_id (else the
 // launch-env external_id), transitions, and fires the notifier on an edge into an
 // On state (spec §9/§10).
-func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string) error {
+func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string, ra *retryActuator) error {
 	// The `ask` event (PreToolUse/AskUserQuestion) is NOT a plain eventState entry —
 	// it must additionally parse the question text — so it is handled separately.
 	if event == "ask" {
@@ -121,6 +132,17 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 			return fmt.Errorf("upsert %q: %w", externalID, err)
 		}
 	}
+	// StopFailure (`fail`) transient-retry: before recording `errored`, try to
+	// resume the SAME Claude session in place when the error is transient and
+	// budget remains. On a successful retry the row stays out of `errored`
+	// (maybeRetry returns it to `working`); the hook is done. Any retry-path
+	// error or a non-retry decision falls through to today's `errored`
+	// transition (never-fail policy, spec §9/§15).
+	if event == "fail" && ra != nil {
+		if retried := tryRetryOnFail(ctx, ra, st, externalID, p.TranscriptPath); retried {
+			return nil
+		}
+	}
 	prior, err := st.Transition(ctx, externalID, to, p.SessionID, p.TranscriptPath)
 	if err != nil {
 		return fmt.Errorf("transition %q: %w", externalID, err)
@@ -143,6 +165,11 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 	// (the hook's primary job) already landed.
 	if event == "stop" {
 		_, _, _ = st.ResolveOldestPendingTurn(ctx, externalID, p.TranscriptPath)
+		// A successful turn ended: reset the transient-retry budget so a later,
+		// unrelated transient error gets a fresh attempt count rather than
+		// inheriting an old one (spec §"Counter resets on a successful turn").
+		// Best-effort — a reset failure must not fail the hook (never-fail).
+		_ = st.ResetRetry(ctx, externalID)
 	}
 	if notify.ShouldNotify(on, string(prior), string(to)) {
 		_ = n.Notify(notify.Event{Name: externalID, UUID: p.SessionID, State: string(to), CWD: p.CWD})

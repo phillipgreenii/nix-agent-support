@@ -51,6 +51,14 @@ type Session struct {
 	// the row is NeedsInput. Transition clears it whenever the row moves to any
 	// other state, so it never lingers stale past the turn (pg2-7a5b).
 	PendingQuestion string
+	// RetryCount is the number of in-place transient-error retries attempted for
+	// the CURRENT retry window (migration 005). It drives the attempt cap and the
+	// exponential-backoff exponent, and resets to 0 on a successful turn.
+	RetryCount int64
+	// RetryWindowStartedAt is the unix time the current retry window opened (the
+	// first retry of a run); 0 when no window is open. It anchors the overall
+	// retry-timeout. Resets to 0 on a successful turn.
+	RetryWindowStartedAt int64
 }
 
 // TurnStatus is a fire-and-forget turn's lifecycle: pending at emit, resolved

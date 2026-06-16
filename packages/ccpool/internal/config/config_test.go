@@ -262,3 +262,71 @@ done_ttl = "15m"
 		t.Errorf("DoneTTL = %v, want 15m", c.List.DoneTTL)
 	}
 }
+
+// TestLoad_retryDefaults pins the [retry] block defaults (transient-retry design).
+func TestLoad_retryDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !c.Retry.Enabled {
+		t.Error("Retry.Enabled must default to true")
+	}
+	if c.Retry.MaxAttempts != 3 {
+		t.Errorf("Retry.MaxAttempts = %d, want 3", c.Retry.MaxAttempts)
+	}
+	if c.Retry.BaseDelay != Duration(time.Second) {
+		t.Errorf("Retry.BaseDelay = %v, want 1s", time.Duration(c.Retry.BaseDelay))
+	}
+	if c.Retry.Timeout != Duration(60*time.Second) {
+		t.Errorf("Retry.Timeout = %v, want 60s", time.Duration(c.Retry.Timeout))
+	}
+	if len(c.Retry.Classes) != 2 || c.Retry.Classes[0] != "transient_server" || c.Retry.Classes[1] != "transient_network" {
+		t.Errorf("Retry.Classes = %v, want [transient_server transient_network]", c.Retry.Classes)
+	}
+}
+
+// TestLoad_retryTOMLOverrides confirms the [retry] block decodes over defaults,
+// including the replace-list semantics for classes.
+func TestLoad_retryTOMLOverrides(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `
+[retry]
+enabled = false
+max_attempts = 5
+base_delay = "2s"
+timeout = "90s"
+classes = ["transient_network"]
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Retry.Enabled {
+		t.Error("Retry.Enabled = true, want false (config override)")
+	}
+	if c.Retry.MaxAttempts != 5 {
+		t.Errorf("Retry.MaxAttempts = %d, want 5", c.Retry.MaxAttempts)
+	}
+	if c.Retry.BaseDelay != Duration(2*time.Second) {
+		t.Errorf("Retry.BaseDelay = %v, want 2s", time.Duration(c.Retry.BaseDelay))
+	}
+	if c.Retry.Timeout != Duration(90*time.Second) {
+		t.Errorf("Retry.Timeout = %v, want 90s", time.Duration(c.Retry.Timeout))
+	}
+	if len(c.Retry.Classes) != 1 || c.Retry.Classes[0] != "transient_network" {
+		t.Errorf("Retry.Classes = %v, want [transient_network] (replace-list)", c.Retry.Classes)
+	}
+}

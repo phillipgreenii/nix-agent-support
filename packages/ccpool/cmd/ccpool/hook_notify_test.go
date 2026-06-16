@@ -19,7 +19,7 @@ func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
 	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Working})
 	rn := &recordNotifier{}
 	const p = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification"}`
-	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "errored"}); err != nil {
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "errored"}, nil); err != nil {
 		t.Fatalf("handleHookN: %v", err)
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
@@ -35,7 +35,7 @@ func TestHook_ask_firesNotifierOnEdgeIntoNeedsInput(t *testing.T) {
 	ctx := context.Background()
 	_ = st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working})
 	rn := &recordNotifier{}
-	if err := handleHookN("ask", strings.NewReader(askPayload), st, "", rn, []string{"needs_input", "errored"}); err != nil {
+	if err := handleHookN("ask", strings.NewReader(askPayload), st, "", rn, []string{"needs_input", "errored"}, nil); err != nil {
 		t.Fatalf("handleHookN ask: %v", err)
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "ext-alpha" {
@@ -49,7 +49,7 @@ func TestHook_notify_noEdgeNoFire(t *testing.T) {
 	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.NeedsInput}) // already needs_input
 	rn := &recordNotifier{}
 	const p = `{"session_id":"csid-x","hook_event_name":"Notification"}`
-	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input"}); err != nil {
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(rn.events) != 0 {

@@ -18,6 +18,7 @@ type Config struct {
 	List   List   `toml:"list"`
 	Wait   Wait   `toml:"wait"`
 	Notify Notify `toml:"notify"`
+	Retry  Retry  `toml:"retry"`
 
 	// Resolved (not from TOML):
 	DBPath     string `toml:"-"`
@@ -59,6 +60,27 @@ type Wait struct {
 	Timeout Duration `toml:"timeout"`
 }
 
+// Retry configures the in-session transient-error retry actuated from the
+// StopFailure hook (the 2026-06-16 transient-retry design). When a turn fails
+// with a transient class in Classes and budget remains, ccpool waits the
+// exponential backoff (BaseDelay * 2^retry_count) and re-nudges the SAME Claude
+// session instead of handing the failure back as `errored`.
+type Retry struct {
+	// Enabled gates the whole feature; false restores hand-back-everything.
+	Enabled bool `toml:"enabled"`
+	// MaxAttempts caps the number of in-place retries per window.
+	MaxAttempts int `toml:"max_attempts"`
+	// BaseDelay is the first backoff; the nth retry waits BaseDelay * 2^(n-1).
+	BaseDelay Duration `toml:"base_delay"`
+	// Timeout bounds the overall retry window (measured from the first retry) so
+	// a persistently-failing session hands back promptly.
+	Timeout Duration `toml:"timeout"`
+	// Classes are the RetryClass names retried; default = the two transient
+	// classes ("transient_server", "transient_network"). ccpool never retries
+	// "rate_limited" or "terminal".
+	Classes []string `toml:"classes"`
+}
+
 // Duration is a TOML-decodable time.Duration ("30m", "10m", ...).
 type Duration time.Duration
 
@@ -79,6 +101,13 @@ func defaults() Config {
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
 		Wait:   Wait{Timeout: Duration(10 * time.Minute)},
 		Notify: Notify{Adapter: "desktop", On: []string{"needs_input", "failed"}},
+		Retry: Retry{
+			Enabled:     true,
+			MaxAttempts: 3,
+			BaseDelay:   Duration(time.Second),
+			Timeout:     Duration(60 * time.Second),
+			Classes:     []string{"transient_server", "transient_network"},
+		},
 	}
 }
 
