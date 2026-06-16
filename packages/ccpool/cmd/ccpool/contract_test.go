@@ -5,9 +5,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/ccpool/internal/eventlog"
 )
 
 // SCOPE POLICY (pg2-tnmb): every test in this file MUST make at least one
@@ -264,4 +267,95 @@ func TestContract_Reap_EvictsLiveClaudeSafely(t *testing.T) {
 	out, _ := sb.ccp("doctor")
 	liveAssert(t, "reaped victim's live claude is gone", sessionLineHas(out, "victim", "live=true"), false)
 	liveAssert(t, "fresher survivor stays live", sessionLineHas(out, "survivor", "live=true"), true)
+}
+
+// TestContract_EventLog_ReflectsOrderedTransitions closes a contract-coverage gap
+// (pg2-mxpj): state DETECTION (`ccpool state` reporting state=working/idle) was
+// already live-asserted, but the JSONL event-log OUTPUT — the append-only,
+// ordered (from→to) transition log shipped by pg2-qech — was NOT verified against
+// real Claude. The only prior coverage of the log was a non-contract smoke test
+// driven by injected events, so a Claude Code upgrade gave us no high-confidence
+// signal that the ordered-transition log still tracks reality (e.g. that a turn
+// still emits ready→working→done in that order, with the prompt's input actions
+// recorded). This scenario drives a REAL turn to completion and asserts the
+// PARSED, ORDERED transitions match the observed lifecycle, so a Claude Code
+// upgrade that breaks the hook/transition wiring localizes HERE.
+func TestContract_EventLog_ReflectsOrderedTransitions(t *testing.T) {
+	sb := newSandbox(t)
+	sb.mustNew("e")
+	// Drive a real turn that COMPLETES, so the stop hook logs a `done` transition.
+	// A SHORT prompt finishes quickly: the event log still records the ready→working
+	// transition and the prompt's input actions regardless of timing, while keeping
+	// the turn inside the completion poll budget (a long thinkingPrompt could never
+	// reach `done` in time). --no-wait returns immediately; we gate on completion below.
+	sb.ccp("reply", "e", "Reply with exactly: DONE", "--no-wait")
+
+	// Gate on completion: poll reconciled state until the turn is done (state=idle),
+	// mirroring the existing poll loops (generous deadline, 1s sleeps). A turn that
+	// never completes is a real-claude/env issue, not a ccpool verdict -> scaffoldFail.
+	deadline := time.Now().Add(120 * time.Second)
+	completed := false
+	for time.Now().Before(deadline) {
+		out, _ := sb.ccp("state", "e")
+		if strings.Contains(out, "state=idle") {
+			completed = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !completed {
+		scaffoldFail(t, "turn never reached state=idle within budget (real-claude/env issue, not a ccpool verdict)")
+	}
+
+	// Read the JSONL event log from its canonical location: in DEFAULT pool mode
+	// config.StateDirPath() is <XDG_STATE_HOME>/ccpool, and the log is events.jsonl
+	// beside hook.log. A broken path/parse is a scaffold failure, not a live verdict.
+	path := filepath.Join(sb.envGet("XDG_STATE_HOME"), "ccpool", "events.jsonl")
+	events, err := eventlog.Read(path)
+	if err != nil {
+		scaffoldFail(t, "reading event log %q failed (log path/mechanics broken): %v", path, err)
+	}
+	if len(events) == 0 {
+		scaffoldFail(t, "event log %q is empty after a completed turn (log path/mechanics broken)", path)
+	}
+
+	// Assert on the PARSED, structured Events (NOT a raw-file substring): find the
+	// first `working` transition for "e" and the first `done` transition that comes
+	// strictly AFTER it in slice (append) order. We deliberately pin only this stable
+	// working→done ordering — mirroring how the reconciled-state asserts pin only
+	// state=working and never the timing-sensitive thinking-vs-streaming sub-state —
+	// so this does not over-fit to sub-states the event log may reorder by timing.
+	workingIdx, doneIdx := -1, -1
+	for i, e := range events {
+		if e.Name != "e" || e.Kind != "transition" {
+			continue
+		}
+		if workingIdx < 0 && e.To == "working" {
+			workingIdx = i
+		}
+		if workingIdx >= 0 && doneIdx < 0 && e.To == "done" {
+			doneIdx = i
+		}
+	}
+	liveAssert(t, "event log records a working transition before a done transition", workingIdx >= 0 && doneIdx > workingIdx, true)
+
+	// The prompt's input actions are recorded as structured input events for "e",
+	// at or after the working transition (the prompt is delivered as part of the
+	// send that drives ready->working). Pin the two stable, always-present actions
+	// of a delivered prompt: paste then enter (clear-input precedes them but is the
+	// less interesting pre-clear, so we don't over-pin it).
+	pasteAfterWorking, enterAfterWorking := false, false
+	for i, e := range events {
+		if e.Name != "e" || e.Kind != "input" || i < workingIdx {
+			continue
+		}
+		switch e.Action {
+		case "paste":
+			pasteAfterWorking = true
+		case "enter":
+			enterAfterWorking = true
+		}
+	}
+	liveAssert(t, "event log records a paste input action at/after the working transition", pasteAfterWorking, true)
+	liveAssert(t, "event log records an enter input action at/after the working transition", enterAfterWorking, true)
 }
