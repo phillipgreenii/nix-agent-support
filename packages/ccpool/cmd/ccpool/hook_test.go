@@ -23,41 +23,98 @@ func openTestStore(t *testing.T) (*store.Store, string) {
 	return st, dbPath
 }
 
-const startPayload = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
-const stopPayload = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","hook_event_name":"Stop","stop_hook_active":false}`
+const startPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
+const stopPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop","stop_hook_active":false}`
+const failPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop"}`
+const notifyPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Notification"}`
 
-func TestHook_start_upsertsThenReady(t *testing.T) {
+// TestHook_start_resolvesByClaudeSessionID_setsReady: payload session_id matches
+// an existing row's claude_session_id → row transitions to Ready.
+func TestHook_start_resolvesByClaudeSessionID_setsReady(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	// No pre-existing row; only CCPOOL_NAME in env (the race case, spec §9/§18).
-	if err := handleHook("start", strings.NewReader(startPayload), st, "alpha"); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Starting}); err != nil {
+		t.Fatal(err)
+	}
+	// No CCPOOL_EXTERNAL_ID — must resolve by claude_session_id.
+	if err := handleHook("start", strings.NewReader(startPayload), st, ""); err != nil {
 		t.Fatalf("handleHook start: %v", err)
 	}
-	got, ok, _ := st.GetByName(ctx, "alpha")
+	got, ok, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if !ok {
+		t.Fatal("row vanished")
+	}
+	if got.State != store.Ready {
+		t.Errorf("state = %q, want ready", got.State)
+	}
+	if got.TranscriptPath != "/p/csid-x.jsonl" {
+		t.Errorf("transcript not reconciled: %+v", got)
+	}
+}
+
+// TestHook_start_resolvesByEnvExternalID_whenNoRowForSessionID: unknown
+// session_id, CCPOOL_EXTERNAL_ID set → Upsert then Ready.
+func TestHook_start_resolvesByEnvExternalID_whenNoRowForSessionID(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	// No pre-existing row; only the env external_id (the race case).
+	if err := handleHook("start", strings.NewReader(startPayload), st, "ext-alpha"); err != nil {
+		t.Fatalf("handleHook start: %v", err)
+	}
+	got, ok, _ := st.GetByExternalID(ctx, "ext-alpha")
 	if !ok {
 		t.Fatal("row not upserted")
 	}
 	if got.State != store.Ready {
 		t.Errorf("state = %q, want ready", got.State)
 	}
-	if got.UUID != "u-x" || got.TranscriptPath != "/p/u-x.jsonl" {
+	if got.ClaudeSessionID != "csid-x" || got.TranscriptPath != "/p/csid-x.jsonl" {
 		t.Errorf("reconcile failed: %+v", got)
 	}
 }
 
-func TestHook_stop_resolvesByUUID_setsDone(t *testing.T) {
+func TestHook_stop_setsIdle(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
 		t.Fatal(err)
 	}
-	// No CCPOOL_NAME — must resolve by session_id.
 	if err := handleHook("stop", strings.NewReader(stopPayload), st, ""); err != nil {
 		t.Fatalf("handleHook stop: %v", err)
 	}
-	got, _, _ := st.GetByName(ctx, "alpha")
-	if got.State != store.Done {
-		t.Errorf("state = %q, want done", got.State)
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if got.State != store.Idle {
+		t.Errorf("state = %q, want idle", got.State)
+	}
+}
+
+func TestHook_fail_setsErrored(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleHook("fail", strings.NewReader(failPayload), st, ""); err != nil {
+		t.Fatalf("handleHook fail: %v", err)
+	}
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if got.State != store.Errored {
+		t.Errorf("state = %q, want errored", got.State)
+	}
+}
+
+func TestHook_notify_setsNeedsInput(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handleHook("notify", strings.NewReader(notifyPayload), st, ""); err != nil {
+		t.Fatalf("handleHook notify: %v", err)
+	}
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if got.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input", got.State)
 	}
 }
 
@@ -68,16 +125,14 @@ func TestHook_stop_resolvesByUUID_setsDone(t *testing.T) {
 func TestHook_stop_resolvesPendingTurn(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
 		t.Fatal(err)
 	}
 	// EMIT: a fire-and-forget turn recorded pending (what runReply does).
-	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", Name: "alpha", Prompt: "hi"}); err != nil {
+	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", ExternalID: "ext-alpha", Prompt: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Stop hook fires for the session → turn completes; the oldest pending turn
-	// gets the transcript anchor stamped onto it.
 	if err := handleHook("stop", strings.NewReader(stopPayload), st, ""); err != nil {
 		t.Fatalf("handleHook stop: %v", err)
 	}
@@ -89,7 +144,7 @@ func TestHook_stop_resolvesPendingTurn(t *testing.T) {
 	if got.Status != store.TurnResolved {
 		t.Errorf("Status = %q, want resolved", got.Status)
 	}
-	if got.TranscriptPath != "/p/u-x.jsonl" {
+	if got.TranscriptPath != "/p/csid-x.jsonl" {
 		t.Errorf("TranscriptPath = %q, want stamped from stop payload", got.TranscriptPath)
 	}
 
@@ -105,21 +160,21 @@ func TestHook_stop_resolvesPendingTurn(t *testing.T) {
 
 // askPayload is a PreToolUse/AskUserQuestion payload (claude 2.1.177 shape):
 // tool_name + tool_input.questions carry the prompt text the model just invoked.
-const askPayload = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","cwd":"/x","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"tu-1","tool_input":{"questions":[{"question":"Which path? Alpha or Bravo","header":"Path","options":[{"label":"Alpha","description":"a"},{"label":"Bravo","description":"b"}],"multiSelect":false}]}}`
+const askPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","cwd":"/x","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"tu-1","tool_input":{"questions":[{"question":"Which path? Alpha or Bravo","header":"Path","options":[{"label":"Alpha","description":"a"},{"label":"Bravo","description":"b"}],"multiSelect":false}]}}`
 
 // askPayloadMulti carries two questions; the handler joins their text with "; ".
-const askPayloadMulti = `{"session_id":"u-x","transcript_path":"/p/u-x.jsonl","cwd":"/x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"First?","header":"H1","options":[],"multiSelect":false},{"question":"Second?","header":"H2","options":[],"multiSelect":false}]}}`
+const askPayloadMulti = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","cwd":"/x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"First?","header":"H1","options":[],"multiSelect":false},{"question":"Second?","header":"H2","options":[],"multiSelect":false}]}}`
 
 func TestHook_ask_transitionsToNeedsInputAndRecordsQuestion(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
 		t.Fatal(err)
 	}
 	if err := handleHook("ask", strings.NewReader(askPayload), st, ""); err != nil {
 		t.Fatalf("handleHook ask: %v", err)
 	}
-	got, _, _ := st.GetByName(ctx, "alpha")
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
 	if got.State != store.NeedsInput {
 		t.Errorf("state = %q, want needs_input", got.State)
 	}
@@ -131,13 +186,13 @@ func TestHook_ask_transitionsToNeedsInputAndRecordsQuestion(t *testing.T) {
 func TestHook_ask_joinsMultipleQuestions(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
 		t.Fatal(err)
 	}
 	if err := handleHook("ask", strings.NewReader(askPayloadMulti), st, ""); err != nil {
 		t.Fatalf("handleHook ask: %v", err)
 	}
-	got, _, _ := st.GetByName(ctx, "alpha")
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
 	if got.PendingQuestion != "First?; Second?" {
 		t.Errorf("PendingQuestion = %q, want %q", got.PendingQuestion, "First?; Second?")
 	}
@@ -148,14 +203,14 @@ func TestHook_ask_malformedToolInput_stillNeedsInputEmptyQuestion(t *testing.T) 
 	// (the picker-detection signal survives); only the question text is lost.
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
 		t.Fatal(err)
 	}
-	const payload = `{"session_id":"u-x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":"garbage-not-an-object"}`
+	const payload = `{"session_id":"csid-x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":"garbage-not-an-object"}`
 	if err := handleHook("ask", strings.NewReader(payload), st, ""); err != nil {
 		t.Fatalf("handleHook ask (malformed): %v", err)
 	}
-	got, _, _ := st.GetByName(ctx, "alpha")
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
 	if got.State != store.NeedsInput {
 		t.Errorf("state = %q, want needs_input despite malformed tool_input", got.State)
 	}
@@ -169,14 +224,14 @@ func TestHook_notify_clearsStalePendingQuestion(t *testing.T) {
 	// so it must clear any stale question left on the row from a prior ask turn.
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.NeedsInput, PendingQuestion: "old question?"}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.NeedsInput, PendingQuestion: "old question?"}); err != nil {
 		t.Fatal(err)
 	}
-	const payload = `{"session_id":"u-x","hook_event_name":"Notification"}`
+	const payload = `{"session_id":"csid-x","hook_event_name":"Notification"}`
 	if err := handleHook("notify", strings.NewReader(payload), st, ""); err != nil {
 		t.Fatalf("handleHook notify: %v", err)
 	}
-	got, _, _ := st.GetByName(ctx, "alpha")
+	got, _, _ := st.GetByExternalID(ctx, "ext-alpha")
 	if got.State != store.NeedsInput {
 		t.Errorf("state = %q, want needs_input", got.State)
 	}
@@ -187,7 +242,7 @@ func TestHook_notify_clearsStalePendingQuestion(t *testing.T) {
 
 func TestHook_unresolvable_isNoErrorNoRow(t *testing.T) {
 	st, _ := openTestStore(t)
-	// session_id matches nothing and no CCPOOL_NAME → log + succeed (exit 0).
+	// session_id matches nothing and no CCPOOL_EXTERNAL_ID → log + succeed (exit 0).
 	if err := handleHook("stop", strings.NewReader(stopPayload), st, ""); err != nil {
 		t.Fatalf("unresolvable hook returned error, want nil: %v", err)
 	}

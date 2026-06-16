@@ -10,22 +10,22 @@ import (
 
 func TestAttendCandidates(t *testing.T) {
 	rows := []store.Session{
-		{Name: "wait1", State: store.NeedsInput, TmuxSession: "cc-wait1"},
-		{Name: "wait2", State: store.NeedsInput, TmuxSession: "cc-wait2"}, // dead
-		{Name: "busy", State: store.Working, TmuxSession: "cc-busy"},
-		{Name: "done1", State: store.Done, TmuxSession: "cc-done1"},
+		{ExternalID: "wait1", Name: "wait1", State: store.NeedsInput, TmuxSession: "cc-wait1"},
+		{ExternalID: "wait2", Name: "wait2", State: store.NeedsInput, TmuxSession: "cc-wait2"}, // dead
+		{ExternalID: "busy", Name: "busy", State: store.Working, TmuxSession: "cc-busy"},
+		{ExternalID: "done1", Name: "done1", State: store.Idle, TmuxSession: "cc-done1"},
 	}
 	live := map[string]bool{"cc-wait1": true, "cc-wait2": false, "cc-busy": true, "cc-done1": true}
 	liveFn := func(_, target string) bool { return live[target] }
 
 	// needs_input only, dead one filtered out
 	got := attendCandidates(rows, false, liveFn, "ccpool")
-	if len(got) != 1 || got[0].Name != "wait1" {
+	if len(got) != 1 || got[0].ExternalID != "wait1" {
 		t.Fatalf("default: got %v, want [wait1]", names(got))
 	}
-	// --include-done adds live done rows
+	// --include-done adds live idle rows
 	got = attendCandidates(rows, true, liveFn, "ccpool")
-	if len(got) != 2 || got[0].Name != "wait1" || got[1].Name != "done1" {
+	if len(got) != 2 || got[0].ExternalID != "wait1" || got[1].ExternalID != "done1" {
 		t.Fatalf("include-done: got %v, want [wait1 done1]", names(got))
 	}
 }
@@ -33,17 +33,17 @@ func TestAttendCandidates(t *testing.T) {
 func names(rows []store.Session) []string {
 	var n []string
 	for _, r := range rows {
-		n = append(n, r.Name)
+		n = append(n, r.ExternalID)
 	}
 	return n
 }
 
 // attendFixtures returns a small, deterministic set of NeedsInput candidates
-// with the fields candidateLine renders (Name/State/CWD/LastActivityAt).
+// with the fields candidateLine renders (ExternalID/Name/State/CWD/LastActivityAt).
 func attendFixtures() []store.Session {
 	return []store.Session{
-		{Name: "alpha", State: store.NeedsInput, CWD: "/tmp/alpha", LastActivityAt: 1_700_000_000},
-		{Name: "bravo", State: store.NeedsInput, CWD: "/tmp/bravo", LastActivityAt: 1_700_000_100},
+		{ExternalID: "alpha", Name: "alpha-display", State: store.NeedsInput, CWD: "/tmp/alpha", LastActivityAt: 1_700_000_000},
+		{ExternalID: "bravo", Name: "bravo-display", State: store.NeedsInput, CWD: "/tmp/bravo", LastActivityAt: 1_700_000_100},
 	}
 }
 
@@ -75,8 +75,8 @@ func TestPickCandidate_NoTTY_ListsAndReturnsFalse(t *testing.T) {
 		t.Errorf("no-TTY: listing header missing; out=%q", s)
 	}
 	for _, c := range cands {
-		if !strings.Contains(s, c.Name) {
-			t.Errorf("no-TTY: candidate %q not listed; out=%q", c.Name, s)
+		if !strings.Contains(s, c.ExternalID) {
+			t.Errorf("no-TTY: candidate %q not listed; out=%q", c.ExternalID, s)
 		}
 	}
 }
@@ -108,8 +108,8 @@ func TestPickCandidate_TTYNoFzf_SelectsNumberedBranch(t *testing.T) {
 	cands := attendFixtures()
 	p, out := testPicker(true, false, "1\n")
 	name, ok := p.pickCandidate(cands)
-	if name != cands[0].Name || !ok {
-		t.Fatalf("numbered branch: got (%q,%v), want (%q,true)", name, ok, cands[0].Name)
+	if name != cands[0].ExternalID || !ok {
+		t.Fatalf("numbered branch: got (%q,%v), want (%q,true)", name, ok, cands[0].ExternalID)
 	}
 	if !strings.Contains(out.String(), "pick>") {
 		t.Errorf("numbered branch: pick> prompt not written; out=%q", out.String())

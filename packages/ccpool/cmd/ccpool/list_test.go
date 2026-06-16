@@ -34,9 +34,9 @@ func TestRenderList_hidesOldColdTerminal_keepsLiveAndYoung(t *testing.T) {
 
 	rows := []store.Session{
 		{Name: "live-working", State: store.Working, TmuxSession: "cc-live-working", LastActivityAt: 1},
-		{Name: "old-done-cold", State: store.Done, TmuxSession: "cc-old-done-cold", LastActivityAt: now.Add(-2 * time.Hour).Unix()},
-		{Name: "young-done-cold", State: store.Done, TmuxSession: "cc-young-done-cold", LastActivityAt: now.Add(-10 * time.Minute).Unix()},
-		{Name: "old-done-live", State: store.Done, TmuxSession: "cc-old-done-live", LastActivityAt: now.Add(-3 * time.Hour).Unix()},
+		{Name: "old-done-cold", State: store.Idle, TmuxSession: "cc-old-done-cold", LastActivityAt: now.Add(-2 * time.Hour).Unix()},
+		{Name: "young-done-cold", State: store.Idle, TmuxSession: "cc-young-done-cold", LastActivityAt: now.Add(-10 * time.Minute).Unix()},
+		{Name: "old-done-live", State: store.Idle, TmuxSession: "cc-old-done-live", LastActivityAt: now.Add(-3 * time.Hour).Unix()},
 	}
 	live := map[string]bool{"cc-live-working": true, "cc-old-done-live": true}
 	liveFn := func(_, target string) bool { return live[target] }
@@ -60,7 +60,7 @@ func TestRenderList_hidesOldColdTerminal_keepsLiveAndYoung(t *testing.T) {
 func TestRenderList_allShowsEverything(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "old-done-cold", State: store.Done, TmuxSession: "cc-x", LastActivityAt: now.Add(-5 * time.Hour).Unix()},
+		{Name: "old-done-cold", State: store.Idle, TmuxSession: "cc-x", LastActivityAt: now.Add(-5 * time.Hour).Unix()},
 	}
 	liveFn := func(_, _ string) bool { return false }
 	out := renderList(rows, true /*all*/, "", liveFn, "ccpool", now, time.Hour, 24*time.Hour)
@@ -95,7 +95,7 @@ func TestRenderList_stateFilter(t *testing.T) {
 func TestRenderListJSON_fieldsAndLiveness(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "alpha", UUID: "uuid-123456789", State: store.Working, TmuxSession: "cc-alpha", TranscriptPath: "/t/alpha.jsonl", CWD: "/repo", LastActivityAt: now.Unix()},
+		{Name: "alpha", ClaudeSessionID: "uuid-123456789", State: store.Working, TmuxSession: "cc-alpha", TranscriptPath: "/t/alpha.jsonl", CWD: "/repo", LastActivityAt: now.Unix()},
 	}
 	liveFn := func(_, target string) bool { return target == "cc-alpha" }
 	// Live pane has wandered into a linked worktree under /repo.
@@ -128,16 +128,16 @@ func TestRenderListJSON_fieldsAndLiveness(t *testing.T) {
 	}
 	r := got[0]
 	for k, want := range map[string]any{
-		"name":            "alpha",
-		"state":           "working",
-		"live":            true,
-		"transcript_path": "/t/alpha.jsonl",
-		"uuid":            "uuid-123456789",
-		"launch_dir":      "/repo",
-		"cwd":             "/repo/worktrees/wt1/sub", // LIVE pane path, not launch dir
-		"git_repo_root":   "/repo",
-		"worktree":        "/repo/worktrees/wt1",
-		"branch":          "feature",
+		"name":              "alpha",
+		"state":             "working",
+		"live":              true,
+		"transcript_path":   "/t/alpha.jsonl",
+		"claude_session_id": "uuid-123456789",
+		"launch_dir":        "/repo",
+		"cwd":               "/repo/worktrees/wt1/sub", // LIVE pane path, not launch dir
+		"git_repo_root":     "/repo",
+		"worktree":          "/repo/worktrees/wt1",
+		"branch":            "feature",
 	} {
 		if r[k] != want {
 			t.Errorf("%s = %#v, want %#v", k, r[k], want)
@@ -151,7 +151,7 @@ func TestRenderListJSON_fieldsAndLiveness(t *testing.T) {
 func TestRenderListJSON_gitFacetsNullWhenNotInRepo(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "alpha", UUID: "u", State: store.Working, TmuxSession: "cc-alpha", CWD: "/tmp/scratch", LastActivityAt: now.Unix()},
+		{Name: "alpha", ClaudeSessionID: "u", State: store.Working, TmuxSession: "cc-alpha", CWD: "/tmp/scratch", LastActivityAt: now.Unix()},
 	}
 	liveFn := func(_, _ string) bool { return true }
 	pathFn := func(_, _ string) (string, error) { return "/tmp/scratch", nil }
@@ -182,7 +182,7 @@ func TestRenderListJSON_gitFacetsNullWhenNotInRepo(t *testing.T) {
 func TestRenderListJSON_notLiveFallsBackToLaunchDir(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "cold", UUID: "u", State: store.Done, TmuxSession: "cc-cold", CWD: "/launch/dir", LastActivityAt: now.Unix()},
+		{Name: "cold", ClaudeSessionID: "u", State: store.Idle, TmuxSession: "cc-cold", CWD: "/launch/dir", LastActivityAt: now.Unix()},
 	}
 	liveFn := func(_, _ string) bool { return false } // not live
 	// pathFn/gitFn would report facets if called; assert they are NOT for a dead row.
@@ -220,7 +220,7 @@ func TestRenderListJSON_notLiveFallsBackToLaunchDir(t *testing.T) {
 func TestRenderListJSON_liveButPathQueryFails(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "alpha", UUID: "u", State: store.Working, TmuxSession: "cc-alpha", CWD: "/launch/dir", LastActivityAt: now.Unix()},
+		{Name: "alpha", ClaudeSessionID: "u", State: store.Working, TmuxSession: "cc-alpha", CWD: "/launch/dir", LastActivityAt: now.Unix()},
 	}
 	liveFn := func(_, _ string) bool { return true }
 	gitFn := func(cwd string) gitfacet.Facets {
@@ -246,7 +246,7 @@ func TestRenderListJSON_liveButPathQueryFails(t *testing.T) {
 func TestRenderListJSON_allBypassesRetention(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "old-done", UUID: "u", State: store.Done, TmuxSession: "cc-x", CWD: "/repo", LastActivityAt: now.Add(-5 * time.Hour).Unix()},
+		{Name: "old-done", ClaudeSessionID: "u", State: store.Idle, TmuxSession: "cc-x", CWD: "/repo", LastActivityAt: now.Add(-5 * time.Hour).Unix()},
 	}
 	liveFn := func(_, _ string) bool { return false }
 
@@ -275,7 +275,7 @@ func TestRenderListJSON_allBypassesRetention(t *testing.T) {
 func TestRenderListJSON_transcriptPathEmptyStillPresentAndEmptyIsArray(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	rows := []store.Session{
-		{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", LastActivityAt: now.Unix()}, // TranscriptPath ""
+		{Name: "a", ClaudeSessionID: "u", State: store.Ready, TmuxSession: "cc-a", LastActivityAt: now.Unix()}, // TranscriptPath ""
 	}
 	liveFn := func(_, _ string) bool { return true }
 	pathFn := func(_, _ string) (string, error) { return "/cwd", nil }

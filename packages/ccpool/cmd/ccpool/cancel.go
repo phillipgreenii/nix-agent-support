@@ -24,7 +24,7 @@ func runCancel(args []string) int {
 	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
 	_ = fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool cancel <name>")
+		fmt.Fprintln(os.Stderr, "usage: ccpool cancel <external_id>")
 		return 2
 	}
 	svc, st, code := buildService()

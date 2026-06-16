@@ -44,17 +44,18 @@ func runDoctor(args []string) int {
 	claudeJSON := filepath.Join(home, ".claude.json")
 
 	report := func(r store.Session) {
-		live := cl.HasSession(cfg.Tmux.Prefix + r.Name)
+		live := cl.HasSession(cfg.Tmux.Prefix + r.ExternalID)
 		// cwd-trust is one of the three hang causes doctor must distinguish (§20):
 		// untrusted cwd, dropped send-key, or missing/failed hook.
 		trusted := r.CWD != "" && trust.IsTrusted(claudeJSON, r.CWD)
-		fmt.Printf("name=%s state=%s live=%v cwd_trusted=%v uuid=%s\n", r.Name, r.State, live, trusted, r.UUID)
+		fmt.Printf("external_id=%s name=%s state=%s live=%v cwd_trusted=%v claude_session_id=%s\n",
+			r.ExternalID, r.Name, r.State, live, trusted, r.ClaudeSessionID)
 		fmt.Printf("  cwd=%s\n  transcript=%s\n", r.CWD, r.TranscriptPath)
 	}
 
 	ctx := context.Background()
 	if fs.NArg() >= 1 {
-		row, ok, _ := st.GetByName(ctx, fs.Arg(0))
+		row, ok, _ := st.GetByExternalID(ctx, fs.Arg(0))
 		if !ok {
 			fmt.Fprintln(os.Stderr, "no such session")
 			return 1

@@ -28,10 +28,10 @@ func runState(args []string) int {
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	_ = fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool state <name> [--json]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool state <external_id> [--json]")
 		return 2
 	}
-	name := fs.Arg(0)
+	externalID := fs.Arg(0)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -46,14 +46,14 @@ func runState(args []string) int {
 	defer st.Close()
 
 	ctx := context.Background()
-	row, ok, _ := st.GetByName(ctx, name)
+	row, ok, _ := st.GetByExternalID(ctx, externalID)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "no such session")
 		return 1
 	}
 
 	cl := tmux.NewClient(cfg.Tmux.Socket)
-	tmuxName := cfg.Tmux.Prefix + name
+	tmuxName := cfg.Tmux.Prefix + externalID
 	// Awaiting wraps claude-transcript's IsAwaitingInput over the row's transcript
 	// path; an empty path means there is nothing to await (false, no read).
 	awaiting := func() (bool, error) {
@@ -70,7 +70,7 @@ func runState(args []string) int {
 		}
 		return transcriptAdapter{}.LastAssistantText(row.TranscriptPath)
 	}
-	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, tmuxName, name, row)
+	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, tmuxName, externalID, row)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "state:", err)
 		return 1

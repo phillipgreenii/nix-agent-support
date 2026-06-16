@@ -20,7 +20,7 @@ func (f fakeTranscript) LastAssistantText(string) (string, error) { return f.tex
 func TestResultForTurn_resolved(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", Name: "alpha", Prompt: "hi"}); err != nil {
+	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", ExternalID: "alpha", Prompt: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := st.ResolveOldestPendingTurn(ctx, "alpha", "/p/anchor.jsonl"); !ok || err != nil {
@@ -40,7 +40,7 @@ func TestResultForTurn_resolved(t *testing.T) {
 func TestResultForTurn_pending(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", Name: "alpha", Prompt: "hi"}); err != nil {
+	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", ExternalID: "alpha", Prompt: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,7 +74,7 @@ func TestResultForTurn_resolvedEmptyTranscript(t *testing.T) {
 	ctx := context.Background()
 	// A resolved turn whose transcript_path was never stamped (empty) cannot be
 	// read back → clear error, non-zero (not the generic pending code).
-	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", Name: "alpha", Prompt: "hi"}); err != nil {
+	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", ExternalID: "alpha", Prompt: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := st.ResolveOldestPendingTurn(ctx, "alpha", ""); !ok || err != nil {

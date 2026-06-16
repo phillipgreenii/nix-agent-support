@@ -25,16 +25,17 @@ func runNew(args []string) int {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
 	cwd := fs.String("cwd", "", "project dir (default: current dir)")
 	model := fs.String("model", "", "claude model")
+	displayName := fs.String("name", "", "optional display label for the session (claude --name; nullable)")
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
-	pos := parseInterspersed(fs, args) // flags may follow the positional name
+	pos := parseInterspersed(fs, args) // flags may follow the positional external_id
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <name> [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--effort v]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--effort v]")
 		return 2
 	}
-	name := pos[0]
+	externalID := pos[0]
 
 	// Validate --permission-mode against the documented set BEFORE any I/O. Empty
 	// is allowed (omit the flag); an explicit unknown value is a usage error (2),
@@ -88,8 +89,9 @@ func runNew(args []string) int {
 		Sleep:     time.Sleep,
 	})
 
-	h, err := svc.Ensure(context.Background(), name, dir, m, session.EnsureOpts{
+	h, err := svc.Ensure(context.Background(), externalID, dir, m, session.EnsureOpts{
 		Env:            env,
+		Name:           *displayName,
 		PermissionMode: launch.PermissionMode(*permMode),
 		Effort:         *effort,
 	})
@@ -97,7 +99,8 @@ func runNew(args []string) int {
 		fmt.Fprintln(os.Stderr, "new:", err)
 		return 1
 	}
-	fmt.Printf("%s\t%s\t%s\n", h.Name, h.State, shortUUID(h.UUID))
+	// Columns: external_id, name, state, short claude_session_id (ADR 0015).
+	fmt.Printf("%s\t%s\t%s\t%s\n", h.ExternalID, h.Name, h.State, shortUUID(h.ClaudeSessionID))
 	return 0
 }
 

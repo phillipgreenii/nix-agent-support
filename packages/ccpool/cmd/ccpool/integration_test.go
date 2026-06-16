@@ -20,7 +20,7 @@ func buildCCPool(t *testing.T) string {
 	return bin
 }
 
-func runCC(t *testing.T, bin, xdgData, xdgState, ccpoolName, stdin string, args ...string) (string, int) {
+func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(),
@@ -28,8 +28,8 @@ func runCC(t *testing.T, bin, xdgData, xdgState, ccpoolName, stdin string, args 
 		"XDG_STATE_HOME="+xdgState,
 		"XDG_CONFIG_HOME="+filepath.Join(xdgData, "..", "cfg"),
 	)
-	if ccpoolName != "" {
-		cmd.Env = append(cmd.Env, "CCPOOL_NAME="+ccpoolName)
+	if externalID != "" {
+		cmd.Env = append(cmd.Env, "CCPOOL_EXTERNAL_ID="+externalID)
 	}
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -72,21 +72,21 @@ func TestEndToEnd_hookLifecycleReflectedInList(t *testing.T) {
 	const start = `{"session_id":"11111111-1111-1111-1111-111111111111","transcript_path":"/p/x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
 	const stop = `{"session_id":"11111111-1111-1111-1111-111111111111","transcript_path":"/p/x.jsonl","hook_event_name":"Stop"}`
 
-	// SessionStart: upserts row by CCPOOL_NAME, sets ready.
+	// SessionStart: upserts row by CCPOOL_EXTERNAL_ID, sets ready.
 	if _, code := runCC(t, bin, data, state, "alpha", start, "hook", "start"); code != 0 {
 		t.Fatalf("hook start exit = %d, want 0", code)
 	}
-	// Stop: resolves by uuid, sets done.
+	// Stop: resolves by claude_session_id, sets idle.
 	if _, code := runCC(t, bin, data, state, "", stop, "hook", "stop"); code != 0 {
 		t.Fatalf("hook stop exit = %d, want 0", code)
 	}
-	// list reflects it (cc-alpha not live → derived cold; young done → shown).
+	// list reflects it (cc-alpha not live → derived not-live; young idle → shown).
 	out, code := runCC(t, bin, data, state, "", "", "list")
 	if code != 0 {
 		t.Fatalf("list exit = %d, want 0\n%s", code, out)
 	}
-	if !strings.Contains(out, "alpha") || !strings.Contains(out, "done") {
-		t.Fatalf("list missing alpha/done:\n%s", out)
+	if !strings.Contains(out, "alpha") || !strings.Contains(out, "idle") {
+		t.Fatalf("list missing alpha/idle:\n%s", out)
 	}
 	if !strings.Contains(out, " no ") {
 		t.Errorf("expected alpha to read not-live (no), got:\n%s", out)

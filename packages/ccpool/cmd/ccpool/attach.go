@@ -14,7 +14,7 @@ func runAttach(args []string) int {
 	fs := flag.NewFlagSet("attach", flag.ExitOnError)
 	_ = fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool attach <name>")
+		fmt.Fprintln(os.Stderr, "usage: ccpool attach <external_id>")
 		return 2
 	}
 	cfg, err := config.Load()

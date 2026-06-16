@@ -19,13 +19,13 @@ import (
 )
 
 // attendCandidates returns the live sessions waiting on the human: needs_input
-// always, plus done when includeDone. Dead rows (no live tmux pane) are dropped
+// always, plus idle when includeDone. Dead rows (no live tmux pane) are dropped
 // so the picker never selects a target runAttach can't attach to. Order is
 // preserved from the store (last_activity DESC).
 func attendCandidates(rows []store.Session, includeDone bool, liveFn func(socket, target string) bool, socket string) []store.Session {
 	var out []store.Session
 	for _, r := range rows {
-		match := r.State == store.NeedsInput || (includeDone && r.State == store.Done)
+		match := r.State == store.NeedsInput || (includeDone && r.State == store.Idle)
 		if match && liveFn(socket, r.TmuxSession) {
 			out = append(out, r)
 		}
@@ -35,7 +35,7 @@ func attendCandidates(rows []store.Session, includeDone bool, liveFn func(socket
 
 func runAttend(args []string) int {
 	fs := flag.NewFlagSet("attend", flag.ExitOnError)
-	includeDone := fs.Bool("include-done", false, "also offer done sessions")
+	includeDone := fs.Bool("include-done", false, "also offer idle sessions")
 	_ = parseInterspersed(fs, args)
 
 	cfg, err := config.Load()
@@ -61,13 +61,13 @@ func runAttend(args []string) int {
 		fmt.Println("no sessions waiting on input")
 		return 0
 	case 1:
-		return runAttach([]string{cands[0].Name})
+		return runAttach([]string{cands[0].ExternalID})
 	default:
-		name, ok := realPicker().pickCandidate(cands)
+		externalID, ok := realPicker().pickCandidate(cands)
 		if !ok {
 			return 0
 		}
-		return runAttach([]string{name})
+		return runAttach([]string{externalID})
 	}
 }
 
@@ -106,7 +106,7 @@ func (p picker) pickCandidate(cands []store.Session) (string, bool) {
 	if !p.isTerminal() {
 		fmt.Fprintln(p.out, "sessions waiting on input (no TTY to pick):")
 		for _, c := range cands {
-			fmt.Fprintln(p.out, " ", c.Name)
+			fmt.Fprintln(p.out, " ", c.ExternalID)
 		}
 		return "", false
 	}
@@ -116,20 +116,24 @@ func (p picker) pickCandidate(cands []store.Session) (string, bool) {
 	return p.pickNumbered(cands)
 }
 
+// candidateLine renders a tab-delimited row. The FIRST column is the external_id
+// (the addressing key pickFzf/pickNumbered return); the name is shown next as the
+// human label (ADR 0015).
 func candidateLine(c store.Session) string {
-	return fmt.Sprintf("%s\t%s\t%s\t%s", c.Name, c.State, c.CWD,
+	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", c.ExternalID, c.Name, c.State, c.CWD,
 		time.Unix(c.LastActivityAt, 0).Format("2006-01-02 15:04:05"))
 }
 
 // pickFzf pipes one tab-delimited line per candidate to fzf and returns the
-// selected name. fzf draws on /dev/tty and returns the choice on stdout.
+// selected external_id (the first column). fzf draws on /dev/tty and returns the
+// choice on stdout.
 func pickFzf(cands []store.Session) (string, bool) {
 	var in strings.Builder
 	for _, c := range cands {
 		in.WriteString(candidateLine(c))
 		in.WriteByte('\n')
 	}
-	cmd := exec.Command("fzf", "--delimiter", "\t", "--with-nth", "1,2,3,4", "--prompt", "attend> ")
+	cmd := exec.Command("fzf", "--delimiter", "\t", "--with-nth", "1,2,3,4,5", "--prompt", "attend> ")
 	cmd.Stdin = strings.NewReader(in.String())
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
@@ -140,8 +144,8 @@ func pickFzf(cands []store.Session) (string, bool) {
 	if sel == "" {
 		return "", false
 	}
-	name, _, _ := strings.Cut(sel, "\t")
-	return name, name != ""
+	externalID, _, _ := strings.Cut(sel, "\t")
+	return externalID, externalID != ""
 }
 
 // pickNumbered prints a numbered list to p.out and reads one line (the index)
@@ -161,7 +165,7 @@ func (p picker) pickNumbered(cands []store.Session) (string, bool) {
 	if err != nil || idx < 1 || idx > len(cands) {
 		return "", false
 	}
-	return cands[idx-1].Name, true
+	return cands[idx-1].ExternalID, true
 }
 
 // stdinIsTerminal reports whether stdin is an interactive char device (so we

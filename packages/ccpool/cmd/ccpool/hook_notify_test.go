@@ -16,10 +16,10 @@ func (r *recordNotifier) Notify(e notify.Event) error { r.events = append(r.even
 func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u-x", State: store.Working})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Working})
 	rn := &recordNotifier{}
-	const p = `{"session_id":"u-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification"}`
-	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "failed"}); err != nil {
+	const p = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "errored"}); err != nil {
 		t.Fatalf("handleHookN: %v", err)
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
@@ -33,12 +33,12 @@ func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
 func TestHook_ask_firesNotifierOnEdgeIntoNeedsInput(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	_ = st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working})
+	_ = st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working})
 	rn := &recordNotifier{}
-	if err := handleHookN("ask", strings.NewReader(askPayload), st, "", rn, []string{"needs_input", "failed"}); err != nil {
+	if err := handleHookN("ask", strings.NewReader(askPayload), st, "", rn, []string{"needs_input", "errored"}); err != nil {
 		t.Fatalf("handleHookN ask: %v", err)
 	}
-	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "alpha" {
+	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "ext-alpha" {
 		t.Errorf("expected one needs_input event, got %+v", rn.events)
 	}
 }
@@ -46,9 +46,9 @@ func TestHook_ask_firesNotifierOnEdgeIntoNeedsInput(t *testing.T) {
 func TestHook_notify_noEdgeNoFire(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u-x", State: store.NeedsInput}) // already needs_input
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.NeedsInput}) // already needs_input
 	rn := &recordNotifier{}
-	const p = `{"session_id":"u-x","hook_event_name":"Notification"}`
+	const p = `{"session_id":"csid-x","hook_event_name":"Notification"}`
 	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input"}); err != nil {
 		t.Fatal(err)
 	}

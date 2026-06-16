@@ -26,7 +26,7 @@ func TestRenderState_human(t *testing.T) {
 		},
 		{
 			"idle_no_sub",
-			state.Result{Name: "alpha", State: state.Idle, Live: true, LastKnown: store.Done},
+			state.Result{Name: "alpha", State: state.Idle, Live: true, LastKnown: store.Idle},
 			"name=alpha state=idle live=true",
 		},
 		{
@@ -48,26 +48,26 @@ func TestRenderState_human(t *testing.T) {
 		},
 		{
 			"not_live_with_last_known",
-			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Done},
-			"name=d state=not-live last_known=done live=false",
+			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Idle},
+			"name=d state=not-live last_known=idle live=false",
 		},
 		{
 			// idle with a last reply -> last_reply token.
 			"idle_with_last_reply",
-			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "done here"},
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Idle, LastText: "done here"},
 			"name=a state=idle last_reply=done here live=true",
 		},
 		{
 			// error with last text -> last_error token.
 			"error_with_last_error",
-			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Failed, LastText: "panic: boom"},
+			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Errored, LastText: "panic: boom"},
 			"name=a state=error last_error=panic: boom live=true",
 		},
 		{
 			// a multi-line reply is collapsed to its first line so the human line
 			// stays one-line.
 			"idle_reply_collapsed_to_first_line",
-			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "first line\nsecond line"},
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Idle, LastText: "first line\nsecond line"},
 			"name=a state=idle last_reply=first line live=true",
 		},
 		{
@@ -140,24 +140,24 @@ func TestRenderStateJSON_omitempty(t *testing.T) {
 		},
 		{
 			"idle_omits_sub_and_last_known",
-			state.Result{Name: "alpha", State: state.Idle, Live: true, LastKnown: store.Done},
+			state.Result{Name: "alpha", State: state.Idle, Live: true, LastKnown: store.Idle},
 			false, false, false, false, false, "idle",
 		},
 		{
 			"not_live_includes_last_known_omits_sub",
-			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Done},
+			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Idle},
 			false, true, false, false, false, "not-live",
 		},
 		{
 			// idle + LastText -> last_reply only.
 			"idle_with_reply_emits_last_reply",
-			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "done here"},
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Idle, LastText: "done here"},
 			false, false, true, false, false, "idle",
 		},
 		{
 			// error + LastText -> last_error only.
 			"error_with_text_emits_last_error",
-			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Failed, LastText: "panic: boom"},
+			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Errored, LastText: "panic: boom"},
 			false, false, false, true, false, "error",
 		},
 		{
@@ -175,7 +175,7 @@ func TestRenderStateJSON_omitempty(t *testing.T) {
 		{
 			// Question on a non-waiting state emits no question key (defensive).
 			"idle_with_question_emits_no_question",
-			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, Question: "leak"},
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Idle, Question: "leak"},
 			false, false, false, false, false, "idle",
 		},
 	}

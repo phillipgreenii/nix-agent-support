@@ -26,14 +26,14 @@ func (f *fakePoller) Poll(_ context.Context, _ string) (int64, store.State, bool
 }
 
 func TestForGenerationAdvance_returnsNewStateOnAdvance(t *testing.T) {
-	fp := &fakePoller{gen: 5, state: store.Working, advanceAt: 3, advState: store.Done}
+	fp := &fakePoller{gen: 5, state: store.Working, advanceAt: 3, advState: store.Idle}
 	out, err := ForGenerationAdvance(context.Background(), fp, "alpha", 5, Opts{
 		Timeout: time.Second, Interval: time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if out.State != store.Done || out.TimedOut {
+	if out.State != store.Idle || out.TimedOut {
 		t.Errorf("out = %+v, want state=done timedOut=false", out)
 	}
 	if fp.calls < 3 {

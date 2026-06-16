@@ -97,17 +97,17 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 	now time.Time, doneTTL, failedTTL time.Duration) string {
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-20s %-12s %-5s %-20s %s\n", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "UUID")
+	fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n", "EXTERNAL_ID", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "CLAUDE_SESSION_ID")
 	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
 		r := lr.row
 		liveStr := "no"
 		if lr.live {
 			liveStr = "yes"
 		}
-		fmt.Fprintf(&b, "%-20s %-12s %-5s %-20s %s\n",
-			r.Name, r.State, liveStr,
+		fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n",
+			r.ExternalID, r.Name, r.State, liveStr,
 			time.Unix(r.LastActivityAt, 0).Format("2006-01-02 15:04:05"),
-			shortUUID(r.UUID))
+			shortUUID(r.ClaudeSessionID))
 	}
 	return b.String()
 }
@@ -127,16 +127,17 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 // transcript_path, launch_dir and cwd are always present (no omitempty) so
 // consumers get a stable schema.
 type listJSON struct {
-	Name           string  `json:"name"`
-	State          string  `json:"state"`
-	Live           bool    `json:"live"`
-	TranscriptPath string  `json:"transcript_path"`
-	UUID           string  `json:"uuid"`
-	LaunchDir      string  `json:"launch_dir"`
-	CWD            string  `json:"cwd"`
-	GitRepoRoot    *string `json:"git_repo_root,omitempty"`
-	Worktree       *string `json:"worktree,omitempty"`
-	Branch         *string `json:"branch,omitempty"`
+	ExternalID      string  `json:"external_id"`
+	Name            string  `json:"name"`
+	State           string  `json:"state"`
+	Live            bool    `json:"live"`
+	TranscriptPath  string  `json:"transcript_path"`
+	ClaudeSessionID string  `json:"claude_session_id"`
+	LaunchDir       string  `json:"launch_dir"`
+	CWD             string  `json:"cwd"`
+	GitRepoRoot     *string `json:"git_repo_root,omitempty"`
+	Worktree        *string `json:"worktree,omitempty"`
+	Branch          *string `json:"branch,omitempty"`
 }
 
 // renderListJSON marshals the visible rows as a JSON array (one object per
@@ -162,13 +163,14 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
 		r := lr.row
 		item := listJSON{
-			Name:           r.Name,
-			State:          string(r.State),
-			Live:           lr.live,
-			TranscriptPath: r.TranscriptPath,
-			UUID:           r.UUID,
-			LaunchDir:      r.CWD,
-			CWD:            r.CWD, // default: fall back to launch dir
+			ExternalID:      r.ExternalID,
+			Name:            r.Name,
+			State:           string(r.State),
+			Live:            lr.live,
+			TranscriptPath:  r.TranscriptPath,
+			ClaudeSessionID: r.ClaudeSessionID,
+			LaunchDir:       r.CWD,
+			CWD:             r.CWD, // default: fall back to launch dir
 		}
 		if lr.live {
 			// Resolve the LIVE pane cwd; fall back to launch dir on error.
@@ -190,17 +192,20 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 	return string(b), nil
 }
 
-// hiddenByRetention implements the §11 view-hygiene predicate: a row is hidden
-// only when it is NOT live AND terminal AND older than its TTL.
+// hiddenByRetention implements the §11 view-hygiene predicate. `Terminal()` is
+// gone (ADR 0015 has no terminal concept), so retention keys off the two SETTLED
+// last-observed outcomes directly: a row is hidden only when it is NOT live and
+// its state is idle/errored older than its TTL (idle→doneTTL, errored→failedTTL).
+// Any other state (or a live row) is always shown.
 func hiddenByRetention(r store.Session, live bool, now time.Time, doneTTL, failedTTL time.Duration) bool {
-	if live || !r.State.Terminal() {
+	if live {
 		return false
 	}
 	age := now.Sub(time.Unix(r.LastActivityAt, 0))
 	switch r.State {
-	case store.Done:
+	case store.Idle:
 		return age > doneTTL
-	case store.Failed:
+	case store.Errored:
 		return age > failedTTL
 	}
 	return false

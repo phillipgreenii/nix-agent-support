@@ -18,7 +18,7 @@ func runTail(args []string) int {
 	fs := flag.NewFlagSet("tail", flag.ExitOnError)
 	_ = fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool tail <name>")
+		fmt.Fprintln(os.Stderr, "usage: ccpool tail <external_id>")
 		return 2
 	}
 	cfg, err := config.Load()
@@ -30,7 +30,7 @@ func runTail(args []string) int {
 		return 1
 	}
 	defer st.Close()
-	row, ok, err := st.GetByName(context.Background(), fs.Arg(0))
+	row, ok, err := st.GetByExternalID(context.Background(), fs.Arg(0))
 	if err != nil || !ok || row.TranscriptPath == "" {
 		fmt.Fprintln(os.Stderr, "no transcript for", fs.Arg(0))
 		return 1

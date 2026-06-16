@@ -31,12 +31,12 @@ func runReply(args []string) int {
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
 	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
 	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
-	pos := parseInterspersed(fs, args) // flags may follow the positional name/prompt
+	pos := parseInterspersed(fs, args) // flags may follow the positional external_id/prompt
 	if len(pos) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool reply <name> <prompt> [--no-wait] [--queue-message] [--interrupt]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool reply <external_id> <prompt> [--no-wait] [--queue-message] [--interrupt]")
 		return 2
 	}
-	name := pos[0]
+	externalID := pos[0]
 	prompt := pos[1]
 
 	cfg, err := config.Load()
@@ -78,7 +78,7 @@ func runReply(args []string) int {
 		cwd, _ = os.Getwd()
 	}
 	// Resume if cold, then send.
-	if _, err := svc.Ensure(context.Background(), name, cwd, cfg.Claude.DefaultModel, session.EnsureOpts{}); err != nil {
+	if _, err := svc.Ensure(context.Background(), externalID, cwd, cfg.Claude.DefaultModel, session.EnsureOpts{}); err != nil {
 		fmt.Fprintln(os.Stderr, "ensure:", err)
 		return 1
 	}
@@ -91,7 +91,7 @@ func runReply(args []string) int {
 	case *noWait:
 		mode = session.ModeNoWait
 	}
-	res, err := svc.Send(context.Background(), name, prompt, mode)
+	res, err := svc.Send(context.Background(), externalID, prompt, mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "reply:", err)
 		return replyExitCode(err)
@@ -102,7 +102,7 @@ func runReply(args []string) int {
 	// hook lazily stamps the transcript anchor onto this turn when it completes.
 	if mode == session.ModeNoWait || mode == session.ModeQueue {
 		turnID := uuid.NewString()
-		if err := st.InsertTurn(context.Background(), store.Turn{TurnID: turnID, Name: name, Prompt: prompt}); err != nil {
+		if err := st.InsertTurn(context.Background(), store.Turn{TurnID: turnID, ExternalID: externalID, Prompt: prompt}); err != nil {
 			fmt.Fprintln(os.Stderr, "reply:", err)
 			return 1
 		}
@@ -110,13 +110,13 @@ func runReply(args []string) int {
 		return 0
 	}
 	switch res.State {
-	case store.Done:
+	case store.Idle:
 		fmt.Println(res.Reply)
 		return 0
 	case store.NeedsInput:
-		fmt.Fprintln(os.Stderr, "needs input — attach with: ccpool attach", name)
+		fmt.Fprintln(os.Stderr, "needs input — attach with: ccpool attach", externalID)
 		return 2
-	case store.Failed:
+	case store.Errored:
 		fmt.Fprintln(os.Stderr, "turn failed")
 		return 3
 	}

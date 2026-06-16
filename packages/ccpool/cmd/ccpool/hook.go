@@ -40,11 +40,13 @@ type askToolInput struct {
 	} `json:"questions"`
 }
 
-// eventState maps the hook subcommand to the state it records.
+// eventState maps the hook subcommand to the observed session FACT it records
+// (ADR 0015): start→ready, stop→idle (Claude Stop = turn ended), fail→errored
+// (Claude StopFailure = API error), notify→needs_input. None is a work judgment.
 var eventState = map[string]store.State{
 	"start":  store.Ready,
-	"stop":   store.Done,
-	"fail":   store.Failed,
+	"stop":   store.Idle,
+	"fail":   store.Errored,
 	"notify": store.NeedsInput,
 }
 
@@ -76,25 +78,27 @@ func runHook(args []string) int {
 	defer st.Close()
 
 	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)
-	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_NAME"), n, cfg.Notify.On); err != nil {
+	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On); err != nil {
 		logHook(stateDir, fmt.Sprintf("hook %s: %v", event, err))
 	}
 	return 0
 }
 
 // handleHook is the production entrypoint (no notifier wired = None). Kept so
-// existing Plan 1 tests calling handleHook still compile.
-func handleHook(event string, stdin io.Reader, st *store.Store, envName string) error {
-	return handleHookN(event, stdin, st, envName, notify.None{}, nil)
+// existing tests calling handleHook still compile. envExternalID is the
+// launch-injected CCPOOL_EXTERNAL_ID fallback (ADR 0015).
+func handleHook(event string, stdin io.Reader, st *store.Store, envExternalID string) error {
+	return handleHookN(event, stdin, st, envExternalID, notify.None{}, nil)
 }
 
-// handleHookN parses the payload, resolves the row, transitions, and fires the
-// notifier on an edge into an On state (spec §9/§10).
-func handleHookN(event string, stdin io.Reader, st *store.Store, envName string, n notify.Notifier, on []string) error {
+// handleHookN parses the payload, resolves the row by claude_session_id (else the
+// launch-env external_id), transitions, and fires the notifier on an edge into an
+// On state (spec §9/§10).
+func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string) error {
 	// The `ask` event (PreToolUse/AskUserQuestion) is NOT a plain eventState entry —
 	// it must additionally parse the question text — so it is handled separately.
 	if event == "ask" {
-		return handleAskHook(stdin, st, envName, n, on)
+		return handleAskHook(stdin, st, envExternalID, n, on)
 	}
 	to, ok := eventState[event]
 	if !ok {
@@ -105,7 +109,7 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 		return fmt.Errorf("decode payload: %w", err)
 	}
 	ctx := context.Background()
-	name, ok, err := resolveName(ctx, st, p.SessionID, envName)
+	externalID, ok, err := resolveExternalID(ctx, st, p.SessionID, envExternalID)
 	if err != nil {
 		return err
 	}
@@ -113,20 +117,20 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 		return nil
 	}
 	if event == "start" {
-		if err := st.Upsert(ctx, name, p.SessionID); err != nil {
-			return fmt.Errorf("upsert %q: %w", name, err)
+		if err := st.Upsert(ctx, externalID, p.SessionID, ""); err != nil {
+			return fmt.Errorf("upsert %q: %w", externalID, err)
 		}
 	}
-	prior, err := st.Transition(ctx, name, to, p.SessionID, p.TranscriptPath)
+	prior, err := st.Transition(ctx, externalID, to, p.SessionID, p.TranscriptPath)
 	if err != nil {
-		return fmt.Errorf("transition %q: %w", name, err)
+		return fmt.Errorf("transition %q: %w", externalID, err)
 	}
 	// A `notify` needs_input edge (permission_prompt/idle_prompt) is NOT an
 	// AskUserQuestion, so clear any stale AskUserQuestion text the row may still
 	// carry from a prior turn — only the `ask` path sets a question, and Transition
 	// preserves it on the way INTO NeedsInput. Best-effort (never-fail).
 	if event == "notify" {
-		_ = st.SetPendingQuestion(ctx, name, "")
+		_ = st.SetPendingQuestion(ctx, externalID, "")
 	}
 	// On a completed turn (Stop → Done), lazily stamp the transcript anchor onto
 	// the oldest pending fire-and-forget turn for this session so `ccpool result`
@@ -138,10 +142,10 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 	// notifier below (never-fail policy, spec §9/§15) — ignore it; the transition
 	// (the hook's primary job) already landed.
 	if event == "stop" {
-		_, _, _ = st.ResolveOldestPendingTurn(ctx, name, p.TranscriptPath)
+		_, _, _ = st.ResolveOldestPendingTurn(ctx, externalID, p.TranscriptPath)
 	}
 	if notify.ShouldNotify(on, string(prior), string(to)) {
-		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(to), CWD: p.CWD})
+		_ = n.Notify(notify.Event{Name: externalID, UUID: p.SessionID, State: string(to), CWD: p.CWD})
 	}
 	return nil
 }
@@ -151,8 +155,8 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 // 2.1.177), persists the question text, and fires the notifier on the edge — all
 // NON-BLOCKING (the caller exits 0) so the picker still renders for a human to
 // attend (pg2-7a5b, pg2-r0zz). It resolves the session the same way the other
-// events do (by session_id, else CCPOOL_NAME).
-func handleAskHook(stdin io.Reader, st *store.Store, envName string, n notify.Notifier, on []string) error {
+// events do (by claude_session_id, else CCPOOL_EXTERNAL_ID).
+func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string) error {
 	var p hookPayload
 	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
@@ -164,7 +168,7 @@ func handleAskHook(stdin io.Reader, st *store.Store, envName string, n notify.No
 		return nil
 	}
 	ctx := context.Background()
-	name, ok, err := resolveName(ctx, st, p.SessionID, envName)
+	externalID, ok, err := resolveExternalID(ctx, st, p.SessionID, envExternalID)
 	if err != nil {
 		return err
 	}
@@ -173,17 +177,17 @@ func handleAskHook(stdin io.Reader, st *store.Store, envName string, n notify.No
 	}
 	// Record the deterministic needs_input edge. Transition leaves pending_question
 	// untouched on the way INTO NeedsInput, so the SetPendingQuestion below survives.
-	prior, err := st.Transition(ctx, name, store.NeedsInput, p.SessionID, p.TranscriptPath)
+	prior, err := st.Transition(ctx, externalID, store.NeedsInput, p.SessionID, p.TranscriptPath)
 	if err != nil {
-		return fmt.Errorf("transition %q: %w", name, err)
+		return fmt.Errorf("transition %q: %w", externalID, err)
 	}
-	if err := st.SetPendingQuestion(ctx, name, askQuestionText(p.ToolInput)); err != nil {
-		return fmt.Errorf("set pending question %q: %w", name, err)
+	if err := st.SetPendingQuestion(ctx, externalID, askQuestionText(p.ToolInput)); err != nil {
+		return fmt.Errorf("set pending question %q: %w", externalID, err)
 	}
 	// Fire the notifier on the working→needs_input edge, exactly like the existing
 	// needs_input path (spec §10).
 	if notify.ShouldNotify(on, string(prior), string(store.NeedsInput)) {
-		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(store.NeedsInput), CWD: p.CWD})
+		_ = n.Notify(notify.Event{Name: externalID, UUID: p.SessionID, State: string(store.NeedsInput), CWD: p.CWD})
 	}
 	return nil
 }
@@ -209,18 +213,19 @@ func askQuestionText(raw json.RawMessage) string {
 	return strings.Join(parts, "; ")
 }
 
-// resolveName finds the row's name by uuid==session_id, else by the launch-env
-// CCPOOL_NAME. Returns ok=false (not an error) when neither resolves.
-func resolveName(ctx context.Context, st *store.Store, sessionID, envName string) (string, bool, error) {
+// resolveExternalID finds the row's external_id by claude_session_id==session_id,
+// else falls back to the launch-env CCPOOL_EXTERNAL_ID (ADR 0015). Returns
+// ok=false (not an error) when neither resolves.
+func resolveExternalID(ctx context.Context, st *store.Store, sessionID, envExternalID string) (string, bool, error) {
 	if sessionID != "" {
-		if s, ok, err := st.GetByUUID(ctx, sessionID); err != nil {
+		if s, ok, err := st.GetByClaudeSessionID(ctx, sessionID); err != nil {
 			return "", false, err
 		} else if ok {
-			return s.Name, true, nil
+			return s.ExternalID, true, nil
 		}
 	}
-	if envName != "" {
-		return envName, true, nil
+	if envExternalID != "" {
+		return envExternalID, true, nil
 	}
 	return "", false, nil
 }
