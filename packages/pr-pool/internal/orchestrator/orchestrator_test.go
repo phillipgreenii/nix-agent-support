@@ -410,8 +410,12 @@ func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
 	if err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.updates)
 	}
-	if len(bd.updates) != 0 {
-		t.Errorf("success must not unclaim/human/comment; updates=%v", bd.updates)
+	// Success clears any pool-launch-fail (ADR 0015) — that is the only permitted
+	// update. It must NOT unclaim, add human, or comment.
+	for _, u := range bd.updates {
+		if u != "update zr-w --remove-label pool-launch-fail" {
+			t.Errorf("success must not unclaim/human/comment; unexpected update %q; updates=%v", u, bd.updates)
+		}
 	}
 }
 
@@ -761,6 +765,42 @@ func TestStuckBead_secondEnsureFailureEscalatesHuman(t *testing.T) {
 	}
 	if !hasUpdate(bd, "update zr-w --add-label human") {
 		t.Errorf("repeated launch failure must escalate to human; updates=%v", bd.updates)
+	}
+}
+
+// TestStuckBead_successClearsLaunchFailLabel: a SUCCESSFUL dispatch (Ensure
+// succeeds and the bead completes) clears any pool-launch-fail label, so the
+// escalation counts CONSECUTIVE launch failures, not lifetime ones. Without the
+// clear, two non-consecutive failures (separated by a success) would escalate a
+// healthy bead to human. (ADR 0015)
+func TestStuckBead_successClearsLaunchFailLabel(t *testing.T) {
+	cfg := fastCfg()
+	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w-" + testStamp, Live: true, State: ccpool.StateWorking}}}}
+	o := newOrch(cc, bd, cfg)
+	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	if err := o.workOne(context.Background(), d); err != nil {
+		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.updates)
+	}
+	if !hasUpdate(bd, "update zr-w --remove-label pool-launch-fail") {
+		t.Errorf("a successful dispatch must clear pool-launch-fail; updates=%v", bd.updates)
+	}
+}
+
+// TestStuckBead_launchFailDoesNotClearLabel: the clear fires ONLY on a
+// successful Ensure. A launch failure must not remove pool-launch-fail (else the
+// escalation would never trip). Guards the "clear on success only" placement.
+func TestStuckBead_launchFailDoesNotClearLabel(t *testing.T) {
+	cfg := fastCfg()
+	bd := &scriptBD{show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
+	cc := &fakeCC{ensureErr: errors.New("ccpool new: did not reach ready")}
+	o := newOrch(cc, bd, cfg)
+	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	if err := o.workOne(context.Background(), d); err == nil {
+		t.Fatal("ensure failure should return an error")
+	}
+	if hasUpdate(bd, "update zr-w --remove-label pool-launch-fail") {
+		t.Errorf("a launch failure must NOT clear pool-launch-fail; updates=%v", bd.updates)
 	}
 }
 

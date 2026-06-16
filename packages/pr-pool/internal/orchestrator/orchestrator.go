@@ -153,6 +153,11 @@ func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchCon
 		o.escalateLaunchFailure(ctx, d.BeadID)
 		return fmt.Errorf("ensure %s: %w", externalID, err)
 	}
+	// The bead was dispatched: clear any pool-launch-fail from a prior attempt so
+	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
+	// 0015). Best-effort — removing a label the bead does not carry is a no-op,
+	// and a bd hiccup here just leaves a stale label that a later failure re-reads.
+	_ = beads.RemoveLabel(ctx, o.BD, d.BeadID, "pool-launch-fail")
 	nudge := d.Role.Nudge(d.BeadID, o.Cfg.WorktreeDir)
 	if d.Role.Kind == roles.Worker {
 		nudge += o.Cfg.WorkerBudget().PromptLine()

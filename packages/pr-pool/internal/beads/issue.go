@@ -86,6 +86,16 @@ func AddLabel(ctx context.Context, r Runner, id, label string) error {
 	return nil
 }
 
+// RemoveLabel removes an arbitrary label: `bd update <id> --remove-label <label>`.
+// Removing a label the bead does not carry is a no-op on bd's side.
+func RemoveLabel(ctx context.Context, r Runner, id, label string) error {
+	_, err := r.Run(ctx, "update", id, "--remove-label", label)
+	if err != nil {
+		return fmt.Errorf("remove-label %s %s: %w", id, label, err)
+	}
+	return nil
+}
+
 // HasLabel reads the bead via `bd show <id> --json` and reports whether it
 // carries the given label.
 func HasLabel(ctx context.Context, r Runner, id, label string) (bool, error) {

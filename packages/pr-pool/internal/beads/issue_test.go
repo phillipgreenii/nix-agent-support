@@ -113,6 +113,17 @@ func TestAddLabel_argv(t *testing.T) {
 	}
 }
 
+func TestRemoveLabel_argv(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := RemoveLabel(context.Background(), fr, "zr-1", "pool-launch-fail"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"update", "zr-1", "--remove-label", "pool-launch-fail"}
+	if joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	}
+}
+
 func TestHasLabel_fromShow(t *testing.T) {
 	fr := &fakeRunner{out: `{"id":"zr-1","labels":["pool-launch-fail"]}`}
 	got, err := HasLabel(context.Background(), fr, "zr-1", "pool-launch-fail")
