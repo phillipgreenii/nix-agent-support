@@ -202,24 +202,34 @@ func TestDisruptProducerClearsEscalatedFlagOnNewError(t *testing.T) {
 }
 
 func TestDisruptProducerCancelsOnSubagentError(t *testing.T) {
-	// A session whose LastError is terminal AND retryable (would normally be
-	// nudged) but with FromSubagent=true must NOT queue a nudge intent — the
-	// subagent guard fires before the nudge path (visibility only, no nudge).
+	// A terminal, retryable error whose firstSeen is already past grace and
+	// whose watermark marks it not-new and recently-nudged (no escalation)
+	// reaches the nudge Add path — so absent the FromSubagent guard a nudge
+	// would be queued here. With FromSubagent=true the subagent guard must
+	// suppress it (visibility only, no auto-nudge). This setup makes the test
+	// fail if the guard is removed.
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	errAt := now.Add(-2 * time.Minute)
 	p := NewDisruptProducer()
+	// Prime firstSeen so the grace window has already elapsed.
+	p.NoteFirstSeen("sid-1", now.Add(-1*time.Minute))
 	store := NewPendingStore()
-	// Pre-seed an intent so we can verify it is also cancelled, not merely
-	// never queued.
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, EmittedAt: now})
-	sv := sessionWithError("sid-1", transcript.ErrUnknown, now.Add(-1*time.Minute), true)
+	sv := sessionWithError("sid-1", transcript.ErrUnknown, errAt, true)
 	sv.SessionEnrichment.LastError.FromSubagent = true
 	tree := treeWith(time.Time{}, sv)
+	// Not a new error (LastDisruptNudgeFor == errAt) and nudged recently
+	// (within EscalationAfter) so neither the new-error reset nor escalation
+	// fires; the grace check passes and the producer would Add a nudge.
+	watermarks := wmStub{per: map[string]SessionWatermark{
+		"sid-1": {LastDisruptNudgeAt: now.Add(-5 * time.Second), LastDisruptNudgeFor: errAt},
+	}}
 	p.Reconcile(TickContext{
-		Now: now, AutoResumeEnabled: true, DisruptGrace: 30 * time.Second,
-		AutoResumeMessage: "continue", Tree: tree, Watermarks: wmStub{},
+		Now: now, AutoResumeEnabled: true,
+		DisruptGrace: 30 * time.Second, EscalationAfter: 60 * time.Second,
+		AutoResumeMessage: "continue", Tree: tree, Watermarks: watermarks,
 	}, store)
 	if store.HasAny("sid-1") {
-		t.Error("intent queued/retained for subagent error (FromSubagent=true should suppress nudge)")
+		t.Error("nudge queued for subagent error (FromSubagent=true must suppress the nudge)")
 	}
 }
 
