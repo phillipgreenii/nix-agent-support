@@ -43,10 +43,13 @@ func (m PermissionMode) Valid() bool {
 // Spec carries everything needed to build a launch command.
 type Spec struct {
 	ClaudeBin string // resolved path to the claude binary (or a fake-claude stub in tests)
-	UUID      string // generated; passed via --session-id (new only)
-	Name      string // friendly key; --name (new) / --resume target (resume)
-	PluginDir string // ccpool-plugin store path; ALWAYS appended
-	Model     string // optional
+	// ClaudeSessionID is the Claude session UUID: passed via --session-id (new)
+	// and as the --resume target (resume), so a resume is EXACT and never opens
+	// Claude's session picker (ADR 0015).
+	ClaudeSessionID string
+	Name            string // optional display label; --name (new only), omitted when empty
+	PluginDir       string // ccpool-plugin store path; ALWAYS appended
+	Model           string // optional
 
 	// PermissionMode emits --permission-mode <value> when non-empty; the zero
 	// value omits the flag.
@@ -55,15 +58,22 @@ type Spec struct {
 	Effort string
 }
 
-// BuildNew builds the argv for a brand-new session.
+// BuildNew builds the argv for a brand-new session, addressing the new Claude
+// session by --session-id <claude_session_id>. --name is appended only when a
+// display label is supplied (it is optional, ADR 0015).
 func BuildNew(s Spec) []string {
-	args := []string{s.ClaudeBin, "--session-id", s.UUID, "--name", s.Name, "--plugin-dir", s.PluginDir}
+	args := []string{s.ClaudeBin, "--session-id", s.ClaudeSessionID}
+	if s.Name != "" {
+		args = append(args, "--name", s.Name)
+	}
+	args = append(args, "--plugin-dir", s.PluginDir)
 	return appendFlags(args, s)
 }
 
-// BuildResume builds the argv to resume an existing session by name.
+// BuildResume builds the argv to resume an existing session by its
+// claude_session_id (ADR 0015) — exact, never the picker.
 func BuildResume(s Spec) []string {
-	args := []string{s.ClaudeBin, "--resume", s.Name, "--plugin-dir", s.PluginDir}
+	args := []string{s.ClaudeBin, "--resume", s.ClaudeSessionID, "--plugin-dir", s.PluginDir}
 	return appendFlags(args, s)
 }
 

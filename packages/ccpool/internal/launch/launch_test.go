@@ -7,7 +7,7 @@ import (
 
 func TestBuildNew(t *testing.T) {
 	got := BuildNew(Spec{
-		ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/nix/plugin", Model: "opus",
+		ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/nix/plugin", Model: "opus",
 	})
 	want := []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/nix/plugin", "--model", "opus"}
 	if !reflect.DeepEqual(got, want) {
@@ -16,16 +16,27 @@ func TestBuildNew(t *testing.T) {
 }
 
 func TestBuildNew_omitsModelWhenEmpty(t *testing.T) {
-	got := BuildNew(Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p"})
+	got := BuildNew(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/p"})
 	want := []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("BuildNew = %v\nwant %v", got, want)
 	}
 }
 
-func TestBuildResume_resumesByName_alwaysHasPluginDir(t *testing.T) {
-	got := BuildResume(Spec{ClaudeBin: "claude", Name: "alpha", PluginDir: "/p"})
-	want := []string{"claude", "--resume", "alpha", "--plugin-dir", "/p"}
+func TestBuildNew_omitsNameWhenEmpty(t *testing.T) {
+	got := BuildNew(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", PluginDir: "/p"})
+	want := []string{"claude", "--session-id", "u1", "--plugin-dir", "/p"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildNew = %v\nwant %v", got, want)
+	}
+}
+
+// TestBuildResume_resumesByClaudeSessionID pins the ADR 0015 resume contract:
+// resume by --resume <claude_session_id> (exact, never opens the picker), with
+// --plugin-dir always present.
+func TestBuildResume_resumesByClaudeSessionID(t *testing.T) {
+	got := BuildResume(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", PluginDir: "/p"})
+	want := []string{"claude", "--resume", "u1", "--plugin-dir", "/p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("BuildResume = %v\nwant %v", got, want)
 	}
@@ -45,17 +56,17 @@ func TestBuildLaunchFlags(t *testing.T) {
 	}{
 		{
 			name: "new with all launch flags in contract order",
-			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"},
+			spec: Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"},
 			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", "bypassPermissions", "--effort", "max", "--model", "opus"},
 		},
 		{
 			name: "new with mode+effort but no model",
-			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModePlan, Effort: "max"},
+			spec: Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: ModePlan, Effort: "max"},
 			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", "plan", "--effort", "max"},
 		},
 		{
 			name: "new omits permission-mode when empty and effort when empty",
-			spec: Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", Model: "opus"},
+			spec: Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/p", Model: "opus"},
 			want: []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--model", "opus"},
 		},
 	}
@@ -73,7 +84,7 @@ func TestBuildLaunchFlags(t *testing.T) {
 func TestBuildNew_emitsEachPermissionMode(t *testing.T) {
 	for _, mode := range ValidPermissionModes() {
 		t.Run(string(mode), func(t *testing.T) {
-			got := BuildNew(Spec{ClaudeBin: "claude", UUID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: mode})
+			got := BuildNew(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", Name: "alpha", PluginDir: "/p", PermissionMode: mode})
 			want := []string{"claude", "--session-id", "u1", "--name", "alpha", "--plugin-dir", "/p", "--permission-mode", string(mode)}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("BuildNew(%q) = %v\nwant %v", mode, got, want)
@@ -83,8 +94,8 @@ func TestBuildNew_emitsEachPermissionMode(t *testing.T) {
 }
 
 func TestBuildResume_includesLaunchFlags(t *testing.T) {
-	got := BuildResume(Spec{ClaudeBin: "claude", Name: "alpha", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"})
-	want := []string{"claude", "--resume", "alpha", "--plugin-dir", "/p", "--permission-mode", "bypassPermissions", "--effort", "max", "--model", "opus"}
+	got := BuildResume(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", PluginDir: "/p", PermissionMode: ModeBypassPermissions, Effort: "max", Model: "opus"})
+	want := []string{"claude", "--resume", "u1", "--plugin-dir", "/p", "--permission-mode", "bypassPermissions", "--effort", "max", "--model", "opus"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("BuildResume = %v\nwant %v", got, want)
 	}
