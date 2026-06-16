@@ -79,11 +79,12 @@ func TestSessionDetailLastErrorPendingNudgeRoundTrip(t *testing.T) {
 		},
 		SessionEnrichment: aggregate.SessionEnrichment{
 			LastError: &transcript.ErrorRecord{
-				Kind:        transcript.ErrServerError,
-				Text:        "upstream 500",
-				At:          errAt,
-				IsTerminal:  true,
-				IsRetryable: true,
+				Kind:         transcript.ErrServerError,
+				Text:         "upstream 500",
+				At:           errAt,
+				IsTerminal:   true,
+				IsRetryable:  true,
+				FromSubagent: true,
 			},
 			PendingNudge: &aggregate.PendingNudge{
 				Sources: []string{"disrupted", "manual"},
@@ -131,6 +132,9 @@ func TestSessionDetailLastErrorPendingNudgeRoundTrip(t *testing.T) {
 	}
 	if !le.IsRetryable {
 		t.Error("LastError.IsRetryable = false, want true")
+	}
+	if !le.FromSubagent {
+		t.Error("LastError.FromSubagent = false, want true")
 	}
 
 	// --- PendingNudge round-trip ---

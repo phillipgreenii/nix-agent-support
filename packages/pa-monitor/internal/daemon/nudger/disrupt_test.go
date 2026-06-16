@@ -201,6 +201,28 @@ func TestDisruptProducerClearsEscalatedFlagOnNewError(t *testing.T) {
 	}
 }
 
+func TestDisruptProducerCancelsOnSubagentError(t *testing.T) {
+	// A session whose LastError is terminal AND retryable (would normally be
+	// nudged) but with FromSubagent=true must NOT queue a nudge intent — the
+	// subagent guard fires before the nudge path (visibility only, no nudge).
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	p := NewDisruptProducer()
+	store := NewPendingStore()
+	// Pre-seed an intent so we can verify it is also cancelled, not merely
+	// never queued.
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, EmittedAt: now})
+	sv := sessionWithError("sid-1", transcript.ErrUnknown, now.Add(-1*time.Minute), true)
+	sv.SessionEnrichment.LastError.FromSubagent = true
+	tree := treeWith(time.Time{}, sv)
+	p.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true, DisruptGrace: 30 * time.Second,
+		AutoResumeMessage: "continue", Tree: tree, Watermarks: wmStub{},
+	}, store)
+	if store.HasAny("sid-1") {
+		t.Error("intent queued/retained for subagent error (FromSubagent=true should suppress nudge)")
+	}
+}
+
 func TestDisruptProducerNewErrorReArms(t *testing.T) {
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	oldErrAt := now.Add(-3 * time.Minute)

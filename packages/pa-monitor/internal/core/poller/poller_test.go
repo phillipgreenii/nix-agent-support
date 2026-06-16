@@ -295,6 +295,79 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	}
 }
 
+// makeSubagentDisruptFixture writes a session with no main-transcript error
+// plus a subagents/agent-*.jsonl that carries a terminal unknown API error.
+// Returns (sessionsDir, claudeHome).
+func makeSubagentDisruptFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	claudeHome := filepath.Join(root, "claude-home")
+	cwd := filepath.Join(root, "cwd")
+	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	projectDir := filepath.Join(claudeHome, "projects", slug)
+	sessID := "sub-sess"
+	subagentsDir := filepath.Join(projectDir, sessID, "subagents")
+	for _, d := range []string{sessionsDir, projectDir, cwd, subagentsDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionJSON := fmt.Sprintf(`{"pid":99002,"sessionId":%q,"cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli"}`, sessID, cwd)
+	if err := os.WriteFile(filepath.Join(sessionsDir, "99002.json"), []byte(sessionJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Main transcript: no API error.
+	mainTranscript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, sessID+".jsonl"), []byte(mainTranscript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Subagent transcript: a terminal unknown API error.
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	subTranscript := fmt.Sprintf(
+		`{"type":"assistant","timestamp":%q,"error":"unknown","isApiErrorMessage":true,"message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Stream idle timeout - partial response received"}]}}`+"\n",
+		ts.UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(filepath.Join(subagentsDir, "agent-aaaa.jsonl"), []byte(subTranscript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return sessionsDir, claudeHome
+}
+
+func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
+	sessionsDir, claudeHome := makeSubagentDisruptFixture(t)
+	p := &Poller{
+		SessionsDir: sessionsDir,
+		ClaudeHome:  claudeHome,
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
+		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+	}
+	tree, _, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, d := range tree.Dirs {
+		for _, s := range d.Sessions {
+			if s.Session.SessionID != "sub-sess" {
+				continue
+			}
+			found = true
+			le := s.SessionEnrichment.LastError
+			if le == nil {
+				t.Fatal("LastError = nil, want subagent error surfaced")
+			}
+			if !le.FromSubagent {
+				t.Errorf("LastError.FromSubagent = false, want true")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("session sub-sess not found in tree")
+	}
+}
+
 // mustWrite writes body to dir/name, fataling the test on any error.
 func mustWrite(t *testing.T, dir, name, body string) {
 	t.Helper()
