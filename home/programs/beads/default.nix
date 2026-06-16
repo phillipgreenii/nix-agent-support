@@ -16,6 +16,11 @@ in
       pkgs.unstable.dolt
     ];
 
+    # Stopgap until BD_JSON_ENVELOPE becomes the bd default: opt every bd
+    # invocation into the JSON envelope without callers passing --json. Remove
+    # once upstream bd defaults the envelope on.
+    home.sessionVariables.BD_JSON_ENVELOPE = "1";
+
     programs.bash.initExtra = lib.mkIf config.phillipgreenii.programs.bash.enable ''
       source <(bd completion bash)
     '';
