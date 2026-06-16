@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/gitfacet"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
 )
@@ -41,10 +42,12 @@ func runList(args []string) int {
 	}
 
 	if *jsonOut {
-		// cwd is the launch cwd (store.Session.CWD). pr-pool's watchdog fail-closes
-		// on cwd==REPO_ROOT, so reporting the launch cwd is a safe no-op until a
-		// live pane_current_path capability lands (deferred follow-up).
-		out, err := renderListJSON(rows, *all, *stateFilter, tmux.HasSession, cfg.Tmux.Socket,
+		// cwd is the LIVE pane current path (tmux display-message), falling back
+		// to the launch cwd when the session is not live; the git facets resolve
+		// against that cwd (fail-soft to null outside a repo). Resolvers are
+		// injected so the renderer stays pure (pg2-gxxl).
+		out, err := renderListJSON(rows, *all, *stateFilter,
+			tmux.HasSession, tmux.PaneCurrentPath, gitfacet.Resolve, cfg.Tmux.Socket,
 			time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "list:", err)
@@ -111,37 +114,74 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 
 // listJSON is the --json shape consumed by pr-pool's Runner.List. `live` is
 // SEPARATE from `state` (tmux has-session liveness, not folded into state).
-// transcript_path and cwd are always present (no omitempty) so consumers get a
-// stable schema. cwd is the launch cwd today; see runList for the deferred
-// live-path enhancement.
+// Location facets (pg2-gxxl):
+//   - launch_dir: directory ccpool launched the session in (store.Session.CWD).
+//     Always present.
+//   - cwd: the LIVE pane current working directory for a live session, falling
+//     back to launch_dir when the session is not live or the pane query fails.
+//     Always present; KEEPS its name for backward compat (pr-pool maps it).
+//   - git_repo_root / worktree / branch: git-dependent facets resolved against
+//     cwd; pointers with omitempty, so they marshal to absent when cwd is not
+//     inside a git work tree (fail-soft, never error the whole list).
+//
+// transcript_path, launch_dir and cwd are always present (no omitempty) so
+// consumers get a stable schema.
 type listJSON struct {
-	Name           string `json:"name"`
-	State          string `json:"state"`
-	Live           bool   `json:"live"`
-	TranscriptPath string `json:"transcript_path"`
-	UUID           string `json:"uuid"`
-	CWD            string `json:"cwd"`
+	Name           string  `json:"name"`
+	State          string  `json:"state"`
+	Live           bool    `json:"live"`
+	TranscriptPath string  `json:"transcript_path"`
+	UUID           string  `json:"uuid"`
+	LaunchDir      string  `json:"launch_dir"`
+	CWD            string  `json:"cwd"`
+	GitRepoRoot    *string `json:"git_repo_root,omitempty"`
+	Worktree       *string `json:"worktree,omitempty"`
+	Branch         *string `json:"branch,omitempty"`
 }
 
 // renderListJSON marshals the visible rows as a JSON array (one object per
 // session), applying the same view hygiene as renderList; --all bypasses
 // retention identically. An empty result marshals as [] (never null), so
 // pr-pool always unmarshals a JSON array.
+//
+// pathFn and gitFn are injected (mirroring liveFn) so the renderer stays PURE
+// and list_test.go stays hermetic. pathFn resolves a session's LIVE pane cwd;
+// gitFn resolves the git-dependent facets for a cwd. Both are consulted ONLY
+// for live rows: a non-live row reports cwd == launch_dir with no git facets
+// (no pane to query). For a live row, cwd is pathFn's result, falling back to
+// launch_dir when the pane query errors; the git facets are resolved against
+// that effective cwd.
 func renderListJSON(rows []store.Session, all bool, stateFilter string,
-	liveFn func(socket, target string) bool, socket string,
+	liveFn func(socket, target string) bool,
+	pathFn func(socket, target string) (string, error),
+	gitFn func(cwd string) gitfacet.Facets,
+	socket string,
 	now time.Time, doneTTL, failedTTL time.Duration) (string, error) {
 
 	out := []listJSON{}
 	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
 		r := lr.row
-		out = append(out, listJSON{
+		item := listJSON{
 			Name:           r.Name,
 			State:          string(r.State),
 			Live:           lr.live,
 			TranscriptPath: r.TranscriptPath,
 			UUID:           r.UUID,
-			CWD:            r.CWD,
-		})
+			LaunchDir:      r.CWD,
+			CWD:            r.CWD, // default: fall back to launch dir
+		}
+		if lr.live {
+			// Resolve the LIVE pane cwd; fall back to launch dir on error.
+			if p, err := pathFn(socket, r.TmuxSession); err == nil && p != "" {
+				item.CWD = p
+			}
+			// Git facets resolve against the effective (live or fallback) cwd.
+			f := gitFn(item.CWD)
+			item.GitRepoRoot = f.RepoRoot
+			item.Worktree = f.Worktree
+			item.Branch = f.Branch
+		}
+		out = append(out, item)
 	}
 	b, err := json.Marshal(out)
 	if err != nil {

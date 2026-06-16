@@ -90,6 +90,20 @@ func (c *Client) HasSession(name string) bool {
 	return err == nil
 }
 
+// PaneCurrentPath returns the live current working directory of the session's
+// active pane (tmux display-message -p '#{pane_current_path}'), trimming the
+// trailing newline tmux appends. Used to report the LIVE cwd in list --json,
+// distinct from the launch cwd recorded in the store (spec: live session-location
+// facets). Errors when the session is not live or the query fails; callers
+// fall back to the launch cwd.
+func (c *Client) PaneCurrentPath(name string) (string, error) {
+	out, err := c.tmux("display-message", "-p", "-t", name, "#{pane_current_path}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(out), "\n"), nil
+}
+
 // Paste delivers body to the session's input via bracketed paste, so multi-line
 // and special-char prompts arrive as a single message (spec §8.3, verified §4).
 // Caller sends Enter separately to submit.

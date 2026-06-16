@@ -70,6 +70,25 @@ func TestClient_SendKeys_argv(t *testing.T) {
 	}
 }
 
+func TestClient_PaneCurrentPath_argvAndTrim(t *testing.T) {
+	var got [][]string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		got = append(got, args)
+		return []byte("/live/path\n"), nil
+	}}
+	path, err := c.PaneCurrentPath("cc-a")
+	if err != nil {
+		t.Fatalf("PaneCurrentPath: %v", err)
+	}
+	want := []string{"-L", "ccpool", "display-message", "-p", "-t", "cc-a", "#{pane_current_path}"}
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v want %v", got, want)
+	}
+	if path != "/live/path" {
+		t.Errorf("path = %q, want %q (trailing newline trimmed)", path, "/live/path")
+	}
+}
+
 func TestClient_KillSession_argv(t *testing.T) {
 	var got [][]string
 	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) { got = append(got, args); return nil, nil }}
