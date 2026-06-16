@@ -31,7 +31,9 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")
 	_ = beads.Unclaim(ctx, w.BD, beadID)
-	w.emit("hard_stop", map[string]any{"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt})
+	w.emit("error", "hard_stop", "budget hard stop reached", map[string]any{
+		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,
+	})
 }
 
 func (w *Watchdog) sessionCWD(ctx context.Context, name string) string {

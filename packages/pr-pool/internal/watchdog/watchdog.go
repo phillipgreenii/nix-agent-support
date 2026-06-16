@@ -50,9 +50,9 @@ func (w *Watchdog) now() time.Time {
 	return time.Now()
 }
 
-func (w *Watchdog) emit(kind string, fields map[string]any) {
+func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
 	if w.Log != nil {
-		_ = w.Log.Emit(kind, fields)
+		_ = w.Log.Emit(level, kind, msg, fields)
 	}
 }
 
@@ -70,11 +70,13 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 			switch level {
 			case budget.Reminder:
 				_ = w.CC.Send(ctx, sessionName, w.ReminderMsg, ccpool.ModeQueue)
-				w.emit("reminder", map[string]any{"session": sessionName, "bead": beadID})
+				w.emit("info", "reminder", "budget reminder threshold reached",
+					map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Cancel:
 				_ = w.CC.Cancel(ctx, sessionName)
 				_ = w.CC.Send(ctx, sessionName, w.WrapUpMsg, ccpool.ModeQueue)
-				w.emit("cancel", map[string]any{"session": sessionName, "bead": beadID})
+				w.emit("warn", "cancel", "budget cancel threshold reached",
+					map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Hard:
 				if w.ClaimTerminal == nil || w.ClaimTerminal() {
 					w.terminal(ctx, sessionName, beadID)

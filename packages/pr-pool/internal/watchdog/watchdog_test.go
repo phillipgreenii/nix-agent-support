@@ -204,14 +204,27 @@ func TestRun_emitsEventsWhenLogSet(t *testing.T) {
 	defer func() { _ = f.Close() }()
 
 	kinds := map[string]int{}
+	levelByKind := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		var rec map[string]any
 		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
 			t.Fatalf("bad JSON line %q: %v", sc.Text(), err)
 		}
+		// Every record must carry the standard fields and no legacy ts.
+		for _, k := range []string{"time", "level", "msg"} {
+			if _, ok := rec[k]; !ok {
+				t.Errorf("record missing required field %q: %v", k, rec)
+			}
+		}
+		if _, ok := rec["ts"]; ok {
+			t.Errorf("legacy ts field must be gone: %v", rec)
+		}
 		if k, ok := rec["kind"].(string); ok {
 			kinds[k]++
+			if lvl, ok := rec["level"].(string); ok {
+				levelByKind[k] = lvl
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -221,6 +234,12 @@ func TestRun_emitsEventsWhenLogSet(t *testing.T) {
 	for _, want := range []string{"reminder", "cancel", "hard_stop"} {
 		if kinds[want] == 0 {
 			t.Errorf("expected %q event in log; got kinds=%v", want, kinds)
+		}
+	}
+	wantLevels := map[string]string{"reminder": "info", "cancel": "warn", "hard_stop": "error"}
+	for kind, want := range wantLevels {
+		if got := levelByKind[kind]; got != want {
+			t.Errorf("kind %q level = %q, want %q", kind, got, want)
 		}
 	}
 }
