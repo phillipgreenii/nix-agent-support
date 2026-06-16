@@ -97,6 +97,18 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 	if err != nil {
 		return fmt.Errorf("transition %q: %w", name, err)
 	}
+	// On a completed turn (Stop → Done), lazily stamp the transcript anchor onto
+	// the oldest pending fire-and-forget turn for this session so `ccpool result`
+	// can resolve its reply (pg2-12ko). FIFO-pop is the v1 correlation assumption:
+	// it breaks if an interactive (blocking) reply's Stop interleaves with a
+	// pending fire-and-forget turn, or if a turn ends needs_input rather than Done.
+	// Documented known limitation, not a v1 requirement (see ResolveOldestPendingTurn).
+	// Best-effort: a turns-resolve error MUST NOT fail the hook nor suppress the
+	// notifier below (never-fail policy, spec §9/§15) — ignore it; the transition
+	// (the hook's primary job) already landed.
+	if event == "stop" {
+		_, _, _ = st.ResolveOldestPendingTurn(ctx, name, p.TranscriptPath)
+	}
 	if notify.ShouldNotify(on, string(prior), string(to)) {
 		_ = n.Notify(notify.Event{Name: name, UUID: p.SessionID, State: string(to), CWD: p.CWD})
 	}

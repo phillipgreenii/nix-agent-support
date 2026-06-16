@@ -154,3 +154,85 @@ func (s *Store) Upsert(ctx context.Context, name, uuid string) error {
 	}
 	return s.Insert(ctx, Session{Name: name, UUID: uuid, State: Starting})
 }
+
+// turnCols is the column order shared by InsertTurn/GetTurn scans.
+const turnCols = `turn_id, name, prompt, status, transcript_path, created_at, resolved_at`
+
+func scanTurn(sc interface{ Scan(...any) error }) (Turn, error) {
+	var t Turn
+	err := sc.Scan(&t.TurnID, &t.Name, &t.Prompt, &t.Status, &t.TranscriptPath, &t.CreatedAt, &t.ResolvedAt)
+	return t, err
+}
+
+// InsertTurn records a fire-and-forget turn as pending (pg2-12ko). The caller
+// supplies turn_id + name + prompt; status defaults pending and created_at is
+// stamped from the injected clock (deterministic in tests).
+func (s *Store) InsertTurn(ctx context.Context, in Turn) error {
+	if in.Status == "" {
+		in.Status = TurnPending
+	}
+	if in.CreatedAt == 0 {
+		in.CreatedAt = s.clock.Now().Unix()
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO turns (`+turnCols+`) VALUES (?,?,?,?,?,?,?)`,
+		in.TurnID, in.Name, in.Prompt, in.Status, in.TranscriptPath, in.CreatedAt, in.ResolvedAt)
+	if err != nil {
+		return fmt.Errorf("insert turn %q: %w", in.TurnID, err)
+	}
+	return nil
+}
+
+// GetTurn loads one turn by id. ok=false (no error) when no such turn.
+func (s *Store) GetTurn(ctx context.Context, turnID string) (Turn, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+turnCols+` FROM turns WHERE turn_id = ?`, turnID)
+	t, err := scanTurn(row)
+	if err == sql.ErrNoRows {
+		return Turn{}, false, nil
+	}
+	if err != nil {
+		return Turn{}, false, fmt.Errorf("get turn %q: %w", turnID, err)
+	}
+	return t, true, nil
+}
+
+// ResolveOldestPendingTurn stamps transcriptPath onto the OLDEST pending turn for
+// `name` (FIFO by created_at), flipping it to resolved and recording resolved_at
+// from the injected clock. Returns ok=false (no error) when there is no pending
+// turn for the name.
+//
+// KNOWN LIMITATION (v1, pg2-12ko): FIFO-pop is the correlation assumption between
+// a completing turn (Stop hook → Done) and its emitted turn-id. It is correct only
+// when fire-and-forget turns for a name complete in emit order. It breaks if an
+// interactive (blocking) reply's Stop interleaves with a pending fire-and-forget
+// turn (the blocking reply's Stop would pop the wrong turn-id), or if a turn ends
+// `needs_input` rather than Done (the Stop hook never fires, so the turn stays
+// pending). This is a documented limitation, NOT a v1 requirement.
+func (s *Store) ResolveOldestPendingTurn(ctx context.Context, name, transcriptPath string) (turnID string, ok bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var id string
+	err = tx.QueryRowContext(ctx,
+		`SELECT turn_id FROM turns WHERE name = ? AND status = ? ORDER BY created_at ASC, turn_id ASC LIMIT 1`,
+		name, TurnPending).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("find pending turn for %q: %w", name, err)
+	}
+	now := s.clock.Now().Unix()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE turns SET status = ?, transcript_path = ?, resolved_at = ? WHERE turn_id = ?`,
+		TurnResolved, transcriptPath, now, id); err != nil {
+		return "", false, fmt.Errorf("resolve turn %q: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return id, true, nil
+}

@@ -96,6 +96,19 @@ func runReply(args []string) int {
 		fmt.Fprintln(os.Stderr, "reply:", err)
 		return replyExitCode(err)
 	}
+	// Fire-and-forget modes deliver and return immediately with no reply. Record a
+	// pending turn keyed by a fresh turn-id and PRINT that id so the caller can
+	// retrieve the reply later via `ccpool result <turn-id>` (pg2-12ko). The Stop
+	// hook lazily stamps the transcript anchor onto this turn when it completes.
+	if mode == session.ModeNoWait || mode == session.ModeQueue {
+		turnID := uuid.NewString()
+		if err := st.InsertTurn(context.Background(), store.Turn{TurnID: turnID, Name: name, Prompt: prompt}); err != nil {
+			fmt.Fprintln(os.Stderr, "reply:", err)
+			return 1
+		}
+		fmt.Println(turnID)
+		return 0
+	}
 	switch res.State {
 	case store.Done:
 		fmt.Println(res.Reply)

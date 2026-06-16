@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,48 @@ func TestHook_stop_resolvesByUUID_setsDone(t *testing.T) {
 	got, _, _ := st.GetByName(ctx, "alpha")
 	if got.State != store.Done {
 		t.Errorf("state = %q, want done", got.State)
+	}
+}
+
+// TestHook_stop_resolvesPendingTurn proves the fire-and-forget emit→resolve flow
+// at the store/cmd layer (pg2-12ko): a pending turn recorded at emit is stamped
+// with the transcript anchor when the Stop hook fires, and `result` then resolves
+// the reply lazily from that anchor.
+func TestHook_stop_resolvesPendingTurn(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	// EMIT: a fire-and-forget turn recorded pending (what runReply does).
+	if err := st.InsertTurn(ctx, store.Turn{TurnID: "t-1", Name: "alpha", Prompt: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stop hook fires for the session → turn completes; the oldest pending turn
+	// gets the transcript anchor stamped onto it.
+	if err := handleHook("stop", strings.NewReader(stopPayload), st, ""); err != nil {
+		t.Fatalf("handleHook stop: %v", err)
+	}
+
+	got, ok, err := st.GetTurn(ctx, "t-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTurn: ok=%v err=%v", ok, err)
+	}
+	if got.Status != store.TurnResolved {
+		t.Errorf("Status = %q, want resolved", got.Status)
+	}
+	if got.TranscriptPath != "/p/u-x.jsonl" {
+		t.Errorf("TranscriptPath = %q, want stamped from stop payload", got.TranscriptPath)
+	}
+
+	// RETRIEVE: result resolves the reply lazily from the stamped anchor.
+	var out, errBuf bytes.Buffer
+	if code := resultForTurn(ctx, st, fakeTranscript{text: "all done"}, "t-1", &out, &errBuf); code != 0 {
+		t.Fatalf("resultForTurn code = %d, want 0; stderr=%q", code, errBuf.String())
+	}
+	if strings.TrimSpace(out.String()) != "all done" {
+		t.Errorf("reply = %q, want %q", out.String(), "all done")
 	}
 }
 

@@ -25,6 +25,7 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 		"reap":     true,
 		"reap-all": true,
 		"reply":    true,
+		"result":   true,
 		"state":    true,
 		"tail":     true,
 		"trust":    true,
@@ -108,6 +109,8 @@ func main() {
 		os.Exit(runReapAll(rest))
 	case "reply":
 		os.Exit(runReply(rest))
+	case "result":
+		os.Exit(runResult(rest))
 	case "state":
 		os.Exit(runState(rest))
 	case "tail":

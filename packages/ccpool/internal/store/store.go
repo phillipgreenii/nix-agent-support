@@ -44,6 +44,29 @@ type Session struct {
 	Flags          string
 }
 
+// TurnStatus is a fire-and-forget turn's lifecycle: pending at emit, resolved
+// once the Stop hook stamps the transcript anchor (pg2-12ko).
+type TurnStatus string
+
+const (
+	TurnPending  TurnStatus = "pending"
+	TurnResolved TurnStatus = "resolved"
+)
+
+// Turn records a fire-and-forget (--no-wait/--queue-message) reply so its result
+// can be retrieved later by turn-id. The reply itself is NOT stored: a resolved
+// turn carries the transcript anchor, and `ccpool result` resolves the reply
+// lazily from that transcript (pg2-12ko).
+type Turn struct {
+	TurnID         string
+	Name           string
+	Prompt         string
+	Status         TurnStatus
+	TranscriptPath string
+	CreatedAt      int64
+	ResolvedAt     int64
+}
+
 type Store struct {
 	db     *sql.DB
 	clock  clock.Clock
