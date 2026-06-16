@@ -187,6 +187,20 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			rlReset = time.Time{}
 		}
 
+		// Subagent disrupt surfacing: a stream-idle-timeout (or any disrupt)
+		// inside a subagent lands only in subagents/agent-*.jsonl, which Scan
+		// does not read. When the main session has no terminal error of its
+		// own, surface the most recent terminal subagent error (tagged
+		// FromSubagent) so it shows in the TUI. Scanned outside the transcript
+		// cache because subagent files change independently of the main one.
+		if path != "" &&
+			(snap.LastError == nil || !snap.LastError.IsTerminal) {
+			if subErr, ok := transcript.LastSubagentError(path); ok {
+				e := subErr
+				snap.LastError = &e
+			}
+		}
+
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
 			ContextTokens:     snap.ContextTokens,
 			SessionTokens:     snap.TotalTokens,

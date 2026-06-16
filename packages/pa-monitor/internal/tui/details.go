@@ -49,6 +49,9 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	le := sv.SessionEnrichment.LastError
 	if le != nil && le.IsTerminal {
 		kindStr := string(le.Kind)
+		if le.FromSubagent {
+			kindStr += "  (in subagent)"
+		}
 		if isEscalated(le) {
 			kindStr += "  (escalated)"
 		}

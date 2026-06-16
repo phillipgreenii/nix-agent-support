@@ -65,6 +65,11 @@ func (p *DisruptProducer) reconcileSession(ctx TickContext, store *PendingStore,
 		cancel()
 		return
 	}
+	if s.LastError.FromSubagent {
+		// Surface-only: nudging the parent will not revive a dead subagent.
+		cancel()
+		return
+	}
 
 	wm := ctx.Watermarks.SessionWatermark(s.SessionID)
 
