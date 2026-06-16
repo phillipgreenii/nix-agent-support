@@ -6,17 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
-	"github.com/phillipgreenii/ccpool/internal/lock"
-	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
-	"github.com/phillipgreenii/ccpool/internal/tmux"
 	ct "github.com/phillipgreenii/claude-transcript"
 )
 
@@ -52,26 +47,7 @@ func runReply(args []string) int {
 	}
 	defer st.Close()
 
-	home, _ := os.UserHomeDir()
-	svc := session.New(session.Deps{
-		Tmux:       tmux.NewClient(cfg.Tmux.Socket),
-		Trust:      truster{path: filepath.Join(home, ".claude.json")},
-		Store:      st,
-		Wait:       storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
-		Transcript: transcriptAdapter{},
-		Lock:       lock.New(cfg.RuntimeDir),
-		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
-		NotifyOn:   cfg.Notify.On,
-		Events:     el,
-		Socket:     cfg.Tmux.Socket,
-		Prefix:     cfg.Tmux.Prefix,
-		PluginDir:  cfg.Claude.PluginDir,
-		ClaudeBin:  cfg.Claude.Bin,
-		PoolPath:   cfg.PoolRoot,
-		NewUUID:    func() string { return uuid.NewString() },
-		Now:        time.Now,
-		Sleep:      time.Sleep,
-	})
+	svc := session.New(newSessionDeps(cfg, st, el))
 
 	cwd := cfg.Claude.DefaultCwd
 	if cwd == "" {

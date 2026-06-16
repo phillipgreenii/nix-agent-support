@@ -5,18 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/launch"
-	"github.com/phillipgreenii/ccpool/internal/lock"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
-	"github.com/phillipgreenii/ccpool/internal/tmux"
 	"github.com/phillipgreenii/ccpool/internal/trust"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
@@ -71,23 +67,7 @@ func runNew(args []string) int {
 	}
 	defer st.Close()
 
-	home, _ := os.UserHomeDir()
-	svc := session.New(session.Deps{
-		Tmux:      tmux.NewClient(cfg.Tmux.Socket),
-		Trust:     truster{path: filepath.Join(home, ".claude.json")},
-		Store:     st,
-		Wait:      storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
-		Lock:      lock.New(cfg.RuntimeDir),
-		Events:    el,
-		Socket:    cfg.Tmux.Socket,
-		Prefix:    cfg.Tmux.Prefix,
-		PluginDir: cfg.Claude.PluginDir,
-		ClaudeBin: cfg.Claude.Bin,
-		PoolPath:  cfg.PoolRoot,
-		NewUUID:   func() string { return uuid.NewString() },
-		Now:       time.Now,
-		Sleep:     time.Sleep,
-	})
+	svc := session.New(newSessionDeps(cfg, st, el))
 
 	h, err := svc.Ensure(context.Background(), externalID, dir, m, session.EnsureOpts{
 		Env:            env,

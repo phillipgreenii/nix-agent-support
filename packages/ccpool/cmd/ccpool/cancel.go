@@ -79,8 +79,18 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return nil, nil, 1
 	}
+	return session.New(newSessionDeps(cfg, st, el)), st, 0
+}
+
+// newSessionDeps builds the production session.Deps shared by new/reply/close/
+// cancel/reap. It is the single place that wires the production Exister
+// (session.NewHomeSessionExister over the user's home), so resume/reap consult
+// the real ~/.claude transcripts (ADR 0015); a nil Exister there makes every row
+// look non-resumable and reap prunes rows that should be kept. st may be nil in
+// unit tests that only inspect the wiring; el may be nil (no-op logger).
+func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) session.Deps {
 	home, _ := os.UserHomeDir()
-	svc := session.New(session.Deps{
+	return session.Deps{
 		Tmux:       tmux.NewClient(cfg.Tmux.Socket),
 		Trust:      truster{path: filepath.Join(home, ".claude.json")},
 		Store:      st,
@@ -90,6 +100,7 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
 		NotifyOn:   cfg.Notify.On,
 		Events:     el,
+		Exister:    session.NewHomeSessionExister(home),
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,
@@ -98,8 +109,7 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		NewUUID:    func() string { return uuid.NewString() },
 		Now:        time.Now,
 		Sleep:      time.Sleep,
-	})
-	return svc, st, 0
+	}
 }
 
 // openEventLog opens the active pool's append-only JSONL event log. A failure is
