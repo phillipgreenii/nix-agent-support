@@ -11,7 +11,7 @@ func TestCreateAction_CreatesAndLinks(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "foo/bar", PRNumber: 12})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "foo/bar#12")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "foo/bar#12", false)
 	fbID, _ := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,

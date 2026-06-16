@@ -32,7 +32,7 @@ const processingCycleTitlePrefix = "process-feedback: "
 // title is appended after the canonical prefix; pass either a short
 // descriptor ("foo/bar#42") or the empty string to let the wrapper derive
 // the title from prID.
-func (c *Client) CreateProcessingCycle(ctx context.Context, prBeadID, title string) (string, error) {
+func (c *Client) CreateProcessingCycle(ctx context.Context, prBeadID, title string, mine bool) (string, error) {
 	if prBeadID == "" {
 		return "", errors.New("processing-cycle: pr bead id required")
 	}
@@ -40,13 +40,17 @@ func (c *Client) CreateProcessingCycle(ctx context.Context, prBeadID, title stri
 		title = prBeadID
 	}
 	fullTitle := processingCycleTitlePrefix + title
-	out, err := c.Runner.Run(ctx,
+	createArgs := []string{
 		"create",
 		"--type=task",
 		"--title", fullTitle,
 		"-d", fullTitle,
 		"--silent",
-	)
+	}
+	if mine {
+		createArgs = append(createArgs, "-l", "mine")
+	}
+	out, err := c.Runner.Run(ctx, createArgs...)
 	if err != nil {
 		return "", fmt.Errorf("create processing-cycle: %w", err)
 	}
@@ -229,8 +233,8 @@ func extractIDs(s string) []string {
 
 // CreateProcessingCycle creates a processing-cycle bead using the default
 // Client.
-func CreateProcessingCycle(ctx context.Context, prBeadID, title string) (string, error) {
-	return NewClient().CreateProcessingCycle(ctx, prBeadID, title)
+func CreateProcessingCycle(ctx context.Context, prBeadID, title string, mine bool) (string, error) {
+	return NewClient().CreateProcessingCycle(ctx, prBeadID, title, mine)
 }
 
 // FindOpenProcessingCycle finds an open processing-cycle bead using the

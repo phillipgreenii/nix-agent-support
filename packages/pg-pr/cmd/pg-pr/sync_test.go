@@ -58,7 +58,7 @@ func (s *stubBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads.MergeR
 func (s *stubBeads) GetMergeRequest(_ context.Context, _ string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
-func (s *stubBeads) CreateProcessingCycle(_ context.Context, _, _ string) (string, error) {
+func (s *stubBeads) CreateProcessingCycle(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", nil
 }
 func (s *stubBeads) FindOpenProcessingCycle(_ context.Context, _ string) (string, bool, error) {

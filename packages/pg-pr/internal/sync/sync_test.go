@@ -593,7 +593,7 @@ func (noopBeads) ListMergeRequests(context.Context, bool) ([]beads.MergeRequest,
 func (noopBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
-func (noopBeads) CreateProcessingCycle(context.Context, string, string) (string, error) {
+func (noopBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
 func (noopBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
@@ -672,7 +672,7 @@ func seedFeedback(t *testing.T, bd *beads.Client, repo string, pr int, kind bead
 	if err != nil {
 		t.Fatalf("seed MR: %v", err)
 	}
-	cycleID, err := bd.CreateProcessingCycle(ctx, prID, repo+"#seed")
+	cycleID, err := bd.CreateProcessingCycle(ctx, prID, repo+"#seed", false)
 	if err != nil {
 		t.Fatalf("seed cycle: %v", err)
 	}
@@ -1124,11 +1124,11 @@ func TestSync_SkipsAndWarnsOnTeammateReplyDraft(t *testing.T) {
 		t.Fatalf("seed team MR: %v", err)
 	}
 
-	selfCycle, err := bd.CreateProcessingCycle(ctx, selfMRID, "foo/bar#self-seed")
+	selfCycle, err := bd.CreateProcessingCycle(ctx, selfMRID, "foo/bar#self-seed", false)
 	if err != nil {
 		t.Fatalf("self cycle: %v", err)
 	}
-	teamCycle, err := bd.CreateProcessingCycle(ctx, teamMRID, "foo/bar#team-seed")
+	teamCycle, err := bd.CreateProcessingCycle(ctx, teamMRID, "foo/bar#team-seed", false)
 	if err != nil {
 		t.Fatalf("team cycle: %v", err)
 	}

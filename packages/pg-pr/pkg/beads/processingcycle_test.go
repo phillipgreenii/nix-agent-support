@@ -47,6 +47,49 @@ func TestFindOpenProcessingCycle_FailsSafeOnDepError(t *testing.T) {
 	}
 }
 
+// recordingRunner captures the argv of each bd call so a test can assert
+// which flags CreateProcessingCycle passes to `bd create`.
+type recordingRunner struct {
+	createArgs []string
+}
+
+func (r *recordingRunner) Run(_ context.Context, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "create" {
+		r.createArgs = args
+		return "cyc-rec", nil // non-empty id so CreateProcessingCycle continues to dep-add
+	}
+	return "", nil // dep add and anything else
+}
+
+func TestCreateProcessingCycle_StampsMineWhenSelf(t *testing.T) {
+	ctx := context.Background()
+	r := &recordingRunner{}
+	c := NewClientWithRunner(r)
+
+	if _, err := c.CreateProcessingCycle(ctx, "pr-1", "foo/bar#7", true); err != nil {
+		t.Fatalf("CreateProcessingCycle: %v", err)
+	}
+	joined := strings.Join(r.createArgs, " ")
+	if !strings.Contains(joined, "-l mine") {
+		t.Fatalf("self cycle: `bd create` args missing `-l mine`; got %q", joined)
+	}
+}
+
+func TestCreateProcessingCycle_TeamCycleUnlabeled(t *testing.T) {
+	ctx := context.Background()
+	r := &recordingRunner{}
+	c := NewClientWithRunner(r)
+
+	if _, err := c.CreateProcessingCycle(ctx, "pr-1", "foo/bar#7", false); err != nil {
+		t.Fatalf("CreateProcessingCycle: %v", err)
+	}
+	for _, a := range r.createArgs {
+		if a == "mine" {
+			t.Fatalf("team cycle must not be labeled mine; got args %v", r.createArgs)
+		}
+	}
+}
+
 func TestCreateProcessingCycle_CreatesAndLinks(t *testing.T) {
 	ctx := context.Background()
 	c, _ := newBDWorkspace(t)
@@ -56,7 +99,7 @@ func TestCreateProcessingCycle_CreatesAndLinks(t *testing.T) {
 		t.Fatalf("ensure MR: %v", err)
 	}
 
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#7")
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#7", false)
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -102,7 +145,7 @@ func TestFindOpenProcessingCycle_AfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#11")
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#11", false)
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -142,7 +185,7 @@ func TestListChildrenOfPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#21")
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#21", false)
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}

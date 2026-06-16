@@ -107,7 +107,7 @@ type BeadClient interface {
 	ListMergeRequests(ctx context.Context, includeClosed bool) ([]beads.MergeRequest, error)
 	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
 
-	CreateProcessingCycle(ctx context.Context, prBeadID, title string) (string, error)
+	CreateProcessingCycle(ctx context.Context, prBeadID, title string, mine bool) (string, error)
 	FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error)
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
@@ -1480,7 +1480,8 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 
 		if !found {
 			// Lazily create a processing-cycle on first new feedback.
-			id, err := bdc.CreateProcessingCycle(ctx, prBeadID, fmt.Sprintf("%s#%d", repo, pr.Number))
+			id, err := bdc.CreateProcessingCycle(ctx, prBeadID,
+				fmt.Sprintf("%s#%d", repo, pr.Number), e.isSelfAuthored(pr.Author))
 			if err != nil {
 				return fmt.Errorf("create processing-cycle: %w", err)
 			}

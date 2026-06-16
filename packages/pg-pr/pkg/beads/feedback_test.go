@@ -13,7 +13,7 @@ func TestCreateFeedback_CreatesAndLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#8")
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#8", false)
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestCreateFeedback_TruncatesLongTitleButPreservesBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#9")
+	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#9", false)
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestFindFeedbackByFingerprint_DedupAcrossRuns(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "x/y", PRNumber: 3})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "x/y#3")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "x/y#3", false)
 	if _, err := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCIFailure,
@@ -206,7 +206,7 @@ func TestMarkFeedbackResolvedUpstream(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "a/b", PRNumber: 5})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "a/b#5")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "a/b#5", false)
 	fbID, _ := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,
@@ -260,7 +260,7 @@ func TestGetFeedback_ReturnsBead(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "g/h", PRNumber: 4})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "g/h#4")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "g/h#4", false)
 	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,
@@ -314,7 +314,7 @@ func TestSetReplyDraft_RoundTrip(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "r/d", PRNumber: 1})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/d#1")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/d#1", false)
 	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,
@@ -358,7 +358,7 @@ func TestSetResponseID_RoundTrip(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "r/x", PRNumber: 2})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/x#2")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/x#2", false)
 	fbID, _ := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,
@@ -388,7 +388,7 @@ func TestListFeedbackPendingReply_FiltersCorrectly(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "r/p", PRNumber: 9})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/p#9")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "r/p#9", false)
 
 	// 1. Pending: has reply_draft, no response_id.
 	pendingID, _ := c.CreateFeedback(ctx, CreateFeedbackInput{

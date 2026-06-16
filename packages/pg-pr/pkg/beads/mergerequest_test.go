@@ -349,7 +349,7 @@ func TestFindMergeRequestForFeedback_WalksUp(t *testing.T) {
 	c, _ := newBDWorkspace(t)
 
 	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "w/x", PRNumber: 11})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "w/x#11")
+	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "w/x#11", false)
 	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
 		ProcessingCycleID: cycleID,
 		Kind:              FeedbackKindCommentThread,
