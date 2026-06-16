@@ -6,9 +6,12 @@ import (
 	"testing"
 )
 
-// TestEncodeProjectDir pins Claude's cwd→project-dir encoding: each run of the
-// OS path separator collapses to a single '-' (a leading separator yields a
-// leading '-'), matching ~/.claude/projects/<encoded-cwd>/ on disk (ADR 0015).
+// TestEncodeProjectDir pins Claude's cwd→project-dir encoding: every character
+// that is not [A-Za-z0-9] is replaced with '-', and runs are NOT collapsed
+// (so adjacent specials like "/." yield "--"), matching
+// ~/.claude/projects/<encoded-cwd>/ on disk (ADR 0015). Verified against real
+// entries, e.g. /Users/phillipg/gc/.gc-worktrees/... →
+// -Users-phillipg-gc--gc-worktrees-..., and phillipg_mbp → phillipg-mbp.
 func TestEncodeProjectDir(t *testing.T) {
 	cases := []struct {
 		cwd  string
@@ -18,6 +21,12 @@ func TestEncodeProjectDir(t *testing.T) {
 		{"/tmp/proj", "-tmp-proj"},
 		{"/", "-"},
 		{"relative/path", "relative-path"},
+		// Underscores are not alphanumeric → become '-' (real: phillipg_mbp → phillipg-mbp).
+		{"/Users/x/phillipg_mbp/.worktrees/s", "-Users-x-phillipg-mbp--worktrees-s"},
+		// Adjacent specials are NOT collapsed: "/." → "--" (real: gc/.gc-worktrees → gc--gc-worktrees).
+		{"/a/b_c/.d", "-a-b-c--d"},
+		// Dots, underscores, and other punctuation all map to '-' without collapsing.
+		{"/Users/phillipg/gc/.gc-worktrees/x", "-Users-phillipg-gc--gc-worktrees-x"},
 	}
 	for _, tc := range cases {
 		if got := encodeProjectDir(tc.cwd); got != tc.want {

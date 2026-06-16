@@ -6,6 +6,21 @@ import (
 	"strings"
 )
 
+// isAlphaNum reports whether r is in [A-Za-z0-9] — the only characters Claude
+// preserves when encoding a cwd into a project-dir name.
+func isAlphaNum(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	default:
+		return false
+	}
+}
+
 // claudeSessionExists reports whether a resumable transcript exists for csid
 // under the recorded cwd: <home>/.claude/projects/<encoded-cwd>/<csid>.jsonl
 // (ADR 0015). Resumability is a FACT — does the Claude session still exist on
@@ -13,8 +28,8 @@ import (
 // mean resumable (a corrupt/mid-turn transcript may still fail to resume), but
 // its absence is a reliable "gone".
 //
-// The encoding mirrors Claude's: <encoded-cwd> replaces each run of the OS path
-// separator with a single '-' (so a leading separator yields a leading '-').
+// The encoding mirrors Claude's: <encoded-cwd> replaces every non-alphanumeric
+// character with '-' (so a leading separator yields a leading '-').
 func claudeSessionExists(home, cwd, claudeSessionID string) bool {
 	if home == "" || claudeSessionID == "" {
 		return false
@@ -24,16 +39,23 @@ func claudeSessionExists(home, cwd, claudeSessionID string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// encodeProjectDir encodes a cwd into Claude's project-dir name: every run of
-// the OS path separator collapses to a single '-'.
+// encodeProjectDir encodes a cwd into Claude's project-dir name: every
+// character that is not [A-Za-z0-9] is replaced with '-'. Runs are NOT
+// collapsed and there is no separator-specific logic, so adjacent specials map
+// to adjacent dashes — e.g. "/a/b_c/.d" → "-a-b-c--d" (the "/." becomes "--"),
+// matching ~/.claude/projects/<encoded-cwd>/ exactly (verified against disk,
+// ADR 0015).
 func encodeProjectDir(cwd string) string {
-	sep := string(os.PathSeparator)
-	// Collapse runs of the separator to a single one, then swap for '-' so a
-	// path like "/a//b" maps the same as "/a/b".
-	for strings.Contains(cwd, sep+sep) {
-		cwd = strings.ReplaceAll(cwd, sep+sep, sep)
+	var b strings.Builder
+	b.Grow(len(cwd))
+	for _, r := range cwd {
+		if isAlphaNum(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
 	}
-	return strings.ReplaceAll(cwd, sep, "-")
+	return b.String()
 }
 
 // SessionExister probes whether a Claude session is resumable on this machine
