@@ -21,7 +21,7 @@ func TestOpen_migratesTurnsTable(t *testing.T) {
 func TestInsertTurnAndGet(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	in := Turn{TurnID: "t-1", Name: "alpha", Prompt: "do the thing"}
+	in := Turn{TurnID: "t-1", ExternalID: "ext-alpha", Prompt: "do the thing"}
 	if err := st.InsertTurn(ctx, in); err != nil {
 		t.Fatalf("InsertTurn: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestInsertTurnAndGet(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetTurn: ok=%v err=%v", ok, err)
 	}
-	if got.Name != "alpha" || got.Prompt != "do the thing" {
+	if got.ExternalID != "ext-alpha" || got.Prompt != "do the thing" {
 		t.Errorf("got %+v", got)
 	}
 	if got.Status != TurnPending {
@@ -55,20 +55,20 @@ func TestGetTurn_unknown(t *testing.T) {
 func TestResolveOldestPendingTurn_FIFO(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	// Insert three pending turns for the same name at increasing times.
-	if err := st.InsertTurn(ctx, Turn{TurnID: "t-1", Name: "alpha", Prompt: "first"}); err != nil {
+	// Insert three pending turns for the same external_id at increasing times.
+	if err := st.InsertTurn(ctx, Turn{TurnID: "t-1", ExternalID: "alpha", Prompt: "first"}); err != nil {
 		t.Fatal(err)
 	}
 	bumpClock(t, st, 10)
-	if err := st.InsertTurn(ctx, Turn{TurnID: "t-2", Name: "alpha", Prompt: "second"}); err != nil {
+	if err := st.InsertTurn(ctx, Turn{TurnID: "t-2", ExternalID: "alpha", Prompt: "second"}); err != nil {
 		t.Fatal(err)
 	}
 	bumpClock(t, st, 10)
-	if err := st.InsertTurn(ctx, Turn{TurnID: "t-3", Name: "alpha", Prompt: "third"}); err != nil {
+	if err := st.InsertTurn(ctx, Turn{TurnID: "t-3", ExternalID: "alpha", Prompt: "third"}); err != nil {
 		t.Fatal(err)
 	}
-	// A different name's pending turn must not be picked.
-	if err := st.InsertTurn(ctx, Turn{TurnID: "t-other", Name: "beta", Prompt: "other"}); err != nil {
+	// A different external_id's pending turn must not be picked.
+	if err := st.InsertTurn(ctx, Turn{TurnID: "t-other", ExternalID: "beta", Prompt: "other"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,7 +102,7 @@ func TestResolveOldestPendingTurn_FIFO(t *testing.T) {
 func TestResolveOldestPendingTurn_noPending(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	// No pending turn for this name → ok=false, no error.
+	// No pending turn for this external_id → ok=false, no error.
 	id, ok, err := st.ResolveOldestPendingTurn(ctx, "alpha", "/p/x.jsonl")
 	if err != nil {
 		t.Fatalf("ResolveOldestPendingTurn: %v", err)
@@ -112,7 +112,7 @@ func TestResolveOldestPendingTurn_noPending(t *testing.T) {
 	}
 
 	// An already-resolved turn does not count as pending.
-	if err := st.InsertTurn(ctx, Turn{TurnID: "t-1", Name: "alpha", Prompt: "first"}); err != nil {
+	if err := st.InsertTurn(ctx, Turn{TurnID: "t-1", ExternalID: "alpha", Prompt: "first"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := st.ResolveOldestPendingTurn(ctx, "alpha", "/p/x.jsonl"); !ok {

@@ -26,8 +26,8 @@ func TestTransition_logsToEventLog(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	mustInsert(t, st, "a", "u-a") // Starting, generation 1
-	if _, err := st.Transition(ctx, "a", Ready, "u-a", "/p/a.jsonl"); err != nil {
+	mustInsert(t, st, "a", "csid-a") // Starting, generation 1
+	if _, err := st.Transition(ctx, "a", Ready, "csid-a", "/p/a.jsonl"); err != nil {
 		t.Fatalf("Transition: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestTransition_logsToEventLog(t *testing.T) {
 	e := evs[0]
 	if e.Kind != "transition" || e.Name != "a" ||
 		e.From != string(Starting) || e.To != string(Ready) ||
-		e.UUID != "u-a" || e.LineRef != "/p/a.jsonl" {
+		e.UUID != "csid-a" || e.LineRef != "/p/a.jsonl" {
 		t.Errorf("logged event = %+v", e)
 	}
 	if e.Ts != time.Unix(1000, 0).UTC().Format(time.RFC3339Nano) {
@@ -53,8 +53,8 @@ func TestTransition_logsToEventLog(t *testing.T) {
 func TestTransition_noEventLog_isNoOp(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
-	mustInsert(t, st, "a", "u-a")
-	if _, err := st.Transition(ctx, "a", Ready, "u-a", ""); err != nil {
+	mustInsert(t, st, "a", "csid-a")
+	if _, err := st.Transition(ctx, "a", Ready, "csid-a", ""); err != nil {
 		t.Fatalf("Transition without event log: %v", err)
 	}
 }
