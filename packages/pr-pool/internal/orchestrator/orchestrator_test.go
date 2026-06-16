@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
@@ -869,6 +870,41 @@ func TestDrain_returnsCompleteAndFlaggedCounts(t *testing.T) {
 	complete, flagged := o.drain(context.Background(), o.Reg.Feedback, ds)
 	if complete != 2 || flagged != 1 {
 		t.Errorf("drain counts = (complete=%d flagged=%d), want (2, 1); updates=%v", complete, flagged, bd.updates)
+	}
+}
+
+// TestCreatedByActor locks the computed value behind the per-dispatch "created"
+// marker: the bead IDs that appeared during a dispatch AND were created by the
+// pool's own actor. Pre-existing beads (in the snapshot) and beads created by a
+// different actor (e.g. the pg-pr daemon) during the window are both excluded.
+func TestCreatedByActor(t *testing.T) {
+	const actor = "pgii-pool__process-feedback"
+	pre := map[string]struct{}{"zr-old1": {}, "zr-old2": {}}
+	post := []beads.Issue{
+		{ID: "zr-old1", CreatedBy: actor},            // pre-existing → excluded by snapshot diff
+		{ID: "zr-old2", CreatedBy: "pg-pr daemon"},   // pre-existing → excluded
+		{ID: "zr-new-b", CreatedBy: actor},           // new + mine → reported
+		{ID: "zr-new-a", CreatedBy: actor},           // new + mine → reported (and sorted before zr-new-b)
+		{ID: "zr-daemon", CreatedBy: "pg-pr daemon"}, // new but daemon → excluded
+	}
+	got := createdByActor(pre, post, actor)
+	want := []string{"zr-new-a", "zr-new-b"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("createdByActor = %v, want %v (sorted, actor-owned, new only)", got, want)
+	}
+}
+
+// TestCreatedByActor_none locks the "created none" path: a dispatch where the
+// actor created nothing new returns an empty slice (the marker prints "none").
+func TestCreatedByActor_none(t *testing.T) {
+	const actor = "pgii-pool__worker"
+	pre := map[string]struct{}{"zr-x": {}}
+	post := []beads.Issue{
+		{ID: "zr-x", CreatedBy: actor},        // pre-existing
+		{ID: "zr-daemon", CreatedBy: "other"}, // new but not mine
+	}
+	if got := createdByActor(pre, post, actor); len(got) != 0 {
+		t.Errorf("createdByActor = %v, want empty (none created by actor)", got)
 	}
 }
 

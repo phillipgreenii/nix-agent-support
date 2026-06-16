@@ -137,6 +137,23 @@ func TestHasLabel_fromShow(t *testing.T) {
 	}
 }
 
+func TestList_parsesCreatedByAndArgv(t *testing.T) {
+	fr := &fakeRunner{out: `[{"id":"zr-1","created_by":"pgii-pool__worker"},{"id":"zr-2","created_by":"pg-pr daemon"}]`}
+	got, err := List(context.Background(), fr, "--all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "zr-1" || got[0].CreatedBy != "pgii-pool__worker" {
+		t.Fatalf("got %+v", got)
+	}
+	// argv assertion: List appends --json --limit 0 after caller args
+	last := fr.args[len(fr.args)-1]
+	want := []string{"list", "--all", "--json", "--limit", "0"}
+	if joinArgs(last) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", last, want)
+	}
+}
+
 func joinArgs(a []string) string {
 	s := ""
 	for _, x := range a {

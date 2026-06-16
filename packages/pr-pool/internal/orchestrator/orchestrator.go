@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -119,16 +120,51 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 			break
 		}
 		slog.Info("dispatching", "role", role.Name, "bead", d.BeadID)
-		if err := o.workOne(ctx, d); err != nil {
+		pre, preOK := o.snapshotIDs(ctx) // bracket workOne so creations on BOTH success and failure paths are seen
+		err := o.workOne(ctx, d)
+		if err != nil {
 			slog.Warn("bead flagged", "role", role.Name, "bead", d.BeadID, "err", err)
 			flagged++
 		} else {
 			slog.Info("bead complete", "role", role.Name, "bead", d.BeadID)
 			complete++
 		}
+		o.logCreated(ctx, role, d.BeadID, pre, preOK)
 		worked++
 	}
 	return complete, flagged
+}
+
+// snapshotIDs returns the set of all bead IDs (any status, incl. closed) and
+// whether the read succeeded. A failed read returns (nil, false) so logCreated
+// reports created=unknown rather than a false created=none.
+func (o *Orchestrator) snapshotIDs(ctx context.Context) (map[string]struct{}, bool) {
+	issues, err := beads.List(ctx, o.BD, "--all")
+	if err != nil {
+		return nil, false
+	}
+	ids := make(map[string]struct{}, len(issues))
+	for _, iss := range issues {
+		ids[iss.ID] = struct{}{}
+	}
+	return ids, true
+}
+
+// logCreated emits the per-dispatch "created" marker: the IDs of beads the role's
+// actor created during this dispatch, or "none". If either snapshot read failed
+// it reports "unknown" (best-effort — a bd hiccup must not disrupt the drain).
+func (o *Orchestrator) logCreated(ctx context.Context, role roles.Role, beadID string, pre map[string]struct{}, preOK bool) {
+	post, err := beads.List(ctx, o.BD, "--all")
+	if !preOK || err != nil {
+		slog.Info("created", "role", role.Name, "bead", beadID, "created", "unknown")
+		return
+	}
+	created := createdByActor(pre, post, role.Actor)
+	if len(created) == 0 {
+		slog.Info("created", "role", role.Name, "bead", beadID, "created", "none")
+		return
+	}
+	slog.Info("created", "role", role.Name, "bead", beadID, "created", created)
 }
 
 // countByRole tallies dispatches by role kind. Feeds the "discover" progress
@@ -143,6 +179,25 @@ func countByRole(all []discover.DispatchContext) (feedback, worker int) {
 		}
 	}
 	return feedback, worker
+}
+
+// createdByActor returns, sorted, the IDs of beads present in post but absent
+// from the pre snapshot whose CreatedBy is actor. The snapshot diff drops every
+// pre-existing bead; the actor filter drops beads created concurrently by anyone
+// else (notably the pg-pr daemon's cycle/PR beads), so the result is exactly the
+// beads this dispatch's worker created. Feeds the per-dispatch "created" marker.
+func createdByActor(pre map[string]struct{}, post []beads.Issue, actor string) []string {
+	var out []string
+	for _, iss := range post {
+		if _, existed := pre[iss.ID]; existed {
+			continue
+		}
+		if iss.CreatedBy == actor {
+			out = append(out, iss.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // workOne dispatches a single bead: Ensure a fresh per-bead session, Send the

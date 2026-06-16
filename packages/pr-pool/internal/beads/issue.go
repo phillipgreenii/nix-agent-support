@@ -9,13 +9,14 @@ import (
 // Issue is the subset of a bd issue pr-pool reads. Metadata is left as a generic
 // map (bd serializes merge-request fields like author/repo/pr_number into it).
 type Issue struct {
-	ID       string         `json:"id"`
-	Title    string         `json:"title"`
-	Status   string         `json:"status"`
-	Type     string         `json:"issue_type"`
-	Parent   string         `json:"parent"`
-	Labels   []string       `json:"labels"`
-	Metadata map[string]any `json:"metadata"`
+	ID        string         `json:"id"`
+	Title     string         `json:"title"`
+	Status    string         `json:"status"`
+	Type      string         `json:"issue_type"`
+	Parent    string         `json:"parent"`
+	Labels    []string       `json:"labels"`
+	Metadata  map[string]any `json:"metadata"`
+	CreatedBy string         `json:"created_by"` // bd attributes creation to BEADS_ACTOR; lets a dispatch claim only its own new beads
 }
 
 // HasLabel reports whether the issue carries the given label.
@@ -43,6 +44,19 @@ func ShowObj(ctx context.Context, r Runner, id string) (Issue, error) {
 // `if type=="array" then . else []`).
 func Ready(ctx context.Context, r Runner, args ...string) ([]Issue, error) {
 	full := append(append([]string{"ready"}, args...), "--json", "--limit", "0")
+	out, err := r.Run(ctx, full...)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMany([]byte(out)), nil
+}
+
+// List runs `bd list <args...> --json --limit 0` and returns the issues. Used to
+// snapshot the store before/after a dispatch; pass `--all` to include closed so a
+// bead the worker created and then closed is still seen. A non-array / null
+// payload yields an empty slice (mirrors Ready).
+func List(ctx context.Context, r Runner, args ...string) ([]Issue, error) {
+	full := append(append([]string{"list"}, args...), "--json", "--limit", "0")
 	out, err := r.Run(ctx, full...)
 	if err != nil {
 		return nil, err
