@@ -3,6 +3,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +189,55 @@ func TestContract_NeedsInput_AskUserQuestionViaTranscriptFallback(t *testing.T) 
 	// IsAwaitingInput fallback ship in Unit B; reliable live detection is deferred.
 	pending(t, "reconciled waiting-for-human for a live AskUserQuestion + question TEXT",
 		"live picker pane marker (transcript persists no assistant event while paused) — see pg2-7a5b")
+}
+
+// TestContract_Canary_GoldenMarkerRendersInPane is the SINGLE intentional pane
+// assertion in this suite. Every other scenario keeps its real-claude pin on the
+// state/event-log layer (pane-assertion-free by design — see the contract-harness
+// design doc), because pane text is the most upgrade-fragile surface Claude Code
+// has. This one canary deliberately depends on it: it drives a KNOWN golden marker
+// all the way out to the visible pane and asserts it renders, so that if a Claude
+// Code upgrade ever breaks the pane-capture path itself (capture-pane returns
+// nothing, the TUI stops echoing model output, etc.) it localizes HERE as a
+// low-cost early warning, rather than silently degrading the gates the other
+// scenarios lean on.
+//
+// Marker strategy / why it dodges the prompt-echo false-positive trap that the
+// AskUserQuestion `seen` check hit (see pg2-7a5b note above): the prompt never
+// contains the literal string we assert. We hand the model the prefix "CCGOLDEN"
+// and a unique numeric nonce as SEPARATE tokens and instruct it to concatenate
+// them with NO separator. The asserted marker `CCGOLDEN<nonce>` therefore appears
+// in the pane ONLY because the model actually produced that output and the pane
+// rendered it — a verbatim copy of the prompt text (TUI prompt-echo) cannot
+// satisfy the check, since the joined form is absent from the prompt. The nonce
+// (pid + UnixNano) also makes the marker unique per run, so it can't collide with
+// TUI chrome or anything left over in scrollback.
+func TestContract_Canary_GoldenMarkerRendersInPane(t *testing.T) {
+	sb := newSandbox(t)
+	sb.mustNew("g")
+	nonce := fmt.Sprintf("%d%d", os.Getpid(), time.Now().UnixNano())
+	marker := "CCGOLDEN" + nonce // the literal we assert; absent from the prompt below
+	canaryPrompt := fmt.Sprintf(
+		"Concatenate the text CCGOLDEN and the number %s with no space or punctuation "+
+			"between them, and reply with exactly that single token and nothing else.", nonce)
+	sb.ccp("reply", "g", canaryPrompt, "--no-wait")
+	// Poll the pane until the joined marker renders (mirrors the AskUserQuestion
+	// poll idiom: 90s deadline, 500ms sleeps).
+	deadline := time.Now().Add(90 * time.Second)
+	markerSeen := false
+	for time.Now().Before(deadline) {
+		if strings.Contains(sb.cap("g"), marker) {
+			markerSeen = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !markerSeen {
+		// Driving/capture broken (pane never showed the model's output), not a
+		// verdict on ccpool — classify as scaffold, not a live failure.
+		scaffoldFail(t, "golden marker %q never rendered in the pane (pane-capture path may be broken)", marker)
+	}
+	liveAssert(t, "golden marker rendered in pane", markerSeen, true)
 }
 
 // TestContract_Reap_EvictsLiveClaudeSafely pins the REAL-claude concern reap exists
