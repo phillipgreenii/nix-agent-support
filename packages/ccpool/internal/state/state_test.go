@@ -211,18 +211,31 @@ func staticAwaiting(b bool) func() (bool, error) {
 	return func() (bool, error) { return b, nil }
 }
 
+// staticLastText returns a lastText resolver yielding a fixed string, no error.
+func staticLastText(s string) func() (string, error) {
+	return func() (string, error) { return s, nil }
+}
+
+// noText is a lastText resolver that must never be consulted for its value
+// (used for states where LastText should stay empty). It returns a sentinel so a
+// leaked population would be visibly wrong.
+func noText() (string, error) { return "SHOULD-NOT-APPEAR", nil }
+
 func TestGather_fastPathSkipsSecondCapture(t *testing.T) {
 	const counter = "✽ Envisioning… (5s · ↓ 13 tokens · thinking with xhigh effort)"
 	p := &fakePaner{live: true, panes: []string{counter}}
 	sl := &recordingSleep{}
 	row := store.Session{Name: "a", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), "cc-a", "a", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-a", "a", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
 	if res.State != Working || res.SubState != SubThinking {
 		t.Errorf("got %s/%s, want working/thinking", res.State, res.SubState)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (working is not idle/error)", res.LastText)
 	}
 	if p.capCalls != 1 {
 		t.Errorf("capCalls = %d, want 1 (fast path: no second capture)", p.capCalls)
@@ -238,12 +251,15 @@ func TestGather_streamingViaThreeFrames(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "s", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), "cc-s", "s", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-s", "s", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
 	if res.State != Working || res.SubState != SubStreaming {
 		t.Errorf("got %s/%s, want working/streaming", res.State, res.SubState)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (working is not idle/error)", res.LastText)
 	}
 	if p.capCalls != 3 {
 		t.Errorf("capCalls = %d, want 3 (counter-less needs 3 frames)", p.capCalls)
@@ -260,7 +276,7 @@ func TestGather_settledIdle(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "i", State: store.Ready}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), "cc-i", "i", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), staticLastText("the last reply"), "cc-i", "i", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -270,6 +286,9 @@ func TestGather_settledIdle(t *testing.T) {
 	if res.SubState != SubNone {
 		t.Errorf("SubState = %q, want empty", res.SubState)
 	}
+	if res.LastText != "the last reply" {
+		t.Errorf("LastText = %q, want %q (idle exposes the last reply)", res.LastText, "the last reply")
+	}
 }
 
 func TestGather_awaitingWaitsForHuman(t *testing.T) {
@@ -278,12 +297,15 @@ func TestGather_awaitingWaitsForHuman(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "q", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(true), "cc-q", "q", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, "cc-q", "q", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
 	if res.State != WaitingForHuman {
 		t.Errorf("State = %s, want waiting-for-human", res.State)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (waiting-for-human is not idle/error)", res.LastText)
 	}
 }
 
@@ -297,7 +319,7 @@ func TestGather_awaitingReadDespiteStreamingDiffOnNonWorkingRow(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "q", State: store.Ready} // not Working/Starting
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(true), "cc-q", "q", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, "cc-q", "q", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -311,7 +333,7 @@ func TestGather_notLiveSkipsCapture(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "d", State: store.Done}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), "cc-d", "d", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-d", "d", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -320,6 +342,9 @@ func TestGather_notLiveSkipsCapture(t *testing.T) {
 	}
 	if res.LastKnown != store.Done {
 		t.Errorf("LastKnown = %s, want done", res.LastKnown)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (not-live is not idle/error)", res.LastText)
 	}
 	if res.Live {
 		t.Error("Live = true, want false")
@@ -338,11 +363,81 @@ func TestGather_awaitingErrorTolerated(t *testing.T) {
 	row := store.Session{Name: "u", State: store.Ready}
 	boom := func() (bool, error) { return false, errors.New("transcript unreadable") }
 
-	res, err := Gather(p, sl.Sleep, boom, "cc-u", "u", row)
+	res, err := Gather(p, sl.Sleep, boom, staticLastText("a reply"), "cc-u", "u", row)
 	if err != nil {
 		t.Fatalf("Gather should tolerate a transcript read error, got: %v", err)
 	}
 	if res.State != Idle {
 		t.Errorf("State = %s, want idle (read error tolerated)", res.State)
+	}
+}
+
+// --- Gather: LastText population (idle/error only) -------------------------
+
+func TestGather_lastTextPopulatedForIdleAndError(t *testing.T) {
+	const staticPane = "❯ ready\n  -- INSERT --"
+	cases := []struct {
+		name      string
+		rowState  store.State
+		awaiting  bool
+		text      string
+		wantState State
+		wantText  string
+	}{
+		{
+			// settled, non-failed row, not awaiting -> idle exposes the last reply.
+			name:      "idle_exposes_reply",
+			rowState:  store.Done,
+			text:      "all done, here is the summary",
+			wantState: Idle,
+			wantText:  "all done, here is the summary",
+		},
+		{
+			// settled, Failed row -> error exposes the best-available last text.
+			name:      "error_exposes_last_text",
+			rowState:  store.Failed,
+			text:      "panic: boom",
+			wantState: Error,
+			wantText:  "panic: boom",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakePaner{live: true, panes: []string{staticPane}}
+			sl := &recordingSleep{}
+			row := store.Session{Name: tc.name, State: tc.rowState}
+
+			res, err := Gather(p, sl.Sleep, staticAwaiting(tc.awaiting), staticLastText(tc.text), "cc-"+tc.name, tc.name, row)
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			if res.State != tc.wantState {
+				t.Fatalf("State = %s, want %s", res.State, tc.wantState)
+			}
+			if res.LastText != tc.wantText {
+				t.Errorf("LastText = %q, want %q", res.LastText, tc.wantText)
+			}
+		})
+	}
+}
+
+// TestGather_lastTextErrorTolerated proves a lastText resolver error never
+// crashes the query and leaves LastText empty (mirrors the awaiting tolerance).
+func TestGather_lastTextErrorTolerated(t *testing.T) {
+	const staticPane = "❯ ready"
+	p := &fakePaner{live: true, panes: []string{staticPane}}
+	sl := &recordingSleep{}
+	row := store.Session{Name: "e", State: store.Failed} // -> error, lastText consulted
+	boom := func() (string, error) { return "", errors.New("transcript unreadable") }
+
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), boom, "cc-e", "e", row)
+	if err != nil {
+		t.Fatalf("Gather should tolerate a lastText read error, got: %v", err)
+	}
+	if res.State != Error {
+		t.Fatalf("State = %s, want error", res.State)
+	}
+	if res.LastText != "" {
+		t.Errorf("LastText = %q, want empty (read error tolerated)", res.LastText)
 	}
 }

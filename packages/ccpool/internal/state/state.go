@@ -46,6 +46,11 @@ type Result struct {
 	SubState  SubState
 	Live      bool
 	LastKnown store.State // the cached store state (always populated; the headline for not-live)
+	// LastText is the best-available last assistant message, populated by Gather
+	// ONLY when State is Idle (the last REPLY) or Error (the last ERROR text).
+	// Empty for every other state — Gather does not read the transcript for them.
+	// Classify never sets this (it is pure); see Gather's lastText resolver.
+	LastText string
 }
 
 // Paner is the minimal pane port (a subset of session.Tmux). The cmd layer
@@ -180,11 +185,18 @@ func Classify(in Inputs) Result {
 //   - awaiting wraps claude-transcript's IsAwaitingInput over the row's
 //     transcript path; its error is tolerated (treated as not-awaiting) so a
 //     missing/half-written transcript never crashes a status query.
+//   - lastText wraps claude-transcript's LastAssistantText over the row's
+//     transcript path; it is resolved ONLY after Classify decides the reconciled
+//     state, and ONLY when that state is Idle (the last REPLY) or Error (the last
+//     ERROR text), so no transcript read happens for working/not-live/
+//     waiting-for-human. Its error is tolerated exactly like awaiting (on error,
+//     LastText is left empty) so a missing/half-written transcript never crashes
+//     a status query.
 //
 // The fast path: capture Frame1; if it carries the live counter, return
 // immediately (NumFrames=1, no sleep, no extra captures). Otherwise sample two
 // more frames PaneDiffInterval apart.
-func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), tmuxName, name string, row store.Session) (Result, error) {
+func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), lastText func() (string, error), tmuxName, name string, row store.Session) (Result, error) {
 	in := Inputs{Name: name, Row: row}
 	in.Live = p.HasSession(tmuxName)
 	if !in.Live {
@@ -224,5 +236,15 @@ func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), t
 	if a, aerr := awaiting(); aerr == nil {
 		in.Awaiting = a
 	}
-	return Classify(in), nil
+	res := Classify(in)
+	// Populate LastText only for the two states that surface it: Idle (the last
+	// REPLY) and Error (the last ERROR text). Other states never read the
+	// transcript here. The resolver error is tolerated like awaiting's: on error
+	// LastText is left empty, so a missing/half-written transcript never crashes.
+	if res.State == Idle || res.State == Error {
+		if txt, terr := lastText(); terr == nil {
+			res.LastText = txt
+		}
+	}
+	return res, nil
 }

@@ -62,7 +62,15 @@ func runState(args []string) int {
 		}
 		return transcriptAdapter{}.IsAwaitingInput(row.TranscriptPath)
 	}
-	res, err := state.Gather(cl, time.Sleep, awaiting, tmuxName, name, row)
+	// lastText mirrors awaiting: an empty path means there is nothing to read
+	// (no transcript anchor yet). Gather only consults it for idle/error.
+	lastText := func() (string, error) {
+		if row.TranscriptPath == "" {
+			return "", nil
+		}
+		return transcriptAdapter{}.LastAssistantText(row.TranscriptPath)
+	}
+	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, tmuxName, name, row)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "state:", err)
 		return 1
@@ -83,7 +91,9 @@ func runState(args []string) int {
 
 // renderState is the pure human-line renderer (mirrors doctor.go's
 // `name= state= live=` style). `sub=` is appended only when present; for
-// not-live `last_known=` is appended. Returns a trailing newline.
+// not-live `last_known=` is appended. For idle/error the last reply/error text
+// is appended (`last_reply=`/`last_error=`), collapsed to its first line so the
+// renderer stays one-line. Returns a trailing newline.
 func renderState(res state.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "name=%s state=%s", res.Name, res.State)
@@ -93,21 +103,50 @@ func renderState(res state.Result) string {
 	if res.State == state.NotLive {
 		fmt.Fprintf(&b, " last_known=%s", res.LastKnown)
 	}
+	// Single source field (res.LastText), state-appropriate key. For error the
+	// text is the best-available last assistant message — there is no structured
+	// error extractor yet (a dedicated extractor is future work); this is honest
+	// and additive.
+	if res.LastText != "" {
+		switch res.State {
+		case state.Idle:
+			fmt.Fprintf(&b, " last_reply=%s", firstLine(res.LastText))
+		case state.Error:
+			fmt.Fprintf(&b, " last_error=%s", firstLine(res.LastText))
+		}
+	}
 	fmt.Fprintf(&b, " live=%v\n", res.Live)
 	return b.String()
 }
 
-// stateJSON is the --json shape; sub_state and last_known are omitted when empty.
+// firstLine collapses a possibly multi-line reply to its first line so the
+// human renderer stays one-line (mirrors the one-line `name= state=` style).
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// stateJSON is the --json shape; sub_state, last_known, last_reply and
+// last_error are omitted when empty. last_reply (idle) and last_error (error)
+// are state-appropriate keys over the single source field res.LastText.
 type stateJSON struct {
 	Name      string `json:"name"`
 	State     string `json:"state"`
 	SubState  string `json:"sub_state,omitempty"`
 	Live      bool   `json:"live"`
 	LastKnown string `json:"last_known,omitempty"`
+	LastReply string `json:"last_reply,omitempty"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 // renderStateJSON is the pure JSON renderer. last_known is emitted only for
-// not-live (where it is the headline); sub_state only when set (working).
+// not-live (where it is the headline); sub_state only when set (working);
+// last_reply only for idle and last_error only for error (the two states that
+// surface res.LastText). For error the text is the best-available last
+// assistant message — there is no structured error extractor yet (a dedicated
+// extractor is future work); this is honest and additive.
 func renderStateJSON(res state.Result) ([]byte, error) {
 	v := stateJSON{
 		Name:     res.Name,
@@ -117,6 +156,12 @@ func renderStateJSON(res state.Result) ([]byte, error) {
 	}
 	if res.State == state.NotLive {
 		v.LastKnown = string(res.LastKnown)
+	}
+	switch res.State {
+	case state.Idle:
+		v.LastReply = res.LastText
+	case state.Error:
+		v.LastError = res.LastText
 	}
 	return json.Marshal(v)
 }

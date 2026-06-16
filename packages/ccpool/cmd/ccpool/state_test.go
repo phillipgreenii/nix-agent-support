@@ -39,6 +39,32 @@ func TestRenderState_human(t *testing.T) {
 			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Done},
 			"name=d state=not-live last_known=done live=false",
 		},
+		{
+			// idle with a last reply -> last_reply token.
+			"idle_with_last_reply",
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "done here"},
+			"name=a state=idle last_reply=done here live=true",
+		},
+		{
+			// error with last text -> last_error token.
+			"error_with_last_error",
+			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Failed, LastText: "panic: boom"},
+			"name=a state=error last_error=panic: boom live=true",
+		},
+		{
+			// a multi-line reply is collapsed to its first line so the human line
+			// stays one-line.
+			"idle_reply_collapsed_to_first_line",
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "first line\nsecond line"},
+			"name=a state=idle last_reply=first line live=true",
+		},
+		{
+			// LastText set on a non-idle/non-error state is never rendered (defensive:
+			// Gather only populates it for idle/error).
+			"working_ignores_last_text",
+			state.Result{Name: "a", State: state.Working, SubState: state.SubThinking, Live: true, LastKnown: store.Working, LastText: "leak"},
+			"name=a state=working sub=thinking live=true",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,26 +112,46 @@ func TestStateAwaitingWiring(t *testing.T) {
 
 func TestRenderStateJSON_omitempty(t *testing.T) {
 	cases := []struct {
-		name       string
-		res        state.Result
-		wantSubKey bool
-		wantLKKey  bool
-		wantState  string
+		name         string
+		res          state.Result
+		wantSubKey   bool
+		wantLKKey    bool
+		wantReplyKey bool
+		wantErrKey   bool
+		wantState    string
 	}{
 		{
 			"working_includes_sub_omits_last_known",
 			state.Result{Name: "alpha", State: state.Working, SubState: state.SubThinking, Live: true, LastKnown: store.Working},
-			true, false, "working",
+			true, false, false, false, "working",
 		},
 		{
 			"idle_omits_sub_and_last_known",
 			state.Result{Name: "alpha", State: state.Idle, Live: true, LastKnown: store.Done},
-			false, false, "idle",
+			false, false, false, false, "idle",
 		},
 		{
 			"not_live_includes_last_known_omits_sub",
 			state.Result{Name: "d", State: state.NotLive, Live: false, LastKnown: store.Done},
-			false, true, "not-live",
+			false, true, false, false, "not-live",
+		},
+		{
+			// idle + LastText -> last_reply only.
+			"idle_with_reply_emits_last_reply",
+			state.Result{Name: "a", State: state.Idle, Live: true, LastKnown: store.Done, LastText: "done here"},
+			false, false, true, false, "idle",
+		},
+		{
+			// error + LastText -> last_error only.
+			"error_with_text_emits_last_error",
+			state.Result{Name: "a", State: state.Error, Live: true, LastKnown: store.Failed, LastText: "panic: boom"},
+			false, false, false, true, "error",
+		},
+		{
+			// LastText on a non-idle/non-error state emits neither key (defensive).
+			"working_with_text_emits_neither",
+			state.Result{Name: "a", State: state.Working, SubState: state.SubThinking, Live: true, LastKnown: store.Working, LastText: "leak"},
+			true, false, false, false, "working",
 		},
 	}
 	for _, tc := range cases {
@@ -123,6 +169,12 @@ func TestRenderStateJSON_omitempty(t *testing.T) {
 			}
 			if got := strings.Contains(s, `"last_known"`); got != tc.wantLKKey {
 				t.Errorf("json %s last_known present=%v, want %v", s, got, tc.wantLKKey)
+			}
+			if got := strings.Contains(s, `"last_reply"`); got != tc.wantReplyKey {
+				t.Errorf("json %s last_reply present=%v, want %v", s, got, tc.wantReplyKey)
+			}
+			if got := strings.Contains(s, `"last_error"`); got != tc.wantErrKey {
+				t.Errorf("json %s last_error present=%v, want %v", s, got, tc.wantErrKey)
 			}
 		})
 	}
