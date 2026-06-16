@@ -88,7 +88,7 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
 	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
 	defer func() {
-		if err := o.CC.Close(ctx, name); err != nil {
+		if err := o.CC.Close(ctx, name, true); err != nil {
 			slog.Warn("run-one teardown close failed", "session", name, "err", err)
 		}
 	}()
@@ -125,7 +125,7 @@ func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext) 
 		"BEADS_DIR":      o.Cfg.RepoRoot + "/.beads",
 		"WORKSPACE_ROOT": o.Cfg.RepoRoot,
 	}
-	if err := o.CC.Ensure(ctx, name, o.Cfg.RepoRoot, env); err != nil {
+	if err := o.CC.Ensure(ctx, name, name, o.Cfg.RepoRoot, env); err != nil {
 		// Could not even create the session. Match the bash (work_one:
 		// `ensure_session || return 1`): NO failure action here — the bead was
 		// never dispatched, so we do not flag/unclaim it. A transient ccpool
@@ -288,7 +288,7 @@ func (o *Orchestrator) active(ctx context.Context, name string) bool {
 	}
 	for _, s := range sessions {
 		if s.Name == name {
-			return s.Live && s.State != ccpool.StateFailed && s.State != ccpool.StateDone
+			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
 		}
 	}
 	return false // absent ⇒ gone
@@ -304,9 +304,9 @@ func (o *Orchestrator) teardownAll(ctx context.Context) {
 		return
 	}
 	for _, s := range sessions {
-		if strings.HasPrefix(s.Name, o.Cfg.SessionPrefix) {
-			if err := o.CC.Close(ctx, s.Name); err != nil {
-				slog.Warn("teardown close failed", "session", s.Name, "err", err)
+		if strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
+			if err := o.CC.Close(ctx, s.ExternalID, true); err != nil {
+				slog.Warn("teardown close failed", "session", s.ExternalID, "err", err)
 			}
 		}
 	}

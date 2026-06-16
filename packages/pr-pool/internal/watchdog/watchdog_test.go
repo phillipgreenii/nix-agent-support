@@ -33,14 +33,16 @@ type fakeCC struct {
 	list    []ccpool.Session
 }
 
-func (f *fakeCC) Ensure(context.Context, string, string, map[string]string) error { return nil }
+func (f *fakeCC) Ensure(context.Context, string, string, string, map[string]string) error {
+	return nil
+}
 func (f *fakeCC) Send(_ context.Context, _, prompt string, m ccpool.SendMode) error {
 	flag := "queue"
 	f.sent = append(f.sent, flag+":"+prompt)
 	return nil
 }
 func (f *fakeCC) Cancel(context.Context, string) error { f.cancels++; return nil }
-func (f *fakeCC) Close(_ context.Context, n string) error {
+func (f *fakeCC) Close(_ context.Context, n string, _ bool) error {
 	f.closed = append(f.closed, n)
 	return nil
 }

@@ -28,14 +28,15 @@ func newSpy() (*CLIRunner, *[][]string, func(out []byte)) {
 
 func TestEnsure_argv(t *testing.T) {
 	cli, got, _ := newSpy()
-	err := cli.Ensure(context.Background(), "pr-pool-worker-zr-1", "/repo",
+	err := cli.Ensure(context.Background(), "pr-pool-worker-zr-1-20260616T010203", "pr-pool-worker-zr-1", "/repo",
 		map[string]string{"WORKSPACE_ROOT": "/repo", "BEADS_ACTOR": "pgii-pool__worker", "BEADS_DIR": "/repo/.beads"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// env keys sorted: BEADS_ACTOR, BEADS_DIR, WORKSPACE_ROOT
+	// addressed by external_id; display name passed via --name; env keys sorted.
 	want := []string{
-		"new", "pr-pool-worker-zr-1", "--cwd", "/repo",
+		"new", "pr-pool-worker-zr-1-20260616T010203", "--cwd", "/repo",
+		"--name", "pr-pool-worker-zr-1",
 		"--env", "BEADS_ACTOR=pgii-pool__worker",
 		"--env", "BEADS_DIR=/repo/.beads",
 		"--env", "WORKSPACE_ROOT=/repo",
@@ -46,7 +47,7 @@ func TestEnsure_argv(t *testing.T) {
 	}
 }
 
-func TestEnsure_argv_withModel_noPermissionMode(t *testing.T) {
+func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 	var got [][]string
 	cfg := config.Default()
 	cfg.Model = "claude-opus-4-8"
@@ -57,7 +58,8 @@ func TestEnsure_argv_withModel_noPermissionMode(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	if err := cli.Ensure(context.Background(), "s", "/r", nil); err != nil {
+	// empty name => no --name flag emitted.
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"new", "s", "--cwd", "/r", "--effort", "high", "--model", "claude-opus-4-8"}
@@ -90,8 +92,8 @@ func TestSend_modes(t *testing.T) {
 func TestCancelCloseList_argv(t *testing.T) {
 	cli, got, setOut := newSpy()
 	_ = cli.Cancel(context.Background(), "s")
-	_ = cli.Close(context.Background(), "s")
-	setOut([]byte(`[{"name":"pr-pool-worker-zr-1","state":"working","live":true,"transcript_path":"/t/x.jsonl"}]`))
+	_ = cli.Close(context.Background(), "s", true)
+	setOut([]byte(`[{"external_id":"pr-pool-worker-zr-1-20260616T010203","name":"pr-pool-worker-zr-1","claude_session_id":"u-1","state":"working","live":true,"transcript_path":"/t/x.jsonl"}]`))
 	sessions, err := cli.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -99,16 +101,39 @@ func TestCancelCloseList_argv(t *testing.T) {
 	if !reflect.DeepEqual((*got)[0], []string{"cancel", "s"}) {
 		t.Errorf("cancel argv = %v", (*got)[0])
 	}
-	if !reflect.DeepEqual((*got)[1], []string{"close", "s"}) {
+	if !reflect.DeepEqual((*got)[1], []string{"close", "s", "--purge"}) {
 		t.Errorf("close argv = %v", (*got)[1])
 	}
 	if !reflect.DeepEqual((*got)[2], []string{"list", "--all", "--json"}) {
 		t.Errorf("list argv = %v", (*got)[2])
 	}
-	if len(sessions) != 1 || sessions[0].Name != "pr-pool-worker-zr-1" ||
+	if len(sessions) != 1 || sessions[0].ExternalID != "pr-pool-worker-zr-1-20260616T010203" ||
+		sessions[0].Name != "pr-pool-worker-zr-1" || sessions[0].ClaudeSessionID != "u-1" ||
 		sessions[0].State != StateWorking || !sessions[0].Live ||
 		sessions[0].TranscriptPath != "/t/x.jsonl" {
 		t.Errorf("parsed session = %+v", sessions)
+	}
+}
+
+// Close without purge omits the --purge flag.
+func TestClose_noPurge_argv(t *testing.T) {
+	cli, got, _ := newSpy()
+	_ = cli.Close(context.Background(), "s", false)
+	if !reflect.DeepEqual((*got)[0], []string{"close", "s"}) {
+		t.Errorf("close (no purge) argv = %v", (*got)[0])
+	}
+}
+
+// ccpool now emits idle/errored (was done/failed); pr-pool's parse must match.
+func TestList_parsesIdleErroredStates(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"idle","live":false},{"external_id":"b","state":"errored","live":false}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].State != StateIdle || got[1].State != StateErrored {
+		t.Errorf("parsed states = %+v (want idle, errored)", got)
 	}
 }
 

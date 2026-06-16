@@ -6,7 +6,10 @@ package ccpool
 
 import "context"
 
-// SessionState mirrors ccpool's store states.
+// SessionState mirrors ccpool's store states — observed session FACTS only, not
+// work judgments (ADR 0015). idle (Claude Stop hook: the turn ended) and errored
+// (Claude StopFailure hook: an API error) are NOT "work done"/"work failed"; the
+// orchestrator re-reads the bead to judge success/failure.
 type SessionState string
 
 const (
@@ -14,17 +17,20 @@ const (
 	StateReady      SessionState = "ready"
 	StateWorking    SessionState = "working"
 	StateNeedsInput SessionState = "needs_input"
-	StateDone       SessionState = "done"
-	StateFailed     SessionState = "failed"
+	StateIdle       SessionState = "idle"    // was "done": Claude Stop hook (turn ended)
+	StateErrored    SessionState = "errored" // was "failed": Claude StopFailure hook (API error)
 )
 
-// Session is one row from `ccpool list --all --json`.
+// Session is one row from `ccpool list --all --json`. A session is addressed by
+// ExternalID; Name is an optional, non-unique display label (ADR 0015).
 type Session struct {
-	Name           string       `json:"name"`
-	State          SessionState `json:"state"`
-	Live           bool         `json:"live"`            // tmux has-session (liveness, NOT a store state)
-	TranscriptPath string       `json:"transcript_path"` // consumed by chunk B (token observation)
-	CWD            string       `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
+	ExternalID      string       `json:"external_id"`
+	Name            string       `json:"name"` // optional display label; nullable, non-unique
+	ClaudeSessionID string       `json:"claude_session_id"`
+	State           SessionState `json:"state"`
+	Live            bool         `json:"live"`            // tmux has-session (liveness, NOT a store state)
+	TranscriptPath  string       `json:"transcript_path"` // consumed by chunk B (token observation)
+	CWD             string       `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
 }
 
 type SendMode int
@@ -35,12 +41,14 @@ const (
 	ModeQueue                     // deliver into claude's native queue (fire-and-forget)
 )
 
-// Runner is the full ccpool capability surface pr-pool needs. Cancel is present
-// only as a chunk-B seam (90/100% budget cancels); Phase-1 never calls it.
+// Runner is the full ccpool capability surface pr-pool needs. Sessions are
+// addressed by external_id; Ensure also passes an optional display name (--name).
+// Close takes purge: pr-pool always purges (it never resumes — continuity lives
+// in bd). Cancel is present only as a chunk-B seam (90/100% budget cancels).
 type Runner interface {
-	Ensure(ctx context.Context, name, cwd string, env map[string]string) error
-	Send(ctx context.Context, name, prompt string, mode SendMode) error
-	Cancel(ctx context.Context, name string) error
-	Close(ctx context.Context, name string) error
+	Ensure(ctx context.Context, externalID, name, cwd string, env map[string]string) error
+	Send(ctx context.Context, externalID, prompt string, mode SendMode) error
+	Cancel(ctx context.Context, externalID string) error
+	Close(ctx context.Context, externalID string, purge bool) error
 	List(ctx context.Context) ([]Session, error)
 }

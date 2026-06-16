@@ -104,10 +104,15 @@ func argSummary(args []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Ensure: ccpool new <name> --cwd <cwd> --env K=V… --permission-mode <mode>
-// --effort <effort> [--model <model>]. env keys sorted for deterministic argv.
-func (c *CLIRunner) Ensure(ctx context.Context, name, cwd string, env map[string]string) error {
-	args := []string{"new", name, "--cwd", cwd}
+// Ensure: ccpool new <external_id> --cwd <cwd> [--name <name>] --env K=V…
+// --permission-mode <mode> --effort <effort> [--model <model>]. The session is
+// addressed by external_id; name is an optional display label (omitted when
+// empty). env keys sorted for deterministic argv.
+func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, env map[string]string) error {
+	args := []string{"new", externalID, "--cwd", cwd}
+	if name != "" {
+		args = append(args, "--name", name)
+	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)
@@ -129,8 +134,8 @@ func (c *CLIRunner) Ensure(ctx context.Context, name, cwd string, env map[string
 	return err
 }
 
-// Send: ccpool reply <name> <prompt> <mode-flag>.
-func (c *CLIRunner) Send(ctx context.Context, name, prompt string, mode SendMode) error {
+// Send: ccpool reply <external_id> <prompt> <mode-flag>.
+func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode SendMode) error {
 	flag := "--no-wait"
 	switch mode {
 	case ModeInterrupt:
@@ -138,24 +143,30 @@ func (c *CLIRunner) Send(ctx context.Context, name, prompt string, mode SendMode
 	case ModeQueue:
 		flag = "--queue-message"
 	}
-	_, err := c.ccpool(ctx, quickCallTimeout, "reply", name, prompt, flag)
+	_, err := c.ccpool(ctx, quickCallTimeout, "reply", externalID, prompt, flag)
 	return err
 }
 
-func (c *CLIRunner) Cancel(ctx context.Context, name string) error {
-	_, err := c.ccpool(ctx, quickCallTimeout, "cancel", name)
+func (c *CLIRunner) Cancel(ctx context.Context, externalID string) error {
+	_, err := c.ccpool(ctx, quickCallTimeout, "cancel", externalID)
 	if err != nil {
 		var ec exitCoder
 		if errors.As(err, &ec) && ec.ExitCode() == 6 {
-			return fmt.Errorf("%w: %s", ErrCancelUnconfirmed, name)
+			return fmt.Errorf("%w: %s", ErrCancelUnconfirmed, externalID)
 		}
 		return err
 	}
 	return nil
 }
 
-func (c *CLIRunner) Close(ctx context.Context, name string) error {
-	_, err := c.ccpool(ctx, quickCallTimeout, "close", name)
+// Close: ccpool close <external_id> [--purge]. purge deletes the session row so
+// the next dispatch is always brand-new (pr-pool never resumes; ADR 0015).
+func (c *CLIRunner) Close(ctx context.Context, externalID string, purge bool) error {
+	args := []string{"close", externalID}
+	if purge {
+		args = append(args, "--purge")
+	}
+	_, err := c.ccpool(ctx, quickCallTimeout, args...)
 	return err
 }
 

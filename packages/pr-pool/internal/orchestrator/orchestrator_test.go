@@ -35,26 +35,29 @@ func (r *rampReader) Read(_ context.Context, _ string) (usage.Snapshot, error) {
 // fakeCC records calls and serves scripted List results.
 // mu guards listIdx so List is safe for concurrent goroutines (workerWaitWithWatchdog).
 type fakeCC struct {
-	mu      sync.Mutex
-	ensured []string
-	sent    []string
-	closed  []string
-	sendErr error
-	listSeq [][]ccpool.Session // one entry consumed per List call (last repeats)
-	listIdx int
+	mu          sync.Mutex
+	ensured     []string
+	sent        []string
+	closed      []string
+	closedPurge []bool
+	sendErr     error
+	ensureErr   error
+	listSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
+	listIdx     int
 }
 
-func (f *fakeCC) Ensure(_ context.Context, name, _ string, _ map[string]string) error {
-	f.ensured = append(f.ensured, name)
-	return nil
+func (f *fakeCC) Ensure(_ context.Context, externalID, _, _ string, _ map[string]string) error {
+	f.ensured = append(f.ensured, externalID)
+	return f.ensureErr
 }
-func (f *fakeCC) Send(_ context.Context, name, _ string, _ ccpool.SendMode) error {
-	f.sent = append(f.sent, name)
+func (f *fakeCC) Send(_ context.Context, externalID, _ string, _ ccpool.SendMode) error {
+	f.sent = append(f.sent, externalID)
 	return f.sendErr
 }
 func (f *fakeCC) Cancel(_ context.Context, _ string) error { return nil }
-func (f *fakeCC) Close(_ context.Context, name string) error {
-	f.closed = append(f.closed, name)
+func (f *fakeCC) Close(_ context.Context, externalID string, purge bool) error {
+	f.closed = append(f.closed, externalID)
+	f.closedPurge = append(f.closedPurge, purge)
 	return nil
 }
 func (f *fakeCC) List(_ context.Context) ([]ccpool.Session, error) {
@@ -233,7 +236,7 @@ func TestWaitDone_paneDiesAsBeadCloses_success(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{
 		{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}},
-		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateDone}},
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateIdle}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
@@ -248,7 +251,7 @@ func TestWaitDone_paneDiesAsBeadCloses_success(t *testing.T) {
 func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{
-		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateFailed}},
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
@@ -347,8 +350,8 @@ func TestDrainOnce_teardownReapsStrays(t *testing.T) {
 	bd := &scriptBD{ready: map[string]string{"feedback": "[]", "worker": "[]"}}
 	// a stray session from a prior crashed run remains in the list
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
-		{Name: "pr-pool-worker-zr-stray", Live: true},
-		{Name: "cc-unrelated", Live: true},
+		{ExternalID: "pr-pool-worker-zr-stray", Live: true},
+		{ExternalID: "cc-unrelated", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
 	_ = o.DrainOnce(context.Background())
@@ -468,7 +471,7 @@ func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
 	// Session is not live on the very first List call — the death path triggers.
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{
-		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateFailed}},
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -490,7 +493,7 @@ func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
 func TestWaitDone_lostRace_deathPathNoFail(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{
-		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateFailed}},
+		{{Name: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -540,7 +543,7 @@ func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
 	bd := &scriptBD{readyErr: errors.New("bd ready failed")}
 	// a stray pr-pool session exists from a prior run
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
-		{Name: "pr-pool-worker-zr-stray", Live: true},
+		{ExternalID: "pr-pool-worker-zr-stray", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
 	if err := o.DrainOnce(context.Background()); err == nil {
@@ -576,7 +579,7 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 
 func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateDone}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
@@ -594,7 +597,7 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 
 func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
@@ -612,7 +615,7 @@ func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 // in the same instant its bead closes must still be a SUCCESS via the re-check.
 func TestWaitDone_doneStopsFast_successRace(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err != nil {
@@ -659,7 +662,7 @@ func TestRunOne_feedbackClosesSession(t *testing.T) {
 
 func TestRunOne_doneWithoutCloseFlagsAndCloses(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateDone}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{Name: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
 	if err := o.RunOne(context.Background(), d); err == nil {
@@ -681,8 +684,8 @@ func TestActive_stateMapping(t *testing.T) {
 	}{
 		{"working-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateWorking}}, true},
 		{"needs_input-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateNeedsInput}}, true},
-		{"done-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateDone}}, false},
-		{"failed-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateFailed}}, false},
+		{"done-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateIdle}}, false},
+		{"failed-live", []ccpool.Session{{Name: "s", Live: true, State: ccpool.StateErrored}}, false},
 		{"working-not-live", []ccpool.Session{{Name: "s", Live: false, State: ccpool.StateWorking}}, false},
 		{"absent", []ccpool.Session{{Name: "other", Live: true, State: ccpool.StateWorking}}, false},
 	}
