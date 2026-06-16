@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -44,6 +45,10 @@ type ErrorRecord struct {
 	// invalid_request errors (low credit balance, bad params) so callers
 	// can count context-limit hits separately.
 	IsContextLimit bool
+	// FromSubagent is true when this error was found in a subagent transcript
+	// (subagents/agent-*.jsonl) rather than the main session transcript. Such
+	// errors are surfaced for visibility but excluded from auto-nudge.
+	FromSubagent bool
 }
 
 // isContextLimitText reports whether an api-error of the given kind is the
@@ -148,4 +153,50 @@ func LastAPIError(path string) (ErrorRecord, error) {
 		break
 	}
 	return rec, nil
+}
+
+// LastSubagentError scans the subagent transcripts of a session for the most
+// recent *terminal* api-error and returns it tagged FromSubagent=true. The
+// subagent directory is derived from the main transcript path:
+// "<dir>/<sessionid>.jsonl" -> "<dir>/<sessionid>/subagents/agent-*.jsonl".
+// Only terminal errors are returned (a child that resumed after its error has
+// recovered and is not a disrupt). Returns ok=false if the directory is absent
+// or no terminal subagent error exists.
+//
+// Note: for resumed/forked sessions ResolveTranscript may return a transcript
+// whose basename differs from the session-id that spawned the subagents, so the
+// derived subagents dir won't exist and this returns ok=false. That is graceful
+// (no crash) and correct for the common non-resumed case; a resumed session
+// with a dead subagent is a known coverage gap, not handled here.
+func LastSubagentError(mainTranscriptPath string) (ErrorRecord, bool) {
+	if mainTranscriptPath == "" {
+		return ErrorRecord{}, false
+	}
+	subDir := strings.TrimSuffix(mainTranscriptPath, ".jsonl") + "/subagents"
+	entries, err := os.ReadDir(subDir)
+	if err != nil {
+		return ErrorRecord{}, false
+	}
+	var best ErrorRecord
+	found := false
+	for _, e := range entries {
+		if e.IsDir() ||
+			!strings.HasPrefix(e.Name(), "agent-") ||
+			filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		rec, err := LastAPIError(filepath.Join(subDir, e.Name()))
+		if err != nil || rec.Kind == "" || !rec.IsTerminal {
+			continue
+		}
+		if !found || rec.At.After(best.At) {
+			best = rec
+			found = true
+		}
+	}
+	if !found {
+		return ErrorRecord{}, false
+	}
+	best.FromSubagent = true
+	return best, true
 }

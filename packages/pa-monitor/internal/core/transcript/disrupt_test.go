@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
@@ -209,5 +210,72 @@ func TestLastAPIErrorDetectsStreamIdleTimeout(t *testing.T) {
 	}
 	if !got.IsRetryable {
 		t.Error("IsRetryable = false, want true (unknown is retryable)")
+	}
+}
+
+// TestLastSubagentErrorFindsTerminalChildDisrupt covers bead pg2-lpxq's
+// subagent blind spot: a stream-idle-timeout that occurs inside a subagent
+// lands only in subagents/agent-*.jsonl, which Scan() does not read. The most
+// recent *terminal* subagent error is returned with FromSubagent=true.
+func TestLastSubagentErrorFindsTerminalChildDisrupt(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := dir + "/sess.jsonl"
+	if err := writeTestFile(mainPath, ""); err != nil {
+		t.Fatal(err)
+	}
+	subDir := dir + "/sess/subagents"
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	const text = "API Error: Stream idle timeout - partial response received"
+	if err := writeTestFile(subDir+"/agent-aaaa.jsonl", apiErrorEvent(ts, ErrUnknown, text)+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := LastSubagentError(mainPath)
+	if !ok {
+		t.Fatal("LastSubagentError ok = false, want true")
+	}
+	if got.Kind != ErrUnknown || !got.IsRetryable || !got.IsTerminal {
+		t.Errorf("got %+v, want unknown/retryable/terminal", got)
+	}
+	if !got.FromSubagent {
+		t.Error("FromSubagent = false, want true")
+	}
+}
+
+// TestLastSubagentErrorIgnoresRecoveredChild verifies a subagent that resumed
+// after its error (IsTerminal=false) is not surfaced — the child recovered.
+func TestLastSubagentErrorIgnoresRecoveredChild(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := dir + "/sess.jsonl"
+	if err := writeTestFile(mainPath, ""); err != nil {
+		t.Fatal(err)
+	}
+	subDir := dir + "/sess/subagents"
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	body := apiErrorEvent(ts, ErrUnknown, "API Error: Stream idle timeout - partial response received") + "\n" +
+		`{"type":"user","message":{"role":"user","content":"continue"}}` + "\n"
+	if err := writeTestFile(subDir+"/agent-aaaa.jsonl", body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LastSubagentError(mainPath); ok {
+		t.Error("LastSubagentError ok = true, want false (child recovered)")
+	}
+}
+
+// TestLastSubagentErrorNoSubagentDir returns ok=false when there is no
+// subagents directory (the common case).
+func TestLastSubagentErrorNoSubagentDir(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := dir + "/sess.jsonl"
+	if err := writeTestFile(mainPath, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LastSubagentError(mainPath); ok {
+		t.Error("LastSubagentError ok = true, want false (no subagents dir)")
 	}
 }
