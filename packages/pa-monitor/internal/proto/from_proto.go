@@ -227,10 +227,11 @@ func apiErrorFromProto(e *ApiError) *transcript.ErrorRecord {
 		return nil
 	}
 	return &transcript.ErrorRecord{
-		Kind:        transcript.ErrorKind(e.GetKind()),
-		Text:        e.GetText(),
-		At:          timeFromTS(e.GetAt()),
-		IsTerminal:  e.GetIsTerminal(),
-		IsRetryable: e.GetIsRetryable(),
+		Kind:         transcript.ErrorKind(e.GetKind()),
+		Text:         e.GetText(),
+		At:           timeFromTS(e.GetAt()),
+		IsTerminal:   e.GetIsTerminal(),
+		IsRetryable:  e.GetIsRetryable(),
+		FromSubagent: e.GetFromSubagent(),
 	}
 }

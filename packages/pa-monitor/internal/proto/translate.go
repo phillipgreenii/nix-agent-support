@@ -67,25 +67,25 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 		return nil
 	}
 	out := &SessionView{
-		SessionId:      sv.SessionID,
-		Pid:            uint32(sv.PID),
-		Cwd:            sv.Cwd,
-		Name:           sv.Name,
-		Kind:           sv.Kind,
-		Entrypoint:     sv.Entrypoint,
-		Status:         session.Status(sv.Status).String(),
-		Branch:         sv.Branch,
-		TerminalHost:   sv.TerminalHost,
-		ContextTokens:  uint64(sv.ContextTokens),
-		Model:          sv.Model,
-		FirstPrompt:    sv.FirstPrompt,
-		SubagentCount:  uint32(sv.SubagentCount),
-		SubshellCount:  uint32(sv.SubshellCount),
-		SessionTokens:  uint64(sv.SessionTokens),
-		BurnRateShort:  sv.BurnRateShort,
-		BurnRateLong:   sv.BurnRateLong,
-		CostUsd:        sv.CostUSD,
-		AwaitingInput:  sv.AwaitingInput,
+		SessionId:     sv.SessionID,
+		Pid:           uint32(sv.PID),
+		Cwd:           sv.Cwd,
+		Name:          sv.Name,
+		Kind:          sv.Kind,
+		Entrypoint:    sv.Entrypoint,
+		Status:        session.Status(sv.Status).String(),
+		Branch:        sv.Branch,
+		TerminalHost:  sv.TerminalHost,
+		ContextTokens: uint64(sv.ContextTokens),
+		Model:         sv.Model,
+		FirstPrompt:   sv.FirstPrompt,
+		SubagentCount: uint32(sv.SubagentCount),
+		SubshellCount: uint32(sv.SubshellCount),
+		SessionTokens: uint64(sv.SessionTokens),
+		BurnRateShort: sv.BurnRateShort,
+		BurnRateLong:  sv.BurnRateLong,
+		CostUsd:       sv.CostUSD,
+		AwaitingInput: sv.AwaitingInput,
 	}
 	if !sv.StartedAt.IsZero() {
 		out.StartedAt = timestamppb.New(sv.StartedAt)
@@ -192,10 +192,11 @@ func apiErrorToProto(e *transcript.ErrorRecord) *ApiError {
 		return nil
 	}
 	out := &ApiError{
-		Kind:        string(e.Kind),
-		Text:        e.Text,
-		IsTerminal:  e.IsTerminal,
-		IsRetryable: e.IsRetryable,
+		Kind:         string(e.Kind),
+		Text:         e.Text,
+		IsTerminal:   e.IsTerminal,
+		IsRetryable:  e.IsRetryable,
+		FromSubagent: e.FromSubagent,
 	}
 	if !e.At.IsZero() {
 		out.At = timestamppb.New(e.At)

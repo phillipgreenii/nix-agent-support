@@ -251,6 +251,7 @@ message ApiError {
   google.protobuf.Timestamp at = 3;
   bool is_terminal = 4;
   bool is_retryable = 5;
+  bool from_subagent = 6;
 }
 
 message PendingNudge {
