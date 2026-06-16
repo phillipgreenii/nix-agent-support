@@ -1,6 +1,6 @@
 // Package discover turns the bead store's ready queue into role→bead dispatches.
-// Feedback cycles are owned by self (the parent merge-request bead's author);
-// worker beads are filtered natively by bd labels. Order is feedback-first.
+// Feedback cycles are identified by a `mine` ownership label stamped at creation
+// (pg-pr); worker beads are filtered natively by bd labels. Order is feedback-first.
 package discover
 
 import (
@@ -37,14 +37,13 @@ func (d DispatchContext) Validate() error {
 	return nil
 }
 
-// Discover returns feedback dispatches (owned by selfLogin) then worker dispatches,
-// in priority order, honoring each role's Enabled flag. An empty selfLogin is an
-// error only when the feedback role is enabled (it needs selfLogin for the ownership
-// join); a worker-only pass with feedback disabled does not require it.
-func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogin string) ([]DispatchContext, error) {
+// Discover returns feedback dispatches then worker dispatches, in priority order,
+// honoring each role's Enabled flag. Both queries are pure `bd ready` label filters
+// — ownership is read from the `mine` label on the cycle, not joined from its parent.
+func Discover(ctx context.Context, br beads.Runner, reg roles.Registry) ([]DispatchContext, error) {
 	var out []DispatchContext
 	if reg.Feedback.Enabled {
-		fb, err := ForRole(ctx, br, reg.Feedback, selfLogin)
+		fb, err := ForRole(ctx, br, reg.Feedback)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +52,7 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 		slog.Info("role disabled; skipping discovery", "role", reg.Feedback.Name)
 	}
 	if reg.Worker.Enabled {
-		wk, err := ForRole(ctx, br, reg.Worker, selfLogin)
+		wk, err := ForRole(ctx, br, reg.Worker)
 		if err != nil {
 			return nil, err
 		}
@@ -65,16 +64,12 @@ func Discover(ctx context.Context, br beads.Runner, reg roles.Registry, selfLogi
 }
 
 // ForRole runs ONE role's discovery query, regardless of the role's Enabled flag
-// (the smoke harness must be able to query a role disabled in config). The feedback
-// path requires a non-empty selfLogin for the parent-author ownership join; the
-// worker path ignores it.
-func ForRole(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]DispatchContext, error) {
+// (the smoke harness must be able to query a role disabled in config). Both paths
+// are self-relative by construction (label filters), so neither needs a self_login.
+func ForRole(ctx context.Context, br beads.Runner, role roles.Role) ([]DispatchContext, error) {
 	switch role.Kind {
 	case roles.Feedback:
-		if selfLogin == "" {
-			return nil, fmt.Errorf("discover: empty self_login (cannot resolve feedback ownership)")
-		}
-		return discoverFeedback(ctx, br, role, selfLogin)
+		return discoverFeedback(ctx, br, role)
 	case roles.Worker:
 		return discoverWorker(ctx, br, role)
 	default:
@@ -82,28 +77,18 @@ func ForRole(ctx context.Context, br beads.Runner, role roles.Role, selfLogin st
 	}
 }
 
-func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role, selfLogin string) ([]DispatchContext, error) {
-	issues, err := beads.Ready(ctx, br) // bd ready --json --limit 0
+func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role) ([]DispatchContext, error) {
+	issues, err := beads.Ready(ctx, br, "--label", "mine") // self-relative: only my cycles carry `mine`
 	if err != nil {
 		// Propagate: a bd failure must NOT masquerade as "no ready work", or the
-		// pool silently idles on infra failure. Only an empty successful query
-		// means no work. (pg2-qq9v)
+		// pool silently idles on infra failure. (pg2-qq9v)
 		return nil, fmt.Errorf("discover feedback: bd ready: %w", err)
 	}
 	var out []DispatchContext
 	for _, iss := range issues {
-		if iss.Type != "task" || !strings.HasPrefix(iss.Title, "process-feedback:") {
-			continue
-		}
-		if iss.Parent == "" {
-			continue
-		}
-		parent, err := beads.ShowObj(ctx, br, iss.Parent)
-		if err != nil {
-			slog.Warn("discover feedback: parent lookup failed", "bead", iss.ID, "parent", iss.Parent, "err", err)
-			continue
-		}
-		if author, _ := parent.Metadata["author"].(string); author == selfLogin {
+		// The `mine` label scopes to my cycles; the type/title guard confirms the
+		// bead is a feedback cycle (the cycle-identity contract; no custom type).
+		if iss.Type == "task" && strings.HasPrefix(iss.Title, "process-feedback:") {
 			out = append(out, DispatchContext{Role: role, BeadID: iss.ID})
 		}
 	}

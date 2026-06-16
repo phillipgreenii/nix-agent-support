@@ -80,6 +80,7 @@ type scriptBD struct {
 	idx         map[string]int
 	updates     []string
 	ready       map[string]string // keyed by "feedback"/"worker"
+	readyErr    error             // if set, every `bd ready` returns this error
 	show        map[string]string
 	showErrOnce map[string]error // returns error once per id, then clears
 }
@@ -89,7 +90,10 @@ func (s *scriptBD) Run(_ context.Context, args ...string) (string, error) {
 	defer s.mu.Unlock()
 	switch args[0] {
 	case "ready":
-		if contains(args, "--label") {
+		if s.readyErr != nil {
+			return "", s.readyErr
+		}
+		if contains(args, "worker-ready") {
 			return s.ready["worker"], nil
 		}
 		return s.ready["feedback"], nil
@@ -278,7 +282,7 @@ func TestDrainOnce_gatedNoTeardown(t *testing.T) {
 	bd := &scriptBD{ready: map[string]string{"feedback": "[]", "worker": "[]"}}
 	cc := &fakeCC{}
 	o := newOrch(cc, bd, cfg)
-	if err := o.DrainOnce(context.Background(), "phillipg"); err != nil {
+	if err := o.DrainOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(cc.ensured) != 0 || len(cc.closed) != 0 {
@@ -292,7 +296,7 @@ func TestDrainOnce_workerCapZeroSkips(t *testing.T) {
 	bd := &scriptBD{ready: map[string]string{"feedback": "[]", "worker": `[{"id":"zr-w"}]`}}
 	cc := &fakeCC{}
 	o := newOrch(cc, bd, cfg)
-	if err := o.DrainOnce(context.Background(), "phillipg"); err != nil {
+	if err := o.DrainOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range cc.ensured {
@@ -312,7 +316,7 @@ func TestDrainOnce_capStopsAtOne(t *testing.T) {
 		{Name: "pr-pool-worker-zr-w1", Live: true}, {Name: "pr-pool-worker-zr-w2", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background(), "phillipg")
+	_ = o.DrainOnce(context.Background())
 	if len(cc.sent) != 1 {
 		t.Errorf("MAX_WORKER=1 should dispatch one worker, sent=%v", cc.sent)
 	}
@@ -332,7 +336,7 @@ func TestDrainOnce_noStarvation(t *testing.T) {
 		{Name: "pr-pool-feedback-processor-zr-c", Live: true}, {Name: "pr-pool-worker-zr-w", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background(), "phillipg")
+	_ = o.DrainOnce(context.Background())
 	if len(cc.sent) != 2 {
 		t.Errorf("one of each role should be worked, sent=%v", cc.sent)
 	}
@@ -347,7 +351,7 @@ func TestDrainOnce_teardownReapsStrays(t *testing.T) {
 		{Name: "cc-unrelated", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	_ = o.DrainOnce(context.Background(), "phillipg")
+	_ = o.DrainOnce(context.Background())
 	if !contains(cc.closed, "pr-pool-worker-zr-stray") {
 		t.Errorf("teardown must reap pr-pool- strays; closed=%v", cc.closed)
 	}
@@ -532,16 +536,15 @@ func TestWaitDone_lostRace_openNotReportedSuccess(t *testing.T) {
 
 func TestDrainOnce_teardownRunsOnDiscoverError(t *testing.T) {
 	cfg := fastCfg()
-	// empty selfLogin causes Discover to return an error (real precondition check)
-	bd := &scriptBD{ready: map[string]string{"feedback": "[]", "worker": "[]"}}
+	// a bd ready failure makes Discover return an error
+	bd := &scriptBD{readyErr: errors.New("bd ready failed")}
 	// a stray pr-pool session exists from a prior run
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
 		{Name: "pr-pool-worker-zr-stray", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
-	err := o.DrainOnce(context.Background(), "") // empty selfLogin => discover errors
-	if err == nil {
-		t.Fatal("empty selfLogin should return an error from DrainOnce")
+	if err := o.DrainOnce(context.Background()); err == nil {
+		t.Fatal("a bd ready failure should return an error from DrainOnce")
 	}
 	if !contains(cc.closed, "pr-pool-worker-zr-stray") {
 		t.Errorf("teardown must run even on discover error; closed=%v", cc.closed)

@@ -48,8 +48,7 @@ func runDrain(args []string) int {
 		fmt.Fprintln(os.Stderr, "precheck:", err)
 		return exitPrecheck
 	}
-	selfLogin, err := resolveSelf(ctx)
-	if err != nil {
+	if _, err := resolveSelf(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "resolve self:", err)
 		return exitPrecheck
 	}
@@ -66,7 +65,7 @@ func runDrain(args []string) int {
 		defer func() { _ = lw.Close() }()
 		o.Log = lw
 	}
-	if err := o.DrainOnce(ctx, selfLogin); err != nil {
+	if err := o.DrainOnce(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "drain:", err)
 		return exitGeneric
 	}

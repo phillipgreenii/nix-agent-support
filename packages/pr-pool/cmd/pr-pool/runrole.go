@@ -64,8 +64,7 @@ func runRunRole(roleName, beadID string) int {
 }
 
 // runRunQuery runs one role's discovery query read-only and prints the matches
-// (id, type, title). It resolves self_login because the feedback query's
-// parent-author join needs it.
+// (id, type, title). Discovery is label-based, so it needs no self_login.
 func runRunQuery(roleName string) int {
 	ctx := context.Background()
 	cfg := config.Load()
@@ -80,18 +79,7 @@ func runRunQuery(roleName string) int {
 		printUsageErr("run-query: unknown role: " + roleName)
 		return exitUsage
 	}
-	// self_login is only needed for the feedback ownership join; a worker query
-	// must not require pg-pr to be configured.
-	var selfLogin string
-	if role.Kind == roles.Feedback {
-		s, err := resolveSelf(ctx)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "resolve self:", err)
-			return exitPrecheck
-		}
-		selfLogin = s
-	}
-	dispatches, err := discover.ForRole(ctx, br, role, selfLogin)
+	dispatches, err := discover.ForRole(ctx, br, role)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-query:", err)
 		return exitGeneric

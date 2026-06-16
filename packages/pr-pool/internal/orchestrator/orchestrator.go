@@ -64,13 +64,13 @@ func (o *Orchestrator) waitPoll(ctx context.Context, d time.Duration) error {
 // DrainOnce runs one pass: gate check, discover, drain each role up to its cap,
 // teardown all pr-pool sessions. Returns nil even when individual beads fail
 // (failures are recorded on the beads via OnFailure), matching the bash.
-func (o *Orchestrator) DrainOnce(ctx context.Context, selfLogin string) error {
+func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 	if o.gated() {
 		slog.Info("gated; pausing without dispatch")
 		return nil // NOTE: gated exit does NOT teardown (no sessions were created)
 	}
 	defer o.teardownAll(ctx) // always run teardown after the gated check, even on error
-	dispatches, err := discover.Discover(ctx, o.BD, o.Reg, selfLogin)
+	dispatches, err := discover.Discover(ctx, o.BD, o.Reg)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}

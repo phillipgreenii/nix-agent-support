@@ -10,14 +10,13 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// routingRunner answers bd calls based on argv, simulating a small bead store.
+// routingRunner answers bd `ready` calls based on the label in argv.
 type routingRunner struct {
-	readyFeedback string // JSON for `bd ready` (no label filter)
-	readyWorker   string // JSON for `bd ready --label worker-ready ...`
-	show          map[string]string
-	sawWorkerArgs []string
-	readyErr      error            // if set, returned from any "ready" branch
-	showErr       map[string]error // keyed by parent id; if set, returned for that show call
+	readyFeedback   string // JSON for `bd ready --label mine`
+	readyWorker     string // JSON for `bd ready --label worker-ready ...`
+	sawFeedbackArgs []string
+	sawWorkerArgs   []string
+	readyErr        error // if set, returned from any "ready" branch
 }
 
 func (r *routingRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -26,19 +25,12 @@ func (r *routingRunner) Run(_ context.Context, args ...string) (string, error) {
 		if r.readyErr != nil {
 			return "", r.readyErr
 		}
-		if contains(args, "--label") {
+		if contains(args, "worker-ready") {
 			r.sawWorkerArgs = args
 			return r.readyWorker, nil
 		}
+		r.sawFeedbackArgs = args // feedback carries --label mine
 		return r.readyFeedback, nil
-	case "show":
-		id := args[1]
-		if r.showErr != nil {
-			if err, ok := r.showErr[id]; ok {
-				return "", err
-			}
-		}
-		return r.show[id], nil
 	}
 	return "", nil
 }
@@ -52,27 +44,28 @@ func contains(s []string, x string) bool {
 	return false
 }
 
-func TestDiscover_feedbackOwnership(t *testing.T) {
+func TestDiscover_feedbackByLabel(t *testing.T) {
 	rr := &routingRunner{
 		readyFeedback: `[
-			{"id":"zr-mine","issue_type":"task","title":"process-feedback: A","parent":"zr-prA"},
-			{"id":"zr-other","issue_type":"task","title":"process-feedback: B","parent":"zr-prB"},
-			{"id":"zr-nottask","issue_type":"feature","title":"process-feedback: C","parent":"zr-prA"},
-			{"id":"zr-nofb","issue_type":"task","title":"some other task","parent":"zr-prA"}
+			{"id":"zr-c1","issue_type":"task","title":"process-feedback: A"},
+			{"id":"zr-nottask","issue_type":"feature","title":"process-feedback: B"},
+			{"id":"zr-nofb","issue_type":"task","title":"some other task"}
 		]`,
 		readyWorker: `[]`,
-		show: map[string]string{
-			"zr-prA": `{"id":"zr-prA","metadata":{"author":"phillipg"}}`,
-			"zr-prB": `{"id":"zr-prB","metadata":{"author":"someoneelse"}}`,
-		},
 	}
 	reg := roles.NewRegistry(config.Default())
-	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	got, err := Discover(context.Background(), rr, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].BeadID != "zr-mine" || got[0].Role.Kind != roles.Feedback {
-		t.Fatalf("feedback discovery = %+v (want only zr-mine)", got)
+	// Only the task whose title has the cycle prefix survives the type/title guard.
+	if len(got) != 1 || got[0].BeadID != "zr-c1" || got[0].Role.Kind != roles.Feedback {
+		t.Fatalf("feedback discovery = %+v (want only zr-c1)", got)
+	}
+	// The feedback query must be `bd ready --label mine` — no parent `bd show`.
+	a := strings.Join(rr.sawFeedbackArgs, " ")
+	if !strings.Contains(a, "--label mine") {
+		t.Fatalf("feedback bd ready missing `--label mine`; got %q", a)
 	}
 }
 
@@ -82,7 +75,7 @@ func TestDiscover_workerLabelFilter(t *testing.T) {
 		readyWorker:   `[{"id":"zr-w1"},{"id":"zr-w2"}]`,
 	}
 	reg := roles.NewRegistry(config.Default())
-	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	got, err := Discover(context.Background(), rr, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,14 +93,13 @@ func TestDiscover_workerLabelFilter(t *testing.T) {
 
 func TestDiscover_skipsDisabledRole(t *testing.T) {
 	rr := &routingRunner{
-		readyFeedback: `[{"id":"zr-mine","issue_type":"task","title":"process-feedback: A","parent":"zr-prA"}]`,
+		readyFeedback: `[{"id":"zr-mine","issue_type":"task","title":"process-feedback: A"}]`,
 		readyWorker:   `[{"id":"zr-w1"}]`,
-		show:          map[string]string{"zr-prA": `{"id":"zr-prA","metadata":{"author":"phillipg"}}`},
 	}
 	cfg := config.Default()
 	cfg.WorkerEnabled = false // worker disabled: its ready bead must be skipped
 	reg := roles.NewRegistry(cfg)
-	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	got, err := Discover(context.Background(), rr, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,22 +118,13 @@ func TestDiscover_skipsDisabledRole(t *testing.T) {
 
 func TestDiscover_orderFeedbackThenWorker(t *testing.T) {
 	rr := &routingRunner{
-		readyFeedback: `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x","parent":"zr-p"}]`,
+		readyFeedback: `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x"}]`,
 		readyWorker:   `[{"id":"zr-w"}]`,
-		show:          map[string]string{"zr-p": `{"id":"zr-p","metadata":{"author":"phillipg"}}`},
 	}
 	reg := roles.NewRegistry(config.Default())
-	got, _ := Discover(context.Background(), rr, reg, "phillipg")
+	got, _ := Discover(context.Background(), rr, reg)
 	if len(got) != 2 || got[0].Role.Kind != roles.Feedback || got[1].Role.Kind != roles.Worker {
 		t.Fatalf("order wrong: %+v", got)
-	}
-}
-
-func TestDiscover_emptySelfLoginErrors(t *testing.T) {
-	rr := &routingRunner{readyFeedback: `[]`, readyWorker: `[]`}
-	reg := roles.NewRegistry(config.Default())
-	if _, err := Discover(context.Background(), rr, reg, ""); err == nil {
-		t.Error("empty selfLogin should error (cannot resolve feedback ownership)")
 	}
 }
 
@@ -152,7 +135,7 @@ func TestDiscover_propagatesReadyError(t *testing.T) {
 	sentinel := errors.New("bd: connection refused")
 	rr := &routingRunner{readyErr: sentinel}
 	reg := roles.NewRegistry(config.Default())
-	got, err := Discover(context.Background(), rr, reg, "phillipg")
+	got, err := Discover(context.Background(), rr, reg)
 	if err == nil {
 		t.Fatal("bd ready failure must propagate, not be swallowed as 'no work'")
 	}
@@ -172,91 +155,31 @@ func TestDiscover_propagatesWorkerReadyError(t *testing.T) {
 	cfg := config.Default()
 	cfg.FeedbackEnabled = false // skip feedback so the worker branch hits the error
 	reg := roles.NewRegistry(cfg)
-	if _, err := Discover(context.Background(), rr, reg, "phillipg"); !errors.Is(err, sentinel) {
+	if _, err := Discover(context.Background(), rr, reg); !errors.Is(err, sentinel) {
 		t.Fatalf("worker bd ready failure must propagate; got %v", err)
 	}
 }
 
-func TestDiscover_skipsBeadOnParentShowError(t *testing.T) {
+func TestForRole_feedbackBypassesEnabled(t *testing.T) {
 	rr := &routingRunner{
-		readyFeedback: `[
-			{"id":"zr-bad","issue_type":"task","title":"process-feedback: A","parent":"zr-prBad"},
-			{"id":"zr-good","issue_type":"task","title":"process-feedback: B","parent":"zr-prGood"}
-		]`,
-		readyWorker: `[]`,
-		show: map[string]string{
-			"zr-prGood": `{"id":"zr-prGood","metadata":{"author":"phillipg"}}`,
-		},
-		showErr: map[string]error{
-			"zr-prBad": errors.New("bd: not found"),
-		},
-	}
-	reg := roles.NewRegistry(config.Default())
-	got, err := Discover(context.Background(), rr, reg, "phillipg")
-	if err != nil {
-		t.Fatalf("parent lookup error should be skipped, not propagated; err=%v", err)
-	}
-	if len(got) != 1 || got[0].BeadID != "zr-good" {
-		t.Fatalf("only zr-good should be returned (zr-bad's parent errored); got %v", got)
-	}
-}
-
-func TestForRole_feedbackOwnershipBypassesEnabled(t *testing.T) {
-	rr := &routingRunner{
-		readyFeedback: `[{"id":"zr-mine","issue_type":"task","title":"process-feedback: A","parent":"zr-prA"}]`,
-		readyWorker:   `[]`,
-		show:          map[string]string{"zr-prA": `{"id":"zr-prA","metadata":{"author":"phillipg"}}`},
+		readyFeedback: `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x"}]`,
 	}
 	cfg := config.Default()
-	cfg.FeedbackEnabled = false // ForRole must run the query anyway (Enabled is bypassed)
+	cfg.FeedbackEnabled = false // ForRole must run the query regardless of Enabled
 	reg := roles.NewRegistry(cfg)
-	got, err := ForRole(context.Background(), rr, reg.Feedback, "phillipg")
+	got, err := ForRole(context.Background(), rr, reg.Feedback)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].BeadID != "zr-mine" || got[0].Role.Kind != roles.Feedback {
-		t.Fatalf("ForRole(feedback) = %+v (want only zr-mine)", got)
-	}
-}
-
-func TestForRole_workerIgnoresSelfLogin(t *testing.T) {
-	rr := &routingRunner{readyFeedback: `[]`, readyWorker: `[{"id":"zr-w1"},{"id":"zr-w2"}]`}
-	reg := roles.NewRegistry(config.Default())
-	got, err := ForRole(context.Background(), rr, reg.Worker, "") // empty selfLogin is fine for worker
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].Role.Kind != roles.Worker {
-		t.Fatalf("ForRole(worker) = %+v", got)
-	}
-}
-
-func TestForRole_feedbackEmptySelfLoginErrors(t *testing.T) {
-	rr := &routingRunner{readyFeedback: `[]`, readyWorker: `[]`}
-	reg := roles.NewRegistry(config.Default())
-	if _, err := ForRole(context.Background(), rr, reg.Feedback, ""); err == nil {
-		t.Error("ForRole(feedback) with empty selfLogin must error (cannot resolve ownership)")
-	}
-}
-
-func TestDiscover_feedbackDisabled_emptySelfLoginOK(t *testing.T) {
-	cfg := config.Default()
-	cfg.FeedbackEnabled = false
-	rr := &routingRunner{readyWorker: `[{"id":"zr-w1"}]`}
-	reg := roles.NewRegistry(cfg)
-	got, err := Discover(context.Background(), rr, reg, "")
-	if err != nil {
-		t.Fatalf("feedback disabled => empty selfLogin must not error; got %v", err)
-	}
-	if len(got) != 1 || got[0].BeadID != "zr-w1" {
-		t.Fatalf("expected only the worker dispatch; got %+v", got)
+	if len(got) != 1 || got[0].BeadID != "zr-c" {
+		t.Fatalf("ForRole(feedback) = %+v (want zr-c even though disabled)", got)
 	}
 }
 
 func TestForRole_unknownKindErrors(t *testing.T) {
 	rr := &routingRunner{}
-	if _, err := ForRole(context.Background(), rr, roles.Role{Kind: roles.RoleKind(99)}, "x"); err == nil {
-		t.Error("unknown role kind must error")
+	if _, err := ForRole(context.Background(), rr, roles.Role{Name: "bogus", Kind: 999}); err == nil {
+		t.Fatal("ForRole with unknown kind must error")
 	}
 }
 
