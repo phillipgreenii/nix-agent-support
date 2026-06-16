@@ -89,9 +89,9 @@ type Deps struct {
 	Notify     notify.Notifier  // optional (nil = no-op); fires the §8.3 fallback edge (§10)
 	NotifyOn   []string         // states that trigger a notification
 	Events     *eventlog.Logger // optional (nil = no-op); records ordered input actions
-	// Exister probes whether a Claude session is resumable on disk (ADR 0015). A
-	// nil Exister means "never resumable" (tests inject a fake; the cmd layer
-	// wires NewHomeSessionExister).
+	// Exister probes whether a Claude session is resumable on disk by stat-ing the
+	// row's hook-recorded transcript path (ADR 0015). A nil Exister means "never
+	// resumable" (tests inject a fake; the cmd layer wires NewFSSessionExister).
 	Exister   SessionExister
 	Socket    string
 	Prefix    string
@@ -250,12 +250,12 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 }
 
 // claudeSessionResumable reports whether the row's Claude session still exists on
-// disk under its recorded cwd (the resume precondition). Nil Exister → false.
+// disk at its HOOK-RECORDED transcript path (the resume precondition, ADR 0015).
+// The transcript path is authoritative (Claude reported it via the hook); ccpool
+// no longer reconstructs the path from the cwd. Nil Exister or an empty recorded
+// path → false. Resume itself still launches `--resume <row.ClaudeSessionID>`.
 func (s *Service) claudeSessionResumable(row store.Session) bool {
-	if s.d.Exister == nil || row.ClaudeSessionID == "" {
-		return false
-	}
-	return s.d.Exister.Exists(row.CWD, row.ClaudeSessionID)
+	return row.TranscriptPath != "" && s.d.Exister != nil && s.d.Exister.Exists(row.TranscriptPath)
 }
 
 // isFreshStarting guards the fresh-session race: a row still in `starting`

@@ -93,16 +93,16 @@ func TestReap_prunesRowsWhoseSessionGone(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(10_000, 0)
 	st := newMemStore(t)
-	// gone: dead + not on disk → pruned. keep: dead + still resumable → kept.
-	_ = st.Insert(ctx, store.Session{ExternalID: "gone", ClaudeSessionID: "csid-gone", State: store.Idle,
+	// gone: dead + transcript absent → pruned. keep: dead + transcript on disk → kept.
+	_ = st.Insert(ctx, store.Session{ExternalID: "gone", ClaudeSessionID: "csid-gone", TranscriptPath: "/p/gone.jsonl", State: store.Idle,
 		TmuxSession: "cc-gone", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200})
-	_ = st.Insert(ctx, store.Session{ExternalID: "keep", ClaudeSessionID: "csid-keep", State: store.Idle,
+	_ = st.Insert(ctx, store.Session{ExternalID: "keep", ClaudeSessionID: "csid-keep", TranscriptPath: "/p/keep.jsonl", State: store.Idle,
 		TmuxSession: "cc-keep", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200})
 
-	// A per-csid exister: csid-keep is on disk, csid-gone is not.
+	// A per-path exister: keep's transcript is on disk, gone's is not.
 	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
-		Exister: existerByCSID{"csid-keep": true}, Now: func() time.Time { return now }})
+		Exister: existerByPath{"/p/keep.jsonl": true}, Now: func() time.Time { return now }})
 
 	if err := s.Reap(ctx, 6, time.Hour); err != nil {
 		t.Fatalf("Reap: %v", err)
@@ -135,8 +135,8 @@ func TestReap_doesNotPruneFreshStartingDeadRow(t *testing.T) {
 	}
 }
 
-// existerByCSID is a per-csid SessionExister for tests with a mix of
+// existerByPath is a per-transcript-path SessionExister for tests with a mix of
 // resumable/gone rows.
-type existerByCSID map[string]bool
+type existerByPath map[string]bool
 
-func (e existerByCSID) Exists(_, claudeSessionID string) bool { return e[claudeSessionID] }
+func (e existerByPath) Exists(transcriptPath string) bool { return e[transcriptPath] }

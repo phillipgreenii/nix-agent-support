@@ -84,10 +84,10 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 
 // newSessionDeps builds the production session.Deps shared by new/reply/close/
 // cancel/reap. It is the single place that wires the production Exister
-// (session.NewHomeSessionExister over the user's home), so resume/reap consult
-// the real ~/.claude transcripts (ADR 0015); a nil Exister there makes every row
-// look non-resumable and reap prunes rows that should be kept. st may be nil in
-// unit tests that only inspect the wiring; el may be nil (no-op logger).
+// (session.NewFSSessionExister), so resume/reap consult the row's hook-recorded
+// transcript path on disk (ADR 0015); a nil Exister there makes every row look
+// non-resumable and reap prunes rows that should be kept. st may be nil in unit
+// tests that only inspect the wiring; el may be nil (no-op logger).
 func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) session.Deps {
 	home, _ := os.UserHomeDir()
 	return session.Deps{
@@ -100,7 +100,7 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
 		NotifyOn:   cfg.Notify.On,
 		Events:     el,
-		Exister:    session.NewHomeSessionExister(home),
+		Exister:    session.NewFSSessionExister(),
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,

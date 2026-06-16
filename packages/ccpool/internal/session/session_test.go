@@ -39,11 +39,11 @@ type fakeTrust struct{ trusted []string }
 
 func (f *fakeTrust) EnsureTrusted(cwd string) error { f.trusted = append(f.trusted, cwd); return nil }
 
-// fakeExister is the SessionExister test seam: ok reports whether the Claude
-// session is "on disk" without touching a real ~/.claude.
+// fakeExister is the SessionExister test seam: ok reports whether the recorded
+// transcript path is "on disk" without touching a real filesystem.
 type fakeExister struct{ ok bool }
 
-func (f fakeExister) Exists(string, string) bool { return f.ok }
+func (f fakeExister) Exists(string) bool { return f.ok }
 
 // a store-backed test using the real store + a hook-like transition to ready.
 func TestEnsure_brandNewWhenNoRow(t *testing.T) {
@@ -197,7 +197,7 @@ func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
 func TestEnsure_resumesWhenSessionExists(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-1", CWD: "/tmp/proj", State: store.Idle, TmuxSession: "cc-ext-alpha"}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-1", CWD: "/tmp/proj", TranscriptPath: "/p/ext-alpha.jsonl", State: store.Idle, TmuxSession: "cc-ext-alpha"}); err != nil {
 		t.Fatalf("seed row: %v", err)
 	}
 	ft := &fakeTmux{live: map[string]bool{}} // not live → resume path
@@ -351,7 +351,7 @@ func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
 	st := newMemStore(t)
 	// Settled row whose Claude session is still on disk; not live → resume path.
 	// Insert sets generation=1.
-	if err := st.Insert(ctx, store.Session{ExternalID: "beta", ClaudeSessionID: "csid-beta", State: store.Idle, TmuxSession: "cc-beta", Model: "opus"}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "beta", ClaudeSessionID: "csid-beta", TranscriptPath: "/p/beta.jsonl", State: store.Idle, TmuxSession: "cc-beta", Model: "opus"}); err != nil {
 		t.Fatal(err)
 	}
 	ft := &fakeTmux{live: map[string]bool{}}

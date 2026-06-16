@@ -10,70 +10,61 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
-// writeTranscript writes a real transcript at the path the REAL encoder produces
-// for cwd: <home>/.claude/projects/<encodeProjectDir(cwd)>/<csid>.jsonl. This is
-// the on-disk shape ccpool's resume probe looks for (ADR 0015).
-func writeTranscript(t *testing.T, home, cwd, csid string) {
+// writeTranscriptAt writes a real transcript file at path (the hook-recorded
+// transcript path ccpool's resume probe stats, ADR 0015).
+func writeTranscriptAt(t *testing.T, path string) {
 	t.Helper()
-	dir := filepath.Join(home, ".claude", "projects", encodeProjectDir(cwd))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, csid+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// TestProductionExister_findsTranscriptViaRealEncoder is the regression that
-// would have caught BOTH critical bugs: it wires the REAL production
-// SessionExister (NewHomeSessionExister) over a temp HOME and uses the REAL
-// encoder to lay down the transcript. A nil-wired Exister (#1) or a wrong
-// encoder (#2) makes Exists return false even though the session is resumable.
-//
-// The cwd intentionally contains '_' and a '/.' run so a separator-only /
-// run-collapsing encoder would look under the wrong directory and miss it.
-func TestProductionExister_findsTranscriptViaRealEncoder(t *testing.T) {
-	home := t.TempDir()
-	cwd := "/Users/x/phillipg_mbp/.worktrees/session-redesign"
-	csid := "11111111-2222-3333-4444-555555555555"
+// TestProductionExister_statsRecordedTranscriptPath is the regression that would
+// have caught CRITICAL #1: it wires the REAL production SessionExister
+// (NewFSSessionExister) and proves it reports resumability by stat-ing the
+// hook-recorded transcript path directly. A nil-wired Exister makes Exists return
+// false even though the session is resumable.
+func TestProductionExister_statsRecordedTranscriptPath(t *testing.T) {
+	transcript := filepath.Join(t.TempDir(), "session-redesign.jsonl")
 
-	ex := NewHomeSessionExister(home) // production constructor, not a fake
+	ex := NewFSSessionExister() // production constructor, not a fake
 
-	if ex.Exists(cwd, csid) {
+	if ex.Exists(transcript) {
 		t.Fatal("must be false before any transcript exists")
 	}
-	writeTranscript(t, home, cwd, csid)
-	if !ex.Exists(cwd, csid) {
-		t.Errorf("production Exister must find the transcript the real encoder names "+
-			"under %q (nil Exister or wrong encoding would miss it)", cwd)
+	writeTranscriptAt(t, transcript)
+	if !ex.Exists(transcript) {
+		t.Errorf("production Exister must find the hook-recorded transcript at %q "+
+			"(a nil Exister would miss it)", transcript)
 	}
 }
 
 // TestReap_realWiring_keepsResumableRow drives the REAL prune path with the REAL
-// production Exister over a temp HOME. A dead row (no tmux) whose Claude session
-// transcript exists on disk MUST be kept (resume later). With a nil Exister (#1)
-// claudeSessionResumable returns false and reap would prune this row; with a
-// wrong encoder (#2) the transcript would not be found and the row pruned too.
+// production Exister. A dead row (no tmux) whose hook-recorded transcript exists
+// on disk MUST be kept (resume later). With a nil Exister claudeSessionResumable
+// returns false and reap would prune this row.
 func TestReap_realWiring_keepsResumableRow(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(10_000, 0)
-	home := t.TempDir()
 	st := newMemStore(t)
 
-	cwd := "/Users/x/phillipg_mbp/.worktrees/session-redesign"
-	csid := "csid-resumable-0001"
+	transcript := filepath.Join(t.TempDir(), "resumable.jsonl")
 	if err := st.Insert(ctx, store.Session{
-		ExternalID: "resumable", ClaudeSessionID: csid, CWD: cwd, State: store.Idle,
+		ExternalID: "resumable", ClaudeSessionID: "csid-resumable-0001",
+		CWD: "/Users/x/proj", TranscriptPath: transcript, State: store.Idle,
 		TmuxSession: "cc-resumable", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	writeTranscript(t, home, cwd, csid) // session exists on disk → resumable
+	writeTranscriptAt(t, transcript) // transcript exists on disk → resumable
 
 	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
 	s := New(Deps{
 		Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
-		Exister: NewHomeSessionExister(home), // REAL production wiring + REAL encoder
+		Exister: NewFSSessionExister(), // REAL production wiring
 		Now:     func() time.Time { return now },
 	})
 
@@ -81,23 +72,24 @@ func TestReap_realWiring_keepsResumableRow(t *testing.T) {
 		t.Fatalf("Reap: %v", err)
 	}
 	if _, ok, _ := st.GetByExternalID(ctx, "resumable"); !ok {
-		t.Error("a dead row whose Claude transcript exists on disk must be KEPT (resumable), not pruned")
+		t.Error("a dead row whose hook-recorded transcript exists on disk must be KEPT (resumable), not pruned")
 	}
 }
 
-// TestReap_realWiring_prunesGoneRow is the negative control: the same real
-// wiring prunes a dead row whose transcript is absent (genuinely gone). Together
-// with the keep test this proves the prune decision flows through the real
-// encoder + real Exister, not a fake.
+// TestReap_realWiring_prunesGoneRow is the negative control: the same real wiring
+// prunes a dead row whose recorded transcript is absent (genuinely gone).
+// Together with the keep test this proves the prune decision flows through the
+// real path-stat Exister, not a fake.
 func TestReap_realWiring_prunesGoneRow(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(10_000, 0)
-	home := t.TempDir()
 	st := newMemStore(t)
 
-	cwd := "/Users/x/phillipg_mbp/.worktrees/gone"
+	// A recorded transcript path that does NOT exist on disk → not resumable.
+	transcript := filepath.Join(t.TempDir(), "gone.jsonl")
 	if err := st.Insert(ctx, store.Session{
-		ExternalID: "gone", ClaudeSessionID: "csid-gone-0001", CWD: cwd, State: store.Idle,
+		ExternalID: "gone", ClaudeSessionID: "csid-gone-0001",
+		CWD: "/Users/x/gone", TranscriptPath: transcript, State: store.Idle,
 		TmuxSession: "cc-gone", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200,
 	}); err != nil {
 		t.Fatal(err)
@@ -107,7 +99,7 @@ func TestReap_realWiring_prunesGoneRow(t *testing.T) {
 	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
 	s := New(Deps{
 		Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
-		Exister: NewHomeSessionExister(home),
+		Exister: NewFSSessionExister(),
 		Now:     func() time.Time { return now },
 	})
 
@@ -115,6 +107,6 @@ func TestReap_realWiring_prunesGoneRow(t *testing.T) {
 		t.Fatalf("Reap: %v", err)
 	}
 	if _, ok, _ := st.GetByExternalID(ctx, "gone"); ok {
-		t.Error("a dead row whose Claude transcript is absent must be pruned")
+		t.Error("a dead row whose hook-recorded transcript is absent must be pruned")
 	}
 }

@@ -396,15 +396,42 @@ func (sb *sandbox) listRow(externalID string) (listJSON, bool) {
 // whose Claude session still exists on disk must RESUME that conversation
 // (`claude --resume <claude_session_id>`) and PRESERVE the same claude_session_id
 // — not mint a fresh one. This is the suite's only coverage that the real
-// `claude --resume <session-id>` flag works AND that claudeSessionExists's on-disk
-// transcript probe matches Claude's real project-dir layout; a stub claude that
-// exits on /exit cannot stand in for either.
+// `claude --resume <session-id>` flag works AND that the hook-recorded
+// transcript_path resume probe matches a transcript real claude actually persists
+// (ADR 0015); a stub claude that exits on /exit cannot stand in for either.
 func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
 	sb := newSandbox(t)
 	sb.mustNew("r")
+	// Drive a real TURN so Claude writes the session transcript to disk. A turnless
+	// session has no transcript and is (correctly) NOT resumable — there is no
+	// conversation to resume — so the resume precondition requires at least one
+	// completed turn. A short prompt keeps it inside the completion budget.
+	sb.ccp("reply", "r", "Reply with exactly: READY", "--no-wait")
+	turnDeadline := time.Now().Add(120 * time.Second)
+	completed := false
+	for time.Now().Before(turnDeadline) {
+		if out, _ := sb.ccp("state", "r"); strings.Contains(out, "state=idle") {
+			completed = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !completed {
+		scaffoldFail(t, "first turn never reached state=idle (real-claude/env issue); cannot set up the resume precondition")
+	}
 	first, ok := sb.listRow("r")
 	if !ok || first.ClaudeSessionID == "" {
 		scaffoldFail(t, "new did not record a claude_session_id for %q (launch mechanics broken)", "r")
+	}
+	// Resumability is driven by the HOOK-RECORDED transcript path (ADR 0015), so
+	// be DIAGNOSTIC about claude's persistence: a future failure here is then
+	// unambiguous (claude didn't report/persist a transcript) rather than masquerading
+	// as a ccpool resume regression.
+	if first.TranscriptPath == "" {
+		scaffoldFail(t, "claude reported no transcript_path for %q; resume cannot be set up", "r")
+	}
+	if _, err := os.Stat(first.TranscriptPath); err != nil {
+		scaffoldFail(t, "claude did not persist a transcript at %q (%v); resume cannot be verified", first.TranscriptPath, err)
 	}
 
 	// Non-purge close ends the tmux session but KEEPS the row and leaves the Claude
