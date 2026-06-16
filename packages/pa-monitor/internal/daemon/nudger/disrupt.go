@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 // NewDisruptProducer constructs a producer with an empty firstSeen map.
@@ -61,7 +62,13 @@ func (p *DisruptProducer) reconcileSession(ctx TickContext, store *PendingStore,
 		cancel()
 		return
 	}
-	if !s.LastError.IsRetryable {
+	// Auto-resume policy: resume only the transient classes
+	// (ClassTransientServer, ClassTransientNetwork). This re-expresses the old
+	// kind-based predicate on the shared RetryClass — a deliberate tightening
+	// (an opaque non-network `unknown` no longer auto-resumes). The escalation
+	// flip (LastErrorRetryable=false) is a separate, later gate handled by the
+	// daemon lifecycle, not here.
+	if !transcript.Retryable(s.LastError) {
 		cancel()
 		return
 	}

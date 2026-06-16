@@ -207,7 +207,7 @@ func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	// Apply error glyph when terminal.
 	le := s.SessionEnrichment.LastError
 	if le != nil && le.IsTerminal {
-		if le.IsRetryable {
+		if s.SessionEnrichment.LastErrorRetryable {
 			primary = "⚠"
 		} else {
 			primary = "✗"

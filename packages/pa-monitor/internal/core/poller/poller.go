@@ -198,21 +198,25 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			if subErr, ok := transcript.LastSubagentError(path); ok {
 				e := subErr
 				snap.LastError = &e
+				// LastError was replaced by a subagent error; re-derive the
+				// auto-resume verdict from the (possibly different) record.
+				snap.LastErrorRetryable = transcript.Retryable(snap.LastError)
 			}
 		}
 
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
-			ContextTokens:     snap.ContextTokens,
-			SessionTokens:     snap.TotalTokens,
-			Model:             snap.Model,
-			FirstPrompt:       snap.FirstPrompt,
-			SubagentCount:     snap.SubagentCount,
-			SubshellCount:     shells,
-			AwaitingInput:     snap.AwaitingInput,
-			RateLimitResetsAt: rlReset,
-			BurnRateShort:     p.burnShort[s.SessionID].Rate(now),
-			BurnRateLong:      p.burnLong[s.SessionID].Rate(now),
-			LastError:         snap.LastError,
+			ContextTokens:      snap.ContextTokens,
+			SessionTokens:      snap.TotalTokens,
+			Model:              snap.Model,
+			FirstPrompt:        snap.FirstPrompt,
+			SubagentCount:      snap.SubagentCount,
+			SubshellCount:      shells,
+			AwaitingInput:      snap.AwaitingInput,
+			RateLimitResetsAt:  rlReset,
+			BurnRateShort:      p.burnShort[s.SessionID].Rate(now),
+			BurnRateLong:       p.burnLong[s.SessionID].Rate(now),
+			LastError:          snap.LastError,
+			LastErrorRetryable: snap.LastErrorRetryable,
 		}
 	}
 
@@ -328,7 +332,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				ss.LastErrorText = le.Text
 				ss.LastErrorAt = le.At
 				ss.LastErrorTerminal = le.IsTerminal
-				ss.LastErrorRetryable = le.IsRetryable
+				ss.LastErrorRetryable = sv.SessionEnrichment.LastErrorRetryable
 			}
 			// Best-effort write — DB failures must not abort the tick.
 			_ = p.WriteService.UpsertSession(ctx, ss)

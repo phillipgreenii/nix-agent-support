@@ -21,7 +21,12 @@ type SessionEnrichment struct {
 	AwaitingInput     bool      // true when last assistant turn contains unresolved AskUserQuestion
 	RateLimitResetsAt time.Time // non-zero: session paused; window resets at this time
 	LastError         *transcript.ErrorRecord // most recent api error from snapshot; nil if none
-	PendingNudge      *PendingNudge           // set by daemon nudger; nil when no intents pending
+	// LastErrorRetryable is pa-monitor's auto-resume verdict for LastError
+	// (transient server/network → true). Tracked separately from the shared
+	// ErrorRecord because the daemon flips it to false on escalation,
+	// independent of the record's intrinsic RetryClass. Zero when LastError nil.
+	LastErrorRetryable bool
+	PendingNudge       *PendingNudge // set by daemon nudger; nil when no intents pending
 
 	// Nudge history (watermarks): populated by the daemon's lifecycle
 	// annotation loop from WatermarkStore. Zero/empty when the session

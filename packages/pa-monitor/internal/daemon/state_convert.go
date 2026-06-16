@@ -141,15 +141,17 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 		AwaitingInput: sc.AwaitingInput,
 	}
 
-	// Reconstruct LastError from the stored fields.
+	// Reconstruct LastError from the stored fields. The escalation-aware
+	// retryable verdict is stored separately and now lives on the enrichment,
+	// not the shared record.
 	if sc.LastErrorKind != "" {
 		en.LastError = &transcript.ErrorRecord{
-			Kind:        transcript.ErrorKind(sc.LastErrorKind),
-			Text:        sc.LastErrorText,
-			At:          sc.LastErrorAt,
-			IsTerminal:  sc.LastErrorTerminal,
-			IsRetryable: sc.LastErrorRetryable,
+			Kind:       transcript.ErrorKind(sc.LastErrorKind),
+			Text:       sc.LastErrorText,
+			At:         sc.LastErrorAt,
+			IsTerminal: sc.LastErrorTerminal,
 		}
+		en.LastErrorRetryable = sc.LastErrorRetryable
 	}
 
 	return &aggregate.SessionView{

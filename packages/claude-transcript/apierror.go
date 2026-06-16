@@ -130,6 +130,12 @@ func isContextLimitText(kind ErrorKind, text string) bool {
 		strings.Contains(strings.ToLower(text), "prompt is too long")
 }
 
+// IsContextLimit is the exported form of isContextLimitText: it reports whether
+// an api-error of the given kind+text is the Claude Code context-window-exceeded
+// condition. Consumers that classify api-errors outside LastAPIError (e.g. a
+// single-pass transcript scanner) use this to set ErrorRecord.IsContextLimit.
+func IsContextLimit(kind ErrorKind, text string) bool { return isContextLimitText(kind, text) }
+
 // LastAPIError returns the most recent isApiErrorMessage event in the
 // transcript regardless of kind. IsTerminal is true iff no subsequent
 // (non-synthetic) user/assistant event follows. Returns zero ErrorRecord

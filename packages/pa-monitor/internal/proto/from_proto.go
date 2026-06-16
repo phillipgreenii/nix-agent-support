@@ -215,6 +215,9 @@ func SessionDetailToView(sd *SessionDetail) *aggregate.SessionView {
 	}
 	if e := sd.GetLastError(); e != nil {
 		sv.LastError = apiErrorFromProto(e)
+		// The escalation-aware retryable verdict rides the proto's is_retryable
+		// field; it now lives on the SessionView, not the shared record.
+		sv.LastErrorRetryable = e.GetIsRetryable()
 	}
 	if pn := sd.GetPendingNudge(); pn != nil {
 		sv.PendingNudge = &aggregate.PendingNudge{Sources: pn.GetSources()}
@@ -231,7 +234,6 @@ func apiErrorFromProto(e *ApiError) *transcript.ErrorRecord {
 		Text:         e.GetText(),
 		At:           timeFromTS(e.GetAt()),
 		IsTerminal:   e.GetIsTerminal(),
-		IsRetryable:  e.GetIsRetryable(),
 		FromSubagent: e.GetFromSubagent(),
 	}
 }

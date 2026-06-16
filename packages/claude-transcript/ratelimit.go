@@ -91,6 +91,16 @@ func parseLimitResetText(text string, eventTime time.Time) (time.Time, bool) {
 	return candidate.UTC(), true
 }
 
+// ParseRateLimitReset is the exported form of parseLimitResetText: it resolves
+// the rate-limit reset time encoded in a synthetic rate-limit message text,
+// relative to the event time. Consumers that parse rate-limit reset windows
+// outside RateLimitPause (e.g. a single-pass transcript scanner) use this so
+// the parsing logic stays a single source of truth. Returns (zero, false) on
+// any parse failure.
+func ParseRateLimitReset(text string, eventTime time.Time) (time.Time, bool) {
+	return parseLimitResetText(text, eventTime)
+}
+
 // RateLimitPause returns the time the usage window reopens when the transcript's
 // most recent rate-limit event has no subsequent (non-synthetic) user/assistant
 // event. Two event shapes are recognized:

@@ -10,15 +10,16 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
-func makeSessionView(status session.Status, le *transcript.ErrorRecord, nudge *aggregate.PendingNudge) *aggregate.SessionView {
+func makeSessionView(status session.Status, le *transcript.ErrorRecord, retryable bool, nudge *aggregate.PendingNudge) *aggregate.SessionView {
 	return &aggregate.SessionView{
 		Session: &session.Session{
 			SessionID: "test-id",
 			Status:    status,
 		},
 		SessionEnrichment: aggregate.SessionEnrichment{
-			LastError:    le,
-			PendingNudge: nudge,
+			LastError:          le,
+			LastErrorRetryable: retryable,
+			PendingNudge:       nudge,
 		},
 	}
 }
@@ -27,13 +28,12 @@ func makeSessionView(status session.Status, le *transcript.ErrorRecord, nudge *a
 // working glyph regardless of LastError or PendingNudge.
 func TestSessionGlyphWorking(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError,
-		IsTerminal:  true,
-		IsRetryable: true,
-		At:          time.Now(),
+		Kind:       transcript.ErrServerError,
+		IsTerminal: true,
+		At:         time.Now(),
 	}
 	nudge := &aggregate.PendingNudge{Sources: []string{"disrupted"}}
-	sv := makeSessionView(session.Working, le, nudge)
+	sv := makeSessionView(session.Working, le, true, nudge)
 
 	glyph := sessionGlyph(sv, Theme{})
 	if strings.Contains(glyph, "⚠") || strings.Contains(glyph, "✗") {
@@ -48,12 +48,11 @@ func TestSessionGlyphWorking(t *testing.T) {
 // a terminal retryable error shows the ⚠ glyph.
 func TestSessionGlyphIdleRetryableTerminalError(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError,
-		IsTerminal:  true,
-		IsRetryable: true,
-		At:          time.Now(),
+		Kind:       transcript.ErrServerError,
+		IsTerminal: true,
+		At:         time.Now(),
 	}
-	sv := makeSessionView(session.Idle, le, nil)
+	sv := makeSessionView(session.Idle, le, true, nil)
 
 	glyph := sessionGlyph(sv, Theme{})
 	if !strings.Contains(glyph, "⚠") {
@@ -65,12 +64,11 @@ func TestSessionGlyphIdleRetryableTerminalError(t *testing.T) {
 // with a terminal non-retryable error shows the ✗ glyph.
 func TestSessionGlyphIdleNonRetryableTerminalError(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrInvalidRequest,
-		IsTerminal:  true,
-		IsRetryable: false,
-		At:          time.Now(),
+		Kind:       transcript.ErrInvalidRequest,
+		IsTerminal: true,
+		At:         time.Now(),
 	}
-	sv := makeSessionView(session.Idle, le, nil)
+	sv := makeSessionView(session.Idle, le, false, nil)
 
 	glyph := sessionGlyph(sv, Theme{})
 	if !strings.Contains(glyph, "✗") {
@@ -82,12 +80,11 @@ func TestSessionGlyphIdleNonRetryableTerminalError(t *testing.T) {
 // not trigger an error glyph — the regular idle symbol is returned.
 func TestSessionGlyphIdleNonTerminalError(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError,
-		IsTerminal:  false, // not terminal → no glyph change
-		IsRetryable: true,
-		At:          time.Now(),
+		Kind:       transcript.ErrServerError,
+		IsTerminal: false, // not terminal → no glyph change
+		At:         time.Now(),
 	}
-	sv := makeSessionView(session.Idle, le, nil)
+	sv := makeSessionView(session.Idle, le, true, nil)
 
 	glyph := sessionGlyph(sv, Theme{})
 	if strings.Contains(glyph, "⚠") || strings.Contains(glyph, "✗") {
@@ -99,7 +96,7 @@ func TestSessionGlyphIdleNonTerminalError(t *testing.T) {
 // when the primary glyph is not Working.
 func TestSessionGlyphIdlePendingNudge(t *testing.T) {
 	nudge := &aggregate.PendingNudge{Sources: []string{"disrupted", "manual"}}
-	sv := makeSessionView(session.Idle, nil, nudge)
+	sv := makeSessionView(session.Idle, nil, false, nudge)
 
 	glyph := sessionGlyph(sv, Theme{})
 	if !strings.Contains(glyph, "↪") {
@@ -108,19 +105,19 @@ func TestSessionGlyphIdlePendingNudge(t *testing.T) {
 }
 
 // TestSessionGlyphEscalatedIsNonRetryableGlyph verifies that an escalated
-// error (retryable kind but IsRetryable=false) shows the ✗ (non-retryable) glyph.
+// error (retryable class but the verdict flipped to false) shows the ✗
+// (non-retryable) glyph.
 func TestSessionGlyphEscalatedIsNonRetryableGlyph(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError, // inherently retryable kind
-		IsTerminal:  true,
-		IsRetryable: false, // daemon flipped this → escalated
-		At:          time.Now(),
+		Kind:       transcript.ErrServerError, // inherently retryable class
+		IsTerminal: true,
+		At:         time.Now(),
 	}
-	sv := makeSessionView(session.Idle, le, nil)
+	sv := makeSessionView(session.Idle, le, false, nil) // verdict flipped → escalated
 
 	glyph := sessionGlyph(sv, Theme{})
 	if !strings.Contains(glyph, "✗") {
-		t.Errorf("escalated error: expected ✗ glyph (IsRetryable=false); got %q", glyph)
+		t.Errorf("escalated error: expected ✗ glyph (LastErrorRetryable=false); got %q", glyph)
 	}
 	if strings.Contains(glyph, "⚠") {
 		t.Errorf("escalated error: should not have ⚠ glyph; got %q", glyph)

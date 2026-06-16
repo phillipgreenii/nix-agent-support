@@ -179,7 +179,7 @@ func SessionDetailFromView(sv *aggregate.SessionView) *SessionDetail {
 		View: sessionViewToProto(sv),
 	}
 	if sv.LastError != nil {
-		out.LastError = apiErrorToProto(sv.LastError)
+		out.LastError = apiErrorToProto(sv.LastError, sv.LastErrorRetryable)
 	}
 	if sv.PendingNudge != nil {
 		out.PendingNudge = &PendingNudge{Sources: sv.PendingNudge.Sources}
@@ -187,7 +187,10 @@ func SessionDetailFromView(sv *aggregate.SessionView) *SessionDetail {
 	return out
 }
 
-func apiErrorToProto(e *transcript.ErrorRecord) *ApiError {
+// apiErrorToProto serializes an ErrorRecord. retryable is pa-monitor's
+// escalation-aware auto-resume verdict (tracked on the SessionView, not the
+// shared record): the daemon flips it to false on escalation.
+func apiErrorToProto(e *transcript.ErrorRecord, retryable bool) *ApiError {
 	if e == nil {
 		return nil
 	}
@@ -195,7 +198,7 @@ func apiErrorToProto(e *transcript.ErrorRecord) *ApiError {
 		Kind:         string(e.Kind),
 		Text:         e.Text,
 		IsTerminal:   e.IsTerminal,
-		IsRetryable:  e.IsRetryable,
+		IsRetryable:  retryable,
 		FromSubagent: e.FromSubagent,
 	}
 	if !e.At.IsZero() {

@@ -83,9 +83,9 @@ func TestSessionDetailLastErrorPendingNudgeRoundTrip(t *testing.T) {
 				Text:         "upstream 500",
 				At:           errAt,
 				IsTerminal:   true,
-				IsRetryable:  true,
 				FromSubagent: true,
 			},
+			LastErrorRetryable: true,
 			PendingNudge: &aggregate.PendingNudge{
 				Sources: []string{"disrupted", "manual"},
 			},
@@ -130,8 +130,8 @@ func TestSessionDetailLastErrorPendingNudgeRoundTrip(t *testing.T) {
 	if !le.IsTerminal {
 		t.Error("LastError.IsTerminal = false, want true")
 	}
-	if !le.IsRetryable {
-		t.Error("LastError.IsRetryable = false, want true")
+	if !out.LastErrorRetryable {
+		t.Error("out.LastErrorRetryable = false, want true (escalation-aware verdict round-trips on the view)")
 	}
 	if !le.FromSubagent {
 		t.Error("LastError.FromSubagent = false, want true")

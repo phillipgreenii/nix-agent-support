@@ -134,14 +134,14 @@ func TestBuildSetsPRInfo(t *testing.T) {
 func TestAggregateCarriesLastError(t *testing.T) {
 	now := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
 	rec := &transcript.ErrorRecord{
-		Kind: transcript.ErrUnknown, Text: "socket closed",
-		At: now, IsTerminal: true, IsRetryable: true,
+		Kind: transcript.ErrUnknown, Text: "API Error: The socket connection was closed unexpectedly",
+		At: now, IsTerminal: true,
 	}
 	sessions := []*session.Session{
 		{SessionID: "sid-1", Cwd: "/tmp/work"},
 	}
 	enriched := map[string]SessionEnrichment{
-		"sid-1": {LastError: rec},
+		"sid-1": {LastError: rec, LastErrorRetryable: true},
 	}
 	tree := Build(sessions, enriched, nil, nil, "")
 	if len(tree.Dirs) == 0 || len(tree.Dirs[0].Sessions) == 0 {
@@ -151,8 +151,8 @@ func TestAggregateCarriesLastError(t *testing.T) {
 	if got == nil {
 		t.Fatal("LastError = nil, want pointer to rec")
 	}
-	if got.Kind != transcript.ErrUnknown || !got.IsRetryable {
-		t.Errorf("LastError = %+v, want unknown+retryable", got)
+	if got.Kind != transcript.ErrUnknown || !tree.Dirs[0].Sessions[0].LastErrorRetryable {
+		t.Errorf("LastError = %+v retryable=%v, want unknown+retryable", got, tree.Dirs[0].Sessions[0].LastErrorRetryable)
 	}
 }
 

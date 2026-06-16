@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // Snapshot holds all per-session enrichment data extracted in a single pass.
@@ -18,6 +20,12 @@ type Snapshot struct {
 	AwaitingInput     bool
 	RateLimitResetsAt time.Time
 	LastError         *ErrorRecord // most recent isApiErrorMessage event in the transcript; nil if no such event seen
+	// LastErrorRetryable is pa-monitor's derived auto-resume verdict for
+	// LastError (transient server/network → true). It is tracked separately
+	// from the shared ErrorRecord because the daemon flips it to false on
+	// escalation, independent of the record's intrinsic RetryClass. Zero when
+	// LastError is nil.
+	LastErrorRetryable bool
 }
 
 // Scan reads path once and returns all enrichment data. It replaces calling
@@ -136,7 +144,7 @@ func Scan(path string) (Snapshot, error) {
 						break
 					}
 				}
-				if t, ok := parseLimitResetText(text, ev.Timestamp); ok {
+				if t, ok := ct.ParseRateLimitReset(text, ev.Timestamp); ok {
 					lastAPIErrTime = t
 					lastAPIErrRetry = 0 // sentinel: lastAPIErrTime is absolute
 					hasAPIErr = true
@@ -231,12 +239,15 @@ func Scan(path string) (Snapshot, error) {
 			break
 		}
 		snap.LastError = &ErrorRecord{
-			Kind:        lastErrKind,
-			Text:        lastErrText,
-			At:          lastErrEventTime,
-			IsTerminal:  terminal,
-			IsRetryable: lastErrKind.IsRetryable(),
+			Kind:       lastErrKind,
+			Text:       lastErrText,
+			At:         lastErrEventTime,
+			IsTerminal: terminal,
 		}
+		// Derive the auto-resume verdict from the shared RetryClass policy. Kept
+		// on the Snapshot (not the record) so the daemon's escalation flip can
+		// override it without mutating the intrinsic classification.
+		snap.LastErrorRetryable = Retryable(snap.LastError)
 	}
 
 	return snap, nil

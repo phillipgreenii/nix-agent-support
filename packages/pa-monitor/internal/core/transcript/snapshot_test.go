@@ -140,7 +140,7 @@ func TestScanSyntheticRateLimitClearedByLaterUser(t *testing.T) {
 func TestSnapshotPopulatesLastErrorForRetryable(t *testing.T) {
 	ts := time.Date(2026, 5, 19, 20, 54, 0, 0, time.UTC)
 	path := t.TempDir() + "/t.jsonl"
-	body := apiErrorEvent(ts, ErrUnknown, "API Error: socket closed") + "\n"
+	body := apiErrorEvent(ts, ErrUnknown, "API Error: The socket connection was closed unexpectedly") + "\n"
 	if err := writeTestFile(path, body); err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +157,8 @@ func TestSnapshotPopulatesLastErrorForRetryable(t *testing.T) {
 	if !snap.LastError.IsTerminal {
 		t.Error("LastError.IsTerminal = false, want true")
 	}
-	if !snap.LastError.IsRetryable {
-		t.Error("LastError.IsRetryable = false, want true")
+	if !snap.LastErrorRetryable {
+		t.Error("LastErrorRetryable = false, want true (unknown socket-drop is transient)")
 	}
 }
 
@@ -194,7 +194,7 @@ func TestScanSurfacesStreamIdleTimeout(t *testing.T) {
 	if snap.LastError == nil {
 		t.Fatal("LastError = nil, want populated stream-idle-timeout error")
 	}
-	if snap.LastError.Kind != ErrUnknown || !snap.LastError.IsRetryable || !snap.LastError.IsTerminal {
-		t.Errorf("LastError = %+v, want unknown/retryable/terminal", snap.LastError)
+	if snap.LastError.Kind != ErrUnknown || !snap.LastErrorRetryable || !snap.LastError.IsTerminal {
+		t.Errorf("LastError = %+v retryable=%v, want unknown/retryable/terminal", snap.LastError, snap.LastErrorRetryable)
 	}
 }

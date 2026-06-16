@@ -511,8 +511,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				n.Dispatch(ctx, tctx)
 				wm.SaveIntents(n.SnapshotStore())
 
-				// Escalation flip: surface IsRetryable=false on terminal errors
-				// for sessions whose watermark marks DisruptEscalated.
+				// Escalation flip: surface LastErrorRetryable=false on terminal
+				// errors for sessions whose watermark marks DisruptEscalated.
 				// Also persist the flip to the DB so it survives a restart.
 				for _, dir := range tree.Dirs {
 					for _, sv := range dir.Sessions {
@@ -523,10 +523,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 						if !swm.DisruptEscalated {
 							continue
 						}
-						// Copy to avoid mutating the snapshot's record.
-						le := *sv.LastError
-						le.IsRetryable = false
-						sv.LastError = &le
+						// The retryable verdict now lives on the view, not the
+						// shared record — flip it in place (no record copy needed).
+						sv.LastErrorRetryable = false
 						// Persist the flip so the DB-materialised path sees it.
 						if opts.WriteService != nil {
 							_ = opts.WriteService.MarkSessionEscalated(ctx, sv.SessionID)

@@ -52,7 +52,7 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 		if le.FromSubagent {
 			kindStr += "  (in subagent)"
 		}
-		if isEscalated(le) {
+		if isEscalated(le, sv.SessionEnrichment.LastErrorRetryable) {
 			kindStr += "  (escalated)"
 		}
 		sb.WriteString(fmt.Sprintf("\nLast error:  %s\n", kindStr))
@@ -173,11 +173,12 @@ func RenderDetailsWindow(sv *aggregate.SessionView, width, height, scrollOffset 
 	return strings.Join(out, "\n")
 }
 
-// isEscalated reports whether the error record was escalated: the kind is
-// inherently retryable by spec (unknown or server_error) but IsRetryable has
-// been flipped to false by the daemon's escalation logic.
-func isEscalated(le *transcript.ErrorRecord) bool {
-	return le.Kind.IsRetryable() && !le.IsRetryable
+// isEscalated reports whether the error record was escalated: the record's
+// class is inherently retryable by pa-monitor's policy (transient server or
+// network) but the auto-resume verdict (retryable) has been flipped to false by
+// the daemon's escalation logic.
+func isEscalated(le *transcript.ErrorRecord, retryable bool) bool {
+	return transcript.Retryable(le) && !retryable
 }
 
 // humanizeAge formats a duration as a human-readable age string like

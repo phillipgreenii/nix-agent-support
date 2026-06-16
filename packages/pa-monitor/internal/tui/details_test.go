@@ -65,15 +65,14 @@ func TestDetailsRuleLineScalesWithWidth(t *testing.T) {
 // the details pane with kind and (escalated) suffix when appropriate.
 func TestDetailsLastErrorTerminalShown(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError,
-		Text:        "API Error: 529 Overloaded",
-		At:          time.Now().Add(-2 * time.Minute),
-		IsTerminal:  true,
-		IsRetryable: true,
+		Kind:       transcript.ErrServerError,
+		Text:       "API Error: 529 Overloaded",
+		At:         time.Now().Add(-2 * time.Minute),
+		IsTerminal: true,
 	}
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1"},
-		SessionEnrichment: aggregate.SessionEnrichment{LastError: le},
+		SessionEnrichment: aggregate.SessionEnrichment{LastError: le, LastErrorRetryable: true},
 	}
 	out := RenderDetails(sv, 120)
 	if !strings.Contains(out, "Last error") {
@@ -94,15 +93,14 @@ func TestDetailsLastErrorTerminalShown(t *testing.T) {
 // kind is inherently retryable but IsRetryable has been flipped to false.
 func TestDetailsLastErrorEscalatedSuffix(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError, // inherently retryable
-		Text:        "API Error: 529 Overloaded",
-		At:          time.Now().Add(-5 * time.Minute),
-		IsTerminal:  true,
-		IsRetryable: false, // escalated by daemon
+		Kind:       transcript.ErrServerError, // inherently retryable (transient server)
+		Text:       "API Error: 529 Overloaded",
+		At:         time.Now().Add(-5 * time.Minute),
+		IsTerminal: true,
 	}
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1"},
-		SessionEnrichment: aggregate.SessionEnrichment{LastError: le},
+		SessionEnrichment: aggregate.SessionEnrichment{LastError: le, LastErrorRetryable: false}, // escalated by daemon
 	}
 	out := RenderDetails(sv, 120)
 	if !strings.Contains(out, "(escalated)") {
@@ -114,15 +112,14 @@ func TestDetailsLastErrorEscalatedSuffix(t *testing.T) {
 // not shown in the details pane.
 func TestDetailsLastErrorNonTerminalHidden(t *testing.T) {
 	le := &transcript.ErrorRecord{
-		Kind:        transcript.ErrServerError,
-		Text:        "transient error",
-		At:          time.Now().Add(-1 * time.Minute),
-		IsTerminal:  false, // user resumed — not terminal
-		IsRetryable: true,
+		Kind:       transcript.ErrServerError,
+		Text:       "transient error",
+		At:         time.Now().Add(-1 * time.Minute),
+		IsTerminal: false, // user resumed — not terminal
 	}
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1"},
-		SessionEnrichment: aggregate.SessionEnrichment{LastError: le},
+		SessionEnrichment: aggregate.SessionEnrichment{LastError: le, LastErrorRetryable: true},
 	}
 	out := RenderDetails(sv, 120)
 	if strings.Contains(out, "Last error") {

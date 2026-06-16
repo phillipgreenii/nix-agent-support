@@ -10,13 +10,18 @@ import (
 )
 
 func sessionWithError(sid string, kind transcript.ErrorKind, at time.Time, terminal bool) *aggregate.SessionView {
+	// Use a connection-drop text so an `unknown` kind classifies as a transient
+	// network drop (ClassTransientNetwork) — the disrupt producer's auto-resume
+	// case. A server_error is transient regardless of text.
+	rec := &transcript.ErrorRecord{
+		Kind: kind, Text: "API Error: The socket connection was closed unexpectedly",
+		At: at, IsTerminal: terminal,
+	}
 	return &aggregate.SessionView{
 		Session: &session.Session{SessionID: sid, PID: 1, Status: session.Idle},
 		SessionEnrichment: aggregate.SessionEnrichment{
-			LastError: &transcript.ErrorRecord{
-				Kind: kind, Text: "API Error: ...",
-				At: at, IsTerminal: terminal, IsRetryable: kind.IsRetryable(),
-			},
+			LastError:          rec,
+			LastErrorRetryable: transcript.Retryable(rec),
 		},
 	}
 }
