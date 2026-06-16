@@ -45,6 +45,55 @@ type fakeExister struct{ ok bool }
 
 func (f fakeExister) Exists(string) bool { return f.ok }
 
+// TestTmuxName_sanitizesTargetSeparators locks the session-name sanitizer: tmux
+// treats '.' and ':' as target separators (session.window.pane), silently
+// rewriting them to '_' on new-session and failing to resolve them on
+// has-session. A sub-bead external_id like "...zr-fy5j5.1..." must therefore be
+// mapped to the '_' form so create/has-session/kill all address one stored name.
+func TestTmuxName_sanitizesTargetSeparators(t *testing.T) {
+	if got := TmuxName("cc-", "pr-pool-worker-zr-fy5j5.1-stamp"); got != "cc-pr-pool-worker-zr-fy5j5_1-stamp" {
+		t.Errorf("TmuxName dotted = %q, want cc-pr-pool-worker-zr-fy5j5_1-stamp", got)
+	}
+	if got := TmuxName("cc-", "a:b.c"); got != "cc-a_b_c" {
+		t.Errorf("TmuxName colon+dot = %q, want cc-a_b_c", got)
+	}
+	if got := TmuxName("cc-", "plain-ext"); got != "cc-plain-ext" {
+		t.Errorf("TmuxName plain = %q, want cc-plain-ext (unchanged)", got)
+	}
+}
+
+// TestEnsure_sanitizesDottedExternalIDInTmuxName is the regression for the
+// sub-bead dispatch failure: an external_id with a '.' (e.g. worker bead
+// "zr-fy5j5.1") must reach tmux as the '_'-sanitized session name, so the name
+// ccpool creates, finds, and kills all match the one tmux stores. Without the
+// fix, NewSession is called with the dotted name; tmux rewrites it to '_' and a
+// later has-session can't find it, producing "duplicate session" on re-create.
+func TestEnsure_sanitizesDottedExternalIDInTmuxName(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+
+	if _, err := s.Ensure(ctx, "pr-pool-worker-zr-fy5j5.1-stamp", "/tmp/proj", "", EnsureOpts{}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	if got := ft.newCalls[0].name; got != "cc-pr-pool-worker-zr-fy5j5_1-stamp" {
+		t.Errorf("tmux session name = %q, want sanitized cc-pr-pool-worker-zr-fy5j5_1-stamp", got)
+	}
+}
+
 // a store-backed test using the real store + a hook-like transition to ready.
 func TestEnsure_brandNewWhenNoRow(t *testing.T) {
 	ctx := context.Background()

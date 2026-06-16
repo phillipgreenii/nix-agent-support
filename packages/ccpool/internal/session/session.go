@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/eventlog"
@@ -139,8 +140,31 @@ type EnsureOpts struct {
 	Effort         string
 }
 
+// tmuxSafe maps the characters tmux treats as target separators ('.' and ':',
+// the session.window.pane delimiters) to '_'. tmux silently rewrites them on
+// `new-session` and cannot resolve them on `has-session`, so an external_id that
+// carries one (e.g. a sub-bead id "zr-fy5j5.1") would create a session under a
+// name we could neither find nor kill. Sanitizing here makes create/has-session/
+// kill all address the single name tmux actually stores.
+func tmuxSafe(s string) string {
+	return strings.NewReplacer(".", "_", ":", "_").Replace(s)
+}
+
+// TmuxName is the canonical tmux session name for an external_id: prefix + id,
+// sanitized so it round-trips through tmux. Every site that addresses a session
+// (create, has-session, kill, attach, doctor) MUST go through this so they agree
+// on one name. Exported because cmd/ccpool builds the same name outside this
+// package; this is the single source of truth for the convention.
+//
+// Mapping only '.'/':' is collision-free for bd's ID alphabet: bead ids use
+// '-' and '.' but never '_', so two distinct external_ids cannot fold onto one
+// name (and the per-attempt timestamp stamp further disambiguates same-bead ids).
+func TmuxName(prefix, externalID string) string {
+	return tmuxSafe(prefix + externalID)
+}
+
 // Ensure returns a live, ready handle for externalID, launching/resuming/pruning
-// as needed (ADR 0015). tmux session name = Prefix + externalID.
+// as needed (ADR 0015). tmux session name = tmuxName(Prefix, externalID).
 func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opts EnsureOpts) (Handle, error) {
 	var h Handle
 	err := s.withLock(externalID, func() error {
@@ -159,7 +183,7 @@ func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opt
 //     guarded against the fresh-session race (don't prune a young `starting` row).
 //  5. no row → brand-new: generate claude_session_id, Insert(Starting), launch.
 func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model string, opts EnsureOpts) (Handle, error) {
-	tmuxName := s.d.Prefix + externalID
+	tmuxName := TmuxName(s.d.Prefix, externalID)
 	row, exists, err := s.d.Store.GetByExternalID(ctx, externalID)
 	if err != nil {
 		return Handle{}, err

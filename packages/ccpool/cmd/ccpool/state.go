@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/state"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
@@ -53,7 +54,7 @@ func runState(args []string) int {
 	}
 
 	cl := tmux.NewClient(cfg.Tmux.Socket)
-	tmuxName := cfg.Tmux.Prefix + externalID
+	tmuxName := session.TmuxName(cfg.Tmux.Prefix, externalID)
 	// Awaiting wraps claude-transcript's IsAwaitingInput over the row's transcript
 	// path; an empty path means there is nothing to await (false, no read).
 	awaiting := func() (bool, error) {

@@ -27,7 +27,7 @@ func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode
 }
 
 func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mode Mode) (Result, error) {
-	tmuxName := s.d.Prefix + externalID
+	tmuxName := TmuxName(s.d.Prefix, externalID)
 	row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
 	if err != nil {
 		return Result{}, err

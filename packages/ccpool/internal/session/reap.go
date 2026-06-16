@@ -24,7 +24,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// (don't prune a young `starting` row that hasn't written a transcript yet).
 	var live []store.Session
 	for _, r := range rows {
-		if s.d.Tmux.HasSession(s.d.Prefix + r.ExternalID) {
+		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) {
 			live = append(live, r)
 			continue
 		}

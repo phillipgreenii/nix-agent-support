@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
 	"github.com/phillipgreenii/ccpool/internal/trust"
@@ -44,7 +45,7 @@ func runDoctor(args []string) int {
 	claudeJSON := filepath.Join(home, ".claude.json")
 
 	report := func(r store.Session) {
-		live := cl.HasSession(cfg.Tmux.Prefix + r.ExternalID)
+		live := cl.HasSession(session.TmuxName(cfg.Tmux.Prefix, r.ExternalID))
 		// cwd-trust is one of the three hang causes doctor must distinguish (§20):
 		// untrusted cwd, dropped send-key, or missing/failed hook.
 		trusted := r.CWD != "" && trust.IsTrusted(claudeJSON, r.CWD)

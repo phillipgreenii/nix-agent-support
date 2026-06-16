@@ -74,7 +74,7 @@ func (s *Service) Cancel(ctx context.Context, externalID string) error {
 }
 
 func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
-	tmuxName := s.d.Prefix + externalID
+	tmuxName := TmuxName(s.d.Prefix, externalID)
 	if !s.d.Tmux.HasSession(tmuxName) {
 		return fmt.Errorf("session %q is not live", externalID)
 	}
@@ -122,7 +122,7 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 // is gone from disk. --purge additionally deletes the store row immediately.
 func (s *Service) Close(ctx context.Context, externalID string, purge bool) error {
 	return s.withLock(externalID, func() error {
-		tmuxName := s.d.Prefix + externalID
+		tmuxName := TmuxName(s.d.Prefix, externalID)
 		if s.d.Tmux.HasSession(tmuxName) {
 			// deliverCommand clears the input line itself, so no separate clear here.
 			if err := s.deliverCommand(tmuxName, "/exit"); err != nil {

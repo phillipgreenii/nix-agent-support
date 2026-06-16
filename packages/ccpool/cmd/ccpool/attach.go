@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/session"
 )
 
 func runAttach(args []string) int {
@@ -22,7 +23,7 @@ func runAttach(args []string) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
-	target := cfg.Tmux.Prefix + fs.Arg(0)
+	target := session.TmuxName(cfg.Tmux.Prefix, fs.Arg(0))
 	tmuxBin, err := exec.LookPath("tmux")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tmux not found")
