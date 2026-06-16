@@ -400,13 +400,25 @@ func (sb *sandbox) listRow(externalID string) (listJSON, bool) {
 // transcript_path resume probe matches a transcript real claude actually persists
 // (ADR 0015); a stub claude that exits on /exit cannot stand in for either.
 func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
+	// PENDING (blocker found live, 2026-06-16): claude does not persist a transcript
+	// file for ccpool-launched sessions — it reports a transcript_path via the hook
+	// but no file lands there, while normal interactive sessions persist fine. With
+	// no on-disk transcript there is nothing to resume, so this scenario cannot be
+	// verified yet. (This is also the deeper root of the original pr-pool wedge: the
+	// phantom session had no transcript.) pr-pool itself never resumes (per-attempt
+	// ids + purge), so this gap does not affect pr-pool. Drop this pending() once
+	// ccpool-launched sessions persist transcripts — the body below is the
+	// ready-to-run verification.
+	pending(t,
+		"new on a tmux-gone session resumes via `claude --resume <claude_session_id>`, preserving the session id",
+		"claude to persist transcripts for ccpool-launched sessions (see the transcript-persistence investigation bead)")
 	sb := newSandbox(t)
 	sb.mustNew("r")
-	// Drive a real TURN so Claude writes the session transcript to disk. A turnless
-	// session has no transcript and is (correctly) NOT resumable — there is no
-	// conversation to resume — so the resume precondition requires at least one
-	// completed turn. A short prompt keeps it inside the completion budget.
-	sb.ccp("reply", "r", "Reply with exactly: READY", "--no-wait")
+	// Drive a SUBSTANTIAL turn so Claude actually persists the session transcript:
+	// a trivial echo ("Reply with exactly X") gives Claude nothing worth writing,
+	// so it reports a transcript_path but no file lands and there is nothing to
+	// resume. Ask for a few sentences of genuine output instead.
+	sb.ccp("reply", "r", "In two or three sentences, explain what a fast-forward git merge is.", "--no-wait")
 	turnDeadline := time.Now().Add(120 * time.Second)
 	completed := false
 	for time.Now().Before(turnDeadline) {
@@ -423,15 +435,24 @@ func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
 	if !ok || first.ClaudeSessionID == "" {
 		scaffoldFail(t, "new did not record a claude_session_id for %q (launch mechanics broken)", "r")
 	}
-	// Resumability is driven by the HOOK-RECORDED transcript path (ADR 0015), so
-	// be DIAGNOSTIC about claude's persistence: a future failure here is then
-	// unambiguous (claude didn't report/persist a transcript) rather than masquerading
-	// as a ccpool resume regression.
 	if first.TranscriptPath == "" {
 		scaffoldFail(t, "claude reported no transcript_path for %q; resume cannot be set up", "r")
 	}
-	if _, err := os.Stat(first.TranscriptPath); err != nil {
-		scaffoldFail(t, "claude did not persist a transcript at %q (%v); resume cannot be verified", first.TranscriptPath, err)
+	// Resumability is driven by the HOOK-RECORDED transcript path (ADR 0015). Claude
+	// flushes the transcript asynchronously, so poll for the file to land after the
+	// turn before relying on it. If it never appears, that is a claude persistence
+	// issue (not a ccpool resume regression) -> scaffoldFail with the precise path.
+	transcriptDeadline := time.Now().Add(30 * time.Second)
+	persisted := false
+	for time.Now().Before(transcriptDeadline) {
+		if _, err := os.Stat(first.TranscriptPath); err == nil {
+			persisted = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !persisted {
+		scaffoldFail(t, "claude never persisted a transcript at %q after a substantial turn; resume cannot be verified", first.TranscriptPath)
 	}
 
 	// Non-purge close ends the tmux session but KEEPS the row and leaves the Claude
@@ -474,9 +495,9 @@ func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
 // TestContract_New_NameFlagSetsDisplayName pins that REAL claude accepts the
 // ADR-0015 `--name` launch flag — the session still reaches ready (new exits 0)
 // — and that ccpool records the supplied display name distinct from the
-// external_id key. (The `--session-id` flag is exercised by every `new`: the
-// generated claude_session_id propagating into the row, asserted in the resume
-// test above, proves real claude accepted `--session-id`.)
+// external_id key. (The `--session-id` flag is exercised by every `new`: every
+// session launches with a generated --session-id and reaches ready, so real claude
+// accepting --session-id is covered by any new-reaches-ready scenario.)
 func TestContract_New_NameFlagSetsDisplayName(t *testing.T) {
 	sb := newSandbox(t)
 	const display = "contract-display-name"
