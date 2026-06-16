@@ -113,3 +113,10 @@ func TestWorkerBudget_envOverrides(t *testing.T) {
 		t.Errorf("env overrides not applied: %+v", b)
 	}
 }
+
+func TestLoad_logDirIsStandardPath(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/xdg/state")
+	if got, want := Load().LogDir, "/xdg/state/pr-pool"; got != want {
+		t.Errorf("LogDir = %q, want %q (standard path, no /log subdir)", got, want)
+	}
+}

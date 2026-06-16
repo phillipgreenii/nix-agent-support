@@ -78,7 +78,7 @@ func Default() Config {
 		ReminderPct:     0.725,
 		CancelPct:       0.90,
 		HardPct:         1.00,
-		LogDir:          state + "/pr-pool/log",
+		LogDir:          state + "/pr-pool",
 		ReminderMsg:     "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
 		WrapUpMsg:       "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
 	}
