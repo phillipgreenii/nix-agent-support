@@ -155,3 +155,33 @@ func TestLastAPIErrorIsTerminalSurvivesAnotherSyntheticError(t *testing.T) {
 		t.Error("IsTerminal = false, want true (second synthetic error is not a resume)")
 	}
 }
+
+// TestLastAPIErrorDetectsStreamIdleTimeout guards bead pg2-lpxq: Claude Code
+// emits "API Error: Stream idle timeout - partial response received" as a
+// synthetic isApiErrorMessage with error="unknown" (verified against real
+// transcripts, 2026-06-16). It must classify as a terminal, retryable unknown
+// disrupt with no text-matching special-case.
+func TestLastAPIErrorDetectsStreamIdleTimeout(t *testing.T) {
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	const text = "API Error: Stream idle timeout - partial response received"
+	path := t.TempDir() + "/t.jsonl"
+	if err := writeTestFile(path, apiErrorEvent(ts, ErrUnknown, text)+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LastAPIError(path)
+	if err != nil {
+		t.Fatalf("LastAPIError err = %v, want nil", err)
+	}
+	if got.Kind != ErrUnknown {
+		t.Errorf("Kind = %q, want %q", got.Kind, ErrUnknown)
+	}
+	if got.Text != text {
+		t.Errorf("Text = %q, want %q", got.Text, text)
+	}
+	if !got.IsTerminal {
+		t.Error("IsTerminal = false, want true (no event follows)")
+	}
+	if !got.IsRetryable {
+		t.Error("IsRetryable = false, want true (unknown is retryable)")
+	}
+}

@@ -176,3 +176,25 @@ func TestSnapshotLastErrorNilWhenNoApiError(t *testing.T) {
 		t.Errorf("LastError = %+v, want nil", snap.LastError)
 	}
 }
+
+// TestScanSurfacesStreamIdleTimeout mirrors TestLastAPIErrorDetectsStreamIdleTimeout
+// at the Snapshot level: Scan must populate LastError for the unknown-kind
+// stream-idle-timeout event so it reaches the poller/TUI. (bead pg2-lpxq)
+func TestScanSurfacesStreamIdleTimeout(t *testing.T) {
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	const text = "API Error: Stream idle timeout - partial response received"
+	path := t.TempDir() + "/t.jsonl"
+	if err := writeTestFile(path, apiErrorEvent(ts, ErrUnknown, text)+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan err = %v, want nil", err)
+	}
+	if snap.LastError == nil {
+		t.Fatal("LastError = nil, want populated stream-idle-timeout error")
+	}
+	if snap.LastError.Kind != ErrUnknown || !snap.LastError.IsRetryable || !snap.LastError.IsTerminal {
+		t.Errorf("LastError = %+v, want unknown/retryable/terminal", snap.LastError)
+	}
+}
