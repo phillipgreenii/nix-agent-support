@@ -17,3 +17,4 @@
 | [0012](0012-pg-pr-fingerprint-driven-daemon-sync.md)             | pg-pr fingerprint-driven daemon sync                          | Accepted | 2026-06-09 |
 | [0013](0013-pg-pr-otlp-logs-via-otelslog.md)                     | pg-pr daemon OTLP logs via the otelslog bridge                | Accepted | 2026-06-09 |
 | [0014](0014-ccpool-reap-all-pool-registry.md)                    | ccpool reap-all over a permanent pool registry                | Accepted | 2026-06-15 |
+| [0015](0015-ccpool-session-facts-not-work-judgments.md)          | ccpool tracks session facts, not work judgments               | Accepted | 2026-06-16 |
