@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	"github.com/phillipgreenii/ccpool/internal/lock"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/session"
@@ -70,7 +71,10 @@ func buildService() (*session.Service, *store.Store, int) {
 // govern many pools in one process — loading each pool's Config via
 // config.LoadForPool and building its service without mutating CCPOOL_POOL.
 func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
-	st, err := store.Open(cfg.DBPath, clock.Real{})
+	// Open the append-only event log; never block the command on a logging
+	// failure (mirrors the hook's never-fail policy — a nil Logger is a no-op).
+	el := openEventLog(cfg)
+	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return nil, nil, 1
@@ -85,6 +89,7 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		Lock:       lock.New(cfg.RuntimeDir),
 		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
 		NotifyOn:   cfg.Notify.On,
+		Events:     el,
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,
@@ -95,4 +100,17 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		Sleep:      time.Sleep,
 	})
 	return svc, st, 0
+}
+
+// openEventLog opens the active pool's append-only JSONL event log. A failure is
+// non-fatal — it logs to stderr and returns nil (a nil *eventlog.Logger is a
+// no-op), so event logging never blocks a command (cf. the hook's never-fail
+// policy). Wire the result into both store.WithEventLog and session.Deps.Events.
+func openEventLog(cfg config.Config) *eventlog.Logger {
+	el, err := eventlog.Open(cfg.EventLogPath())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "event log:", err)
+		return nil
+	}
+	return el
 }

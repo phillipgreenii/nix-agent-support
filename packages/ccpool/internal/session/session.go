@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
@@ -79,8 +80,9 @@ type Deps struct {
 	Wait       Waiter
 	Transcript Transcript
 	Lock       Locker
-	Notify     notify.Notifier // optional (nil = no-op); fires the §8.3 fallback edge (§10)
-	NotifyOn   []string        // states that trigger a notification
+	Notify     notify.Notifier  // optional (nil = no-op); fires the §8.3 fallback edge (§10)
+	NotifyOn   []string         // states that trigger a notification
+	Events     *eventlog.Logger // optional (nil = no-op); records ordered input actions
 	Socket     string
 	Prefix     string
 	PoolPath   string // canonical pool dir; injected as CCPOOL_POOL into sessions; "" = default mode

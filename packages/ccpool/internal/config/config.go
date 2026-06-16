@@ -143,3 +143,7 @@ func loadFrom(pc PoolContext) (Config, error) {
 
 // Helpers used by later plans / convenience accessors.
 func (c Config) DoneTTL() time.Duration { return time.Duration(c.List.DoneTTL) }
+
+// EventLogPath is the active pool's append-only JSONL event log
+// (<state-dir>/events.jsonl), sitting beside hook.log. See internal/eventlog.
+func (c Config) EventLogPath() string { return filepath.Join(c.StateDir, "events.jsonl") }

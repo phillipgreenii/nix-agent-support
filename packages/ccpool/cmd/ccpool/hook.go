@@ -45,7 +45,11 @@ func runHook(args []string) int {
 		logHook(stateDir, fmt.Sprintf("hook %s: config load: %v", event, err))
 		return 0
 	}
-	st, err := store.Open(cfg.DBPath, clock.Real{})
+	// Wire the append-only event log so hook-driven transitions are recorded in
+	// order (nil-safe — a failed Open is non-fatal, mirroring the never-fail
+	// policy below).
+	el := openEventLog(cfg)
+	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
 		logHook(stateDir, fmt.Sprintf("hook %s: store open: %v", event, err))
 		return 0

@@ -64,7 +64,7 @@ func (s *Service) sendLocked(ctx context.Context, name, prompt string, mode Mode
 		return Result{}, err
 	}
 
-	if err := s.deliverPrompt(tmuxName, prompt); err != nil {
+	if err := s.deliverPrompt(name, tmuxName, prompt); err != nil {
 		return Result{}, fmt.Errorf("deliver prompt: %w", err)
 	}
 
@@ -81,16 +81,24 @@ func (s *Service) sendLocked(ctx context.Context, name, prompt string, mode Mode
 
 // deliverPrompt clears the input line, then delivers the body via bracketed
 // paste (leading-`/` space-guarded so a path/regex isn't run as a command,
-// spec §8.3/§4), then submits with Enter.
-func (s *Service) deliverPrompt(tmuxName, prompt string) error {
+// spec §8.3/§4), then submits with Enter. Each step is recorded to the event
+// log as an ordered input action (nil-safe). The paste detail is a short note —
+// NEVER the prompt body — so prompt contents stay out of the log.
+func (s *Service) deliverPrompt(name, tmuxName, prompt string) error {
 	body := guardLeadingSlash(prompt)
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
+	_ = s.d.Events.Input(s.d.Now(), name, "clear-input", "C-u")
 	if err := s.d.Tmux.Paste(tmuxName, body); err != nil {
 		return err
 	}
-	return s.d.Tmux.SendKeys(tmuxName, "Enter")
+	_ = s.d.Events.Input(s.d.Now(), name, "paste", "prompt delivered")
+	if err := s.d.Tmux.SendKeys(tmuxName, "Enter"); err != nil {
+		return err
+	}
+	_ = s.d.Events.Input(s.d.Now(), name, "enter", "")
+	return nil
 }
 
 // clearInput empties the prompt box so leftover text can't concatenate (spec §4).

@@ -62,7 +62,8 @@ func runNew(args []string) int {
 		m = cfg.Claude.DefaultModel
 	}
 
-	st, err := store.Open(cfg.DBPath, clock.Real{})
+	el := openEventLog(cfg)
+	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
@@ -76,6 +77,7 @@ func runNew(args []string) int {
 		Store:     st,
 		Wait:      storeWaiter{st: st, timeout: time.Duration(cfg.Wait.Timeout)},
 		Lock:      lock.New(cfg.RuntimeDir),
+		Events:    el,
 		Socket:    cfg.Tmux.Socket,
 		Prefix:    cfg.Tmux.Prefix,
 		PluginDir: cfg.Claude.PluginDir,

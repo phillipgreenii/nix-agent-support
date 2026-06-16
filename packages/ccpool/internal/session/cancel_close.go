@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/pane"
@@ -94,6 +95,8 @@ func (s *Service) cancelLocked(ctx context.Context, name string) error {
 			return fmt.Errorf("send Escape: %w", err)
 		}
 	}
+	// Record the Escape burst as ONE ordered input action (detail = the count).
+	_ = s.d.Events.Input(s.d.Now(), name, "escape-burst", strconv.Itoa(escapeBurst))
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}

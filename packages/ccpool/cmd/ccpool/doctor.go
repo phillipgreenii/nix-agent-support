@@ -20,8 +20,8 @@ func doctorPoolHeader(cfg config.Config) string {
 	if root == "" {
 		root = "default (XDG)"
 	}
-	return fmt.Sprintf("pool: %s\n  db:     %s\n  socket: %s\n  hook.log: %s\n",
-		root, cfg.DBPath, cfg.Tmux.Socket, filepath.Join(cfg.StateDir, "hook.log"))
+	return fmt.Sprintf("pool: %s\n  db:     %s\n  socket: %s\n  hook.log: %s\n  events.jsonl: %s\n",
+		root, cfg.DBPath, cfg.Tmux.Socket, filepath.Join(cfg.StateDir, "hook.log"), cfg.EventLogPath())
 }
 
 func runDoctor(args []string) int {

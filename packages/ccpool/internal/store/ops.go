@@ -117,6 +117,10 @@ func (s *Store) Transition(ctx context.Context, name string, to State, uuid, tra
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	// Record the transition to the append-only event log (nil-safe no-op when no
+	// log is wired). Uses the store's injected clock so a fake clock yields a
+	// deterministic ts; transcriptPath is the optional claude-session line ref.
+	_ = s.events.Transition(s.clock.Now(), name, string(prior), string(to), uuid, transcriptPath)
 	return prior, nil
 }
 

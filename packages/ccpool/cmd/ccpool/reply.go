@@ -44,7 +44,8 @@ func runReply(args []string) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
-	st, err := store.Open(cfg.DBPath, clock.Real{})
+	el := openEventLog(cfg)
+	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
@@ -61,6 +62,7 @@ func runReply(args []string) int {
 		Lock:       lock.New(cfg.RuntimeDir),
 		Notify:     notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command),
 		NotifyOn:   cfg.Notify.On,
+		Events:     el,
 		Socket:     cfg.Tmux.Socket,
 		Prefix:     cfg.Tmux.Prefix,
 		PluginDir:  cfg.Claude.PluginDir,

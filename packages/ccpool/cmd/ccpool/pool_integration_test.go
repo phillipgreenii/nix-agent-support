@@ -12,7 +12,7 @@ import (
 
 func TestDoctorHeader_poolContext(t *testing.T) {
 	got := doctorPoolHeader(config.Config{PoolRoot: "/pools/alpha", DBPath: "/pools/alpha/store.db", StateDir: "/pools/alpha", Tmux: config.Tmux{Socket: "cc-abc123"}})
-	for _, want := range []string{"/pools/alpha", "store.db", "cc-abc123", "hook.log"} {
+	for _, want := range []string{"/pools/alpha", "store.db", "cc-abc123", "hook.log", "events.jsonl"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("doctor header missing %q:\n%s", want, got)
 		}

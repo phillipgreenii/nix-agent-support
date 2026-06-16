@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
+	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	_ "modernc.org/sqlite"
 )
 
@@ -44,12 +45,23 @@ type Session struct {
 }
 
 type Store struct {
-	db    *sql.DB
-	clock clock.Clock
+	db     *sql.DB
+	clock  clock.Clock
+	events *eventlog.Logger // optional; nil-safe (a nil Logger's methods no-op)
+}
+
+// Option configures a Store at Open time (functional options, so existing
+// callers stay source-compatible).
+type Option func(*Store)
+
+// WithEventLog wires an append-only event log so every Transition is recorded
+// as an ordered state-transition event. l may be nil (the Logger is nil-safe).
+func WithEventLog(l *eventlog.Logger) Option {
+	return func(s *Store) { s.events = l }
 }
 
 // Open opens dbPath (":memory:" for tests) with WAL + busy_timeout and migrates.
-func Open(dbPath string, c clock.Clock) (*Store, error) {
+func Open(dbPath string, c clock.Clock, opts ...Option) (*Store, error) {
 	if dbPath != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 			return nil, fmt.Errorf("mkdir db parent: %w", err)
@@ -74,7 +86,11 @@ func Open(dbPath string, c clock.Clock) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &Store{db: db, clock: c}, nil
+	s := &Store{db: db, clock: c}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
