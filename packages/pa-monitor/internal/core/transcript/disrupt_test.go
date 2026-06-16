@@ -16,6 +16,7 @@ func TestErrorKindIsRetryable(t *testing.T) {
 		{ErrRateLimit, false},
 		{ErrInvalidRequest, false},
 		{ErrAuthFailed, false},
+		{ErrModelNotFound, false},
 		{ErrorKind(""), false},
 	}
 	for _, tt := range tests {
@@ -153,6 +154,31 @@ func TestLastAPIErrorIsTerminalSurvivesAnotherSyntheticError(t *testing.T) {
 	}
 	if !got.IsTerminal {
 		t.Error("IsTerminal = false, want true (second synthetic error is not a resume)")
+	}
+}
+
+// TestLastAPIErrorDetectsModelNotFound covers the model_not_found kind, which
+// Claude Code emits when the selected model is unavailable (verified against
+// real transcripts, 2026-06-16). It is non-retryable (human must fix the model).
+func TestLastAPIErrorDetectsModelNotFound(t *testing.T) {
+	ts := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	const text = "There's an issue with the selected model (claude-fable-5). It may not exist or you may not have access."
+	path := t.TempDir() + "/t.jsonl"
+	if err := writeTestFile(path, apiErrorEvent(ts, ErrModelNotFound, text)+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LastAPIError(path)
+	if err != nil {
+		t.Fatalf("LastAPIError err = %v, want nil", err)
+	}
+	if got.Kind != ErrModelNotFound {
+		t.Errorf("Kind = %q, want %q", got.Kind, ErrModelNotFound)
+	}
+	if got.IsRetryable {
+		t.Error("IsRetryable = true, want false (model_not_found needs human fix)")
+	}
+	if !got.IsTerminal {
+		t.Error("IsTerminal = false, want true")
 	}
 }
 

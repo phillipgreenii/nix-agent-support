@@ -147,7 +147,7 @@ func Scan(path string) (Snapshot, error) {
 			if aux.IsApiErrorMessage {
 				k := ErrorKind(aux.Error)
 				switch k {
-				case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed:
+				case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed, ErrModelNotFound:
 					var text string
 					for _, c := range ev.Message.Content {
 						if c.Type == "text" {

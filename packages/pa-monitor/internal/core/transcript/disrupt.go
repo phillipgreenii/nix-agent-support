@@ -19,6 +19,7 @@ const (
 	ErrServerError    ErrorKind = "server_error"
 	ErrInvalidRequest ErrorKind = "invalid_request"
 	ErrAuthFailed     ErrorKind = "authentication_failed"
+	ErrModelNotFound  ErrorKind = "model_not_found"
 )
 
 // IsRetryable reports whether the disrupt producer treats this kind as
@@ -108,7 +109,7 @@ func LastAPIError(path string) (ErrorRecord, error) {
 		}
 		kind := ErrorKind(ev.Error)
 		switch kind {
-		case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed:
+		case ErrRateLimit, ErrUnknown, ErrServerError, ErrInvalidRequest, ErrAuthFailed, ErrModelNotFound:
 		default:
 			continue
 		}
