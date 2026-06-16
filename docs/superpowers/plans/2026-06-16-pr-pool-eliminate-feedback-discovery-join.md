@@ -641,7 +641,7 @@ This is a runbook the deploying agent executes; it produces no committed code. R
 
 Build/deploy the new pg-pr so it begins stamping `mine` on new self-owned cycles. The old pr-pool join is still running and continues to discover everything correctly.
 
-- [ ] **Step 2: Backfill any open cycle (expected no-op — 0 open cycles)**
+- [ ] **Step 2: Backfill open self-owned cycles** — do NOT assume zero. There can be many open `process-feedback:` cycles at cutover (29 on 2026-06-16, 13 self-owned). Skipping this strands every pre-existing self-cycle: after the Step 4 flip they carry no `mine` and are silently dropped by discovery (`drain` reports `feedback=0`). Run it and confirm Step 3 prints nothing before flipping.
 
 ```bash
 SELF_LOGIN=$(pg-pr config show --json | jq -r .self_login)
@@ -651,7 +651,7 @@ bd list --type=task --status=open --json --limit 0 \
   | while read -r cycle; do
       parent=$(bd dep list "$cycle" --direction=down --json | jq -r '.[0].id // empty')
       [ -z "$parent" ] && continue
-      author=$(bd show "$parent" --json | jq -r '.metadata.author // ""')
+      author=$(bd show "$parent" --json | jq -r '.[0].metadata.author // ""')  # bd show --json returns a 1-element array
       [ "$author" = "$SELF_LOGIN" ] && bd update "$cycle" --add-label mine
     done
 ```
