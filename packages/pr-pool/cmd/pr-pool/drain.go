@@ -44,14 +44,18 @@ func runDrain(args []string) int {
 
 	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
 
+	slog.Info("drain starting", "repo", cfg.RepoRoot)
 	if err := precheck(ctx, cfg, br); err != nil {
 		fmt.Fprintln(os.Stderr, "precheck:", err)
 		return exitPrecheck
 	}
-	if _, err := resolveSelf(ctx); err != nil {
+	slog.Info("precheck ok", "prefix", cfg.BeadsPrefix)
+	selfLogin, err := resolveSelf(ctx)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "resolve self:", err)
 		return exitPrecheck
 	}
+	slog.Info("resolved self", "login", selfLogin)
 
 	o := &orchestrator.Orchestrator{
 		CC:  ccpool.NewCLIRunner(cfg),

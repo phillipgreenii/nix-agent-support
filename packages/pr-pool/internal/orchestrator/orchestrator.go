@@ -85,8 +85,11 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
-	o.drain(ctx, o.Reg.Feedback, dispatches)
-	o.drain(ctx, o.Reg.Worker, dispatches)
+	nFb, nWk := countByRole(dispatches)
+	slog.Info("discover", "found", len(dispatches), "feedback", nFb, "worker", nWk)
+	cFb, fFb := o.drain(ctx, o.Reg.Feedback, dispatches)
+	cWk, fWk := o.drain(ctx, o.Reg.Worker, dispatches)
+	slog.Info("done", "complete", cFb+cWk, "flagged", fFb+fWk)
 	return nil
 }
 
@@ -106,7 +109,7 @@ func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) e
 	return o.workOneWithID(ctx, d, externalID)
 }
 
-func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) {
+func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) (complete, flagged int) {
 	worked := 0
 	for _, d := range all {
 		if d.Role.Kind != role.Kind {
@@ -115,13 +118,31 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 		if worked >= role.Cap {
 			break
 		}
+		slog.Info("dispatching", "role", role.Name, "bead", d.BeadID)
 		if err := o.workOne(ctx, d); err != nil {
 			slog.Warn("bead flagged", "role", role.Name, "bead", d.BeadID, "err", err)
+			flagged++
 		} else {
 			slog.Info("bead complete", "role", role.Name, "bead", d.BeadID)
+			complete++
 		}
 		worked++
 	}
+	return complete, flagged
+}
+
+// countByRole tallies dispatches by role kind. Feeds the "discover" progress
+// marker so the operator sees the role split before any session is started.
+func countByRole(all []discover.DispatchContext) (feedback, worker int) {
+	for _, d := range all {
+		switch d.Role.Kind {
+		case roles.Feedback:
+			feedback++
+		case roles.Worker:
+			worker++
+		}
+	}
+	return feedback, worker
 }
 
 // workOne dispatches a single bead: Ensure a fresh per-bead session, Send the
@@ -343,19 +364,23 @@ func (o *Orchestrator) active(ctx context.Context, externalID string) bool {
 // teardownAll closes every session whose name carries pr-pool's prefix — this
 // pass's sessions AND strays left by a crashed prior run (the only self-healing
 // behavior). Sessions outside the prefix are left untouched.
-func (o *Orchestrator) teardownAll(ctx context.Context) {
+func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
 	sessions, err := o.CC.List(ctx)
 	if err != nil {
 		slog.Warn("teardown list failed", "err", err)
-		return
+		return 0
 	}
 	for _, s := range sessions {
 		if strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
 			if err := o.CC.Close(ctx, s.ExternalID, true); err != nil {
 				slog.Warn("teardown close failed", "session", s.ExternalID, "err", err)
+				continue
 			}
+			closed++
 		}
 	}
+	slog.Info("teardown", "closed", closed)
+	return closed
 }
 
 func (o *Orchestrator) gated() bool {

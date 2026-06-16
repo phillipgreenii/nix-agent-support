@@ -826,3 +826,63 @@ func TestActive_stateMapping(t *testing.T) {
 		})
 	}
 }
+
+// --- progress-marker support: computed values behind the new slog.Info markers ---
+
+// TestCountByRole locks the role tally that feeds the "discover" progress marker
+// (found=N feedback=X worker=Y).
+func TestCountByRole(t *testing.T) {
+	reg := roles.NewRegistry(fastCfg())
+	ds := []discover.DispatchContext{
+		{Role: reg.Feedback, BeadID: "zr-c1"},
+		{Role: reg.Worker, BeadID: "zr-w1"},
+		{Role: reg.Worker, BeadID: "zr-w2"},
+	}
+	fb, wk := countByRole(ds)
+	if fb != 1 || wk != 2 {
+		t.Errorf("countByRole = (feedback=%d worker=%d), want (1, 2)", fb, wk)
+	}
+}
+
+// TestDrain_returnsCompleteAndFlaggedCounts locks the per-role tally that feeds
+// the "done" progress marker (complete=C flagged=F). One feedback bead closes
+// (complete); the other never completes and times out (flagged).
+func TestDrain_returnsCompleteAndFlaggedCounts(t *testing.T) {
+	cfg := fastCfg()
+	cfg.MaxFeedback = 3 // allow all three feedback dispatches through the cap
+	bd := &scriptBD{statusSeq: map[string][]string{
+		"zr-ok":  {"closed"},      // DoneSignal on first poll => complete
+		"zr-ok2": {"closed"},      // a second completion => asymmetric (2,1) catches a complete/flagged field swap
+		"zr-bad": {"in_progress"}, // never completes => timeout => flagged
+	}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{
+		{ExternalID: "pr-pool-feedback-processor-zr-ok", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-processor-zr-ok2", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-processor-zr-bad", Live: true, State: ccpool.StateWorking},
+	}}}
+	o := newOrch(cc, bd, cfg)
+	ds := []discover.DispatchContext{
+		{Role: o.Reg.Feedback, BeadID: "zr-ok"},
+		{Role: o.Reg.Feedback, BeadID: "zr-ok2"},
+		{Role: o.Reg.Feedback, BeadID: "zr-bad"},
+	}
+	complete, flagged := o.drain(context.Background(), o.Reg.Feedback, ds)
+	if complete != 2 || flagged != 1 {
+		t.Errorf("drain counts = (complete=%d flagged=%d), want (2, 1); updates=%v", complete, flagged, bd.updates)
+	}
+}
+
+// TestTeardownAll_returnsClosedCount locks the count that feeds the "teardown"
+// progress marker (closed=N) — only pr-pool-prefixed sessions are counted.
+func TestTeardownAll_returnsClosedCount(t *testing.T) {
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{
+		{ExternalID: "pr-pool-worker-zr-a", Live: true},
+		{ExternalID: "pr-pool-feedback-processor-zr-b", Live: true},
+		{ExternalID: "cc-unrelated", Live: true},
+	}}}
+	o := newOrch(cc, &scriptBD{}, fastCfg())
+	n := o.teardownAll(context.Background())
+	if n != 2 {
+		t.Errorf("teardownAll closed count = %d, want 2 (pr-pool- sessions only); closed=%v", n, cc.closed)
+	}
+}
