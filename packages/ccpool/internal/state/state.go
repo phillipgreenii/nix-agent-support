@@ -178,7 +178,7 @@ func Classify(in Inputs) Result {
 		res.Question = in.Row.PendingQuestion
 		return res
 	}
-	if in.Row.State == store.Failed {
+	if in.Row.State == store.Errored {
 		res.State = Error
 		return res
 	}

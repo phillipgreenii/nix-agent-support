@@ -27,9 +27,9 @@ func TestClassify(t *testing.T) {
 		{
 			// precedence 1: not live -> not-live, carry row state
 			name:   "not_live_reports_last_known",
-			in:     Inputs{Name: "a", Live: false, Row: store.Session{State: store.Done}},
+			in:     Inputs{Name: "a", Live: false, Row: store.Session{State: store.Idle}},
 			want:   NotLive,
-			wantLK: store.Done,
+			wantLK: store.Idle,
 		},
 		{
 			// precedence 2: in-flight thinking (counter in frame1, fast path)
@@ -76,16 +76,16 @@ func TestClassify(t *testing.T) {
 		{
 			// precedence 3 before 4: waiting wins over a Failed row
 			name:   "waiting_precedes_error",
-			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Awaiting: true, Row: store.Session{State: store.Failed}},
+			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Awaiting: true, Row: store.Session{State: store.Errored}},
 			want:   WaitingForHuman,
-			wantLK: store.Failed,
+			wantLK: store.Errored,
 		},
 		{
 			// precedence 4: settled + Failed row -> error
 			name:   "settled_error_from_failed_row",
-			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Row: store.Session{State: store.Failed}},
+			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Row: store.Session{State: store.Errored}},
 			want:   Error,
-			wantLK: store.Failed,
+			wantLK: store.Errored,
 		},
 		{
 			// precedence 5: settled + Starting row (launching) -> working/thinking
@@ -98,9 +98,9 @@ func TestClassify(t *testing.T) {
 		{
 			// precedence 6: settled, completed turn -> idle
 			name:   "settled_idle_completed_turn",
-			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Row: store.Session{State: store.Done}},
+			in:     Inputs{Name: "a", Live: true, Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3, Row: store.Session{State: store.Idle}},
 			want:   Idle,
-			wantLK: store.Done,
+			wantLK: store.Idle,
 		},
 		{
 			// precedence 6: settled, discarded/rewound (static pane, Ready row) -> idle
@@ -370,7 +370,7 @@ func TestGather_awaitingReadDespiteStreamingDiffOnNonWorkingRow(t *testing.T) {
 func TestGather_notLiveSkipsCapture(t *testing.T) {
 	p := &fakePaner{live: false, panes: []string{"unused"}}
 	sl := &recordingSleep{}
-	row := store.Session{Name: "d", State: store.Done}
+	row := store.Session{Name: "d", State: store.Idle}
 
 	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-d", "d", row)
 	if err != nil {
@@ -379,7 +379,7 @@ func TestGather_notLiveSkipsCapture(t *testing.T) {
 	if res.State != NotLive {
 		t.Errorf("State = %s, want not-live", res.State)
 	}
-	if res.LastKnown != store.Done {
+	if res.LastKnown != store.Idle {
 		t.Errorf("LastKnown = %s, want done", res.LastKnown)
 	}
 	if res.LastText != "" {
@@ -426,7 +426,7 @@ func TestGather_lastTextPopulatedForIdleAndError(t *testing.T) {
 		{
 			// settled, non-failed row, not awaiting -> idle exposes the last reply.
 			name:      "idle_exposes_reply",
-			rowState:  store.Done,
+			rowState:  store.Idle,
 			text:      "all done, here is the summary",
 			wantState: Idle,
 			wantText:  "all done, here is the summary",
@@ -434,7 +434,7 @@ func TestGather_lastTextPopulatedForIdleAndError(t *testing.T) {
 		{
 			// settled, Failed row -> error exposes the best-available last text.
 			name:      "error_exposes_last_text",
-			rowState:  store.Failed,
+			rowState:  store.Errored,
 			text:      "panic: boom",
 			wantState: Error,
 			wantText:  "panic: boom",
@@ -466,7 +466,7 @@ func TestGather_lastTextErrorTolerated(t *testing.T) {
 	const staticPane = "❯ ready"
 	p := &fakePaner{live: true, panes: []string{staticPane}}
 	sl := &recordingSleep{}
-	row := store.Session{Name: "e", State: store.Failed} // -> error, lastText consulted
+	row := store.Session{Name: "e", State: store.Errored} // -> error, lastText consulted
 	boom := func() (string, error) { return "", errors.New("transcript unreadable") }
 
 	res, err := Gather(p, sl.Sleep, staticAwaiting(false), boom, "cc-e", "e", row)
