@@ -17,10 +17,10 @@ func TestEmit_writesJSONLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	if err := w.Emit("reminder", map[string]any{"session": "s", "pct": 0.73}); err != nil {
+	if err := w.Emit("info", "reminder", "near limit", map[string]any{"session": "s", "pct": 0.73}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Emit("hard_stop", map[string]any{"session": "s", "bead": "zr-1"}); err != nil {
+	if err := w.Emit("error", "hard_stop", "budget hard stop reached", map[string]any{"session": "s", "bead": "zr-1"}); err != nil {
 		t.Fatal(err)
 	}
 	f, _ := os.Open(p)
@@ -32,8 +32,10 @@ func TestEmit_writesJSONLines(t *testing.T) {
 		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
 			t.Fatalf("line %d not valid JSON: %v", n, err)
 		}
-		if m["kind"] == nil {
-			t.Errorf("line %d missing kind", n)
+		for _, k := range []string{"time", "level", "msg", "kind"} {
+			if m[k] == nil {
+				t.Errorf("line %d missing %q", n, k)
+			}
 		}
 		n++
 	}
@@ -61,7 +63,7 @@ func readFirstRecord(t *testing.T, p string) map[string]any {
 	return m
 }
 
-func TestEmit_stampsTimestamp(t *testing.T) {
+func TestEmit_stampsStandardFields(t *testing.T) {
 	fixed := time.Date(2026, 6, 12, 15, 4, 5, 123456789, time.UTC)
 	want := fixed.UTC().Format(time.RFC3339Nano)
 
@@ -73,57 +75,69 @@ func TestEmit_stampsTimestamp(t *testing.T) {
 	defer func() { _ = w.Close() }()
 	w.Now = func() time.Time { return fixed }
 
-	if err := w.Emit("reminder", map[string]any{"session": "s", "bead": "zr-1"}); err != nil {
+	if err := w.Emit("info", "reminder", "budget reminder threshold reached",
+		map[string]any{"session": "s", "bead": "zr-1"}); err != nil {
 		t.Fatal(err)
 	}
 	_ = w.Close()
 
 	rec := readFirstRecord(t, p)
-	if rec["ts"] != want {
-		t.Errorf("ts = %v, want %v", rec["ts"], want)
+	if rec["time"] != want {
+		t.Errorf("time = %v, want %v", rec["time"], want)
+	}
+	if rec["level"] != "info" {
+		t.Errorf("level = %v, want info", rec["level"])
+	}
+	if rec["msg"] != "budget reminder threshold reached" {
+		t.Errorf("msg = %v, want the reminder message", rec["msg"])
 	}
 	if rec["kind"] != "reminder" {
 		t.Errorf("kind = %v, want reminder", rec["kind"])
 	}
-	if rec["session"] != "s" {
-		t.Errorf("session = %v, want s", rec["session"])
+	if _, ok := rec["ts"]; ok {
+		t.Errorf("legacy ts field must be gone, got %v", rec["ts"])
 	}
-	if rec["bead"] != "zr-1" {
-		t.Errorf("bead = %v, want zr-1", rec["bead"])
+	if rec["session"] != "s" || rec["bead"] != "zr-1" {
+		t.Errorf("caller fields dropped: %v", rec)
 	}
 }
 
-func TestEmit_callerTsAndKindDoNotOverride(t *testing.T) {
+func TestEmit_reservedKeysNotOverridable(t *testing.T) {
 	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	want := fixed.UTC().Format(time.RFC3339Nano)
 
 	p := filepath.Join(t.TempDir(), "events.jsonl")
-	w, err := New(p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	w, _ := New(p)
 	defer func() { _ = w.Close() }()
 	w.Now = func() time.Time { return fixed }
 
-	// Caller tries to override the stamped ts and kind; both must be ignored.
-	if err := w.Emit("real_kind", map[string]any{
-		"ts":      "1999-12-31T23:59:59Z",
-		"kind":    "fake_kind",
-		"session": "s",
+	// Caller tries to override every stamped key; all must be ignored.
+	if err := w.Emit("warn", "real_kind", "real message", map[string]any{
+		"time":  "1999-12-31T23:59:59Z",
+		"level": "debug",
+		"kind":  "fake_kind",
+		"msg":   "fake message",
+		"keep":  "me",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	_ = w.Close()
 
 	rec := readFirstRecord(t, p)
-	if rec["ts"] != want {
-		t.Errorf("caller ts overrode stamp: ts = %v, want %v", rec["ts"], want)
+	if rec["time"] != want {
+		t.Errorf("caller overrode time: %v", rec["time"])
+	}
+	if rec["level"] != "warn" {
+		t.Errorf("caller overrode level: %v", rec["level"])
 	}
 	if rec["kind"] != "real_kind" {
-		t.Errorf("caller kind overrode kind arg: kind = %v, want real_kind", rec["kind"])
+		t.Errorf("caller overrode kind: %v", rec["kind"])
 	}
-	if rec["session"] != "s" {
-		t.Errorf("session = %v, want s", rec["session"])
+	if rec["msg"] != "real message" {
+		t.Errorf("caller overrode msg: %v", rec["msg"])
+	}
+	if rec["keep"] != "me" {
+		t.Errorf("non-reserved field dropped: %v", rec)
 	}
 }
 
@@ -134,7 +148,7 @@ func TestEmit_concurrentNoInterleave(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func(i int) { defer wg.Done(); _ = w.Emit("tick", map[string]any{"i": i}) }(i)
+		go func(i int) { defer wg.Done(); _ = w.Emit("debug", "tick", "t", map[string]any{"i": i}) }(i)
 	}
 	wg.Wait()
 	f, _ := os.Open(p)

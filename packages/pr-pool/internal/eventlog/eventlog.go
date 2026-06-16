@@ -1,6 +1,8 @@
 // Package eventlog is pr-pool's own structured per-run event log (JSONL). It is
-// NOT Claude's transcript. Safe for concurrent emitters (a mutex serializes
-// marshal+write so lines never interleave).
+// NOT Claude's transcript. Each line conforms to the phillipgreenii JSONL
+// standard (`time`/`level`/`msg`, with `kind` kept as an ordinary event-type
+// field). Safe for concurrent emitters (a mutex serializes marshal+write so
+// lines never interleave).
 package eventlog
 
 import (
@@ -39,18 +41,26 @@ func (w *Writer) now() time.Time {
 	return time.Now()
 }
 
-// Emit writes one JSON object as a line. `ts` (RFC3339Nano, UTC) and `kind` are
-// always stamped by Emit; fields are merged in but fields named "ts" or "kind"
-// are ignored so they cannot override the stamped values.
-func (w *Writer) Emit(kind string, fields map[string]any) error {
-	rec := make(map[string]any, len(fields)+2)
+// Emit writes one JSON object as a line. `time` (RFC3339Nano, UTC), `level`,
+// `kind`, and `msg` are always stamped by Emit; fields are merged in but any of
+// those four reserved keys present in fields is ignored so it cannot override the
+// stamped value. `level` should be one of debug/info/warn/error (the JSONL
+// standard); `kind` is an event-type, not a severity, and is kept as a normal
+// field.
+func (w *Writer) Emit(level, kind, msg string, fields map[string]any) error {
+	rec := make(map[string]any, len(fields)+4)
 	for k, v := range fields {
-		if k != "kind" && k != "ts" {
+		switch k {
+		case "time", "level", "kind", "msg":
+			// reserved — stamped below
+		default:
 			rec[k] = v
 		}
 	}
-	rec["ts"] = w.now().UTC().Format(time.RFC3339Nano)
+	rec["time"] = w.now().UTC().Format(time.RFC3339Nano)
+	rec["level"] = level
 	rec["kind"] = kind
+	rec["msg"] = msg
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
