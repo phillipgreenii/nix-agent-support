@@ -143,6 +143,48 @@ func TestHook_ask_joinsMultipleQuestions(t *testing.T) {
 	}
 }
 
+func TestHook_ask_malformedToolInput_stillNeedsInputEmptyQuestion(t *testing.T) {
+	// Never-fail: a malformed tool_input must still record the needs_input edge
+	// (the picker-detection signal survives); only the question text is lost.
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	const payload = `{"session_id":"u-x","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":"garbage-not-an-object"}`
+	if err := handleHook("ask", strings.NewReader(payload), st, ""); err != nil {
+		t.Fatalf("handleHook ask (malformed): %v", err)
+	}
+	got, _, _ := st.GetByName(ctx, "alpha")
+	if got.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input despite malformed tool_input", got.State)
+	}
+	if got.PendingQuestion != "" {
+		t.Errorf("PendingQuestion = %q, want empty on malformed tool_input", got.PendingQuestion)
+	}
+}
+
+func TestHook_notify_clearsStalePendingQuestion(t *testing.T) {
+	// A notify (permission/idle prompt) needs_input edge is NOT an AskUserQuestion,
+	// so it must clear any stale question left on the row from a prior ask turn.
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "u-x", State: store.NeedsInput, PendingQuestion: "old question?"}); err != nil {
+		t.Fatal(err)
+	}
+	const payload = `{"session_id":"u-x","hook_event_name":"Notification"}`
+	if err := handleHook("notify", strings.NewReader(payload), st, ""); err != nil {
+		t.Fatalf("handleHook notify: %v", err)
+	}
+	got, _, _ := st.GetByName(ctx, "alpha")
+	if got.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input", got.State)
+	}
+	if got.PendingQuestion != "" {
+		t.Errorf("PendingQuestion = %q, want cleared by notify", got.PendingQuestion)
+	}
+}
+
 func TestHook_unresolvable_isNoErrorNoRow(t *testing.T) {
 	st, _ := openTestStore(t)
 	// session_id matches nothing and no CCPOOL_NAME → log + succeed (exit 0).

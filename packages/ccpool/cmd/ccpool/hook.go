@@ -121,6 +121,13 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envName string,
 	if err != nil {
 		return fmt.Errorf("transition %q: %w", name, err)
 	}
+	// A `notify` needs_input edge (permission_prompt/idle_prompt) is NOT an
+	// AskUserQuestion, so clear any stale AskUserQuestion text the row may still
+	// carry from a prior turn — only the `ask` path sets a question, and Transition
+	// preserves it on the way INTO NeedsInput. Best-effort (never-fail).
+	if event == "notify" {
+		_ = st.SetPendingQuestion(ctx, name, "")
+	}
 	// On a completed turn (Stop → Done), lazily stamp the transcript anchor onto
 	// the oldest pending fire-and-forget turn for this session so `ccpool result`
 	// can resolve its reply (pg2-12ko). FIFO-pop is the v1 correlation assumption:
@@ -149,6 +156,12 @@ func handleAskHook(stdin io.Reader, st *store.Store, envName string, n notify.No
 	var p hookPayload
 	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
+	}
+	// Defensive: the hooks.json matcher already restricts this to AskUserQuestion,
+	// but guard a broader/misconfigured wiring so we never record needs_input for a
+	// different tool. An empty tool_name (e.g. a minimal test payload) is tolerated.
+	if p.ToolName != "" && p.ToolName != "AskUserQuestion" {
+		return nil
 	}
 	ctx := context.Background()
 	name, ok, err := resolveName(ctx, st, p.SessionID, envName)
