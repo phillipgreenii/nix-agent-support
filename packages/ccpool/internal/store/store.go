@@ -1,5 +1,8 @@
-// Package store is ccpool's only SQLite touchpoint: durable session identity
-// plus the last turn outcome. Liveness is NOT stored (derived from tmux on read).
+// Package store is ccpool's only SQLite touchpoint: durable, observed session
+// FACTS — identity plus the last observed turn outcome (ADR 0015). It records
+// what Claude reported, never a work-done/failed judgment (that lives in bd).
+// Liveness is NOT stored (derived from tmux on read); resumability is a fact
+// (does the Claude session still exist on disk), not a stored state.
 package store
 
 import (
@@ -15,7 +18,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// State is the last turn outcome. `cold` is intentionally absent — liveness is derived.
+// State is the last OBSERVED turn outcome — a session FACT, never a work
+// judgment (ADR 0015). `cold` is intentionally absent (liveness is derived) and
+// there is NO terminal concept: `idle`/`errored` are just the last thing Claude
+// reported (Stop / StopFailure), not "the work finished/failed".
 type State string
 
 const (
@@ -23,25 +29,24 @@ const (
 	Ready      State = "ready"
 	Working    State = "working"
 	NeedsInput State = "needs_input"
-	Done       State = "done"
-	Failed     State = "failed"
+	Idle       State = "idle"    // Claude Stop hook — the turn ended (NOT "work done")
+	Errored    State = "errored" // Claude StopFailure hook — the turn hit an API error
 )
 
-// Terminal reports whether s is a settled terminal outcome (for retention §11).
-func (s State) Terminal() bool { return s == Done || s == Failed }
-
 type Session struct {
-	Name           string
-	UUID           string
-	CWD            string
-	TranscriptPath string
-	State          State
-	Generation     int64
-	CreatedAt      int64
-	LastActivityAt int64
-	TmuxSession    string
-	Model          string
-	Flags          string
+	ID              int64  // surrogate PK (autoincrement); assigned by Insert
+	ExternalID      string // unique; the caller's handle — sessions are ADDRESSED by this
+	ClaudeSessionID string // unique; the Claude session UUID — used to RESUME
+	Name            string // optional display label; nullable, NON-unique
+	CWD             string
+	TranscriptPath  string
+	State           State
+	Generation      int64
+	CreatedAt       int64
+	LastActivityAt  int64
+	TmuxSession     string
+	Model           string
+	Flags           string
 	// PendingQuestion is the AskUserQuestion text recorded by the `ask` hook while
 	// the row is NeedsInput. Transition clears it whenever the row moves to any
 	// other state, so it never lingers stale past the turn (pg2-7a5b).
@@ -63,7 +68,7 @@ const (
 // lazily from that transcript (pg2-12ko).
 type Turn struct {
 	TurnID         string
-	Name           string
+	ExternalID     string // keyed to sessions.external_id (ADR 0015)
 	Prompt         string
 	Status         TurnStatus
 	TranscriptPath string
