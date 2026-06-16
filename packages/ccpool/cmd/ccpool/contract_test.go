@@ -335,7 +335,7 @@ func TestContract_EventLog_ReflectsOrderedTransitions(t *testing.T) {
 	// working→done ordering — mirroring how the reconciled-state asserts pin only
 	// state=working and never the timing-sensitive thinking-vs-streaming sub-state —
 	// so this does not over-fit to sub-states the event log may reorder by timing.
-	workingIdx, doneIdx := -1, -1
+	workingIdx, idleIdx := -1, -1
 	for i, e := range events {
 		if e.Name != "e" || e.Kind != "transition" {
 			continue
@@ -343,11 +343,13 @@ func TestContract_EventLog_ReflectsOrderedTransitions(t *testing.T) {
 		if workingIdx < 0 && e.To == "working" {
 			workingIdx = i
 		}
-		if workingIdx >= 0 && doneIdx < 0 && e.To == "done" {
-			doneIdx = i
+		// ADR 0015: the Stop hook now records `idle` (was `done`) — ccpool reports
+		// the turn ended (returned to idle), not a work-completion judgment.
+		if workingIdx >= 0 && idleIdx < 0 && e.To == "idle" {
+			idleIdx = i
 		}
 	}
-	liveAssert(t, "event log records a working transition before a done transition", workingIdx >= 0 && doneIdx > workingIdx, true)
+	liveAssert(t, "event log records a working transition before an idle transition", workingIdx >= 0 && idleIdx > workingIdx, true)
 
 	// The prompt's input actions are recorded as structured input events for "e",
 	// at or after the working transition (the prompt is delivered as part of the
@@ -368,4 +370,92 @@ func TestContract_EventLog_ReflectsOrderedTransitions(t *testing.T) {
 	}
 	liveAssert(t, "event log records a paste input action at/after the working transition", pasteAfterWorking, true)
 	liveAssert(t, "event log records an enter input action at/after the working transition", enterAfterWorking, true)
+}
+
+// listRow returns the `list --json` row for externalID (ok=false if absent). It
+// is the contract suite's window onto fields `state --json` does not expose —
+// the claude_session_id and the display name set via --name. A parse failure is
+// a harness/output-mechanics problem, not a live verdict -> scaffoldFail.
+func (sb *sandbox) listRow(externalID string) (listJSON, bool) {
+	out, _ := sb.ccp("list", "--json")
+	var rows []listJSON
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+		scaffoldFail(sb.t, "list --json did not parse (output mechanics broken): %v\n%s", err, out)
+		return listJSON{}, false
+	}
+	for _, r := range rows {
+		if r.ExternalID == externalID {
+			return r, true
+		}
+	}
+	return listJSON{}, false
+}
+
+// TestContract_Resume_NewResumesExistingClaudeSession pins the ADR-0015 resume
+// path against REAL claude: `ccpool new <id>` on a row whose tmux is gone but
+// whose Claude session still exists on disk must RESUME that conversation
+// (`claude --resume <claude_session_id>`) and PRESERVE the same claude_session_id
+// — not mint a fresh one. This is the suite's only coverage that the real
+// `claude --resume <session-id>` flag works AND that claudeSessionExists's on-disk
+// transcript probe matches Claude's real project-dir layout; a stub claude that
+// exits on /exit cannot stand in for either.
+func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
+	sb := newSandbox(t)
+	sb.mustNew("r")
+	first, ok := sb.listRow("r")
+	if !ok || first.ClaudeSessionID == "" {
+		scaffoldFail(t, "new did not record a claude_session_id for %q (launch mechanics broken)", "r")
+	}
+
+	// Non-purge close ends the tmux session but KEEPS the row and leaves the Claude
+	// conversation on disk — exactly the resume precondition (tmux gone, session
+	// exists).
+	_, code, _ := sb.ccpTimed(20*time.Second, "close", "r")
+	liveAssert(t, "close exits 0", code, 0)
+	if doctorOut, _ := sb.ccp("doctor"); sessionLineHas(doctorOut, "r", "live=true") {
+		scaffoldFail(t, "session %q still live after close (teardown mechanics broken)", "r")
+	}
+
+	// new with the SAME external_id must resume the existing conversation.
+	_, code, _ = sb.ccpTimed(90*time.Second, "new", "r")
+	liveAssert(t, "resume-new exits 0", code, 0)
+
+	// A turnless resume can take a moment to re-attach; poll for it to come back
+	// live. A resume that never goes live is a real-claude/env issue (or a real
+	// resume regression) — either way not a clean ccpool verdict here -> scaffoldFail.
+	deadline := time.Now().Add(90 * time.Second)
+	relive := false
+	for time.Now().Before(deadline) {
+		if doctorOut, _ := sb.ccp("doctor"); sessionLineHas(doctorOut, "r", "live=true") {
+			relive = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !relive {
+		scaffoldFail(t, "resumed session %q never came back live (real `claude --resume` may be failing)", "r")
+	}
+
+	second, ok := sb.listRow("r")
+	liveAssert(t, "resumed row still present", ok, true)
+	// THE contract: a real resume preserves the original claude_session_id. A fresh
+	// launch (resume failed, or prune-and-recreate because the on-disk probe missed)
+	// would mint a different one.
+	liveAssert(t, "resume preserved the original claude_session_id (did not start fresh)", second.ClaudeSessionID, first.ClaudeSessionID)
+}
+
+// TestContract_New_NameFlagSetsDisplayName pins that REAL claude accepts the
+// ADR-0015 `--name` launch flag — the session still reaches ready (new exits 0)
+// — and that ccpool records the supplied display name distinct from the
+// external_id key. (The `--session-id` flag is exercised by every `new`: the
+// generated claude_session_id propagating into the row, asserted in the resume
+// test above, proves real claude accepted `--session-id`.)
+func TestContract_New_NameFlagSetsDisplayName(t *testing.T) {
+	sb := newSandbox(t)
+	const display = "contract-display-name"
+	_, code, _ := sb.ccpTimed(90*time.Second, "new", "n2", "--name", display)
+	liveAssert(t, "new --name exits 0 (real claude accepts --name and reaches ready)", code, 0)
+	row, ok := sb.listRow("n2")
+	liveAssert(t, "named session present in list", ok, true)
+	liveAssert(t, "list reports the display name set via --name", row.Name, display)
 }
