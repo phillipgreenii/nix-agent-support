@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // ----------------------------------------------------------------------
@@ -1367,5 +1368,55 @@ func TestCommentEvent_StripsInternalStateBeforeStorage(t *testing.T) {
 	}
 	if !strings.HasPrefix(ev.title, "## Walkthrough") {
 		t.Errorf("title should be derived from human-readable first line; got %q", ev.title)
+	}
+}
+
+type recordingCycleBeads struct {
+	noopBeads
+	mineSeen []bool
+}
+
+func (r *recordingCycleBeads) CreateProcessingCycle(_ context.Context, _, _ string, mine bool) (string, error) {
+	r.mineSeen = append(r.mineSeen, mine)
+	return "cyc-rec", nil
+}
+
+func TestProcessFeedback_StampsOwnershipFromAuthor(t *testing.T) {
+	ctx := context.Background()
+	mkEngine := func(b BeadClient) *Engine {
+		e, err := New(Deps{
+			Cfg:      minimalCfg(),
+			VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+			Beads:    b,
+			StateDir: t.TempDir(),
+			Now:      func() time.Time { return time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC) },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	// One net-new comment event is enough to trigger lazy cycle creation.
+	enriched := &vcs.EnrichedPR{Comments: []api.Comment{{ID: "c1", Author: "reviewer", Body: "please fix"}}}
+
+	// self-authored PR (author == SelfLogin "phillipg") -> mine=true
+	recSelf := &recordingCycleBeads{}
+	selfPR := samplePR(42, "foo/bar", "feat/mine")
+	if err := mkEngine(recSelf).processFeedback(ctx, recSelf, nil, enriched, "foo/bar", selfPR, "pr-bead-self", &Summary{}); err != nil {
+		t.Fatalf("processFeedback (self): %v", err)
+	}
+	if len(recSelf.mineSeen) != 1 || recSelf.mineSeen[0] != true {
+		t.Fatalf("self PR: want exactly one cycle stamped mine=true; got %v", recSelf.mineSeen)
+	}
+
+	// team-authored PR (author "coworker") -> mine=false
+	recTeam := &recordingCycleBeads{}
+	teamPR := samplePR(99, "foo/bar", "feat/theirs")
+	teamPR.Author = "coworker"
+	if err := mkEngine(recTeam).processFeedback(ctx, recTeam, nil, enriched, "foo/bar", teamPR, "pr-bead-team", &Summary{}); err != nil {
+		t.Fatalf("processFeedback (team): %v", err)
+	}
+	if len(recTeam.mineSeen) != 1 || recTeam.mineSeen[0] != false {
+		t.Fatalf("team PR: want exactly one cycle stamped mine=false; got %v", recTeam.mineSeen)
 	}
 }
