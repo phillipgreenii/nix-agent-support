@@ -33,6 +33,24 @@ func TestDefault(t *testing.T) {
 	}
 }
 
+func TestValidate_permissionMode(t *testing.T) {
+	valid := []string{"", "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"}
+	for _, m := range valid {
+		c := Default()
+		c.PermissionMode = m
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() with PermissionMode=%q = %v, want nil", m, err)
+		}
+	}
+	for _, m := range []string{"bypass", "Plan", "yolo", "skip-permissions"} {
+		c := Default()
+		c.PermissionMode = m
+		if err := c.Validate(); err == nil {
+			t.Errorf("Validate() with PermissionMode=%q = nil, want error", m)
+		}
+	}
+}
+
 func TestLoad_envOverrides(t *testing.T) {
 	t.Setenv("PR_POOL_MAX_WORKER", "3")
 	t.Setenv("PR_POOL_MAX_WAIT", "60")

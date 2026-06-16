@@ -21,6 +21,11 @@
 // (the hook process vs the reply process both append to the same file). A nil
 // *Logger is a valid no-op so callers can treat it as an optional dependency,
 // mirroring the never-fail policy of the hook's diagnostics logging.
+//
+// Ordering: APPEND (file) order is authoritative. The `ts` field is ADVISORY —
+// transitions are stamped from the store's clock and input actions from the
+// session's clock (two distinct injected time sources), so consumers must not
+// sort by `ts` to recover the sequence; read the lines in file order instead.
 package eventlog
 
 import (

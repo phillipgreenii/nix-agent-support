@@ -103,6 +103,9 @@ func parseSelfLogin(b []byte) (string, error) {
 // .beads — which is the normal case for workers. Everything is verified through
 // bd itself rather than by stat-ing a path.
 func precheck(ctx context.Context, cfg config.Config, br beads.Runner) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	if _, err := br.Run(ctx, "list", "--limit", "1", "--json"); err != nil {
 		return fmt.Errorf("bd unreachable from %s: %w", cfg.RepoRoot, err)
 	}

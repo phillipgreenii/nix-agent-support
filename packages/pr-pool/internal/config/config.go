@@ -5,6 +5,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -108,6 +109,31 @@ func Load() Config {
 	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)
 	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
 	return c
+}
+
+// validPermissionModes is the set of claude --permission-mode values pr-pool may
+// pass through to `ccpool new` (mirrors ccpool's launch.PermissionMode; it is
+// duplicated here because pr-pool does not depend on the ccpool module). The
+// empty string is valid: it means "omit the flag".
+var validPermissionModes = map[string]bool{
+	"":                  true,
+	"default":           true,
+	"acceptEdits":       true,
+	"plan":              true,
+	"auto":              true,
+	"dontAsk":           true,
+	"bypassPermissions": true,
+}
+
+// Validate checks operator-overridable fields that would otherwise fail late.
+// Today that is PermissionMode (PR_POOL_PERMISSION_MODE): an unknown value would
+// otherwise surface only once a worker launches, as a `ccpool new` exit-2 launch
+// failure. Catching it pre-flight fails fast with a clear message.
+func (c Config) Validate() error {
+	if !validPermissionModes[c.PermissionMode] {
+		return fmt.Errorf("invalid PR_POOL_PERMISSION_MODE %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
+	}
+	return nil
 }
 
 // WorkerBudget assembles the per-worker Budget from config scalars + the default
