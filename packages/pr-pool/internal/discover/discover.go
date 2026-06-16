@@ -78,7 +78,10 @@ func ForRole(ctx context.Context, br beads.Runner, role roles.Role) ([]DispatchC
 }
 
 func discoverFeedback(ctx context.Context, br beads.Runner, role roles.Role) ([]DispatchContext, error) {
-	issues, err := beads.Ready(ctx, br, "--label", "mine") // self-relative: only my cycles carry `mine`
+	// self-relative: only my cycles carry `mine`. Exclude `human` (mirrors the
+	// worker query) so a feedback cycle escalated to a human is not rediscovered
+	// and re-dispatched forever.
+	issues, err := beads.Ready(ctx, br, "--label", "mine", "--exclude-label", "human")
 	if err != nil {
 		// Propagate: a bd failure must NOT masquerade as "no ready work", or the
 		// pool silently idles on infra failure. (pg2-qq9v)

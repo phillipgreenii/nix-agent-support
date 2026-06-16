@@ -62,10 +62,32 @@ func TestDiscover_feedbackByLabel(t *testing.T) {
 	if len(got) != 1 || got[0].BeadID != "zr-c1" || got[0].Role.Kind != roles.Feedback {
 		t.Fatalf("feedback discovery = %+v (want only zr-c1)", got)
 	}
-	// The feedback query must be `bd ready --label mine` — no parent `bd show`.
+	// The feedback query must be `bd ready --label mine` — no parent `bd show` —
+	// AND must exclude human-labeled beads, so a feedback cycle escalated to a
+	// human is not rediscovered forever (mirrors the worker exclusion).
 	a := strings.Join(rr.sawFeedbackArgs, " ")
-	if !strings.Contains(a, "--label mine") {
-		t.Fatalf("feedback bd ready missing `--label mine`; got %q", a)
+	for _, sub := range []string{"--label mine", "--exclude-label human"} {
+		if !strings.Contains(a, sub) {
+			t.Fatalf("feedback bd ready missing %q; got %q", sub, a)
+		}
+	}
+}
+
+// TestDiscover_feedbackExcludesHuman locks in IMPORTANT #4: a human-labeled
+// feedback cycle must be filtered by the bd query itself (--exclude-label
+// human), exactly as the worker query already does. Without it, a feedback bead
+// escalated to a human is rediscovered and re-dispatched on every pass.
+func TestDiscover_feedbackExcludesHuman(t *testing.T) {
+	rr := &routingRunner{
+		readyFeedback: `[{"id":"zr-c1","issue_type":"task","title":"process-feedback: A"}]`,
+		readyWorker:   `[]`,
+	}
+	reg := roles.NewRegistry(config.Default())
+	if _, err := Discover(context.Background(), rr, reg); err != nil {
+		t.Fatal(err)
+	}
+	if !contains(rr.sawFeedbackArgs, "--exclude-label") || !contains(rr.sawFeedbackArgs, "human") {
+		t.Errorf("feedback bd ready must carry `--exclude-label human`; got %v", rr.sawFeedbackArgs)
 	}
 }
 
