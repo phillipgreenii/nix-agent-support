@@ -14,7 +14,18 @@ type Issue struct {
 	Status   string         `json:"status"`
 	Type     string         `json:"issue_type"`
 	Parent   string         `json:"parent"`
+	Labels   []string       `json:"labels"`
 	Metadata map[string]any `json:"metadata"`
+}
+
+// HasLabel reports whether the issue carries the given label.
+func (i Issue) HasLabel(label string) bool {
+	for _, l := range i.Labels {
+		if l == label {
+			return true
+		}
+	}
+	return false
 }
 
 // ShowObj runs `bd show <id> --json` and normalizes bd's array-or-object output
@@ -64,6 +75,25 @@ func AddHuman(ctx context.Context, r Runner, id string) error {
 		return fmt.Errorf("add-human %s: %w", id, err)
 	}
 	return nil
+}
+
+// AddLabel adds an arbitrary label: `bd update <id> --add-label <label>`.
+func AddLabel(ctx context.Context, r Runner, id, label string) error {
+	_, err := r.Run(ctx, "update", id, "--add-label", label)
+	if err != nil {
+		return fmt.Errorf("add-label %s %s: %w", id, label, err)
+	}
+	return nil
+}
+
+// HasLabel reads the bead via `bd show <id> --json` and reports whether it
+// carries the given label.
+func HasLabel(ctx context.Context, r Runner, id, label string) (bool, error) {
+	iss, err := ShowObj(ctx, r, id)
+	if err != nil {
+		return false, err
+	}
+	return iss.HasLabel(label), nil
 }
 
 func decodeOne(b []byte) (Issue, error) {

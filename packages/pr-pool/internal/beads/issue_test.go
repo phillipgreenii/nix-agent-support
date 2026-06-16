@@ -88,6 +88,44 @@ func TestAddHuman_argv(t *testing.T) {
 	}
 }
 
+func TestShowObj_parsesLabels(t *testing.T) {
+	fr := &fakeRunner{out: `{"id":"zr-1","status":"open","labels":["worker-ready","pool-launch-fail"]}`}
+	iss, err := ShowObj(context.Background(), fr, "zr-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !iss.HasLabel("pool-launch-fail") {
+		t.Errorf("HasLabel(pool-launch-fail) = false; labels=%v", iss.Labels)
+	}
+	if iss.HasLabel("human") {
+		t.Errorf("HasLabel(human) should be false; labels=%v", iss.Labels)
+	}
+}
+
+func TestAddLabel_argv(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := AddLabel(context.Background(), fr, "zr-1", "pool-launch-fail"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"update", "zr-1", "--add-label", "pool-launch-fail"}
+	if joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	}
+}
+
+func TestHasLabel_fromShow(t *testing.T) {
+	fr := &fakeRunner{out: `{"id":"zr-1","labels":["pool-launch-fail"]}`}
+	got, err := HasLabel(context.Background(), fr, "zr-1", "pool-launch-fail")
+	if err != nil || !got {
+		t.Fatalf("HasLabel = %v, err=%v; want true,nil", got, err)
+	}
+	last := fr.args[len(fr.args)-1]
+	want := []string{"show", "zr-1", "--json"}
+	if joinArgs(last) != joinArgs(want) {
+		t.Errorf("HasLabel must read via show --json; argv=%v", last)
+	}
+}
+
 func joinArgs(a []string) string {
 	s := ""
 	for _, x := range a {

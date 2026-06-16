@@ -40,7 +40,7 @@ func TestTerminal_unclaimsNotesNoHuman(t *testing.T) {
 	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
 	wd.Git = &recGit{}
 	// session cwd == repoRoot -> reset is a guarded no-op (the v1 reality)
-	cc.list = []ccpool.Session{{Name: "s", CWD: "/repo"}}
+	cc.list = []ccpool.Session{{ExternalID: "s", CWD: "/repo"}}
 	wd.terminal(context.Background(), "s", "zr-1")
 	if !bd.has("update zr-1 --status=open --assignee=") {
 		t.Errorf("must unclaim; calls=%v", bd.calls)

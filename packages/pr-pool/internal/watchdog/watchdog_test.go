@@ -94,7 +94,7 @@ func (noopGit) Run(context.Context, string, ...string) error { return nil }
 func TestRun_firesEachLevelOnceThenHardStop(t *testing.T) {
 	// token cap 1000; ramp crosses 72.5% -> 90% -> 100%
 	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 700}, {OutputTokens: 730}, {OutputTokens: 920}, {OutputTokens: 1000}}}
-	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true, CWD: "/repo"}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
 	bd := &recBD{}
 	wd := newWD(r, cc, bd, tokBudget(1000))
 	err := wd.Run(context.Background(), "s", "zr-1")
@@ -124,7 +124,7 @@ func TestRun_firesEachLevelOnceThenHardStop(t *testing.T) {
 
 func TestRun_ctxCancelReturnsCtxErr(t *testing.T) {
 	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 0}}}
-	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true}}}
 	wd := newWD(r, cc, &recBD{}, tokBudget(1000))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -139,7 +139,7 @@ func TestRun_ctxCancelReturnsCtxErr(t *testing.T) {
 // TestWaitDone_lostRace_* tests for the watchdog side of the race.
 func TestRun_lostClaimSkipsTerminal(t *testing.T) {
 	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 5000}}} // immediately >100% of a 1000 cap
-	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true, CWD: "/repo"}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
 	bd := &recBD{}
 	wd := newWD(r, cc, bd, tokBudget(1000))
 	wd.ClaimTerminal = func() bool { return false } // bead-poll already owns the terminal outcome
@@ -178,7 +178,7 @@ func TestRun_emitsEventsWhenLogSet(t *testing.T) {
 		{OutputTokens: 920},
 		{OutputTokens: 1000},
 	}}
-	cc := &fakeCC{list: []ccpool.Session{{Name: "s", Live: true, CWD: "/repo"}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
 	bd := &recBD{}
 
 	logPath := t.TempDir() + "/events.jsonl"

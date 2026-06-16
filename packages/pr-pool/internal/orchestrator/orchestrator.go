@@ -31,7 +31,18 @@ type Orchestrator struct {
 	Log         *eventlog.Writer                           // may be nil (no-op); threaded onto Watchdog
 	now         func() time.Time                           // clock seam (default time.Now)
 	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
+	stamp       func() string                              // per-attempt id stamp seam (default below)
 	usageReader usage.Reader                               // default usage.NewTranscriptReader()
+}
+
+// attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
+// dispatch yields a unique external_id, so ccpool always launches a brand-new
+// session and never resumes a prior attempt (ADR 0015).
+func (o *Orchestrator) attemptStamp() string {
+	if o.stamp != nil {
+		return o.stamp()
+	}
+	return time.Now().UTC().Format("20060102T150405")
 }
 
 func (o *Orchestrator) reader() usage.Reader {
@@ -86,13 +97,13 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 // gates and does NOT reap stray pr-pool-* sessions — it is a manual, intentional
 // single dispatch where the operator is in control.
 func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
-	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
+	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.BeadID, o.attemptStamp())
 	defer func() {
-		if err := o.CC.Close(ctx, name, true); err != nil {
-			slog.Warn("run-one teardown close failed", "session", name, "err", err)
+		if err := o.CC.Close(ctx, externalID, true); err != nil {
+			slog.Warn("run-one teardown close failed", "session", externalID, "err", err)
 		}
 	}()
-	return o.workOne(ctx, d)
+	return o.workOneWithID(ctx, d, externalID)
 }
 
 func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) {
@@ -119,34 +130,61 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 // For worker dispatches the nudge includes the budget prompt line and completion
 // races against the budget watchdog. Feedback dispatches keep the prior behavior.
 func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext) error {
-	name := d.Role.SessionName(o.Cfg.SessionPrefix, d.BeadID)
+	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.BeadID, o.attemptStamp())
+	return o.workOneWithID(ctx, d, externalID)
+}
+
+// workOneWithID is workOne with the per-attempt external_id pinned by the caller
+// (so RunOne's teardown closes the very session workOne launched). The session is
+// addressed by externalID; the stable DisplayName is passed only as ccpool --name.
+func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchContext, externalID string) error {
+	display := d.Role.DisplayName(o.Cfg.SessionPrefix, d.BeadID)
 	env := map[string]string{
 		"BEADS_ACTOR":    d.Role.Actor,
 		"BEADS_DIR":      o.Cfg.RepoRoot + "/.beads",
 		"WORKSPACE_ROOT": o.Cfg.RepoRoot,
 	}
-	if err := o.CC.Ensure(ctx, name, name, o.Cfg.RepoRoot, env); err != nil {
-		// Could not even create the session. Match the bash (work_one:
-		// `ensure_session || return 1`): NO failure action here — the bead was
-		// never dispatched, so we do not flag/unclaim it. A transient ccpool
-		// launch hiccup must not permanently mark a worker bead `human`.
-		return fmt.Errorf("ensure %s: %w", name, err)
+	if err := o.CC.Ensure(ctx, externalID, display, o.Cfg.RepoRoot, env); err != nil {
+		// Could not even create the session. The bead was never dispatched, so we
+		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
+		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
+		// first failure; on a subsequent failure (label already present) add human
+		// so discovery stops retrying it (worker discovery excludes human).
+		o.escalateLaunchFailure(ctx, d.BeadID)
+		return fmt.Errorf("ensure %s: %w", externalID, err)
 	}
 	nudge := d.Role.Nudge(d.BeadID, o.Cfg.WorktreeDir)
 	if d.Role.Kind == roles.Worker {
 		nudge += o.Cfg.WorkerBudget().PromptLine()
 	}
-	if err := o.CC.Send(ctx, name, nudge, ccpool.ModeNoWait); err != nil {
+	if err := o.CC.Send(ctx, externalID, nudge, ccpool.ModeNoWait); err != nil {
 		// J-dispatch-fail: feedback unclaims; worker is left for human inspection.
 		if d.Role.Kind == roles.Feedback {
 			_ = beads.Unclaim(ctx, o.BD, d.BeadID)
 		}
-		return fmt.Errorf("send %s: %w", name, err)
+		return fmt.Errorf("send %s: %w", externalID, err)
 	}
 	if d.Role.Kind != roles.Worker {
-		return o.waitDone(ctx, nil, d, name) // feedback: no watchdog, so no race; always own the outcome
+		return o.waitDone(ctx, nil, d, externalID) // feedback: no watchdog, so no race; always own the outcome
 	}
-	return o.workerWaitWithWatchdog(ctx, d, name)
+	return o.workerWaitWithWatchdog(ctx, d, externalID)
+}
+
+// escalateLaunchFailure escalates a bead that ccpool could not launch. First
+// failure: add pool-launch-fail. Repeat failure (label already present): add
+// human and stop retrying (worker discovery excludes the human label). Reads are
+// best-effort — a bd hiccup here just means we retry next pass rather than
+// escalate, which is the safe direction. (ADR 0015)
+func (o *Orchestrator) escalateLaunchFailure(ctx context.Context, beadID string) {
+	already, err := beads.HasLabel(ctx, o.BD, beadID, "pool-launch-fail")
+	if err != nil {
+		return // can't tell ⇒ do nothing this pass; the next launch failure retries
+	}
+	if already {
+		_ = beads.AddHuman(ctx, o.BD, beadID)
+		return
+	}
+	_ = beads.AddLabel(ctx, o.BD, beadID, "pool-launch-fail")
 }
 
 // workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.
@@ -275,19 +313,22 @@ func (o *Orchestrator) fail(ctx context.Context, d discover.DispatchContext, rea
 	return fmt.Errorf("%s: %s", d.BeadID, reason)
 }
 
-// active reports whether it is still worth waiting on the named session. A session
-// is active while it can still make progress: starting/ready/working, and
-// needs_input (paused awaiting a human who may attach and move it along — still
-// bounded by MaxWait). It is NOT active once it reaches done (the agent finished its
-// turn and nothing re-nudges it) or failed, or once it is absent from ccpool list.
-// A list error is treated as active (can't tell ⇒ keep waiting; MaxWait bounds us).
-func (o *Orchestrator) active(ctx context.Context, name string) bool {
+// active reports whether it is still worth waiting on the session addressed by
+// externalID. A session is active while it can still make progress:
+// starting/ready/working, and needs_input (paused awaiting a human who may attach
+// and move it along — still bounded by MaxWait). It is NOT active once the ccpool
+// session reaches idle (Claude Stop: the turn ended and nothing re-nudges it) or
+// errored (Claude StopFailure), or once it is absent from ccpool list. These are
+// session FACTS, not work judgments — on !active the caller re-reads the BEAD to
+// decide success vs failure (ADR 0015). A list error is treated as active (can't
+// tell ⇒ keep waiting; MaxWait bounds us).
+func (o *Orchestrator) active(ctx context.Context, externalID string) bool {
 	sessions, err := o.CC.List(ctx)
 	if err != nil {
 		return true // can't tell ⇒ assume active; the deadline still bounds us
 	}
 	for _, s := range sessions {
-		if s.Name == name {
+		if s.ExternalID == externalID {
 			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
 		}
 	}

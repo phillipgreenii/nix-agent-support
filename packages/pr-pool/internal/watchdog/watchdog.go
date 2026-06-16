@@ -96,14 +96,16 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 	}
 }
 
-// transcriptPath looks up the session's transcript path from ccpool.List.
-func (w *Watchdog) transcriptPath(ctx context.Context, name string) string {
+// transcriptPath looks up the session's transcript path from ccpool.List. The
+// session is addressed by external_id (ADR 0015), matching how the orchestrator
+// hands the watchdog its session handle.
+func (w *Watchdog) transcriptPath(ctx context.Context, externalID string) string {
 	sessions, err := w.CC.List(ctx)
 	if err != nil {
 		return ""
 	}
 	for _, s := range sessions {
-		if s.Name == name {
+		if s.ExternalID == externalID {
 			return s.TranscriptPath
 		}
 	}

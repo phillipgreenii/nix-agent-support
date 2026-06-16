@@ -66,14 +66,6 @@ func (r Role) DisplayName(prefix, beadID string) string {
 	return prefix + r.Name + "-" + beadID
 }
 
-// SessionName is the pre-redesign per-bead handle, identical to DisplayName.
-// Retained transiently so callers compile until they migrate to ExternalID
-// (per-attempt) + DisplayName (--name); removed once the orchestrator is
-// rewired (ADR 0015). Prefer ExternalID for addressing and DisplayName for --name.
-func (r Role) SessionName(prefix, beadID string) string {
-	return r.DisplayName(prefix, beadID)
-}
-
 // Nudge returns the role's prompt for the given bead. worktreeDir is only used
 // by the worker template.
 func (r Role) Nudge(beadID, worktreeDir string) string {

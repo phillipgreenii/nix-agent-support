@@ -36,13 +36,13 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 	})
 }
 
-func (w *Watchdog) sessionCWD(ctx context.Context, name string) string {
+func (w *Watchdog) sessionCWD(ctx context.Context, externalID string) string {
 	sessions, err := w.CC.List(ctx)
 	if err != nil {
 		return ""
 	}
 	for _, s := range sessions {
-		if s.Name == name {
+		if s.ExternalID == externalID {
 			return s.CWD
 		}
 	}
