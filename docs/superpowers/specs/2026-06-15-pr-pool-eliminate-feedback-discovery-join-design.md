@@ -242,10 +242,11 @@ pre-cutover unstamped cycle that reopened would be silently skipped.
   (`:101`), `TestDiscover_orderFeedbackThenWorker` (`:127`),
   `TestDiscover_propagatesReadyError` (`:151`), `TestDiscover_propagatesWorkerReadyError`
   (`:169`).
-- **precheck relocates to a new cmd test:** the empty-`self_login` "fail fast"
-  assertion moves out of discover into a new `drain` cmd-layer test (no such cmd
-  test exists today). `run-query` no longer prechecks `self_login`, so it has no
-  such test.
+- **precheck coverage stays at the cmd layer:** the empty-`self_login` "fail fast"
+  assertion leaves discover (whose `selfLogin` guard is deleted) but is already
+  covered by the existing `TestParseSelfLogin_empty` (`cmd/pr-pool/drain_test.go`),
+  since `resolveSelf`/`parseSelfLogin` are unchanged — no new cmd test is needed.
+  `run-query` no longer prechecks `self_login`, so it has no such test.
 
 ### Live (manual, full-stack)
 
