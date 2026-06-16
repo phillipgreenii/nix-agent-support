@@ -39,8 +39,14 @@ type fakeTrust struct{ trusted []string }
 
 func (f *fakeTrust) EnsureTrusted(cwd string) error { f.trusted = append(f.trusted, cwd); return nil }
 
+// fakeExister is the SessionExister test seam: ok reports whether the Claude
+// session is "on disk" without touching a real ~/.claude.
+type fakeExister struct{ ok bool }
+
+func (f fakeExister) Exists(string, string) bool { return f.ok }
+
 // a store-backed test using the real store + a hook-like transition to ready.
-func TestEnsure_new_insertsBeforeLaunch_waitsReady(t *testing.T) {
+func TestEnsure_brandNewWhenNoRow(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t) // helper below
 	ft := &fakeTmux{live: map[string]bool{}}
@@ -48,57 +54,57 @@ func TestEnsure_new_insertsBeforeLaunch_waitsReady(t *testing.T) {
 
 	// waiter that, on first poll, simulates the SessionStart hook having flipped
 	// the row to ready (advance generation in the store, then report it).
-	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
 		return wait.Outcome{State: store.Ready}, nil
 	})
 
 	s := New(Deps{
 		Tmux: ft, Trust: ftr, Store: st, Wait: waiter,
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
-		NewUUID: func() string { return "uuid-1" },
+		NewUUID: func() string { return "csid-1" },
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
 
-	h, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{})
+	h, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{Name: "display-alpha"})
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	if h.Name != "alpha" || h.State != store.Ready {
+	if h.ExternalID != "ext-alpha" || h.State != store.Ready || h.ClaudeSessionID != "csid-1" {
 		t.Errorf("handle = %+v", h)
 	}
-	// Row inserted before launch.
 	if len(ft.newCalls) != 1 {
 		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
 	}
 	nc := ft.newCalls[0]
-	if nc.name != "cc-alpha" {
-		t.Errorf("tmux session name = %q, want cc-alpha", nc.name)
+	if nc.name != "cc-ext-alpha" {
+		t.Errorf("tmux session name = %q, want cc-ext-alpha", nc.name)
 	}
 	if nc.cwd != "/tmp/proj" {
-		t.Errorf("tmux session cwd = %q, want /tmp/proj (the --cwd must set the session working dir)", nc.cwd)
+		t.Errorf("tmux session cwd = %q, want /tmp/proj", nc.cwd)
 	}
-	if nc.env["CCPOOL_NAME"] != "alpha" || nc.env["CCPOOL_UUID"] != "uuid-1" || nc.env["PA_MONITOR_NO_NUDGE"] != "1" {
+	if nc.env["CCPOOL_EXTERNAL_ID"] != "ext-alpha" || nc.env["PA_MONITOR_NO_NUDGE"] != "1" {
 		t.Errorf("env markers missing: %v", nc.env)
 	}
-	if nc.argv[0] != "claude" || nc.argv[1] != "--session-id" || nc.argv[2] != "uuid-1" {
+	if nc.argv[0] != "claude" || nc.argv[1] != "--session-id" || nc.argv[2] != "csid-1" {
 		t.Errorf("argv = %v", nc.argv)
+	}
+	if !strings.Contains(strings.Join(nc.argv, " "), "--name display-alpha") {
+		t.Errorf("argv missing --name display-alpha: %v", nc.argv)
 	}
 	if len(ftr.trusted) != 1 || ftr.trusted[0] != "/tmp/proj" {
 		t.Errorf("cwd not pre-trusted: %v", ftr.trusted)
 	}
-	row, _, _ := st.GetByName(ctx, "alpha")
-	if row.UUID != "uuid-1" {
-		t.Errorf("row uuid = %q, want uuid-1", row.UUID)
+	row, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if row.ClaudeSessionID != "csid-1" || row.Name != "display-alpha" {
+		t.Errorf("row = %+v, want csid-1/display-alpha", row)
 	}
 }
 
 // TestEnsure_mergesCallerEnv asserts that EnsureOpts.Env is injected into the
-// session at launch alongside ccpool's own correlation markers (the pool worker
-// stalls without BEADS_ACTOR/BEADS_DIR/WORKSPACE_ROOT). Merge policy: ccpool's
-// reserved markers (CCPOOL_NAME/CCPOOL_UUID/PA_MONITOR_NO_NUDGE) are
-// authoritative and win over a colliding caller key — hooks correlate the store
-// row off those markers, so a caller must never be able to clobber them.
+// session at launch alongside ccpool's own correlation markers. Merge policy:
+// ccpool's reserved markers (CCPOOL_EXTERNAL_ID/PA_MONITOR_NO_NUDGE) are
+// authoritative and win over a colliding caller key.
 func TestEnsure_mergesCallerEnv(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -110,18 +116,18 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 			callerEnv: map[string]string{"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo"},
 			wantEnv: map[string]string{
 				"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo",
-				"CCPOOL_NAME": "alpha", "CCPOOL_UUID": "uuid-1", "PA_MONITOR_NO_NUDGE": "1",
+				"CCPOOL_EXTERNAL_ID": "ext-alpha", "PA_MONITOR_NO_NUDGE": "1",
 			},
 		},
 		{
 			name:      "reserved ccpool markers win over caller override attempts",
-			callerEnv: map[string]string{"CCPOOL_UUID": "hijack", "CCPOOL_NAME": "hijack", "BEADS_DIR": "/repo/.beads"},
-			wantEnv:   map[string]string{"CCPOOL_UUID": "uuid-1", "CCPOOL_NAME": "alpha", "BEADS_DIR": "/repo/.beads"},
+			callerEnv: map[string]string{"CCPOOL_EXTERNAL_ID": "hijack", "BEADS_DIR": "/repo/.beads"},
+			wantEnv:   map[string]string{"CCPOOL_EXTERNAL_ID": "ext-alpha", "BEADS_DIR": "/repo/.beads"},
 		},
 		{
 			name:      "nil caller env keeps only the hardcoded markers",
 			callerEnv: nil,
-			wantEnv:   map[string]string{"CCPOOL_NAME": "alpha", "CCPOOL_UUID": "uuid-1", "PA_MONITOR_NO_NUDGE": "1"},
+			wantEnv:   map[string]string{"CCPOOL_EXTERNAL_ID": "ext-alpha", "PA_MONITOR_NO_NUDGE": "1"},
 		},
 	}
 	for _, tt := range tests {
@@ -129,17 +135,17 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 			ctx := context.Background()
 			st := newMemStore(t)
 			ft := &fakeTmux{live: map[string]bool{}}
-			waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-				_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+			waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+				_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
 				return wait.Outcome{State: store.Ready}, nil
 			})
 			s := New(Deps{
 				Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
 				Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
-				NewUUID: func() string { return "uuid-1" },
+				NewUUID: func() string { return "csid-1" },
 				Now:     func() time.Time { return time.Unix(100, 0) },
 			})
-			if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{Env: tt.callerEnv}); err != nil {
+			if _, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{Env: tt.callerEnv}); err != nil {
 				t.Fatalf("Ensure: %v", err)
 			}
 			if len(ft.newCalls) != 1 {
@@ -156,24 +162,22 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 }
 
 // TestEnsure_threadsLaunchFlagsToArgv asserts that EnsureOpts launch flags reach
-// the claude argv that ensureLocked hands to tmux — the glue between the CLI
-// flags and launch.BuildNew. Without a permission mode that bypasses prompts a
-// dispatched worker stalls on the first tool prompt.
+// the claude argv that ensureLocked hands to tmux.
 func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
 	ft := &fakeTmux{live: map[string]bool{}}
-	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
 		return wait.Outcome{State: store.Ready}, nil
 	})
 	s := New(Deps{
 		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
-		NewUUID: func() string { return "uuid-1" },
+		NewUUID: func() string { return "csid-1" },
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
-	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"}); err != nil {
+	if _, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	if len(ft.newCalls) != 1 {
@@ -188,58 +192,143 @@ func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {
 	}
 }
 
-// TestEnsure_threadsPermissionModeToResumeArgv closes the resume-path gap: a
-// cold (existing) row resumes by name, and the permission mode must still reach
-// the claude argv via launch.BuildResume.
-func TestEnsure_threadsPermissionModeToResumeArgv(t *testing.T) {
+// TestEnsure_resumesWhenSessionExists: tmux gone, row exists, exister=true →
+// launch contains --resume <csid>; waits ready; permission mode threads through.
+func TestEnsure_resumesWhenSessionExists(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	// Seed a cold row so ensureLocked takes the resume branch.
-	if err := st.Insert(ctx, store.Session{Name: "alpha", UUID: "uuid-1", CWD: "/tmp/proj", State: store.Done, TmuxSession: "cc-alpha"}); err != nil {
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-1", CWD: "/tmp/proj", State: store.Idle, TmuxSession: "cc-ext-alpha"}); err != nil {
 		t.Fatalf("seed row: %v", err)
 	}
 	ft := &fakeTmux{live: map[string]bool{}} // not live → resume path
-	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/t.jsonl")
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
 		return wait.Outcome{State: store.Ready}, nil
 	})
 	s := New(Deps{
-		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: true},
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
-		NewUUID: func() string { return "uuid-1" },
+		NewUUID: func() string { return "must-not-be-used" },
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
-	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"}); err != nil {
-		t.Fatalf("Ensure: %v", err)
+	h, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{PermissionMode: launch.ModeBypassPermissions, Effort: "max"})
+	if err != nil {
+		t.Fatalf("Ensure resume: %v", err)
+	}
+	if h.ClaudeSessionID != "csid-1" {
+		t.Errorf("resume must preserve csid-1, got %q", h.ClaudeSessionID)
 	}
 	if len(ft.newCalls) != 1 {
 		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
 	}
 	joined := strings.Join(ft.newCalls[0].argv, " ")
-	if !strings.Contains(joined, "--resume alpha") {
-		t.Errorf("resume argv expected; got %q", joined)
+	if !strings.Contains(joined, "--resume csid-1") {
+		t.Errorf("resume argv expected --resume csid-1; got %q", joined)
 	}
 	if !strings.Contains(joined, "--permission-mode bypassPermissions") {
 		t.Errorf("resume argv missing --permission-mode bypassPermissions: %q", joined)
 	}
 }
 
-func TestEnsure_liveSessionReused_noLaunch(t *testing.T) {
+// TestEnsure_prunesAndCreatesFreshWhenSessionGone: tmux gone, row exists,
+// exister=false, row NOT fresh-starting → row Deleted, then a brand-new
+// --session-id launch with a freshly generated csid.
+func TestEnsure_prunesAndCreatesFreshWhenSessionGone(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "alpha", UUID: "u", State: store.Ready, TmuxSession: "cc-alpha"})
-	ft := &fakeTmux{live: map[string]bool{"cc-alpha": true}}
+	// An idle (settled) row whose Claude session is gone from disk.
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-OLD", CWD: "/tmp/proj", State: store.Idle, TmuxSession: "cc-ext-alpha"}); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: false},
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-NEW" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	h, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if h.ClaudeSessionID != "csid-NEW" {
+		t.Errorf("phantom prune must launch a FRESH session; got csid %q", h.ClaudeSessionID)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	joined := strings.Join(ft.newCalls[0].argv, " ")
+	if !strings.Contains(joined, "--session-id csid-NEW") {
+		t.Errorf("expected a fresh --session-id launch; got %q", joined)
+	}
+	if strings.Contains(joined, "--resume") {
+		t.Errorf("a pruned phantom must NOT resume; got %q", joined)
+	}
+	row, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if row.ClaudeSessionID != "csid-NEW" {
+		t.Errorf("row csid = %q, want the fresh csid-NEW after prune+recreate", row.ClaudeSessionID)
+	}
+}
+
+// TestEnsure_doesNotPruneFreshStartingRow: a row State=Starting younger than the
+// prune grace with exister=false is NOT deleted (fresh-session race guard); it
+// resume-launches by its existing csid.
+func TestEnsure_doesNotPruneFreshStartingRow(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	now := time.Unix(1000, 0)
+	// created_at == now (age 0) → within the default 30s grace.
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-1", CWD: "/tmp/proj", State: store.Starting, CreatedAt: now.Unix(), LastActivityAt: now.Unix()}); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: false},
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "must-not-be-used" },
+		Now:     func() time.Time { return now },
+	})
+	if _, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// The original row must survive (not pruned): its csid is unchanged.
+	row, ok, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if !ok {
+		t.Fatal("fresh starting row must NOT be pruned")
+	}
+	if row.ClaudeSessionID != "csid-1" {
+		t.Errorf("fresh row csid = %q, want unchanged csid-1 (no prune+recreate)", row.ClaudeSessionID)
+	}
+}
+
+func TestEnsure_reusesLiveTmux_noLaunch(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-ext-alpha"})
+	ft := &fakeTmux{live: map[string]bool{"cc-ext-alpha": true}}
 
 	s := New(Deps{
 		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waitFunc(nil),
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
 		NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	if _, err := s.Ensure(ctx, "alpha", "/tmp/proj", "", EnsureOpts{}); err != nil {
+	h, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ft.newCalls) != 0 {
 		t.Errorf("reused live session must not launch; got %d launches", len(ft.newCalls))
+	}
+	if h.ExternalID != "ext-alpha" || h.ClaudeSessionID != "csid" {
+		t.Errorf("reuse handle = %+v", h)
 	}
 }
 
@@ -260,23 +349,24 @@ func (fixedClock) Now() time.Time { return time.Unix(100, 0) }
 func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	// Cold row in a terminal state; not live → resume path. Insert sets generation=1.
-	if err := st.Insert(ctx, store.Session{Name: "beta", UUID: "u-beta", State: store.Done, TmuxSession: "cc-beta", Model: "opus"}); err != nil {
+	// Settled row whose Claude session is still on disk; not live → resume path.
+	// Insert sets generation=1.
+	if err := st.Insert(ctx, store.Session{ExternalID: "beta", ClaudeSessionID: "csid-beta", State: store.Idle, TmuxSession: "cc-beta", Model: "opus"}); err != nil {
 		t.Fatal(err)
 	}
 	ft := &fakeTmux{live: map[string]bool{}}
 	var sawState store.State
 	var sawSince int64
-	waiter := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-		// At wait time the row must already be `starting` (flipped before launch, §8.2 step 3).
-		row, _, _ := st.GetByName(ctx, name)
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		// At wait time the row must already be `starting` (flipped before launch).
+		row, _, _ := st.GetByExternalID(ctx, externalID)
 		sawState = row.State
 		sawSince = since
-		_, _ = st.Transition(ctx, name, store.Ready, "", "/p/beta.jsonl")
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/beta.jsonl")
 		return wait.Outcome{State: store.Ready}, nil
 	})
 	s := New(Deps{
-		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: true},
 		Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
 		NewUUID: func() string { return "must-not-be-used" },
 		Now:     func() time.Time { return time.Unix(1, 0) },
@@ -286,8 +376,8 @@ func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure resume: %v", err)
 	}
-	if h.UUID != "u-beta" {
-		t.Errorf("resume must preserve uuid u-beta, got %q", h.UUID)
+	if h.ClaudeSessionID != "csid-beta" {
+		t.Errorf("resume must preserve csid csid-beta, got %q", h.ClaudeSessionID)
 	}
 	if sawState != store.Starting {
 		t.Errorf("row state at launch = %q, want starting (flipped before launch)", sawState)

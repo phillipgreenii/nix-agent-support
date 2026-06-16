@@ -27,7 +27,7 @@ func (c *envCapTmux) CapturePane(string) (string, error) { return "", nil }
 func TestLaunchAndWait_injectsPool(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Starting, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Starting, TmuxSession: "cc-a"})
 	tm := &envCapTmux{}
 	s := New(Deps{
 		Tmux: tm, Store: st, Prefix: "cc-", PoolPath: "/pools/alpha",
@@ -36,7 +36,7 @@ func TestLaunchAndWait_injectsPool(t *testing.T) {
 		}),
 		Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	if _, err := s.launchAndWait(ctx, "a", "cc-a", "u", "/cwd", 0, []string{"claude"}, nil); err != nil {
+	if _, err := s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil); err != nil {
 		t.Fatalf("launchAndWait: %v", err)
 	}
 	if tm.env["CCPOOL_POOL"] != "/pools/alpha" {
@@ -47,7 +47,7 @@ func TestLaunchAndWait_injectsPool(t *testing.T) {
 func TestLaunchAndWait_defaultModeNoPool(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Starting, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Starting, TmuxSession: "cc-a"})
 	tm := &envCapTmux{}
 	s := New(Deps{
 		Tmux: tm, Store: st, Prefix: "cc-", PoolPath: "", // default mode
@@ -56,7 +56,7 @@ func TestLaunchAndWait_defaultModeNoPool(t *testing.T) {
 		}),
 		Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	_, _ = s.launchAndWait(ctx, "a", "cc-a", "u", "/cwd", 0, []string{"claude"}, nil)
+	_, _ = s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil)
 	if _, ok := tm.env["CCPOOL_POOL"]; ok {
 		t.Error("default mode must NOT set CCPOOL_POOL")
 	}

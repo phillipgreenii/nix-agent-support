@@ -69,7 +69,7 @@ func tickingPanes(n int) []string {
 func TestCancel_confirmsWhenPaneGoesStable(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
 	// Pane animates (thinking), then goes STATIC to a rewound input box with NO
 	// "Interrupted" marker and NO live counter — the thinking-rewind end state
 	// (rep1.post.txt). Stability must confirm even though no marker is present.
@@ -94,7 +94,7 @@ func TestCancel_confirmsWhenPaneGoesStable(t *testing.T) {
 	if escapes != escapeBurst {
 		t.Errorf("sent %d Escapes, want %d", escapes, escapeBurst)
 	}
-	row, _, _ := st.GetByName(ctx, "a")
+	row, _, _ := st.GetByExternalID(ctx, "a")
 	if row.State != store.Ready {
 		t.Errorf("state = %s, want ready", row.State)
 	}
@@ -103,7 +103,7 @@ func TestCancel_confirmsWhenPaneGoesStable(t *testing.T) {
 func TestCancel_neverStableStaysWorking(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
 	// Always-changing pane (a ticking counter) → never K identical reads →
 	// unconfirmed. Exactly cancelMaxSamples distinct panes (see tickingPanes).
 	tm := &closeTmux{live: true, panes: tickingPanes(cancelMaxSamples)}
@@ -116,7 +116,7 @@ func TestCancel_neverStableStaysWorking(t *testing.T) {
 	if tm.capCalls != cancelMaxSamples {
 		t.Errorf("capCalls = %d, want %d (full sample budget)", tm.capCalls, cancelMaxSamples)
 	}
-	row, _, _ := st.GetByName(ctx, "a")
+	row, _, _ := st.GetByExternalID(ctx, "a")
 	if row.State != store.Working {
 		t.Errorf("state = %s, want working (not falsely idle)", row.State)
 	}
@@ -125,7 +125,7 @@ func TestCancel_neverStableStaysWorking(t *testing.T) {
 func TestCancel_liveCounterBlocksFalseConfirm(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
 	// Pathological: the pane is byte-identical on every read (would satisfy
 	// stability) yet still carries a live counter line. The defense-in-depth
 	// guard must reject it so we never confirm a turn rendering a (frozen) counter.
@@ -137,7 +137,7 @@ func TestCancel_liveCounterBlocksFalseConfirm(t *testing.T) {
 	if !errors.Is(err, ErrCancelUnconfirmed) {
 		t.Fatalf("err = %v, want ErrCancelUnconfirmed (guard must block a frozen live-counter pane)", err)
 	}
-	row, _, _ := st.GetByName(ctx, "a")
+	row, _, _ := st.GetByExternalID(ctx, "a")
 	if row.State != store.Working {
 		t.Errorf("state = %s, want working", row.State)
 	}
@@ -146,7 +146,7 @@ func TestCancel_liveCounterBlocksFalseConfirm(t *testing.T) {
 func TestSendInterrupt_abortsOnUnconfirmedCancel(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: true, panes: tickingPanes(cancelMaxSamples)} // cancel will not confirm
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
@@ -166,7 +166,7 @@ func TestSendInterrupt_abortsOnUnconfirmedCancel(t *testing.T) {
 func TestCancel_notLiveErrors(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: false} // no live tmux session
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
@@ -185,7 +185,7 @@ func TestCancel_notLiveErrors(t *testing.T) {
 func TestCancel_idleNormalizesToReady(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: true} // live but idle (state Ready)
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
@@ -195,7 +195,7 @@ func TestCancel_idleNormalizesToReady(t *testing.T) {
 	if len(tm.keys) != 0 {
 		t.Errorf("idle cancel sent keys %v; want none (no Escape burst)", tm.keys)
 	}
-	if row, _, _ := st.GetByName(ctx, "a"); row.State != store.Ready {
+	if row, _, _ := st.GetByExternalID(ctx, "a"); row.State != store.Ready {
 		t.Errorf("state = %s, want ready", row.State)
 	}
 }
@@ -203,7 +203,7 @@ func TestCancel_idleNormalizesToReady(t *testing.T) {
 func TestClose_graceful(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: true, goneAfter: 1} // vanishes after the first liveness poll
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
@@ -228,7 +228,7 @@ func TestClose_graceful(t *testing.T) {
 func TestClose_forceKillsWhenExitIgnored(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: true} // never vanishes → force kill
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
@@ -243,55 +243,55 @@ func TestClose_forceKillsWhenExitIgnored(t *testing.T) {
 func TestClose_purgeDeletesRow(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Done, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Idle, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: false} // already cold
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
 	if err := s.Close(ctx, "a", true); err != nil {
 		t.Fatalf("Close purge: %v", err)
 	}
-	if _, ok, _ := st.GetByName(ctx, "a"); ok {
+	if _, ok, _ := st.GetByExternalID(ctx, "a"); ok {
 		t.Error("--purge should delete the store row")
 	}
 }
 
-// TestClose_reconcilesNonTerminalRowToDone covers pg2-4f0y: a non-purge close
-// KEEPS the row (resumable) but reconciles a non-terminal row to a terminal state
-// (Done) so list retention can sweep it. Otherwise a dead session left as
-// `working|live=false` / `ready|live=false` lingers in `list` forever (retention
-// only hides terminal rows), accumulating across pr-pool drains.
-func TestClose_reconcilesNonTerminalRowToDone(t *testing.T) {
+// TestClose_nonPurgeKeepsRowNoStateChange: a non-purge close KEEPS the row and
+// does NOT fabricate a settled state (ADR 0015). The row retains its last
+// OBSERVED state (here: working); only the tmux session is torn down. Pruning is
+// deferred to Reap, once the Claude session is gone from disk.
+func TestClose_nonPurgeKeepsRowNoStateChange(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
-	tm := &closeTmux{live: false} // session already dead (worker's claude exited)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
+	tm := &closeTmux{live: true, goneAfter: 1} // /exit lands; session vanishes
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
 	if err := s.Close(ctx, "a", false); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	row, ok, _ := st.GetByName(ctx, "a")
+	row, ok, _ := st.GetByExternalID(ctx, "a")
 	if !ok {
-		t.Fatal("non-purge close must KEEP the row (resumable)")
+		t.Fatal("non-purge close must KEEP the row")
 	}
-	if row.State != store.Done {
-		t.Errorf("state = %s, want done (reconciled so retention can sweep it)", row.State)
+	if row.State != store.Working {
+		t.Errorf("state = %s, want working UNCHANGED (close must not fabricate idle/errored)", row.State)
 	}
 }
 
-// TestClose_preservesTerminalOutcome: close must NOT clobber an already-terminal
-// outcome — a Failed session stays Failed (not silently reconciled to Done).
-func TestClose_preservesTerminalOutcome(t *testing.T) {
+// TestClose_nonPurgeDoesNotFabricateIdle: even an errored row is left exactly as
+// observed — close never overwrites it with idle (ADR 0015 forbids the old
+// reconcile-to-Done).
+func TestClose_nonPurgeDoesNotFabricateIdle(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Failed, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Errored, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: false}
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
 	if err := s.Close(ctx, "a", false); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if row, _, _ := st.GetByName(ctx, "a"); row.State != store.Failed {
-		t.Errorf("state = %s, want failed (close must not overwrite a terminal outcome)", row.State)
+	if row, _, _ := st.GetByExternalID(ctx, "a"); row.State != store.Errored {
+		t.Errorf("state = %s, want errored (close must not overwrite the observed state)", row.State)
 	}
 }

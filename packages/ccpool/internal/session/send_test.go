@@ -50,13 +50,13 @@ func newSendService(t *testing.T, st *store.Store, tm Tmux, tr Transcript, w Wai
 func TestSend_done_returnsReply_andGuardsLeadingSlash(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
 	tm := &sendTmux{live: true}
 	tr := fakeTranscript{reply: "the answer"}
 	// waiter flips to done when called.
 	w := waitFunc(func(_ context.Context, name string, since int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Done, "", "")
-		return wait.Outcome{State: store.Done}, nil
+		_, _ = st.Transition(ctx, name, store.Idle, "", "")
+		return wait.Outcome{State: store.Idle}, nil
 	})
 	s := newSendService(t, st, tm, tr, w)
 
@@ -64,7 +64,7 @@ func TestSend_done_returnsReply_andGuardsLeadingSlash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if res.State != store.Done || res.Reply != "the answer" {
+	if res.State != store.Idle || res.Reply != "the answer" {
 		t.Errorf("res = %+v", res)
 	}
 	// leading-/ guard: pasted body must start with a space then the slash.
@@ -80,7 +80,7 @@ func TestSend_done_returnsReply_andGuardsLeadingSlash(t *testing.T) {
 func TestSend_refusesWhenBusy(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Working, TmuxSession: "cc-a"})
 	s := newSendService(t, st, &sendTmux{live: true}, fakeTranscript{}, waitFunc(nil))
 	_, err := s.Send(ctx, "a", "hi", ModeRefuseIfBusy)
 	if err == nil {
@@ -94,19 +94,19 @@ func TestSend_refusesWhenBusy(t *testing.T) {
 func TestSend_interrupt_cancelsThenDelivers(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Working, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
 	tm := &sendTmux{live: true, pane: "Interrupted"}
 	tr := fakeTranscript{reply: "done now"}
 	w := waitFunc(func(_ context.Context, name string, _ int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Done, "", "")
-		return wait.Outcome{State: store.Done}, nil
+		_, _ = st.Transition(ctx, name, store.Idle, "", "")
+		return wait.Outcome{State: store.Idle}, nil
 	})
 	s := newSendService(t, st, tm, tr, w)
 	res, err := s.Send(ctx, "a", "hi", ModeInterrupt)
 	if err != nil {
 		t.Fatalf("Send interrupt: %v", err)
 	}
-	if res.State != store.Done || res.Reply != "done now" {
+	if res.State != store.Idle || res.Reply != "done now" {
 		t.Errorf("res = %+v", res)
 	}
 	// Escape must have been sent (the cancel) before delivery.
@@ -126,7 +126,7 @@ func TestSend_interrupt_cancelsThenDelivers(t *testing.T) {
 func TestSend_queue_deliversWithoutWaiting(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Working, TmuxSession: "cc-a"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Working, TmuxSession: "cc-a"})
 	tm := &sendTmux{live: true}
 	// waiter must NOT be called for queue mode; fail if it is.
 	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
@@ -149,7 +149,7 @@ func TestSend_queue_deliversWithoutWaiting(t *testing.T) {
 func TestSend_timeoutFallsBackToNeedsInput(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
 	tr := fakeTranscript{awaiting: true} // transcript shows a dangling question
 	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
 		return wait.Outcome{State: store.Working, TimedOut: true}, nil
@@ -173,7 +173,7 @@ func (r *recordNotify) Notify(e notify.Event) error { r.events = append(r.events
 func TestSend_fallbackFiresNotifier(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
 	w := waitFunc(func(_ context.Context, _ string, _ int64) (wait.Outcome, error) {
 		return wait.Outcome{State: store.Working, TimedOut: true}, nil
 	})

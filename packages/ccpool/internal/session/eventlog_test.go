@@ -46,13 +46,13 @@ func TestSend_recordsOrderedInputSequence(t *testing.T) {
 		t.Fatalf("eventlog.Open: %v", err)
 	}
 	st := newLoggedStore(t, el)
-	_ = st.Insert(ctx, store.Session{Name: "a", UUID: "u", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
 
 	tm := &sendTmux{live: true}
 	tr := fakeTranscript{reply: "ok"}
 	w := waitFunc(func(_ context.Context, name string, _ int64) (wait.Outcome, error) {
-		_, _ = st.Transition(ctx, name, store.Done, "", "")
-		return wait.Outcome{State: store.Done}, nil
+		_, _ = st.Transition(ctx, name, store.Idle, "", "")
+		return wait.Outcome{State: store.Idle}, nil
 	})
 	s := New(Deps{
 		Tmux: tm, Trust: &fakeTrust{}, Store: st, Wait: w, Transcript: tr,
@@ -94,7 +94,7 @@ func TestSend_recordsOrderedInputSequence(t *testing.T) {
 			idxWorking = i
 		case e.Kind == "input" && e.Action == "clear-input":
 			idxClear = i
-		case e.Kind == "transition" && e.To == string(store.Done):
+		case e.Kind == "transition" && e.To == string(store.Idle):
 			idxDone = i
 		}
 	}
@@ -104,10 +104,11 @@ func TestSend_recordsOrderedInputSequence(t *testing.T) {
 	}
 }
 
-// Reap eviction (harvest #7) closes an idle session via Close→Transition(Done).
-// The store-wired event log must capture that transition so the eviction is
-// recoverable as an ordered event even though the store overwrites the row.
-func TestReap_evictionTransitionIsLogged(t *testing.T) {
+// Reap eviction tears down the stale session's tmux but, per ADR 0015, does NOT
+// fabricate a settled state: Close no longer reconciles to idle/done, so the row
+// keeps its last OBSERVED state and the event log records NO eviction transition.
+// The fresh session must survive untouched.
+func TestReap_evictionTearsDownTmux_noFabricatedTransition(t *testing.T) {
 	ctx := context.Background()
 	events := filepath.Join(t.TempDir(), "events.jsonl")
 	el, err := eventlog.Open(events)
@@ -117,44 +118,41 @@ func TestReap_evictionTransitionIsLogged(t *testing.T) {
 	st := newLoggedStore(t, el)
 
 	now := time.Unix(10_000, 0)
-	// One stale (idle past TTL) and one fresh session, both live.
-	_ = st.Insert(ctx, store.Session{Name: "stale", UUID: "u-stale", State: store.Ready,
+	// One stale (idle past TTL) and one fresh session, both live and resumable so
+	// the prune pass leaves them alone (eviction is by TTL, not prune).
+	_ = st.Insert(ctx, store.Session{ExternalID: "stale", ClaudeSessionID: "u-stale", Name: "stale", State: store.Ready,
 		TmuxSession: "cc-stale", LastActivityAt: now.Unix() - 7200})
-	_ = st.Insert(ctx, store.Session{Name: "fresh", UUID: "u-fresh", State: store.Ready,
+	_ = st.Insert(ctx, store.Session{ExternalID: "fresh", ClaudeSessionID: "u-fresh", Name: "fresh", State: store.Ready,
 		TmuxSession: "cc-fresh", LastActivityAt: now.Unix() - 10})
 	tm := &reapTmux{live: map[string]bool{"cc-stale": true, "cc-fresh": true}, closed: map[string]bool{}}
-	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true},
 		Events: el, Now: func() time.Time { return now }})
 
 	if err := s.Reap(ctx, 2, time.Hour); err != nil {
 		t.Fatalf("Reap: %v", err)
 	}
 
+	// The stale session's tmux must be torn down; the fresh one must remain live.
+	if tm.live["cc-stale"] {
+		t.Error("stale (idle past ttl) session must have its tmux torn down")
+	}
+	if !tm.live["cc-fresh"] {
+		t.Error("fresh session must survive the reap")
+	}
+	// Both rows must KEEP their last observed state (close fabricates nothing).
+	for _, id := range []string{"stale", "fresh"} {
+		if row, ok, _ := st.GetByExternalID(ctx, id); !ok || row.State != store.Ready {
+			t.Errorf("row %q state = %v (ok=%v), want ready unchanged (no fabricated eviction state)", id, row.State, ok)
+		}
+	}
+	// No eviction transition may be logged — Close stopped fabricating state.
 	evs, err := eventlog.Read(events)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	// The stale session must have a logged ready→done transition; the fresh one
-	// must NOT (it survived the reap).
-	sawStaleDone, sawFreshDone := false, false
 	for _, e := range evs {
-		if e.Kind != "transition" || e.To != string(store.Done) {
-			continue
+		if e.Kind == "transition" {
+			t.Errorf("reap eviction must NOT log a fabricated transition; got %+v", e)
 		}
-		switch e.Name {
-		case "stale":
-			sawStaleDone = true
-			if e.From != string(store.Ready) {
-				t.Errorf("eviction transition from = %q, want ready", e.From)
-			}
-		case "fresh":
-			sawFreshDone = true
-		}
-	}
-	if !sawStaleDone {
-		t.Errorf("reap eviction of the stale session must log a done transition; evs=%+v", evs)
-	}
-	if sawFreshDone {
-		t.Errorf("the surviving fresh session must NOT be evicted/logged; evs=%+v", evs)
 	}
 }

@@ -66,23 +66,23 @@ func (s *Service) confirmStable(tmuxName string) (bool, error) {
 	return false, nil
 }
 
-// Cancel interrupts the current turn (Escape) and resets the session to idle.
+// Cancel interrupts the current turn (Escape) and resets the session to ready.
 // No Stop hook fires on a user interrupt (spec §4/§8.5), so Cancel resets state
 // itself rather than waiting. It also clears the restored input buffer.
-func (s *Service) Cancel(ctx context.Context, name string) error {
-	return s.withLock(name, func() error { return s.cancelLocked(ctx, name) })
+func (s *Service) Cancel(ctx context.Context, externalID string) error {
+	return s.withLock(externalID, func() error { return s.cancelLocked(ctx, externalID) })
 }
 
-func (s *Service) cancelLocked(ctx context.Context, name string) error {
-	tmuxName := s.d.Prefix + name
+func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
+	tmuxName := s.d.Prefix + externalID
 	if !s.d.Tmux.HasSession(tmuxName) {
-		return fmt.Errorf("session %q is not live", name)
+		return fmt.Errorf("session %q is not live", externalID)
 	}
-	// Nothing to interrupt if already idle (standalone cancel on a ready/done
+	// Nothing to interrupt if already idle (standalone cancel on a ready/idle
 	// session); just normalize to ready without bursting/verifying.
-	if row, ok, err := s.d.Store.GetByName(ctx, name); err == nil && ok &&
-		(row.State == store.Ready || row.State == store.Done) {
-		_, err := s.d.Store.Transition(ctx, name, store.Ready, "", "")
+	if row, ok, err := s.d.Store.GetByExternalID(ctx, externalID); err == nil && ok &&
+		(row.State == store.Ready || row.State == store.Idle) {
+		_, err := s.d.Store.Transition(ctx, externalID, store.Ready, "", "")
 		return err
 	}
 	// Brute-force a burst of Escapes spanning the thinking->streaming window; a
@@ -96,7 +96,7 @@ func (s *Service) cancelLocked(ctx context.Context, name string) error {
 		}
 	}
 	// Record the Escape burst as ONE ordered input action (detail = the count).
-	_ = s.d.Events.Input(s.d.Now(), name, "escape-burst", strconv.Itoa(escapeBurst))
+	_ = s.d.Events.Input(s.d.Now(), externalID, "escape-burst", strconv.Itoa(escapeBurst))
 	if err := s.clearInput(tmuxName); err != nil {
 		return err
 	}
@@ -111,16 +111,18 @@ func (s *Service) cancelLocked(ctx context.Context, name string) error {
 	if !confirmed {
 		return ErrCancelUnconfirmed // row left as-is (working); caller fails safely
 	}
-	_, err = s.d.Store.Transition(ctx, name, store.Ready, "", "")
+	_, err = s.d.Store.Transition(ctx, externalID, store.Ready, "", "")
 	return err
 }
 
 // Close ends the local REPL: clear input, send /exit, wait briefly for the tmux
-// session to vanish, else force-kill (spec §8.4). The conversation stays
-// resumable; --purge additionally deletes the store row.
-func (s *Service) Close(ctx context.Context, name string, purge bool) error {
-	return s.withLock(name, func() error {
-		tmuxName := s.d.Prefix + name
+// session to vanish, else force-kill (spec §8.4). The row is NOT mutated on a
+// non-purge close — ccpool no longer fabricates a settled state (ADR 0015); the
+// row keeps its last OBSERVED state and is pruned later, once the Claude session
+// is gone from disk. --purge additionally deletes the store row immediately.
+func (s *Service) Close(ctx context.Context, externalID string, purge bool) error {
+	return s.withLock(externalID, func() error {
+		tmuxName := s.d.Prefix + externalID
 		if s.d.Tmux.HasSession(tmuxName) {
 			// deliverCommand clears the input line itself, so no separate clear here.
 			if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
@@ -133,21 +135,9 @@ func (s *Service) Close(ctx context.Context, name string, purge bool) error {
 			}
 		}
 		if purge {
-			return s.d.Store.Delete(ctx, name)
+			return s.d.Store.Delete(ctx, externalID)
 		}
-		// Non-purge close keeps the row (the conversation stays resumable), but a
-		// row left in a non-terminal state with live=false lingers in `list`
-		// forever — retention only sweeps terminal rows (pg2-4f0y). Reconcile a
-		// non-terminal row to a terminal state so retention can age it out;
-		// preserve an already-terminal outcome (don't clobber Failed with Done).
-		row, ok, err := s.d.Store.GetByName(ctx, name)
-		if err != nil {
-			return err
-		}
-		if ok && !row.State.Terminal() {
-			_, err = s.d.Store.Transition(ctx, name, store.Done, "", "")
-			return err
-		}
+		// Non-purge close: do nothing else. No fabricated state.
 		return nil
 	})
 }

@@ -32,20 +32,21 @@ func (r *reapTmux) KillSession(name string) error {
 func (r *reapTmux) CapturePane(string) (string, error) { return r.pane, nil }
 
 // reapFixture builds N live sessions with the given ages (seconds idle) and a
-// service whose tmux reports them all live and records closures.
+// service whose tmux reports them all live and records closures. All sessions
+// are resumable (Exister ok=true) so the prune pass leaves the live rows alone.
 func reapFixture(t *testing.T, now time.Time, ages map[string]int64) (*Service, map[string]bool) {
 	t.Helper()
 	ctx := context.Background()
 	st := newMemStore(t)
 	liveMap := map[string]bool{}
-	for name, ageSec := range ages {
-		_ = st.Insert(ctx, store.Session{Name: name, UUID: "u-" + name, State: store.Ready,
-			TmuxSession: "cc-" + name, LastActivityAt: now.Unix() - ageSec})
-		liveMap["cc-"+name] = true
+	for externalID, ageSec := range ages {
+		_ = st.Insert(ctx, store.Session{ExternalID: externalID, ClaudeSessionID: "csid-" + externalID, State: store.Ready,
+			TmuxSession: "cc-" + externalID, LastActivityAt: now.Unix() - ageSec})
+		liveMap["cc-"+externalID] = true
 	}
 	closed := map[string]bool{}
 	tm := &reapTmux{live: liveMap, closed: closed}
-	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true},
 		Now: func() time.Time { return now }})
 	return s, closed
 }
@@ -84,3 +85,58 @@ func TestReap_overCapClosesOldestFirst(t *testing.T) {
 		t.Error("most-recently-active session must survive")
 	}
 }
+
+// TestReap_prunesRowsWhoseSessionGone: a DEAD row (no live tmux) whose Claude
+// session is gone from disk is removed by reconcile (ADR 0015), while a dead row
+// that is still resumable is KEPT (resume later).
+func TestReap_prunesRowsWhoseSessionGone(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(10_000, 0)
+	st := newMemStore(t)
+	// gone: dead + not on disk → pruned. keep: dead + still resumable → kept.
+	_ = st.Insert(ctx, store.Session{ExternalID: "gone", ClaudeSessionID: "csid-gone", State: store.Idle,
+		TmuxSession: "cc-gone", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200})
+	_ = st.Insert(ctx, store.Session{ExternalID: "keep", ClaudeSessionID: "csid-keep", State: store.Idle,
+		TmuxSession: "cc-keep", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200})
+
+	// A per-csid exister: csid-keep is on disk, csid-gone is not.
+	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+		Exister: existerByCSID{"csid-keep": true}, Now: func() time.Time { return now }})
+
+	if err := s.Reap(ctx, 6, time.Hour); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "gone"); ok {
+		t.Error("a dead row whose Claude session is gone must be pruned")
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "keep"); !ok {
+		t.Error("a dead but still-resumable row must be KEPT")
+	}
+}
+
+// TestReap_doesNotPruneFreshStartingDeadRow guards the fresh-session race: a
+// young `starting` row with no live tmux and no transcript yet is NOT pruned.
+func TestReap_doesNotPruneFreshStartingDeadRow(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(10_000, 0)
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "fresh", ClaudeSessionID: "csid-fresh", State: store.Starting,
+		TmuxSession: "cc-fresh", CreatedAt: now.Unix(), LastActivityAt: now.Unix()})
+	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+		Exister: fakeExister{ok: false}, Now: func() time.Time { return now }})
+
+	if err := s.Reap(ctx, 6, time.Hour); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "fresh"); !ok {
+		t.Error("a fresh starting row must NOT be pruned (it may not have written a transcript yet)")
+	}
+}
+
+// existerByCSID is a per-csid SessionExister for tests with a mix of
+// resumable/gone rows.
+type existerByCSID map[string]bool
+
+func (e existerByCSID) Exists(_, claudeSessionID string) bool { return e[claudeSessionID] }
