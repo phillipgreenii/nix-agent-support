@@ -45,13 +45,23 @@ func TestNewRegistry_enabledFlags(t *testing.T) {
 	}
 }
 
-func TestSessionName(t *testing.T) {
+func TestRole_ExternalID_includesStamp(t *testing.T) {
 	reg := NewRegistry(config.Default())
-	if got := reg.Worker.SessionName("pr-pool-", "zr-lweh.2"); got != "pr-pool-worker-zr-lweh.2" {
-		t.Errorf("worker session name = %q", got)
+	if got := reg.Feedback.ExternalID("pr-pool-", "zr-1", "20260616T010203"); got != "pr-pool-feedback-processor-zr-1-20260616T010203" {
+		t.Errorf("feedback external id = %q", got)
 	}
-	if got := reg.Feedback.SessionName("pr-pool-", "zr-7"); got != "pr-pool-feedback-processor-zr-7" {
-		t.Errorf("feedback session name = %q", got)
+	if got := reg.Worker.ExternalID("pr-pool-", "zr-lweh.2", "20260616T010203"); got != "pr-pool-worker-zr-lweh.2-20260616T010203" {
+		t.Errorf("worker external id = %q", got)
+	}
+}
+
+func TestRole_DisplayName(t *testing.T) {
+	reg := NewRegistry(config.Default())
+	if got := reg.Worker.DisplayName("pr-pool-", "zr-lweh.2"); got != "pr-pool-worker-zr-lweh.2" {
+		t.Errorf("worker display name = %q", got)
+	}
+	if got := reg.Feedback.DisplayName("pr-pool-", "zr-7"); got != "pr-pool-feedback-processor-zr-7" {
+		t.Errorf("feedback display name = %q", got)
 	}
 }
 

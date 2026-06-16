@@ -51,10 +51,27 @@ func NewRegistry(cfg config.Config) Registry {
 	}
 }
 
-// SessionName builds the per-bead ccpool session name: <prefix><role>-<beadid>,
-// e.g. "pr-pool-worker-zr-lweh.2".
-func (r Role) SessionName(prefix, beadID string) string {
+// ExternalID builds the per-attempt ccpool external_id:
+// <prefix><role>-<beadid>-<stamp>, e.g.
+// "pr-pool-worker-zr-lweh.2-20260616T010203". The stamp makes the id unique per
+// attempt so ccpool never resumes a prior conversation (ADR 0015).
+func (r Role) ExternalID(prefix, beadID, stamp string) string {
+	return prefix + r.Name + "-" + beadID + "-" + stamp
+}
+
+// DisplayName builds the optional ccpool --name display label, stable per bead:
+// <prefix><role>-<beadid>, e.g. "pr-pool-worker-zr-lweh.2". It groups the N
+// per-attempt sessions of one bead under a human-readable handle.
+func (r Role) DisplayName(prefix, beadID string) string {
 	return prefix + r.Name + "-" + beadID
+}
+
+// SessionName is the pre-redesign per-bead handle, identical to DisplayName.
+// Retained transiently so callers compile until they migrate to ExternalID
+// (per-attempt) + DisplayName (--name); removed once the orchestrator is
+// rewired (ADR 0015). Prefer ExternalID for addressing and DisplayName for --name.
+func (r Role) SessionName(prefix, beadID string) string {
+	return r.DisplayName(prefix, beadID)
 }
 
 // Nudge returns the role's prompt for the given bead. worktreeDir is only used
