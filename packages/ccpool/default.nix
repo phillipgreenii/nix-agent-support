@@ -20,7 +20,18 @@ mkGoApp {
   };
   modRoot = "ccpool";
 
-  vendorHash = "sha256-M6AYREbtZ+lIvuxofJQeyCgA5+8IYoVLTkw/841cg+w=";
+  # claude-transcript is a first-party local-replace module. Keep it "live"
+  # (never frozen into the vendorHash FOD) via mkGoApp's overlay — see pg2-gjzz.
+  localReplaceModules = [
+    {
+      goImportPath = "github.com/phillipgreenii/claude-transcript";
+      relPath = "../claude-transcript";
+    }
+  ];
+
+  # Tracks only third-party deps (claude-transcript stripped + overlaid live), so
+  # it no longer drifts on a claude-transcript edit — pg2-gjzz.
+  vendorHash = "sha256-IsHZpnzp/AHjvocudWcbLwIqX/7NLVi8sX5LxuWCWVY=";
 
   nativeBuildInputs = [ makeWrapper ];
 

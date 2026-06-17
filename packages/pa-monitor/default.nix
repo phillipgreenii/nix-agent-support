@@ -28,9 +28,20 @@ mkGoApp {
   };
   modRoot = "pa-monitor";
 
+  # claude-transcript is a first-party local-replace module. Keep it "live"
+  # (never frozen into the vendorHash FOD) via mkGoApp's overlay — see pg2-gjzz.
+  localReplaceModules = [
+    {
+      goImportPath = "github.com/phillipgreenii/claude-transcript";
+      relPath = "../claude-transcript";
+    }
+  ];
+
   subPackages = [ "cmd/pa-monitor" ];
 
-  vendorHash = "sha256-7Ng9sHJOrVTw14UNsyXhYI/EQOvu3d1+HIbWfUQSQVo=";
+  # Tracks only third-party deps (claude-transcript is stripped from the FOD and
+  # overlaid live), so it no longer drifts on a claude-transcript edit — pg2-gjzz.
+  vendorHash = "sha256-VOeOQ9H15/tjFbUXN1DcZQkkn9YP7Z+iY314WgkVq5o=";
 
   # Binary version (`-X main.version`) is derived from this package's own
   # source by mkGoApp; `main.version` (lowercase) is mkGoApp's default target.
