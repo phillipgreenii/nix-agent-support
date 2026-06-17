@@ -39,6 +39,10 @@
     git-hooks.inputs.nixpkgs.follows = "nixpkgs";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     stylix = {
       url = "github:danth/stylix/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -59,6 +63,7 @@
       phillipgreenii-nix-overlay,
       phillipgreenii-nix-base,
       flake-utils,
+      gomod2nix,
       ...
     }:
     let
@@ -223,6 +228,10 @@
           pkgs = import nixpkgs {
             inherit system;
             overlays = [
+              # gomod2nix overlay (ADR 0008): provides pkgs.buildGoApplication so
+              # the dual-engine mkGoApp can reach the gomod2nix engine. No package
+              # opts in yet; this only makes the builder available.
+              gomod2nix.overlays.default
               phillipgreenii-nix-overlay.overlays.default
               # Provide `unstable` for STANDALONE agent-support builds so the
               # exported overlay's `final.unstable.dolt` (used by gascity)
