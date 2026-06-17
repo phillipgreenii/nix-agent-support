@@ -80,6 +80,25 @@ func (f waitFunc) Wait(ctx context.Context, externalID string, since int64) (wai
 // SessionStart hook may not have written one). Wired into Deps.PruneGrace.
 const defaultPruneGrace = 30 * time.Second
 
+// claudeChildMarkers are the env vars Claude Code uses to flag a CHILD/nested
+// session. When CLAUDE_CODE_CHILD_SESSION is set, Claude does NOT persist the
+// conversation transcript .jsonl (it treats itself as nested), which breaks
+// resume-by-claude_session_id and `ccpool result` (pg2-lki6). A ccpool process
+// launched from inside a Claude session (an agent driving ccpool, or `go test`
+// running the contract suite) inherits these, and the tmux server passes them
+// through to the pane. launchAndWait neutralizes each by emitting it as an EMPTY
+// `-e VAR=` override (verified live: empty value is treated as "not a child"), so
+// every managed session starts as a fresh top-level claude. The whole family is
+// blanked — not just CHILD_SESSION — so a managed session never appears to be a
+// continuation of the launching claude.
+var claudeChildMarkers = []string{
+	"CLAUDE_CODE_CHILD_SESSION",
+	"CLAUDECODE",
+	"CLAUDE_CODE_ENTRYPOINT",
+	"CLAUDE_CODE_SESSION_ID",
+	"CLAUDE_CODE_EXECPATH",
+}
+
 type Deps struct {
 	Tmux       Tmux
 	Trust      Truster
@@ -322,12 +341,17 @@ func (s *Service) currentGeneration(ctx context.Context, externalID string) (int
 // are written last so they are authoritative — hooks key the store row off
 // CCPOOL_EXTERNAL_ID, so a caller must never be able to clobber it.
 func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid, name, cwd string, since int64, argv []string, extraEnv map[string]string) (Handle, error) {
-	env := make(map[string]string, len(extraEnv)+3)
+	env := make(map[string]string, len(extraEnv)+len(claudeChildMarkers)+3)
 	maps.Copy(env, extraEnv)
 	env["CCPOOL_EXTERNAL_ID"] = externalID
 	env["PA_MONITOR_NO_NUDGE"] = "1"
 	if s.d.PoolPath != "" {
 		env["CCPOOL_POOL"] = s.d.PoolPath
+	}
+	// Blank the Claude child-session markers (authoritatively, after the caller
+	// env) so the launched claude persists its transcript (pg2-lki6).
+	for _, k := range claudeChildMarkers {
+		env[k] = ""
 	}
 	if err := s.d.Tmux.NewSession(tmuxName, cwd, env, argv); err != nil {
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)

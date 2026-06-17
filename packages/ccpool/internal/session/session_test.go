@@ -210,6 +210,61 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 	}
 }
 
+// TestEnsure_neutralizesClaudeChildMarkers asserts that ccpool blanks the Claude
+// "child/nested session" env markers in the launched session env. Claude Code does
+// NOT persist the conversation transcript .jsonl when CLAUDE_CODE_CHILD_SESSION is
+// set — it treats itself as a nested session (verified live, claude 2.1.177). So a
+// ccpool session launched from INSIDE a Claude session (e.g. an agent driving
+// ccpool, or `go test` running the contract suite) inherits the marker and never
+// persists a transcript, breaking resume-by-claude_session_id and `ccpool result`
+// (pg2-lki6). ccpool emits each marker as an EMPTY -e override (tmux `-e VAR=`
+// neutralizes it — verified) so every managed session starts as a fresh top-level
+// claude. The neutralizer is AUTHORITATIVE: it wins even when a caller leaks the
+// marker, exactly like the reserved CCPOOL_* markers.
+func TestEnsure_neutralizesClaudeChildMarkers(t *testing.T) {
+	markers := []string{
+		"CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_EXECPATH",
+	}
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, _ int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	// A caller (e.g. a Claude session driving ccpool) leaks the child marker; the
+	// neutralizer must still win and blank it.
+	callerEnv := map[string]string{"CLAUDE_CODE_CHILD_SESSION": "1", "BEADS_DIR": "/repo/.beads"}
+	if _, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{Env: callerEnv}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	got := ft.newCalls[0].env
+	for _, k := range markers {
+		v, ok := got[k]
+		if !ok {
+			t.Errorf("marker %q absent from launched env; it must be present and set to \"\" to neutralize the inherited value (full env: %v)", k, got)
+			continue
+		}
+		if v != "" {
+			t.Errorf("marker %q = %q, want \"\" (neutralized)", k, v)
+		}
+	}
+	// Sanity: an ordinary caller key still passes through untouched.
+	if got["BEADS_DIR"] != "/repo/.beads" {
+		t.Errorf("caller env clobbered: BEADS_DIR=%q, want /repo/.beads", got["BEADS_DIR"])
+	}
+}
+
 // TestEnsure_threadsLaunchFlagsToArgv asserts that EnsureOpts launch flags reach
 // the claude argv that ensureLocked hands to tmux.
 func TestEnsure_threadsLaunchFlagsToArgv(t *testing.T) {

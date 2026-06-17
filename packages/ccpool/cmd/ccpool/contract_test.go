@@ -400,18 +400,13 @@ func (sb *sandbox) listRow(externalID string) (listJSON, bool) {
 // transcript_path resume probe matches a transcript real claude actually persists
 // (ADR 0015); a stub claude that exits on /exit cannot stand in for either.
 func TestContract_Resume_NewResumesExistingClaudeSession(t *testing.T) {
-	// PENDING (blocker found live, 2026-06-16): claude does not persist a transcript
-	// file for ccpool-launched sessions — it reports a transcript_path via the hook
-	// but no file lands there, while normal interactive sessions persist fine. With
-	// no on-disk transcript there is nothing to resume, so this scenario cannot be
-	// verified yet. (This is also the deeper root of the original pr-pool wedge: the
-	// phantom session had no transcript.) pr-pool itself never resumes (per-attempt
-	// ids + purge), so this gap does not affect pr-pool. Drop this pending() once
-	// ccpool-launched sessions persist transcripts — the body below is the
-	// ready-to-run verification.
-	pending(t,
-		"new on a tmux-gone session resumes via `claude --resume <claude_session_id>`, preserving the session id",
-		"claude to persist transcripts for ccpool-launched sessions (see the transcript-persistence investigation bead)")
+	// RESOLVED (pg2-lki6, 2026-06-17): ccpool-launched sessions previously did not
+	// persist a transcript because the launched claude inherited CLAUDE_CODE_CHILD_SESSION
+	// (set whenever ccpool is driven from inside a Claude session — e.g. this suite under
+	// `go test`), and Claude Code skips transcript persistence for a child/nested session.
+	// session.launchAndWait now blanks that marker family via an empty `-e` override, so
+	// the launched claude is a fresh top-level session and persists its transcript. This
+	// scenario verifies the full ADR-0015 resume path end-to-end against real claude.
 	sb := newSandbox(t)
 	sb.mustNew("r")
 	// Drive a SUBSTANTIAL turn so Claude actually persists the session transcript:
