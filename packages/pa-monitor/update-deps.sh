@@ -2,10 +2,11 @@
 # Standalone developer utility - not Nix-wrapped intentionally
 set -euo pipefail
 
-# Update Go module dependencies and refresh vendorHash in default.nix.
-# Uses nix-update to rewrite the hash in place (no fake-hash dance, no error
-# scraping). Safe to run from the package directory or via the top-level
-# update-locks.sh (which handles fsmonitor itself).
+# Refresh Go module dependencies and regenerate gomod2nix.toml.
+# This package builds on the gomod2nix engine (ADR 0008), so the dependency
+# graph is pinned by a committed gomod2nix.toml beside go.mod — there is no
+# vendorHash to rewrite. `gomod2nix generate` rewrites the toml in place; no
+# nix-update, no fake-hash dance, no fsmonitor hack.
 #
 # Usage: ./update-deps.sh
 
@@ -16,39 +17,22 @@ PKG_NAME="pa-monitor"
 # Devbox may export GOEXPERIMENT from its Go; clear so Nix-managed Go isn't confused.
 unset GOEXPERIMENT
 
-# nix-update trips on git fsmonitor's .git/fsmonitor--daemon.ipc socket.
-# When invoked standalone, suspend fsmonitor for the duration. When invoked
-# from update-locks.sh, fsmonitor is already off — this becomes a no-op.
-_fsmonitor_was_active="$(git -C "${FLAKE_ROOT}" config core.fsmonitor 2>/dev/null || echo false)"
-if [ "${_fsmonitor_was_active}" = "true" ]; then
-  git -C "${FLAKE_ROOT}" config core.fsmonitor false
-  git -C "${FLAKE_ROOT}" fsmonitor--daemon stop 2>/dev/null || true
-  trap '
-    if [ "${_fsmonitor_was_active}" = "true" ]; then
-      git -C "'"${FLAKE_ROOT}"'" config core.fsmonitor true
-    fi
-  ' EXIT
-fi
-
 cd "${SCRIPT_DIR}"
 
 echo "==> Tidying Go modules..."
 go mod tidy
 
 echo ""
-echo "==> Refreshing vendorHash via nix-update..."
-(
-  cd "${FLAKE_ROOT}"
-  nix run nixpkgs#nix-update -- -F --no-src --version=skip "${PKG_NAME}"
-)
+echo "==> Regenerating gomod2nix.toml..."
+nix run github:nix-community/gomod2nix -- generate
 
 echo ""
 echo "==> Verifying build..."
 if (cd "${FLAKE_ROOT}" && nix build ".#${PKG_NAME}" --no-link); then
   echo ""
-  echo "✓ Success! Dependencies updated and vendorHash refreshed."
+  echo "✓ Success! Dependencies updated and gomod2nix.toml regenerated."
   echo "  Updated: go.mod, go.sum"
-  echo "  Updated: default.nix (vendorHash)"
+  echo "  Updated: gomod2nix.toml"
 else
   echo ""
   echo "✗ Build failed. Check the output above." >&2
