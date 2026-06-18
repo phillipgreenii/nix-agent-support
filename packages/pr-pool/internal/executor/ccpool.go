@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -21,9 +22,7 @@ import (
 type ccpoolExecutor struct{}
 
 func (ccpoolExecutor) Dispatch(ctx context.Context, d discover.DispatchContext, deps Deps) (report.Result, error) {
-	r := &ccpoolRun{deps: deps}
-	err := r.run(ctx, d)
-	return report.Result{}, err // Task 4 attaches the failure action here
+	return (&ccpoolRun{deps: deps}).run(ctx, d)
 }
 
 // ccpoolRun carries Deps so the moved methods keep their original signatures
@@ -34,7 +33,7 @@ type ccpoolRun struct{ deps Deps }
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
 // the role carries a finite budget. The session is addressed by ExternalID; the
 // stable DisplayName is passed only as ccpool --name.
-func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) error {
+func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report.Result, error) {
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 	env := map[string]string{
@@ -48,8 +47,11 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) error {
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
 		// first failure; on a subsequent failure (label already present) add human
 		// so discovery stops retrying it (worker discovery excludes human).
-		r.escalateLaunchFailure(ctx, d.Item.ID)
-		return fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
+		var res report.Result
+		if r.escalateLaunchFailure(ctx, d.Item.ID) {
+			res = failureAction(report.Escalated, d.Item.ID)
+		}
+		return res, fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
 	}
 	// The bead was dispatched: clear any pool-launch-fail from a prior attempt so
 	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
@@ -58,17 +60,42 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) error {
 	nudge := r.renderNudge(cc, d)
 	if err := r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
 		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
+		var res report.Result
 		if cc.OnDispatchFail == roles.DispatchUnclaim {
 			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+			res = failureAction(report.Unclaimed, d.Item.ID)
 		}
-		return fmt.Errorf("send %s: %w", r.deps.ExternalID, err)
+		return res, fmt.Errorf("send %s: %w", r.deps.ExternalID, err)
 	}
 	// A finite budget => run the watchdog (it races waitDone); unlimited => no
 	// watchdog, so no race and waitDone always owns the outcome.
+	var werr error
 	if budgetUnlimited(cc.Budget) {
-		return r.waitDone(ctx, nil, d, r.deps.ExternalID)
+		werr = r.waitDone(ctx, nil, d, r.deps.ExternalID)
+	} else {
+		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID)
 	}
-	return r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID)
+	return r.waitFailureResult(cc, d.Item.ID, werr), werr
+}
+
+// waitFailureResult maps a wait-path error to the verb actually applied to the
+// bead: a budget hard-stop (watchdog won) always unclaimed; any other failure
+// went through fail → complete.OnFailure(OnFailure). nil/ctx errors → no verb.
+// (pg2-kj7j)
+func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) report.Result {
+	if err == nil {
+		return report.Result{}
+	}
+	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		return failureAction(report.Unclaimed, beadID)
+	}
+	switch cc.OnFailure {
+	case roles.Unclaim:
+		return failureAction(report.Unclaimed, beadID)
+	case roles.AddHuman:
+		return failureAction(report.Escalated, beadID)
+	}
+	return report.Result{}
 }
 
 // budgetUnlimited reports whether a budget imposes no finite bound (so no watchdog
@@ -109,16 +136,20 @@ func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d discover.DispatchConte
 // human and stop retrying (worker discovery excludes the human label). Reads are
 // best-effort — a bd hiccup here just means we retry next pass rather than
 // escalate, which is the safe direction. (ADR 0015)
-func (r *ccpoolRun) escalateLaunchFailure(ctx context.Context, beadID string) {
+//
+// Returns true iff it escalated to human (repeat failure); false on the first
+// failure (label only) or on a bd read hiccup. (pg2-kj7j)
+func (r *ccpoolRun) escalateLaunchFailure(ctx context.Context, beadID string) bool {
 	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, "pool-launch-fail")
 	if err != nil {
-		return // can't tell ⇒ do nothing this pass; the next launch failure retries
+		return false // can't tell ⇒ do nothing this pass; the next launch failure retries
 	}
 	if already {
 		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
-		return
+		return true
 	}
 	_ = beads.AddLabel(ctx, r.deps.BD, beadID, "pool-launch-fail")
+	return false
 }
 
 // workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.

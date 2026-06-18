@@ -104,8 +104,7 @@ func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) e
 	}()
 	pre, preOK := o.snapshotIDs(ctx)
 	res, err := o.workOneWithID(ctx, d, externalID)
-	_ = res // Task 4 threads res into buildResult; buildResult still derives the verb from OnFailure this task
-	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, err))
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, res, err))
 	return err
 }
 
@@ -121,7 +120,6 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 		slog.Info("dispatching", "role", role.Name, "item", d.Item.ID)
 		pre, preOK := o.snapshotIDs(ctx) // bracket workOne so creations on BOTH success and failure paths are seen
 		res, err := o.workOne(ctx, d)
-		_ = res // Task 4 threads res into buildResult; buildResult still derives the verb from OnFailure this task
 		if err != nil {
 			slog.Warn("bead flagged", "role", role.Name, "item", d.Item.ID, "err", err)
 			flagged++
@@ -129,7 +127,7 @@ func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discove
 			slog.Info("bead complete", "role", role.Name, "item", d.Item.ID)
 			complete++
 		}
-		o.emitResult(ctx, role, d.Item.ID, o.buildResult(ctx, role, d, pre, preOK, err))
+		o.emitResult(ctx, role, d.Item.ID, o.buildResult(ctx, role, d, pre, preOK, res, err))
 		worked++
 	}
 	return complete, flagged
@@ -153,9 +151,9 @@ func (o *Orchestrator) snapshotIDs(ctx context.Context) (map[string]struct{}, bo
 // buildResult assembles the structured dispatch report from observable signals,
 // WITHOUT touching the single-terminal race code: the created marker from the
 // snapshot diff (or indeterminate on a failed read), plus the outcome verb — on
-// success the bead's final status (closed vs handed-back), on failure the role's
-// configured failure action (escalated/unclaimed).
-func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d discover.DispatchContext, pre map[string]struct{}, preOK bool, dispatchErr error) report.Result {
+// success the bead's final status (closed vs handed-back), on failure the verb
+// the executor actually applied to the bead (execRes — pg2-kj7j).
+func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d discover.DispatchContext, pre map[string]struct{}, preOK bool, execRes report.Result, dispatchErr error) report.Result {
 	var actions []report.Action
 	post, lerr := beads.List(ctx, o.BD, "--all")
 	switch {
@@ -167,14 +165,7 @@ func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d disco
 		}
 	}
 	if dispatchErr != nil {
-		if role.CCPool != nil {
-			switch role.CCPool.OnFailure {
-			case roles.AddHuman:
-				actions = append(actions, report.Action{Verb: report.Escalated, Refs: beadRefs([]string{d.Item.ID})})
-			case roles.Unclaim:
-				actions = append(actions, report.Action{Verb: report.Unclaimed, Refs: beadRefs([]string{d.Item.ID})})
-			}
-		}
+		actions = append(actions, execRes.Actions...) // verb the executor actually applied (pg2-kj7j)
 	} else {
 		switch status, _ := beads.Status(ctx, o.BD, d.Item.ID); status {
 		case "closed":

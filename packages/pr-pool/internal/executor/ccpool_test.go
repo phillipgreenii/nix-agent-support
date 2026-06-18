@@ -11,7 +11,9 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
 	"github.com/phillipgreenii/pr-pool/internal/item"
+	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
 // newExec builds a *ccpoolRun with injected clock/tick + fakes, mirroring the
@@ -341,5 +343,99 @@ func TestActive_stateMapping(t *testing.T) {
 				t.Errorf("active(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- pg2-kj7j: Dispatch reports the failure verb actually taken ---
+
+func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (report.Result, error) {
+	t.Helper()
+	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = ext
+	return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+}
+
+func verbOf(res report.Result) report.Verb {
+	if len(res.Actions) == 0 {
+		return ""
+	}
+	return res.Actions[0].Verb
+}
+
+func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
+	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
+	res, err := dispatchWorker(t, cc, bd, cfg, "pr-pool-worker-zr-w")
+	if err == nil {
+		t.Fatal("ensure failure should error")
+	}
+	if v := verbOf(res); v != "" {
+		t.Errorf("first launch-fail (label only) must report NO verb, got %q", v)
+	}
+}
+
+func TestDispatch_ensureFailRepeat_escalated(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":["pool-launch-fail"]}`}}
+	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
+	res, _ := dispatchWorker(t, cc, bd, cfg, "pr-pool-worker-zr-w")
+	if v := verbOf(res); v != report.Escalated {
+		t.Errorf("repeat launch-fail must report Escalated, got %q", v)
+	}
+}
+
+func TestDispatch_sendFailWorkerLeave_noVerb(t *testing.T) {
+	cfg := fastCfg() // worker on_dispatch_fail = leave
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
+	res, err := dispatchWorker(t, cc, bd, cfg, "pr-pool-worker-zr-w")
+	if err == nil {
+		t.Fatal("send failure should error")
+	}
+	if v := verbOf(res); v != "" {
+		t.Errorf("worker send-fail (leave) must report NO verb, got %q", v)
+	}
+}
+
+func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
+	cfg := fastCfg() // feedback on_dispatch_fail = unclaim
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
+	d := discover.DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pr-pool-feedback-zr-c"
+	res, _ := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if v := verbOf(res); v != report.Unclaimed {
+		t.Errorf("feedback send-fail (unclaim) must report Unclaimed, got %q", v)
+	}
+}
+
+func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
+	cfg := fastCfg() // worker on_failure = add-human
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	res, _ := dispatchWorker(t, cc, bd, cfg, "pr-pool-worker-zr-w")
+	if v := verbOf(res); v != report.Escalated {
+		t.Errorf("worker timeout must report Escalated, got %q", v)
+	}
+}
+
+func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
+	cfg := fastCfg()
+	cfg.BudgetTokens = 1000 // finite cap so the ramp trips it
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
+	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pr-pool-worker-zr-w"
+	deps.UsageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately >100%
+	res, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatal("expected a budget error")
+	}
+	if v := verbOf(res); v != report.Unclaimed {
+		t.Errorf("budget hard-stop unclaims => must report Unclaimed (NOT Escalated), got %q", v)
 	}
 }

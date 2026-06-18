@@ -84,6 +84,6 @@ func For(roleType string) Executor {
 }
 
 // failureAction builds a single-bead Result for one failure verb.
-func failureAction(verb report.Verb, beadID string) report.Result { //nolint:unused // used in Task 4 by ccpoolRun
+func failureAction(verb report.Verb, beadID string) report.Result {
 	return report.Result{Actions: []report.Action{{Verb: verb, Refs: []report.Ref{{Type: "bead", ID: beadID}}}}}
 }
