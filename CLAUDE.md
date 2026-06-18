@@ -47,6 +47,14 @@ commit). The repo git rev belongs only in the repo-meta install-metadata module.
 bump only via `update-locks.sh`. Authority: `phillipg-nix-repo-base` ADR 0006; see also the
 `bash-scripting` skill's "Help and Version" section.
 
+**Go packages** (`mkGoApp`/`mkGoBinary`) use the **gomod2nix engine** — pass
+`gomod2nixToml = ./gomod2nix.toml;`, commit that toml beside `go.mod`, and refresh deps with
+`go mod tidy && nix run github:nix-community/gomod2nix -- generate` (NOT `nix-update`; there is no
+`vendorHash` for this family). A local `replace => ../sibling` (e.g. `../claude-transcript`) is
+resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Authority and the full
+A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
+reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
+
 ## Key Principles
 
 - **Self-Contained**: No external flake dependencies beyond declared inputs
