@@ -10,7 +10,7 @@ mkGoApp {
 
   subPackages = [ "cmd/claude-extended-tool-approver" ];
 
-  vendorHash = "sha256-rsXM7oU8wPc2nQ8viBj+ppKJlEhRwjBoQqFlTA1NrOY=";
+  gomod2nixToml = ./gomod2nix.toml;
 
   # This package exports its version as `main.Version` (capitalised).
   versionPath = "main.Version";
