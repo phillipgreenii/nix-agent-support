@@ -42,11 +42,12 @@ type WatermarkView interface {
 }
 
 type SessionWatermark struct {
-	LastNudgedAt        time.Time
-	LastNudgeSources    []string
-	LastDisruptNudgeAt  time.Time
-	LastDisruptNudgeFor time.Time
-	DisruptEscalated    bool
+	LastNudgedAt         time.Time
+	LastNudgeSources     []string
+	LastDisruptNudgeAt   time.Time
+	LastDisruptNudgeFor  time.Time
+	DisruptEscalated     bool
+	LastDisruptAttemptAt time.Time
 }
 
 // WindowResetProducer, DisruptProducer, ManualProducer are concrete

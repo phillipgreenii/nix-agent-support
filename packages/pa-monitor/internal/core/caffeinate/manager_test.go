@@ -186,3 +186,36 @@ func TestToggleOffKillsImmediately(t *testing.T) {
 		t.Errorf("State = %v, want Off", m.State())
 	}
 }
+
+// TestKeepAwakeHoldsAssertion documents that Tick's argument is now the
+// generalized keepAwake signal: any source (working session OR an unattempted
+// nudgeable disrupt, computed by the caller) holds the assertion exactly like
+// anyWorking used to. A keepAwake tick spawns; dropping it begins the grace.
+func TestKeepAwakeHoldsAssertion(t *testing.T) {
+	var now time.Time
+	spawned, killed := 0, 0
+	m := &Manager{
+		Grace: 5 * time.Second,
+		Spawn: func(pid int) error { spawned++; return nil },
+		Kill:  func() error { killed++; return nil },
+		Now:   func() time.Time { return now },
+	}
+	now = time.Unix(0, 0)
+	m.SetToggle(true)
+	// keepAwake true (e.g. an unattempted nudgeable disrupt, no working session).
+	m.Tick(true)
+	if m.State() != StateArmedRunning || spawned != 1 {
+		t.Fatalf("keepAwake=true: state=%v spawned=%d, want ArmedRunning/1", m.State(), spawned)
+	}
+	// Attempt recorded → keepAwake drops → grace begins.
+	now = time.Unix(1, 0)
+	m.Tick(false)
+	if m.State() != StateArmedCountdown {
+		t.Fatalf("after keepAwake drops: state=%v, want ArmedCountdown", m.State())
+	}
+	now = time.Unix(10, 0)
+	m.Tick(false)
+	if m.State() != StateOff || killed != 1 {
+		t.Fatalf("after grace: state=%v killed=%d, want Off/1", m.State(), killed)
+	}
+}

@@ -45,6 +45,12 @@ type NudgerSessionWatermarks struct {
 	LastDisruptNudgeAt  time.Time `json:"last_disrupt_nudge_at,omitempty"`
 	LastDisruptNudgeFor time.Time `json:"last_disrupt_nudge_for,omitempty"`
 	DisruptEscalated    bool      `json:"disrupt_escalated,omitempty"`
+	// LastDisruptAttemptAt is the watermark of the most recent disrupt-nudge
+	// ATTEMPT (recorded on BOTH success and failure, unlike LastDisruptNudgeAt
+	// which records only on success). It is the keep-awake authority for D5:
+	// a terminal nudgeable error with zero recorded attempts holds caffeinate
+	// awake until the first attempt, then releases. A failed attempt counts.
+	LastDisruptAttemptAt time.Time `json:"last_disrupt_attempt_at,omitempty"`
 }
 
 // ReadRuntimeState reads the file at path. A missing file is not an
@@ -137,11 +143,12 @@ func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
 		sources = append([]string(nil), x.LastNudgeSources...)
 	}
 	return nudger.SessionWatermark{
-		LastNudgedAt:        x.LastNudgedAt,
-		LastNudgeSources:    sources,
-		LastDisruptNudgeAt:  x.LastDisruptNudgeAt,
-		LastDisruptNudgeFor: x.LastDisruptNudgeFor,
-		DisruptEscalated:    x.DisruptEscalated,
+		LastNudgedAt:         x.LastNudgedAt,
+		LastNudgeSources:     sources,
+		LastDisruptNudgeAt:   x.LastDisruptNudgeAt,
+		LastDisruptNudgeFor:  x.LastDisruptNudgeFor,
+		DisruptEscalated:     x.DisruptEscalated,
+		LastDisruptAttemptAt: x.LastDisruptAttemptAt,
 	}
 }
 
@@ -247,6 +254,22 @@ func (w *WatermarkStore) SetWindowResetFiredFor(at time.Time) {
 // actually fires a SourceWindowReset nudge.
 func (w *WatermarkStore) AdvanceWindowResetFiredFor(at time.Time) {
 	w.SetWindowResetFiredFor(at)
+}
+
+// RecordDisruptAttempt implements nudger.Recorder. It stamps the
+// LastDisruptAttemptAt watermark for sid (best-effort persist). Called by the
+// dispatcher on BOTH the success and failure path of a disrupt nudge so the
+// D5 error keep-awake releases after the first attempt.
+func (w *WatermarkStore) RecordDisruptAttempt(sid string, at time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state.Nudger.Sessions == nil {
+		w.state.Nudger.Sessions = map[string]NudgerSessionWatermarks{}
+	}
+	wm := w.state.Nudger.Sessions[sid]
+	wm.LastDisruptAttemptAt = at
+	w.state.Nudger.Sessions[sid] = wm
+	_ = WriteRuntimeState(w.path, w.state)
 }
 
 func (w *WatermarkStore) AutoResumeEnabled() bool {

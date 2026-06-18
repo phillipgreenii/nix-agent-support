@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
@@ -395,16 +396,31 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					break
 				}
 			}
+			// D5: a terminal nudgeable error with zero recorded nudge attempts
+			// keeps the Mac awake until the first attempt. Computed INLINE here
+			// from tree + watermark store (NOT the nudger's pending-store —
+			// that reconciles later in this same tick, at n.Reconcile below, so
+			// its grace/pending state is empty during the 0–30s disrupt grace).
+			// Reading LastError directly makes the predicate true at T+0, before
+			// idle-sleep could fire during the grace.
+			state.mu.RLock()
+			wmCaffeinate := state.watermarks
+			state.mu.RUnlock()
+			anyUnattemptedNudgeableDisrupt := false
+			if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
+				anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
+			}
+			keepAwake := anyWorking || anyUnattemptedNudgeableDisrupt
 			if opts.Caffeinate != nil {
 				toggleOn := state.isCaffeinateOn()
 				opts.Caffeinate.SetToggle(toggleOn)
 				prevState := opts.Caffeinate.State()
-				opts.Caffeinate.Tick(anyWorking)
+				opts.Caffeinate.Tick(keepAwake)
 				newState := opts.Caffeinate.State()
 				// active is true when the subprocess is running OR when the
 				// user toggle is on but the manager is waiting for agents to
 				// start before spawning (StateOff + toggle=true). Without the
-				// toggleOn guard, a tick with anyWorking=false would reset
+				// toggleOn guard, a tick with keepAwake=false would reset
 				// caffeinateActive to false immediately after the user flips
 				// the toggle on, causing the TUI indicator to revert.
 				active := newState != caffeinate.StateOff || toggleOn
@@ -413,7 +429,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					if toggleOn {
 						cause = "manual"
 					}
-					if anyWorking {
+					if keepAwake {
 						cause = "agents_active"
 					}
 				}
@@ -422,7 +438,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
 					opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
 				}
-				if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !anyWorking {
+				if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !keepAwake {
 					opts.Emitter.RecordCaffeinateGraceExpired(nil)
 				}
 			}
@@ -539,6 +555,42 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			}
 		}
 	}
+}
+
+// hasUnattemptedNudgeableDisrupt reports whether any session in the tree has a
+// terminal, nudgeable error with ZERO recorded nudge attempts — the D5 error
+// keep-awake disjunct. It mirrors the disrupt producer's nudge gates (terminal
+// + Retryable + !FromSubagent + a resolvable signaler) but is computed
+// independently of the nudger so it is true at T+0 (before the disrupt grace
+// elapses and anything is enqueued). The caller has already verified
+// AutoResumeEnabled. A session counts as "zero recorded attempts" when its
+// LastDisruptAttemptAt watermark is zero OR predates this error's timestamp.
+func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, signalers []signal.Signaler) bool {
+	if tree == nil || wm == nil {
+		return false
+	}
+	for _, dir := range tree.Dirs {
+		for _, sv := range dir.Sessions {
+			le := sv.LastError
+			if le == nil || !le.IsTerminal {
+				continue
+			}
+			if !transcript.Retryable(le) {
+				continue
+			}
+			if le.FromSubagent {
+				continue
+			}
+			if signal.ResolveSignaler(signalers, sv.PID) == nil {
+				continue
+			}
+			attempt := wm.SessionWatermark(sv.SessionID).LastDisruptAttemptAt
+			if attempt.IsZero() || attempt.Before(le.At) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // updateGauges pushes session counts grouped by (state + per-workspace +

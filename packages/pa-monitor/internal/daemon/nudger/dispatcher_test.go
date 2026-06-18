@@ -34,12 +34,13 @@ func (f *fakeSignaler) Send(pid int, text string) error {
 }
 
 type fakeRecorder struct {
-	mu               sync.Mutex
-	suppressed       []string
-	sent             []string
-	watermarkOps     []string
-	windowLatchOps   []time.Time
-	queuedOps        []string // "sid:source" pairs recorded by RecordQueued
+	mu             sync.Mutex
+	suppressed     []string
+	sent           []string
+	watermarkOps   []string
+	windowLatchOps []time.Time
+	queuedOps      []string // "sid:source" pairs recorded by RecordQueued
+	attemptOps     []string // sids recorded by RecordDisruptAttempt
 }
 
 func (r *fakeRecorder) RecordSuppressed(sid string, sources []Source, cause string) {
@@ -66,6 +67,11 @@ func (r *fakeRecorder) RecordQueued(sid string, source Source) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.queuedOps = append(r.queuedOps, sid+":"+string(source))
+}
+func (r *fakeRecorder) RecordDisruptAttempt(sid string, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attemptOps = append(r.attemptOps, sid)
 }
 
 func TestDispatcherFiresOnceAndClears(t *testing.T) {
@@ -338,4 +344,85 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 			t.Errorf("windowLatchOps = %d, want 0 (no window_reset dispatched)", len(ops))
 		}
 	})
+}
+
+// TestDispatcherSuppressesWaitingForHuman verifies that a WaitingForHuman
+// session never receives a nudge: intents are cleared and recorded as
+// suppressed with the "waiting_for_human" cause (§6/D3).
+func TestDispatcherSuppressesWaitingForHuman(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.WaitingForHuman))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	if len(sig.sent) != 0 {
+		t.Errorf("len(sent) = %d, want 0 (suppressed over human prompt)", len(sig.sent))
+	}
+	if store.HasAny("sid-1") {
+		t.Error("store not cleared after waiting-for-human suppression")
+	}
+	if len(rec.suppressed) != 1 {
+		t.Errorf("recorder.suppressed = %d, want 1", len(rec.suppressed))
+	}
+	if len(rec.attemptOps) != 0 {
+		t.Errorf("recorder.attemptOps = %d, want 0 (no attempt for suppressed)", len(rec.attemptOps))
+	}
+}
+
+// TestDispatcherRecordsDisruptAttemptOnSuccess verifies a delivered disrupt
+// nudge records an attempt watermark.
+func TestDispatcherRecordsDisruptAttemptOnSuccess(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	if len(rec.attemptOps) != 1 || rec.attemptOps[0] != "sid-1" {
+		t.Errorf("recorder.attemptOps = %v, want [sid-1]", rec.attemptOps)
+	}
+}
+
+// TestDispatcherRecordsDisruptAttemptOnFailure verifies a FAILED disrupt nudge
+// still records an attempt watermark (D5: a failed attempt counts) while
+// leaving the intent in place to retry.
+func TestDispatcherRecordsDisruptAttemptOnFailure(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{err: errors.New("no signaler")}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	if len(rec.attemptOps) != 1 || rec.attemptOps[0] != "sid-1" {
+		t.Errorf("recorder.attemptOps = %v, want [sid-1] (attempt counts even on failure)", rec.attemptOps)
+	}
+	if !store.HasAny("sid-1") {
+		t.Error("store cleared after send failure; should retry next tick")
+	}
+}
+
+// TestDispatcherNoDisruptAttemptForNonDisrupt verifies a non-disrupt nudge
+// (e.g. window_reset) does not record a disrupt attempt watermark.
+func TestDispatcherNoDisruptAttemptForNonDisrupt(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+	if len(rec.attemptOps) != 0 {
+		t.Errorf("recorder.attemptOps = %v, want empty (window_reset is not a disrupt)", rec.attemptOps)
+	}
 }

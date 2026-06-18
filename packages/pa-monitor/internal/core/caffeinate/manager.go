@@ -48,8 +48,12 @@ func (m *Manager) GraceRemaining() time.Duration {
 	return rem
 }
 
-// Tick advances the state machine.
-func (m *Manager) Tick(anyWorking bool) {
+// Tick advances the state machine. keepAwake is true when the Mac should be
+// held awake this tick — any session is Working (D1/D2) OR there is an
+// unattempted nudgeable disrupt (D5). The caller computes the disjunction
+// inline from the tree + watermark store (NOT the nudger's pending-store,
+// which reconciles later in the same tick).
+func (m *Manager) Tick(keepAwake bool) {
 	if !m.toggle {
 		return
 	}
@@ -60,21 +64,22 @@ func (m *Manager) Tick(anyWorking bool) {
 	now := m.Now()
 	switch m.state {
 	case StateOff:
-		// Only spawn when sessions are active; if toggle was just turned on with no
-		// working sessions, or grace expired and sessions are still idle, stay off
-		// until work resumes — avoids perpetual kill/respawn cycle.
-		if !anyWorking {
+		// Only spawn when something needs the Mac awake; if toggle was just
+		// turned on with nothing active, or grace expired and sessions are
+		// still idle, stay off until work resumes — avoids perpetual
+		// kill/respawn cycle.
+		if !keepAwake {
 			return
 		}
 		_ = m.Spawn(m.PID)
 		m.state = StateArmedRunning
 	case StateArmedRunning:
-		if !anyWorking {
+		if !keepAwake {
 			m.state = StateArmedCountdown
 			m.countdownEnd = now.Add(m.Grace)
 		}
 	case StateArmedCountdown:
-		if anyWorking {
+		if keepAwake {
 			m.state = StateArmedRunning
 			return
 		}

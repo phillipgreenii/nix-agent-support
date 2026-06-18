@@ -31,6 +31,11 @@ type Recorder interface {
 	// WindowResetsAt=at fired this tick. Called by the dispatcher exactly
 	// once per tick when any session with SourceWindowReset is dispatched.
 	AdvanceWindowResetFiredFor(at time.Time)
+	// RecordDisruptAttempt persists the LastDisruptAttemptAt watermark for a
+	// disrupt nudge ATTEMPT — called on BOTH the success and failure path so
+	// the D5 error keep-awake releases after the first attempt (even a failed
+	// one). Only called for groups carrying a SourceDisrupted intent.
+	RecordDisruptAttempt(sid string, at time.Time)
 	// RecordQueued increments pa_monitor.nudge.queued_total once for each
 	// newly-added intent. Called by Nudger.Reconcile after diffing the
 	// pre/post pending-store key sets.
@@ -107,10 +112,34 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			store.RemoveKeys(observedKeys)
 			continue
 		}
+		// Never inject "continue" over a permission prompt / AskUserQuestion —
+		// the session is blocked on a human, not on a recoverable error (§6/D3).
+		if view.Status == session.WaitingForHuman {
+			d.Recorder.RecordSuppressed(sid, sources, "waiting_for_human")
+			store.RemoveKeys(observedKeys)
+			continue
+		}
+		// A disrupt attempt is recorded on BOTH the success and failure path
+		// (see RecordDisruptAttempt) so the D5 error keep-awake releases after
+		// the first attempt, even a failed one.
+		hasDisrupt := false
+		for _, in := range group {
+			if in.Key.Source == SourceDisrupted {
+				hasDisrupt = true
+				break
+			}
+		}
 		text := resolveText(group)
 		if err := d.Signaler.Send(view.PID, text); err != nil {
-			// Leave intents in place; retry next tick.
+			// Record the attempt even though delivery failed, then leave the
+			// intents in place to retry next tick.
+			if hasDisrupt {
+				d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
+			}
 			continue
+		}
+		if hasDisrupt {
+			d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
 		}
 		var cause *transcript.ErrorRecord
 		var kind string
