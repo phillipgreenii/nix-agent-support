@@ -29,8 +29,8 @@ func (i Issue) HasLabel(label string) bool {
 	return false
 }
 
-// ShowObj runs `bd show <id> --json` and normalizes bd's array-or-object output
-// (mirrors the bash bd_obj helper).
+// ShowObj runs `bd show <id> --json` and normalizes bd's output: the
+// `{"data":[<issue>]}` envelope as well as the legacy bare array/object forms.
 func ShowObj(ctx context.Context, r Runner, id string) (Issue, error) {
 	out, err := r.Run(ctx, "show", id, "--json")
 	if err != nil {
@@ -40,8 +40,8 @@ func ShowObj(ctx context.Context, r Runner, id string) (Issue, error) {
 }
 
 // Ready runs `bd ready <args...> --json --limit 0` and returns the issues.
-// A non-array / null payload yields an empty slice (mirrors the bash
-// `if type=="array" then . else []`).
+// bd wraps the result in a `{"data":[...]}` envelope (see unwrapData); a null /
+// empty / unparseable payload yields an empty slice.
 func Ready(ctx context.Context, r Runner, args ...string) ([]Issue, error) {
 	full := append(append([]string{"ready"}, args...), "--json", "--limit", "0")
 	out, err := r.Run(ctx, full...)
@@ -53,8 +53,8 @@ func Ready(ctx context.Context, r Runner, args ...string) ([]Issue, error) {
 
 // List runs `bd list <args...> --json --limit 0` and returns the issues. Used to
 // snapshot the store before/after a dispatch; pass `--all` to include closed so a
-// bead the worker created and then closed is still seen. A non-array / null
-// payload yields an empty slice (mirrors Ready).
+// bead the worker created and then closed is still seen. Decodes the same
+// `{"data":[...]}` envelope as Ready; a null / empty payload yields an empty slice.
 func List(ctx context.Context, r Runner, args ...string) ([]Issue, error) {
 	full := append(append([]string{"list"}, args...), "--json", "--limit", "0")
 	out, err := r.Run(ctx, full...)
@@ -120,7 +120,28 @@ func HasLabel(ctx context.Context, r Runner, id, label string) (bool, error) {
 	return iss.HasLabel(label), nil
 }
 
+// unwrapData peels bd's response envelope. bd >=1.0.x wraps every `--json`
+// payload as `{"data": <array-or-object>, "schema_version": N}`; older bd (and
+// the bash original this was ported from) emitted a bare top-level array/object.
+// If b is an envelope carrying a "data" key, its raw value is returned;
+// otherwise b is returned unchanged so the legacy bare shapes still decode.
+// Decoupling this peel from the array/object decode keeps decodeMany/decodeOne
+// tolerant of both the enveloped and bare forms (pg2-ygbt).
+func unwrapData(b []byte) []byte {
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	// A bare top-level array fails to unmarshal into a struct (err != nil) and is
+	// returned as-is. A bare object without a "data" key unmarshals fine but
+	// leaves Data empty, so it too is returned unchanged.
+	if err := json.Unmarshal(b, &env); err == nil && len(env.Data) > 0 {
+		return env.Data
+	}
+	return b
+}
+
 func decodeOne(b []byte) (Issue, error) {
+	b = unwrapData(b)
 	var arr []Issue
 	if err := json.Unmarshal(b, &arr); err == nil {
 		if len(arr) > 0 {
@@ -145,6 +166,7 @@ func Comment(ctx context.Context, r Runner, id, text string) error {
 }
 
 func decodeMany(b []byte) []Issue {
+	b = unwrapData(b)
 	var arr []Issue
 	if err := json.Unmarshal(b, &arr); err == nil {
 		return arr

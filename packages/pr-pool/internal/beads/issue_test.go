@@ -66,6 +66,55 @@ func TestReady_handlesNonArray(t *testing.T) {
 	}
 }
 
+// TestReady_handlesDataEnvelope locks in the bd-output contract: bd >=1.0.x wraps
+// every `--json` payload in a `{"data":[...],"schema_version":N}` envelope rather
+// than a bare top-level array. Ready must peel that envelope, otherwise the
+// worker/feedback discovery queries silently see zero ready beads and every drain
+// dispatches nothing (pg2-ygbt). The fixture is the real shape emitted by bd.
+func TestReady_handlesDataEnvelope(t *testing.T) {
+	fr := &fakeRunner{out: `{"data":[{"id":"zr-1","issue_type":"task","labels":["worker-ready"]},{"id":"zr-2","issue_type":"bug"}],"schema_version":1}`}
+	got, err := Ready(context.Background(), fr, "--label", "worker-ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "zr-1" || got[1].ID != "zr-2" {
+		t.Fatalf("data-envelope should yield both issues, got %+v", got)
+	}
+	if !got[0].HasLabel("worker-ready") {
+		t.Errorf("labels lost through envelope decode; got %v", got[0].Labels)
+	}
+}
+
+// TestReady_handlesEmptyDataEnvelope: an envelope with an empty data array is the
+// no-ready-work case and must yield zero issues without error.
+func TestReady_handlesEmptyDataEnvelope(t *testing.T) {
+	fr := &fakeRunner{out: `{"data":[],"schema_version":1}`}
+	got, err := Ready(context.Background(), fr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("empty data envelope should yield empty slice, got %v", got)
+	}
+}
+
+// TestShowObj_dataEnvelope: `bd show <id> --json` is also wrapped in the
+// `{"data":[<issue>]}` envelope. ShowObj must recover a populated Issue, not the
+// empty Issue that an envelope-blind decoder produces (pg2-ygbt).
+func TestShowObj_dataEnvelope(t *testing.T) {
+	fr := &fakeRunner{out: `{"data":[{"id":"zr-9","status":"open","labels":["worker-ready","human"]}],"schema_version":1}`}
+	iss, err := ShowObj(context.Background(), fr, "zr-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.ID != "zr-9" || iss.Status != "open" {
+		t.Fatalf("envelope show yielded empty/wrong issue: %+v", iss)
+	}
+	if !iss.HasLabel("worker-ready") || !iss.HasLabel("human") {
+		t.Errorf("labels lost through envelope decode; got %v", iss.Labels)
+	}
+}
+
 func TestUnclaim_argv(t *testing.T) {
 	fr := &fakeRunner{}
 	if err := Unclaim(context.Background(), fr, "zr-1"); err != nil {
