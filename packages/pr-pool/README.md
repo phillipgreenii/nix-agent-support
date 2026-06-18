@@ -1,36 +1,75 @@
 # pr-pool
 
 `pr-pool` runs one drain pass over a monorepo: it discovers ready beads,
-dispatches a Claude session per role (feedback, then worker) up to each role's
+dispatches a session per configured role (in config order) up to each role's
 cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 `pr-pool` is equivalent to `pr-pool drain`.
 
 ## Subcommands
 
-| Command                  | Description                                                   |
-| ------------------------ | ------------------------------------------------------------- |
-| `drain`                  | run one drain pass (the default when omitted)                 |
-| `run-query <role>`       | run a role's discovery query and print matches (read-only)    |
-| `run-role <role> <bead>` | dispatch one bead through a role, then tear down (smoke test) |
-| `version`                | print the version and exit                                    |
-| `help`                   | print help and exit                                           |
+| Command                   | Description                                                   |
+| ------------------------- | ------------------------------------------------------------- |
+| `drain`                   | run one drain pass (the default when omitted)                 |
+| `run-query <role>`        | run a role's discovery query and print matches (read-only)    |
+| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test) |
+| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start) |
+| `config --show`           | print the resolved config path and effective role set         |
+| `version`                 | print the version and exit                                    |
+| `help`                    | print help and exit                                           |
 
-## Configuration
+`<role>` is the role's configured `name`.
 
-Configuration is via `PR_POOL_*` environment variables (there are no flags). See
-`internal/config` for the full set and defaults. Common ones:
+## Roles, prompts & queries (`config.toml`)
 
-- `PR_POOL_MAX_WORKER` — max concurrent worker dispatches (default 1)
-- `PR_POOL_MAX_FEEDBACK` — max concurrent feedback dispatches (default 1)
+Roles, their prompts, and their discovery queries are configured in a repo-local
+`<RepoRoot>/.pr-pool/config.toml` (override the path with `PR_POOL_CONFIG`). When
+no config file is present, pr-pool uses the **built-in feedback + worker roles**,
+behaving exactly as before. Run `pr-pool config --print-defaults` to see the full
+schema and the canonical defaults, then copy it and edit.
+
+Roles and queries are typed tagged unions discriminated by a `type` field:
+
+- **role `type`**: `ccpool` (dispatch a Claude session) or `command` (run an
+  executable; completion = exit code).
+- **query `type`**: `beads-ready` / `beads-list` (run `bd` with label filters +
+  optional `title_prefix` / `item_type` post-filters), `command` (run an
+  executable that emits items as JSON/JSONL); `github-issues` / `jira-issues` are
+  registered but not yet implemented (they error at dispatch).
+
+A `ccpool` role's behavior is set by code-owned enums: `completion`
+(`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),
+`on_dispatch_fail` (`unclaim` | `leave`). When `authorship_guard = true`, pr-pool
+prepends a **non-editable** safety preamble (assert author is me, branch starts
+with `phillipg.`, never force-push) ahead of the role's task prompt, so
+externalizing the prompt never weakens the guardrails. A role's prompt is inline
+(`prompt`) or an external file (`prompt_file`, resolved relative to the config
+dir) — exactly one.
+
+> **ZipRecruiter monorepo:** add `.pr-pool/` to the monorepo's
+> `.git/info/exclude` so a repo-local pr-pool config (and its prompts) is never
+> committed there. `pr-pool drain` warns at pre-flight if `.pr-pool/config.toml`
+> is git-tracked.
+
+## Configuration (pool-wide env)
+
+Pool-wide settings come from `PR_POOL_*` environment variables; roles are NOT
+configured via env (use `config.toml`). See `internal/config` for the full set.
+
+- `PR_POOL_REPO_ROOT` — monorepo root the drain operates in (default: cwd)
+- `PR_POOL_BEADS_PREFIX` — expected bead prefix, asserted at precheck (default `zr`)
+- `PR_POOL_CONFIG` — explicit `config.toml` path (default `<RepoRoot>/.pr-pool/config.toml`)
 - `PR_POOL_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PR_POOL_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
 - `PR_POOL_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)
 - `PR_POOL_MODEL` — claude model override (default: ccpool's default)
 - `PR_POOL_EFFORT` — claude `--effort` value (default `max`)
 - `PR_POOL_PERMISSION_MODE` — claude `--permission-mode` for workers (default `bypassPermissions`)
-- `PR_POOL_REPO_ROOT` — monorepo root the drain operates in (default: cwd)
-- `PR_POOL_BEADS_PREFIX` — expected bead prefix, asserted at precheck (default `zr`)
 - `PR_POOL_LOG_DIR` — override the event-log directory (default: the standard path below)
+
+**Removed** (now per-role in `config.toml`, not env): `PR_POOL_MAX_WORKER`,
+`PR_POOL_MAX_FEEDBACK`, `PR_POOL_FEEDBACK_ENABLED`, `PR_POOL_WORKER_ENABLED`,
+`PR_POOL_SKILL_MD`, `PR_POOL_WORKER_SKILL_MD`. Set `role.cap` / `role.enabled` /
+the role's prompt in `config.toml` instead; `drain` warns if any are still set.
 
 ## Observability
 
