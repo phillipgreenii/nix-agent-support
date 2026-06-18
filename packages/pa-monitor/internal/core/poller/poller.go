@@ -3,8 +3,12 @@ package poller
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
@@ -38,6 +42,9 @@ type Poller struct {
 	PlanTier         string
 	WorkingThreshold time.Duration
 	IdleThreshold    time.Duration
+	// WaitingFreshWindow bounds the registry-"waiting" freshness cross-check
+	// (claude-transcript.ClassifyActivity). Zero falls back to a small default.
+	WaitingFreshWindow time.Duration
 	BurnWindowShort  time.Duration
 	BurnWindowLong   time.Duration
 	Now              func() time.Time
@@ -112,11 +119,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		if ok {
 			s.TranscriptMTime = mtime
 		}
-		s.Status = session.Classify(now, s.TranscriptMTime, p.WorkingThreshold, p.IdleThreshold)
 		s.Branch = session.GitBranch(s.Cwd)
-		if s.Status == session.Working {
-			anyWorking = true
-		}
 
 		// Transcript cache: re-read only when path or mtime changed.
 		var snap transcript.Snapshot
@@ -202,6 +205,48 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				// auto-resume verdict from the (possibly different) record.
 				snap.LastErrorRetryable = transcript.Retryable(snap.LastError)
 			}
+		}
+
+		// Registry-driven activity verdict (§4.2/§4.3). Supersedes the old
+		// mtime-only Classify as the PRIMARY signal. busy is TRUSTED and never
+		// demoted on transcript staleness — that demotion is what reintroduced
+		// the incident bug. Subagent mtime is load-bearing ONLY for the
+		// "waiting"-freshness cross-check and the display/age (dormant) bucket.
+		if !s.PidAlive {
+			// Dead pid: keep last-known (the poller persists state until GC).
+			// Fall back to the mtime age bucket, but never report Working — a
+			// dead process is not actively working.
+			s.Status = session.Classify(now, s.TranscriptMTime, p.WorkingThreshold, p.IdleThreshold)
+			if s.Status == session.Working {
+				s.Status = session.Idle
+			}
+		} else {
+			lastActivity := maxActivity(s.TranscriptMTime, path)
+			reg := claudetranscript.RegistrySession{
+				Status:          s.RegistryStatus,
+				WaitingFor:      s.WaitingFor,
+				StatusUpdatedAt: s.StatusUpdatedAt,
+			}
+			verdict := claudetranscript.ClassifyActivity(reg, snap.AwaitingInput, lastActivity, p.waitingFreshWindow())
+			switch verdict.Activity {
+			case claudetranscript.Active:
+				s.Status = session.Working
+			case claudetranscript.WaitingForHuman:
+				s.Status = session.WaitingForHuman
+			default:
+				s.Status = session.Idle
+			}
+			// Display-only age bucket, orthogonal to the verdict: an Idle
+			// session whose last activity is older than IdleThreshold renders
+			// as Dormant. Working/WaitingForHuman are NOT demoted (busy is
+			// trusted; a fresh wait is a real wait).
+			if s.Status == session.Idle && !lastActivity.IsZero() &&
+				now.Sub(lastActivity) > p.IdleThreshold {
+				s.Status = session.Dormant
+			}
+		}
+		if s.Status == session.Working {
+			anyWorking = true
 		}
 
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
@@ -359,6 +404,54 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	}
 
 	return tree, anyWorking, nil
+}
+
+// waitingFreshWindow returns the configured WaitingFreshWindow, falling back
+// to 2*WorkingThreshold (or 60s when neither is set).
+func (p *Poller) waitingFreshWindow() time.Duration {
+	if p.WaitingFreshWindow > 0 {
+		return p.WaitingFreshWindow
+	}
+	if p.WorkingThreshold > 0 {
+		return 2 * p.WorkingThreshold
+	}
+	return 60 * time.Second
+}
+
+// maxActivity returns the latest of the main transcript's mtime and the max
+// mtime over <sessionid>/subagents/agent-*.jsonl. The subagents directory is
+// derived from the resolved main transcript path exactly as
+// claude-transcript.LastSubagentError does ("<dir>/<sid>.jsonl" ->
+// "<dir>/<sid>/subagents"); for a resumed/forked session whose resolved
+// transcript basename differs from the spawning session id, that directory
+// won't exist and only the main mtime is used. This feeds ONLY the
+// "waiting"-freshness check and the display/age bucket — it is intentionally
+// NOT load-bearing for the busy keep-awake (busy is trusted, never demoted).
+func maxActivity(mainMTime time.Time, mainPath string) time.Time {
+	best := mainMTime
+	if mainPath == "" {
+		return best
+	}
+	subDir := strings.TrimSuffix(mainPath, ".jsonl") + "/subagents"
+	entries, err := os.ReadDir(subDir)
+	if err != nil {
+		return best
+	}
+	for _, e := range entries {
+		if e.IsDir() ||
+			!strings.HasPrefix(e.Name(), "agent-") ||
+			filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(best) {
+			best = info.ModTime()
+		}
+	}
+	return best
 }
 
 // sessionMtime returns the TranscriptMTime of the session with the given ID,

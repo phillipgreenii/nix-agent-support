@@ -11,14 +11,19 @@ import (
 )
 
 type Config struct {
-	PlanTier                 string
-	TopupPoolUSD             float64
-	BurnWindowShort          time.Duration
-	BurnWindowLong           time.Duration
-	RefreshInterval          time.Duration
-	CaffeinateGrace          time.Duration
-	WorkingThreshold         time.Duration
-	IdleThreshold            time.Duration
+	PlanTier         string
+	TopupPoolUSD     float64
+	BurnWindowShort  time.Duration
+	BurnWindowLong   time.Duration
+	RefreshInterval  time.Duration
+	CaffeinateGrace  time.Duration
+	WorkingThreshold time.Duration
+	IdleThreshold    time.Duration
+	// WaitingFreshWindow bounds how far the transcript may have advanced past
+	// the registry's statusUpdatedAt before a "waiting" flag is treated as
+	// stale (and ignored, falling through to Idle). See the registry-driven
+	// activity verdict (claude-transcript.ClassifyActivity) §4.3.
+	WaitingFreshWindow       time.Duration
 	AutoResumeDelay          time.Duration
 	AutoResumeMessage        string
 	DisruptGrace             time.Duration
@@ -39,21 +44,22 @@ type DecoratorConfig struct {
 }
 
 type tomlConfig struct {
-	PlanTier                 *string             `toml:"plan_tier"`
-	TopupPoolUSD             *float64            `toml:"topup_pool_usd"`
-	BurnWindowShortS         *int                `toml:"burn_window_short_s"`
-	BurnWindowLongS          *int                `toml:"burn_window_long_s"`
-	RefreshIntervalMS        *int                `toml:"refresh_interval_ms"`
-	CaffeinateGraceS         *int                `toml:"caffeinate_grace_s"`
-	WorkingThresholdS        *int                `toml:"working_threshold_s"`
-	IdleThresholdS           *int                `toml:"idle_threshold_s"`
-	AutoResumeDelayS         *int                `toml:"auto_resume_delay_s"`
-	AutoResumeMessage        *string             `toml:"auto_resume_message"`
-	DisruptGraceS            *int                `toml:"disrupt_grace_s"`
-	EscalationAfterS         *int                `toml:"escalation_after_s"`
-	CmuxSidebarEnable        *bool               `toml:"cmux_sidebar_enable"`
-	CmuxSidebarIntervalTicks *int                `toml:"cmux_sidebar_interval_ticks"`
-	Decorators               []tomlDecorator     `toml:"decorator"`
+	PlanTier                 *string         `toml:"plan_tier"`
+	TopupPoolUSD             *float64        `toml:"topup_pool_usd"`
+	BurnWindowShortS         *int            `toml:"burn_window_short_s"`
+	BurnWindowLongS          *int            `toml:"burn_window_long_s"`
+	RefreshIntervalMS        *int            `toml:"refresh_interval_ms"`
+	CaffeinateGraceS         *int            `toml:"caffeinate_grace_s"`
+	WorkingThresholdS        *int            `toml:"working_threshold_s"`
+	IdleThresholdS           *int            `toml:"idle_threshold_s"`
+	WaitingFreshWindowS      *int            `toml:"waiting_fresh_window_s"`
+	AutoResumeDelayS         *int            `toml:"auto_resume_delay_s"`
+	AutoResumeMessage        *string         `toml:"auto_resume_message"`
+	DisruptGraceS            *int            `toml:"disrupt_grace_s"`
+	EscalationAfterS         *int            `toml:"escalation_after_s"`
+	CmuxSidebarEnable        *bool           `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks *int            `toml:"cmux_sidebar_interval_ticks"`
+	Decorators               []tomlDecorator `toml:"decorator"`
 }
 
 type tomlDecorator struct {
@@ -64,14 +70,17 @@ type tomlDecorator struct {
 
 func defaults() Config {
 	return Config{
-		PlanTier:                 "max_5x",
-		TopupPoolUSD:             0,
-		BurnWindowShort:          60 * time.Second,
-		BurnWindowLong:           300 * time.Second,
-		RefreshInterval:          1 * time.Second,
-		CaffeinateGrace:          60 * time.Second,
-		WorkingThreshold:         30 * time.Second,
-		IdleThreshold:            10 * time.Minute,
+		PlanTier:         "max_5x",
+		TopupPoolUSD:     0,
+		BurnWindowShort:  60 * time.Second,
+		BurnWindowLong:   300 * time.Second,
+		RefreshInterval:  1 * time.Second,
+		CaffeinateGrace:  60 * time.Second,
+		WorkingThreshold: 30 * time.Second,
+		IdleThreshold:    10 * time.Minute,
+		// Default ~2*WorkingThreshold: a fresh "waiting" flag should not have a
+		// transcript that has advanced well past statusUpdatedAt.
+		WaitingFreshWindow:       60 * time.Second,
 		AutoResumeDelay:          45 * time.Second,
 		AutoResumeMessage:        "continue",
 		DisruptGrace:             30 * time.Second,
@@ -124,6 +133,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.IdleThresholdS != nil {
 		cfg.IdleThreshold = time.Duration(*raw.IdleThresholdS) * time.Second
+	}
+	if raw.WaitingFreshWindowS != nil {
+		cfg.WaitingFreshWindow = time.Duration(*raw.WaitingFreshWindowS) * time.Second
 	}
 	if raw.AutoResumeDelayS != nil {
 		cfg.AutoResumeDelay = time.Duration(*raw.AutoResumeDelayS) * time.Second

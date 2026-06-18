@@ -296,19 +296,20 @@ func buildPoller(ctx context.Context, cfg config.Config) (*poller.Poller, *block
 	signalers := signallayer.DefaultSignalers()
 
 	p := &poller.Poller{
-		SessionsDir:      session.DefaultSessionsDir(),
-		ClaudeHome:       filepath.Join(home, ".claude"),
-		PidAlive:         session.DefaultPidAlive,
-		PlanTier:         cfg.PlanTier,
-		WorkingThreshold: cfg.WorkingThreshold,
-		IdleThreshold:    cfg.IdleThreshold,
-		BurnWindowShort:  cfg.BurnWindowShort,
-		BurnWindowLong:   cfg.BurnWindowLong,
-		Now:              time.Now,
-		CCUsageFn:        ccusageCache.Get,
-		CCUsageStateFn:   func() (bool, error) { return ccusageCache.Probed(), ccusageCache.LastErr() },
-		PRLookupFn:       prCache.Get,
-		Signalers:        signalers,
+		SessionsDir:        session.DefaultSessionsDir(),
+		ClaudeHome:         filepath.Join(home, ".claude"),
+		PidAlive:           session.DefaultPidAlive,
+		PlanTier:           cfg.PlanTier,
+		WorkingThreshold:   cfg.WorkingThreshold,
+		IdleThreshold:      cfg.IdleThreshold,
+		WaitingFreshWindow: cfg.WaitingFreshWindow,
+		BurnWindowShort:    cfg.BurnWindowShort,
+		BurnWindowLong:     cfg.BurnWindowLong,
+		Now:                time.Now,
+		CCUsageFn:          ccusageCache.Get,
+		CCUsageStateFn:     func() (bool, error) { return ccusageCache.Probed(), ccusageCache.LastErr() },
+		PRLookupFn:         prCache.Get,
+		Signalers:          signalers,
 	}
 
 	blockCap := ccusage.PlanCapUSD(cfg.PlanTier)

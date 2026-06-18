@@ -425,3 +425,153 @@ func TestPoller_WritesToStores(t *testing.T) {
 		t.Errorf("AllSessionIDs = %v, want [sid-a]", ids)
 	}
 }
+
+// makeRegistryFixture writes a session registry file with the given status /
+// waitingFor / statusUpdatedAt plus a main transcript whose last message event
+// (and mtime) sit at msgTime. Returns (sessionsDir, claudeHome).
+func makeRegistryFixture(t *testing.T, status, waitingFor string, statusUpdatedAt, msgTime time.Time) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	claudeHome := filepath.Join(root, "claude-home")
+	cwd := filepath.Join(root, "cwd")
+	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	projectDir := filepath.Join(claudeHome, "projects", slug)
+	for _, d := range []string{sessionsDir, projectDir, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionJSON := fmt.Sprintf(
+		`{"pid":99050,"sessionId":"reg-sess","cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli","status":%q,"waitingFor":%q,"statusUpdatedAt":%d}`,
+		cwd, status, waitingFor, statusUpdatedAt.UnixMilli())
+	if err := os.WriteFile(filepath.Join(sessionsDir, "99050.json"), []byte(sessionJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tx := `{"type":"assistant","timestamp":"` + msgTime.UTC().Format(time.RFC3339Nano) +
+		`","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	txPath := filepath.Join(projectDir, "reg-sess.jsonl")
+	if err := os.WriteFile(txPath, []byte(tx), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(txPath, msgTime, msgTime); err != nil {
+		t.Fatal(err)
+	}
+	return sessionsDir, claudeHome
+}
+
+func snapshotStatus(t *testing.T, p *Poller) session.Status {
+	t.Helper()
+	tree, _, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range tree.Dirs {
+		for _, s := range d.Sessions {
+			return s.Status
+		}
+	}
+	t.Fatal("no session in tree")
+	return 0
+}
+
+func TestSnapshotVerdict_BusyIsWorking(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// busy status, but the main transcript is 20 min stale (subagent run).
+	// busy is TRUSTED → Working, never demoted.
+	sessionsDir, claudeHome := makeRegistryFixture(t, "busy", "", now.Add(-20*time.Minute), now.Add(-20*time.Minute))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return true },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
+	}
+	if got := snapshotStatus(t, p); got != session.Working {
+		t.Errorf("busy stale-transcript Status = %v, want Working (trusted)", got)
+	}
+}
+
+func TestSnapshotVerdict_FreshWaitingIsWaitingForHuman(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// waiting + transcript fresh relative to statusUpdatedAt → WaitingForHuman.
+	sessionsDir, claudeHome := makeRegistryFixture(t, "waiting", "permission prompt", now.Add(-30*time.Second), now.Add(-30*time.Second))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return true },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
+		WaitingFreshWindow: 60 * time.Second,
+	}
+	if got := snapshotStatus(t, p); got != session.WaitingForHuman {
+		t.Errorf("fresh waiting Status = %v, want WaitingForHuman", got)
+	}
+}
+
+func TestSnapshotVerdict_StaleWaitingFallsThrough(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// waiting set 16h ago but the transcript advanced to 15m ago → the stale
+	// "waiting" flag falls through (NOT WaitingForHuman). With an alive pid the
+	// existing Dormant→Idle clamp keeps the freshest-transcript session Idle.
+	sessionsDir, claudeHome := makeRegistryFixture(t, "waiting", "permission prompt", now.Add(-16*time.Hour), now.Add(-15*time.Minute))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:           func(int) bool { return true },
+		Now:                func() time.Time { return now },
+		WorkingThreshold:   30 * time.Second,
+		IdleThreshold:      10 * time.Minute,
+		WaitingFreshWindow: 60 * time.Second,
+	}
+	got := snapshotStatus(t, p)
+	if got == session.WaitingForHuman {
+		t.Errorf("stale waiting Status = %v, want non-waiting (fell through)", got)
+	}
+	if got != session.Idle {
+		t.Errorf("stale waiting + alive pid Status = %v, want Idle (clamp bump)", got)
+	}
+}
+
+func TestSnapshotVerdict_DeadIdleStaleIsDormant(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// idle + 15m-old transcript + dead pid → age-bucketed to Dormant (the
+	// alive-pid clamp does not apply to dead pids).
+	sessionsDir, claudeHome := makeRegistryFixture(t, "idle", "", now.Add(-15*time.Minute), now.Add(-15*time.Minute))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return false },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second,
+		IdleThreshold:    10 * time.Minute,
+	}
+	if got := snapshotStatus(t, p); got != session.Dormant {
+		t.Errorf("dead idle 15m-old Status = %v, want Dormant", got)
+	}
+}
+
+func TestSnapshotVerdict_IdleStatusFreshIsIdle(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	sessionsDir, claudeHome := makeRegistryFixture(t, "idle", "", now.Add(-5*time.Second), now.Add(-5*time.Second))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return true },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
+	}
+	if got := snapshotStatus(t, p); got != session.Idle {
+		t.Errorf("fresh idle Status = %v, want Idle", got)
+	}
+}
+
+func TestSnapshotVerdict_DeadPidNeverWorking(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// busy + fresh transcript, but pid is dead → must not be Working.
+	sessionsDir, claudeHome := makeRegistryFixture(t, "busy", "", now.Add(-5*time.Second), now.Add(-5*time.Second))
+	p := &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return false },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
+	}
+	if got := snapshotStatus(t, p); got == session.Working {
+		t.Errorf("dead pid Status = Working, want not-Working")
+	}
+}
