@@ -41,28 +41,28 @@ type Deps struct {
 	ExternalID  string                                     // resolved once by the orchestrator
 }
 
-func (d Deps) clock() time.Time { //nolint:unused // used in Task 3 by ccpoolRun
+func (d Deps) clock() time.Time {
 	if d.Now != nil {
 		return d.Now()
 	}
 	return time.Now()
 }
 
-func (d Deps) reader() usage.Reader { //nolint:unused // used in Task 3 by ccpoolRun
+func (d Deps) reader() usage.Reader {
 	if d.UsageReader != nil {
 		return d.UsageReader
 	}
 	return usage.NewTranscriptReader()
 }
 
-func (d Deps) commander() query.Commander { //nolint:unused // used in Task 3 by commandRun
+func (d Deps) commander() query.Commander {
 	if d.Cmd != nil {
 		return d.Cmd
 	}
 	return query.OSCommander{}
 }
 
-func (d Deps) waitPoll(ctx context.Context, dur time.Duration) error { //nolint:unused // used in Task 3 by ccpoolRun
+func (d Deps) waitPoll(ctx context.Context, dur time.Duration) error {
 	if d.Tick != nil {
 		return d.Tick(ctx, dur)
 	}
@@ -84,18 +84,6 @@ func For(roleType string) Executor {
 }
 
 // failureAction builds a single-bead Result for one failure verb.
-func failureAction(verb report.Verb, beadID string) report.Result { //nolint:unused // used in Task 3 by ccpoolRun
+func failureAction(verb report.Verb, beadID string) report.Result { //nolint:unused // used in Task 4 by ccpoolRun
 	return report.Result{Actions: []report.Action{{Verb: verb, Refs: []report.Ref{{Type: "bead", ID: beadID}}}}}
-}
-
-type ccpoolExecutor struct{}
-
-func (ccpoolExecutor) Dispatch(_ context.Context, _ discover.DispatchContext, _ Deps) (report.Result, error) {
-	panic("not yet implemented")
-}
-
-type commandExecutor struct{}
-
-func (commandExecutor) Dispatch(_ context.Context, _ discover.DispatchContext, _ Deps) (report.Result, error) {
-	panic("not yet implemented")
 }

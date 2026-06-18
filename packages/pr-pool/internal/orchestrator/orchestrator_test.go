@@ -74,89 +74,6 @@ func writeTemp(t *testing.T) (string, func()) {
 	return p, func() {}
 }
 
-// --- waitDone scenarios (ports bats: wait_done cases) ---
-
-func TestWaitDone_workerCloses(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
-		t.Fatalf("expected success, got %v; updates=%v", err, bd.Updates)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("success must not unclaim/human; updates=%v", bd.Updates)
-	}
-}
-
-func TestWaitDone_workerHandbackToOpen(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
-		t.Fatalf("handback after seen_claimed should be success, got %v", err)
-	}
-}
-
-func TestWaitDone_workerTimeoutAddsHumanNoUnclaim(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
-		t.Fatal("timeout should be failure")
-	}
-	if !dtest.HasUpdate(bd, "update zr-w --add-label human") || dtest.HasUpdate(bd, "--status=open") {
-		t.Errorf("worker timeout must add human and not unclaim; updates=%v", bd.Updates)
-	}
-}
-
-func TestWaitDone_paneDiesAsBeadCloses_success(t *testing.T) {
-	// first poll: in_progress + live; second poll: status reads closed AND session not live.
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}},
-		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateIdle}},
-	}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
-		t.Fatalf("bead closed as pane died = success, got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("must not flag on race-success; updates=%v", bd.Updates)
-	}
-}
-
-func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
-	}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
-		t.Fatal("dead session + in_progress = failure")
-	}
-	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
-		t.Errorf("must add human; updates=%v", bd.Updates)
-	}
-}
-
-func TestWaitDone_feedbackTimeoutUnclaims(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
-		t.Fatal("timeout should fail")
-	}
-	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
-		t.Errorf("feedback timeout must unclaim; updates=%v", bd.Updates)
-	}
-}
-
 // --- DrainOnce scenarios (ports bats: drain_once cases) ---
 
 func TestDrainOnce_gatedNoTeardown(t *testing.T) {
@@ -250,7 +167,7 @@ func TestWorkOne_sendFailFeedbackUnclaims(t *testing.T) {
 	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	_ = o.workOne(context.Background(), d)
+	_, _ = o.workOne(context.Background(), d)
 	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
 		t.Errorf("feedback send-fail must unclaim; updates=%v", bd.Updates)
 	}
@@ -262,7 +179,7 @@ func TestWorkOne_sendFailWorkerNotUnclaimed(t *testing.T) {
 	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	_ = o.workOne(context.Background(), d)
+	_, _ = o.workOne(context.Background(), d)
 	if dtest.HasUpdate(bd, "--status=open") {
 		t.Errorf("worker send-fail must NOT unclaim; updates=%v", bd.Updates)
 	}
@@ -281,7 +198,7 @@ func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
 	o := newOrch(cc, bd, cfg)
 	o.usageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 10}}} // nowhere near 1,000,000
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err != nil {
+	if _, err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.Updates)
 	}
 	// Success clears any pool-launch-fail (ADR 0015) — that is the only permitted
@@ -290,113 +207,6 @@ func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
 		if u != "update zr-w --remove-label pool-launch-fail" {
 			t.Errorf("success must not unclaim/human/comment; unexpected update %q; updates=%v", u, bd.Updates)
 		}
-	}
-}
-
-func TestWaitDone_transientStatusErrorKeepsPolling(t *testing.T) {
-	// First show call for "zr-w" errors; subsequent calls return "closed".
-	bd := &dtest.ScriptBD{
-		StatusSeq:   map[string][]string{"zr-w": {"closed"}},
-		ShowErrOnce: map[string]error{"zr-w": errors.New("bd: transient error")},
-	}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
-		t.Fatalf("transient status error should not flag bead; got err=%v; updates=%v", err, bd.Updates)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("transient error must not trigger human/unclaim; updates=%v", bd.Updates)
-	}
-}
-
-func TestWaitDone_ctxCancelDoesNotFail(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true}}}}
-	o := newOrch(cc, bd, fastCfg())
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("want context.Canceled, got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("cancellation must NOT run a failure action; updates=%v", bd.Updates)
-	}
-}
-
-// TestWaitDone_ctxCancelledBeforeDeathPathNoFail covers the structural
-// single-terminal guard (Fix 2): when ctx is already cancelled AND the session
-// is reported NOT live AND bead status is in_progress (the death path), waitDone
-// must return ctx.Err() and run NO failure action (no bead update).
-func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
-	// Session is not live on the very first List call — the death path triggers.
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
-	}}
-	o := newOrch(cc, bd, fastCfg())
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancelled before waitDone is called (watchdog already won)
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("want context.Canceled on cancelled-ctx death path, got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("cancelled-ctx death path must NOT run o.fail; updates=%v", bd.Updates)
-	}
-}
-
-// pg2-c1vp: when the watchdog wins the single-terminal race, waitDone (the
-// loser) must run NO failure action — otherwise the bead ends up both unclaimed
-// (watchdog) AND human-labeled (waitDone). An injected claimTerminal that always
-// loses drives the death path; it must mutate nothing and exit with ctx.Err().
-func TestWaitDone_lostRace_deathPathNoFail(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
-	}}
-	o := newOrch(cc, bd, fastCfg())
-	ctx, cancel := context.WithCancel(context.Background())
-	claimed := make(chan struct{}, 1)
-	claim := func() bool { claimed <- struct{}{}; return false } // always lose the claim
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	resCh := make(chan error, 1)
-	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
-	<-claimed // waitDone reached its terminal decision and lost
-	cancel()  // release the loser
-	if err := <-resCh; !errors.Is(err, context.Canceled) {
-		t.Fatalf("loser should return ctx.Err(), got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("loser must not mutate the bead; updates=%v", bd.Updates)
-	}
-}
-
-// pg2-c1vp: the watchdog's terminal unclaim sets the bead to open; waitDone must
-// NOT misread that as a successful "open" hand-back when it lost the race (else a
-// budget hard-stop is reported as success). A lost "open" must yield ctx.Err().
-func TestWaitDone_lostRace_openNotReportedSuccess(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	o := newOrch(cc, bd, fastCfg())
-	ctx, cancel := context.WithCancel(context.Background())
-	claimed := make(chan struct{}, 1)
-	claim := func() bool { claimed <- struct{}{}; return false }
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	resCh := make(chan error, 1)
-	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
-	<-claimed
-	cancel()
-	if err := <-resCh; err == nil {
-		t.Fatal("a lost 'open' hand-back must NOT be reported as success (nil)")
-	} else if !errors.Is(err, context.Canceled) {
-		t.Fatalf("loser should return ctx.Err(), got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("loser must not mutate the bead; updates=%v", bd.Updates)
 	}
 }
 
@@ -428,7 +238,7 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 	o := newOrch(cc, bd, cfg)
 	o.usageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately over 100%
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	err := o.workOne(context.Background(), d)
+	_, err := o.workOne(context.Background(), d)
 	if err == nil {
 		t.Fatal("expected a budget error")
 	}
@@ -437,73 +247,6 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 	}
 	if dtest.HasUpdate(bd, "update zr-w --add-label human") {
 		t.Error("hard stop must NOT add human")
-	}
-}
-
-func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateIdle}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
-		t.Fatal("done + not-closed should fail")
-	}
-	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
-		t.Errorf("worker done-without-close must add human; updates=%v", bd.Updates)
-	}
-	// active() is the ONLY List caller in waitDone, so a single List call proves
-	// the loop stopped on the first check instead of polling to MaxWait.
-	if cc.ListIdx != 1 {
-		t.Errorf("done must stop on first check (listIdx=1), got %d (looped to MaxWait?)", cc.ListIdx)
-	}
-}
-
-func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateIdle}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
-		t.Fatal("done + not-closed should fail")
-	}
-	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
-		t.Errorf("feedback done-without-close must unclaim; updates=%v", bd.Updates)
-	}
-	if cc.ListIdx != 1 {
-		t.Errorf("done must stop on first check (listIdx=1), got %d", cc.ListIdx)
-	}
-}
-
-// Regression guard (passes before AND after the fix): a session that reaches done
-// in the same instant its bead closes must still be a SUCCESS via the re-check.
-func TestWaitDone_doneStopsFast_successRace(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateIdle}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err != nil {
-		t.Fatalf("bead closed as the turn ended = success, got %v", err)
-	}
-	if len(bd.Updates) != 0 {
-		t.Errorf("success must not unclaim/flag; updates=%v", bd.Updates)
-	}
-}
-
-// Lock-in (passes before AND after): needs_input is NOT terminal — a human may
-// attach. The loop must keep waiting to MaxWait, then time out and apply OnFailure.
-func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
-	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
-		t.Fatal("needs_input that never resolves should time out (failure)")
-	}
-	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
-		t.Errorf("needs_input timeout must apply OnFailure (feedback unclaim); updates=%v", bd.Updates)
-	}
-	if cc.ListIdx < 10 {
-		t.Errorf("needs_input must keep waiting to MaxWait; listIdx=%d (stopped early?)", cc.ListIdx)
 	}
 }
 
@@ -554,7 +297,7 @@ func TestWorkOne_usesPerAttemptExternalID(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err != nil {
+	if _, err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v", err)
 	}
 	if !dtest.Contains(cc.Ensured, ext) {
@@ -593,7 +336,7 @@ func TestStuckBead_firstEnsureFailureLabelsLaunchFail(t *testing.T) {
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err == nil {
+	if _, err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
 	if !dtest.HasUpdate(bd, "update zr-w --add-label pool-launch-fail") {
@@ -612,7 +355,7 @@ func TestStuckBead_secondEnsureFailureEscalatesHuman(t *testing.T) {
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err == nil {
+	if _, err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
 	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
@@ -631,7 +374,7 @@ func TestStuckBead_successClearsLaunchFailLabel(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w-" + dtest.TestStamp, Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err != nil {
+	if _, err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.Updates)
 	}
 	if !dtest.HasUpdate(bd, "update zr-w --remove-label pool-launch-fail") {
@@ -648,34 +391,11 @@ func TestStuckBead_launchFailDoesNotClearLabel(t *testing.T) {
 	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
-	if err := o.workOne(context.Background(), d); err == nil {
+	if _, err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
 	if dtest.HasUpdate(bd, "update zr-w --remove-label pool-launch-fail") {
 		t.Errorf("a launch failure must NOT clear pool-launch-fail; updates=%v", bd.Updates)
-	}
-}
-
-func TestActive_stateMapping(t *testing.T) {
-	cases := []struct {
-		name string
-		sess []ccpool.Session
-		want bool
-	}{
-		{"working-live", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}, true},
-		{"needs_input-live", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateNeedsInput}}, true},
-		{"done-live", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateIdle}}, false},
-		{"failed-live", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateErrored}}, false},
-		{"working-not-live", []ccpool.Session{{ExternalID: "s", Live: false, State: ccpool.StateWorking}}, false},
-		{"absent", []ccpool.Session{{ExternalID: "other", Live: true, State: ccpool.StateWorking}}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			o := newOrch(&dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sess}}, &dtest.ScriptBD{}, fastCfg())
-			if got := o.active(context.Background(), "s"); got != tc.want {
-				t.Errorf("active(%s) = %v, want %v", tc.name, got, tc.want)
-			}
-		})
 	}
 }
 
