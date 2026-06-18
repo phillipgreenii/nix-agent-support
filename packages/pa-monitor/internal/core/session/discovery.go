@@ -1,22 +1,12 @@
 package session
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"syscall"
-	"time"
-)
 
-type rawSession struct {
-	PID        int    `json:"pid"`
-	SessionID  string `json:"sessionId"`
-	Cwd        string `json:"cwd"`
-	Kind       string `json:"kind"`
-	Entrypoint string `json:"entrypoint"`
-	Name       string `json:"name"`
-	StartedAt  int64  `json:"startedAt"` // ms epoch
-}
+	ct "github.com/phillipgreenii/claude-transcript"
+)
 
 type Discoverer struct {
 	SessionsDir string
@@ -56,12 +46,11 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(d.SessionsDir, e.Name()))
+		// Parse the registry row via the shared library so status/waitingFor/
+		// statusUpdatedAt are decoded alongside the existing fields. Malformed
+		// files are silently skipped (mirrors prior behavior).
+		r, err := ct.ReadSessionFile(filepath.Join(d.SessionsDir, e.Name()))
 		if err != nil {
-			continue
-		}
-		var r rawSession
-		if err := json.Unmarshal(body, &r); err != nil {
 			continue
 		}
 		alive := true
@@ -75,15 +64,18 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		env, _ := readEnv(r.PID) // best-effort; empty map on failure
 
 		out = append(out, &Session{
-			PID:        r.PID,
-			SessionID:  r.SessionID,
-			Cwd:        r.Cwd,
-			Kind:       r.Kind,
-			Entrypoint: r.Entrypoint,
-			Name:       r.Name,
-			StartedAt:  time.UnixMilli(r.StartedAt),
-			Env:        env,
-			PidAlive:   alive,
+			PID:             r.PID,
+			SessionID:       r.SessionID,
+			Cwd:             r.Cwd,
+			Kind:            r.Kind,
+			Entrypoint:      r.Entrypoint,
+			Name:            r.Name,
+			StartedAt:       r.StartedAt,
+			RegistryStatus:  r.Status,
+			WaitingFor:      r.WaitingFor,
+			StatusUpdatedAt: r.StatusUpdatedAt,
+			Env:             env,
+			PidAlive:        alive,
 		})
 	}
 	return out, nil

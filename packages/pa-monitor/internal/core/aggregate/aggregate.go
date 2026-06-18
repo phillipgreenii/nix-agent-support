@@ -34,6 +34,8 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 			d.IdleN++
 		case session.Dormant:
 			d.DormantN++
+		case session.WaitingForHuman:
+			d.WaitingN++
 		}
 		if en.RateLimitResetsAt.After(windowResetsAt) {
 			windowResetsAt = en.RateLimitResetsAt

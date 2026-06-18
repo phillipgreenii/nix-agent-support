@@ -11,6 +11,11 @@ const (
 	Working Status = iota
 	Idle
 	Dormant
+	// WaitingForHuman is the registry-derived "blocked on a human" state
+	// (a fresh "waiting" flag or a dangling AskUserQuestion). It suppresses
+	// both caffeinate keep-awake and nudges. See the activity verdict in the
+	// poller and claude-transcript.ClassifyActivity.
+	WaitingForHuman
 )
 
 func (s Status) String() string {
@@ -21,6 +26,8 @@ func (s Status) String() string {
 		return "idle"
 	case Dormant:
 		return "dormant"
+	case WaitingForHuman:
+		return "waiting"
 	}
 	return "unknown"
 }
@@ -37,6 +44,15 @@ type Session struct {
 	TerminalHost    string // populated by poller: "tmux","ghostty","vscode","unknown"
 	TranscriptMTime time.Time
 	Status          Status
+
+	// RegistryStatus / WaitingFor / StatusUpdatedAt mirror the raw
+	// ~/.claude/sessions/<pid>.json fields ("busy"/"idle"/"waiting", the
+	// waitingFor label, and the turn-start marker). They are decoded by the
+	// Discoverer and consumed by the poller's registry-driven activity
+	// verdict. Status (above) is the derived verdict; these are the inputs.
+	RegistryStatus  string
+	WaitingFor      string
+	StatusUpdatedAt time.Time
 
 	// Env is the process environment of the agent process, populated by the
 	// poller via per-OS readers. Empty when the env could not be read (dead

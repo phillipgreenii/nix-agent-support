@@ -168,6 +168,11 @@ func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) str
 	switch st {
 	case session.Working:
 		return theme.Working.Render("●")
+	case session.WaitingForHuman:
+		// Blocked on a human (fresh "waiting" flag / dangling AskUserQuestion).
+		// Distinct from idle+awaiting so it stands out and is not rendered as
+		// Dormant ✕ by the default arm.
+		return theme.Awaiting.Render("◐")
 	case session.Idle:
 		if awaiting {
 			return theme.Awaiting.Render("?")

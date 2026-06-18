@@ -72,6 +72,7 @@ func convertDirectory(dir *service.Directory) *aggregate.Directory {
 		WorkingN:     dir.WorkingN,
 		IdleN:        dir.IdleN,
 		DormantN:     dir.DormantN,
+		WaitingN:     dir.WaitingN,
 		TotalTokens:  int(dir.TotalTokens),
 		TotalCostUSD: dir.TotalCostUSD,
 		BurnRateSum:  dir.BurnRateSum,
@@ -200,6 +201,8 @@ func parseSessionStatus(s string) session.Status {
 		return session.Working
 	case "idle":
 		return session.Idle
+	case "waiting":
+		return session.WaitingForHuman
 	default:
 		return session.Dormant
 	}

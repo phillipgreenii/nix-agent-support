@@ -174,6 +174,8 @@ func statusFromString(s string) session.Status {
 		return session.Working
 	case "idle":
 		return session.Idle
+	case "waiting":
+		return session.WaitingForHuman
 	default:
 		return session.Dormant
 	}

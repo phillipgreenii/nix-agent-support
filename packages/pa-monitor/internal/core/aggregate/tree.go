@@ -50,6 +50,7 @@ type Directory struct {
 	WorkingN     int
 	IdleN        int
 	DormantN     int
+	WaitingN     int
 	TotalTokens  int
 	TotalCostUSD float64
 	BurnRateSum  float64 // NEW: sum of children's BurnRateShort

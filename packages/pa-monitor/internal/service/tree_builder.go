@@ -11,6 +11,7 @@ type Directory struct {
 	WorkingN     int
 	IdleN        int
 	DormantN     int
+	WaitingN     int
 	TotalTokens  uint64
 	TotalCostUSD float64
 	BurnRateSum  float64
@@ -41,6 +42,8 @@ func BuildDirectories(sessions []store.SessionWithContribution) []*Directory {
 			d.WorkingN++
 		case "idle":
 			d.IdleN++
+		case "waiting":
+			d.WaitingN++
 		default:
 			d.DormantN++
 		}

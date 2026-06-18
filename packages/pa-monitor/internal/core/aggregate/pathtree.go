@@ -106,7 +106,11 @@ func computeRollup(n *PathNode) {
 		switch s.Status {
 		case session.Working:
 			n.WorkingN++
-		case session.Idle:
+		case session.Idle, session.WaitingForHuman:
+			// WaitingForHuman is an attention state, not dormant — bucket it
+			// with Idle so the path-tree rollup keeps it visible (PathNode has
+			// no dedicated waiting count). The Directory rollup tracks a
+			// separate WaitingN; this compressed view does not.
 			n.IdleN++
 		default:
 			n.DormantN++

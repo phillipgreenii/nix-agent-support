@@ -13,6 +13,7 @@ func TestStatusString(t *testing.T) {
 		{Working, "working"},
 		{Idle, "idle"},
 		{Dormant, "dormant"},
+		{WaitingForHuman, "waiting"},
 	}
 	for _, c := range cases {
 		if got := c.s.String(); got != c.want {
