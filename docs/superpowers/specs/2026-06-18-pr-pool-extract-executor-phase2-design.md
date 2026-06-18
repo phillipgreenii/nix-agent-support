@@ -97,25 +97,44 @@ orchestrator → executor, discover, roles, report, ccpool, complete,
 Nothing in the `executor` closure imports `executor`, so there is no cycle. `report`
 remains a pure-value leaf.
 
-### 2. Code that moves **verbatim** into `internal/executor`
+### 2. Code that moves into `internal/executor` — verbatim vs. modified
 
-Into **`ccpoolExecutor`** (`Dispatch` = today's `runCCPool` body):
-`runCCPool`, `workerWaitWithWatchdog`, `waitDone`, `renderNudge`,
-`escalateLaunchFailure`, `fail`, `active`, `budgetUnlimited`. The entire `pg2-c1vp`
-atomic-owner-claim machinery (`owner atomic.Bool`, `claimTerminal`, the buffered
-`done` channel, `cancel()`/drain ordering, every `won()`/`lose()` gate in `waitDone`)
-moves **byte-for-byte**. Only the receiver changes (`*Orchestrator` → `*ccpoolExecutor`)
-and field references rebind (`o.CC` → `deps.CC`, `o.clock()` → `deps.clock()`, …).
+All of `runCCPool`, `workerWaitWithWatchdog`, `waitDone`, `renderNudge`,
+`escalateLaunchFailure`, `fail`, `active`, `budgetUnlimited` move into
+**`ccpoolExecutor`**; `runCommand`, `renderArgv` move into **`commandExecutor`**. But
+the move is two distinct categories, and the "verbatim" claim applies only to the first:
 
-Into **`commandExecutor`** (`Dispatch`): `runCommand`, `renderArgv`.
+- **Moved byte-for-byte (the `pg2-c1vp` race machinery):** `waitDone` and
+  `workerWaitWithWatchdog` keep their **`error`-only return signatures** and every line
+  of the atomic-owner-claim logic (`owner atomic.Bool`, `claimTerminal`, the buffered
+  `done` channel, `cancel()`/drain ordering, every `won()`/`lose()` gate). `active`,
+  `budgetUnlimited`, `renderNudge` likewise. Only the receiver changes
+  (`*Orchestrator` → `*ccpoolExecutor`) and field refs rebind (`o.CC` → `deps.CC`,
+  `o.clock()` → `deps.clock()`, …). **This is the load-bearing race code; it must not be
+  re-shaped.**
+- **Moved AND modified (the `pg2-kj7j` failure-verb plumbing, §4):** `escalateLaunchFailure`
+  gains a **`bool` return** (did it escalate to `human`, vs. only label?). The
+  `Dispatch` wrapper (today's `runCCPool` body) is the one place that changes shape: at
+  each failure return it attaches the `report.Action` for the verb actually taken (see
+  §4 for the derivation). `fail`, `waitDone`, and `workerWaitWithWatchdog` are **not**
+  re-signatured for this — the verb is derived in `Dispatch` from the returned error +
+  role config (§4), so the race code stays verbatim.
 
 ### 3. Code that **stays** in `internal/orchestrator`
 
 `DrainOnce`, `drain`, `RunOne`, `workOne` / `workOneWithID`, `snapshotIDs`,
 `createdByActor`, `buildResult`, `emitResult`, `teardownAll`, `queryEnv`, `gated`,
-`actorOf`, `beadRefs`. `workOne` / `workOneWithID` become the thin seam: build `Deps`
-from the orchestrator, select the executor by `role.Type`, call `Dispatch`, return
-`(report.Result, error)` up to the caller.
+`fileExists`, `actorOf`, `beadRefs`. `workOne` / `workOneWithID` become the thin seam:
+build `Deps` from the orchestrator, select `ccpoolExecutor{}` / `commandExecutor{}` by
+`role.Type`, and call `Dispatch`.
+
+**Return-type ripple (required, not optional):** today `workOne` / `workOneWithID`
+return `error`; they must change to **`(report.Result, error)`** so the executor's
+`Result` reaches `buildResult` for the §4 merge. This ripples to the two call sites:
+`drain` (`orchestrator.go:153`) and `RunOne` (`:137`), which already call
+`buildResult` right after — they now pass the executor's `Result` in instead of
+recomputing the failure verb. `error` still independently drives the complete/flagged
+tally (`drain:154`) — unchanged.
 
 ### 4. `report.Result` integration + the `pg2-kj7j` fix
 
@@ -133,24 +152,46 @@ orchestrator (post-status read + pre/post snapshot diff). So:
   - `err != nil` → use **`execRes.Actions`** for the failure verb, replacing the
     `switch role.CCPool.OnFailure { … }` guess.
 
-Failure-verb mapping the executor emits (the `pg2-kj7j` fix):
+Failure-verb mapping (the `pg2-kj7j` fix). The "today" column is what `buildResult`
+emits now (the bug: it keys off `role.CCPool.OnFailure` for **any** `dispatchErr != 0`,
+so it mis-reports the launch-fail / dispatch-leave / budget cases); "after" is the
+verb matching the action actually taken:
 
-| path                                  | bead action taken         | reported verb             |
-| ------------------------------------- | ------------------------- | ------------------------- |
-| ensure-fail, 1st time                 | `pool-launch-fail` label  | _(none)_                  |
-| ensure-fail, repeat                   | add `human`               | `Escalated`               |
-| send-fail, `on_dispatch_fail=unclaim` | unclaim                   | `Unclaimed`               |
-| send-fail, `on_dispatch_fail=leave`   | nothing                   | _(none)_                  |
-| waitDone fail (timeout/death)         | `OnFailure` unclaim/human | `Unclaimed` / `Escalated` |
+| failure path                          | bead action actually taken        | today (buggy)      | after (this fix)          |
+| ------------------------------------- | --------------------------------- | ------------------ | ------------------------- |
+| ensure-fail, 1st time                 | `pool-launch-fail` label only     | `OnFailure`-verb   | _(none)_                  |
+| ensure-fail, repeat                   | add `human`                       | `OnFailure`-verb   | `Escalated`               |
+| send-fail, `on_dispatch_fail=unclaim` | unclaim                           | `OnFailure`-verb   | `Unclaimed`               |
+| send-fail, `on_dispatch_fail=leave`   | nothing                           | `OnFailure`-verb   | _(none)_                  |
+| waitDone fail (timeout / death)       | `complete.OnFailure(OnFailure)`   | `OnFailure`-verb ✓ | `Unclaimed` / `Escalated` |
+| **watchdog hard-stop wins** (budget)  | `watchdog.terminal` → **unclaim** | `OnFailure`-verb   | `Unclaimed`               |
+
+The last row is a **distinct third failure path**: when the budget watchdog wins the
+single-terminal race it unclaims the bead in `watchdog.Run` (`watchdog.go:80-83`,
+always an unclaim), and `workerWaitWithWatchdog` returns `watchdog.ErrBudgetExceeded`.
+This is NOT the `waitDone`-fail path, and today's `OnFailure`-verb guess mis-labels a
+worker (`OnFailure=add-human`) budget stop as `Escalated` when it was actually unclaimed.
+
+**Derivation mechanism (in `ccpoolExecutor.Dispatch`, no race-code re-signaturing):**
+
+- ensure-fail → `report.Action{Escalated}` iff `escalateLaunchFailure` returned
+  `true` (escalated to human); else no action.
+- send-fail → `report.Action{Unclaimed}` iff `cc.OnDispatchFail == DispatchUnclaim`;
+  else no action.
+- wait-fail → if `errors.Is(err, watchdog.ErrBudgetExceeded)` → `Unclaimed` (watchdog
+  unclaimed); else map `cc.OnFailure` → `Unclaimed` (unclaim) / `Escalated` (add-human),
+  matching what `complete.OnFailure` applied inside `fail`.
 
 This stays inside the **closed verb vocabulary** (`Created`, `Closed`, `HandedBack`,
-`Unclaimed`, `Escalated`, `Indeterminate`) — no new verb. "None" is the faithful report
-for a label-only flag or a leave: nothing terminal happened to the bead's claim/human
-state, so we must not claim `Escalated`/`Unclaimed`. Mechanically, the executor builds
-the `report.Action` at the point it performs the action (e.g.
-`escalateLaunchFailure` signals whether it escalated to human vs only labeled; the
-send-fail path emits `Unclaimed` only when it unclaims; `fail` emits the verb matching
-the `OnFailure` it applied).
+`Unclaimed`, `Escalated`, `Indeterminate`) — no new verb. "(none)" is the faithful
+report for a label-only flag or a leave: nothing terminal happened to the bead's
+claim/human state, so we must not claim `Escalated`/`Unclaimed`.
+
+`commandExecutor.Dispatch` returns an **empty `report.Result{}`** on both success and
+failure: a command role performs no bead mutation (`runCommand`), and `actorOf` is `""`
+for command roles so the snapshot diff finds nothing. The `buildResult` merge for a
+command role is therefore a no-op on the executor's side (created/indeterminate from the
+snapshot still apply).
 
 ### 5. `ExternalID` threading
 
@@ -159,18 +200,33 @@ and sets `Deps.ExternalID`. `ccpoolExecutor.Dispatch` uses `deps.ExternalID` for
 `Ensure`; `RunOne` reads the same value for its deferred teardown `Close`. The stamp
 cannot drift between ensure and close, preserving `TestRunOne_feedbackClosesSession`.
 (The drain path tears down by prefix in `teardownAll`, so it is unaffected either way.)
+`Deps.ExternalID` is consumed **only by `ccpoolExecutor`**; `commandExecutor` ignores it
+(command roles launch no ccpool session), so no `Stamp()`/`Ensure` wiring leaks into the
+command path.
 
 ### 6. Test strategy
 
-- **Move verbatim into `package executor`:** all `TestWaitDone_*` (incl. both
-  `TestWaitDone_lostRace_*`) and `TestActive_stateMapping` — they call executor-internal
-  methods. Test _logic_ is unchanged; call sites become `exec.waitDone(...)` /
-  `exec.active(...)` on a `ccpoolExecutor` constructed with a `Deps`.
-- **Stay in `package orchestrator`:** `TestWorkOne_*`, `TestStuckBead_*`,
-  `TestRunOne_*`, `TestDrainOnce_*`, `TestDrain_*`, `TestTeardownAll_*`,
-  `TestCreatedByActor*` — they exercise `workOne`/`drain`/`RunOne` and become
-  integration tests across the orchestrator↔executor seam. The **golden test is
-  untouched**.
+- **Move into `package executor` (they call executor-internal `waitDone`/`active`
+  directly):** **all 14** such tests, not just the `lostRace` pair —
+  `TestWaitDone_workerCloses`, `_workerHandbackToOpen`, `_workerTimeoutAddsHumanNoUnclaim`,
+  `_paneDiesAsBeadCloses_success`, `_paneDiesStillInProgress_failure`,
+  `_feedbackTimeoutUnclaims`, `_transientStatusErrorKeepsPolling`, `_ctxCancelDoesNotFail`,
+  `_ctxCancelledBeforeDeathPathNoFail`, `_lostRace_deathPathNoFail`,
+  `_lostRace_openNotReportedSuccess`, `_workerDoneStopsFast_failure`,
+  `_feedbackDoneStopsFast_unclaims`, `_doneStopsFast_successRace`,
+  `_needsInputWaitsUntilMaxWait`, plus `TestActive_stateMapping`. Test _logic_ is
+  unchanged; call sites become `exec.waitDone(...)` / `exec.active(...)` on a
+  `ccpoolExecutor` built with a `Deps`. This requires a **`newExec(...)` helper** in the
+  executor test package (parallel to `newOrch`) that builds `ccpoolExecutor{}` + a `Deps`
+  with the injected `manualClock` clock/tick, fixed `stamp`, and fakes — the moved tests
+  cannot use `newOrch` (no `*Orchestrator`).
+- **Stay in `package orchestrator` (they go through `workOne`/`drain`/`RunOne` — now
+  integration tests across the orch↔executor↔watchdog seam):** `TestWorkOne_*` (incl.
+  the budget tests `TestWorkOne_workerSuccessWithWatchdogArmed`,
+  `TestWorkOne_workerBudgetHardStopUnclaimsNoHuman`, which drive
+  `workOne → Dispatch → workerWaitWithWatchdog` and set `usageReader`/`BudgetTokens`),
+  `TestStuckBead_*`, `TestRunOne_*`, `TestDrainOnce_*`, `TestDrain_*`,
+  `TestTeardownAll_*`, `TestCreatedByActor*`. The **golden test is untouched**.
 - **Shared fakes:** extract `fakeCC`, `scriptBD`, `manualClock`, `rampReader` (and the
   `hasUpdate`/`contains`/`join` helpers, `testStamp`) into a new **`internal/dtest`**
   package as exported types (`dtest.FakeCC`, `dtest.ScriptBD`, …), imported by both test
@@ -201,7 +257,13 @@ cannot drift between ensure and close, preserving `TestRunOne_feedbackClosesSess
 
 - One genuinely non-mechanical chunk: extracting the shared test fakes into
   `internal/dtest` (otherwise `executor` and `orchestrator` test packages would
-  duplicate ~150 lines of fakes).
+  duplicate ~150 lines of fakes), plus a parallel `newExec` test helper.
+- The `pg2-kj7j` plumbing is **not** a pure verbatim move: `escalateLaunchFailure` gains
+  a `bool` return and `workOneWithID`/`workOne` change to `(report.Result, error)`,
+  rippling to `drain`/`RunOne`. The `pg2-c1vp` race code itself (`waitDone`,
+  `workerWaitWithWatchdog`) stays byte-for-byte; the verb is derived in `Dispatch` from
+  the error + role config, so the failure-verb fix never touches the race-critical
+  loop.
 - `Deps` exports seams that were previously unexported orchestrator internals — a
   slightly wider surface, justified by the cross-package boundary.
 
