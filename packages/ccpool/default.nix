@@ -20,18 +20,11 @@ mkGoApp {
   };
   modRoot = "ccpool";
 
-  # claude-transcript is a first-party local-replace module. Keep it "live"
-  # (never frozen into the vendorHash FOD) via mkGoApp's overlay — see pg2-gjzz.
-  localReplaceModules = [
-    {
-      goImportPath = "github.com/phillipgreenii/claude-transcript";
-      relPath = "../claude-transcript";
-    }
-  ];
-
-  # Tracks only third-party deps (claude-transcript stripped + overlaid live), so
-  # it no longer drifts on a claude-transcript edit — pg2-gjzz.
-  vendorHash = "sha256-IsHZpnzp/AHjvocudWcbLwIqX/7NLVi8sX5LxuWCWVY=";
+  # gomod2nix engine (ADR 0008, Case B): buildGoApplication symlinks the
+  # first-party local-replace module (../claude-transcript) from source — live,
+  # no vendorHash, no localReplaceModules overlay. The toml tracks only
+  # third-party deps; claude-transcript is intentionally absent from it.
+  gomod2nixToml = ./gomod2nix.toml;
 
   nativeBuildInputs = [ makeWrapper ];
 
