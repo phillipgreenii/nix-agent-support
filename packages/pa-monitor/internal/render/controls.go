@@ -8,14 +8,32 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
 )
 
+// CaffeinateProcess is the caffeination PROCESS state for display — what the
+// wake-assertion subprocess is actually doing, orthogonal to the MODE toggle
+// (CaffeinateOn). The incident state was MODE on + PROCESS off; rendering both
+// makes that distinct.
+type CaffeinateProcess int
+
+const (
+	CaffeinateProcessOff   CaffeinateProcess = iota // not holding the assertion
+	CaffeinateProcessOn                             // holding the assertion
+	CaffeinateProcessGrace                          // armed countdown (see GraceRemaining)
+	CaffeinateProcessError                          // spawn failed
+)
+
 // ControlsOpts carries everything Controls needs to render the toggle row.
 type ControlsOpts struct {
-	CaffeinateOn   bool
-	GraceRemaining time.Duration
-	ShowAll        bool
-	CostMode       bool
-	ForceID        bool
-	AutoResume     bool
+	// CaffeinateOn is the auto-caffeinate MODE (the user toggle).
+	CaffeinateOn bool
+	// CaffeinateProcess is the caffeination PROCESS state. Rendered as a second
+	// marker alongside the MODE so "armed but not holding" (the incident) and
+	// "spawn failed" are visibly distinct from "holding".
+	CaffeinateProcess CaffeinateProcess
+	GraceRemaining    time.Duration
+	ShowAll           bool
+	CostMode          bool
+	ForceID           bool
+	AutoResume        bool
 	// DaemonConnected drives the upper-left daemon RPC connection indicator.
 	// true  -> filled green dot ("●") meaning the latest poll succeeded
 	// false -> hollow dim dot  ("○") meaning the latest poll failed or
@@ -50,15 +68,24 @@ func Controls(opts ControlsOpts) string {
 		daemonGlyph = th.Dormant.Render("○")
 	}
 
-	caffWide := "○ off"
-	caffGlyph := "○"
+	// Two caffeinate indicators (D6): MODE (the user toggle) and PROCESS (what
+	// the wake-assertion subprocess is doing). MODE answers "did the user arm
+	// auto-caffeinate"; PROCESS answers "is the Mac actually being held awake".
+	//
+	// WIDE renders both as "mode · process"; NARROW/TINY render a MODE glyph
+	// plus a one-char PROCESS marker so "armed but not holding" (the incident:
+	// mode on, process off) and "spawn failed" stay distinguishable.
+	caffProc := caffeinateProcessLabel(opts.CaffeinateProcess, opts.GraceRemaining)
+	caffProcMark := caffeinateProcessMark(opts.CaffeinateProcess)
+
+	var caffWide, caffGlyph string
 	if opts.CaffeinateOn {
-		caffGlyph = th.ActiveToggle.Render("●")
-		if opts.GraceRemaining > 0 {
-			caffWide = th.ActiveToggle.Render(fmt.Sprintf("● on %ds", int(opts.GraceRemaining.Seconds())))
-		} else {
-			caffWide = th.ActiveToggle.Render("● on")
-		}
+		modeGlyph := th.ActiveToggle.Render("●")
+		caffWide = th.ActiveToggle.Render("● on") + " · " + caffProc
+		caffGlyph = modeGlyph + caffProcMark
+	} else {
+		caffWide = "○ off · " + caffProc
+		caffGlyph = "○" + caffProcMark
 	}
 
 	autoResumeWide := "○ off"
@@ -133,4 +160,39 @@ func Controls(opts ControlsOpts) string {
 			caffGlyph, th.ActiveToggle.Render(tokOrCost), th.ActiveToggle.Render(actOrAll), th.ActiveToggle.Render(nmOrID), autoResumeGlyph)
 	}
 	return sb.String()
+}
+
+// caffeinateProcessLabel returns the word form of the PROCESS state for the
+// WIDE controls row. The grace state carries its remaining seconds, which the
+// daemon now feeds through (previously this branch was dead because the TUI
+// never supplied GraceRemaining).
+func caffeinateProcessLabel(p CaffeinateProcess, graceRemaining time.Duration) string {
+	switch p {
+	case CaffeinateProcessOn:
+		return "holding"
+	case CaffeinateProcessGrace:
+		if graceRemaining > 0 {
+			return fmt.Sprintf("grace %ds", int(graceRemaining.Seconds()))
+		}
+		return "grace"
+	case CaffeinateProcessError:
+		return "ERROR"
+	default:
+		return "off"
+	}
+}
+
+// caffeinateProcessMark returns the compact one-char PROCESS marker for the
+// NARROW/TINY tiers: holding "*", grace "~", error "!", off "" (nothing).
+func caffeinateProcessMark(p CaffeinateProcess) string {
+	switch p {
+	case CaffeinateProcessOn:
+		return "*"
+	case CaffeinateProcessGrace:
+		return "~"
+	case CaffeinateProcessError:
+		return "!"
+	default:
+		return ""
+	}
 }

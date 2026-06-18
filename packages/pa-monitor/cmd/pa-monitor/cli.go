@@ -48,7 +48,8 @@ func runStatus(args []string) {
 		fmt.Printf("week  %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
 			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
 	}
-	fmt.Printf("caffeinate:    %v\n", state.GetCaffeinateActive())
+	fmt.Printf("caffeinate:    mode %s · process %s\n",
+		onOff(state.GetCaffeinateMode()), caffeinateProcessString(state.GetCaffeinateProcess(), state.GetCaffeinateGraceRemainingS()))
 	fmt.Printf("auto_resume:   %v\n", state.GetAutoResumeEnabled())
 
 	// Collect per-session details (LastError + PendingNudge) and print

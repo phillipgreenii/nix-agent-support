@@ -19,7 +19,7 @@ func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 func TestEmitter_NilSafeMethods(t *testing.T) {
 	var e *Emitter
 	// Methods MUST not panic on nil receiver.
-	e.RecordCaffeinateActive(false, nil)
+	e.RecordCaffeinateActive(false, "off", 0, nil)
 	e.RecordBlockCost(3.14, map[string]string{"plan_tier": "max_5x"})
 	e.RecordWeekCost(42.0, nil)
 	e.RecordBlockLimitHit(map[string]string{"plan_tier": "max_5x"})
@@ -150,6 +150,41 @@ func TestEmitter_RecordSessionInfo_RoundTrip(t *testing.T) {
 	}
 	if got1["status"] != "idle" {
 		t.Errorf("row1 status = %q, want idle", got1["status"])
+	}
+}
+
+// TestEmitter_RecordCaffeinateActive_StateAttr verifies the process `state`
+// attribute and grace-remaining value are buffered. The gauge VALUE encodes
+// the MODE (active), while `state` carries the PROCESS — so "armed but not
+// holding" (active=true, state=off) is distinguishable from "holding".
+func TestEmitter_RecordCaffeinateActive_StateAttr(t *testing.T) {
+	e := &Emitter{}
+	e.RecordCaffeinateActive(true, "grace", 42, map[string]string{"plan_tier": "max_5x"})
+	if e.caffeinateActiveVal != 1 {
+		t.Errorf("caffeinateActiveVal = %d, want 1 (mode active)", e.caffeinateActiveVal)
+	}
+	if e.caffeinateGraceVal != 42 {
+		t.Errorf("caffeinateGraceVal = %d, want 42", e.caffeinateGraceVal)
+	}
+	got := map[string]string{}
+	for _, kv := range e.caffeinateAttrs {
+		got[string(kv.Key)] = kv.Value.AsString()
+	}
+	if got["state"] != "grace" {
+		t.Errorf("state attr = %q, want grace; attrs=%v", got["state"], got)
+	}
+	if got["plan_tier"] != "max_5x" {
+		t.Errorf("plan_tier attr = %q, want max_5x", got["plan_tier"])
+	}
+	// The incident case: MODE active, PROCESS off.
+	e.RecordCaffeinateActive(true, "off", 0, nil)
+	got2 := map[string]string{}
+	for _, kv := range e.caffeinateAttrs {
+		got2[string(kv.Key)] = kv.Value.AsString()
+	}
+	if e.caffeinateActiveVal != 1 || got2["state"] != "off" {
+		t.Errorf("incident case: want active=1 + state=off, got active=%d state=%q",
+			e.caffeinateActiveVal, got2["state"])
 	}
 }
 

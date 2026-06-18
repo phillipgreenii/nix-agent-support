@@ -7,6 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
 
 type Poller interface {
@@ -20,6 +22,11 @@ type MetaPoller interface {
 	LastAutoResumeEnabled() bool
 	LastAutoResumeDelay() time.Duration
 	LastCaffeinateActive() bool
+	// Two-indicator caffeinate state (D6): MODE (the user toggle) and the
+	// PROCESS state + grace-remaining countdown.
+	LastCaffeinateMode() bool
+	LastCaffeinateProcess() pb.CaffeinateProcess
+	LastCaffeinateGraceRemaining() time.Duration
 	LastDaemonVersion() string
 	// LastDaemonNow returns the daemon-side wallclock observed on the most
 	// recent GetState. Used by the Model to break optimistic-update races:
@@ -35,8 +42,27 @@ type DaemonMeta struct {
 	AutoResumeEnabled bool
 	AutoResumeDelay   time.Duration
 	CaffeinateActive  bool
-	DaemonVersion     string
-	DaemonNow         time.Time
+	// Two-indicator caffeinate state (D6).
+	CaffeinateMode           bool
+	CaffeinateProcess        render.CaffeinateProcess
+	CaffeinateGraceRemaining time.Duration
+	DaemonVersion            string
+	DaemonNow                time.Time
+}
+
+// caffeinateProcessFromProto maps the wire CaffeinateProcess enum onto the
+// render-layer display state, keeping render a leaf package free of proto.
+func caffeinateProcessFromProto(p pb.CaffeinateProcess) render.CaffeinateProcess {
+	switch p {
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON:
+		return render.CaffeinateProcessOn
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE:
+		return render.CaffeinateProcessGrace
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR:
+		return render.CaffeinateProcessError
+	default:
+		return render.CaffeinateProcessOff
+	}
 }
 
 type pollTickMsg struct{}
@@ -62,11 +88,14 @@ func (m *Model) pollNow() tea.Cmd {
 		var meta DaemonMeta
 		if mp, ok := m.poller.(MetaPoller); ok {
 			meta = DaemonMeta{
-				AutoResumeEnabled: mp.LastAutoResumeEnabled(),
-				AutoResumeDelay:   mp.LastAutoResumeDelay(),
-				CaffeinateActive:  mp.LastCaffeinateActive(),
-				DaemonVersion:     mp.LastDaemonVersion(),
-				DaemonNow:         mp.LastDaemonNow(),
+				AutoResumeEnabled:        mp.LastAutoResumeEnabled(),
+				AutoResumeDelay:          mp.LastAutoResumeDelay(),
+				CaffeinateActive:         mp.LastCaffeinateActive(),
+				CaffeinateMode:           mp.LastCaffeinateMode(),
+				CaffeinateProcess:        caffeinateProcessFromProto(mp.LastCaffeinateProcess()),
+				CaffeinateGraceRemaining: mp.LastCaffeinateGraceRemaining(),
+				DaemonVersion:            mp.LastDaemonVersion(),
+				DaemonNow:                mp.LastDaemonNow(),
 			}
 		}
 		return pollResultMsg{tree: tree, anyWorking: working, meta: meta}

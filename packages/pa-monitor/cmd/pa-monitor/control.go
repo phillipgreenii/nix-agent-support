@@ -11,6 +11,34 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 )
 
+// onOff renders a bool as the "on"/"off" word form used by the two caffeinate
+// indicators.
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+// caffeinateProcessString renders the caffeination PROCESS state as a word.
+// The grace state carries its remaining seconds. Distinct from the MODE so the
+// incident case (mode on + process off) is unambiguous in the CLI.
+func caffeinateProcessString(p pb.CaffeinateProcess, graceRemainingS uint32) string {
+	switch p {
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON:
+		return "on (holding)"
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE:
+		if graceRemainingS > 0 {
+			return fmt.Sprintf("grace (%ds)", graceRemainingS)
+		}
+		return "grace"
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR:
+		return "error"
+	default:
+		return "off"
+	}
+}
+
 // runCaffeinate implements `caffeinate on|off|toggle`.
 func runCaffeinate(args []string) {
 	action := "toggle"
@@ -39,13 +67,17 @@ func runCaffeinate(args []string) {
 		fmt.Fprintf(os.Stderr, "caffeinate: %v\n", err)
 		os.Exit(2)
 	}
-	state := "off"
-	if resp.GetActive() {
-		state = "on"
-	}
-	fmt.Printf("caffeinate: %s", state)
+	// Show BOTH indicators: MODE (the toggle just set) and PROCESS (what the
+	// subprocess is doing). GetMode falls back to GetActive for daemons that
+	// predate the two-indicator split.
+	mode := resp.GetMode() || resp.GetActive()
+	fmt.Printf("caffeinate: mode %s · process %s",
+		onOff(mode), caffeinateProcessString(resp.GetProcess(), resp.GetGraceRemainingS()))
 	if resp.GetCause() != "" {
 		fmt.Printf(" (%s)", resp.GetCause())
+	}
+	if u := resp.GetUntil(); u != nil {
+		fmt.Printf(" until %s", u.AsTime().Local().Format("15:04:05"))
 	}
 	fmt.Println()
 }

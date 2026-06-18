@@ -89,6 +89,10 @@ type Emitter struct {
 	sessionsErroredObs  map[string]int64 // kind -> count; replaced per tick
 	caffeinateActiveVal int64
 	caffeinateAttrs     []attribute.KeyValue
+	// caffeinateGraceVal buffers the grace-remaining countdown (seconds) for
+	// the pa_monitor.caffeinate.grace_remaining_seconds gauge. Shares the
+	// caffeinateAttrs label set; gated by the same caffeinateActiveKnown flag.
+	caffeinateGraceVal int64
 	// caffeinateActiveKnown gates observation. Without it the callback fires
 	// once before any RecordCaffeinateActive call (the SDK collects shortly
 	// after registration) and observes 0 with NO attrs, creating a permanent
@@ -175,6 +179,10 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	caffGraceGauge, err := meter.Int64ObservableGauge("pa_monitor.caffeinate.grace_remaining_seconds")
+	if err != nil {
+		return err
+	}
 	sessionsErroredGauge, err := meter.Int64ObservableGauge("pa_monitor.sessions.errored")
 	if err != nil {
 		return err
@@ -247,6 +255,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		obs := e.sessionsObs
 		erroredObs := e.sessionsErroredObs
 		caffVal, caffAttrs, caffKnown := e.caffeinateActiveVal, e.caffeinateAttrs, e.caffeinateActiveKnown
+		caffGrace := e.caffeinateGraceVal
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
@@ -257,6 +266,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		}
 		if caffKnown {
 			o.ObserveInt64(caffGauge, caffVal, metric.WithAttributes(caffAttrs...))
+			o.ObserveInt64(caffGraceGauge, caffGrace, metric.WithAttributes(caffAttrs...))
 		}
 		if autoKnown {
 			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
@@ -282,7 +292,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveFloat64(sessionCostGauge, si.costUSD, metric.WithAttributes(idAttr))
 		}
 		return nil
-	}, sessionsGauge, caffGauge, autoResumeGauge, sessionsErroredGauge,
+	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, sessionsErroredGauge,
 		blockCostGauge, weekCostGauge,
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge)
 	return err
@@ -344,10 +354,17 @@ func (e *Emitter) RecordSessionGroups(groups []SessionGroup, baseAttrs map[strin
 	e.mu.Unlock()
 }
 
-// RecordCaffeinateActive sets the caffeinate gauge. nil-safe. Until the
-// first call, the gauge is not observed (avoiding a ghost label-less
+// RecordCaffeinateActive sets the caffeinate gauges. nil-safe. Until the
+// first call, the gauges are not observed (avoiding a ghost label-less
 // series at 0 before the daemon tick loop fires).
-func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
+//
+// The gauge VALUE is the auto-caffeinate MODE signal (1 when active). The
+// `state` attribute carries the caffeination PROCESS state (off/on/grace/
+// error) so dashboards can tell "armed but not holding" (the incident:
+// active gauge can be 1 via the MODE while process=off) apart from "holding".
+// process must be one of "off"/"on"/"grace"/"error"; graceRemainingSeconds
+// feeds the companion grace gauge.
+func (e *Emitter) RecordCaffeinateActive(active bool, process string, graceRemainingSeconds int, attrs map[string]string) {
 	if e == nil {
 		return
 	}
@@ -355,9 +372,17 @@ func (e *Emitter) RecordCaffeinateActive(active bool, attrs map[string]string) {
 	if active {
 		v = 1
 	}
-	kv := attrsToKV(attrs)
+	merged := map[string]string{}
+	for k, val := range attrs {
+		merged[k] = val
+	}
+	if process != "" {
+		merged["state"] = process
+	}
+	kv := attrsToKV(merged)
 	e.mu.Lock()
 	e.caffeinateActiveVal = v
+	e.caffeinateGraceVal = int64(graceRemainingSeconds)
 	e.caffeinateAttrs = kv
 	e.caffeinateActiveKnown = true
 	e.mu.Unlock()

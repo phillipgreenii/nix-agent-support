@@ -58,6 +58,13 @@ type Model struct {
 	forceID       bool
 	costMode      bool
 	caffeinateOn  bool
+	// caffeinateProcess + caffeinateGraceRemaining are the daemon-reported
+	// PROCESS indicator (D6): what the wake-assertion subprocess is doing,
+	// separate from caffeinateOn (the MODE). View-only; populated from
+	// pollResultMsg.meta. Not race-guarded — the user's C toggle only changes
+	// the MODE, never the PROCESS, so a stale snapshot can't undo a user action.
+	caffeinateProcess        render.CaffeinateProcess
+	caffeinateGraceRemaining time.Duration
 	width, height       int
 	selected            *aggregate.SessionView
 	activeModal         ModalKind

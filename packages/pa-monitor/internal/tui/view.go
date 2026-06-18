@@ -29,14 +29,16 @@ func (m *Model) View() string {
 
 	now := time.Now()
 	controls := render.Controls(render.ControlsOpts{
-		CaffeinateOn:    m.caffeinateOn,
-		ShowAll:         m.showAll,
-		CostMode:        m.costMode,
-		ForceID:         m.forceID,
-		AutoResume:      m.autoResumeEnabled,
-		DaemonConnected: m.daemonConnected,
-		Theme:           m.theme,
-		Width:           m.width,
+		CaffeinateOn:      m.caffeinateOn,
+		CaffeinateProcess: m.caffeinateProcess,
+		GraceRemaining:    m.caffeinateGraceRemaining,
+		ShowAll:           m.showAll,
+		CostMode:          m.costMode,
+		ForceID:           m.forceID,
+		AutoResume:        m.autoResumeEnabled,
+		DaemonConnected:   m.daemonConnected,
+		Theme:             m.theme,
+		Width:             m.width,
 	})
 	blockRow := render.BlockRow(m.tree, render.BlockRowOpts{Width: m.width, Now: now})
 	alerts := render.Alerts(m.tree, render.AlertsOpts{

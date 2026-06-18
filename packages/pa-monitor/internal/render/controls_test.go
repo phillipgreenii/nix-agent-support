@@ -64,13 +64,44 @@ func TestControlsFitsAtTierFloor(t *testing.T) {
 }
 
 func TestControlsCaffeineGraceCountdown(t *testing.T) {
-	out := Controls(ControlsOpts{Width: 200, CaffeinateOn: true, GraceRemaining: 55 * time.Second})
+	out := Controls(ControlsOpts{Width: 200, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessGrace, GraceRemaining: 55 * time.Second})
 	if !strings.Contains(out, "55s") {
 		t.Errorf("expected grace countdown '55s' at WIDE, got:\n%s", out)
 	}
-	tiny := Controls(ControlsOpts{Width: 60, CaffeinateOn: true, GraceRemaining: 55 * time.Second})
+	tiny := Controls(ControlsOpts{Width: 60, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessGrace, GraceRemaining: 55 * time.Second})
 	if strings.Contains(tiny, "55s") {
 		t.Errorf("grace should drop at TINY, got:\n%s", tiny)
+	}
+}
+
+// TestControlsTwoCaffeineIndicators verifies the MODE and PROCESS indicators
+// are rendered as two distinct signals at WIDE. The critical case is the
+// incident: MODE on + PROCESS off (armed, not holding) must be visibly
+// distinct from MODE on + PROCESS holding.
+func TestControlsTwoCaffeineIndicators(t *testing.T) {
+	armedNotHolding := stripANSI(Controls(ControlsOpts{Width: 200, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessOff}))
+	holding := stripANSI(Controls(ControlsOpts{Width: 200, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessOn}))
+	if !strings.Contains(armedNotHolding, "on · off") {
+		t.Errorf("MODE on + PROCESS off should render 'on · off', got:\n%s", armedNotHolding)
+	}
+	if !strings.Contains(holding, "on · holding") {
+		t.Errorf("MODE on + PROCESS holding should render 'on · holding', got:\n%s", holding)
+	}
+	if armedNotHolding == holding {
+		t.Errorf("the incident case (mode on, process off) must be distinct from holding:\n%s", armedNotHolding)
+	}
+}
+
+// TestControlsCaffeineError verifies a failed spawn surfaces as an ERROR
+// PROCESS marker at WIDE and as a "!" marker at TINY.
+func TestControlsCaffeineError(t *testing.T) {
+	wide := stripANSI(Controls(ControlsOpts{Width: 200, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessError}))
+	if !strings.Contains(wide, "ERROR") {
+		t.Errorf("PROCESS error should render 'ERROR' at WIDE, got:\n%s", wide)
+	}
+	tiny := stripANSI(Controls(ControlsOpts{Width: 60, CaffeinateOn: true, CaffeinateProcess: CaffeinateProcessError}))
+	if !strings.Contains(tiny, "!") {
+		t.Errorf("PROCESS error should render '!' marker at TINY, got:\n%s", tiny)
 	}
 }
 
