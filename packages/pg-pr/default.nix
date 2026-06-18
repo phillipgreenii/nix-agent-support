@@ -9,7 +9,10 @@ mkGoApp {
   pname = "pg-pr";
   src = ./.;
 
-  vendorHash = "sha256-6qpEixCKR3JZF8zeRxXsd2wBWZ+ASIIeRJEq/U1V43w=";
+  # gomod2nix engine (ADR 0008, Case A): no local replace, so third-party deps
+  # are pinned in gomod2nix.toml and buildGoApplication builds from src — no
+  # vendorHash FOD.
+  gomod2nixToml = ./gomod2nix.toml;
 
   subPackages = [ "cmd/pg-pr" ];
 
