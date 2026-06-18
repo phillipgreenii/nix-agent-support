@@ -8,6 +8,11 @@ const (
 	StateOff State = iota
 	StateArmedRunning
 	StateArmedCountdown
+	// StateError means the most recent Spawn attempt failed; the manager is
+	// armed (toggle on) and wanted to hold the assertion but could not. It is
+	// observable as process=error so a broken caffeinate is visible rather
+	// than silently presenting as "off".
+	StateError
 )
 
 type Manager struct {
@@ -21,9 +26,15 @@ type Manager struct {
 	state        State
 	toggle       bool
 	countdownEnd time.Time
+	spawnErr     error
 }
 
 func (m *Manager) State() State { return m.state }
+
+// SpawnErr returns the error from the most recent failed Spawn attempt, or
+// nil when the last spawn succeeded / none has been attempted. Non-nil iff
+// State() == StateError.
+func (m *Manager) SpawnErr() error { return m.spawnErr }
 
 func (m *Manager) SetToggle(on bool) {
 	m.toggle = on
@@ -32,6 +43,7 @@ func (m *Manager) SetToggle(on bool) {
 			_ = m.Kill()
 			m.state = StateOff
 		}
+		m.spawnErr = nil
 	}
 }
 
@@ -57,8 +69,10 @@ func (m *Manager) Tick(keepAwake bool) {
 	if !m.toggle {
 		return
 	}
-	// If caffeinate died unexpectedly, reset so it can be re-spawned.
-	if m.state != StateOff && m.IsAlive != nil && !m.IsAlive() {
+	// If caffeinate died unexpectedly, reset so it can be re-spawned. Skip
+	// StateError: no process was ever started there, so an IsAlive==false is
+	// expected and must not mask the error by collapsing it to Off.
+	if m.state != StateOff && m.state != StateError && m.IsAlive != nil && !m.IsAlive() {
 		m.state = StateOff
 	}
 	now := m.Now()
@@ -71,8 +85,7 @@ func (m *Manager) Tick(keepAwake bool) {
 		if !keepAwake {
 			return
 		}
-		_ = m.Spawn(m.PID)
-		m.state = StateArmedRunning
+		m.trySpawn()
 	case StateArmedRunning:
 		if !keepAwake {
 			m.state = StateArmedCountdown
@@ -87,5 +100,28 @@ func (m *Manager) Tick(keepAwake bool) {
 			_ = m.Kill()
 			m.state = StateOff
 		}
+	case StateError:
+		// A prior Spawn failed. Retry while the Mac still needs to be awake;
+		// otherwise release the error and fall back to Off (nothing to hold).
+		if !keepAwake {
+			m.spawnErr = nil
+			m.state = StateOff
+			return
+		}
+		m.trySpawn()
 	}
+}
+
+// trySpawn attempts to start the caffeinate subprocess, recording the outcome
+// as either StateArmedRunning (success) or StateError (failure). Capturing the
+// spawn error makes a broken caffeinate observable as process=error instead of
+// silently reverting to "off".
+func (m *Manager) trySpawn() {
+	if err := m.Spawn(m.PID); err != nil {
+		m.spawnErr = err
+		m.state = StateError
+		return
+	}
+	m.spawnErr = nil
+	m.state = StateArmedRunning
 }

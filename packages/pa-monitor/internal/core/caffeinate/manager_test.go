@@ -1,6 +1,7 @@
 package caffeinate
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -165,6 +166,97 @@ func TestUnexpectedExitResetsStateAndRespawns(t *testing.T) {
 	}
 	if m.State() != StateArmedRunning {
 		t.Errorf("State = %v, want ArmedRunning after respawn", m.State())
+	}
+}
+
+func TestSpawnFailureSurfacesAsError(t *testing.T) {
+	spawnErr := errors.New("exec: caffeinate not found")
+	m := &Manager{
+		Grace: 5 * time.Second,
+		Spawn: func(int) error { return spawnErr },
+		Kill:  func() error { return nil },
+		Now:   func() time.Time { return time.Unix(0, 0) },
+	}
+	m.SetToggle(true)
+	m.Tick(true) // wants awake, but spawn fails
+	if m.State() != StateError {
+		t.Fatalf("State = %v, want StateError after Spawn failure", m.State())
+	}
+	if !errors.Is(m.SpawnErr(), spawnErr) {
+		t.Errorf("SpawnErr = %v, want %v", m.SpawnErr(), spawnErr)
+	}
+}
+
+func TestErrorRecoversToRunningOnSuccessfulRespawn(t *testing.T) {
+	fail := true
+	spawned := 0
+	m := &Manager{
+		Grace: 5 * time.Second,
+		Spawn: func(int) error {
+			spawned++
+			if fail {
+				return errors.New("boom")
+			}
+			return nil
+		},
+		Kill: func() error { return nil },
+		Now:  func() time.Time { return time.Unix(0, 0) },
+	}
+	m.SetToggle(true)
+	m.Tick(true) // spawn fails → Error
+	if m.State() != StateError {
+		t.Fatalf("State = %v, want StateError", m.State())
+	}
+	// caffeinate becomes available; next tick retries and succeeds.
+	fail = false
+	m.Tick(true)
+	if m.State() != StateArmedRunning {
+		t.Errorf("State = %v, want StateArmedRunning after recovery", m.State())
+	}
+	if m.SpawnErr() != nil {
+		t.Errorf("SpawnErr = %v, want nil after recovery", m.SpawnErr())
+	}
+	if spawned != 2 {
+		t.Errorf("spawned %d times, want 2 (initial fail + retry)", spawned)
+	}
+}
+
+func TestErrorClearsWhenKeepAwakeDrops(t *testing.T) {
+	m := &Manager{
+		Grace: 5 * time.Second,
+		Spawn: func(int) error { return errors.New("boom") },
+		Kill:  func() error { return nil },
+		Now:   func() time.Time { return time.Unix(0, 0) },
+	}
+	m.SetToggle(true)
+	m.Tick(true) // Error
+	if m.State() != StateError {
+		t.Fatalf("State = %v, want StateError", m.State())
+	}
+	m.Tick(false) // nothing needs the Mac awake → release error
+	if m.State() != StateOff {
+		t.Errorf("State = %v, want StateOff after keepAwake drops", m.State())
+	}
+	if m.SpawnErr() != nil {
+		t.Errorf("SpawnErr = %v, want nil after release", m.SpawnErr())
+	}
+}
+
+func TestToggleOffClearsError(t *testing.T) {
+	m := &Manager{
+		Grace: 5 * time.Second,
+		Spawn: func(int) error { return errors.New("boom") },
+		Kill:  func() error { return nil },
+		Now:   func() time.Time { return time.Unix(0, 0) },
+	}
+	m.SetToggle(true)
+	m.Tick(true) // Error
+	m.SetToggle(false)
+	if m.State() != StateOff {
+		t.Errorf("State = %v, want StateOff after toggle off", m.State())
+	}
+	if m.SpawnErr() != nil {
+		t.Errorf("SpawnErr = %v, want nil after toggle off", m.SpawnErr())
 	}
 }
 
