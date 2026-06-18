@@ -70,6 +70,17 @@ message PingResponse {
   google.protobuf.Timestamp ts = 1;
 }
 
+// CaffeinateProcess is the caffeination PROCESS state — what the subprocess
+// holding the wake assertion is actually doing. Orthogonal to the
+// auto-caffeinate MODE (the user toggle). The incident state was mode:on +
+// process:off (armed, not holding); separating the two makes that visible.
+enum CaffeinateProcess {
+  CAFFEINATE_PROCESS_OFF = 0;   // not holding any assertion
+  CAFFEINATE_PROCESS_ON = 1;    // holding the wake assertion
+  CAFFEINATE_PROCESS_GRACE = 2; // armed countdown; release pending (see grace_remaining_s)
+  CAFFEINATE_PROCESS_ERROR = 3; // spawn failed; wanted to hold but could not
+}
+
 // DaemonState is the full server-rendered view of agent activity that
 // clients consume via GetState or WatchState. The shape mirrors
 // aggregate.Tree but is stable across daemon versions (the daemon
@@ -82,6 +93,9 @@ message DaemonState {
   repeated Directory dirs = 4;
   Block active_block = 5;
   Week active_week = 6;
+  // caffeinate_active is the legacy collapsed flag, retained for clients that
+  // only need a single bit. New clients should read caffeinate_mode (the user
+  // toggle) and caffeinate_process (what the subprocess is doing).
   bool caffeinate_active = 7;
   google.protobuf.Timestamp window_resets_at = 8; // earliest pause-reset across sessions
   string plan_tier = 9;
@@ -91,6 +105,12 @@ message DaemonState {
   string ccusage_error = 13;
   bool auto_resume_enabled = 14;
   uint32 auto_resume_delay_s = 15;
+
+  // Two unambiguous caffeinate indicators (see CaffeinateProcess).
+  bool caffeinate_mode = 16;                 // auto-caffeinate MODE: the user toggle (on/off)
+  CaffeinateProcess caffeinate_process = 17; // caffeination PROCESS state
+  uint32 caffeinate_grace_remaining_s = 18;  // seconds left in grace; 0 unless process == GRACE
+  string caffeinate_cause = 19;              // "manual", "agents_active", or ""
 }
 
 message Directory {
@@ -188,9 +208,12 @@ message CaffeinateRequest {
 }
 
 message CaffeinateResponse {
-  bool active = 1;            // state after the action
+  bool active = 1;            // legacy collapsed flag (mode || process != off)
   string cause = 2;           // "manual", "agents_active", or ""
-  google.protobuf.Timestamp until = 3; // grace-period expiry
+  google.protobuf.Timestamp until = 3; // grace-period expiry (set only while process == GRACE)
+  bool mode = 4;                      // auto-caffeinate MODE: the user toggle after the action
+  CaffeinateProcess process = 5;      // caffeination PROCESS state after the action
+  uint32 grace_remaining_s = 6;       // seconds left in grace; 0 unless process == GRACE
 }
 
 // --- Nudge --- //

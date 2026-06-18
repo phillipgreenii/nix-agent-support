@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
@@ -26,13 +27,19 @@ type sharedState struct {
 	mu               sync.RWMutex
 	readService      *service.ReadService
 	caffeinateOn     bool
-	caffeinateActive bool // distinct from "on": on=user wants caffeinate, active=process running
+	caffeinateActive bool // legacy collapsed flag; on=user wants caffeinate, active=process running OR armed
 	caffeinateCause  string
-	runtimePath      string // for persistence on toggle
-	nudger           *nudger.Nudger
-	nudgerForPending pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
-	watermarks       *WatermarkStore
-	autoResumeDelay  time.Duration // static config: how long to wait before auto-nudging
+	// Two unambiguous caffeinate indicators (D6). caffeinateProcess mirrors
+	// the caffeinate.Manager's State (off / on(holding) / grace / error);
+	// caffeinateGraceRemaining carries the countdown seconds while in grace.
+	// caffeinateOn above is the auto-caffeinate MODE (the user toggle).
+	caffeinateProcess        caffeinate.State
+	caffeinateGraceRemaining time.Duration
+	runtimePath              string // for persistence on toggle
+	nudger                   *nudger.Nudger
+	nudgerForPending         pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
+	watermarks               *WatermarkStore
+	autoResumeDelay          time.Duration // static config: how long to wait before auto-nudging
 }
 
 func newSharedState() *sharedState {
@@ -111,10 +118,32 @@ func (s *sharedState) setCaffeinateActive(active bool, cause string) {
 	s.mu.Unlock()
 }
 
+// setCaffeinateState records both indicators in one shot: the legacy collapsed
+// `active` flag plus the richer PROCESS state (from caffeinate.Manager.State())
+// and its grace-remaining countdown. The MODE (user toggle) lives separately on
+// caffeinateOn. Called by the tick loop after Caffeinate.Tick.
+func (s *sharedState) setCaffeinateState(active bool, cause string, process caffeinate.State, graceRemaining time.Duration) {
+	s.mu.Lock()
+	s.caffeinateActive = active
+	s.caffeinateCause = cause
+	s.caffeinateProcess = process
+	s.caffeinateGraceRemaining = graceRemaining
+	s.mu.Unlock()
+}
+
 func (s *sharedState) caffeinateView() (active bool, cause string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.caffeinateActive, s.caffeinateCause
+}
+
+// caffeinateIndicators returns the full two-indicator view for surfacing:
+// mode (the user toggle), the legacy collapsed active flag, the PROCESS state,
+// its grace-remaining countdown, and the cause.
+func (s *sharedState) caffeinateIndicators() (mode, active bool, process caffeinate.State, graceRemaining time.Duration, cause string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.caffeinateOn, s.caffeinateActive, s.caffeinateProcess, s.caffeinateGraceRemaining, s.caffeinateCause
 }
 
 // Nudger returns the daemon's Nudger instance. May be nil when nudger

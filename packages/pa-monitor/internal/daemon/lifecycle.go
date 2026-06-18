@@ -433,8 +433,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 						cause = "agents_active"
 					}
 				}
-				state.setCaffeinateActive(active, cause)
-				opts.Emitter.RecordCaffeinateActive(active, map[string]string{"plan_tier": opts.PlanTier})
+				// Store BOTH indicators: the legacy collapsed `active` flag plus
+				// the richer PROCESS state (newState) and its grace countdown.
+				// The MODE (toggleOn) is already on caffeinateOn. Reading the
+				// manager's real state here revives the long-dead grace display.
+				graceRemaining := opts.Caffeinate.GraceRemaining()
+				state.setCaffeinateState(active, cause, newState, graceRemaining)
+				opts.Emitter.RecordCaffeinateActive(active, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
 				if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
 					opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
 				}

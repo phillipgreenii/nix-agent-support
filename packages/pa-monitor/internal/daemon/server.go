@@ -13,10 +13,43 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
-	"github.com/phillipgreenii/pa-monitor/internal/service"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
 )
+
+// caffeinateProcessToProto maps the caffeinate.Manager's internal State onto
+// the wire CaffeinateProcess enum. StateOff → OFF, StateArmedRunning → ON
+// (holding the assertion), StateArmedCountdown → GRACE, StateError → ERROR.
+func caffeinateProcessToProto(st caffeinate.State) pb.CaffeinateProcess {
+	switch st {
+	case caffeinate.StateArmedRunning:
+		return pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON
+	case caffeinate.StateArmedCountdown:
+		return pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE
+	case caffeinate.StateError:
+		return pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR
+	default:
+		return pb.CaffeinateProcess_CAFFEINATE_PROCESS_OFF
+	}
+}
+
+// caffeinateProcessLabel maps the caffeinate.Manager's State to the
+// off/on/grace/error process label used as the OTel `state` attribute and the
+// CLI process indicator.
+func caffeinateProcessLabel(st caffeinate.State) string {
+	switch st {
+	case caffeinate.StateArmedRunning:
+		return "on"
+	case caffeinate.StateArmedCountdown:
+		return "grace"
+	case caffeinate.StateError:
+		return "error"
+	default:
+		return "off"
+	}
+}
 
 type server struct {
 	pb.UnimplementedPaMonitorServer
@@ -138,7 +171,24 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 	if s.writeService != nil {
 		_ = s.writeService.SetToggle(ctx, "caffeinate_on", target)
 	}
-	return &pb.CaffeinateResponse{Active: target, Cause: cause}, nil
+	// Build the two-indicator response. The manager hasn't re-ticked yet, so
+	// the PROCESS state reflects the last tick's value; the MODE reflects the
+	// just-committed toggle. `until` (grace expiry) is set only while the
+	// process is in its grace countdown — previously this field was defined
+	// but never populated.
+	_, _, process, graceRemaining, _ := s.state.caffeinateIndicators()
+	procEnum := caffeinateProcessToProto(process)
+	resp := &pb.CaffeinateResponse{
+		Active:  target,
+		Cause:   cause,
+		Mode:    target,
+		Process: procEnum,
+	}
+	if procEnum == pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE && graceRemaining > 0 {
+		resp.GraceRemainingS = uint32(graceRemaining.Seconds())
+		resp.Until = timestamppb.New(time.Now().Add(graceRemaining))
+	}
+	return resp, nil
 }
 
 func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoRequest) (*pb.SessionDetail, error) {
@@ -366,8 +416,12 @@ func (s *server) buildState() *pb.DaemonState {
 	state.DaemonUptimeSeconds = uint64(time.Since(s.started).Seconds())
 	state.DaemonVersion = s.version
 	state.PlanTier = s.planTier
-	active, _ := s.state.caffeinateView()
+	mode, active, process, graceRemaining, cause := s.state.caffeinateIndicators()
 	state.CaffeinateActive = active
+	state.CaffeinateMode = mode
+	state.CaffeinateProcess = caffeinateProcessToProto(process)
+	state.CaffeinateGraceRemainingS = uint32(graceRemaining.Seconds())
+	state.CaffeinateCause = cause
 	s.state.mu.RLock()
 	delay := s.state.autoResumeDelay
 	wm := s.state.watermarks

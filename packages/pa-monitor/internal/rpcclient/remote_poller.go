@@ -27,6 +27,11 @@ type RemotePoller struct {
 	lastAutoResumeEnabled bool
 	lastAutoResumeDelay   time.Duration
 	lastCaffeinateActive  bool
+	// Two-indicator caffeinate state (D6): MODE (the user toggle) and the
+	// PROCESS state (off/on/grace/error) + grace-remaining seconds.
+	lastCaffeinateMode    bool
+	lastCaffeinateProcess pb.CaffeinateProcess
+	lastCaffeinateGraceS  uint32
 	lastDaemonVersion     string
 	lastDaemonNow         time.Time
 }
@@ -92,6 +97,9 @@ func (r *RemotePoller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, err
 	r.lastAutoResumeEnabled = state.GetAutoResumeEnabled()
 	r.lastAutoResumeDelay = time.Duration(state.GetAutoResumeDelayS()) * time.Second
 	r.lastCaffeinateActive = state.GetCaffeinateActive()
+	r.lastCaffeinateMode = state.GetCaffeinateMode()
+	r.lastCaffeinateProcess = state.GetCaffeinateProcess()
+	r.lastCaffeinateGraceS = state.GetCaffeinateGraceRemainingS()
 	r.lastDaemonVersion = state.GetDaemonVersion()
 	if ts := state.GetNow(); ts != nil {
 		r.lastDaemonNow = ts.AsTime()
@@ -130,6 +138,30 @@ func (r *RemotePoller) LastCaffeinateActive() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.lastCaffeinateActive
+}
+
+// LastCaffeinateMode returns the auto-caffeinate MODE (the user toggle) from
+// the most recent successful GetState.
+func (r *RemotePoller) LastCaffeinateMode() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastCaffeinateMode
+}
+
+// LastCaffeinateProcess returns the caffeination PROCESS state
+// (off/on/grace/error) from the most recent successful GetState.
+func (r *RemotePoller) LastCaffeinateProcess() pb.CaffeinateProcess {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastCaffeinateProcess
+}
+
+// LastCaffeinateGraceRemaining returns the grace-countdown remaining from the
+// most recent successful GetState. Zero unless the process is in grace.
+func (r *RemotePoller) LastCaffeinateGraceRemaining() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return time.Duration(r.lastCaffeinateGraceS) * time.Second
 }
 
 // LastDaemonVersion returns the daemon's reported version from the most

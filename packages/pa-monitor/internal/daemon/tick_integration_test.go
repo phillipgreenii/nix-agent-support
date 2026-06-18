@@ -294,6 +294,15 @@ func TestCaffeinate_TogglePersistsAcrossTicks(t *testing.T) {
 	if !state.GetCaffeinateActive() {
 		t.Error("caffeinate_active reverted to false after tick — toggle did not persist across ticks (regression)")
 	}
+	// Two-indicator (D6) distinction: this is the incident shape — MODE on
+	// (the user armed auto-caffeinate) but PROCESS off (no agents working, so
+	// nothing is holding the assertion). The two must read distinctly.
+	if !state.GetCaffeinateMode() {
+		t.Error("caffeinate_mode = false after toggling on; want true (the user toggle)")
+	}
+	if state.GetCaffeinateProcess() != pb.CaffeinateProcess_CAFFEINATE_PROCESS_OFF {
+		t.Errorf("caffeinate_process = %v; want OFF (incident shape: armed, not holding)", state.GetCaffeinateProcess())
+	}
 
 	cancel()
 	select {
