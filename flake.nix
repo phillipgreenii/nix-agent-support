@@ -588,6 +588,75 @@
 
                 touch $out
               '';
+
+            # Validate tuicr theme token map: render via the same TOML generator
+            # the module uses, plus a JSON view for jq to assert required keys,
+            # hex-format values, and a sane token count.
+            test-tuicr-theme =
+              let
+                mockColors = {
+                  base00 = "1e1e2e";
+                  base01 = "181825";
+                  base02 = "313244";
+                  base03 = "45475a";
+                  base04 = "585b70";
+                  base05 = "cdd6f4";
+                  base06 = "f5e0dc";
+                  base07 = "b4befe";
+                  base08 = "f38ba8";
+                  base09 = "fab387";
+                  base0A = "f9e2af";
+                  base0B = "a6e3a1";
+                  base0C = "89dceb";
+                  base0D = "89b4fa";
+                  base0E = "cba6f7";
+                  base0F = "f2cdcd";
+                };
+                tokens = import ./home/programs/tuicr/theme.nix {
+                  colors = mockColors;
+                  inherit (pkgs) lib;
+                };
+                tomlFile = (pkgs.formats.toml { }).generate "test-tuicr-stylix.toml" tokens;
+                jsonFile = pkgs.writeText "test-tuicr-stylix.json" (builtins.toJSON tokens);
+              in
+              pkgs.runCommand "check-tuicr-theme" { buildInputs = [ pkgs.jq ]; } ''
+                # The generated TOML must be serializable and non-empty.
+                test -s ${tomlFile}
+
+                # Validate JSON view is well-formed
+                ${pkgs.jq}/bin/jq empty < ${jsonFile}
+
+                # Assert required tokens across each category are present
+                ${pkgs.jq}/bin/jq -e '
+                  has("panel_bg") and
+                  has("fg_primary") and
+                  has("diff_add") and
+                  has("diff_del") and
+                  has("diff_add_bg") and
+                  has("diff_del_bg") and
+                  has("syntax_add_bg") and
+                  has("file_added") and
+                  has("comment_issue") and
+                  has("border_focused") and
+                  has("status_bar_bg") and
+                  has("mode_bg") and
+                  has("message_error_bg")
+                ' < ${jsonFile}
+
+                # Assert all values are hex color strings starting with #
+                ${pkgs.jq}/bin/jq -e '
+                  to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
+                ' < ${jsonFile}
+
+                # Assert the full token set is present (tuicr v0.17.1 = 41 tokens)
+                count=$(${pkgs.jq}/bin/jq 'length' < ${jsonFile})
+                [ "$count" -ge 41 ] || {
+                  echo "Expected at least 41 tokens, got $count"
+                  exit 1
+                }
+
+                touch $out
+              '';
           }
           // (import ./packages/gc-dolt-maintenance {
             inherit pkgs;
