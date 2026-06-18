@@ -498,11 +498,11 @@
         "pre-commit-hooks": "pre-commit-hooks"
       },
       "locked": {
-        "lastModified": 1781693366,
-        "narHash": "sha256-nVneASokOgIocbIUuCFPrXXpGzaSc1V5dN723tlp4pA=",
+        "lastModified": 1781744223,
+        "narHash": "sha256-c5PyZ3s13mosnd5lhl8tFgbqLIGe5WFOt6eatqYlplM=",
         "owner": "flox",
         "repo": "flox",
-        "rev": "857904baaaa74e661e6cfe4f3a93848b8113f1bd",
+        "rev": "b847ec86b141647f40b11a00c5d8aa8c33b50e9b",
         "type": "github"
       },
       "original": {
@@ -557,11 +557,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1778507602,
-        "narHash": "sha256-kTwur1wV+01SdqskVMSo6JMEpg71ps3HpbFY2GsflKs=",
+        "lastModified": 1781733627,
+        "narHash": "sha256-U3yTuGBnmXvXoQI3qkpfEDsn9RovQPAjN7ndRco+3u0=",
         "owner": "cachix",
         "repo": "git-hooks.nix",
-        "rev": "61ab0e80d9c7ab14c256b5b453d8b3fb0189ba0a",
+        "rev": "3bbec39bc90eadfa031e6f3b77272f3f60803e39",
         "type": "github"
       },
       "original": {
@@ -774,11 +774,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1781700620,
-        "narHash": "sha256-n1/qGJMy/KdY8hVxNNwOrT1ISXoeXnWpV7rOwqOrmOw=",
+        "lastModified": 1781809409,
+        "narHash": "sha256-r3srq9SOAMcQStSURhnD9oYmY2hr5HDao5rdZQnI6xw=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "9bbc8a186eb5fa1e570179a61d870b7cb929a578",
+        "rev": "e5b4941715d946998b7de57176b600254014ee83",
         "type": "github"
       },
       "original": {
@@ -817,11 +817,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781190061,
-        "narHash": "sha256-QRMpLbsmlciMGv4yx75FUoIl54K02JbIX1tgdPHPw1s=",
+        "lastModified": 1781772065,
+        "narHash": "sha256-xIbRSwDB1GBAUsWsQZUjudGfAGQt3BOpsWaO/ugVa4w=",
         "owner": "LnL7",
         "repo": "nix-darwin",
-        "rev": "f2b3fdb347f91dfd344ad196666a0b0fe8aad05c",
+        "rev": "adda04f0bf4819575b1978c2f8d78401b3c2be12",
         "type": "github"
       },
       "original": {
@@ -838,11 +838,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781671561,
-        "narHash": "sha256-EtzMoOfmlprE9pAea6gx8UN+/LrYZ7Dhs8uLXOKqhgo=",
+        "lastModified": 1781756886,
+        "narHash": "sha256-O19FRVtXC+2fNkbIlwssYVay284ynwEK9QAvHAVTLFA=",
         "owner": "nix-community",
         "repo": "nix-vscode-extensions",
-        "rev": "8202100a2b8c33a5cb40a559ca4750c5f855aaf1",
+        "rev": "092eb7e14b6950afb62ad4b0bc2532a122d206e0",
         "type": "github"
       },
       "original": {
@@ -891,11 +891,11 @@
     },
     "nixpkgs-unstable": {
       "locked": {
-        "lastModified": 1781714535,
-        "narHash": "sha256-OeM/uveS/xf/tYAl908wtR2J91qDrQLAadF31nkjBb8=",
+        "lastModified": 1781809869,
+        "narHash": "sha256-1hwp8CfoJFznProg3evYaIHXgkmicdDeF8cUmj63zfI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e32bbc19d5b6da4db5d85fc60822e34c5794e6b4",
+        "rev": "093f96236926e390d6d92555834e62c0647cfd2e",
         "type": "github"
       },
       "original": {
@@ -1037,11 +1037,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781761096,
-        "narHash": "sha256-t0b38ycEhtNnlqj9Rkw6m51AAaSJueYH0ooQxvyy6Ic=",
+        "lastModified": 1781769354,
+        "narHash": "sha256-gfWSbB9wiuWvi02vM7ThCOKERC/Flj5V5UaQUKISHHU=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "b64c7ffa9374072107b2a66a3e4eecc3782f66f8",
+        "rev": "43d3468eca4cdf5679d422b0148d4164f172f40e",
         "type": "github"
       },
       "original": {
@@ -1098,11 +1098,11 @@
         "treefmt-nix": "treefmt-nix_3"
       },
       "locked": {
-        "lastModified": 1781714483,
-        "narHash": "sha256-TtKwSJrRX5kMesUE4+M9jyCTsDrghpWcqIIoJxYgWqo=",
+        "lastModified": 1781786890,
+        "narHash": "sha256-0uTdyDPHFX3Y4vIMzf3RwTPxJTUSMclnl2jNXEGZpl0=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "4107fd60435fcaab8b999c0254ead91a9a65abaa",
+        "rev": "e177a27e9249028c0ca075c6c3cc85a0806ad8a7",
         "type": "github"
       },
       "original": {
