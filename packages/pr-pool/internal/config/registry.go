@@ -193,6 +193,12 @@ func buildCCPool(md toml.MetaData, prim toml.Primitive, configDir string, c Conf
 	if ct.Completion == "" || ct.OnFailure == "" || ct.OnDispatchFail == "" {
 		return nil, fmt.Errorf("ccpool role: completion, on_failure, and on_dispatch_fail are required")
 	}
+	// actor is required: a ccpool role dispatches under BEADS_ACTOR, and an empty
+	// actor (e.g. from a typo'd `actorr =` key, which BurntSushi silently ignores)
+	// would create beads with no attribution and break the created-marker diff.
+	if ct.Actor == "" {
+		return nil, fmt.Errorf("ccpool role: actor is required")
+	}
 	body := ct.Prompt
 	if ct.PromptFile != "" {
 		b, err := os.ReadFile(filepath.Join(configDir, ct.PromptFile))
