@@ -23,6 +23,8 @@ func main() {
 		os.Exit(runRunRole(r.role, r.bead))
 	case routeRunQuery:
 		os.Exit(runRunQuery(r.role))
+	case routeConfig:
+		os.Exit(runConfig(r.configMode))
 	}
 }
 

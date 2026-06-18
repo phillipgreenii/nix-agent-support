@@ -8,14 +8,27 @@ import (
 )
 
 func TestResolveRole(t *testing.T) {
-	reg := roles.NewRegistry(config.Default())
-	if r, ok := resolveRole(reg, "feedback"); !ok || r != reg.Feedback {
-		t.Errorf("feedback should resolve to reg.Feedback; ok=%v r=%+v", ok, r)
+	d := config.Default()
+	rs := roles.BuiltinRoleSet(roles.BuiltinParams{
+		WorktreeDir:  d.WorktreeDir,
+		MaxFeedback:  d.MaxFeedback,
+		MaxWorker:    d.MaxWorker,
+		WorkerBudget: d.WorkerBudget(),
+	})
+	if r, ok := resolveRole(rs, "feedback"); !ok || r.Name != "feedback" {
+		t.Errorf("feedback should resolve; ok=%v r=%+v", ok, r)
 	}
-	if r, ok := resolveRole(reg, "worker"); !ok || r != reg.Worker {
-		t.Errorf("worker should resolve to reg.Worker; ok=%v r=%+v", ok, r)
+	if r, ok := resolveRole(rs, "worker"); !ok || r.Name != "worker" {
+		t.Errorf("worker should resolve; ok=%v r=%+v", ok, r)
 	}
-	if _, ok := resolveRole(reg, "bogus"); ok {
+	if _, ok := resolveRole(rs, "bogus"); ok {
 		t.Errorf("unknown role must not resolve")
+	}
+}
+
+func TestRoleNames(t *testing.T) {
+	rs := roles.RoleSet{{Name: "feedback"}, {Name: "worker"}}
+	if got := roleNames(rs); got != "feedback, worker" {
+		t.Errorf("roleNames = %q, want \"feedback, worker\"", got)
 	}
 }

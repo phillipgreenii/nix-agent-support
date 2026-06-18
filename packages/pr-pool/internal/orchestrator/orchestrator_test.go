@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
+	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
@@ -186,13 +187,39 @@ func (c *manualClock) tickAdvancing() func(context.Context, time.Duration) error
 const testStamp = "20260616T010203"
 
 func newOrch(cc ccpool.Runner, bd *scriptBD, cfg config.Config) *Orchestrator {
-	o := &Orchestrator{CC: cc, BD: bd, Reg: roles.NewRegistry(cfg), Cfg: cfg}
+	o := &Orchestrator{CC: cc, BD: bd, Reg: testRoleSet(cfg), Cfg: cfg}
 	clk := &manualClock{t: time.Unix(0, 0)}
 	o.now = clk.now
 	o.tick = clk.tickAdvancing()
 	o.stamp = func() string { return testStamp }
 	return o
 }
+
+// testRoleSet builds the built-in role set for tests (feedback then worker), with
+// caps/budget derived from cfg — so the workerRole/feedbackRole helpers resolve the
+// same roles the orchestrator drains.
+func testRoleSet(cfg config.Config) roles.RoleSet {
+	return roles.BuiltinRoleSet(roles.BuiltinParams{
+		WorktreeDir:   cfg.WorktreeDir,
+		SkillMD:       cfg.SkillMD,
+		WorkerSkillMD: cfg.WorkerSkillMD,
+		MaxFeedback:   cfg.MaxFeedback,
+		MaxWorker:     cfg.MaxWorker,
+		WorkerBudget:  cfg.WorkerBudget(),
+	})
+}
+
+func roleByName(o *Orchestrator, name string) roles.Role {
+	for _, r := range o.Reg {
+		if r.Name == name {
+			return r
+		}
+	}
+	panic("test: role not found: " + name)
+}
+
+func feedbackRole(o *Orchestrator) roles.Role { return roleByName(o, "feedback") }
+func workerRole(o *Orchestrator) roles.Role   { return roleByName(o, "worker") }
 
 func fastCfg() config.Config {
 	c := config.Default()
@@ -207,7 +234,7 @@ func TestWaitDone_workerCloses(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("expected success, got %v; updates=%v", err, bd.updates)
 	}
@@ -220,7 +247,7 @@ func TestWaitDone_workerHandbackToOpen(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("handback after seen_claimed should be success, got %v", err)
 	}
@@ -230,7 +257,7 @@ func TestWaitDone_workerTimeoutAddsHumanNoUnclaim(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
 		t.Fatal("timeout should be failure")
 	}
@@ -247,7 +274,7 @@ func TestWaitDone_paneDiesAsBeadCloses_success(t *testing.T) {
 		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateIdle}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("bead closed as pane died = success, got %v", err)
 	}
@@ -262,7 +289,7 @@ func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
 		{{ExternalID: "pr-pool-worker-zr-w", Live: false, State: ccpool.StateErrored}},
 	}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
 		t.Fatal("dead session + in_progress = failure")
 	}
@@ -273,10 +300,10 @@ func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
 
 func TestWaitDone_feedbackTimeoutUnclaims(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateWorking}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
 		t.Fatal("timeout should fail")
 	}
 	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
@@ -344,7 +371,7 @@ func TestDrainOnce_noStarvation(t *testing.T) {
 		statusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}, "zr-w": {"in_progress", "closed"}},
 	}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-feedback-processor-zr-c", Live: true}, {ExternalID: "pr-pool-worker-zr-w", Live: true},
+		{ExternalID: "pr-pool-feedback-zr-c", Live: true}, {ExternalID: "pr-pool-worker-zr-w", Live: true},
 	}}}
 	o := newOrch(cc, bd, cfg)
 	_ = o.DrainOnce(context.Background())
@@ -376,7 +403,7 @@ func TestWorkOne_sendFailFeedbackUnclaims(t *testing.T) {
 	bd := &scriptBD{}
 	cc := &fakeCC{sendErr: errSend}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
 	_ = o.workOne(context.Background(), d)
 	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
 		t.Errorf("feedback send-fail must unclaim; updates=%v", bd.updates)
@@ -388,7 +415,7 @@ func TestWorkOne_sendFailWorkerNotUnclaimed(t *testing.T) {
 	bd := &scriptBD{}
 	cc := &fakeCC{sendErr: errSend}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	_ = o.workOne(context.Background(), d)
 	if hasUpdate(bd, "--status=open") {
 		t.Errorf("worker send-fail must NOT unclaim; updates=%v", bd.updates)
@@ -407,7 +434,7 @@ func TestWorkOne_workerSuccessWithWatchdogArmed(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking, TranscriptPath: "/t"}}}}
 	o := newOrch(cc, bd, cfg)
 	o.usageReader = &rampReader{seq: []usage.Snapshot{{OutputTokens: 10}}} // nowhere near 1,000,000
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.updates)
 	}
@@ -450,7 +477,7 @@ func TestWaitDone_transientStatusErrorKeepsPolling(t *testing.T) {
 	}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err != nil {
 		t.Fatalf("transient status error should not flag bead; got err=%v; updates=%v", err, bd.updates)
 	}
@@ -465,7 +492,7 @@ func TestWaitDone_ctxCancelDoesNotFail(t *testing.T) {
 	o := newOrch(cc, bd, fastCfg())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
@@ -488,7 +515,7 @@ func TestWaitDone_ctxCancelledBeforeDeathPathNoFail(t *testing.T) {
 	o := newOrch(cc, bd, fastCfg())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before waitDone is called (watchdog already won)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	err := o.waitDone(ctx, nil, d, "pr-pool-worker-zr-w")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled on cancelled-ctx death path, got %v", err)
@@ -511,7 +538,7 @@ func TestWaitDone_lostRace_deathPathNoFail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	claimed := make(chan struct{}, 1)
 	claim := func() bool { claimed <- struct{}{}; return false } // always lose the claim
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	resCh := make(chan error, 1)
 	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
 	<-claimed // waitDone reached its terminal decision and lost
@@ -534,7 +561,7 @@ func TestWaitDone_lostRace_openNotReportedSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	claimed := make(chan struct{}, 1)
 	claim := func() bool { claimed <- struct{}{}; return false }
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	resCh := make(chan error, 1)
 	go func() { resCh <- o.waitDone(ctx, claim, d, "pr-pool-worker-zr-w") }()
 	<-claimed
@@ -576,7 +603,7 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
 	o := newOrch(cc, bd, cfg)
 	o.usageReader = &rampReader{seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately over 100%
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	err := o.workOne(context.Background(), d)
 	if err == nil {
 		t.Fatal("expected a budget error")
@@ -593,7 +620,7 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.waitDone(context.Background(), nil, d, "pr-pool-worker-zr-w"); err == nil {
 		t.Fatal("done + not-closed should fail")
 	}
@@ -609,10 +636,10 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 
 func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateIdle}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
 		t.Fatal("done + not-closed should fail")
 	}
 	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
@@ -627,10 +654,10 @@ func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 // in the same instant its bead closes must still be a SUCCESS via the re-check.
 func TestWaitDone_doneStopsFast_successRace(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateIdle}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err != nil {
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err != nil {
 		t.Fatalf("bead closed as the turn ended = success, got %v", err)
 	}
 	if len(bd.updates) != 0 {
@@ -642,10 +669,10 @@ func TestWaitDone_doneStopsFast_successRace(t *testing.T) {
 // attach. The loop must keep waiting to MaxWait, then time out and apply OnFailure.
 func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
-	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-processor-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
+	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
-	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-processor-zr-c"); err == nil {
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
+	if err := o.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
 		t.Fatal("needs_input that never resolves should time out (failure)")
 	}
 	if !hasUpdate(bd, "update zr-c --status=open --assignee=") {
@@ -657,11 +684,11 @@ func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
 }
 
 func TestRunOne_feedbackClosesSession(t *testing.T) {
-	ext := "pr-pool-feedback-processor-zr-c-" + testStamp
+	ext := "pr-pool-feedback-zr-c-" + testStamp
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"closed"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
 	if err := o.RunOne(context.Background(), d); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -675,11 +702,11 @@ func TestRunOne_feedbackClosesSession(t *testing.T) {
 }
 
 func TestRunOne_doneWithoutCloseFlagsAndCloses(t *testing.T) {
-	ext := "pr-pool-feedback-processor-zr-c-" + testStamp
+	ext := "pr-pool-feedback-zr-c-" + testStamp
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-c": {"in_progress"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
-	d := discover.DispatchContext{Role: o.Reg.Feedback, BeadID: "zr-c"}
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
 	if err := o.RunOne(context.Background(), d); err == nil {
 		t.Fatal("idle-without-close should fail")
 	}
@@ -702,7 +729,7 @@ func TestWorkOne_usesPerAttemptExternalID(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: ext, Name: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v", err)
 	}
@@ -741,7 +768,7 @@ func TestStuckBead_firstEnsureFailureLabelsLaunchFail(t *testing.T) {
 	bd := &scriptBD{show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
 	cc := &fakeCC{ensureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
@@ -760,7 +787,7 @@ func TestStuckBead_secondEnsureFailureEscalatesHuman(t *testing.T) {
 	bd := &scriptBD{show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":["pool-launch-fail"]}`}}
 	cc := &fakeCC{ensureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
@@ -779,7 +806,7 @@ func TestStuckBead_successClearsLaunchFailLabel(t *testing.T) {
 	bd := &scriptBD{statusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w-" + testStamp, Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err != nil {
 		t.Fatalf("worker that closes its bead should succeed, got %v; updates=%v", err, bd.updates)
 	}
@@ -796,7 +823,7 @@ func TestStuckBead_launchFailDoesNotClearLabel(t *testing.T) {
 	bd := &scriptBD{show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
 	cc := &fakeCC{ensureErr: errors.New("ccpool new: did not reach ready")}
 	o := newOrch(cc, bd, cfg)
-	d := discover.DispatchContext{Role: o.Reg.Worker, BeadID: "zr-w"}
+	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	if err := o.workOne(context.Background(), d); err == nil {
 		t.Fatal("ensure failure should return an error")
 	}
@@ -830,21 +857,6 @@ func TestActive_stateMapping(t *testing.T) {
 
 // --- progress-marker support: computed values behind the new slog.Info markers ---
 
-// TestCountByRole locks the role tally that feeds the "discover" progress marker
-// (found=N feedback=X worker=Y).
-func TestCountByRole(t *testing.T) {
-	reg := roles.NewRegistry(fastCfg())
-	ds := []discover.DispatchContext{
-		{Role: reg.Feedback, BeadID: "zr-c1"},
-		{Role: reg.Worker, BeadID: "zr-w1"},
-		{Role: reg.Worker, BeadID: "zr-w2"},
-	}
-	fb, wk := countByRole(ds)
-	if fb != 1 || wk != 2 {
-		t.Errorf("countByRole = (feedback=%d worker=%d), want (1, 2)", fb, wk)
-	}
-}
-
 // TestDrain_returnsCompleteAndFlaggedCounts locks the per-role tally that feeds
 // the "done" progress marker (complete=C flagged=F). One feedback bead closes
 // (complete); the other never completes and times out (flagged).
@@ -857,17 +869,17 @@ func TestDrain_returnsCompleteAndFlaggedCounts(t *testing.T) {
 		"zr-bad": {"in_progress"}, // never completes => timeout => flagged
 	}}
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
-		{ExternalID: "pr-pool-feedback-processor-zr-ok", Live: true, State: ccpool.StateWorking},
-		{ExternalID: "pr-pool-feedback-processor-zr-ok2", Live: true, State: ccpool.StateWorking},
-		{ExternalID: "pr-pool-feedback-processor-zr-bad", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-zr-ok", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-zr-ok2", Live: true, State: ccpool.StateWorking},
+		{ExternalID: "pr-pool-feedback-zr-bad", Live: true, State: ccpool.StateWorking},
 	}}}
 	o := newOrch(cc, bd, cfg)
 	ds := []discover.DispatchContext{
-		{Role: o.Reg.Feedback, BeadID: "zr-ok"},
-		{Role: o.Reg.Feedback, BeadID: "zr-ok2"},
-		{Role: o.Reg.Feedback, BeadID: "zr-bad"},
+		{Role: feedbackRole(o), Item: item.Item{ID: "zr-ok"}},
+		{Role: feedbackRole(o), Item: item.Item{ID: "zr-ok2"}},
+		{Role: feedbackRole(o), Item: item.Item{ID: "zr-bad"}},
 	}
-	complete, flagged := o.drain(context.Background(), o.Reg.Feedback, ds)
+	complete, flagged := o.drain(context.Background(), feedbackRole(o), ds)
 	if complete != 2 || flagged != 1 {
 		t.Errorf("drain counts = (complete=%d flagged=%d), want (2, 1); updates=%v", complete, flagged, bd.updates)
 	}
@@ -913,7 +925,7 @@ func TestCreatedByActor_none(t *testing.T) {
 func TestTeardownAll_returnsClosedCount(t *testing.T) {
 	cc := &fakeCC{listSeq: [][]ccpool.Session{{
 		{ExternalID: "pr-pool-worker-zr-a", Live: true},
-		{ExternalID: "pr-pool-feedback-processor-zr-b", Live: true},
+		{ExternalID: "pr-pool-feedback-zr-b", Live: true},
 		{ExternalID: "cc-unrelated", Live: true},
 	}}}
 	o := newOrch(cc, &scriptBD{}, fastCfg())

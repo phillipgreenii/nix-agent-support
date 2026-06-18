@@ -1,16 +1,21 @@
-// Package config holds pr-pool's runtime configuration. The bash pr-pool used
-// env-var-with-default for everything; this preserves that exactly. TOML/XDG is
-// a deliberate future seam: a loader could layer a file between Default() and
-// the env overlay in Load() without changing callers.
+// Package config holds pr-pool's runtime configuration. Pool scalars layer
+// Default() -> [pool] TOML -> PR_POOL_* env. Roles come from the [[role]] array in
+// <RepoRoot>/.pr-pool/config.toml (or PR_POOL_CONFIG), or the built-in default set
+// when no config file is present. Role identity lives ONLY in config / built-in
+// defaults — there is no env overlay for role fields (spec C).
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/budget"
+	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
@@ -31,12 +36,15 @@ type Config struct {
 	PermissionMode string
 	SessionPrefix  string
 
-	// Per-role enable flags. A disabled role is skipped at discovery (no
-	// dispatches). Both default true. Env: PR_POOL_FEEDBACK_ENABLED /
-	// PR_POOL_WORKER_ENABLED. (Maps to feedback.enabled / worker.enabled if/when
-	// the TOML loader lands — the deliberate future seam noted above.)
-	FeedbackEnabled bool
-	WorkerEnabled   bool
+	// SelfLogin is the GitHub login the worker safety preamble asserts authorship
+	// against. From [pool].self_login; falls back to `pg-pr config show` at the
+	// orchestrator/precheck layer when unset.
+	SelfLogin string
+
+	// Roles is the resolved, validated role set (TOML [[role]] or the built-in
+	// default set). ConfigPath is the resolved config file path (for `config --show`).
+	Roles      roles.RoleSet
+	ConfigPath string
 
 	// Budget watchdog (chunk B). Token/Cost <= 0 means unlimited.
 	BudgetTokens int64
@@ -55,45 +63,46 @@ func Default() Config {
 	cwd, _ := os.Getwd()
 	state := stateHome()
 	return Config{
-		RepoRoot:        cwd,
-		BeadsPrefix:     "zr",
-		WorktreeDir:     state + "/pr-pool/worktrees",
-		SkillMD:         "",
-		WorkerSkillMD:   "",
-		MaxFeedback:     1,
-		MaxWorker:       1,
-		MaxWait:         1800 * time.Second,
-		PollInterval:    10 * time.Second,
-		QuotaPaused:     "",
-		CICDDown:        "",
-		Effort:          "max",
-		Model:           "",
-		PermissionMode:  "bypassPermissions",
-		SessionPrefix:   "pr-pool-",
-		FeedbackEnabled: true,
-		WorkerEnabled:   true,
-		BudgetTokens:    0,                // unlimited until ccpool N3
-		BudgetCost:      0,                // unlimited until ccpool N3
-		BudgetTime:      25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:     0.725,
-		CancelPct:       0.90,
-		HardPct:         1.00,
-		LogDir:          state + "/pr-pool",
-		ReminderMsg:     "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
-		WrapUpMsg:       "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
+		RepoRoot:       cwd,
+		BeadsPrefix:    "zr",
+		WorktreeDir:    state + "/pr-pool/worktrees",
+		SkillMD:        "",
+		WorkerSkillMD:  "",
+		MaxFeedback:    1,
+		MaxWorker:      1,
+		MaxWait:        1800 * time.Second,
+		PollInterval:   10 * time.Second,
+		QuotaPaused:    "",
+		CICDDown:       "",
+		Effort:         "max",
+		Model:          "",
+		PermissionMode: "bypassPermissions",
+		SessionPrefix:  "pr-pool-",
+		BudgetTokens:   0,                // unlimited until ccpool N3
+		BudgetCost:     0,                // unlimited until ccpool N3
+		BudgetTime:     25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:    0.725,
+		CancelPct:      0.90,
+		HardPct:        1.00,
+		LogDir:         state + "/pr-pool",
+		ReminderMsg:    "You are nearing your budget for this bead — start wrapping up: record progress with bd comment.",
+		WrapUpMsg:      "Budget nearly exhausted. Stop now: commit your notes with bd comment, then finish or hand back. Do not start new work.",
 	}
 }
 
-// Load returns Default() overlaid with any PR_POOL_* environment variables.
-func Load() Config {
+// Load returns Default() overlaid with PR_POOL_* environment variables (pool scalars
+// only), then the resolved role set: the [[role]] array from the config file
+// (PR_POOL_CONFIG, else <RepoRoot>/.pr-pool/config.toml), or the built-in default
+// set when no file / no [[role]] is present. A present-but-malformed file, an
+// unknown type, or a failed validation is a hard error (never a silent fallback).
+func Load() (Config, error) {
 	c := Default()
+	// Pool-scalar env overlay. The legacy role-specific env vars
+	// (PR_POOL_MAX_WORKER/MAX_FEEDBACK/*_ENABLED/*_SKILL_MD) are intentionally GONE:
+	// role identity now lives only in config / built-in defaults (spec C decision 7).
 	c.RepoRoot = envStr("PR_POOL_REPO_ROOT", c.RepoRoot)
 	c.BeadsPrefix = envStr("PR_POOL_BEADS_PREFIX", c.BeadsPrefix)
 	c.WorktreeDir = envStr("PR_POOL_WORKTREE_DIR", c.WorktreeDir)
-	c.SkillMD = envStr("PR_POOL_SKILL_MD", c.SkillMD)
-	c.WorkerSkillMD = envStr("PR_POOL_WORKER_SKILL_MD", c.WorkerSkillMD)
-	c.MaxFeedback = envInt("PR_POOL_MAX_FEEDBACK", c.MaxFeedback)
-	c.MaxWorker = envInt("PR_POOL_MAX_WORKER", c.MaxWorker)
 	c.MaxWait = envSecs("PR_POOL_MAX_WAIT", c.MaxWait)
 	c.PollInterval = envSecs("PR_POOL_POLL_INTERVAL", c.PollInterval)
 	c.QuotaPaused = envStr("PR_POOL_QUOTA_PAUSED", c.QuotaPaused)
@@ -102,13 +111,44 @@ func Load() Config {
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
 	c.PermissionMode = envStr("PR_POOL_PERMISSION_MODE", c.PermissionMode)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
-	c.FeedbackEnabled = envBool("PR_POOL_FEEDBACK_ENABLED", c.FeedbackEnabled)
-	c.WorkerEnabled = envBool("PR_POOL_WORKER_ENABLED", c.WorkerEnabled)
 	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PR_POOL_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)
 	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
-	return c
+
+	path := envStr("PR_POOL_CONFIG", filepath.Join(c.RepoRoot, ".pr-pool", "config.toml"))
+	c.ConfigPath = path
+	reg := NewRegistry()
+	if _, statErr := os.Stat(path); statErr == nil {
+		rs, err := reg.decodeRoleSet(path, filepath.Dir(path), &c)
+		if err != nil {
+			return Config{}, err
+		}
+		if rs != nil {
+			c.Roles = rs
+			slog.Info("loaded pr-pool config", "path", path, "roles", len(rs))
+		} else {
+			slog.Info("pr-pool config present but defines no [[role]]; using built-in roles", "path", path)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return Config{}, fmt.Errorf("stat %s: %w", path, statErr)
+	} else {
+		slog.Info("no pr-pool config found; using built-in roles", "path", path)
+	}
+	if c.Roles == nil {
+		c.Roles = roles.BuiltinRoleSet(roles.BuiltinParams{
+			WorktreeDir:   c.WorktreeDir,
+			SkillMD:       c.SkillMD,
+			WorkerSkillMD: c.WorkerSkillMD,
+			MaxFeedback:   c.MaxFeedback,
+			MaxWorker:     c.MaxWorker,
+			WorkerBudget:  c.WorkerBudget(),
+		})
+	}
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	return c, nil
 }
 
 // validPermissionModes is the set of claude --permission-mode values pr-pool may
@@ -125,20 +165,27 @@ var validPermissionModes = map[string]bool{
 	"bypassPermissions": true,
 }
 
-// Validate checks operator-overridable fields that would otherwise fail late.
-// Today that is PermissionMode (PR_POOL_PERMISSION_MODE): an unknown value would
-// otherwise surface only once a worker launches, as a `ccpool new` exit-2 launch
-// failure. Catching it pre-flight fails fast with a clear message.
+// Validate checks operator-overridable fields that would otherwise fail late:
+// PermissionMode, plus each resolved role's query. Errors are aggregated so a bad
+// config reports every problem at once at pre-flight.
 func (c Config) Validate() error {
+	var errs []error
 	if !validPermissionModes[c.PermissionMode] {
-		return fmt.Errorf("invalid PR_POOL_PERMISSION_MODE %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
+		errs = append(errs, fmt.Errorf("invalid PR_POOL_PERMISSION_MODE %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode))
 	}
-	return nil
+	for _, role := range c.Roles {
+		if role.Query != nil {
+			if err := role.Query.Validate(); err != nil {
+				errs = append(errs, fmt.Errorf("role %q query: %w", role.Name, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // WorkerBudget assembles the per-worker Budget from config scalars + the default
-// price table. Today one budget for all workers; future per-agent budgets are a
-// different constructor, no refactor.
+// price table. Used as the pool-default budget for built-in roles and as the base
+// a per-role [role.ccpool].budget overlays.
 func (c Config) WorkerBudget() budget.Budget {
 	return budget.Budget{
 		Tokens:     budget.Limit(c.BudgetTokens),
@@ -176,18 +223,6 @@ func envSecs(key string, def time.Duration) time.Duration {
 	if v, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			return time.Duration(n) * time.Second
-		}
-	}
-	return def
-}
-
-func envBool(key string, def bool) bool {
-	if v, ok := os.LookupEnv(key); ok {
-		switch v {
-		case "0", "false", "no", "":
-			return false
-		default:
-			return true
 		}
 	}
 	return def

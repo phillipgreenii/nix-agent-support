@@ -8,43 +8,50 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead>]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show)]"
 
-// helpText is the full help printed to stdout for --help/help. pr-pool takes no
-// config flags — its entire configuration surface is PR_POOL_* environment
-// variables — so --help is the only place an operator can discover them.
+// helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
 
-pr-pool runs one drain pass: it discovers ready beads, dispatches a Claude
-session per role (feedback, then worker) up to each role's cap, waits for
-completion, then tears down every pr-pool-* tmux session. Bare "pr-pool" is
-equivalent to "pr-pool drain".
+pr-pool runs one drain pass: it discovers ready beads, dispatches a session per
+configured role (in config order) up to each role's cap, waits for completion, then
+tears down every pr-pool-* tmux session. Bare "pr-pool" is equivalent to "pr-pool drain".
 
 Subcommands:
   drain                   run one drain pass (the default when omitted)
   run-query <role>        run a role's discovery query and print matches (read-only)
   run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
+  config --print-defaults print the built-in default config.toml (copy-paste starting point)
+  config --show           print the resolved config path and effective role set
   version                 print the version and exit
   help                    print this help and exit
 
-Configuration is via PR_POOL_* environment variables (there are no flags).
-Common ones (see internal/config for the full set and defaults):
-  PR_POOL_MAX_WORKER       max concurrent worker dispatches (default 1)
-  PR_POOL_MAX_FEEDBACK     max concurrent feedback dispatches (default 1)
+Roles are configured in <RepoRoot>/.pr-pool/config.toml (override the path with
+PR_POOL_CONFIG). With no config file, pr-pool uses the built-in feedback + worker
+roles. <role> is the role's configured name. Run "pr-pool config --print-defaults"
+to see the schema and defaults.
+
+Pool-wide settings come from PR_POOL_* environment variables:
+  PR_POOL_REPO_ROOT        monorepo root the drain operates in (default: cwd)
+  PR_POOL_BEADS_PREFIX     expected bead prefix, asserted at precheck (default zr)
   PR_POOL_BUDGET_TOKENS    per-worker token budget; 0 = unlimited (default 0)
   PR_POOL_BUDGET_COST      per-worker cost budget in cents; 0 = unlimited (default 0)
   PR_POOL_BUDGET_TIME      per-worker wall-clock budget in seconds (default 1500)
   PR_POOL_MODEL            claude model override (default: ccpool's default)
   PR_POOL_EFFORT           claude --effort value (default max)
   PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default bypassPermissions)
-  PR_POOL_REPO_ROOT        monorepo root the drain operates in (default: cwd)
-  PR_POOL_BEADS_PREFIX     expected bead prefix, asserted at precheck (default zr)`
+  PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
+
+REMOVED (now configured per-role in config.toml, not via env): PR_POOL_MAX_WORKER,
+PR_POOL_MAX_FEEDBACK, PR_POOL_FEEDBACK_ENABLED, PR_POOL_WORKER_ENABLED,
+PR_POOL_SKILL_MD, PR_POOL_WORKER_SKILL_MD. Set role.cap / role.enabled / the role's
+prompt in config.toml instead.`
 
 // routeKind enumerates what the program should do after parsing argv. Keeping
 // the decision pure (no I/O, no side effects) is what guarantees a help/version
 // request or a parse error can never fall through to a real drain — a drain
-// dispatches Claude sessions and tears down every pr-pool-* tmux session, so
-// fail-open on a parse error is a real foot-gun (pg2-52rn).
+// dispatches sessions and tears down every pr-pool-* tmux session, so fail-open on
+// a parse error is a real foot-gun (pg2-52rn).
 type routeKind int
 
 const (
@@ -54,14 +61,16 @@ const (
 	routeUsageErr                  // print .msg + usage to stderr and exit 2
 	routeRunRole                   // dispatch one bead through a role (.role, .bead)
 	routeRunQuery                  // run a role's discovery query read-only (.role)
+	routeConfig                    // print/show config (.configMode)
 )
 
 type routeResult struct {
-	kind routeKind
-	rest []string // drain subcommand args (routeDrain only)
-	msg  string   // diagnostic for routeUsageErr
-	role string   // run-role / run-query role name
-	bead string   // run-role bead id
+	kind       routeKind
+	rest       []string // drain subcommand args (routeDrain only)
+	msg        string   // diagnostic for routeUsageErr
+	role       string   // run-role / run-query role name
+	bead       string   // run-role bead id
+	configMode string   // "print-defaults" | "show" (routeConfig only)
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -91,6 +100,8 @@ func route(argv []string) routeResult {
 		return parseRunRoleArgs(args[1:])
 	case "run-query":
 		return parseRunQueryArgs(args[1:])
+	case "config":
+		return parseConfigArgs(args[1:])
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -122,20 +133,13 @@ func parseDrainArgs(args []string) routeResult {
 	return routeResult{kind: routeDrain}
 }
 
-// knownRoles is the set of role names run-query/run-role accept. Today it is the
-// fixed feedback/worker set; under the planned TOML extraction it becomes the set of
-// configured role names. Kept here so arg parsing stays pure (no config load), per
-// the pg2-52rn "no fall-through to a real dispatch on bad input" guarantee.
-// These are CLI short-tokens, not roles.Role.Name values (which are
-// "feedback-processor"/"worker"); the run-role/run-query handler maps them to
-// registry roles.
-var knownRoles = map[string]bool{"feedback": true, "worker": true}
-
-// parseRunRoleArgs validates `run-role <role> <bead>`. Pure: a missing/unknown role
-// or missing bead yields routeUsageErr (exit 2) before any config load or dispatch.
+// parseRunRoleArgs validates `run-role <role> <bead>`. Pure: it checks only that a
+// role TOKEN and a bead id are present (and no extra args). The role NAME is NOT
+// validated here — that needs the loaded config, so it moves to the handler. A
+// dash-prefixed first token is a missing role (a flag, not a name). (pg2-52rn)
 func parseRunRoleArgs(args []string) routeResult {
-	if len(args) < 1 || !knownRoles[args[0]] {
-		return routeResult{kind: routeUsageErr, msg: "run-role: unknown or missing role (want: feedback|worker)"}
+	if len(args) < 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return routeResult{kind: routeUsageErr, msg: "run-role: missing role (usage: run-role <role> <bead>)"}
 	}
 	if len(args) < 2 || args[1] == "" {
 		return routeResult{kind: routeUsageErr, msg: "run-role: missing bead id"}
@@ -146,15 +150,30 @@ func parseRunRoleArgs(args []string) routeResult {
 	return routeResult{kind: routeRunRole, role: args[0], bead: args[1]}
 }
 
-// parseRunQueryArgs validates `run-query <role>`. Pure, same fail-fast contract.
+// parseRunQueryArgs validates `run-query <role>`. Pure, same fail-fast contract;
+// the role name is validated in the handler after config load.
 func parseRunQueryArgs(args []string) routeResult {
-	if len(args) < 1 || !knownRoles[args[0]] {
-		return routeResult{kind: routeUsageErr, msg: "run-query: unknown or missing role (want: feedback|worker)"}
+	if len(args) < 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return routeResult{kind: routeUsageErr, msg: "run-query: missing role (usage: run-query <role>)"}
 	}
 	if len(args) > 1 {
 		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + args[1]}
 	}
 	return routeResult{kind: routeRunQuery, role: args[0]}
+}
+
+// parseConfigArgs validates `config (--print-defaults | --show)`.
+func parseConfigArgs(args []string) routeResult {
+	if len(args) != 1 {
+		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show)"}
+	}
+	switch args[0] {
+	case "--print-defaults":
+		return routeResult{kind: routeConfig, configMode: "print-defaults"}
+	case "--show":
+		return routeResult{kind: routeConfig, configMode: "show"}
+	}
+	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + args[0] + " (want --print-defaults or --show)"}
 }
 
 // firstFlag returns the first dash-prefixed token in args (the offending flag on

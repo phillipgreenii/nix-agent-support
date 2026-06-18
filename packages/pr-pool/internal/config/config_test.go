@@ -1,9 +1,28 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// absentConfig points PR_POOL_CONFIG at a non-existent path so Load() resolves to
+// the built-in role set deterministically (independent of the test's cwd).
+func absentConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("PR_POOL_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+}
+
+// writeCfg writes a config.toml into a temp dir and points PR_POOL_CONFIG at it.
+func writeCfg(t *testing.T, body string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PR_POOL_CONFIG", p)
+}
 
 func TestDefault(t *testing.T) {
 	d := Default()
@@ -28,9 +47,6 @@ func TestDefault(t *testing.T) {
 	if d.SessionPrefix != "pr-pool-" {
 		t.Errorf("SessionPrefix = %q, want pr-pool-", d.SessionPrefix)
 	}
-	if !d.FeedbackEnabled || !d.WorkerEnabled {
-		t.Error("roles should default enabled")
-	}
 }
 
 func TestValidate_permissionMode(t *testing.T) {
@@ -52,15 +68,14 @@ func TestValidate_permissionMode(t *testing.T) {
 }
 
 func TestLoad_envOverrides(t *testing.T) {
-	t.Setenv("PR_POOL_MAX_WORKER", "3")
+	absentConfig(t)
 	t.Setenv("PR_POOL_MAX_WAIT", "60")
 	t.Setenv("PR_POOL_BEADS_PREFIX", "pg2")
 	t.Setenv("PR_POOL_MODEL", "claude-opus-4-8")
 	t.Setenv("PR_POOL_PERMISSION_MODE", "plan")
-	t.Setenv("PR_POOL_WORKER_ENABLED", "0")
-	c := Load()
-	if c.MaxWorker != 3 {
-		t.Errorf("MaxWorker = %d, want 3", c.MaxWorker)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if c.MaxWait != 60*time.Second {
 		t.Errorf("MaxWait = %v, want 60s", c.MaxWait)
@@ -74,18 +89,33 @@ func TestLoad_envOverrides(t *testing.T) {
 	if c.PermissionMode != "plan" {
 		t.Errorf("PR_POOL_PERMISSION_MODE = %q, want plan", c.PermissionMode)
 	}
-	if c.WorkerEnabled {
-		t.Error("PR_POOL_WORKER_ENABLED=0 should disable worker role")
+}
+
+// PR_POOL_MAX_WORKER and the other role env vars are dropped (spec C): setting them
+// must have NO effect (role caps live in config / built-in defaults only).
+func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PR_POOL_MAX_WORKER", "3")
+	t.Setenv("PR_POOL_MAX_FEEDBACK", "5")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !c.FeedbackEnabled {
-		t.Error("feedback role should stay enabled (default) when only worker is disabled")
+	// Built-in roles use the Default() caps (1/1); the dropped env vars do nothing.
+	if len(c.Roles) != 2 || c.Roles[1].Cap != 1 {
+		t.Errorf("PR_POOL_MAX_WORKER must be a no-op; worker cap = %d, want 1", c.Roles[1].Cap)
 	}
 }
 
 func TestLoad_badIntFallsBackToDefault(t *testing.T) {
-	t.Setenv("PR_POOL_MAX_WORKER", "notanint")
-	if c := Load(); c.MaxWorker != 1 {
-		t.Errorf("bad int should fall back to default 1, got %d", c.MaxWorker)
+	absentConfig(t)
+	t.Setenv("PR_POOL_MAX_WAIT", "notanint")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxWait != 1800*time.Second {
+		t.Errorf("bad int should fall back to default 1800s, got %v", c.MaxWait)
 	}
 }
 
@@ -106,17 +136,123 @@ func TestWorkerBudget_defaults(t *testing.T) {
 }
 
 func TestWorkerBudget_envOverrides(t *testing.T) {
+	absentConfig(t)
 	t.Setenv("PR_POOL_BUDGET_TOKENS", "1000000")
 	t.Setenv("PR_POOL_BUDGET_TIME", "600")
-	b := Load().WorkerBudget()
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.WorkerBudget()
 	if int64(b.Tokens) != 1000000 || b.Time != 600*time.Second {
 		t.Errorf("env overrides not applied: %+v", b)
 	}
 }
 
 func TestLoad_logDirIsStandardPath(t *testing.T) {
+	absentConfig(t)
 	t.Setenv("XDG_STATE_HOME", "/xdg/state")
-	if got, want := Load().LogDir, "/xdg/state/pr-pool"; got != want {
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.LogDir, "/xdg/state/pr-pool"; got != want {
 		t.Errorf("LogDir = %q, want %q (standard path, no /log subdir)", got, want)
+	}
+}
+
+func TestLoad_noFile_builtinRoleSet(t *testing.T) {
+	absentConfig(t)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Roles) != 2 || c.Roles[0].Name != "feedback" || c.Roles[1].Name != "worker" {
+		t.Fatalf("no-file must yield built-in feedback+worker: %+v", c.Roles)
+	}
+}
+
+func TestLoad_tomlReplacesBuiltins(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "solo"
+type = "ccpool"
+cap = 2
+enabled = true
+[role.query]
+type = "beads-ready"
+[role.query.beads-ready]
+labels = ["worker-ready"]
+[role.ccpool]
+actor = "a"
+completion = "close-or-handback"
+on_failure = "add-human"
+on_dispatch_fail = "leave"
+prompt = "do {{.BeadID}}"
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Roles) != 1 || c.Roles[0].Name != "solo" || c.Roles[0].Cap != 2 {
+		t.Fatalf("toml must replace built-ins: %+v", c.Roles)
+	}
+	if c.Roles[0].CCPool == nil || c.Roles[0].CCPool.Completion != "close-or-handback" {
+		t.Fatalf("ccpool config not decoded: %+v", c.Roles[0].CCPool)
+	}
+}
+
+func TestLoad_malformedIsHardError(t *testing.T) {
+	writeCfg(t, "this is = not valid toml [[[")
+	if _, err := Load(); err == nil {
+		t.Fatal("malformed config must be a hard error, not a silent fallback")
+	}
+}
+
+func TestLoad_singleBracketRoleTypoIsError(t *testing.T) {
+	writeCfg(t, "[role]\nname = \"x\"\n") // single bracket = the classic [[role]] typo
+	if _, err := Load(); err == nil {
+		t.Fatal("[role] single-bracket table must error, not fall back to built-ins")
+	}
+}
+
+func TestLoad_unknownTypeIsError(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "x"
+type = "weird"
+cap = 1
+[role.query]
+type = "beads-ready"
+[role.query.beads-ready]
+labels = ["a"]
+[role.weird]
+foo = "bar"
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("unknown role type must error")
+	}
+}
+
+func TestLoad_promptXorPromptFile(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "x"
+type = "ccpool"
+cap = 1
+[role.query]
+type = "beads-ready"
+[role.query.beads-ready]
+labels = ["a"]
+[role.ccpool]
+actor = "a"
+completion = "close-only"
+on_failure = "unclaim"
+on_dispatch_fail = "unclaim"
+prompt = "hi"
+prompt_file = "x.md"
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("prompt AND prompt_file must error (XOR)")
 	}
 }

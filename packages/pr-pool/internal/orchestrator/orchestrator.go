@@ -1,6 +1,12 @@
 // Package orchestrator is pr-pool's mechanical drive loop: discover → per-role
 // bounded drain → teardown-all. It owns no claude/tmux mechanics (ccpool does)
 // and no LLM. Completion is bead-status-based; ccpool state is liveness only.
+//
+// Per-dispatch execution is selected by role.Type: ccpool roles run the
+// ensure→send→wait path (with the budget watchdog when a finite budget is set);
+// command roles run a configured executable. The pg2-c1vp single-terminal race
+// between waitDone and the watchdog is unchanged — only its data source moved from
+// the deleted RoleKind enum to the role's typed config.
 package orchestrator
 
 import (
@@ -14,11 +20,15 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
+	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/complete"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
+	"github.com/phillipgreenii/pr-pool/internal/prompt"
+	"github.com/phillipgreenii/pr-pool/internal/query"
+	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
@@ -27,8 +37,9 @@ import (
 type Orchestrator struct {
 	CC          ccpool.Runner
 	BD          beads.Runner
-	Reg         roles.Registry
+	Reg         roles.RoleSet
 	Cfg         config.Config
+	Cmd         query.Commander                            // command-query/role exec seam (default OSCommander)
 	Log         *eventlog.Writer                           // may be nil (no-op); threaded onto Watchdog
 	now         func() time.Time                           // clock seam (default time.Now)
 	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
@@ -60,6 +71,13 @@ func (o *Orchestrator) clock() time.Time {
 	return time.Now()
 }
 
+func (o *Orchestrator) commander() query.Commander {
+	if o.Cmd != nil {
+		return o.Cmd
+	}
+	return query.OSCommander{}
+}
+
 // waitPoll blocks for d or until ctx is cancelled; returns ctx.Err() if cancelled.
 func (o *Orchestrator) waitPoll(ctx context.Context, d time.Duration) error {
 	if o.tick != nil {
@@ -82,16 +100,24 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 		return nil // NOTE: gated exit does NOT teardown (no sessions were created)
 	}
 	defer o.teardownAll(ctx) // always run teardown after the gated check, even on error
-	dispatches, err := discover.Discover(ctx, o.BD, o.Reg)
+	dispatches, err := discover.Discover(ctx, o.queryEnv(), o.Reg)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
-	nFb, nWk := countByRole(dispatches)
-	slog.Info("discover", "found", len(dispatches), "feedback", nFb, "worker", nWk)
-	cFb, fFb := o.drain(ctx, o.Reg.Feedback, dispatches)
-	cWk, fWk := o.drain(ctx, o.Reg.Worker, dispatches)
-	slog.Info("done", "complete", cFb+cWk, "flagged", fFb+fWk)
+	slog.Info("discover", "found", len(dispatches))
+	var complete, flagged int
+	for _, role := range o.Reg {
+		c, f := o.drain(ctx, role, dispatches)
+		complete += c
+		flagged += f
+	}
+	slog.Info("done", "complete", complete, "flagged", flagged)
 	return nil
+}
+
+// queryEnv builds the capability bag passed to each role's query.
+func (o *Orchestrator) queryEnv() query.Env {
+	return query.Env{BD: o.BD, RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
 }
 
 // RunOne dispatches a single DispatchContext through the full workOne path and then
@@ -101,43 +127,46 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 // gates and does NOT reap stray pr-pool-* sessions — it is a manual, intentional
 // single dispatch where the operator is in control.
 func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
-	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.BeadID, o.attemptStamp())
+	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
 	defer func() {
 		if err := o.CC.Close(ctx, externalID, true); err != nil {
 			slog.Warn("run-one teardown close failed", "session", externalID, "err", err)
 		}
 	}()
-	return o.workOneWithID(ctx, d, externalID)
+	pre, preOK := o.snapshotIDs(ctx)
+	err := o.workOneWithID(ctx, d, externalID)
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, err))
+	return err
 }
 
 func (o *Orchestrator) drain(ctx context.Context, role roles.Role, all []discover.DispatchContext) (complete, flagged int) {
 	worked := 0
 	for _, d := range all {
-		if d.Role.Kind != role.Kind {
+		if d.Role.Name != role.Name {
 			continue
 		}
 		if worked >= role.Cap {
 			break
 		}
-		slog.Info("dispatching", "role", role.Name, "bead", d.BeadID)
+		slog.Info("dispatching", "role", role.Name, "item", d.Item.ID)
 		pre, preOK := o.snapshotIDs(ctx) // bracket workOne so creations on BOTH success and failure paths are seen
 		err := o.workOne(ctx, d)
 		if err != nil {
-			slog.Warn("bead flagged", "role", role.Name, "bead", d.BeadID, "err", err)
+			slog.Warn("bead flagged", "role", role.Name, "item", d.Item.ID, "err", err)
 			flagged++
 		} else {
-			slog.Info("bead complete", "role", role.Name, "bead", d.BeadID)
+			slog.Info("bead complete", "role", role.Name, "item", d.Item.ID)
 			complete++
 		}
-		o.logCreated(ctx, role, d.BeadID, pre, preOK)
+		o.emitResult(ctx, role, d.Item.ID, o.buildResult(ctx, role, d, pre, preOK, err))
 		worked++
 	}
 	return complete, flagged
 }
 
 // snapshotIDs returns the set of all bead IDs (any status, incl. closed) and
-// whether the read succeeded. A failed read returns (nil, false) so logCreated
-// reports created=unknown rather than a false created=none.
+// whether the read succeeded. A failed read returns (nil, false) so buildResult
+// reports an indeterminate "created" rather than a false "none".
 func (o *Orchestrator) snapshotIDs(ctx context.Context) (map[string]struct{}, bool) {
 	issues, err := beads.List(ctx, o.BD, "--all")
 	if err != nil {
@@ -150,43 +179,85 @@ func (o *Orchestrator) snapshotIDs(ctx context.Context) (map[string]struct{}, bo
 	return ids, true
 }
 
-// logCreated emits the per-dispatch "created" marker: the IDs of beads the role's
-// actor created during this dispatch, or "none". If either snapshot read failed
-// it reports "unknown" (best-effort — a bd hiccup must not disrupt the drain).
-func (o *Orchestrator) logCreated(ctx context.Context, role roles.Role, beadID string, pre map[string]struct{}, preOK bool) {
-	post, err := beads.List(ctx, o.BD, "--all")
-	if !preOK || err != nil {
-		slog.Info("created", "role", role.Name, "bead", beadID, "created", "unknown")
-		return
-	}
-	created := createdByActor(pre, post, role.Actor)
-	if len(created) == 0 {
-		slog.Info("created", "role", role.Name, "bead", beadID, "created", "none")
-		return
-	}
-	slog.Info("created", "role", role.Name, "bead", beadID, "created", created)
-}
-
-// countByRole tallies dispatches by role kind. Feeds the "discover" progress
-// marker so the operator sees the role split before any session is started.
-func countByRole(all []discover.DispatchContext) (feedback, worker int) {
-	for _, d := range all {
-		switch d.Role.Kind {
-		case roles.Feedback:
-			feedback++
-		case roles.Worker:
-			worker++
+// buildResult assembles the structured dispatch report from observable signals,
+// WITHOUT touching the single-terminal race code: the created marker from the
+// snapshot diff (or indeterminate on a failed read), plus the outcome verb — on
+// success the bead's final status (closed vs handed-back), on failure the role's
+// configured failure action (escalated/unclaimed).
+func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d discover.DispatchContext, pre map[string]struct{}, preOK bool, dispatchErr error) report.Result {
+	var actions []report.Action
+	post, lerr := beads.List(ctx, o.BD, "--all")
+	switch {
+	case !preOK || lerr != nil:
+		actions = append(actions, report.Action{Verb: report.Indeterminate, Refs: beadRefs([]string{d.Item.ID})})
+	default:
+		if created := createdByActor(pre, post, actorOf(role)); len(created) > 0 {
+			actions = append(actions, report.Action{Verb: report.Created, Refs: beadRefs(created)})
 		}
 	}
-	return feedback, worker
+	if dispatchErr != nil {
+		if role.CCPool != nil {
+			switch role.CCPool.OnFailure {
+			case roles.AddHuman:
+				actions = append(actions, report.Action{Verb: report.Escalated, Refs: beadRefs([]string{d.Item.ID})})
+			case roles.Unclaim:
+				actions = append(actions, report.Action{Verb: report.Unclaimed, Refs: beadRefs([]string{d.Item.ID})})
+			}
+		}
+	} else {
+		switch status, _ := beads.Status(ctx, o.BD, d.Item.ID); status {
+		case "closed":
+			actions = append(actions, report.Action{Verb: report.Closed, Refs: beadRefs([]string{d.Item.ID})})
+		case "open":
+			actions = append(actions, report.Action{Verb: report.HandedBack, Refs: beadRefs([]string{d.Item.ID})})
+		}
+	}
+	return report.Result{Actions: actions}
+}
+
+// emitResult writes the dispatch report to the event log (when configured) and the
+// human-readable drain summary; on the run-role smoke path (Log == nil) it prints to
+// stdout so the operator still sees what happened.
+func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result) {
+	slog.Info("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions)
+	if o.Log != nil {
+		fields := res.Fields()
+		fields["role"] = role.Name
+		fields["bead"] = beadID
+		if err := o.Log.Emit("info", "dispatch", "dispatch result", fields); err != nil {
+			slog.Warn("event log emit failed", "err", err)
+		}
+		return
+	}
+	fmt.Printf("# dispatch %s %s: %v\n", role.Name, beadID, res.Actions)
+}
+
+// actorOf returns the BEADS_ACTOR a ccpool role's dispatch creates beads under, or
+// "" for a command role (no actor ⇒ the created-marker diff finds nothing).
+func actorOf(role roles.Role) string {
+	if role.CCPool != nil {
+		return role.CCPool.Actor
+	}
+	return ""
+}
+
+func beadRefs(ids []string) []report.Ref {
+	refs := make([]report.Ref, 0, len(ids))
+	for _, id := range ids {
+		refs = append(refs, report.Ref{Type: "bead", ID: id})
+	}
+	return refs
 }
 
 // createdByActor returns, sorted, the IDs of beads present in post but absent
 // from the pre snapshot whose CreatedBy is actor. The snapshot diff drops every
 // pre-existing bead; the actor filter drops beads created concurrently by anyone
 // else (notably the pg-pr daemon's cycle/PR beads), so the result is exactly the
-// beads this dispatch's worker created. Feeds the per-dispatch "created" marker.
+// beads this dispatch's actor created. Feeds the per-dispatch "created" action.
 func createdByActor(pre map[string]struct{}, post []beads.Issue, actor string) []string {
+	if actor == "" {
+		return nil
+	}
 	var out []string
 	for _, iss := range post {
 		if _, existed := pre[iss.ID]; existed {
@@ -200,23 +271,32 @@ func createdByActor(pre map[string]struct{}, post []beads.Issue, actor string) [
 	return out
 }
 
-// workOne dispatches a single bead: Ensure a fresh per-bead session, Send the
-// nudge (async), then wait for completion. The session is torn down by the
+// workOne dispatches a single item. The session (ccpool roles) is torn down by the
 // pass-level teardownAll, not here (so strays are reaped uniformly).
-// For worker dispatches the nudge includes the budget prompt line and completion
-// races against the budget watchdog. Feedback dispatches keep the prior behavior.
 func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext) error {
-	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.BeadID, o.attemptStamp())
+	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
 	return o.workOneWithID(ctx, d, externalID)
 }
 
-// workOneWithID is workOne with the per-attempt external_id pinned by the caller
-// (so RunOne's teardown closes the very session workOne launched). The session is
-// addressed by externalID; the stable DisplayName is passed only as ccpool --name.
+// workOneWithID dispatches one item with the per-attempt external_id pinned by the
+// caller. It selects the executor by role.Type: command roles run an executable;
+// every other role takes the ccpool ensure→send→wait path.
 func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchContext, externalID string) error {
-	display := d.Role.DisplayName(o.Cfg.SessionPrefix, d.BeadID)
+	if d.Role.Type == "command" {
+		return o.runCommand(ctx, d)
+	}
+	return o.runCCPool(ctx, d, externalID)
+}
+
+// runCCPool is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
+// rendered nudge (async), then wait for completion — racing the budget watchdog when
+// the role carries a finite budget. The session is addressed by externalID; the
+// stable DisplayName is passed only as ccpool --name.
+func (o *Orchestrator) runCCPool(ctx context.Context, d discover.DispatchContext, externalID string) error {
+	cc := d.Role.CCPool
+	display := d.Role.DisplayName(o.Cfg.SessionPrefix, d.Item.ID)
 	env := map[string]string{
-		"BEADS_ACTOR":    d.Role.Actor,
+		"BEADS_ACTOR":    cc.Actor,
 		"BEADS_DIR":      o.Cfg.RepoRoot + "/.beads",
 		"WORKSPACE_ROOT": o.Cfg.RepoRoot,
 	}
@@ -226,29 +306,94 @@ func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchCon
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
 		// first failure; on a subsequent failure (label already present) add human
 		// so discovery stops retrying it (worker discovery excludes human).
-		o.escalateLaunchFailure(ctx, d.BeadID)
+		o.escalateLaunchFailure(ctx, d.Item.ID)
 		return fmt.Errorf("ensure %s: %w", externalID, err)
 	}
 	// The bead was dispatched: clear any pool-launch-fail from a prior attempt so
 	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
-	// 0015). Best-effort — removing a label the bead does not carry is a no-op,
-	// and a bd hiccup here just leaves a stale label that a later failure re-reads.
-	_ = beads.RemoveLabel(ctx, o.BD, d.BeadID, "pool-launch-fail")
-	nudge := d.Role.Nudge(d.BeadID, o.Cfg.WorktreeDir)
-	if d.Role.Kind == roles.Worker {
-		nudge += o.Cfg.WorkerBudget().PromptLine()
-	}
+	// 0015). Best-effort.
+	_ = beads.RemoveLabel(ctx, o.BD, d.Item.ID, "pool-launch-fail")
+	nudge := o.renderNudge(cc, d)
 	if err := o.CC.Send(ctx, externalID, nudge, ccpool.ModeNoWait); err != nil {
-		// J-dispatch-fail: feedback unclaims; worker is left for human inspection.
-		if d.Role.Kind == roles.Feedback {
-			_ = beads.Unclaim(ctx, o.BD, d.BeadID)
+		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
+		if cc.OnDispatchFail == roles.DispatchUnclaim {
+			_ = beads.Unclaim(ctx, o.BD, d.Item.ID)
 		}
 		return fmt.Errorf("send %s: %w", externalID, err)
 	}
-	if d.Role.Kind != roles.Worker {
-		return o.waitDone(ctx, nil, d, externalID) // feedback: no watchdog, so no race; always own the outcome
+	// A finite budget => run the watchdog (it races waitDone); unlimited => no
+	// watchdog, so no race and waitDone always owns the outcome.
+	if budgetUnlimited(cc.Budget) {
+		return o.waitDone(ctx, nil, d, externalID)
 	}
 	return o.workerWaitWithWatchdog(ctx, d, externalID)
+}
+
+// budgetUnlimited reports whether a budget imposes no finite bound (so no watchdog
+// is needed and no budget prompt-line is appended).
+func budgetUnlimited(b budget.Budget) bool {
+	return b.Tokens.Unlimited() && b.Cost.Unlimited() && b.Time <= 0
+}
+
+// renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety
+// preamble when authorship_guard is set, then the role's rendered task prompt, then
+// the budget prompt-line (empty when the budget is unlimited).
+func (o *Orchestrator) renderNudge(cc *roles.CCPoolConfig, d discover.DispatchContext) string {
+	pctx := prompt.Context{
+		Item:        d.Item,
+		WorktreeDir: o.Cfg.WorktreeDir,
+		SkillMD:     cc.SkillMD,
+		SelfLogin:   o.Cfg.SelfLogin,
+		RepoRoot:    o.Cfg.RepoRoot,
+	}
+	body, err := prompt.Render(cc.Prompt, pctx)
+	if err != nil {
+		// A prompt that references an unknown var fails here; fall back to the raw
+		// template source so the dispatch still carries the task (and log it).
+		slog.Warn("prompt render failed; sending raw body", "role", d.Role.Name, "err", err)
+		body = cc.PromptBody
+	}
+	var sb strings.Builder
+	if cc.AuthorshipGuard {
+		sb.WriteString(prompt.AuthorshipPreamble())
+	}
+	sb.WriteString(body)
+	sb.WriteString(cc.Budget.PromptLine()) // "" when unlimited
+	return sb.String()
+}
+
+// runCommand dispatches a command role: render its argv, run it once, success iff
+// exit 0. No ccpool/watchdog. (No built-in command role exists; this path is
+// exercised by explicit config.)
+func (o *Orchestrator) runCommand(ctx context.Context, d discover.DispatchContext) error {
+	argv, err := o.renderArgv(d.Role.Command.Argv, d)
+	if err != nil {
+		return fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
+	}
+	if _, err := o.commander().Run(ctx, argv); err != nil {
+		return fmt.Errorf("command role %q item %s: %w", d.Role.Name, d.Item.ID, err)
+	}
+	return nil
+}
+
+// renderArgv interpolates each argv element through the prompt template engine, so a
+// command role can reference {{.BeadID}} etc. An element with no template actions
+// renders to itself.
+func (o *Orchestrator) renderArgv(argv []string, d discover.DispatchContext) ([]string, error) {
+	pctx := prompt.Context{Item: d.Item, WorktreeDir: o.Cfg.WorktreeDir, SelfLogin: o.Cfg.SelfLogin, RepoRoot: o.Cfg.RepoRoot}
+	out := make([]string, 0, len(argv))
+	for _, a := range argv {
+		t, err := prompt.Parse("argv", a)
+		if err != nil {
+			return nil, err
+		}
+		s, err := prompt.Render(t, pctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // escalateLaunchFailure escalates a bead that ccpool could not launch. First
@@ -293,7 +438,7 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 		CC:            o.CC,
 		BD:            o.BD,
 		Log:           o.Log,
-		Budget:        o.Cfg.WorkerBudget(),
+		Budget:        d.Role.CCPool.Budget,
 		RepoRoot:      o.Cfg.RepoRoot,
 		WorktreeDir:   o.Cfg.WorktreeDir,
 		ReminderMsg:   o.Cfg.ReminderMsg,
@@ -307,7 +452,7 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 	type res struct{ err error }
 	done := make(chan res, 2) // buffered 2: both goroutines can send without blocking
 	go func() { done <- res{o.waitDone(ctx, claimTerminal, d, name)} }()
-	go func() { done <- res{wd.Run(ctx, name, d.BeadID)} }()
+	go func() { done <- res{wd.Run(ctx, name, d.Item.ID)} }()
 
 	first := <-done // the winner's terminal result (the loser blocks until cancel)
 	cancel()        // release the loser
@@ -327,6 +472,7 @@ func (o *Orchestrator) workerWaitWithWatchdog(ctx context.Context, d discover.Di
 // means no watchdog is racing (feedback dispatches / direct tests) — always own.
 // (pg2-c1vp)
 func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, d discover.DispatchContext, name string) error {
+	completion := d.Role.CCPool.Completion
 	deadline := o.clock().Add(o.Cfg.MaxWait)
 	seenClaimed := false
 	// won reports whether this loop owns the single terminal outcome.
@@ -343,20 +489,20 @@ func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, 
 			return ctx.Err()
 		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
-		status, _ := beads.Status(ctx, o.BD, d.BeadID)
-		if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
+		status, _ := beads.Status(ctx, o.BD, d.Item.ID)
+		if complete.DoneSignal(completion, status, seenClaimed) {
 			if won() {
 				return nil
 			}
 			return lose()
 		}
-		if d.Role.Kind == roles.Worker && status == "in_progress" {
+		if completion == roles.CloseOrHandback && status == "in_progress" {
 			seenClaimed = true
 		}
 		if !o.active(ctx, name) {
 			// re-check-after-death: the bead may have closed as the session ended.
-			status, _ = beads.Status(ctx, o.BD, d.BeadID)
-			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
+			status, _ = beads.Status(ctx, o.BD, d.Item.ID)
+			if complete.DoneSignal(completion, status, seenClaimed) {
 				if won() {
 					return nil
 				}
@@ -369,8 +515,8 @@ func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, 
 		}
 		if !o.clock().Before(deadline) {
 			// final status check after the deadline.
-			status, _ = beads.Status(ctx, o.BD, d.BeadID)
-			if complete.DoneSignal(d.Role.Kind, status, seenClaimed) {
+			status, _ = beads.Status(ctx, o.BD, d.Item.ID)
+			if complete.DoneSignal(completion, status, seenClaimed) {
 				if won() {
 					return nil
 				}
@@ -390,8 +536,8 @@ func (o *Orchestrator) waitDone(ctx context.Context, claimTerminal func() bool, 
 }
 
 func (o *Orchestrator) fail(ctx context.Context, d discover.DispatchContext, reason string) error {
-	_ = complete.OnFailure(ctx, o.BD, d.Role, d.BeadID)
-	return fmt.Errorf("%s: %s", d.BeadID, reason)
+	_ = complete.OnFailure(ctx, o.BD, d.Role.CCPool.OnFailure, d.Item.ID)
+	return fmt.Errorf("%s: %s", d.Item.ID, reason)
 }
 
 // active reports whether it is still worth waiting on the session addressed by

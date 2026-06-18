@@ -161,12 +161,20 @@ func TestRoute_runSubcommands(t *testing.T) {
 	}{
 		{"run-role-ok", []string{"pr-pool", "run-role", "feedback", "zr-1"}, routeRunRole},
 		{"run-role-missing-bead", []string{"pr-pool", "run-role", "feedback"}, routeUsageErr},
-		{"run-role-unknown-role", []string{"pr-pool", "run-role", "bogus", "zr-1"}, routeUsageErr},
+		// An unknown role NAME now parses OK — it is validated in the handler after
+		// config load (arg parse stays config-free, pg2-52rn). A flag-like token is
+		// still a missing role.
+		{"run-role-unknown-name-parses", []string{"pr-pool", "run-role", "bogus", "zr-1"}, routeRunRole},
+		{"run-role-flag-as-role", []string{"pr-pool", "run-role", "--x", "zr-1"}, routeUsageErr},
 		{"run-role-extra-arg", []string{"pr-pool", "run-role", "feedback", "zr-1", "x"}, routeUsageErr},
 		{"run-query-ok", []string{"pr-pool", "run-query", "worker"}, routeRunQuery},
 		{"run-query-missing-role", []string{"pr-pool", "run-query"}, routeUsageErr},
-		{"run-query-unknown-role", []string{"pr-pool", "run-query", "bogus"}, routeUsageErr},
+		{"run-query-unknown-name-parses", []string{"pr-pool", "run-query", "bogus"}, routeRunQuery},
 		{"run-query-extra-arg", []string{"pr-pool", "run-query", "worker", "extra"}, routeUsageErr},
+		{"config-print-defaults", []string{"pr-pool", "config", "--print-defaults"}, routeConfig},
+		{"config-show", []string{"pr-pool", "config", "--show"}, routeConfig},
+		{"config-no-flag", []string{"pr-pool", "config"}, routeUsageErr},
+		{"config-bad-flag", []string{"pr-pool", "config", "--nope"}, routeUsageErr},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
