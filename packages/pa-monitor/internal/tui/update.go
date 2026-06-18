@@ -87,7 +87,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoResumeEnabled = msg.meta.AutoResumeEnabled
 		}
 		if msg.meta.DaemonNow.IsZero() || msg.meta.DaemonNow.After(m.caffeinateUserAt) {
-			m.caffeinateOn = msg.meta.CaffeinateActive
+			m.caffeinateOn = msg.meta.CaffeinateMode
 		}
 		// The PROCESS indicator + grace countdown are display-only and not
 		// user-controlled (C only toggles the MODE), so adopt them unguarded.

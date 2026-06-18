@@ -8,9 +8,11 @@ import (
 )
 
 // TestPollResultMsg_AdoptsCaffeinateFromDaemon: a fresh model adopts
-// CaffeinateActive=true from the first successful poll, mirroring how
-// AutoResumeEnabled is adopted at update.go:60-62. Guards against the
-// regression where the TUI never reads daemon caffeinate state at startup.
+// CaffeinateMode=true from the first successful poll, mirroring how
+// AutoResumeEnabled is adopted at update.go:60-62. The MODE indicator
+// (caffeinateOn) tracks the user toggle (CaffeinateMode), not the legacy
+// CaffeinateActive. Guards against the regression where the TUI never reads
+// daemon caffeinate state at startup.
 func TestPollResultMsg_AdoptsCaffeinateFromDaemon(t *testing.T) {
 	m := NewModel(Options{Tree: &aggregate.Tree{}})
 	if m.caffeinateOn {
@@ -21,13 +23,13 @@ func TestPollResultMsg_AdoptsCaffeinateFromDaemon(t *testing.T) {
 	m.Update(pollResultMsg{
 		tree: &aggregate.Tree{},
 		meta: DaemonMeta{
-			CaffeinateActive: true,
-			DaemonNow:        now,
+			CaffeinateMode: true,
+			DaemonNow:      now,
 		},
 	})
 
 	if !m.caffeinateOn {
-		t.Error("first pollResultMsg with CaffeinateActive=true should set caffeinateOn=true")
+		t.Error("first pollResultMsg with CaffeinateMode=true should set caffeinateOn=true")
 	}
 }
 
@@ -47,8 +49,8 @@ func TestPollResultMsg_StaleSnapshotDoesNotOverwriteCaffeinateUserAction(t *test
 	m.Update(pollResultMsg{
 		tree: &aggregate.Tree{},
 		meta: DaemonMeta{
-			CaffeinateActive: false,
-			DaemonNow:        stale,
+			CaffeinateMode: false,
+			DaemonNow:      stale,
 		},
 	})
 
@@ -69,13 +71,13 @@ func TestPollResultMsg_FreshSnapshotAfterUserToggleStillAdoptsDaemon(t *testing.
 	m.Update(pollResultMsg{
 		tree: &aggregate.Tree{},
 		meta: DaemonMeta{
-			CaffeinateActive: false,
-			DaemonNow:        fresh,
+			CaffeinateMode: false,
+			DaemonNow:      fresh,
 		},
 	})
 
 	if m.caffeinateOn {
-		t.Error("post-user-action snapshot reporting CaffeinateActive=false should be adopted")
+		t.Error("post-user-action snapshot reporting CaffeinateMode=false should be adopted")
 	}
 }
 

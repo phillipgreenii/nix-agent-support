@@ -576,6 +576,13 @@ func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, si
 	}
 	for _, dir := range tree.Dirs {
 		for _, sv := range dir.Sessions {
+			// A session blocked on a human (permission prompt / AskUserQuestion)
+			// suppresses BOTH nudges and caffeinate (§6/D3). Even if it carries a
+			// terminal-retryable LastError, no nudge is ever attempted, so it must
+			// not hold the Mac awake via the D5 error keep-awake disjunct.
+			if sv.Status == session.WaitingForHuman {
+				continue
+			}
 			le := sv.LastError
 			if le == nil || !le.IsTerminal {
 				continue

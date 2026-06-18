@@ -117,3 +117,18 @@ func TestHasUnattemptedNudgeableDisrupt_NonTerminalSkipped(t *testing.T) {
 		t.Error("want keep-awake false for a non-terminal error")
 	}
 }
+
+func TestHasUnattemptedNudgeableDisrupt_WaitingForHumanSkipped(t *testing.T) {
+	wm := newWMForTest(t)
+	// Terminal + retryable + no attempt would normally hold the Mac awake, but
+	// a WaitingForHuman session suppresses both nudges and caffeinate (§6/D3).
+	// Since no nudge is ever attempted for it, it must NOT keep the Mac awake.
+	le := &transcript.ErrorRecord{Kind: transcript.ErrServerError, IsTerminal: true, At: time.Now()}
+	sv := svWithError("sid-1", 100, le)
+	sv.Status = session.WaitingForHuman
+	tree := treeWithSessions(sv)
+	sigs := []signal.Signaler{detectSignaler{detect: true}}
+	if hasUnattemptedNudgeableDisrupt(tree, wm, sigs) {
+		t.Error("want keep-awake false for a waiting-for-human session (D3 suppresses caffeinate)")
+	}
+}
