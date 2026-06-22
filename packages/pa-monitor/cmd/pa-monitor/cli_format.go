@@ -67,7 +67,11 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 			}
 		}
 		if le := sd.GetLastError(); le != nil && le.GetIsTerminal() {
-			r.errKind = le.GetKind()
+			if apiErrorIsAuthFailure(le) {
+				r.errKind = "auth"
+			} else {
+				r.errKind = le.GetKind()
+			}
 		}
 		if pn := sd.GetPendingNudge(); pn != nil && len(pn.GetSources()) > 0 {
 			r.nudge = "[" + strings.Join(pn.GetSources(), ",") + "]"
@@ -132,7 +136,9 @@ func formatSessionInfo(sd *pb.SessionDetail) string {
 	le := sd.GetLastError()
 	if le != nil && le.GetIsTerminal() {
 		kindStr := le.GetKind()
-		if apiErrorIsEscalated(le) {
+		if apiErrorIsAuthFailure(le) {
+			kindStr += " — run /login"
+		} else if apiErrorIsEscalated(le) {
 			kindStr += "  (escalated)"
 		}
 		sb.WriteString(fmt.Sprintf("last_error:     %s\n", kindStr))
@@ -166,6 +172,33 @@ func apiErrorIsEscalated(e *pb.ApiError) bool {
 	}
 	kindRetryable := e.GetKind() == "unknown" || e.GetKind() == "server_error"
 	return kindRetryable && !e.GetIsRetryable()
+}
+
+// apiErrorIsAuthFailure reports a terminal HTTP-401 authentication failure.
+// Literal kind string matches the apiErrorIsEscalated convention (no
+// cmd → internal/core/transcript import).
+func apiErrorIsAuthFailure(e *pb.ApiError) bool {
+	return e != nil && e.GetIsTerminal() && e.GetKind() == "authentication_failed"
+}
+
+// formatAuthFailureBanner returns a prominent one-line warning when any session
+// has a terminal auth failure, else "". A 401 is account-wide, so this is shown
+// near the top of `status`.
+func formatAuthFailureBanner(sessions []*pb.SessionDetail) string {
+	n := 0
+	for _, sd := range sessions {
+		if apiErrorIsAuthFailure(sd.GetLastError()) {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	noun := "session"
+	if n != 1 {
+		noun = "sessions"
+	}
+	return fmt.Sprintf("⊘ authentication failure — run /login (%d %s)\n", n, noun)
 }
 
 // humanizeAgeCLI formats a duration as a human-readable age string.

@@ -194,6 +194,44 @@ func TestFormatSessionInfoNonTerminalHidden(t *testing.T) {
 	}
 }
 
+func authDetail(sid string) *pb.SessionDetail {
+	return &pb.SessionDetail{
+		View:      &pb.SessionView{SessionId: sid, Status: "idle"},
+		LastError: &pb.ApiError{Kind: "authentication_failed", IsTerminal: true, Text: "Please run /login · API Error: 401 Invalid authentication credentials"},
+	}
+}
+
+func TestFormatAuthFailureBanner(t *testing.T) {
+	if out := formatAuthFailureBanner(nil); out != "" {
+		t.Errorf("no sessions: want empty, got %q", out)
+	}
+	one := formatAuthFailureBanner([]*pb.SessionDetail{authDetail("a")})
+	if !strings.Contains(one, "⊘") || !strings.Contains(one, "/login") || !strings.Contains(one, "(1 session)") {
+		t.Errorf("one auth failure banner wrong: %q", one)
+	}
+	two := formatAuthFailureBanner([]*pb.SessionDetail{authDetail("a"), authDetail("b")})
+	if !strings.Contains(two, "(2 sessions)") {
+		t.Errorf("two auth failures plural wrong: %q", two)
+	}
+}
+
+func TestFormatStatusSessionsAuthColumn(t *testing.T) {
+	out := formatStatusSessions([]*pb.SessionDetail{authDetail("sid-1")})
+	if !strings.Contains(out, "auth") {
+		t.Errorf("expected compact 'auth' in ERROR column, got:\n%s", out)
+	}
+	if strings.Contains(out, "authentication_failed") {
+		t.Errorf("expected compact 'auth', not raw kind, got:\n%s", out)
+	}
+}
+
+func TestFormatSessionInfoAuthHint(t *testing.T) {
+	out := formatSessionInfo(authDetail("sid-1"))
+	if !strings.Contains(out, "authentication_failed — run /login") {
+		t.Errorf("expected run /login hint on last_error line, got:\n%s", out)
+	}
+}
+
 // --- apiErrorIsEscalated tests ---
 
 func TestAPIErrorIsEscalatedUnknownFlipped(t *testing.T) {

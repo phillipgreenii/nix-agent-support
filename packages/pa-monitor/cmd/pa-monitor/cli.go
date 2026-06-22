@@ -40,17 +40,6 @@ func runStatus(args []string) {
 	fmt.Printf("uptime:        %ds\n", state.GetDaemonUptimeSeconds())
 	fmt.Printf("plan_tier:     %s\n", state.GetPlanTier())
 	fmt.Printf("sessions:      %d working, %d idle, %d dormant\n", working, idle, dormant)
-	if b := state.GetActiveBlock(); b != nil {
-		fmt.Printf("block %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
-			b.GetId(), b.GetCostUsd(), state.GetPlanCapUsd(), b.GetWindowPct()*100)
-	}
-	if w := state.GetActiveWeek(); w != nil {
-		fmt.Printf("week  %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
-			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
-	}
-	fmt.Printf("caffeinate:    mode %s · process %s\n",
-		onOff(state.GetCaffeinateMode()), caffeinateProcessString(state.GetCaffeinateProcess(), state.GetCaffeinateGraceRemainingS()))
-	fmt.Printf("auto_resume:   %v\n", state.GetAutoResumeEnabled())
 
 	// Collect per-session details (LastError + PendingNudge) and print
 	// annotations only when at least one session has something noteworthy.
@@ -70,6 +59,22 @@ func runStatus(args []string) {
 			details = append(details, sd)
 		}
 	}
+	if banner := formatAuthFailureBanner(details); banner != "" {
+		fmt.Print(banner)
+	}
+
+	if b := state.GetActiveBlock(); b != nil {
+		fmt.Printf("block %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
+			b.GetId(), b.GetCostUsd(), state.GetPlanCapUsd(), b.GetWindowPct()*100)
+	}
+	if w := state.GetActiveWeek(); w != nil {
+		fmt.Printf("week  %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
+			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
+	}
+	fmt.Printf("caffeinate:    mode %s · process %s\n",
+		onOff(state.GetCaffeinateMode()), caffeinateProcessString(state.GetCaffeinateProcess(), state.GetCaffeinateGraceRemainingS()))
+	fmt.Printf("auto_resume:   %v\n", state.GetAutoResumeEnabled())
+
 	if annotation := formatStatusSessions(details); annotation != "" {
 		fmt.Print(annotation)
 	}
