@@ -577,7 +577,7 @@ func formatAuthFailureBanner(sessions []*pb.SessionDetail) string {
 
 - [ ] **Step 4: Use the compact `auth` label in the status table**
 
-In `formatStatusSessions`, replace the error-kind assignment (currently `r.errKind = le.GetKind()` at `:70`):
+In `formatStatusSessions`, replace the **entire** terminal-error `if` block (currently `if le := sd.GetLastError(); le != nil && le.GetIsTerminal() { r.errKind = le.GetKind() }` at lines `:69-71`) — not just the inner line:
 
 ```go
 		if le := sd.GetLastError(); le != nil && le.GetIsTerminal() {
@@ -609,7 +609,7 @@ Expected: PASS (new + existing format tests).
 
 - [ ] **Step 7: Wire the banner into `runStatus`**
 
-In `cmd/pa-monitor/cli.go`, move detail collection to just after the `sessions:` summary line and print the banner there. After:
+In `cmd/pa-monitor/cli.go`, `runStatus` today has **exactly one** detail-collection loop (~`:55-72`), located _after_ the cost/caffeinate/auto_resume prints and feeding `formatStatusSessions`. **Move that entire loop up** to just after the `sessions:` summary line, then add the banner print right after it. There must remain only **one** `var details []*pb.SessionDetail` in the function — leaving two is a `details redeclared` compile error. After this line:
 
 ```go
 	fmt.Printf("sessions:      %d working, %d idle, %d dormant\n", working, idle, dormant)
@@ -640,7 +640,7 @@ insert detail collection + banner:
 	}
 ```
 
-Then **delete** the now-duplicated detail-collection loop later in the function (the second `var details []*pb.SessionDetail { ... }` block that preceded `formatStatusSessions`), leaving the final:
+Because you **moved** (not copied) the original loop, the bottom of the function now has no second `var details` collection block — only the final render call remains:
 
 ```go
 	if annotation := formatStatusSessions(details); annotation != "" {
@@ -907,7 +907,7 @@ in
 }
 ```
 
-If `phillipgreenii.observability.internal` is a strict/fixed submodule, declare `_renderedAlertingDir` wherever `_renderedDashboards` is declared (from the Step 2 `rg`): mirror it as `lib.mkOption { type = lib.types.nullOr lib.types.path; default = null; internal = true; }`.
+Note: `phillipgreenii.observability.internal` is declared as `lib.types.attrsOf lib.types.anything` (a free-form attrset), so assigning a fresh `_renderedAlertingDir` key needs no option declaration — the primary path above always works. (No fallback required.)
 
 - [ ] **Step 4: Wire it into `ui.nix`**
 
@@ -966,7 +966,7 @@ git commit -m "feat(observability): provision app-contributed Grafana alert rule
 
 - [ ] **Step 1: Register the rule file**
 
-In `$PM/darwin/modules/pa-monitor/default.nix`, inside the same `config = lib.mkIf (...)` block that sets `phillipgreenii.observability.dashboardProviders.pa-monitor` (~`:49-53`), add a sibling assignment:
+In `$PM/darwin/modules/pa-monitor/default.nix`, inside the same `lib.mkIf (obs.enable or false) { ... }` attrset (one element of the file's `lib.mkMerge`) that sets `phillipgreenii.observability.dashboardProviders.pa-monitor` (~`:50-53`), add a sibling assignment:
 
 ```nix
       phillipgreenii.observability.alertRuleFiles =
