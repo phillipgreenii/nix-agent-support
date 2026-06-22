@@ -9,17 +9,17 @@ import (
 )
 
 type SessionEnrichment struct {
-	ContextTokens int
-	Model         string
-	FirstPrompt   string
-	SubagentCount int
-	SubshellCount int
-	SessionTokens int     // cumulative output_tokens across session
-	BurnRateShort float64 // tokens/min, short window
-	BurnRateLong  float64 // tokens/min, long window
-	CostUSD       float64 // estimated share, filled by Build
-	AwaitingInput     bool      // true when last assistant turn contains unresolved AskUserQuestion
-	RateLimitResetsAt time.Time // non-zero: session paused; window resets at this time
+	ContextTokens     int
+	Model             string
+	FirstPrompt       string
+	SubagentCount     int
+	SubshellCount     int
+	SessionTokens     int                     // cumulative output_tokens across session
+	BurnRateShort     float64                 // tokens/min, short window
+	BurnRateLong      float64                 // tokens/min, long window
+	CostUSD           float64                 // estimated share, filled by Build
+	AwaitingInput     bool                    // true when last assistant turn contains unresolved AskUserQuestion
+	RateLimitResetsAt time.Time               // non-zero: session paused; window resets at this time
 	LastError         *transcript.ErrorRecord // most recent api error from snapshot; nil if none
 	// LastErrorRetryable is pa-monitor's auto-resume verdict for LastError
 	// (transient server/network → true). Tracked separately from the shared
@@ -98,4 +98,19 @@ func (t *Tree) TopupShouldDisplay() bool {
 		return false
 	}
 	return t.ActiveBlock.CostUSD >= t.PlanCapUSD
+}
+
+// AuthFailedCount returns the number of sessions whose most recent error is a
+// terminal authentication failure (HTTP 401 → run /login). Because a 401 is
+// account-wide, any positive count means the credentials are broken for the
+// whole user. Safe on a nil tree.
+func (t *Tree) AuthFailedCount() int {
+	n := 0
+	for _, s := range t.Sessions() {
+		le := s.SessionEnrichment.LastError
+		if le != nil && le.IsTerminal && le.Kind == transcript.ErrAuthFailed {
+			n++
+		}
+	}
+	return n
 }
