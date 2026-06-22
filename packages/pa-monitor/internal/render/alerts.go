@@ -13,6 +13,7 @@ import (
 type AlertsOpts struct {
 	Now             time.Time
 	Width           int
+	Theme           Theme
 	AutoResume      bool
 	WindowResetsAt  time.Time
 	AutoResumeDelay time.Duration
@@ -35,6 +36,19 @@ func Alerts(tree *aggregate.Tree, opts AlertsOpts) string {
 	tier := wrap.Tier(opts.Width)
 
 	var segs []string
+
+	if n := tree.AuthFailedCount(); n > 0 {
+		var seg string
+		switch tier {
+		case wrap.TierWide:
+			seg = "⊘ AUTHENTICATION FAILURE — run /login"
+		case wrap.TierNarrow:
+			seg = "⊘ auth — run /login"
+		default:
+			seg = "⊘ /login"
+		}
+		segs = append(segs, opts.Theme.Error.Render(seg))
+	}
 
 	if opts.AutoResume && !opts.WindowResetsAt.IsZero() {
 		fireAt := opts.WindowResetsAt.Add(opts.AutoResumeDelay)

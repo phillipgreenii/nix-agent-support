@@ -7,6 +7,8 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 func TestAlertsEmptyWhenNoneActive(t *testing.T) {
@@ -85,5 +87,49 @@ func TestAlertsSingleLineNoTrailingNewline(t *testing.T) {
 	out := Alerts(tree, AlertsOpts{Now: now, Width: 200, AutoResume: true, WindowResetsAt: tree.WindowResetsAt})
 	if strings.Contains(out, "\n") {
 		t.Errorf("Alerts must be single line, got: %q", out)
+	}
+}
+
+func treeWithAuthFailures(n int) *aggregate.Tree {
+	var sv []*aggregate.SessionView
+	for i := 0; i < n; i++ {
+		sv = append(sv, &aggregate.SessionView{
+			Session: &session.Session{SessionID: string(rune('a' + i))},
+			SessionEnrichment: aggregate.SessionEnrichment{
+				LastError: &transcript.ErrorRecord{Kind: transcript.ErrAuthFailed, IsTerminal: true},
+			},
+		})
+	}
+	return &aggregate.Tree{Dirs: []*aggregate.Directory{{Sessions: sv}}}
+}
+
+func TestAlertsAuthFailureShows(t *testing.T) {
+	out := Alerts(treeWithAuthFailures(1), AlertsOpts{Now: time.Now(), Width: 200})
+	if !strings.Contains(out, "⊘") || !strings.Contains(out, "AUTHENTICATION FAILURE") {
+		t.Errorf("expected auth-failure banner, got: %q", out)
+	}
+	if !strings.Contains(out, "/login") {
+		t.Errorf("expected /login remediation, got: %q", out)
+	}
+}
+
+func TestAlertsAuthFailureAbsentWhenNone(t *testing.T) {
+	out := Alerts(treeWithAuthFailures(0), AlertsOpts{Now: time.Now(), Width: 200})
+	if strings.Contains(out, "AUTHENTICATION") {
+		t.Errorf("expected no auth banner when none failing, got: %q", out)
+	}
+}
+
+func TestAlertsAuthFailureSortsFirst(t *testing.T) {
+	now := time.Date(2026, 5, 8, 20, 0, 0, 0, time.UTC)
+	tree := treeWithAuthFailures(1)
+	tree.WindowResetsAt = now.Add(60 * time.Second)
+	out := Alerts(tree, AlertsOpts{
+		Now: now, Width: 200, AutoResume: true, WindowResetsAt: tree.WindowResetsAt,
+	})
+	authIdx := strings.Index(out, "⊘")
+	resumeIdx := strings.Index(out, "⏸")
+	if authIdx == -1 || resumeIdx == -1 || authIdx > resumeIdx {
+		t.Errorf("auth banner must sort before resume; got: %q", out)
 	}
 }

@@ -44,6 +44,7 @@ func (m *Model) View() string {
 	alerts := render.Alerts(m.tree, render.AlertsOpts{
 		Now:             now,
 		Width:           m.width,
+		Theme:           m.theme,
 		AutoResume:      m.autoResumeEnabled,
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
