@@ -1,0 +1,46 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pa-monitor
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pa-monitor-auth-failure
+        title: pa-monitor authentication failure
+        condition: C
+        for: 0s # fire immediately — the error is already terminal
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Authentication failure — run /login"
+          description: "One or more Claude Code sessions have a terminal authentication failure (HTTP 401). Run /login to re-authenticate."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(pa_monitor_sessions_errored{kind="authentication_failed"}) or vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
