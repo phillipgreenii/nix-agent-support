@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
 // recentNudgeWindow is how long after a successful nudge fire the tree row
@@ -80,7 +81,8 @@ type TreeOpts struct {
 
 // statsBlockCols is the total width of the right-side stats block including
 // the single space between each of the five columns:
-//   col1(12) + sp + pct(5) + sp + bar(5) + sp + amount(10) + sp + burn(7) = 43
+//
+//	col1(12) + sp + pct(5) + sp + bar(5) + sp + amount(10) + sp + burn(7) = 43
 const statsBlockCols = col1Width + 1 + colPctWidth + 1 + colBarWidth + 1 + colAmtWidth + 1 + colBurnWidth
 
 // prefixCols accounts for the cursor mark ("  " or "> ") plus the branch glyph
@@ -183,6 +185,11 @@ func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) str
 	}
 }
 
+// authFailed reports a terminal authentication failure (non-retryable; run /login).
+func authFailed(le *transcript.ErrorRecord) bool {
+	return le != nil && le.IsTerminal && le.Kind == transcript.ErrAuthFailed
+}
+
 // sessionGlyph returns the status glyph for a session row, incorporating error
 // and nudge-queued indicators. Precedence:
 //  1. Working → existing working glyph (overrides everything).
@@ -212,9 +219,12 @@ func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	// Apply error glyph when terminal.
 	le := s.SessionEnrichment.LastError
 	if le != nil && le.IsTerminal {
-		if s.SessionEnrichment.LastErrorRetryable {
+		switch {
+		case authFailed(le):
+			primary = theme.Error.Render("⊘") // auth failure — run /login
+		case s.SessionEnrichment.LastErrorRetryable:
 			primary = "⚠"
-		} else {
+		default:
 			primary = "✗"
 		}
 	}

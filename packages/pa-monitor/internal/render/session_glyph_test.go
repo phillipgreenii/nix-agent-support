@@ -123,3 +123,41 @@ func TestSessionGlyphEscalatedIsNonRetryableGlyph(t *testing.T) {
 		t.Errorf("escalated error: should not have ⚠ glyph; got %q", glyph)
 	}
 }
+
+// TestSessionGlyphAuthFailure verifies a terminal authentication_failed error
+// shows the ⊘ glyph and not the generic ⚠/✗ error glyphs.
+func TestSessionGlyphAuthFailure(t *testing.T) {
+	le := &transcript.ErrorRecord{
+		Kind:       transcript.ErrAuthFailed,
+		IsTerminal: true,
+		At:         time.Now(),
+	}
+	sv := makeSessionView(session.Idle, le, false, nil)
+
+	glyph := sessionGlyph(sv, Theme{})
+	if !strings.Contains(glyph, "⊘") {
+		t.Errorf("auth failure: expected ⊘ glyph; got %q", glyph)
+	}
+	if strings.Contains(glyph, "⚠") || strings.Contains(glyph, "✗") {
+		t.Errorf("auth failure: should not use generic error glyph; got %q", glyph)
+	}
+}
+
+// TestSessionGlyphNonAuthNonRetryableStillX guards that other non-retryable
+// terminal errors keep the ✗ glyph (no accidental ⊘ widening).
+func TestSessionGlyphNonAuthNonRetryableStillX(t *testing.T) {
+	le := &transcript.ErrorRecord{
+		Kind:       transcript.ErrInvalidRequest,
+		IsTerminal: true,
+		At:         time.Now(),
+	}
+	sv := makeSessionView(session.Idle, le, false, nil)
+
+	glyph := sessionGlyph(sv, Theme{})
+	if strings.Contains(glyph, "⊘") {
+		t.Errorf("invalid_request should not use ⊘; got %q", glyph)
+	}
+	if !strings.Contains(glyph, "✗") {
+		t.Errorf("invalid_request: expected ✗; got %q", glyph)
+	}
+}
