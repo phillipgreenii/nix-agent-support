@@ -20,3 +20,6 @@ result
 
 # Claude Code per-session worktrees (runtime state, created by EnterWorktree)
 .claude/worktrees/
+
+# sp-bd-bridge per-session cache (local-only)
+.perles/
