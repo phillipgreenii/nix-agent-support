@@ -52,7 +52,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 3,
         "w": 24,
         "h": 1
       },
@@ -68,7 +68,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 1,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -90,7 +90,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 1,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -129,7 +129,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -188,7 +188,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 1,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -247,7 +247,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 8,
         "w": 12,
         "h": 7
       },
@@ -278,7 +278,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 8,
         "w": 12,
         "h": 7
       },
@@ -300,7 +300,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 15,
         "w": 24,
         "h": 8
       },
@@ -524,7 +524,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 23,
         "w": 12,
         "h": 7
       },
@@ -553,7 +553,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 20,
+        "y": 23,
         "w": 12,
         "h": 7
       },
@@ -582,7 +582,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 30,
         "w": 6,
         "h": 4
       },
@@ -603,7 +603,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 27,
+        "y": 30,
         "w": 6,
         "h": 4
       },
@@ -620,7 +620,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 34,
         "w": 24,
         "h": 1
       },
@@ -636,7 +636,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 35,
         "w": 12,
         "h": 7
       },
@@ -667,7 +667,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 35,
         "w": 12,
         "h": 7
       },
@@ -690,7 +690,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 42,
         "w": 12,
         "h": 7
       },
@@ -712,7 +712,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 42,
         "w": 12,
         "h": 7
       },
@@ -743,7 +743,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 46,
+        "y": 49,
         "w": 8,
         "h": 4
       },
@@ -764,7 +764,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 46,
+        "y": 49,
         "w": 8,
         "h": 4
       },
@@ -785,7 +785,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 46,
+        "y": 49,
         "w": 8,
         "h": 4
       },
@@ -807,7 +807,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 53,
         "w": 24,
         "h": 6
       },
@@ -835,7 +835,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 59,
         "w": 24,
         "h": 1
       },
@@ -851,7 +851,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 57,
+        "y": 60,
         "w": 12,
         "h": 7
       },
@@ -883,7 +883,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 57,
+        "y": 60,
         "w": 12,
         "h": 7
       },
@@ -910,7 +910,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 64,
+        "y": 67,
         "w": 24,
         "h": 1
       },
@@ -927,7 +927,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 65,
+        "y": 68,
         "w": 12,
         "h": 7
       },
@@ -950,7 +950,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 65,
+        "y": 68,
         "w": 12,
         "h": 7
       },
@@ -977,7 +977,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 72,
+        "y": 75,
         "w": 24,
         "h": 1
       },
@@ -994,7 +994,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 73,
+        "y": 76,
         "w": 24,
         "h": 10
       },
@@ -1010,6 +1010,72 @@
         "enableLogDetails": true,
         "sortOrder": "Descending",
         "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 105,
+      "type": "stat",
+      "title": "Authentication",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [
+        {
+          "expr": "sum(pa_monitor_sessions_errored{kind=\"authentication_failed\"}) or vector(0)",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "✓ Auth OK",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1,
+                "to": 1000000,
+                "result": {
+                  "text": "⊘ AUTHENTICATION FAILURE — run /login",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          }
+        }
       }
     }
   ]
