@@ -187,6 +187,9 @@ func apiErrorIsAuthFailure(e *pb.ApiError) bool {
 func formatAuthFailureBanner(sessions []*pb.SessionDetail) string {
 	n := 0
 	for _, sd := range sessions {
+		if sd == nil {
+			continue
+		}
 		if apiErrorIsAuthFailure(sd.GetLastError()) {
 			n++
 		}

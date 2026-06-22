@@ -223,6 +223,9 @@ func TestFormatStatusSessionsAuthColumn(t *testing.T) {
 	if strings.Contains(out, "authentication_failed") {
 		t.Errorf("expected compact 'auth', not raw kind, got:\n%s", out)
 	}
+	if strings.Contains(out, "/login") {
+		t.Errorf("status table column should not contain /login hint, got:\n%s", out)
+	}
 }
 
 func TestFormatSessionInfoAuthHint(t *testing.T) {

@@ -120,6 +120,19 @@ func TestAlertsAuthFailureAbsentWhenNone(t *testing.T) {
 	}
 }
 
+func TestAlertsAuthFailureTierVariants(t *testing.T) {
+	// Narrow tier (80–119 → TierNarrow)
+	outNarrow := Alerts(treeWithAuthFailures(1), AlertsOpts{Now: time.Now(), Width: 90})
+	if !strings.Contains(outNarrow, "⊘ auth — run /login") {
+		t.Errorf("narrow tier: expected '⊘ auth — run /login', got: %q", outNarrow)
+	}
+	// Tiny tier (< 80 → TierTiny)
+	outTiny := Alerts(treeWithAuthFailures(1), AlertsOpts{Now: time.Now(), Width: 40})
+	if !strings.Contains(outTiny, "⊘ /login") {
+		t.Errorf("tiny tier: expected '⊘ /login', got: %q", outTiny)
+	}
+}
+
 func TestAlertsAuthFailureSortsFirst(t *testing.T) {
 	now := time.Date(2026, 5, 8, 20, 0, 0, 0, time.UTC)
 	tree := treeWithAuthFailures(1)

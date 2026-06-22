@@ -192,10 +192,11 @@ func authFailed(le *transcript.ErrorRecord) bool {
 
 // sessionGlyph returns the status glyph for a session row, incorporating error
 // and nudge-queued indicators. Precedence:
-//  1. Working → existing working glyph (overrides everything).
-//  2. LastError terminal+retryable → ⚠ (retryable error).
-//  3. LastError terminal+non-retryable → ✗ (non-retryable / escalated error).
-//  4. Otherwise → normal idle/dormant glyph.
+//  1. Working / rate-limited → existing symbol (overrides everything).
+//  2. LastError terminal + auth failure → ⊘ (run /login).
+//  3. LastError terminal + retryable → ⚠ (retryable error).
+//  4. LastError terminal + non-retryable → ✗ (non-retryable / escalated).
+//  5. Otherwise → normal idle/dormant glyph.
 //
 // Nudge markers (independent of the error precedence above) appended to the
 // primary glyph when the row is NOT Working / rate-limited:
