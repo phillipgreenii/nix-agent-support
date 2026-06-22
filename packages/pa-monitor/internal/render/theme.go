@@ -12,6 +12,7 @@ type Theme struct {
 	Working      lipgloss.Style
 	Idle         lipgloss.Style
 	Awaiting     lipgloss.Style
+	Error        lipgloss.Style
 	Dormant      lipgloss.Style
 	Cursor       lipgloss.Style
 	DirRow       lipgloss.Style
@@ -47,6 +48,7 @@ func NewTheme(hasColors bool) Theme {
 		Working:      lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
 		Idle:         lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		Awaiting:     lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		Error:        lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true),
 		Dormant:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		Cursor:       bold,
 		DirRow:       bold,
