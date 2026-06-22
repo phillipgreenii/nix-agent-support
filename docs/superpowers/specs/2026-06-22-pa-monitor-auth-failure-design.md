@@ -76,9 +76,14 @@ alertable** condition across the TUI, CLI, and Grafana — without touching the
 
 Guiding rules:
 
-- **One definition.** "Is this an auth failure?" is a single predicate keyed off
-  `transcript.ErrAuthFailed`, not the literal string matched in N places. Mirrors
-  the existing `apiErrorIsEscalated` helper.
+- **One definition per package.** "Is this an auth failure?" is a single predicate,
+  not an inline string match scattered across call sites. The render package keys it
+  off `transcript.ErrAuthFailed` (it already imports `transcript` — that's the type
+  of `LastError`). The `cmd` package compares the proto kind to the literal
+  `"authentication_failed"` instead — this matches the existing `apiErrorIsEscalated`
+  convention (`cli_format.go:167`, which compares `"unknown"`/`"server_error"`
+  literals) and avoids a new `cmd → internal/core/transcript` import edge that does
+  not exist today.
 - **Always point at the fix.** Every surface says **run `/login`**.
 - **Account-wide gets a banner.** Beyond per-session marks, auth failure raises a
   top-level banner (TUI alert bar, dashboard banner) because it usually means
@@ -140,9 +145,11 @@ override everything), tier-aware via `wrap.Tier`:
 - Narrow: `⊘ auth — run /login`
 - Tiny: `⊘ /login`
 
-To render the segment red, thread `Theme` into `AlertsOpts` and apply
-`theme.Error`. The call site (`internal/tui/view.go:44`) already has `m.theme`, so
-this is a one-line addition to the existing `render.AlertsOpts{...}` literal.
+To render the segment red, `Alerts` needs the theme. `AlertsOpts` has no `Theme`
+field today, so this is three edits, not one: (1) add `Theme Theme` to `AlertsOpts`
+(`alerts.go:13`), (2) pass `Theme: m.theme` in the `render.AlertsOpts{...}` literal
+at the call site (`internal/tui/view.go:44`, where `m.theme` is in scope), and
+(3) apply `opts.Theme.Error.Render(...)` to the auth segment inside `Alerts`.
 
 **Legend** — `render/modals.go:legendRows`. The error glyphs are currently
 undocumented; add all three:
@@ -155,22 +162,25 @@ undocumented; add all three:
 
 ### 2. CLI (`cmd/pa-monitor`)
 
-**Shared predicate** (proto form, alongside `apiErrorIsEscalated`):
+**Shared predicate** (proto form, alongside `apiErrorIsEscalated` at
+`cli_format.go:163`; literal kind string per that helper's convention — no
+`cmd → transcript` import):
 
 ```go
 func apiErrorIsAuthFailure(e *pb.ApiError) bool {
     return e != nil && e.GetIsTerminal() &&
-        e.GetKind() == string(transcript.ErrAuthFailed)
+        e.GetKind() == "authentication_failed"
 }
 ```
 
-**`status`** — `cli.go:runStatus` already collects `details []*pb.SessionDetail`.
-After collection, count auth failures; if any, print a prominent line near the top
-of the status block (immediately after the `sessions:` summary line, so it is seen
-before scrolling):
+**`status`** — `cli.go:runStatus` already collects `details []*pb.SessionDetail`
+(`cli.go:57`). After collection, count auth failures; if any, print a prominent line
+immediately after the `sessions:` summary line (`cli.go:42`), so it is seen before
+scrolling. Use `⊘` for consistency with the TUI auth glyph (not `⚠`, which the TUI
+uses for retryable errors):
 
 ```
-⚠ authentication failure — run /login (2 sessions)
+⊘ authentication failure — run /login (2 sessions)
 ```
 
 In `formatStatusSessions`, render the ERROR column as the compact `auth` for
@@ -188,9 +198,12 @@ last_error:     authentication_failed — run /login
 
 ### 3. Grafana dashboard (`packages/pa-monitor/grafana/pa-monitor-overview.json`)
 
-Add a **full-width Stat panel at the top of the dashboard** (a new first row, or
-the first panel above the existing "Current status" row). It is **never blank** —
-that is the explicit requirement (no "No data" gap when healthy):
+Add a **full-width Stat panel at the very top of the dashboard**, above the
+existing "Current status" row. Concretely: give the banner `gridPos {x:0, y:0, w:24, h:3}`
+with a fresh unique panel `id` (100–104 and the per-panel ids are taken; use `105`),
+and **shift every existing panel's `y` (and the "Current status" row's `y`) down by 3**
+so nothing overlaps. It is **never blank** — that is the explicit requirement (no
+"No data" gap when healthy):
 
 - **Query** (Prometheus): `sum(pa_monitor_sessions_errored{kind="authentication_failed"}) or vector(0)`
   — the `or vector(0)` guarantees a value even when the series is absent/stale, so
@@ -215,43 +228,98 @@ Goal: make auth failure **register as an alert** in Grafana with the _minimum_
 configuration — not a full alerting/notification build-out. Today the
 observability module provisions datasources + dashboards but **no alerting**.
 
+**Important format note (corrects an earlier draft):** Grafana **alerting** file
+provisioning is _not_ shaped like dashboard provisioning. Dashboards use a
+`dashboards.yaml` provider catalog that points at a directory of JSON files
+(`dashboards.nix:27` renders that catalog). Alerting has **no provider-catalog
+analog** — you drop the rule-definition YAML files directly into
+`provisioning/alerting/` and Grafana loads them. The folder is named **inside each
+rule's YAML**, not in a catalog. So the option below is a flat list of rule files,
+**not** a `{folder, rules}` submodule.
+
 **Observability module (`phillipgreenii-nix-support-apps/darwin/modules/observability`):**
 
-- `ui.nix` — create `provisioning/alerting/` and symlink app-contributed rule
-  files into it, mirroring the existing `provisioning/dashboards` wiring
-  (`ui.nix:56-65`).
-- `dashboards.nix` (or a sibling `alerting.nix`) — add an `alertProviders` option
-  mirroring `dashboardProviders` (`dashboards.nix:45`): each named provider
-  contributes one or more Grafana unified-alerting provisioning YAML files, which
-  the module places under `provisioning/alerting/`.
-- Use Grafana's **default** contact point and default notification policy — no new
-  contact points or routes. The rule will evaluate and show as **Firing** in
-  Alerting; delivery (Slack/email) is wired later when alerting is built out
-  properly.
+- `ui.nix` — `mkdir -p .../provisioning/alerting` and symlink each contributed rule
+  file into it (net-new wiring, parallel to the dashboards symlinks at `ui.nix:56-65`,
+  but symlinking the rule YAML directly, not a catalog).
+- New `alerting.nix` (sibling of `dashboards.nix`) — add option
+  `phillipgreenii.observability.alertRuleFiles = lib.mkOption { type = listOf path; default = []; }`.
+  The module symlinks each into `provisioning/alerting/`. Keep it minimal; this is
+  the first alerting support in the module.
+- **Verify unified alerting is enabled** in the rendered `grafana.ini`
+  (`ui.nix` `grafanaIni`). Grafana ~11.x (nixpkgs 26.05) defaults `[unified_alerting] enabled = true`,
+  but if the ini disables it or enables legacy alerting, `provisioning/alerting/` is
+  silently ignored — confirm during implementation.
+- Use Grafana's **default** contact point + default notification policy — no new
+  contact points or routes. A well-formed rule transitions to **Firing** and shows
+  in Alerting without any contact-point wiring; delivery (Slack/email) is wired later.
 
 **pa-monitor (`phillipgreenii-nix-agent-support`):**
 
-- Add `packages/pa-monitor/grafana/alerting/auth-failure.yaml` — Grafana
-  unified-alerting provisioning (`apiVersion: 1`), one rule group with one rule:
-  - **condition**: `sum(pa_monitor_sessions_errored{kind="authentication_failed"}) > 0`
-  - **for**: `0m` (fire immediately — the error is already terminal)
-  - **labels**: `severity: critical`
-  - **annotations**: `summary: "Authentication failure — run /login"`, description
-    naming the affected-session count.
-  - **folder**: `"Claude Agents"` (same folder the dashboard registers under).
-- Register it in `darwin/modules/pa-monitor/default.nix`, right beside the existing
-  `phillipgreenii.observability.dashboardProviders.pa-monitor` block
-  (`default.nix:50`):
+- Add `packages/pa-monitor/grafana/alerting/auth-failure.yaml` — a complete Grafana
+  unified-alerting provisioning rule. The `condition` is a **refId** (not PromQL),
+  and the query lives in a `data[]` array with a Prometheus query node plus
+  `__expr__` reduce/threshold nodes. The Prometheus datasource UID must be the
+  provisioned one (`prometheus`, matching the dashboard panels' `uid: prometheus`):
 
-  ```nix
-  phillipgreenii.observability.alertProviders.pa-monitor = {
-    folder = "Claude Agents";
-    rules = [ ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml ];
-  };
+  ```yaml
+  apiVersion: 1
+  groups:
+    - orgId: 1
+      name: pa-monitor
+      folder: Claude Agents
+      interval: 1m
+      rules:
+        - uid: pa-monitor-auth-failure
+          title: pa-monitor authentication failure
+          condition: C
+          for: 0s # fire immediately — the error is already terminal
+          noDataState: OK
+          execErrState: Error
+          labels:
+            severity: critical
+          annotations:
+            summary: "Authentication failure — run /login"
+            description: "Claude Code session(s) have a terminal authentication failure (HTTP 401). Run /login to re-authenticate."
+          data:
+            - refId: A
+              relativeTimeRange: { from: 600, to: 0 }
+              datasourceUid: prometheus
+              model:
+                refId: A
+                editorMode: code
+                instant: true
+                expr: sum(pa_monitor_sessions_errored{kind="authentication_failed"}) or vector(0)
+            - refId: B # reduce A to a single number
+              datasourceUid: __expr__
+              model: { refId: B, type: reduce, expression: A, reducer: last }
+            - refId: C # threshold: > 0 ⇒ firing
+              datasourceUid: __expr__
+              model:
+                refId: C
+                type: threshold
+                expression: B
+                conditions: [{ evaluator: { type: gt, params: [0] } }]
   ```
 
-  Guarded the same way as the dashboard registration (no-op on machines without the
-  observability stack).
+- Register it in `darwin/modules/pa-monitor/default.nix`, beside the existing
+  `dashboardProviders.pa-monitor` block (`default.nix:50`), guarded the same way
+  (no-op without the observability stack):
+
+  ```nix
+  phillipgreenii.observability.alertRuleFiles =
+    [ ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml ];
+  ```
+
+**Folder caveat (decided):** alerting file provisioning resolves the folder **by
+title** and auto-creates it if missing, but it does **not** share the UID of the
+folder dashboard provisioning created — a known, still-open Grafana limitation
+(`grafana/grafana#125079`). Result: the alert rule lands in a folder _titled_
+"Claude Agents" that is **distinct** from the dashboards' "Claude Agents" folder
+(two same-named folders). We **accept this** for the minimal registration; it does
+not affect firing or the dashboard banner. Reconciling to a single shared folder
+(e.g. provisioning the folder explicitly with a pinned UID) is deferred to the
+future full-alerting build-out.
 
 ## Out of scope (already correct — regression-test only)
 
@@ -276,8 +344,14 @@ observability module provisions datasources + dashboards but **no alerting**.
   depends on).
 - nudger (`internal/daemon/nudger`): a terminal auth error never produces a nudge
   intent.
-- `nix flake check` in **both** repos; validate the dashboard JSON parses and the
-  alerting YAML is accepted by Grafana provisioning.
+- `nix flake check` in **both** repos; validate the dashboard JSON parses (and the
+  new banner panel has a unique `id` + non-overlapping `gridPos`).
+- Grafana alerting acceptance (manual/live, since it needs a running Grafana):
+  confirm `[unified_alerting] enabled` in the rendered `grafana.ini`; load the
+  provisioned rule and confirm it appears in Alerting → Alert rules and transitions
+  to **Firing** when `pa_monitor_sessions_errored{kind="authentication_failed"} > 0`
+  (and **Normal** when absent, via `or vector(0)`). A YAML lint/schema check can run
+  in CI; firing behavior is verified live.
 
 ## Files touched
 
@@ -288,19 +362,22 @@ observability module provisions datasources + dashboards but **no alerting**.
 - `packages/pa-monitor/internal/render/theme.go` — `Error` (red) style
 - `packages/pa-monitor/internal/render/modals.go` — legend rows
 - `packages/pa-monitor/internal/core/aggregate/tree.go` — `AuthFailedCount()`
-- `packages/pa-monitor/internal/tui/view.go` — pass `Theme` to `AlertsOpts`
+- `packages/pa-monitor/internal/render/alerts.go` — add `Theme` to `AlertsOpts` + apply
+- `packages/pa-monitor/internal/tui/view.go` — pass `Theme: m.theme` to `AlertsOpts`
 - `packages/pa-monitor/cmd/pa-monitor/cli.go` — `status` banner line
 - `packages/pa-monitor/cmd/pa-monitor/cli_format.go` — `apiErrorIsAuthFailure`, column/info
-- `packages/pa-monitor/grafana/pa-monitor-overview.json` — top banner panel
+- `packages/pa-monitor/grafana/pa-monitor-overview.json` — top banner panel (id 105, y-shift)
 - `packages/pa-monitor/grafana/alerting/auth-failure.yaml` — alert rule (new)
-- `darwin/modules/pa-monitor/default.nix` — register `alertProviders.pa-monitor`
+- `darwin/modules/pa-monitor/default.nix` — register `alertRuleFiles`
 - tests alongside the above; README symbols/legend note
 
 **`phillipgreenii-nix-support-apps`:**
 
-- `darwin/modules/observability/ui.nix` — `provisioning/alerting/` symlink
-- `darwin/modules/observability/dashboards.nix` (or new `alerting.nix`) —
-  `alertProviders` option + render
+- `darwin/modules/observability/ui.nix` — `provisioning/alerting/` mkdir + symlink
+  rule files; confirm `[unified_alerting] enabled` in `grafanaIni`
+- `darwin/modules/observability/alerting.nix` (new) — `alertRuleFiles` option
+  (`listOf path`) + render (symlinks rule YAML directly into `provisioning/alerting/`)
+- `darwin/modules/observability/default.nix` — import `alerting.nix`
 - module README
 
 ## Consequences
