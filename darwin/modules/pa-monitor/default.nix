@@ -51,6 +51,9 @@ in
         folder = "Claude Agents";
         dashboards = [ ../../../packages/pa-monitor/grafana/pa-monitor-overview.json ];
       };
+      phillipgreenii.observability.alertRuleFiles = [
+        ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml
+      ];
     })
 
     # LaunchAgent registration via the canonical helper (ADR 0049). The

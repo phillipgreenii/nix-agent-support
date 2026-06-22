@@ -97,6 +97,21 @@ Consumer-specific values (e.g. `workspace.scope=zr`) come from external shell-ou
 
 `config.toml` is nix-rendered; see `internal/config/config.go` for keys. Defaults work for most users.
 
+## TUI symbols
+
+Status glyph shown next to each session (see `internal/render/modals.go` for the in-app legend):
+
+| Glyph | Status   | Meaning                               |
+| ----- | -------- | ------------------------------------- |
+| `●`   | working  | actively producing output             |
+| `○`   | idle     | waiting for input                     |
+| `⏸`   | paused   | rate-limited                          |
+| `?`   | awaiting | asked for clarification               |
+| `✕`   | dormant  | ended (resumable)                     |
+| `⊘`   | auth     | authentication failure — run `/login` |
+| `⚠`   | error    | retryable error (auto-resuming)       |
+| `✗`   | error    | non-retryable error                   |
+
 ## Keybindings (TUI)
 
 | Key                  | Action                              |
