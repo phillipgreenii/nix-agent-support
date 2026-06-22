@@ -61,3 +61,17 @@ func TestRetryable_nilIsFalse(t *testing.T) {
 		t.Error("Retryable(nil) = true, want false")
 	}
 }
+
+func TestAuthFailedIsTerminalAndNonRetryable(t *testing.T) {
+	rec := &ErrorRecord{
+		Kind:       ErrAuthFailed,
+		Text:       "Please run /login · API Error: 401 Invalid authentication credentials",
+		IsTerminal: true,
+	}
+	if rec.RetryClass() != ClassTerminal {
+		t.Errorf("auth failure RetryClass = %v, want ClassTerminal", rec.RetryClass())
+	}
+	if Retryable(rec) {
+		t.Error("auth failure must be non-retryable (Retryable == false)")
+	}
+}
