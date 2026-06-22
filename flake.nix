@@ -314,11 +314,6 @@
       phillipgreenii = {
         # Custom hooks merged into the base pre-commit set.
         pre-commit.extraHooks = extraHooks;
-
-        # go is needed in the devShell (Go packages / pre-commit Go hooks at commit
-        # time). The extraInputs option is a flat `listOf package` evaluated once
-        # (system-agnostic), so pin to the primary dev host like the hook tooling.
-        devshell.extraInputs = [ hookPkgs.go ];
       };
 
       perSystem =
@@ -364,6 +359,11 @@
           # formatter, devShells.default, packages.install-pre-commit-hooks,
           # checks.{formatting, linting, pre-commit, consumer-input-alignment}
           # — all auto-contributed by the imported flakeModules.
+
+          # go is needed in the devShell (Go packages / pre-commit Go hooks at
+          # commit time). Uses the perSystem overlaid pkgs so the package matches
+          # the current system's architecture.
+          phillipgreenii.devshell.extraInputs = [ pkgs.go ];
 
           checks = {
             test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
