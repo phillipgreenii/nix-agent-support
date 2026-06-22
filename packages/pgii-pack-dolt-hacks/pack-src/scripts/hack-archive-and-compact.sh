@@ -266,7 +266,7 @@ fi
 # ── Step 6: git commit the archive (continuable) ────────────────────
 log "STEP 6: git add archive/ && git commit"
 if [ -d "$CITY_DIR/.git" ]; then
-  cd "$CITY_DIR"
+  cd "$CITY_DIR" || exit 1
   if ! git add archive/ 2>"$TMP.err"; then
     err "STEP 6: git add archive/ failed:"
     sed 's/^/    /' "$TMP.err" >&2 || true

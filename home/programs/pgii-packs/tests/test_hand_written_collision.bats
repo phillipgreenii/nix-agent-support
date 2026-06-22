@@ -18,7 +18,7 @@ EOF
 
   run "$SCRIPT" --cities "$cities" --packs "$packs"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "Hand-written [imports.pgii-pack-foo] exists" ]]
+  [[ "$output" == *"Hand-written [imports.pgii-pack-foo] exists"* ]]
 
   # File untouched.
   grep -q "somewhere-by-hand" "$city/pack.toml"

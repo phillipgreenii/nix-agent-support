@@ -1,7 +1,7 @@
 # bash completion for agent-activity-api
 
 _agent_activity_api() {
-  local cur prev opts
+  local cur prev
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD - 1]}"
@@ -14,7 +14,7 @@ _agent_activity_api() {
 
   # If first argument, complete commands
   if [[ ${COMP_CWORD} -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "${commands}" -- ${cur}))
+    mapfile -t COMPREPLY < <(compgen -W "${commands}" -- "${cur}")
     return 0
   fi
 
@@ -26,7 +26,7 @@ _agent_activity_api() {
       return 0
       ;;
     *)
-      COMPREPLY=($(compgen -W "${wait_opts}" -- ${cur}))
+      mapfile -t COMPREPLY < <(compgen -W "${wait_opts}" -- "${cur}")
       return 0
       ;;
     esac

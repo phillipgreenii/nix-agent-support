@@ -9,11 +9,13 @@ setup() {
     fi
 
     # Create a separate directory for mock scripts (not in the git repo)
-    export MOCK_DIR=$(mktemp -d)
+    export MOCK_DIR
+    MOCK_DIR=$(mktemp -d)
 
     # Create a temporary git repository
-    export TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
+    export TEST_DIR
+    TEST_DIR=$(mktemp -d)
+    cd "$TEST_DIR" || return 1
     git init --initial-branch=main
     git config user.email "test@example.com"
     git config user.name "Test User"

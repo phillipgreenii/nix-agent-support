@@ -83,7 +83,7 @@ EOF
 
   run_wait_for_agents --version
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "pa-monitor 1.2.3" ]]
+  [[ "$output" == *"pa-monitor 1.2.3"* ]]
 }
 
 @test "forwards --wait-until-idle by default" {

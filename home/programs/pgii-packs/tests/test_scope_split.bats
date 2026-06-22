@@ -125,7 +125,7 @@ EOF
   run "$SCRIPT" --cities "$(citiesJson "$city")" \
                 --packs  "$(packsJson "pgii-pr-support" "$citypack")"
   [ "$status" -ne 0 ]
-  [[ "$output" =~ "Hand-written [imports.pgii-pr-support] exists" ]]
+  [[ "$output" == *"Hand-written [imports.pgii-pr-support] exists"* ]]
   grep -q "/by-hand" "$city/pack.toml"
 }
 

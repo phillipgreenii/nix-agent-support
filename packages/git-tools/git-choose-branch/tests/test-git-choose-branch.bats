@@ -9,8 +9,9 @@ setup() {
     fi
 
     # Create a temporary git repository
-    export TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
+    export TEST_DIR
+    TEST_DIR=$(mktemp -d)
+    cd "$TEST_DIR" || return 1
     git init --initial-branch=main
     git config user.email "test@example.com"
     git config user.name "Test User"

@@ -1,14 +1,14 @@
 # bash completion for git-branch-maintenance
 
 _git_branch_maintenance() {
-  local cur prev words cword
+  local cur prev
   _init_completion || return
 
   local flags="--ff --rebase --delete-merged --delete-merged-worktrees --protect-branch --protect-worktree --dry-run --force --help"
 
   # If current word starts with -, complete flags
   if [[ $cur == -* ]]; then
-    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    mapfile -t COMPREPLY < <(compgen -W "$flags" -- "$cur")
     return
   fi
 
@@ -16,8 +16,9 @@ _git_branch_maintenance() {
   case "$prev" in
   --protect-branch)
     # Complete with branch names
-    local branches=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
-    COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+    local branches
+    branches=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+    mapfile -t COMPREPLY < <(compgen -W "$branches" -- "$cur")
     return
     ;;
   --protect-worktree)
@@ -28,8 +29,9 @@ _git_branch_maintenance() {
   esac
 
   # Otherwise complete with branch names
-  local branches=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
-  COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+  local branches
+  branches=$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+  mapfile -t COMPREPLY < <(compgen -W "$branches" -- "$cur")
 }
 
 complete -F _git_branch_maintenance git-branch-maintenance

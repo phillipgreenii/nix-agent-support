@@ -13,6 +13,7 @@ setup() {
     source "${LIB_PATH}/claude-activity-lib.bash"
   else
     # LIB_PATH is a file (nix composed library) — source directly
+    # shellcheck disable=SC1090  # dynamic path resolved at runtime
     source "${LIB_PATH}"
   fi
 
@@ -20,8 +21,11 @@ setup() {
   TEST_DIR="$(mktemp -d)"
   export CLAUDE_TRACKING_ACTIVITY_DIR="$TEST_DIR/claude-activity"
   export CLAUDE_ACTIVITY_MAX_AGE=1440
-  # Re-evaluate ACTIVITY_DIR after setting the env var
+  # Re-evaluate ACTIVITY_DIR/MAX_AGE_MINUTES after setting the env vars; these
+  # globals are read by the sourced library, so shellcheck cannot see the use.
+  # shellcheck disable=SC2034
   ACTIVITY_DIR="${CLAUDE_TRACKING_ACTIVITY_DIR}"
+  # shellcheck disable=SC2034
   MAX_AGE_MINUTES="${CLAUDE_ACTIVITY_MAX_AGE}"
   mkdir -p "$CLAUDE_TRACKING_ACTIVITY_DIR"
 
@@ -47,6 +51,8 @@ teardown() {
 
 @test "ensure_activity_dir creates directory" {
   local new_dir="$TEST_DIR/new-activity-dir"
+  # ACTIVITY_DIR is read by ensure_activity_dir (sourced lib); not unused.
+  # shellcheck disable=SC2034
   ACTIVITY_DIR="$new_dir"
   [ ! -d "$new_dir" ]
   ensure_activity_dir

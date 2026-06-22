@@ -20,14 +20,14 @@
       url = "github:phillipgreenii/nix-repo-base";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        nixpkgs-unstable.follows = "nixpkgs-unstable";
-        llm-agents.follows = "llm-agents";
-        nix-vscode-extensions.follows = "nix-vscode-extensions";
-        flake-utils.follows = "flake-utils";
         git-hooks.follows = "git-hooks";
         treefmt-nix.follows = "treefmt-nix";
       };
     };
+    # flake-parts: framework for the consumed nix-base flakeModules. Deduped onto
+    # nix-base's pin so it is a single shared node (inherits nix-base's
+    # nixpkgs-lib follow; no extra wiring needed).
+    flake-parts.follows = "phillipgreenii-nix-base/flake-parts";
     nix-darwin.url = "github:LnL7/nix-darwin/nix-darwin-26.05";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     home-manager.url = "github:nix-community/home-manager/release-26.05";
@@ -55,14 +55,14 @@
   };
 
   outputs =
-    {
+    inputs@{
       self,
       nixpkgs,
       nixpkgs-unstable,
       llm-agents,
       phillipgreenii-nix-overlay,
       phillipgreenii-nix-base,
-      flake-utils,
+      flake-parts,
       gomod2nix,
       ...
     }:
@@ -222,8 +222,111 @@
             };
         };
 
-      systemOutputs = flake-utils.lib.eachDefaultSystem (
-        system:
+      # Fixed pkgs used ONLY to build the pre-commit hook entries below. The
+      # `phillipgreenii.pre-commit.extraHooks` option is top-level (system-agnostic),
+      # so it cannot close over perSystem `pkgs`; pin the hook tooling to
+      # aarch64-darwin, the primary dev host where these hooks run at commit time.
+      hookSystem = "aarch64-darwin";
+      hookPkgs = import nixpkgs { system = hookSystem; };
+
+      # Custom pre-commit hooks merged into the base set (which already provides
+      # treefmt, statix, deadnix, shellcheck --severity=warning, trailing-whitespace,
+      # end-of-file-fixer, check-merge-conflicts, check-case-conflicts). Those are
+      # DROPPED here as redundant.
+      extraHooks = {
+        gofmt = {
+          enable = true;
+          name = "gofmt (pg-pr/pr-pool)";
+          entry = "${hookPkgs.go}/bin/gofmt -l -w";
+          files = "^packages/(pg-pr|pr-pool)/.*\\.go$";
+          types_or = [ "go" ];
+        };
+        golangci-lint = {
+          enable = true;
+          name = "golangci-lint (pg-pr)";
+          # Default hook runs `golangci-lint run ./<dir>` from the repo root,
+          # which fails for monorepo modules (no enclosing go.mod). Override
+          # entry to chdir into the pg-pr module first.
+          entry = toString (
+            hookPkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
+              set -e
+              # golangci-lint shells out to `go`; put it on PATH.
+              export PATH="${hookPkgs.go}/bin:$PATH"
+              # The auto checks.pre-commit runs this hook inside a pure nix build
+              # sandbox (NIX_BUILD_TOP set, HOME=/homeless-shelter, no network).
+              # golangci-lint needs to download pg-pr's external module deps,
+              # which the sandbox cannot do. Skip there; lint normally on a dev
+              # machine. Preserves the pre-migration behaviour, where this hook
+              # only ran at commit time (it never ran in flake check before).
+              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                echo "golangci-lint (pg-pr): skipped — nix build sandbox (no network for go module download)"
+                exit 0
+              fi
+              cd packages/pg-pr
+              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+            ''
+          );
+          files = "^packages/pg-pr/.*\\.go$";
+          pass_filenames = false;
+        };
+        golangci-lint-pr-pool = {
+          enable = true;
+          name = "golangci-lint (pr-pool)";
+          entry = toString (
+            hookPkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
+              set -e
+              # golangci-lint shells out to `go`; put it on PATH.
+              export PATH="${hookPkgs.go}/bin:$PATH"
+              # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
+              # pr-pool has external deps + a local replace to ../claude-transcript
+              # that golangci-lint cannot resolve offline. Lint normally on a dev
+              # machine. Mirrors the pg-pr hook guard above.
+              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                echo "golangci-lint (pr-pool): skipped — nix build sandbox (no network for go module download)"
+                exit 0
+              fi
+              cd packages/pr-pool
+              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+            ''
+          );
+          files = "^packages/pr-pool/.*\\.go$";
+          pass_filenames = false;
+        };
+      };
+    in
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      # Mirror flake-utils.lib.eachDefaultSystem verbatim — standalone,
+      # multi-system (darwin + linux).
+      systems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "x86_64-linux"
+      ];
+
+      imports = [
+        # pre-commit transitively imports treefmt; do NOT import treefmt separately.
+        inputs.phillipgreenii-nix-base.flakeModules.pre-commit
+        inputs.phillipgreenii-nix-base.flakeModules.devshell
+        inputs.phillipgreenii-nix-base.flakeModules.checks
+      ];
+
+      phillipgreenii = {
+        # Custom hooks merged into the base pre-commit set.
+        pre-commit.extraHooks = extraHooks;
+
+        # go is needed in the devShell (Go packages / pre-commit Go hooks at commit
+        # time). The extraInputs option is a flat `listOf package` evaluated once
+        # (system-agnostic), so pin to the primary dev host like the hook tooling.
+        devshell.extraInputs = [ hookPkgs.go ];
+      };
+
+      perSystem =
+        {
+          system,
+          checksHelpers,
+          ...
+        }:
         let
           pkgs = import nixpkgs {
             inherit system;
@@ -249,55 +352,21 @@
             ];
           };
           inherit (pkgs) lib;
-
-          checks-lib = phillipgreenii-nix-base.lib.mkChecks pkgs;
-          treefmtEval = phillipgreenii-nix-base.lib.mkTreefmtConfig { inherit pkgs; };
-          pre-commit = phillipgreenii-nix-base.lib.mkPreCommitHooks {
-            inherit system;
-            src = ./.;
-            treefmtWrapper = treefmtEval.config.build.wrapper;
-            extraHooks = {
-              gofmt = {
-                enable = true;
-                files = "^packages/(pg-pr|pr-pool)/.*\\.go$";
-              };
-              golangci-lint = {
-                enable = true;
-                files = "^packages/pg-pr/.*\\.go$";
-                # Default hook runs `golangci-lint run ./<dir>` from the repo root,
-                # which fails for monorepo modules (no enclosing go.mod). Override
-                # entry to chdir into the pg-pr module first.
-                entry = toString (
-                  pkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
-                    set -e
-                    cd packages/pg-pr
-                    ${pkgs.golangci-lint}/bin/golangci-lint run ./...
-                  ''
-                );
-                pass_filenames = false;
-              };
-              golangci-lint-pr-pool = {
-                enable = true;
-                files = "^packages/pr-pool/.*\\.go$";
-                entry = toString (
-                  pkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
-                    set -e
-                    cd packages/pr-pool
-                    ${pkgs.golangci-lint}/bin/golangci-lint run ./...
-                  ''
-                );
-                pass_filenames = false;
-              };
-            };
-          };
         in
         {
-          formatter = treefmtEval.config.build.wrapper;
+          # The perSystem pkgs carries the full agent-support overlay stack
+          # (gomod2nix + nix-overlay + unstable + llm-agents ccusage + this
+          # flake's overlay). flake-parts' own `pkgs` arg is overridden so the
+          # auto-contributed checks (formatting, linting, pre-commit) and the
+          # checks below all see the overlaid package set.
+          _module.args.pkgs = pkgs;
+
+          # formatter, devShells.default, packages.install-pre-commit-hooks,
+          # checks.{formatting, linting, pre-commit, consumer-input-alignment}
+          # — all auto-contributed by the imported flakeModules.
 
           checks = {
-            formatting = treefmtEval.config.build.check self;
-            linting = checks-lib.linting ./.;
-            test-update-locks-lib = checks-lib.testUpdateLocksLib { };
+            test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
             test-ollama-wrapper =
               let
@@ -312,7 +381,7 @@
                   '';
                 };
               in
-              checks-lib.testBashScripts {
+              checksHelpers.testBashScripts {
                 package = wrapper;
                 tests = ./home/programs/ollama/tests;
                 extraInputs = [ ];
@@ -326,7 +395,7 @@
                 };
                 wrapperScript = slScripts.mkWrapperScript slScripts.defaultParts;
               in
-              checks-lib.testBashScripts {
+              checksHelpers.testBashScripts {
                 package = pkgs.writeShellScriptBin "claude-status-line" ''
                   exec ${wrapperScript} "$@"
                 '';
@@ -334,7 +403,7 @@
                 extraInputs = [ ];
               };
 
-            test-claude-settings-replace = checks-lib.testBashScripts {
+            test-claude-settings-replace = checksHelpers.testBashScripts {
               package = pkgs.writeShellApplication {
                 name = "claude-settings-replace-managed-keys";
                 runtimeInputs = [
@@ -350,7 +419,7 @@
               ];
             };
 
-            test-claude-settings-install-plugin = checks-lib.testBashScripts {
+            test-claude-settings-install-plugin = checksHelpers.testBashScripts {
               package = pkgs.writeShellApplication {
                 name = "claude-settings-install-plugin";
                 runtimeInputs = [
@@ -366,7 +435,7 @@
               ];
             };
 
-            test-pgii-packs-activation = checks-lib.testBashScripts {
+            test-pgii-packs-activation = checksHelpers.testBashScripts {
               package = pkgs.writeShellApplication {
                 name = "pgii-packs-activation";
                 runtimeInputs = [
@@ -691,10 +760,7 @@
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}
             '';
-            install-pre-commit-hooks = pkgs.writeShellScriptBin "install-pre-commit-hooks" ''
-              ${pre-commit.shellHook}
-              echo "Pre-commit hooks installed successfully!"
-            '';
+            # install-pre-commit-hooks REMOVED — pre-commit module auto-contributes it.
             # pa-monitor-codegen wraps the gen-proto.sh script with
             # protoc + plugins on PATH so `nix run .#pa-monitor-codegen`
             # works without relying on the user's devbox.
@@ -733,37 +799,42 @@
             };
           };
 
-          devShells.default = phillipgreenii-nix-base.lib.mkDevShell {
-            inherit pkgs;
-            pre-commit-shellHook = pre-commit.shellHook;
-            extraInputs = [ pkgs.go ];
-          };
-        }
-      );
-    in
-    systemOutputs
-    // {
-      darwinModules.default = ./darwin;
-      nixosModules.default = ./nixos;
-      homeModules.default =
-        { lib, ... }:
-        {
-          imports = [ ./home ];
-          config.phillipgreenii.programs.claude.plugins.local.version = lib.mkDefault self.lib.pluginVersion;
+          # devShells.default is auto-contributed by flakeModules.devshell
+          # (nixfmt/statix/deadnix/shellcheck + the pre-commit shellHook + the
+          # phillipgreenii.devshell.extraInputs go above).
         };
-      homeModules.install-metadata = phillipgreenii-nix-base.lib.mkInstallMetadata {
-        flakeSelf = self;
-        name = "phillipgreenii-nix-agent-support";
-      };
-      overlays.default = overlay;
-      lib = {
-        pluginVersion =
-          let
-            ts = self.lastModifiedDate or "19700101000000";
-            year = builtins.substring 0 4 ts;
-            rest = builtins.substring 4 10 ts;
-          in
-          "0.${year}.${rest}";
+
+      flake = {
+        darwinModules.default = ./darwin;
+        nixosModules.default = ./nixos;
+        homeModules.default =
+          { lib, ... }:
+          {
+            imports = [ ./home ];
+            config.phillipgreenii.programs.claude.plugins.local.version = lib.mkDefault self.lib.pluginVersion;
+          };
+        # Shape-B wrapper: imports the producer's HM module and sets options
+        # with this flake's self + name. Downstream consumers see the configured
+        # module shape (no further options to set).
+        homeModules.install-metadata =
+          { ... }:
+          {
+            imports = [ inputs.phillipgreenii-nix-base.homeModules.install-metadata ];
+            phillipgreenii.install-metadata = {
+              flakeSelf = self;
+              name = "phillipgreenii-nix-agent-support";
+            };
+          };
+        overlays.default = overlay;
+        lib = {
+          pluginVersion =
+            let
+              ts = self.lastModifiedDate or "19700101000000";
+              year = builtins.substring 0 4 ts;
+              rest = builtins.substring 4 10 ts;
+            in
+            "0.${year}.${rest}";
+        };
       };
     };
 }

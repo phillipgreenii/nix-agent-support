@@ -77,9 +77,11 @@ EOF
 
 @test "read_cursor: missing file returns now - 86400" {
   load_script
-  local before=$(date +%s)
+  local before
+  before=$(date +%s)
   local result; result="$(read_cursor)"
-  local after=$(date +%s)
+  local after
+  after=$(date +%s)
   [ "$result" -ge $((before - 86400)) ]
   [ "$result" -le $((after - 86400 + 1)) ]
 }
@@ -87,7 +89,8 @@ EOF
 @test "read_cursor: malformed file falls back to now - 86400" {
   echo "garbage" > "$CURSOR_FILE"
   load_script
-  local before=$(date +%s)
+  local before
+  before=$(date +%s)
   local result; result="$(read_cursor)"
   [ "$result" -ge $((before - 86400 - 1)) ]
 }
@@ -96,7 +99,8 @@ EOF
   local eight_days_ago=$(( $(date +%s) - 8*86400 ))
   echo "$eight_days_ago" > "$CURSOR_FILE"
   load_script
-  local now=$(date +%s)
+  local now
+  now=$(date +%s)
   local result; result="$(read_cursor)"
   [ "$result" -ge $((now - 604801)) ]
   [ "$result" -le $((now - 604799)) ]

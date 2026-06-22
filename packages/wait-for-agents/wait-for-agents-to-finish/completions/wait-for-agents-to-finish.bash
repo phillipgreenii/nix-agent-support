@@ -1,14 +1,14 @@
 # bash completion for wait-for-agents-to-finish
 
 _wait_for_agents_to_finish() {
-  local cur prev words cword
+  local cur prev
   _init_completion || return
 
   local flags="--maximum-wait --time-between-checks --consecutive-idle-checks --caffeinate --help -h"
 
   # If current word starts with -, complete flags
   if [[ $cur == -* ]]; then
-    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    mapfile -t COMPREPLY < <(compgen -W "$flags" -- "$cur")
     return
   fi
 

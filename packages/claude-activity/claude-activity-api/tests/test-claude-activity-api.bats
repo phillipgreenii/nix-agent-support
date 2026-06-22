@@ -65,7 +65,7 @@ teardown() {
 
   run run_cmd claude-activity-api clean
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "Removed 1 stale file(s)" ]]
+  [[ "$output" == *"Removed 1 stale file(s)"* ]]
 
   # Fresh file should still exist
   [ -f "$CLAUDE_TRACKING_ACTIVITY_DIR/fresh.json" ]
@@ -76,7 +76,7 @@ teardown() {
 @test "claude-activity-api clean handles empty directory" {
   run run_cmd claude-activity-api clean
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "Removed 0 stale file(s)" ]]
+  [[ "$output" == *"Removed 0 stale file(s)"* ]]
 }
 
 @test "claude-activity-api help shows usage" {

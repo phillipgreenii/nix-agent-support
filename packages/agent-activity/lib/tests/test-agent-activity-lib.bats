@@ -13,6 +13,7 @@ setup() {
     source "${LIB_PATH}/agent-activity-lib.bash"
   else
     # LIB_PATH is a file (nix composed library) — source directly
+    # shellcheck disable=SC1090  # dynamic path resolved at runtime
     source "${LIB_PATH}"
   fi
 
@@ -34,6 +35,8 @@ esac
 MOCK
   chmod +x "$TEST_DIR/claude-activity-api"
   export CLAUDE_ACTIVITY_CMD="$TEST_DIR/claude-activity-api"
+  # CLAUDE_CMD is read by the sourced lib's functions; shellcheck can't see it.
+  # shellcheck disable=SC2034
   CLAUDE_CMD="$TEST_DIR/claude-activity-api"
 }
 
@@ -74,6 +77,8 @@ teardown() {
 @test "relative_path converts HOME prefix to tilde" {
   run relative_path "$HOME/projects/test"
   [ "$status" -eq 0 ]
+  # The leading ~ is a literal in relative_path's output, not a path to expand.
+  # shellcheck disable=SC2088
   [ "$output" = "~/projects/test" ]
 }
 

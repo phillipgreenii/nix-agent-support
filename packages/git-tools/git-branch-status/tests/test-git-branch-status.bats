@@ -9,8 +9,9 @@ setup() {
     fi
 
     # Create a temporary git repository
-    export TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
+    export TEST_DIR
+    TEST_DIR=$(mktemp -d)
+    cd "$TEST_DIR" || return 1
     git init --initial-branch=main
     git config user.email "test@example.com"
     git config user.name "Test User"
@@ -85,6 +86,8 @@ EOF
     export PATH="$TEST_DIR:$PATH"
 }
 
+# Forwards optional arguments to the script under test; callers may pass none.
+# shellcheck disable=SC2120
 run_git_branch_status() {
     run bash -euo pipefail "$SCRIPTS_DIR/git-branch-status.sh" "$@"
 }
