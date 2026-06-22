@@ -50,5 +50,5 @@ schema = 3
     hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.52.0'
-    hash = 'sha256-Y3TfO3AKxTIE2p00llUdXf8p9X5uw+EpSrwCAtO3Dyc='
+    version = 'v1.53.0'
+    hash = 'sha256-G8pXCpu2jJlPxd+7p1vQd8GzWGCTnKQug58fnQzTVRY='
