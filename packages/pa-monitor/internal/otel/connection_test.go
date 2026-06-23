@@ -41,3 +41,24 @@ func TestConnectionEmitterConstructsAndRecords(t *testing.T) {
 		t.Errorf("connectedValue = %d, want 0", got)
 	}
 }
+
+// TestConnectionEmitterLogEvent exercises the LogEvent emission path on a
+// constructed (non-nil) emitter: it must build a record and walk the attrs
+// map, skipping empty values, without panicking. The batch log processor
+// buffers the record, so no live collector is required.
+func TestConnectionEmitterLogEvent(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+	e, err := NewConnectionEmitter(context.Background(), ConnOptions{
+		ServiceName: "pa-monitor", ServiceVersion: "test", Component: "cmux-bridge",
+	})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	if e == nil {
+		t.Fatal("want non-nil emitter when endpoint set")
+	}
+	defer e.Shutdown(context.Background())
+	// Non-empty and empty values: the empty value must be skipped by the loop.
+	e.LogEvent("daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
+	e.LogEvent("daemon.reconnect", nil)
+}

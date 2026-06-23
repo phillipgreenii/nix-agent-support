@@ -32,6 +32,12 @@ func TestCaffeinatePhraseLowercase(t *testing.T) {
 	if caffeinatePhrase(true) != "Caffeinated enabled" {
 		t.Errorf("got %q", caffeinatePhrase(true))
 	}
+	if caffeinatePhrase(false) != "Caffeinated disabled" {
+		t.Errorf("got %q", caffeinatePhrase(false))
+	}
+	if autoNudgePhrase(true) != "Auto Nudge enabled" {
+		t.Errorf("got %q", autoNudgePhrase(true))
+	}
 	if autoNudgePhrase(false) != "Auto Nudge disabled" {
 		t.Errorf("got %q", autoNudgePhrase(false))
 	}
