@@ -153,14 +153,21 @@ func ClassifyFrame(f1, f2, f3 string, nFrames int) PaneVerdict {
 // Classify applies the reconciliation precedence to gathered Inputs. Pure: no
 // I/O, no clock. This is the unit under test.
 //
-// Precedence (first match wins):
-//  1. !Live                         -> not-live (carry LastKnown = row state)
-//  2. in-flight (pane)              -> working + sub (thinking|streaming)
-//  3. settled + row NeedsInput      -> waiting-for-human (hook-set; PRIMARY signal)
-//  4. settled + Awaiting            -> waiting-for-human (transcript FALLBACK)
-//  5. settled + row Failed          -> error
-//  6. settled + row Starting        -> working/thinking (launching; direct row check)
-//  7. else                          -> idle
+// Precedence (first match wins). The registry verdict (in.Registry, valid only
+// when in.RegistryFound) is an additive cross-check: it NEVER supplies substate
+// (thinking/streaming stay pane-derived) and NEVER overrides the hook-set
+// NeedsInput row. Mapping: Active->working, WaitingForHuman->waiting-for-human,
+// Idle->idle.
+//  1. !Live                                  -> not-live (carry LastKnown = row state)
+//  2. in-flight (pane)                        -> working + sub (thinking|streaming)
+//  3. settled + row NeedsInput                -> waiting-for-human (hook-set; PRIMARY)
+//  4. settled + registry WaitingForHuman      -> waiting-for-human (registry cross-check)
+//  5. settled + Awaiting (transcript)         -> waiting-for-human (transcript FALLBACK)
+//  6. settled + registry Active               -> working (substate none; busy TRUSTED)
+//  7. settled + row Failed                    -> error
+//  8. settled + row Starting                  -> working/thinking (launching)
+//  9. settled + registry Idle                 -> idle (positive idle confirmation)
+// 10. else                                    -> idle
 func Classify(in Inputs) Result {
 	res := Result{Name: in.Name, Live: in.Live, LastKnown: in.Row.State}
 	res.RegistryFound = in.RegistryFound
@@ -192,11 +199,29 @@ func Classify(in Inputs) Result {
 		res.Question = in.Row.PendingQuestion
 		return res
 	}
+	// Registry cross-check (precedence 4): a pid-gated registry verdict of
+	// WaitingForHuman classifies waiting-for-human even when the hook never
+	// fired. Surfaces the row's pending question (may be empty). Placed after the
+	// hook-set NeedsInput row so that PRIMARY signal still wins.
+	if in.RegistryFound && in.Registry.Activity == ct.WaitingForHuman {
+		res.State = WaitingForHuman
+		res.Question = in.Row.PendingQuestion
+		return res
+	}
 	// FALLBACK (defense-in-depth): the transcript Awaiting signal still classifies
 	// waiting-for-human when the row is NOT NeedsInput (e.g. the hook never fired).
 	if in.Awaiting {
 		res.State = WaitingForHuman
 		res.Question = in.Row.PendingQuestion
+		return res
+	}
+	// Registry cross-check (precedence 6): the pane settled this sample but a
+	// pid-gated registry verdict of Active says a turn is underway (busy is
+	// TRUSTED — never demoted on transcript/pane staleness; mirrors pa-monitor).
+	// No substate: the pane was settled, so thinking/streaming is unknown.
+	if in.RegistryFound && in.Registry.Activity == ct.Active {
+		res.State = Working
+		res.SubState = SubNone
 		return res
 	}
 	if in.Row.State == store.Errored {

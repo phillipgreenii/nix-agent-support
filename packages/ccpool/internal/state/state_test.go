@@ -482,6 +482,90 @@ func TestGather_lastTextErrorTolerated(t *testing.T) {
 	}
 }
 
+func TestClassify_registrySignal(t *testing.T) {
+	const staticPane = "❯ ready for input\n  -- INSERT --"
+	const counter = "✽ Envisioning… (5s · ↓ 13 tokens · thinking with xhigh effort)"
+	settled := func(rowState store.State) Inputs {
+		return Inputs{
+			Name: "a", Live: true,
+			Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3,
+			Row: store.Session{State: rowState},
+		}
+	}
+	withReg := func(in Inputs, a ct.Activity) Inputs {
+		in.RegistryFound = true
+		in.Registry = ct.ActivityVerdict{Activity: a}
+		return in
+	}
+
+	cases := []struct {
+		name    string
+		in      Inputs
+		want    State
+		wantSub SubState
+	}{
+		{
+			// NEW: settled pane + registry says Active -> working (no substate; pane was settled).
+			name:    "settled_pane_registry_active_is_working",
+			in:      withReg(settled(store.Ready), ct.Active),
+			want:    Working,
+			wantSub: SubNone,
+		},
+		{
+			// NEW: settled pane + registry says WaitingForHuman -> waiting-for-human.
+			name: "settled_pane_registry_waiting_is_waiting_for_human",
+			in:   withReg(settled(store.Ready), ct.WaitingForHuman),
+			want: WaitingForHuman,
+		},
+		{
+			// NEW: settled pane + registry says Idle -> idle.
+			name: "settled_pane_registry_idle_is_idle",
+			in:   withReg(settled(store.Ready), ct.Idle),
+			want: Idle,
+		},
+		{
+			// REGRESSION GUARD: the hook-set NeedsInput row stays PRIMARY even when
+			// the registry says Active — waiting-for-human wins, question preserved.
+			name: "needs_input_row_beats_registry_active",
+			in: func() Inputs {
+				in := withReg(settled(store.NeedsInput), ct.Active)
+				in.Row.PendingQuestion = "Alpha or Bravo?"
+				return in
+			}(),
+			want: WaitingForHuman,
+		},
+		{
+			// SUBSTATE GUARD: a live pane counter still yields working/THINKING even
+			// when the registry only says Active (no substate) — the pane owns substate.
+			name: "pane_counter_keeps_thinking_substate_over_registry",
+			in: func() Inputs {
+				in := Inputs{Name: "a", Live: true, Frame1: counter, NumFrames: 1, Row: store.Session{State: store.Working}}
+				return withReg(in, ct.Active)
+			}(),
+			want:    Working,
+			wantSub: SubThinking,
+		},
+		{
+			// FALLBACK GUARD: when no live registry row was found, behavior is the
+			// pre-change pane+row precedence (settled Ready row -> idle).
+			name: "no_registry_row_falls_back_to_idle",
+			in:   settled(store.Ready),
+			want: Idle,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(tc.in)
+			if got.State != tc.want {
+				t.Errorf("State = %q, want %q", got.State, tc.want)
+			}
+			if got.SubState != tc.wantSub {
+				t.Errorf("SubState = %q, want %q", got.SubState, tc.wantSub)
+			}
+		})
+	}
+}
+
 func TestInputsAndResult_carryRegistryVerdict(t *testing.T) {
 	in := Inputs{
 		Name: "a", Live: true, Row: store.Session{State: store.Working},
