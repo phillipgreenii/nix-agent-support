@@ -343,6 +343,7 @@ func NewTextLogger() *slog.Logger { return slog.New(NewTextHandler()) }
 func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
 	e.refreshHumanLabels(ctx)
 	e.drainReplies(ctx, log)
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 }
 
 // drainReplies posts queued reply drafts for every configured repo. It uses a

@@ -37,3 +37,17 @@ func Open(path string) (*DB, error) {
 
 // Close closes the underlying handle.
 func (db *DB) Close() error { return db.sql.Close() }
+
+// OpenForTest opens an in-temp-dir store for tests, registering cleanup.
+func OpenForTest(t interface {
+	TempDir() string
+	Cleanup(func())
+	Fatalf(string, ...any)
+}) *DB {
+	db, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("OpenForTest: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}

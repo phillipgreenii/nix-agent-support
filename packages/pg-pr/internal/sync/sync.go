@@ -40,6 +40,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -161,6 +162,16 @@ type Deps struct {
 	// daemon mode (snapshot may still be written, with sync_interval_seconds
 	// reading 0).
 	SyncInterval time.Duration
+
+	// Store is the SQLite-backed event store. Optional: when nil, outbox
+	// flushing is a no-op and no events are persisted. Tests that don't need
+	// event plumbing may omit this field.
+	Store *store.DB
+
+	// Dispatch is the function used to dispatch outbox events to registered
+	// handlers. Optional: when nil (or when Store is nil), flushOutbox is a
+	// no-op. Typically set to (*event.Dispatcher).Dispatch.
+	Dispatch store.DispatchFunc
 }
 
 // Engine carries the configured dependencies for a series of sync calls.
@@ -561,6 +572,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	if e.deps.Snapshot != nil {
 		e.buildAndStoreSnapshot(ctx, observed, repoClients, cachesByRepo, enrichByRepo)
 	}
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 	if len(summary.Errors) > 0 {
 		return summary, fmt.Errorf("sync: %d error(s) (see Summary.Errors)", len(summary.Errors))
 	}
@@ -891,6 +903,21 @@ func (e *Engine) SetAgentRegistry(reg *agentregistry.Registry) {
 	e.deps.AgentRegistry = reg
 }
 
+// SetStoreAndDispatch wires the SQLite event store and dispatcher onto the
+// engine. Called by CLI setup so the outbox flush runs after each sync
+// cycle. Safe to call only before Sync goroutines are active (i.e. once,
+// before the loop starts). Both arguments are required — passing nil for
+// either is a no-op (flushOutbox nil-guards both).
+func (e *Engine) SetStoreAndDispatch(db *store.DB, dispatch store.DispatchFunc) {
+	e.deps.Store = db
+	e.deps.Dispatch = dispatch
+}
+
+// StoreFile returns the path that the CLI should open as the SQLite store.
+// Exposed so cmd/pg-pr/sync.go can open the file before calling
+// SetStoreAndDispatch, without importing the store package's path logic.
+func (e *Engine) StoreFile() string { return e.storeFile() }
+
 // SyncPR refreshes a single PR. The repo identifier MUST be in the configured
 // list (the engine can only sync repos with VCS provider config).
 //
@@ -947,6 +974,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 		summary.TotalPRs = 1
 		summary.FinishedAt = e.deps.Now()
+		flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 		return summary, nil
 	}
 
@@ -968,6 +996,7 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 	summary.TotalPRs = 1
 	summary.FinishedAt = e.deps.Now()
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 	return summary, nil
 }
 
@@ -1251,6 +1280,34 @@ func defaultStateFile() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "pg-pr", "repo-state.json")
+}
+
+// storeFile returns the path to the SQLite store database.
+func (e *Engine) storeFile() string {
+	if e.deps.StateDir != "" {
+		return filepath.Join(e.deps.StateDir, "store.db")
+	}
+	return defaultStoreFile()
+}
+
+func defaultStoreFile() string {
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pg-pr", "store.db")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "pg-pr", "store.db")
+}
+
+// flushOutbox drains the store's outbox through the dispatcher. Called at the
+// end of each one-shot Sync and each daemon maintenance cycle. No-op until
+// ingestion (a later phase) starts enqueuing events.
+func flushOutbox(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
+	if db == nil || dispatch == nil {
+		return
+	}
+	if err := db.RunOutbox(ctx, dispatch); err != nil {
+		_ = err // pending rows are retried next run; daemon logs separately
+	}
 }
 
 func loadState(path string) (stateFile, error) {

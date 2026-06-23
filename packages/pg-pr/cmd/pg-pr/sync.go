@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,11 +10,15 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/cicd/ghactions"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
@@ -56,6 +61,41 @@ var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
 	})
 }
 
+// newBeadsBridgeHandler returns an event.Handler that routes each event to the
+// correct per-repo beads workspace. The beads client model is per-repo (each
+// monorepo's .beads/ workspace is separate), so this wrapper resolves the repo
+// path from the config and constructs a beads.NewClientForRepo on each call.
+// beads.NewClientForRepo is cheap (no I/O until a bd command is issued), so
+// constructing it per-dispatch is safe.
+//
+// Events whose repo is not in the config are silently ignored (the repo may
+// have been removed from config between enqueueing and flushing).
+func newBeadsBridgeHandler(cfg *config.Config) event.Handler {
+	// Build a repo-remote → path index once.
+	repoPaths := make(map[string]string, len(cfg.Repos))
+	for _, r := range cfg.Repos {
+		if r.Path != "" {
+			repoPaths[r.Remote] = r.Path
+		}
+	}
+	return func(ctx context.Context, e store.Event) error {
+		// Extract the repo identifier from the event payload. All current event
+		// types carry a "repo" field at the top level.
+		var head struct {
+			Repo string `json:"repo"`
+		}
+		if err := json.Unmarshal(e.Payload, &head); err != nil || head.Repo == "" {
+			return nil // no repo → cannot route; skip silently
+		}
+		path, ok := repoPaths[head.Repo]
+		if !ok {
+			return nil // repo not in config; skip silently
+		}
+		client := beads.NewClientForRepo(path)
+		return beadsbridge.New(client).Handle(ctx, e)
+	}
+}
+
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync PR state from upstream into bd merge-request beads",
@@ -78,6 +118,18 @@ configured repo.`,
 			return err
 		}
 
+		// Open the SQLite event store and wire up the outbox dispatcher.
+		// The store path is resolved by the engine (honors StateDir / XDG).
+		// Close is deferred so both the one-shot and daemon paths clean up.
+		eventStore, err := store.Open(engine.StoreFile())
+		if err != nil {
+			return fmt.Errorf("open event store: %w", err)
+		}
+		defer func() { _ = eventStore.Close() }()
+		disp := event.New()
+		disp.Register(newBeadsBridgeHandler(cfg))
+		engine.SetStoreAndDispatch(eventStore, disp.Dispatch)
+
 		if syFlags.daemon {
 			interval, err := time.ParseDuration(syFlags.interval)
 			if err != nil {
@@ -99,13 +151,13 @@ configured repo.`,
 			if err != nil {
 				return fmt.Errorf("agent registry: %w", err)
 			}
-			store := snapshot.NewStore()
+			snapStore := snapshot.NewStore()
 			engine.SetAgentRegistry(reg)
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
 				Logger:      logger,
 				MetricsAddr: syFlags.metricsAddr,
-				Dashboard:   store,
+				Dashboard:   snapStore,
 			})
 		}
 

@@ -78,5 +78,6 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 		return nil, err
 	}
 	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, id)
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 	return &in, nil
 }
