@@ -63,18 +63,24 @@ func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
 	return curr
 }
 
+// formatBridgeLine renders one operator-facing terminal line: a local
+// date+time stamp and the message, with no "cmux-bridge:" prefix.
+func formatBridgeLine(ts time.Time, msg string) string {
+	return ts.Format("2006-01-02 15:04:05") + " " + msg
+}
+
 func caffeinatePhrase(on bool) string {
 	if on {
-		return "Caffeinated Enabled"
+		return "Caffeinated enabled"
 	}
-	return "Caffeinated Disabled"
+	return "Caffeinated disabled"
 }
 
 func autoNudgePhrase(on bool) string {
 	if on {
-		return "Auto Nudge Enabled"
+		return "Auto Nudge enabled"
 	}
-	return "Auto Nudge Disabled"
+	return "Auto Nudge disabled"
 }
 
 // bridgeSessionInfo is the display tuple the bridge logs for one session.

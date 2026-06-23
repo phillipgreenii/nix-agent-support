@@ -3,12 +3,31 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureLog returns a log function that appends each line to lines.
 func captureLog(lines *[]string) func(string) {
 	return func(s string) {
 		*lines = append(*lines, s)
+	}
+}
+
+func TestFormatBridgeLine(t *testing.T) {
+	ts := time.Date(2026, 6, 23, 15, 4, 5, 0, time.UTC)
+	got := formatBridgeLine(ts, "Lost connection to daemon")
+	want := "2026-06-23 15:04:05 Lost connection to daemon"
+	if got != want {
+		t.Errorf("formatBridgeLine = %q, want %q", got, want)
+	}
+}
+
+func TestCaffeinatePhraseLowercase(t *testing.T) {
+	if caffeinatePhrase(true) != "Caffeinated enabled" {
+		t.Errorf("got %q", caffeinatePhrase(true))
+	}
+	if autoNudgePhrase(false) != "Auto Nudge disabled" {
+		t.Errorf("got %q", autoNudgePhrase(false))
 	}
 }
 
@@ -37,7 +56,7 @@ func TestDiffAndLogCaffeinateFlip(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "Caffeinated Enabled") {
+	if !strings.Contains(lines[0], "Caffeinated enabled") {
 		t.Fatalf("expected caffeinate-on phrase, got %q", lines[0])
 	}
 }
@@ -52,7 +71,7 @@ func TestDiffAndLogAutoResumeFlip(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "Auto Nudge Disabled") {
+	if !strings.Contains(lines[0], "Auto Nudge disabled") {
 		t.Fatalf("expected auto-nudge-off phrase, got %q", lines[0])
 	}
 }
@@ -71,11 +90,11 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	if !strings.Contains(lines[0], "initial state") {
 		t.Fatalf("expected line to mention 'initial state', got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], "Caffeinated Enabled") {
-		t.Fatalf("expected initial-state line to include 'Caffeinated Enabled', got %q", lines[0])
+	if !strings.Contains(lines[0], "Caffeinated enabled") {
+		t.Fatalf("expected initial-state line to include 'Caffeinated enabled', got %q", lines[0])
 	}
-	if !strings.Contains(lines[0], "Auto Nudge Enabled") {
-		t.Fatalf("expected initial-state line to include 'Auto Nudge Enabled', got %q", lines[0])
+	if !strings.Contains(lines[0], "Auto Nudge enabled") {
+		t.Fatalf("expected initial-state line to include 'Auto Nudge enabled', got %q", lines[0])
 	}
 	if !got.initialized {
 		t.Fatalf("expected returned state to be marked initialized")
