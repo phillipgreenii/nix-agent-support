@@ -64,16 +64,34 @@ pa-monitor config show
 
 ## OpenTelemetry
 
-When `OTEL_EXPORTER_OTLP_ENDPOINT` is set (typically by the workspace observability LaunchAgent env), the daemon emits:
+OTel is configured via the `[otel]` block in `~/.config/pa-monitor/config.toml` (see
+[Configuration](#configuration)) and is read by the daemon, cmux-bridge, and TUI alike — a single
+source of truth. When no endpoint is configured the OTel SDK is never initialised and every emit is
+a nil-receiver no-op.
+
+The daemon emits:
 
 - **Metrics**
   - Observable gauges: `pa_monitor.sessions.count` (by `state` + workspace/agent/model labels), `pa_monitor.sessions.errored` (by `kind`), `pa_monitor.caffeinate.active`, `pa_monitor.auto_resume.enabled`, `pa_monitor.block.cost.usd`, `pa_monitor.week.cost.usd`, and per-active-session `pa_monitor.session.info` / `pa_monitor.session.tokens` / `pa_monitor.session.cost.usd` (keyed by `session_id`, one row per non-Dormant session).
   - Counters: `pa_monitor.block.usage.limit_hits_total`, `pa_monitor.week.usage.limit_hits_total`, `pa_monitor.caffeinate.rounds_total`, `pa_monitor.caffeinate.grace_expirations_total`, `pa_monitor.signal.sends_total`, `pa_monitor.nudge.queued_total`, `pa_monitor.nudge.suppressed_total`, `pa_monitor.session.api_error.observed_total`, `pa_monitor.session.context.limit_hits_total` (context-window-exceeded / "prompt is too long" hits, by `model`), `pa_monitor.signaler.binary_missing_total` (fired once per required signaler binary — `tmux`/`cmux` — not found on the daemon's PATH at startup, by `signaler` + `binary`).
 - **Logs** — structured event records: `block.usage.limit_hit`, `week.usage.limit_hit`, `caffeinate.start`, `caffeinate.grace_expired`, `nudge.queued`, `nudge.sent`, `nudge.suppressed`, `session.api_error.observed`, `session.context.limit_hit`, `signaler.binary_missing`.
 
-The disabled-state contract: when the env var is unset, the OTel SDK is never initialised and every emit is a nil-receiver no-op.
+The cmux-bridge and TUI additionally emit:
 
-A Grafana dashboard ships at `grafana/pa-monitor-overview.json` and is registered via `phillipgreenii.observability.dashboardProviders.pa-monitor` when observability is enabled.
+- **`pa_monitor.daemon.connected{component="cmux-bridge"|"tui"}`** — gauge, 1 = connected, 0 =
+  disconnected. A provisioned Grafana alert (`grafana/alerting/daemon-connection.yaml`) fires when
+  `min by (component)(pa_monitor_daemon_connected) < 1` for more than 1m (`noDataState: OK`).
+
+### cmux-bridge pane output
+
+The cmux-bridge pane shows only timestamped (`2006-01-02 15:04:05`), prefix-less, operator-facing
+lines: startup banner, caffeinate/auto-nudge state changes, session roster events (`+/-<pid>`), and
+`Lost connection to daemon` / `Connection to daemon restored` (shown once per episode). Low-level
+RPC/transport/retry detail goes to `~/.cache/pa-monitor/cmux-bridge.log` and to OTel logs — never
+the pane.
+
+A Grafana dashboard ships at `grafana/pa-monitor-overview.json` and is registered via
+`phillipgreenii.observability.dashboardProviders.pa-monitor` when observability is enabled.
 
 ## Labels
 
@@ -95,7 +113,27 @@ Consumer-specific values (e.g. `workspace.scope=zr`) come from external shell-ou
 
 ## Configuration
 
-`config.toml` is nix-rendered; see `internal/config/config.go` for keys. Defaults work for most users.
+`config.toml` (`~/.config/pa-monitor/config.toml`) is nix-rendered; see `internal/config/config.go`
+for all keys. Defaults work for most users.
+
+### `[otel]` block
+
+Controls OpenTelemetry export for the daemon, cmux-bridge, and TUI. There is no `protocol` key —
+the exporters are gRPC-only; the endpoint URL scheme selects transport (`http://` = insecure gRPC).
+
+```toml
+[otel]
+endpoint = "http://127.0.0.1:4317"
+
+[otel.resource_attributes]
+# Optional extra resource attributes attached to every export.
+# "deployment.environment" = "dev"
+```
+
+| Key                          | Type       | Description                                    |
+| ---------------------------- | ---------- | ---------------------------------------------- |
+| `otel.endpoint`              | string     | OTLP gRPC endpoint. Omit to disable OTel.      |
+| `otel.resource_attributes.*` | string map | Extra resource attributes (key = value pairs). |
 
 ## TUI symbols
 
