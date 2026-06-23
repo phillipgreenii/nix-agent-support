@@ -53,8 +53,10 @@ func (t *Tx) QueryRow(query string, args ...any) *sql.Row {
 	return t.tx.QueryRowContext(t.ctx, query, args...)
 }
 
-// DispatchFunc handles one event. Returning an error is logged by RunOutbox but
-// does NOT prevent the row from completing (fire-once, at-least-once).
+// DispatchFunc handles one event. Returning an error is ignored by RunOutbox —
+// the row is marked complete regardless (fire-once / best-effort semantics).
+// A crash between a successful dispatch and the completing UPDATE can re-dispatch
+// the same event on the next run, so consumers should be idempotent.
 type DispatchFunc func(ctx context.Context, e Event) error
 
 // RunOutbox pulls each pending row, dispatches it, then marks it complete

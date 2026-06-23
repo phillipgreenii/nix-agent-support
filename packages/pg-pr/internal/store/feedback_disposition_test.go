@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestSetDispositionValidatesAction(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	prID, _ := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 1, Ownership: "mine", State: "open"})
+	id, _ := db.UpsertFeedback(ctx, Feedback{PRID: prID, Kind: "pr-comments", Fingerprint: "fp-v"})
+
+	// Invalid action must be rejected before touching the DB.
+	if err := db.SetDisposition(ctx, id, "frobnicate", "", ""); err == nil {
+		t.Fatal("SetDisposition with invalid action: expected error, got nil")
+	}
+
+	// Valid action must succeed.
+	if err := db.SetDisposition(ctx, id, "no-action", "noted", ""); err != nil {
+		t.Fatalf("SetDisposition with valid action %q: %v", "no-action", err)
+	}
+	got, _ := db.GetFeedback(ctx, id)
+	if got.DispositionAction != "no-action" {
+		t.Fatalf("DispositionAction = %q, want no-action", got.DispositionAction)
+	}
+}
+
 func TestSetDispositionAndListPendingReplies(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

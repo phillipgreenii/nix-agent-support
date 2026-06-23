@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// Feedback is one feedback item (any kind). The type-specific tail is nullable;
-// the schema's CHECK constraints enforce required fields per kind.
+// Feedback is one feedback item (any kind). The type-specific tail is nullable.
+// Note: the `file` field for code-comment-thread is enforced at the Go layer
+// (see UpsertFeedback); other kind-specific fields are advisory and not enforced.
 type Feedback struct {
 	ID          int64
 	PRID        int64
@@ -110,7 +112,10 @@ func (t *Tx) UpsertFeedback(f Feedback) (int64, error) {
 	if f.PRID == 0 || f.Kind == "" || f.Fingerprint == "" {
 		return 0, errors.New("store: UpsertFeedback requires pr_id, kind, fingerprint")
 	}
-	if f.Kind == "code-comment-thread" && f.File == "" {
+	// Only `file` (for code-comment-thread) is hard-required at the Go layer;
+	// other type-specific fields (run_id, check_name, etc.) are advisory and
+	// not enforced in this phase.
+	if f.Kind == "code-comment-thread" && strings.TrimSpace(f.File) == "" {
 		return 0, errors.New("store: code-comment-thread requires file")
 	}
 	if f.Status == "" {
@@ -245,6 +250,12 @@ func (db *DB) SetDisposition(ctx context.Context, id int64, action, note, reply 
 // SetDisposition records the agent's decision and (optionally) a queued reply
 // inside the transaction. Moves status to "dispositioned".
 func (t *Tx) SetDisposition(id int64, action, note, reply string) error {
+	switch action {
+	case "will-fix", "wont-fix", "no-action":
+		// valid
+	default:
+		return fmt.Errorf("store: invalid disposition action %q", action)
+	}
 	now := nowRFC3339()
 	res, err := t.Exec(`
 UPDATE feedback SET disposition_action=?, disposition_note=?, reply_body=?, status='dispositioned', updated_at=?
@@ -259,6 +270,7 @@ WHERE id=?`, action, note, reply, now, id)
 }
 
 // MarkReplied records the upstream response id and moves status to "replied".
+// No event emitted; direct write is intentional (reply delivery is fire-and-forget).
 func (db *DB) MarkReplied(ctx context.Context, id int64, responseID string) error {
 	now := nowRFC3339()
 	_, err := db.sql.ExecContext(ctx,
@@ -293,6 +305,7 @@ func (db *DB) ListPendingReplies(ctx context.Context) ([]Feedback, error) {
 // ReconcileStaleness marks ci-failure rows whose subject_sha != the PR head as
 // superseded. Code-thread is_outdated comes from the provider (set on upsert),
 // so it is NOT touched here.
+// No event emitted; direct write is intentional (reconciliation is a bulk sweep, not a tracked mutation).
 func (db *DB) ReconcileStaleness(ctx context.Context, prID int64, headSHA string) error {
 	_, err := db.sql.ExecContext(ctx, `
 UPDATE feedback SET status='superseded', updated_at=?
