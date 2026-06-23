@@ -170,6 +170,31 @@ func TestConfigOTelDefaultsEmpty(t *testing.T) {
 	}
 }
 
+func TestApplyOTelEnvSetsWhenUnset(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	os.Unsetenv("OTEL_RESOURCE_ATTRIBUTES")
+	ApplyOTelEnv(OTelConfig{
+		Endpoint:      "http://127.0.0.1:4317",
+		ResourceAttrs: map[string]string{"host.name": "mbp-02"},
+	})
+	if got := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); got != "http://127.0.0.1:4317" {
+		t.Errorf("endpoint env = %q", got)
+	}
+	if got := os.Getenv("OTEL_RESOURCE_ATTRIBUTES"); got != "host.name=mbp-02" {
+		t.Errorf("resource attrs env = %q", got)
+	}
+}
+
+func TestApplyOTelEnvLeavesExplicitEnv(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://explicit:4317")
+	ApplyOTelEnv(OTelConfig{Endpoint: "http://config:4317"})
+	if got := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); got != "http://explicit:4317" {
+		t.Errorf("explicit env must win, got %q", got)
+	}
+}
+
 // TestConfigDecoratorsRoundTrip verifies that [[decorator]] blocks parse into
 // cfg.Decorators with name/command/timeout_ms preserved. The decorator path is
 // the only sanctioned extension point for downstream-org labels (see ADR-0011).

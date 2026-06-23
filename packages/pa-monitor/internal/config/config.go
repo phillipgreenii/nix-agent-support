@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -199,4 +201,41 @@ func DefaultPath() string {
 		base = home + "/.config"
 	}
 	return base + "/pa-monitor/config.toml"
+}
+
+// ApplyOTelEnv exports the standard OTEL_* env vars from the config's [otel]
+// block, but ONLY for env vars that are currently unset — an explicit env
+// (e.g. a launchd plist) always wins. This lets the SDK-native otel
+// constructors read endpoint/resource-attrs from env without bespoke exporter
+// wiring. No OTEL_EXPORTER_OTLP_PROTOCOL is set: the gRPC exporters ignore it.
+func ApplyOTelEnv(o OTelConfig) {
+	setIfUnset := func(key, val string) {
+		if val == "" {
+			return
+		}
+		if _, ok := os.LookupEnv(key); ok {
+			return
+		}
+		_ = os.Setenv(key, val)
+	}
+	setIfUnset("OTEL_EXPORTER_OTLP_ENDPOINT", o.Endpoint)
+	setIfUnset("OTEL_RESOURCE_ATTRIBUTES", encodeResourceAttrs(o.ResourceAttrs))
+}
+
+// encodeResourceAttrs renders attrs as the comma list the OTel SDK expects
+// (key=value,key=value), sorted for determinism.
+func encodeResourceAttrs(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+m[k])
+	}
+	return strings.Join(parts, ",")
 }
