@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
@@ -35,6 +36,46 @@ func runTUIRemote() {
 		fmt.Fprintf(os.Stderr, "remote poller: %v\n", err)
 		os.Exit(2)
 	}
+
+	config.ApplyOTelEnv(cfg.OTel)
+	emitCtx, emitCancel := context.WithCancel(context.Background())
+	defer emitCancel()
+	connEmit, emitErr := otel.NewConnectionEmitter(emitCtx, otel.ConnOptions{
+		ServiceName:    "pa-monitor",
+		ServiceVersion: version,
+		Component:      "tui",
+	})
+	if emitErr != nil {
+		connEmit = nil
+	}
+	defer connEmit.Shutdown(emitCtx)
+
+	// Sample the poller's connection state on a ticker and publish the gauge.
+	// IsOffline() is reliable: every backoff in RemotePoller is preceded by
+	// client=nil, so client==nil holds throughout a disconnect window.
+	go func() {
+		const sample = 10 * time.Second
+		t := time.NewTicker(sample)
+		defer t.Stop()
+		announced := false
+		for {
+			select {
+			case <-emitCtx.Done():
+				return
+			case <-t.C:
+				connected := !rp.IsOffline()
+				connEmit.RecordDaemonConnected(connected)
+				if !connected && !announced {
+					announced = true
+					connEmit.LogEvent("daemon.disconnect", map[string]string{"component": "tui"})
+				}
+				if connected && announced {
+					announced = false
+					connEmit.LogEvent("daemon.reconnect", map[string]string{"component": "tui"})
+				}
+			}
+		}
+	}()
 
 	home, _ := os.UserHomeDir()
 	cacheDir := filepath.Join(home, ".cache", "pa-monitor")
