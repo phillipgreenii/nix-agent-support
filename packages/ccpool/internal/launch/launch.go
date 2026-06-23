@@ -54,6 +54,12 @@ type Spec struct {
 	// PermissionMode emits --permission-mode <value> when non-empty; the zero
 	// value omits the flag.
 	PermissionMode PermissionMode
+	// AllowedTools emits --allowed-tools <value> when non-empty (a passthrough
+	// allowlist forwarded verbatim to claude, e.g. "Bash(git *),Edit"). The zero
+	// value omits the flag. Paired with PermissionMode=dontAsk it makes a
+	// non-interactive worker auto-DENY any tool outside the list instead of
+	// stalling on a permission prompt.
+	AllowedTools string
 	// Effort emits --effort <value> (e.g. "max") when non-empty.
 	Effort string
 }
@@ -78,11 +84,14 @@ func BuildResume(s Spec) []string {
 }
 
 // appendFlags appends the optional claude launch flags shared by new and resume,
-// in a fixed order: --permission-mode <value>, --effort <value>, --model
-// <value>. Each is omitted when unset (empty string).
+// in a fixed order: --permission-mode <value>, --allowed-tools <value>,
+// --effort <value>, --model <value>. Each is omitted when unset (empty string).
 func appendFlags(args []string, s Spec) []string {
 	if s.PermissionMode != "" {
 		args = append(args, "--permission-mode", string(s.PermissionMode))
+	}
+	if s.AllowedTools != "" {
+		args = append(args, "--allowed-tools", s.AllowedTools)
 	}
 	if s.Effort != "" {
 		args = append(args, "--effort", s.Effort)

@@ -101,6 +101,28 @@ func TestBuildResume_includesLaunchFlags(t *testing.T) {
 	}
 }
 
+func TestBuildNew_emitsAllowedToolsAfterPermissionMode(t *testing.T) {
+	got := BuildNew(Spec{
+		ClaudeBin: "claude", ClaudeSessionID: "u1", PluginDir: "/p",
+		PermissionMode: ModeDontAsk, AllowedTools: "Bash(git *),Edit", Effort: "max",
+	})
+	want := []string{
+		"claude", "--session-id", "u1", "--plugin-dir", "/p",
+		"--permission-mode", "dontAsk", "--allowed-tools", "Bash(git *),Edit", "--effort", "max",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildNew = %v\nwant %v", got, want)
+	}
+}
+
+func TestAppendFlags_omitsAllowedToolsWhenEmpty(t *testing.T) {
+	got := BuildResume(Spec{ClaudeBin: "claude", ClaudeSessionID: "u1", PluginDir: "/p", PermissionMode: ModeDontAsk})
+	want := []string{"claude", "--resume", "u1", "--plugin-dir", "/p", "--permission-mode", "dontAsk"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("BuildResume = %v\nwant %v", got, want)
+	}
+}
+
 func TestPermissionMode_Valid(t *testing.T) {
 	for _, mode := range ValidPermissionModes() {
 		if !mode.Valid() {
