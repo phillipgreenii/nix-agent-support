@@ -48,6 +48,11 @@ func (t *Tx) Exec(query string, args ...any) (sql.Result, error) {
 	return t.tx.ExecContext(t.ctx, query, args...)
 }
 
+// QueryRow runs a single-row query inside the transaction.
+func (t *Tx) QueryRow(query string, args ...any) *sql.Row {
+	return t.tx.QueryRowContext(t.ctx, query, args...)
+}
+
 // DispatchFunc handles one event. Returning an error is logged by RunOutbox but
 // does NOT prevent the row from completing (fire-once, at-least-once).
 type DispatchFunc func(ctx context.Context, e Event) error

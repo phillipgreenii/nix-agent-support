@@ -94,6 +94,19 @@ func nullStr(s string) any {
 // returning its id. On update it overwrites only upstream-sourced fields, never
 // the agent-owned disposition/reply columns.
 func (db *DB) UpsertFeedback(ctx context.Context, f Feedback) (int64, error) {
+	var id int64
+	err := db.InTx(ctx, func(tx *Tx) error {
+		var e error
+		id, e = tx.UpsertFeedback(f)
+		return e
+	})
+	return id, err
+}
+
+// UpsertFeedback inserts or updates a feedback row by (pr_id, fingerprint)
+// inside the transaction, returning its id. Preserves the nullStr author
+// handling and the code-comment-thread file guard.
+func (t *Tx) UpsertFeedback(f Feedback) (int64, error) {
 	if f.PRID == 0 || f.Kind == "" || f.Fingerprint == "" {
 		return 0, errors.New("store: UpsertFeedback requires pr_id, kind, fingerprint")
 	}
@@ -104,7 +117,7 @@ func (db *DB) UpsertFeedback(ctx context.Context, f Feedback) (int64, error) {
 		f.Status = "new"
 	}
 	now := nowRFC3339()
-	_, err := db.sql.ExecContext(ctx, `
+	_, err := t.Exec(`
 INSERT INTO feedback
   (pr_id, kind, external_id, fingerprint, status, title, body,
    subject_sha, first_seen_head_sha, is_outdated, is_minimized, minimized_reason,
@@ -135,8 +148,7 @@ ON CONFLICT(pr_id, fingerprint) DO UPDATE SET
 		return 0, fmt.Errorf("store: upsert feedback (pr=%d fp=%s): %w", f.PRID, f.Fingerprint, err)
 	}
 	var id int64
-	err = db.sql.QueryRowContext(ctx,
-		"SELECT id FROM feedback WHERE pr_id=? AND fingerprint=?", f.PRID, f.Fingerprint).Scan(&id)
+	err = t.QueryRow("SELECT id FROM feedback WHERE pr_id=? AND fingerprint=?", f.PRID, f.Fingerprint).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: read back feedback id: %w", err)
 	}
@@ -225,8 +237,16 @@ func (db *DB) ListFeedback(ctx context.Context, prID int64, filter ListFilter) (
 // SetDisposition records the agent's decision and (optionally) a queued reply.
 // Moves status to "dispositioned".
 func (db *DB) SetDisposition(ctx context.Context, id int64, action, note, reply string) error {
+	return db.InTx(ctx, func(tx *Tx) error {
+		return tx.SetDisposition(id, action, note, reply)
+	})
+}
+
+// SetDisposition records the agent's decision and (optionally) a queued reply
+// inside the transaction. Moves status to "dispositioned".
+func (t *Tx) SetDisposition(id int64, action, note, reply string) error {
 	now := nowRFC3339()
-	res, err := db.sql.ExecContext(ctx, `
+	res, err := t.Exec(`
 UPDATE feedback SET disposition_action=?, disposition_note=?, reply_body=?, status='dispositioned', updated_at=?
 WHERE id=?`, action, note, reply, now, id)
 	if err != nil {

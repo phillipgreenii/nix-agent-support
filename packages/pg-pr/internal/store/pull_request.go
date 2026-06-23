@@ -28,11 +28,23 @@ var nowRFC3339 = func() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // UpsertPR inserts or updates a PR by (repo, number) and returns its id.
 func (db *DB) UpsertPR(ctx context.Context, pr PullRequest) (int64, error) {
+	var id int64
+	err := db.InTx(ctx, func(tx *Tx) error {
+		var e error
+		id, e = tx.UpsertPR(pr)
+		return e
+	})
+	return id, err
+}
+
+// UpsertPR inserts or updates a PR by (repo, number) inside the transaction,
+// returning its id.
+func (t *Tx) UpsertPR(pr PullRequest) (int64, error) {
 	if pr.Repo == "" || pr.Number == 0 {
 		return 0, errors.New("store: UpsertPR requires repo and number")
 	}
 	now := nowRFC3339()
-	_, err := db.sql.ExecContext(ctx, `
+	_, err := t.Exec(`
 INSERT INTO pull_request
   (repo, number, ownership, author, state, branch, base, url, head_sha, last_synced_at, created_at, updated_at)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
@@ -47,11 +59,12 @@ ON CONFLICT(repo, number) DO UPDATE SET
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert pr %s#%d: %w", pr.Repo, pr.Number, err)
 	}
-	got, err := db.GetPR(ctx, pr.Repo, pr.Number)
+	var id int64
+	err = t.QueryRow("SELECT id FROM pull_request WHERE repo=? AND number=?", pr.Repo, pr.Number).Scan(&id)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("store: read back pr id %s#%d: %w", pr.Repo, pr.Number, err)
 	}
-	return got.ID, nil
+	return id, nil
 }
 
 // GetPR returns the PR by (repo, number), or nil if not found.
