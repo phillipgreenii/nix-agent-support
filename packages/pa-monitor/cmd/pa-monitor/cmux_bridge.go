@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
+	"github.com/phillipgreenii/pa-monitor/internal/config"
+	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 )
@@ -172,29 +175,50 @@ func diffSessionsAndLog(prev, curr bridgeSessions, log func(string)) bridgeSessi
 func runCmuxBridge(args []string) {
 	ws := os.Getenv("CMUX_WORKSPACE_ID")
 	if ws == "" {
-		fmt.Fprintln(os.Stderr, "cmux-bridge: CMUX_WORKSPACE_ID not set; nothing to bridge")
+		fmt.Fprintln(os.Stderr, "CMUX_WORKSPACE_ID not set; nothing to bridge")
 		os.Exit(2)
 	}
 	_ = args
 
-	reporter := cmuxstatus.NewReporter(cmuxstatus.Options{
-		Enable: true,
-		Logf:   func(s string) { fmt.Fprintln(os.Stderr, "cmux-bridge:", s) },
-	})
-
+	cfg, _ := config.Load(config.DefaultPath())
+	config.ApplyOTelEnv(cfg.OTel)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	emit, err := otel.NewConnectionEmitter(ctx, otel.ConnOptions{
+		ServiceName:    "pa-monitor",
+		ServiceVersion: version,
+		Component:      "cmux-bridge",
+	})
+	if err != nil {
+		emit = nil // best-effort; never block the sidebar on OTel
+	}
+	defer emit.Shutdown(ctx)
+
+	home, _ := os.UserHomeDir()
+	log := newBridgeLogger(filepath.Join(home, ".cache", "pa-monitor"), emit)
+
+	reporter := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable: true,
+		Logf:   func(s string) { log.Detail("cmux.reporter", map[string]string{"msg": s}) },
+	})
 	defer reporter.Clear()
 
-	logBridgeVersions(ctx)
+	announcer := &connAnnouncer{
+		term:   log.Term,
+		detail: log.Detail,
+		gauge:  emit.RecordDaemonConnected,
+	}
+
+	logBridgeVersions(ctx, log)
 
 	for {
-		if err := streamOnce(ctx, ws, reporter); err != nil {
+		if err := streamOnce(ctx, ws, reporter, log, announcer); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			reporter.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateUnknown})
-			fmt.Fprintf(os.Stderr, "cmux-bridge: stream lost: %v\n", err)
+			announcer.disconnected(map[string]string{"error": err.Error()})
 			time.Sleep(2 * time.Second)
 			continue
 		}
@@ -202,25 +226,24 @@ func runCmuxBridge(args []string) {
 	}
 }
 
-// logBridgeVersions does a best-effort one-shot GetState to learn the daemon
-// version, then prints both the bridge's own version and the daemon's. Stays
-// silent if the daemon is unreachable — the main watch loop already handles
-// reconnect/backoff with its own diagnostics.
-func logBridgeVersions(ctx context.Context) {
+// logBridgeVersions prints the startup banner only when the daemon is
+// reachable. If unreachable it stays silent on the pane (detail to log) — the
+// reconnect loop will surface "Lost connection to daemon" instead.
+func logBridgeVersions(ctx context.Context, log *bridgeLogger) {
 	dialCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 	client, err := rpcclient.Dial(dialCtx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s (daemon unreachable)\n", version)
+		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
 		return
 	}
 	defer client.Close()
 	state, err := client.C.GetState(dialCtx, &pb.GetStateRequest{})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s (daemon GetState: %v)\n", version, err)
+		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
 		return
 	}
-	fmt.Fprintf(os.Stderr, "cmux-bridge: version=%s daemon=%s\n", version, state.GetDaemonVersion())
+	log.Term(fmt.Sprintf("pa-monitor bridge v%s (daemon v%s)", version, state.GetDaemonVersion()))
 }
 
 // bridgeHeartbeatInterval is how often the bridge re-calls RegisterBridge
@@ -234,20 +257,18 @@ const bridgeHeartbeatInterval = 10 * time.Second
 // Failures are non-fatal — the bridge keeps streaming state; the only
 // effect of a failed registration is that sessions in this cmux workspace
 // will surface as "cmux (no bridge)" until a later attempt succeeds.
-func registerBridge(ctx context.Context, client *rpcclient.Client, ws string) {
+func registerBridge(ctx context.Context, client *rpcclient.Client, ws string, log *bridgeLogger) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if _, err := client.C.RegisterBridge(cctx, &pb.RegisterBridgeRequest{
 		WorkspaceId: ws,
 		BridgePid:   int32(os.Getpid()),
 	}); err != nil {
-		// Older daemons (pre-RPC) will return Unimplemented; that's fine,
-		// just log at debug level.
-		fmt.Fprintf(os.Stderr, "cmux-bridge: RegisterBridge: %v\n", err)
+		log.Detail("bridge.register_failed", map[string]string{"error": err.Error()})
 	}
 }
 
-func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) error {
+func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer) error {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		return err
@@ -257,7 +278,7 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 	// Announce ourselves to the daemon so it can refine "cmux" terminal-host
 	// labels for sessions in our workspace. Then start a goroutine that
 	// re-registers every bridgeHeartbeatInterval as a liveness heartbeat.
-	registerBridge(ctx, client, ws)
+	registerBridge(ctx, client, ws, log)
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
 	go func() {
@@ -268,7 +289,7 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 			case <-heartbeatCtx.Done():
 				return
 			case <-t.C:
-				registerBridge(heartbeatCtx, client, ws)
+				registerBridge(heartbeatCtx, client, ws, log)
 			}
 		}
 	}()
@@ -295,21 +316,19 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 
 	// Per-stream diff state: tracks observable toggles (caffeinate,
 	// auto_resume) across ticks so the bridge can emit human-readable
-	// change events on stderr instead of being a silent mirror. Reset
+	// change events on the pane instead of being a silent mirror. Reset
 	// per streamOnce call: a reconnect re-emits the "initial state" line,
 	// which is desirable since pane operators care about state across
 	// reconnects.
 	var prev bridgeState
 	var prevSessions bridgeSessions
-	logChange := func(msg string) {
-		fmt.Fprintln(os.Stderr, "cmux-bridge:", msg)
-	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(pushBudget):
+			log.Detail("bridge.push_missed", map[string]string{"budget": pushBudget.String()})
 			return fmt.Errorf("push missed: no message in %s", pushBudget)
 		case r := <-recvCh:
 			if r.err != nil {
@@ -319,8 +338,9 @@ func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter) er
 			if r.msg == nil {
 				continue
 			}
-			prev = diffAndLog(prev, stateFromDaemon(r.msg), logChange)
-			prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(r.msg, ws), logChange)
+			announcer.connected()
+			prev = diffAndLog(prev, stateFromDaemon(r.msg), log.Term)
+			prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(r.msg, ws), log.Term)
 			snap := snapshotForWorkspace(r.msg, ws)
 			reporter.Push(snap)
 		}
