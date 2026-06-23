@@ -137,6 +137,39 @@ func TestPartialOverridePreservesDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigOTelRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[otel]
+endpoint = "http://127.0.0.1:4317"
+
+[otel.resource_attributes]
+"deployment.environment" = "local"
+"host.name" = "mbp-02"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OTel.Endpoint != "http://127.0.0.1:4317" {
+		t.Errorf("OTel.Endpoint = %q", cfg.OTel.Endpoint)
+	}
+	if cfg.OTel.ResourceAttrs["host.name"] != "mbp-02" {
+		t.Errorf("OTel.ResourceAttrs = %+v", cfg.OTel.ResourceAttrs)
+	}
+}
+
+func TestConfigOTelDefaultsEmpty(t *testing.T) {
+	cfg := defaults()
+	if cfg.OTel.Endpoint != "" || len(cfg.OTel.ResourceAttrs) != 0 {
+		t.Errorf("OTel default must be empty, got %+v", cfg.OTel)
+	}
+}
+
 // TestConfigDecoratorsRoundTrip verifies that [[decorator]] blocks parse into
 // cfg.Decorators with name/command/timeout_ms preserved. The decorator path is
 // the only sanctioned extension point for downstream-org labels (see ADR-0011).

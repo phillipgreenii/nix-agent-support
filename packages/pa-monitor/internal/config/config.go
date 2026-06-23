@@ -31,6 +31,17 @@ type Config struct {
 	CmuxSidebarEnable        bool
 	CmuxSidebarIntervalTicks int
 	Decorators               []DecoratorConfig
+	OTel                     OTelConfig
+}
+
+// OTelConfig is the [otel] block. Endpoint is the OTLP gRPC endpoint
+// (an http:// scheme selects insecure gRPC). There is intentionally no
+// protocol field: the emitters import the gRPC-only exporter packages, so
+// transport is fixed at compile time and OTEL_EXPORTER_OTLP_PROTOCOL is a
+// no-op. ResourceAttrs becomes OTEL_RESOURCE_ATTRIBUTES.
+type OTelConfig struct {
+	Endpoint      string
+	ResourceAttrs map[string]string
 }
 
 // DecoratorConfig is one [[decorator]] block parsed from config.toml. The
@@ -60,12 +71,18 @@ type tomlConfig struct {
 	CmuxSidebarEnable        *bool           `toml:"cmux_sidebar_enable"`
 	CmuxSidebarIntervalTicks *int            `toml:"cmux_sidebar_interval_ticks"`
 	Decorators               []tomlDecorator `toml:"decorator"`
+	OTel                     *tomlOTel       `toml:"otel"`
 }
 
 type tomlDecorator struct {
 	Name      string `toml:"name"`
 	Command   string `toml:"command"`
 	TimeoutMS *int   `toml:"timeout_ms"`
+}
+
+type tomlOTel struct {
+	Endpoint      *string           `toml:"endpoint"`
+	ResourceAttrs map[string]string `toml:"resource_attributes"`
 }
 
 func defaults() Config {
@@ -154,6 +171,14 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.CmuxSidebarIntervalTicks != nil {
 		cfg.CmuxSidebarIntervalTicks = *raw.CmuxSidebarIntervalTicks
+	}
+	if raw.OTel != nil {
+		if raw.OTel.Endpoint != nil {
+			cfg.OTel.Endpoint = *raw.OTel.Endpoint
+		}
+		if raw.OTel.ResourceAttrs != nil {
+			cfg.OTel.ResourceAttrs = raw.OTel.ResourceAttrs
+		}
 	}
 	for _, d := range raw.Decorators {
 		dc := DecoratorConfig{Name: d.Name, Command: d.Command}
