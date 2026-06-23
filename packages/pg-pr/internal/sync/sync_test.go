@@ -14,6 +14,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -727,8 +728,11 @@ func TestSync_PostsQueuedReplyAndStoresResponseID(t *testing.T) {
 		t.Fatalf("expected 1 ReplyToThread call, got %d: %+v", len(vcs.replyCalls), vcs.replyCalls)
 	}
 	got := vcs.replyCalls[0]
-	if got.Repo != "foo/bar" || got.ThreadID != "THREAD_ABC" || got.Body != "thanks, fixed in deadbee" {
+	if got.Repo != "foo/bar" || got.ThreadID != "THREAD_ABC" {
 		t.Fatalf("ReplyToThread args: got %+v", got)
+	}
+	if !marker.IsOurs(got.Body) {
+		t.Fatalf("ReplyToThread body not stamped with marker: %q", got.Body)
 	}
 	respID, err := bd.GetResponseID(ctx, fbID)
 	if err != nil {
@@ -744,6 +748,48 @@ func TestSync_PostsQueuedReplyAndStoresResponseID(t *testing.T) {
 	}
 	if len(vcs.replyCalls) != 1 {
 		t.Fatalf("expected no further ReplyToThread calls; got %d total", len(vcs.replyCalls))
+	}
+}
+
+// TestSync_ReplyBodyIsStamped asserts the marker invariant: every body posted
+// via processReplyDrafts must satisfy marker.IsOurs so a later ingestion phase
+// can distinguish pg-pr's own posts from human-typed comments.
+func TestSync_ReplyBodyIsStamped(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	vcs.my["foo/bar"] = []api.PR{samplePR(43, "foo/bar", "feat/stamp")}
+	vcs.replyResp = &api.Comment{ID: "C_STAMP_1", Author: "pg-pr"}
+
+	bd := newRealBDClient(t)
+	stateDir := t.TempDir()
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Seed a feedback bead with a plain reply draft (no marker).
+	fbID := seedFeedback(t, bd, "foo/bar", 43, beads.FeedbackKindCommentThread, "THREAD_STAMP")
+	if err := bd.SetReplyDraft(ctx, fbID, "plain draft body, no marker"); err != nil {
+		t.Fatalf("SetReplyDraft: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v\nErrors: %+v", err, sum.Errors)
+	}
+	if len(vcs.replyCalls) != 1 {
+		t.Fatalf("expected 1 ReplyToThread call, got %d", len(vcs.replyCalls))
+	}
+
+	// Invariant: the body posted to GitHub must carry the pg-pr marker.
+	postedBody := vcs.replyCalls[0].Body
+	if !marker.IsOurs(postedBody) {
+		t.Fatalf("posted body not stamped: %q", postedBody)
 	}
 }
 

@@ -39,6 +39,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
@@ -1747,7 +1748,7 @@ func (e *Engine) processReplyDrafts(ctx context.Context, bdc BeadClient, rcfg co
 			continue
 		}
 
-		resp, err := replier.ReplyToThread(ctx, mr.Fields.Repo, fb.Fields.ExternalID, fb.Fields.ReplyDraft)
+		resp, err := replier.ReplyToThread(ctx, mr.Fields.Repo, fb.Fields.ExternalID, marker.Stamp(fb.Fields.ReplyDraft))
 		if err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{
 				Repo:    rcfg.Remote,

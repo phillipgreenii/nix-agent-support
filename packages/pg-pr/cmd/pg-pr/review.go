@@ -140,11 +140,11 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 
 	unique, skipped := reviewstage.Dedup(draft.Comments, existing)
 	for i := range unique {
-		unique[i].Body = marker.Markerify(unique[i].Body)
+		unique[i].Body = marker.Stamp(unique[i].Body)
 	}
 	body := draft.Body
 	if body != "" {
-		body = marker.Markerify(body)
+		body = marker.Stamp(body)
 	}
 
 	rev, err := provider.PostReview(ctx, draft.Repo, draft.PR, body, unique)
@@ -252,7 +252,7 @@ var commentAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		body = marker.Markerify(body)
+		body = marker.Stamp(body)
 		c, err := vcsProviderFor(repo).AddComment(ctx, repo, num, body)
 		if err != nil {
 			return err
@@ -339,7 +339,7 @@ func runCommentRespond(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("comment respond: merge-request bead %s missing repo metadata", mr.ID)
 	}
 
-	body = marker.Markerify(body)
+	body = marker.Stamp(body)
 	c, err := vcsProviderFor(repo).ReplyToThread(ctx, repo, externalID, body)
 	if err != nil {
 		return fmt.Errorf("comment respond: reply to thread %s: %w", externalID, err)
