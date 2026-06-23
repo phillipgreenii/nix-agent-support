@@ -157,6 +157,10 @@ type EnsureOpts struct {
 	// else claude stalls on the first tool-permission prompt.
 	PermissionMode launch.PermissionMode
 	Effort         string
+	// AllowedTools is forwarded verbatim to launch.Spec.AllowedTools (claude
+	// --allowed-tools). Empty omits the flag. Set by pr-pool to constrain a
+	// dontAsk worker to an allowlist.
+	AllowedTools string
 }
 
 // tmuxSafe maps the characters tmux treats as target separators ('.' and ':',
@@ -241,7 +245,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			argv := launch.BuildResume(launch.Spec{
 				ClaudeBin: s.d.ClaudeBin, ClaudeSessionID: row.ClaudeSessionID, PluginDir: s.d.PluginDir,
 				Model:          orDefault(model, row.Model),
-				PermissionMode: opts.PermissionMode, Effort: opts.Effort,
+				PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 			})
 			return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env)
 		}
@@ -268,7 +272,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		argv := launch.BuildResume(launch.Spec{
 			ClaudeBin: s.d.ClaudeBin, ClaudeSessionID: row.ClaudeSessionID, PluginDir: s.d.PluginDir,
 			Model:          orDefault(model, row.Model),
-			PermissionMode: opts.PermissionMode, Effort: opts.Effort,
+			PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 		})
 		return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env)
 	}
@@ -287,7 +291,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	}
 	argv := launch.BuildNew(launch.Spec{
 		ClaudeBin: s.d.ClaudeBin, ClaudeSessionID: csid, Name: opts.Name, PluginDir: s.d.PluginDir, Model: model,
-		PermissionMode: opts.PermissionMode, Effort: opts.Effort,
+		PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 	})
 	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env)
 }
