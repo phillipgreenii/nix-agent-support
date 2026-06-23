@@ -4,6 +4,8 @@
 package feedbackclassify
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
@@ -57,4 +59,44 @@ func (r Registry) Classify(login, typename, body, self string) Author {
 	// Otherwise human (the self manual-note case included; author_role is set by
 	// the caller, not here).
 	return Author{Kind: "human"}
+}
+
+// FPParts carries the inputs to Fingerprint. Which fields matter depends on kind.
+type FPParts struct {
+	File       string
+	Line       int
+	Body       string
+	CheckName  string
+	SubjectSHA string
+	ExternalID string
+}
+
+// Fingerprint computes a stable dedup key for a feedback item, per-kind:
+//   - ci-failure: revision-SCOPED (check_name + subject_sha) — each failure per
+//     revision is distinct (build-failure history).
+//   - code-comment-thread: revision-STABLE (file + normalized body) — one row
+//     survives force-pushes; staleness is tracked separately via is_outdated.
+//   - pr-comments: revision-stable (external id if present, else normalized body).
+//   - review-request / jira-link: keyed by external id.
+//
+// Body whitespace is collapsed so trivial reflow doesn't churn the key.
+func Fingerprint(kind string, p FPParts) string {
+	norm := strings.Join(strings.Fields(p.Body), " ")
+	var key string
+	switch kind {
+	case "ci-failure":
+		key = "ci-failure\x00" + p.CheckName + "\x00" + p.SubjectSHA
+	case "code-comment-thread":
+		key = "code-comment-thread\x00" + p.File + "\x00" + norm
+	case "pr-comments":
+		key = "pr-comments\x00" + p.ExternalID + "\x00" + norm
+	case "review-request":
+		key = "review-request\x00" + p.ExternalID
+	case "jira-link":
+		key = "jira-link\x00" + p.ExternalID
+	default:
+		key = kind + "\x00" + p.ExternalID + "\x00" + norm
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
