@@ -117,6 +117,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		return daemon.RunOptions{}, func() {}, err
 	}
 
+	// Source OTel config from the shared config file (single source of truth
+	// for daemon + bridge + tui). Only-if-unset, so an explicit env still wins.
+	config.ApplyOTelEnv(cfg.OTel)
+
 	emitter, err := otel.New(ctx, otel.Options{
 		ServiceName:    "pa-monitor",
 		ServiceVersion: ver,
