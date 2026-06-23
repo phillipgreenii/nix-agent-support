@@ -619,6 +619,25 @@ func TestResolveThread_PostsGraphQL(t *testing.T) {
 	}
 }
 
+func TestMinimizeComment_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.MinimizeComment(context.Background(), "IC_xxx", "OUTDATED"); err != nil {
+		t.Fatalf("MinimizeComment: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "id=IC_xxx") {
+		t.Fatalf("expected id arg: %v", last)
+	}
+	if !strings.Contains(joined, "classifier=OUTDATED") {
+		t.Fatalf("expected classifier arg: %v", last)
+	}
+}
+
 func TestListComments_EmptyArrays(t *testing.T) {
 	p := NewWithRunner(&pathFakeGH{
 		responses: map[string][]byte{

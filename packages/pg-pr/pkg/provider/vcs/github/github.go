@@ -674,6 +674,32 @@ func (p *Provider) ReplyToThread(ctx context.Context, repo, threadID, body strin
 	}, nil
 }
 
+// minimizeCommentMutation hides a comment with the given classifier
+// (OUTDATED|RESOLVED|OFF_TOPIC|SPAM|ABUSE|DUPLICATE). Mirrors
+// resolveReviewThreadMutation.
+const minimizeCommentMutation = `
+mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+  minimizeComment(input: {subjectId: $id, classifier: $classifier}) {
+    minimizedComment { isMinimized }
+  }
+}
+`
+
+// MinimizeComment marks a comment minimized with the given classifier. nodeID is
+// the comment's GraphQL node id.
+func (p *Provider) MinimizeComment(ctx context.Context, nodeID, classifier string) error {
+	args := []string{
+		"api", "graphql",
+		"-F", "query=" + minimizeCommentMutation,
+		"-f", "id=" + nodeID,
+		"-f", "classifier=" + classifier,
+	}
+	if _, err := p.gh.Run(ctx, args...); err != nil {
+		return fmt.Errorf("github: minimize comment: %w", err)
+	}
+	return nil
+}
+
 // ResolveThread marks a review thread as resolved.
 func (p *Provider) ResolveThread(ctx context.Context, repo, threadID string) error {
 	if err := validateRepo(repo); err != nil {
