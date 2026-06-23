@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
@@ -71,7 +72,14 @@ func runState(args []string) int {
 		}
 		return transcriptAdapter{}.LastAssistantText(row.TranscriptPath)
 	}
-	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, tmuxName, externalID, row)
+	// registry resolves the shared claude-transcript activity verdict for this
+	// session: it sweeps ~/.claude/sessions, matches the row by ClaudeSessionID,
+	// PID-gates it, and returns ClassifyActivity's verdict. No live match -> false,
+	// and Gather/Classify then ignore it (pane+row fallback).
+	registry := func() (ct.ActivityVerdict, bool) {
+		return registryVerdict(defaultSessionsDir(), row.ClaudeSessionID, row.TranscriptPath, registryWaitingFreshWindow)
+	}
+	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, registry, tmuxName, externalID, row)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "state:", err)
 		return 1
