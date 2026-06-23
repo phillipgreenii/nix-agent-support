@@ -1378,6 +1378,15 @@ func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *bea
 		return nil
 	}
 
+	// Store-path: ingest feedback into SQLite in parallel with the bead path.
+	// Only runs when Deps.Store is set; errors are non-fatal (recorded into
+	// summary.Errors) so the existing bead/processing-cycle path is unaffected.
+	if e.deps.Store != nil {
+		if err := e.ingestFeedbackToStore(ctx, repo, pr, enriched); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: "ingestFeedbackToStore: " + err.Error()})
+		}
+	}
+
 	// Gather events.
 	var events []feedbackEvent
 	if enriched != nil {
