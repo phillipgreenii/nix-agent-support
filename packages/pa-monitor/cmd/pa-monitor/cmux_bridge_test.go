@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,32 @@ func TestCaffeinatePhraseLowercase(t *testing.T) {
 	}
 	if autoNudgePhrase(false) != "Auto Nudge disabled" {
 		t.Errorf("got %q", autoNudgePhrase(false))
+	}
+}
+
+func TestConnAnnouncerTransitions(t *testing.T) {
+	var term []string
+	var details []string
+	var gauge []bool
+	a := &connAnnouncer{
+		term:   func(s string) { term = append(term, s) },
+		detail: func(event string, _ map[string]string) { details = append(details, event) },
+		gauge:  func(c bool) { gauge = append(gauge, c) },
+	}
+	a.connected()                                   // clean startup: no "restored", gauge true
+	a.disconnected(map[string]string{"error": "x"}) // one "Lost", detail
+	a.disconnected(map[string]string{"error": "y"}) // still one "Lost", another detail
+	a.connected()                                   // one "restored"
+	wantTerm := []string{"Lost connection to daemon", "Connection to daemon restored"}
+	if !reflect.DeepEqual(term, wantTerm) {
+		t.Errorf("term = %v, want %v", term, wantTerm)
+	}
+	if len(details) != 2 {
+		t.Errorf("details = %v, want 2", details)
+	}
+	wantGauge := []bool{true, false, true}
+	if !reflect.DeepEqual(gauge, wantGauge) {
+		t.Errorf("gauge = %v, want %v", gauge, wantGauge)
 	}
 }
 
