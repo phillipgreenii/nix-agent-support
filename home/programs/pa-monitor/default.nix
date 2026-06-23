@@ -7,6 +7,7 @@
 
 let
   cfg = config.phillipgreenii.programs.pa-monitor;
+  tomlFormat = pkgs.formats.toml { };
 in
 {
   options.phillipgreenii.programs.pa-monitor = {
@@ -23,14 +24,30 @@ in
       option only exists as the public-facing enable flag; the darwin
       module reads it across `config.home-manager.users.<u>`.
     '';
+
+    settings = lib.mkOption {
+      inherit (tomlFormat) type;
+      default = { };
+      example = {
+        otel.endpoint = "http://127.0.0.1:4317";
+      };
+      description = ''
+        Written to `~/.config/pa-monitor/config.toml`. Keys must match
+        pa-monitor's TOML schema (e.g. `otel.endpoint`,
+        `otel.resource_attributes`, `plan_tier`, `[[decorator]]`). When empty,
+        no file is written and pa-monitor uses its built-in defaults.
+      '';
+    };
   };
 
   # Grafana dashboard registration and LaunchAgent wiring both live in the
   # parallel darwin module (darwin/modules/pa-monitor) because the relevant
-  # options are declared at darwin/system scope, not HM scope. Per ADR 0049
-  # the LaunchAgent MUST go through phillipgreenii.system.launchdServices —
-  # writing launchd.agents directly from this HM module is forbidden.
+  # options are declared at darwin/system scope, not HM scope.
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
     home.packages = [ cfg.package ];
+
+    xdg.configFile."pa-monitor/config.toml" = lib.mkIf (cfg.settings != { }) {
+      source = tomlFormat.generate "pa-monitor-config.toml" cfg.settings;
+    };
   };
 }

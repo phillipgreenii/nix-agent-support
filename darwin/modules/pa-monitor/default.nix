@@ -29,6 +29,16 @@ let
     else
       { };
 
+  # OTel settings for the shared config file, derived from the same emitterEnv
+  # the daemon used to receive via its plist. The ENDPOINT key is present iff
+  # obs.enable, so it is the correct gate. We deliberately carry only the
+  # endpoint: there is no `protocol` config field (the Go exporters are
+  # gRPC-only), OTEL_SERVICE_NAME is set in Go, and the module passes no
+  # resourceAttrs so OTEL_RESOURCE_ATTRIBUTES is absent.
+  otelSettings = lib.optionalAttrs (emitterEnv ? OTEL_EXPORTER_OTLP_ENDPOINT) {
+    otel.endpoint = emitterEnv.OTEL_EXPORTER_OTLP_ENDPOINT;
+  };
+
   # XDG_STATE_HOME default for macOS user agents. The launchdServices helper
   # plist runs under the primary user, so resolve via system.primaryUser.
   primaryUser = config.system.primaryUser or null;
@@ -53,7 +63,21 @@ in
       };
       phillipgreenii.observability.alertRuleFiles = [
         ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml
+        ../../../packages/pa-monitor/grafana/alerting/daemon-connection.yaml
       ];
+
+      # Feed OTel config into each daemon-enabled user's pa-monitor settings via
+      # a shared HM module. This reads each user's own daemon.enable and never
+      # enumerates config.home-manager.users, avoiding the read-then-write
+      # recursion that a mapAttrs-over-users approach would cause.
+      home-manager.sharedModules = lib.optional (otelSettings != { }) (
+        { config, lib, ... }:
+        {
+          config = lib.mkIf (config.phillipgreenii.programs.pa-monitor.daemon.enable or false) {
+            phillipgreenii.programs.pa-monitor.settings = otelSettings;
+          };
+        }
+      );
     })
 
     # LaunchAgent registration via the canonical helper (ADR 0049). The
@@ -73,7 +97,9 @@ in
         serviceConfig = {
           StandardErrorPath = "${stateHome}/pa-monitor/launchd-stderr.log";
           StandardOutPath = "${stateHome}/pa-monitor/launchd-stdout.log";
-          EnvironmentVariables = emitterEnv;
+          # OTel is now sourced from ~/.config/pa-monitor/config.toml (single
+          # source of truth), written from obs via home-manager.sharedModules
+          # above — no longer injected as plist env.
         };
       };
     })
