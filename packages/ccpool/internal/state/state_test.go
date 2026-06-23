@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -478,5 +479,21 @@ func TestGather_lastTextErrorTolerated(t *testing.T) {
 	}
 	if res.LastText != "" {
 		t.Errorf("LastText = %q, want empty (read error tolerated)", res.LastText)
+	}
+}
+
+func TestInputsAndResult_carryRegistryVerdict(t *testing.T) {
+	in := Inputs{
+		Name: "a", Live: true, Row: store.Session{State: store.Working},
+		RegistryFound: true,
+		Registry:      ct.ActivityVerdict{Activity: ct.Active},
+	}
+	res := Classify(in)
+	// The verdict is mirrored onto Result for downstream reuse (pg2-yukh).
+	if !res.RegistryFound {
+		t.Error("RegistryFound = false, want true (mirrored from Inputs)")
+	}
+	if res.Registry.Activity != ct.Active {
+		t.Errorf("Registry.Activity = %v, want Active (mirrored from Inputs)", res.Registry.Activity)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"time"
 
+	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/pane"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
@@ -56,6 +57,12 @@ type Result struct {
 	// (Row.PendingQuestion, set by the `ask` hook) — no resolver/IO — so Classify
 	// sets it directly and it stays pure (pg2-7a5b).
 	Question string
+	// RegistryFound / Registry mirror the gathered registry signal onto the
+	// result so downstream consumers (the pg2-yukh ingestion guard) can reuse
+	// the same verdict ccpool classified with, without re-reading the registry.
+	// RegistryFound is false when no live row was matched (Registry is zero).
+	RegistryFound bool
+	Registry      ct.ActivityVerdict
 }
 
 // Paner is the minimal pane port (a subset of session.Tmux). The cmd layer
@@ -75,6 +82,18 @@ type Inputs struct {
 	// layer computes it via claude-transcript's IsAwaitingInput over the row's
 	// TranscriptPath; an unreadable/empty transcript yields false (tolerated).
 	Awaiting bool
+	// RegistryFound is true when Gather located a LIVE (pid-gated) Claude
+	// session-registry row for this session (matched by ClaudeSessionID). When
+	// false, Registry is the zero verdict and Classify ignores it — the
+	// classifier falls back to the pane+row precedence unchanged.
+	RegistryFound bool
+	// Registry is the shared claude-transcript activity verdict for this
+	// session's registry row (Active/WaitingForHuman/Idle), already pid-gated
+	// and freshness-cross-checked by Gather. Consulted by Classify only when
+	// RegistryFound. It NEVER supplies the thinking/streaming substate — that
+	// remains pane-derived (the registry has no such field). Mapping:
+	// Active->Working, WaitingForHuman->WaitingForHuman, Idle->Idle.
+	Registry ct.ActivityVerdict
 	// Frame1..Frame3 are up to three pane captures, PaneDiffInterval apart.
 	// NumFrames records how many were actually captured: 1 means the fast path
 	// short-circuited (Frame1 carried the live counter, so Frame2/Frame3 are
@@ -144,6 +163,8 @@ func ClassifyFrame(f1, f2, f3 string, nFrames int) PaneVerdict {
 //  7. else                          -> idle
 func Classify(in Inputs) Result {
 	res := Result{Name: in.Name, Live: in.Live, LastKnown: in.Row.State}
+	res.RegistryFound = in.RegistryFound
+	res.Registry = in.Registry
 	if !in.Live {
 		res.State = NotLive
 		return res
