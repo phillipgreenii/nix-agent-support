@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/tui"
 )
 
 // captureLog returns a log function that appends each line to lines.
@@ -55,6 +60,43 @@ func TestConnAnnouncerTransitions(t *testing.T) {
 	wantGauge := []bool{true, false, true}
 	if !reflect.DeepEqual(gauge, wantGauge) {
 		t.Errorf("gauge = %v, want %v", gauge, wantGauge)
+	}
+}
+
+func TestBridgeLoggerRouting(t *testing.T) {
+	dir := t.TempDir()
+	var pane bytes.Buffer
+	bl := &bridgeLogger{
+		now:  func() time.Time { return time.Date(2026, 6, 23, 15, 4, 5, 0, time.UTC) },
+		file: &tui.ErrorLogger{CacheDir: dir, FileName: "cmux-bridge.log"},
+		emit: nil, // nil-safe
+		out:  nil, // set below
+	}
+	// Term writes to out; Detail must not. Use a temp file as out so we can
+	// inspect what reached the pane. (os.File required by the struct.)
+	f, err := os.CreateTemp(dir, "pane-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	bl.out = f
+
+	bl.Detail("daemon.disconnect", map[string]string{"error": "x"})
+	bl.Term("Lost connection to daemon")
+
+	// Pane file: only the Term line, no detail.
+	paneBytes, _ := os.ReadFile(f.Name())
+	pane.Write(paneBytes)
+	if !strings.Contains(pane.String(), "2026-06-23 15:04:05 Lost connection to daemon") {
+		t.Errorf("Term line missing from pane: %q", pane.String())
+	}
+	if strings.Contains(pane.String(), "daemon.disconnect") {
+		t.Errorf("Detail leaked to pane: %q", pane.String())
+	}
+	// Detail must land in the log file.
+	logBytes, _ := os.ReadFile(filepath.Join(dir, "cmux-bridge.log"))
+	if !strings.Contains(string(logBytes), "daemon.disconnect") {
+		t.Errorf("Detail missing from log file: %q", string(logBytes))
 	}
 }
 
