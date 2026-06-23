@@ -8,6 +8,21 @@
 // internal/pane (the shared ReLiveCounter). It deliberately does NOT depend on
 // internal/session — it defines its own narrow Paner port — to avoid an import
 // cycle and keep the package fake-driven testable.
+//
+// Registry signal (pg2-oois.5): Gather also folds in the shared
+// claude-transcript session-registry activity verdict (ClassifyActivity) as an
+// additive INPUT signal, pid-gated and matched to this session by
+// ClaudeSessionID. It cross-checks — it does not replace — the pane+row signals,
+// and it NEVER supplies the thinking/streaming substate (the registry has no
+// such field; substate stays pane-derived). Mapping:
+//
+//	claudetranscript.Active          -> state.Working
+//	claudetranscript.WaitingForHuman -> state.WaitingForHuman
+//	claudetranscript.Idle            -> state.Idle
+//
+// When no live registry row is found the verdict is ignored entirely. The
+// verdict is mirrored onto Result (RegistryFound/Registry) so the pg2-yukh
+// ingestion guard can reuse it without re-reading the registry.
 package state
 
 import (

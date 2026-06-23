@@ -615,6 +615,42 @@ func TestClassify_registrySignal(t *testing.T) {
 	}
 }
 
+// TestClassify_needsInputUnregressedByRegistry pins AC(3): a hook-set NeedsInput
+// row (PRIMARY signal) plus its pending question survives the registry signal in
+// EVERY registry activity (Active/WaitingForHuman/Idle) and when no row is found.
+func TestClassify_needsInputUnregressedByRegistry(t *testing.T) {
+	const staticPane = "❯ ready\n  -- INSERT --"
+	base := Inputs{
+		Name: "a", Live: true,
+		Frame1: staticPane, Frame2: staticPane, Frame3: staticPane, NumFrames: 3,
+		Row: store.Session{State: store.NeedsInput, PendingQuestion: "Alpha or Bravo?"},
+	}
+	regCases := []struct {
+		name  string
+		found bool
+		act   ct.Activity
+	}{
+		{"no_row", false, ct.Idle},
+		{"registry_active", true, ct.Active},
+		{"registry_waiting", true, ct.WaitingForHuman},
+		{"registry_idle", true, ct.Idle},
+	}
+	for _, rc := range regCases {
+		t.Run(rc.name, func(t *testing.T) {
+			in := base
+			in.RegistryFound = rc.found
+			in.Registry = ct.ActivityVerdict{Activity: rc.act}
+			got := Classify(in)
+			if got.State != WaitingForHuman {
+				t.Errorf("State = %q, want waiting-for-human (hook-set NeedsInput is PRIMARY)", got.State)
+			}
+			if got.Question != "Alpha or Bravo?" {
+				t.Errorf("Question = %q, want the row's pending question (pg2-7a5b)", got.Question)
+			}
+		})
+	}
+}
+
 func TestInputsAndResult_carryRegistryVerdict(t *testing.T) {
 	in := Inputs{
 		Name: "a", Live: true, Row: store.Session{State: store.Working},
