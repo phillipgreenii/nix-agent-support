@@ -84,6 +84,7 @@ const enrichedPRsQuery = `query($search: String!) {
           nodes {
             id
             isResolved
+            isOutdated
             comments(first: 30) {
               totalCount
               pageInfo { hasNextPage }
@@ -96,6 +97,9 @@ const enrichedPRsQuery = `query($search: String!) {
                 originalLine
                 line
                 createdAt
+                isMinimized
+                minimizedReason
+                originalCommit { oid }
               }
             }
           }
@@ -272,6 +276,7 @@ type ghReviewThreadsConn struct {
 	Nodes      []struct {
 		ID         string `json:"id"`
 		IsResolved bool   `json:"isResolved"`
+		IsOutdated bool   `json:"isOutdated"`
 		Comments   struct {
 			TotalCount int        `json:"totalCount"`
 			PageInfo   ghPageInfo `json:"pageInfo"`
@@ -284,6 +289,11 @@ type ghReviewThreadsConn struct {
 				OriginalLine      int     `json:"originalLine"`
 				Line              int     `json:"line"`
 				CreatedAt         string  `json:"createdAt"`
+				IsMinimized       bool    `json:"isMinimized"`
+				MinimizedReason   string  `json:"minimizedReason"`
+				OriginalCommit    *struct {
+					OID string `json:"oid"`
+				} `json:"originalCommit"`
 			} `json:"nodes"`
 		} `json:"comments"`
 	} `json:"nodes"`
@@ -392,15 +402,23 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 			if line == 0 {
 				line = c.OriginalLine
 			}
+			var originalCommitOID string
+			if c.OriginalCommit != nil {
+				originalCommitOID = c.OriginalCommit.OID
+			}
 			out = append(out, api.Comment{
-				ID:         c.ID,
-				Author:     c.Author.canonicalLogin(),
-				AuthorRole: strings.ToLower(c.AuthorAssociation),
-				Body:       c.Body,
-				Path:       c.Path,
-				Line:       line,
-				ThreadID:   t.ID,
-				Resolved:   t.IsResolved,
+				ID:                c.ID,
+				Author:            c.Author.canonicalLogin(),
+				AuthorRole:        strings.ToLower(c.AuthorAssociation),
+				Body:              c.Body,
+				Path:              c.Path,
+				Line:              line,
+				ThreadID:          t.ID,
+				Resolved:          t.IsResolved,
+				ThreadIsOutdated:  t.IsOutdated,
+				IsMinimized:       c.IsMinimized,
+				MinimizedReason:   c.MinimizedReason,
+				OriginalCommitOID: originalCommitOID,
 			})
 		}
 	}

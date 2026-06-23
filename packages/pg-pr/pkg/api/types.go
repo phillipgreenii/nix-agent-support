@@ -13,6 +13,22 @@ type Comment struct {
 	Line       int    `json:"line,omitempty"`
 	ThreadID   string `json:"thread_id,omitempty"`
 	Resolved   bool   `json:"resolved"`
+
+	// Review-thread staleness fields (populated for inline thread comments only).
+	//
+	// ThreadIsOutdated mirrors PullRequestReviewThread.isOutdated: true when
+	// the thread's diff context has been pushed past (the thread is "stale").
+	//
+	// IsMinimized / MinimizedReason reflect the per-comment collapse state
+	// GitHub exposes as "marked as outdated". MinimizedReason is an uppercase
+	// string (e.g. "OUTDATED", "RESOLVED", "OFF_TOPIC").
+	//
+	// OriginalCommitOID is the OID of the commit the comment was originally
+	// posted against — used as subject_sha when writing feedback-store entries.
+	ThreadIsOutdated  bool   `json:"thread_is_outdated,omitempty"`
+	IsMinimized       bool   `json:"is_minimized,omitempty"`
+	MinimizedReason   string `json:"minimized_reason,omitempty"`
+	OriginalCommitOID string `json:"original_commit_oid,omitempty"`
 }
 
 // Review is the JSON shape for a PR review summary.

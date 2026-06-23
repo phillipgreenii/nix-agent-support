@@ -260,6 +260,60 @@ func sliceEq(a, b []string) bool {
 	return true
 }
 
+// TestParseEnrichedSurfacesStalenessFields verifies that the new
+// isOutdated/isMinimized/minimizedReason/originalCommit fields are
+// correctly parsed from the GraphQL response and surfaced on the output
+// api.Comment values.
+func TestParseEnrichedSurfacesStalenessFields(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":7,"title":"test pr","author":{"__typename":"User","login":"alice"},
+	   "reviews":{"nodes":[]},
+	   "comments":{"nodes":[]},
+	   "reviewThreads":{"nodes":[
+	     {"id":"t1","isResolved":false,"isOutdated":true,
+	      "comments":{"nodes":[
+	        {"id":"c1","databaseId":11,"author":{"__typename":"User","login":"bob"},
+	         "authorAssociation":"CONTRIBUTOR","body":"looks wrong",
+	         "path":"pkg/foo.go","originalLine":5,"line":0,"createdAt":"2024-01-01T00:00:00Z",
+	         "isMinimized":true,"minimizedReason":"OUTDATED",
+	         "originalCommit":{"oid":"deadbeefdeadbeef"}}
+	      ]}}
+	   ]},
+	   "commits":{"nodes":[]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	comments := got[0].Comments
+	if len(comments) != 1 {
+		t.Fatalf("want 1 comment (from review thread), got %d", len(comments))
+	}
+	c := comments[0]
+
+	// Thread-level staleness flag.
+	if !c.ThreadIsOutdated {
+		t.Errorf("Comment.ThreadIsOutdated = false, want true")
+	}
+
+	// Per-comment minimization fields.
+	if !c.IsMinimized {
+		t.Errorf("Comment.IsMinimized = false, want true")
+	}
+	if c.MinimizedReason != "OUTDATED" {
+		t.Errorf("Comment.MinimizedReason = %q, want OUTDATED", c.MinimizedReason)
+	}
+
+	// Original commit OID (source of subject_sha in feedback store).
+	if c.OriginalCommitOID != "deadbeefdeadbeef" {
+		t.Errorf("Comment.OriginalCommitOID = %q, want deadbeefdeadbeef", c.OriginalCommitOID)
+	}
+}
+
 // Compile-time check that ghGraphQLResponse decodes the recorded fixture
 // shape so silent schema drift gets caught here, not in production.
 var _ = func() bool {
