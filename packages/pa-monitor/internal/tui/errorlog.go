@@ -14,6 +14,9 @@ import (
 // share one file. When CacheDir is empty, LogString silently drops the line.
 type ErrorLogger struct {
 	CacheDir string
+	// FileName is the log file's basename; defaults to "signal-errors.log"
+	// when empty (preserving existing callers).
+	FileName string
 
 	mu   sync.Mutex
 	file io.WriteCloser
@@ -32,7 +35,11 @@ func (e *ErrorLogger) LogString(msg string) {
 		if err := os.MkdirAll(e.CacheDir, 0o755); err != nil {
 			return
 		}
-		f, err := os.OpenFile(filepath.Join(e.CacheDir, "signal-errors.log"),
+		name := e.FileName
+		if name == "" {
+			name = "signal-errors.log"
+		}
+		f, err := os.OpenFile(filepath.Join(e.CacheDir, name),
 			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return
