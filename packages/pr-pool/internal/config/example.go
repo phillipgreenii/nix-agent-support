@@ -28,8 +28,10 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 #                  NON-editable safety preamble (assert author is me, branch starts
 #                  with phillipg., never force-push) ahead of the task prompt below.
 #
-# Pool-wide scalars (budgets, gates, model, ...) come from PR_POOL_* env vars and an
-# optional [pool] section; this file defines roles.
+# Pool-wide scalars (budgets, gates, model, worktree_dir, ...) come from PR_POOL_*
+# env vars and an optional [pool] section; this file defines roles. Where both a
+# PR_POOL_* env var and a [pool] key set the same scalar, [pool] (this file) wins —
+# e.g. [pool].worktree_dir overrides PR_POOL_WORKTREE_DIR.
 
 `
 

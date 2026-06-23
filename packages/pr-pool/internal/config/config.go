@@ -1,5 +1,6 @@
 // Package config holds pr-pool's runtime configuration. Pool scalars layer
-// Default() -> [pool] TOML -> PR_POOL_* env. Roles come from the [[role]] array in
+// Default() -> PR_POOL_* env -> [pool] TOML (the config file wins for the keys it
+// sets: self_login, worktree_dir, budget). Roles come from the [[role]] array in
 // <RepoRoot>/.pr-pool/config.toml (or PR_POOL_CONFIG), or the built-in default set
 // when no config file is present. Role identity lives ONLY in config / built-in
 // defaults — there is no env overlay for role fields (spec C).

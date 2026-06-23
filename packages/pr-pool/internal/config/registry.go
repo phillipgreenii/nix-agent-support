@@ -36,8 +36,9 @@ type fileShape struct {
 }
 
 type poolTOML struct {
-	SelfLogin string      `toml:"self_login"`
-	Budget    *budgetTOML `toml:"budget"`
+	SelfLogin   string      `toml:"self_login"`
+	WorktreeDir string      `toml:"worktree_dir"`
+	Budget      *budgetTOML `toml:"budget"`
 }
 
 type budgetTOML struct {
@@ -108,6 +109,12 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	}
 	if shape.Pool.SelfLogin != "" {
 		c.SelfLogin = shape.Pool.SelfLogin
+	}
+	// [pool].worktree_dir overlays after the env overlay in Load(), so config
+	// (repo) takes precedence over PR_POOL_WORKTREE_DIR (env, global). An absent
+	// key leaves the env/default value intact.
+	if shape.Pool.WorktreeDir != "" {
+		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
 	overlayConfigBudget(c, shape.Pool.Budget)
 	if len(shape.Roles) == 0 {

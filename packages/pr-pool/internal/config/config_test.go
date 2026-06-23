@@ -91,6 +91,33 @@ func TestLoad_envOverrides(t *testing.T) {
 	}
 }
 
+// WorktreeDir layers Default() -> PR_POOL_WORKTREE_DIR (env, global) ->
+// [pool].worktree_dir (config, repo). Config is the highest priority.
+func TestLoad_worktreeDir_configWinsOverEnv(t *testing.T) {
+	t.Setenv("PR_POOL_WORKTREE_DIR", "/env/wt")
+	writeCfg(t, "[pool]\nworktree_dir = \"/config/wt\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WorktreeDir != "/config/wt" {
+		t.Errorf("WorktreeDir = %q, want /config/wt ([pool].worktree_dir must override the env var)", c.WorktreeDir)
+	}
+}
+
+// A [pool] table that omits worktree_dir must NOT clobber the env value.
+func TestLoad_worktreeDir_envWhenConfigOmitsKey(t *testing.T) {
+	t.Setenv("PR_POOL_WORKTREE_DIR", "/env/wt")
+	writeCfg(t, "[pool]\nself_login = \"someone\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WorktreeDir != "/env/wt" {
+		t.Errorf("WorktreeDir = %q, want /env/wt (absent [pool].worktree_dir must not override the env var)", c.WorktreeDir)
+	}
+}
+
 // PR_POOL_MAX_WORKER and the other role env vars are dropped (spec C): setting them
 // must have NO effect (role caps live in config / built-in defaults only).
 func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
