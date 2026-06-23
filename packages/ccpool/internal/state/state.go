@@ -255,11 +255,18 @@ func Classify(in Inputs) Result {
 //     waiting-for-human. Its error is tolerated exactly like awaiting (on error,
 //     LastText is left empty) so a missing/half-written transcript never crashes
 //     a status query.
+//   - registry wraps the cmd layer's registry lookup: it sweeps the Claude
+//     session registry (~/.claude/sessions), matches the row by
+//     ClaudeSessionID, PID-gates the match (PidAlive), and returns
+//     ClassifyActivity's verdict plus a "found a live row" bool. A missing dir,
+//     no match, or a dead pid yields (zero verdict, false) — Classify then
+//     ignores it and uses the pane+row precedence. Resolved whenever the
+//     session is live (cheap relative to the pane captures).
 //
 // The fast path: capture Frame1; if it carries the live counter, return
 // immediately (NumFrames=1, no sleep, no extra captures). Otherwise sample two
 // more frames PaneDiffInterval apart.
-func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), lastText func() (string, error), tmuxName, name string, row store.Session) (Result, error) {
+func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), lastText func() (string, error), registry func() (ct.ActivityVerdict, bool), tmuxName, name string, row store.Session) (Result, error) {
 	in := Inputs{Name: name, Row: row}
 	in.Live = p.HasSession(tmuxName)
 	if !in.Live {
@@ -299,6 +306,11 @@ func Gather(p Paner, sleep func(time.Duration), awaiting func() (bool, error), l
 	if a, aerr := awaiting(); aerr == nil {
 		in.Awaiting = a
 	}
+	// Resolve the registry verdict whenever the session is live. The resolver
+	// swallows its own errors into found=false (a missing dir / no match / dead
+	// pid all read as "no live row"), so a registry hiccup never crashes a status
+	// query — Classify then ignores it and falls back to pane+row.
+	in.Registry, in.RegistryFound = registry()
 	res := Classify(in)
 	// Populate LastText only for the two states that surface it: Idle (the last
 	// REPLY) and Error (the last ERROR text). Other states never read the

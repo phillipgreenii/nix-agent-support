@@ -243,7 +243,7 @@ func TestGather_fastPathSkipsSecondCapture(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "a", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-a", "a", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, noRegistry, "cc-a", "a", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestGather_streamingViaThreeFrames(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "s", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-s", "s", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, noRegistry, "cc-s", "s", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestGather_settledIdle(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "i", State: store.Ready}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), staticLastText("the last reply"), "cc-i", "i", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), staticLastText("the last reply"), noRegistry, "cc-i", "i", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestGather_awaitingWaitsForHuman(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "q", State: store.Working}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, "cc-q", "q", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, noRegistry, "cc-q", "q", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestGather_needsInputRowWaitsForHumanWithQuestion(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "q", State: store.NeedsInput, PendingQuestion: "Which path? Alpha or Bravo"}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-q", "q", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, noRegistry, "cc-q", "q", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestGather_awaitingReadDespiteStreamingDiffOnNonWorkingRow(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "q", State: store.Ready} // not Working/Starting
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, "cc-q", "q", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(true), noText, noRegistry, "cc-q", "q", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestGather_notLiveSkipsCapture(t *testing.T) {
 	sl := &recordingSleep{}
 	row := store.Session{Name: "d", State: store.Idle}
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, "cc-d", "d", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, noRegistry, "cc-d", "d", row)
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestGather_awaitingErrorTolerated(t *testing.T) {
 	row := store.Session{Name: "u", State: store.Ready}
 	boom := func() (bool, error) { return false, errors.New("transcript unreadable") }
 
-	res, err := Gather(p, sl.Sleep, boom, staticLastText("a reply"), "cc-u", "u", row)
+	res, err := Gather(p, sl.Sleep, boom, staticLastText("a reply"), noRegistry, "cc-u", "u", row)
 	if err != nil {
 		t.Fatalf("Gather should tolerate a transcript read error, got: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestGather_lastTextPopulatedForIdleAndError(t *testing.T) {
 			sl := &recordingSleep{}
 			row := store.Session{Name: tc.name, State: tc.rowState}
 
-			res, err := Gather(p, sl.Sleep, staticAwaiting(tc.awaiting), staticLastText(tc.text), "cc-"+tc.name, tc.name, row)
+			res, err := Gather(p, sl.Sleep, staticAwaiting(tc.awaiting), staticLastText(tc.text), noRegistry, "cc-"+tc.name, tc.name, row)
 			if err != nil {
 				t.Fatalf("Gather: %v", err)
 			}
@@ -470,7 +470,7 @@ func TestGather_lastTextErrorTolerated(t *testing.T) {
 	row := store.Session{Name: "e", State: store.Errored} // -> error, lastText consulted
 	boom := func() (string, error) { return "", errors.New("transcript unreadable") }
 
-	res, err := Gather(p, sl.Sleep, staticAwaiting(false), boom, "cc-e", "e", row)
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), boom, noRegistry, "cc-e", "e", row)
 	if err != nil {
 		t.Fatalf("Gather should tolerate a lastText read error, got: %v", err)
 	}
@@ -479,6 +479,55 @@ func TestGather_lastTextErrorTolerated(t *testing.T) {
 	}
 	if res.LastText != "" {
 		t.Errorf("LastText = %q, want empty (read error tolerated)", res.LastText)
+	}
+}
+
+// staticRegistry returns a registry resolver yielding a fixed verdict+found.
+func staticRegistry(a ct.Activity, found bool) func() (ct.ActivityVerdict, bool) {
+	return func() (ct.ActivityVerdict, bool) {
+		return ct.ActivityVerdict{Activity: a}, found
+	}
+}
+
+// noRegistry is a resolver that reports no live row (the common fallback path).
+func noRegistry() (ct.ActivityVerdict, bool) { return ct.ActivityVerdict{}, false }
+
+func TestGather_registryActiveOverSettledPane(t *testing.T) {
+	// Pane is settled (sticky single frame), row is Ready, but the registry
+	// reports a live busy row -> working. Verdict mirrored onto Result.
+	const staticPane = "❯ ready\n  -- INSERT --"
+	p := &fakePaner{live: true, panes: []string{staticPane}}
+	sl := &recordingSleep{}
+	row := store.Session{Name: "w", State: store.Ready}
+
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), noText, staticRegistry(ct.Active, true), "cc-w", "w", row)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.State != Working || res.SubState != SubNone {
+		t.Errorf("got %s/%s, want working/<none>", res.State, res.SubState)
+	}
+	if !res.RegistryFound || res.Registry.Activity != ct.Active {
+		t.Errorf("Result registry = %v/%v, want found/Active", res.RegistryFound, res.Registry.Activity)
+	}
+}
+
+func TestGather_noRegistryRowFallsBack(t *testing.T) {
+	// No live registry row -> classifier uses the pane+row precedence (idle).
+	const staticPane = "❯ ready\n  -- INSERT --"
+	p := &fakePaner{live: true, panes: []string{staticPane}}
+	sl := &recordingSleep{}
+	row := store.Session{Name: "i", State: store.Ready}
+
+	res, err := Gather(p, sl.Sleep, staticAwaiting(false), staticLastText("a reply"), noRegistry, "cc-i", "i", row)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.State != Idle {
+		t.Errorf("State = %s, want idle (no registry row -> fallback)", res.State)
+	}
+	if res.RegistryFound {
+		t.Error("RegistryFound = true, want false (no live row)")
 	}
 }
 
