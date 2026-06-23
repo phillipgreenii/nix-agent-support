@@ -148,10 +148,13 @@ retained; only the _logging_ changes.
 
 Low-level detail must survive even when OTel is disabled. Two sinks:
 
-1. **Local log** — the bridge writes structured detail to a local log. Reuse
-   the existing `tui.ErrorLogger` pattern (it writes to
-   `~/.cache/pa-monitor`), or a small equivalent for the bridge, so detail is
-   always captured on disk.
+1. **Local log** — the bridge writes structured detail to its **own**
+   bridge-named log file under `~/.cache/pa-monitor` (e.g.
+   `cmux-bridge.log`), built on the same mechanism as `tui.ErrorLogger`
+   (which writes `<CacheDir>/signal-errors.log`,
+   `internal/tui/errorlog.go:11,35`). A separate file avoids co-mingling
+   bridge detail with the TUI's signal-error log. Detail is always captured
+   on disk, even when OTel is off.
 2. **OTel logs** — when an emitter is configured, the same detail is emitted
    via `Emitter.LogEvent(name, attrs)` (Loki). Event names:
    `daemon.disconnect`, `daemon.reconnect`, `bridge.register_failed`,
@@ -177,21 +180,45 @@ sit unused in a bridge/TUI process).
   interval (vs the daemon's default 60s) so a `connected = 0` reading reaches
   Prometheus quickly and the `for: 1m` alert is responsive.
 - A buffered-value + `known` gate (same idiom as the daemon emitter's
-  `caffeinateActiveKnown`) avoids a ghost label-less series before the first
-  reading.
+  `caffeinateActiveKnown`, guarded by a mutex because the SDK's
+  `PeriodicReader` fires the observable-gauge callback from its own goroutine
+  while the bridge/TUI call `RecordDaemonConnected` from their loops) avoids a
+  ghost label-less series before the first reading.
 - `buildResource` gains `resource.WithFromEnv()` so `OTEL_RESOURCE_ATTRIBUTES`
   (e.g. `host.name`, `deployment.environment`) flows into the resource for all
-  emitters. (Today it ignores that env var.)
+  emitters. (Today `resource.New` is called with only `WithAttributes`, so the
+  env var is ignored — confirmed in `internal/otel/resource.go`.) **Ordering
+  matters**: later detectors win on key conflict, so order the options so the
+  explicit `service.name`/`service.version` win over any env-supplied value
+  (put `WithFromEnv()` first, or keep `service.name` out of the env). Pin this
+  in a test.
+
+**Shutdown/flush (required, not polish).** `runCmuxBridge` currently neither
+imports otel nor flushes anything; the daemon flushes via
+`defer opts.Emitter.Shutdown(...)` (`internal/daemon/lifecycle.go:248`). The
+bridge and TUI MUST `defer connEmitter.Shutdown(ctx)` on exit so the batch log
+processor flushes buffered `LogEvent`s. (The `connected=0` metric is held by
+the live process and re-exported every 15s, so it survives until the process
+dies; on death the series goes stale → `noDataState: OK`. The buffered logs are
+what a missing Shutdown loses.)
 
 Wiring:
 
-- **Bridge**: `runCmuxBridge` constructs the connection emitter; the state
-  machine in D2 calls `RecordDaemonConnected(true/false)`.
-- **TUI**: `runTUIRemote` constructs the connection emitter and starts a small
-  ticker (e.g. every 10s) that samples the `RemotePoller`:
-  `connected := !rp.IsOffline() && time.Since(rp.LastFreshAt()) <
-2*cfg.RefreshInterval` (clamped to a sane floor), calling
-  `RecordDaemonConnected`. Transitions also emit a `LogEvent`.
+- **Bridge**: `runCmuxBridge` constructs the connection emitter (with
+  `defer Shutdown`); the state machine in D2 calls
+  `RecordDaemonConnected(true/false)`.
+- **TUI**: `runTUIRemote` constructs the connection emitter (with
+  `defer Shutdown`) and starts a small sample ticker that records
+  `connected := !rp.IsOffline()` — which is sound, because every
+  `scheduleBackoff()` in `remote_poller.go` is preceded by `r.client = nil`,
+  so `IsOffline()` (`client == nil`) is reliably true throughout a
+  disconnect/backoff window (verified at `remote_poller.go:77,88-90,179`). Do
+  **not** key a freshness window off `cfg.RefreshInterval` (default **1s**,
+  `config.go:78`) — with a ~10s sample ticker that yields constant
+  false-disconnects. If a staleness guard is wanted (to catch a wedged daemon
+  that keeps answering `GetState` with stale data), use a window comfortably
+  larger than the sample interval (e.g. `≥ 3 ×` the ticker period), specified
+  as a concrete constant. Transitions emit a `LogEvent`.
 
 ### D5. OTel config via the existing XDG config file (single source of truth)
 
@@ -203,23 +230,35 @@ New config schema (`internal/config/config.go`):
 ```toml
 [otel]
 endpoint = "http://127.0.0.1:4317"
-protocol = "grpc"            # or "http/protobuf"
 
 [otel.resource_attributes]
 "deployment.environment" = "local"
 "host.name" = "phillipg-mbp-02"
 ```
 
-- `Config` gains `OTel OTelConfig` where `OTelConfig{ Endpoint, Protocol
-string; ResourceAttrs map[string]string }`. `tomlConfig` gains a matching
-  `*tomlOTel`, with `apply` and `defaults` updated. Defaults: all empty
-  (OTel off) — preserving today's behaviour when no `[otel]` block is present.
-- New `config.ApplyOTelEnv(o OTelConfig)`: sets `OTEL_EXPORTER_OTLP_ENDPOINT`,
-  `OTEL_EXPORTER_OTLP_PROTOCOL`, and `OTEL_RESOURCE_ATTRIBUTES` **only if the
-  env var is currently unset and the config value is non-empty**. This lets the
-  existing SDK-native `otel.New` / `NewConnectionEmitter` consume the values
-  without bespoke exporter wiring, and keeps "explicit env wins" precedence for
-  any edge case.
+**Transport is gRPC; the endpoint scheme is what's load-bearing — there is no
+`protocol` knob.** The emitters import the protocol-specific
+`otlpmetricgrpc`/`otlploggrpc` packages (`internal/otel/emitter.go:14-15`),
+which never read `OTEL_EXPORTER_OTLP_PROTOCOL` — transport is fixed at compile
+time. What the gRPC exporter _does_ honour is the endpoint URL: an `http://`
+scheme selects insecure gRPC (so `http://127.0.0.1:4317` works against the
+local stack, whose default gRPC port is 4317). Therefore the config schema
+omits a `protocol` field entirely; adding HTTP/protobuf support later would be
+separate, explicitly-scoped work (import the `*http` exporter families and
+branch). `endpoint` and `resource_attributes` are the only knobs.
+
+- `Config` gains `OTel OTelConfig` where `OTelConfig{ Endpoint string;
+ResourceAttrs map[string]string }`. `tomlConfig` gains a matching `*tomlOTel`,
+  with `apply` and `defaults` updated. Defaults: all empty (OTel off) —
+  preserving today's behaviour when no `[otel]` block is present.
+- New `config.ApplyOTelEnv(o OTelConfig)`: sets `OTEL_EXPORTER_OTLP_ENDPOINT`
+  and `OTEL_RESOURCE_ATTRIBUTES` **only if the env var is currently unset and
+  the config value is non-empty**. (No
+  `OTEL_EXPORTER_OTLP_PROTOCOL` — see above; setting it would be a silent
+  no-op.) This lets the existing SDK-native `otel.New` / `NewConnectionEmitter`
+  consume the values without bespoke exporter wiring, and keeps "explicit env
+  wins" precedence for any edge case. The on/off gate in `otel.New` keys off
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, so a config with an endpoint turns OTel on.
 - Each entrypoint calls `ApplyOTelEnv(cfg.OTel)` immediately before
   constructing its emitter:
   - daemon: `buildRunOptions` (has `cfg`) before `otel.New`.
@@ -242,39 +281,53 @@ tools.
     each daemon-enabled user's pa-monitor settings (darwin→HM cross-scope
     write; the module already reads `config.home-manager.users`):
 
+    `mkEmitterEnv` returns the keys `OTEL_EXPORTER_OTLP_ENDPOINT`,
+    `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME`, and (only when
+    `resourceAttrs` is passed) `OTEL_RESOURCE_ATTRIBUTES`. The
+    `ENDPOINT` key is present iff `obs.enable`, so it is the correct gate.
+    Drop the others: `protocol` has no config field (see D5), `OTEL_SERVICE_NAME`
+    is set in Go via `otel.Options{ServiceName}`, and the darwin module passes
+    **no** `resourceAttrs` today so `OTEL_RESOURCE_ATTRIBUTES` is never produced
+    — don't write parsing for a key that isn't set.
+
     ```nix
     otelSettings =
       lib.optionalAttrs (emitterEnv ? OTEL_EXPORTER_OTLP_ENDPOINT) {
-        otel = {
-          endpoint = emitterEnv.OTEL_EXPORTER_OTLP_ENDPOINT;
-          protocol = emitterEnv.OTEL_EXPORTER_OTLP_PROTOCOL or "grpc";
-          # resource_attributes parsed from OTEL_RESOURCE_ATTRIBUTES if present
-        };
+        otel.endpoint = emitterEnv.OTEL_EXPORTER_OTLP_ENDPOINT;
       };
     # for each user u with pa-monitor.daemon.enable:
-    #   home-manager.users.<u>.phillipgreenii.programs.pa-monitor.settings =
-    #     lib.mkMerge [ existing otelSettings ]
+    #   home-manager.users.<u>.phillipgreenii.programs.pa-monitor.settings = otelSettings;
     ```
 
-    (Implementation detail for the plan: confirm whether to gate on
-    `daemon.enable` or `pa-monitor.enable`, and how to merge with any
-    user-supplied `settings`.)
+    Sequencing/merge caveats (S4): (1) the HM `settings` option below must land
+    **before** this darwin write, or eval fails on an undefined option; (2)
+    merge with any user-supplied `settings` via the module system / `mkMerge`
+    semantics — do **not** read `config.home-manager.users.<u>.…settings` and
+    write it back (that is a read-then-write of the same attr and risks
+    recursion); set the option as a contribution and let the module system
+    merge. Gate on `daemon.enable` (the same predicate as the LaunchAgent),
+    matching `daemonEnabledByAnyUser`.
 
 - **`home/programs/pa-monitor/default.nix`**: add a generic settings
-  passthrough option:
+  passthrough option, typed by the TOML format so renderability is validated at
+  eval time (the `tuicr`/`ccpool` modules use this pattern):
 
   ```nix
+  let tomlFormat = pkgs.formats.toml { }; in
+  # …options…
   phillipgreenii.programs.pa-monitor.settings = lib.mkOption {
-    type = lib.types.attrs;          # free-form; keys must match config.toml
+    inherit (tomlFormat) type;       # keys must match config.toml field names
     default = { };
     description = "Rendered to ~/.config/pa-monitor/config.toml";
   };
   ```
 
-  When `settings != {}`, render via `(pkgs.formats.toml { }).generate
-"pa-monitor-config.toml" cfg.settings` and install as
-  `xdg.configFile."pa-monitor/config.toml"`. Empty → no file written →
-  today's default behaviour. This module is the single owner of that path.
+  When `settings != {}`, render via
+  `tomlFormat.generate "pa-monitor-config.toml" cfg.settings` and install as
+  `xdg.configFile."pa-monitor/config.toml"`. Empty → no file written → today's
+  default behaviour. This module is the single owner of that path. `(pkgs.formats.toml {}).generate`
+  renders the nested `[otel.resource_attributes]` table and quotes dotted keys
+  correctly (confirmed against the in-repo `tuicr`/`ccpool` usages).
 
 - **`phillipg-nix-ziprecruiter`**: no new work required — it composes
   agent-support + the observability stack, so the derived `settings.otel`
@@ -294,6 +347,13 @@ New `grafana/alerting/daemon-connection.yaml`, modelled on
   - `A` (Prometheus, instant): `min by (component) (pa_monitor_daemon_connected)`
   - `B` (reduce, last of `A`)
   - `C` (threshold): `B < 1` → fire.
+- Unlike `auth-failure.yaml`, this rule must **not** append `or vector(0)` to
+  the query — that would manufacture a 0 series when the metric is absent and
+  fire spuriously. Here absence must fall through to `noDataState: OK`.
+- Metric name: OTel `pa_monitor.daemon.connected` is exposed by Prometheus as
+  `pa_monitor_daemon_connected` (dots→underscores; an observable gauge gets no
+  `_total`/unit suffix), matching the naming of every existing gauge in
+  `grafana/pa-monitor-overview.json`.
 - Annotations name the component(s) so the alert says which side
   (cmux-bridge / tui) lost the daemon.
 
@@ -356,9 +416,10 @@ streamOnce err ──▶ state machine ──▶ terminal: "Lost connection to d
 ## Testing
 
 - Go unit tests for components 1–4 above.
-- Update `cmd/pa-monitor/cmux_bridge_test.go` for the new phrases/format and
-  add coverage for the lost/restored transitions (no duplicate "lost", no
-  spurious "restored" at clean startup).
+- Update `cmd/pa-monitor/cmux_bridge_test.go` (assertions at `:40,55,74,77`
+  check `"Caffeinated Enabled"` / `"Auto Nudge Disabled"` etc.) for the new
+  lowercase phrases/format, and add coverage for the lost/restored transitions
+  (no duplicate "lost", no spurious "restored" at clean startup).
 - `nix flake check` must pass (formatting, eval, package build, Go tests).
 - Manual: with the local otel-stack up, kill the daemon, confirm the pane
   shows a single `Lost connection to daemon`, `otel-stack`/Loki shows the
@@ -382,6 +443,13 @@ streamOnce err ──▶ state machine ──▶ terminal: "Lost connection to d
   plist and reads the config file; agent-support writes the config file from
   `obs`, so the change is transparent on hosts with observability enabled. On
   hosts without observability, OTel was already off and stays off.
+- **First-activation ordering**: if the daemon LaunchAgent is (re)bootstrapped
+  before home-manager writes `~/.config/pa-monitor/config.toml`, the daemon
+  comes up with OTel off (`config.Load` treats a missing file as
+  defaults-with-OTel-off, `config.go:96-99`). With `keepAlive = true` it
+  self-heals on the next restart; no host _regresses_ (OTel was plist-driven
+  before, config-driven after — the only cost is a brief OTel-off window on the
+  very first activation).
 
 ## Risks / edge cases
 
@@ -394,6 +462,10 @@ streamOnce err ──▶ state machine ──▶ terminal: "Lost connection to d
   emits two `component` series — intended; the alert is `by (component)`.
 - **Clock**: terminal timestamps use local wall-clock; if the machine clock
   jumps, lines reflect it. Acceptable for an operator pane.
-- **`render/controls_test.go` phrase coupling**: confirm the sidebar renderer
-  does not share a phrase constant with the bridge before lowercasing verbs, to
-  avoid changing sidebar rendering unintentionally.
+- **Phrase coupling (resolved)**: the bridge defines its own
+  `caffeinatePhrase`/`autoNudgePhrase` (`cmux_bridge.go:66-78`); the sidebar
+  renderer does not share a constant, and `render/controls_test.go:22`'s
+  `"Caffeinated Enabled"` strings are a **negative** (`wantNone`) assertion
+  that the sidebar does _not_ render those phrases. Lowercasing the bridge
+  verbs is therefore safe and does not touch the renderer — the only tests to
+  update are in `cmux_bridge_test.go`.
