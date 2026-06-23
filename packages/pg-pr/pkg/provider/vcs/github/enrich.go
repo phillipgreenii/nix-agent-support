@@ -349,6 +349,10 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 	if owner == "" {
 		owner = repo
 	}
+	var headSHA string
+	if len(n.Commits.Nodes) > 0 {
+		headSHA = n.Commits.Nodes[0].Commit.OID
+	}
 	return api.PR{
 		Repo:         owner,
 		Number:       n.Number,
@@ -363,6 +367,7 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 		Additions:    n.Additions,
 		Deletions:    n.Deletions,
 		ChangedFiles: n.ChangedFiles,
+		HeadSHA:      headSHA,
 	}
 }
 
@@ -429,10 +434,15 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 // []api.CIRun. Both CheckRun (Actions/native) and StatusContext (old
 // commit-status API) nodes are normalized to the same shape so the
 // snapshot's rollupCI computation works unchanged.
+//
+// HeadSHA is set from the commit OID that owns the statusCheckRollup —
+// this is the PR's current head commit, which is the SHA all the CI
+// contexts in the rollup were evaluated against.
 func ciRunsFromGHNode(n ghPRNode) []api.CIRun {
 	if len(n.Commits.Nodes) == 0 || n.Commits.Nodes[0].Commit.StatusCheckRollup == nil {
 		return nil
 	}
+	headSHA := n.Commits.Nodes[0].Commit.OID
 	rollup := n.Commits.Nodes[0].Commit.StatusCheckRollup
 	out := make([]api.CIRun, 0, len(rollup.Contexts.Nodes))
 	for _, c := range rollup.Contexts.Nodes {
@@ -445,6 +455,7 @@ func ciRunsFromGHNode(n ghPRNode) []api.CIRun {
 				Conclusion: strings.ToLower(c.Conclusion),
 				URL:        c.DetailsURL,
 				Provider:   "github-actions",
+				HeadSHA:    headSHA,
 			})
 		case "StatusContext":
 			// StatusContext has no separate status/conclusion split —
@@ -458,6 +469,7 @@ func ciRunsFromGHNode(n ghPRNode) []api.CIRun {
 				Conclusion: strings.ToLower(c.State),
 				URL:        c.TargetURL,
 				Provider:   "github-status",
+				HeadSHA:    headSHA,
 			})
 		}
 	}

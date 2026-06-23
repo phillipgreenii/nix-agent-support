@@ -213,3 +213,23 @@ func TestRerunFailed_NoFailedRuns(t *testing.T) {
 		t.Fatalf("expected error when no failed runs")
 	}
 }
+
+func TestListRuns_HeadSHAPropagated(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	p := NewWithDeps(gh, &fakePR{branch: "feat/x"})
+
+	runs, err := p.ListRuns(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	// sampleRunList has headSha:"deadbeef" for both runs.
+	for _, r := range runs {
+		if r.HeadSHA != "deadbeef" {
+			t.Errorf("run %s HeadSHA: got %q want \"deadbeef\"", r.ID, r.HeadSHA)
+		}
+	}
+}

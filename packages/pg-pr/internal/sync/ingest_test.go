@@ -47,7 +47,7 @@ func TestIngestFeedbackToStore(t *testing.T) {
 		Author: "phillipg",
 		Body:   marker.Stamp("pg-pr auto-reply"),
 	}
-	// Failing CI run.
+	// Failing CI run — carries a HeadSHA so subject_sha is set on the row.
 	failRun := api.CIRun{
 		ID:         "run-1",
 		Name:       "unit-tests",
@@ -55,16 +55,18 @@ func TestIngestFeedbackToStore(t *testing.T) {
 		Conclusion: "failure",
 		URL:        "https://github.com/o/r/actions/runs/run-1",
 		Provider:   "github-actions",
+		HeadSHA:    "sha-abc",
 	}
 
 	pr := api.PR{
-		Repo:   "o/r",
-		Number: 7,
-		State:  "open",
-		Branch: "feat/x",
-		Base:   "main",
-		Author: "phillipg",
-		URL:    "https://github.com/o/r/pull/7",
+		Repo:    "o/r",
+		Number:  7,
+		State:   "open",
+		Branch:  "feat/x",
+		Base:    "main",
+		Author:  "phillipg",
+		URL:     "https://github.com/o/r/pull/7",
+		HeadSHA: "sha-abc",
 	}
 	enriched := &vcs.EnrichedPR{
 		PR:       pr,
@@ -102,6 +104,9 @@ func TestIngestFeedbackToStore(t *testing.T) {
 	}
 	if storedPR.Ownership != "mine" {
 		t.Errorf("ownership: got %q want \"mine\"", storedPR.Ownership)
+	}
+	if storedPR.HeadSHA != "sha-abc" {
+		t.Errorf("head_sha: got %q want \"sha-abc\"", storedPR.HeadSHA)
 	}
 
 	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
@@ -172,9 +177,9 @@ func TestIngestFeedbackToStore(t *testing.T) {
 	if ci.Conclusion != "failure" {
 		t.Errorf("ci run conclusion: got %q want \"failure\"", ci.Conclusion)
 	}
-	// SubjectSHA is empty because api.CIRun has no HeadSHA field.
-	if ci.SubjectSHA != "" {
-		t.Errorf("ci run subject_sha: got %q want \"\" (api.CIRun has no HeadSHA)", ci.SubjectSHA)
+	// SubjectSHA must be propagated from api.CIRun.HeadSHA.
+	if ci.SubjectSHA != "sha-abc" {
+		t.Errorf("ci run subject_sha: got %q want \"sha-abc\"", ci.SubjectSHA)
 	}
 
 	// --- Verify outbox events ---
@@ -243,6 +248,141 @@ func TestIngestFeedbackToStore_NilEnrichedIsNoop(t *testing.T) {
 	pr := api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"}
 	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, nil); err != nil {
 		t.Fatalf("nil enriched must be a no-op, got error: %v", err)
+	}
+}
+
+// TestIngestCIFailure_PerRevision verifies that two failing runs of the same
+// check but with different HeadSHAs produce TWO distinct feedback rows (each
+// having its own fingerprint), providing per-revision history.
+func TestIngestCIFailure_PerRevision(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo:    "o/r",
+		Number:  10,
+		State:   "open",
+		Branch:  "feat/y",
+		Base:    "main",
+		Author:  "alice",
+		URL:     "https://github.com/o/r/pull/10",
+		HeadSHA: "sha-v2",
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "bot",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// First ingest: sha-v1 fails "unit-tests".
+	run1 := api.CIRun{
+		ID: "run-sha1", Name: "unit-tests", Status: "completed",
+		Conclusion: "failure", URL: "https://u/1", Provider: "github-actions",
+		HeadSHA: "sha-v1",
+	}
+	enriched1 := &vcs.EnrichedPR{PR: pr, CIRuns: []api.CIRun{run1}}
+	pr1 := pr
+	pr1.HeadSHA = "sha-v1"
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr1, enriched1); err != nil {
+		t.Fatalf("ingest 1: %v", err)
+	}
+
+	// Second ingest: sha-v2 also fails "unit-tests" (different head).
+	run2 := api.CIRun{
+		ID: "run-sha2", Name: "unit-tests", Status: "completed",
+		Conclusion: "failure", URL: "https://u/2", Provider: "github-actions",
+		HeadSHA: "sha-v2",
+	}
+	enriched2 := &vcs.EnrichedPR{PR: pr, CIRuns: []api.CIRun{run2}}
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched2); err != nil {
+		t.Fatalf("ingest 2: %v", err)
+	}
+
+	// Should have two distinct feedback rows (different fingerprints).
+	storedPR, err := db.GetPR(ctx, "o/r", 10)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 feedback rows (one per revision), got %d: %+v", len(rows), rows)
+	}
+	byExtID := map[string]store.Feedback{}
+	for _, r := range rows {
+		byExtID[r.ExternalID] = r
+	}
+	r1, ok1 := byExtID["run-sha1"]
+	r2, ok2 := byExtID["run-sha2"]
+	if !ok1 || !ok2 {
+		t.Fatalf("missing rows: have %v", byExtID)
+	}
+	if r1.SubjectSHA != "sha-v1" {
+		t.Errorf("run-sha1 subject_sha: got %q want sha-v1", r1.SubjectSHA)
+	}
+	if r2.SubjectSHA != "sha-v2" {
+		t.Errorf("run-sha2 subject_sha: got %q want sha-v2", r2.SubjectSHA)
+	}
+	if r1.Fingerprint == r2.Fingerprint {
+		t.Errorf("fingerprints must differ across revisions; both = %q", r1.Fingerprint)
+	}
+
+	// After the second ingest (head=sha-v2), the sha-v1 row must be superseded.
+	if r1.Status != "superseded" {
+		t.Errorf("sha-v1 row status: got %q want \"superseded\" after head moved to sha-v2", r1.Status)
+	}
+	if r2.Status == "superseded" {
+		t.Errorf("sha-v2 row (current head) must NOT be superseded; status=%q", r2.Status)
+	}
+}
+
+// TestIngestCIFailure_SubjectSHASet verifies the basic contract that a CI run
+// with a HeadSHA produces a feedback row with that subject_sha populated.
+func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 20, State: "open",
+		Branch: "feat/z", Base: "main", Author: "alice",
+		URL: "https://github.com/o/r/pull/20", HeadSHA: "deadbeef",
+	}
+	run := api.CIRun{
+		ID: "run-x", Name: "lint", Status: "completed",
+		Conclusion: "failure", URL: "https://u", Provider: "github-actions",
+		HeadSHA: "deadbeef",
+	}
+	e, err := New(Deps{
+		Cfg:      &config.Config{SelfLogin: "bot", Repos: []config.RepoConfig{{Remote: "o/r", VCS: "github"}}},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, &vcs.EnrichedPR{PR: pr, CIRuns: []api.CIRun{run}}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	storedPR, _ := db.GetPR(ctx, "o/r", 20)
+	rows, _ := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].SubjectSHA != "deadbeef" {
+		t.Errorf("subject_sha: got %q want deadbeef", rows[0].SubjectSHA)
 	}
 }
 

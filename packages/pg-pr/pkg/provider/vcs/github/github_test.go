@@ -809,6 +809,54 @@ func TestListMyPRsPopulatesTitle(t *testing.T) {
 	}
 }
 
+func TestGetPRPopulatesHeadSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number":7,"state":"OPEN","title":"feat","headRefName":"feat/x",
+		"headRefOid":"cafebabe1234","baseRefName":"main",
+		"author":{"login":"alice"},"url":"u",
+		"isDraft":false,"mergedAt":"","closedAt":"",
+		"additions":0,"deletions":0,"changedFiles":0
+	}`)
+	p := NewWithRunner(gh)
+	got, err := p.GetPR(context.Background(), "owner/repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got.HeadSHA != "cafebabe1234" {
+		t.Errorf("HeadSHA: got %q want cafebabe1234", got.HeadSHA)
+	}
+	// Verify headRefOid is in the --json field list.
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "headRefOid") {
+		t.Fatalf("expected headRefOid in gh --json fields: %v", last)
+	}
+}
+
+func TestListMyPRsPopulatesHeadSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":11,"title":"Add feature","headRefName":"feat/add",
+		"headRefOid":"beefdead","baseRefName":"main",
+		"url":"https://github.com/foo/bar/pull/11",
+		"author":{"login":"alice"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":0,"deletions":0,"changedFiles":0
+	}]`)
+	p := NewWithRunner(gh)
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].HeadSHA != "beefdead" {
+		t.Errorf("HeadSHA: got %q want beefdead", prs[0].HeadSHA)
+	}
+}
+
 func TestListTeamPRsPopulatesTitle(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["pr list"] = []byte(`[{

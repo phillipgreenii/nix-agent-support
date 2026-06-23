@@ -314,6 +314,75 @@ func TestParseEnrichedSurfacesStalenessFields(t *testing.T) {
 	}
 }
 
+// TestParseEnrichedPRs_HeadSHAPropagated verifies that api.PR.HeadSHA is
+// populated from the commit OID, and api.CIRun.HeadSHA is populated from
+// the same commit OID for every CI context in the rollup.
+func TestParseEnrichedPRs_HeadSHAPropagated(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":5,"title":"pr","author":{"__typename":"User","login":"alice"},
+	   "headRefName":"feat/x","baseRefName":"main","url":"u","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":0,"deletions":0,"changedFiles":0,
+	   "repository":{"nameWithOwner":"x/y"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "commits":{"nodes":[{"commit":{
+	     "oid":"cafebabe",
+	     "statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
+	       {"__typename":"CheckRun","id":"cr1","name":"ci","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://u/1"},
+	       {"__typename":"StatusContext","id":"sc1","context":"lint","state":"failure","targetUrl":"https://u/2"}
+	     ]}}
+	   }}]}
+	  }
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	ep := got[0]
+
+	// PR.HeadSHA must equal the commit OID.
+	if ep.PR.HeadSHA != "cafebabe" {
+		t.Errorf("PR.HeadSHA = %q, want cafebabe", ep.PR.HeadSHA)
+	}
+
+	// All CI runs must carry the same head SHA.
+	if len(ep.CIRuns) != 2 {
+		t.Fatalf("want 2 CIRuns, got %d", len(ep.CIRuns))
+	}
+	for _, r := range ep.CIRuns {
+		if r.HeadSHA != "cafebabe" {
+			t.Errorf("CIRun %q HeadSHA = %q, want cafebabe", r.Name, r.HeadSHA)
+		}
+	}
+}
+
+// TestParseEnrichedPRs_HeadSHAEmptyWhenNoCommits verifies that HeadSHA is
+// empty (not panicking) when the commits connection is empty.
+func TestParseEnrichedPRs_HeadSHAEmptyWhenNoCommits(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":3,"title":"pr","author":{"__typename":"User","login":"bob"},
+	   "headRefName":"feat/z","baseRefName":"main","url":"u","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":0,"deletions":0,"changedFiles":0,
+	   "repository":{"nameWithOwner":"x/y"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "commits":{"nodes":[]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	if got[0].PR.HeadSHA != "" {
+		t.Errorf("PR.HeadSHA should be empty when commits is empty, got %q", got[0].PR.HeadSHA)
+	}
+}
+
 // Compile-time check that ghGraphQLResponse decodes the recorded fixture
 // shape so silent schema drift gets caught here, not in production.
 var _ = func() bool {

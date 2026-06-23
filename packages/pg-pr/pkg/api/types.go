@@ -48,6 +48,9 @@ type CIRun struct {
 	Conclusion string `json:"conclusion"`
 	URL        string `json:"url"`
 	Provider   string `json:"provider"`
+	// HeadSHA is the commit SHA the run was triggered against. Used as
+	// subject_sha in the feedback store so ci-failure rows are per-revision.
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 // Issue is the JSON shape for an external issue (jira ticket, github issue, etc.).

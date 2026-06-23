@@ -105,6 +105,7 @@ func (r ghRun) toAPI() api.CIRun {
 		Conclusion: strings.ToLower(r.Conclusion),
 		URL:        r.URL,
 		Provider:   ProviderName,
+		HeadSHA:    r.HeadSHA,
 	}
 }
 

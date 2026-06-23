@@ -15,4 +15,7 @@ type PR struct {
 	Additions    int    `json:"additions,omitempty"`
 	Deletions    int    `json:"deletions,omitempty"`
 	ChangedFiles int    `json:"changed_files,omitempty"`
+	// HeadSHA is the OID of the PR's current head commit. Used to write
+	// store.PullRequest.HeadSHA and to drive ReconcileStaleness.
+	HeadSHA string `json:"head_sha,omitempty"`
 }

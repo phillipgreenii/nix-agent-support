@@ -115,13 +115,14 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles"
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
 	HeadRefName string `json:"headRefName"`
+	HeadRefOid  string `json:"headRefOid"`
 	BaseRefName string `json:"baseRefName"`
 	URL         string `json:"url"`
 	Author      struct {
@@ -152,6 +153,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Additions:    p.Additions,
 		Deletions:    p.Deletions,
 		ChangedFiles: p.ChangedFiles,
+		HeadSHA:      p.HeadRefOid,
 	}
 }
 

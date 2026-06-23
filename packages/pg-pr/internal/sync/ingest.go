@@ -50,8 +50,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		Branch:    pr.Branch,
 		Base:      pr.Base,
 		URL:       pr.URL,
-		// HeadSHA: api.PR has no HeadSHA field; left empty and populated
-		// by ReconcileStaleness's subject_sha on the feedback rows instead.
+		HeadSHA:   pr.HeadSHA,
 	})
 	if err != nil {
 		return fmt.Errorf("ingest: upsert pr %s#%d: %w", repo, pr.Number, err)
@@ -137,11 +136,8 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 
 		kind := "ci-failure"
 		fp := feedbackclassify.Fingerprint(kind, feedbackclassify.FPParts{
-			CheckName: r.Name,
-			// SubjectSHA: api.CIRun has no HeadSHA field; left empty.
-			// ReconcileStaleness uses subject_sha on existing rows; new rows
-			// will not be superseded until the field is populated by a future
-			// extension.
+			CheckName:  r.Name,
+			SubjectSHA: r.HeadSHA,
 		})
 
 		f := store.Feedback{
@@ -154,6 +150,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			Conclusion:  r.Conclusion,
 			Link:        r.URL,
 			RunID:       r.ID,
+			SubjectSHA:  r.HeadSHA,
 		}
 
 		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
@@ -166,12 +163,9 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		}
 	}
 
-	// Reconcile stale CI-failure rows (those whose subject_sha ≠ current
-	// head). Since api.PR has no HeadSHA, pass empty string — the UPDATE
-	// WHERE subject_sha IS NOT NULL AND subject_sha <> '' guard ensures
-	// rows without a subject_sha (which is all of our CI rows) are
-	// left untouched.
-	if err := e.deps.Store.ReconcileStaleness(ctx, prID, ""); err != nil {
+	// Reconcile stale CI-failure rows: mark any ci-failure row whose
+	// subject_sha differs from the current PR head as superseded.
+	if err := e.deps.Store.ReconcileStaleness(ctx, prID, pr.HeadSHA); err != nil {
 		return fmt.Errorf("ingest: reconcile staleness pr=%d: %w", prID, err)
 	}
 
