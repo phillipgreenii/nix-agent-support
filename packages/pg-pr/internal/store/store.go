@@ -37,6 +37,3 @@ func Open(path string) (*DB, error) {
 
 // Close closes the underlying handle.
 func (db *DB) Close() error { return db.sql.Close() }
-
-// migrate is a temporary no-op stub; Task 1.3 replaces it with real migrations.
-func migrate(db *DB) error { return nil }
