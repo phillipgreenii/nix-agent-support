@@ -375,13 +375,30 @@ func encodeMetadata(f MergeRequestFields) (string, error) {
 	return string(b), nil
 }
 
-// parseBDList unmarshals the JSON array returned by `bd list --json`. An
-// empty string parses to an empty slice.
+// parseBDList unmarshals the JSON output of bd list / dep list / dep tree
+// / query commands. bd 1.0.4+ wraps results in an envelope:
+//
+//	{"data": [...], "schema_version": 1}
+//
+// Older bd builds returned a bare JSON array. parseBDList accepts both: it
+// peeks at the first non-space byte — '{' signals the envelope, '[' signals
+// the bare-array legacy shape. An empty string parses to an empty slice.
 func parseBDList(s string) ([]bdIssue, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil, nil
 	}
+	if len(s) > 0 && s[0] == '{' {
+		// bd 1.0.4+ envelope: {"data":[...],"schema_version":N}
+		var env struct {
+			Data []bdIssue `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(s), &env); err != nil {
+			return nil, fmt.Errorf("parse bd list JSON: %w", err)
+		}
+		return env.Data, nil
+	}
+	// Legacy bare-array shape (older bd builds).
 	var issues []bdIssue
 	if err := json.Unmarshal([]byte(s), &issues); err != nil {
 		return nil, fmt.Errorf("parse bd list JSON: %w", err)

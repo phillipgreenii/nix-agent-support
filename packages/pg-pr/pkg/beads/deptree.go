@@ -38,14 +38,13 @@ func (c *Client) DepTreeUp(ctx context.Context, rootID string) ([]DepNode, error
 	if trimmed == "" {
 		return nil, nil
 	}
-	var raw []struct {
-		ID     string `json:"id"`
-		Title  string `json:"title"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+	// Reuse parseBDList which handles both the bd 1.0.4+ envelope
+	// ({"data":[...],"schema_version":N}) and the legacy bare-array shape.
+	rawIssues, err := parseBDList(trimmed)
+	if err != nil {
 		return nil, fmt.Errorf("decode bd dep tree json: %w", err)
 	}
+	raw := rawIssues
 	nodes := make([]DepNode, 0, len(raw))
 	for _, r := range raw {
 		if r.ID == rootID {
@@ -65,38 +64,43 @@ func (c *Client) DepTreeUp(ctx context.Context, rootID string) ([]DepNode, error
 // DepTreeUp results without per-bead label lookups — replaces one
 // `bd label list <id>` call per dep with a single `bd query` per workspace.
 //
-// `bd query "label=human" --json` returns a JSON array of issue objects;
-// only the id field is consulted here.
+// `bd query "label=human" --json` returns issue objects. bd 1.0.4+ wraps
+// them in an envelope: {"data":[...],"schema_version":N}. Older builds
+// returned a bare JSON array. parseBDList handles both shapes; only the id
+// field of each issue is consulted here.
+//
+// bd may also surface errors as a JSON object {"error":"..."} on stdout with
+// exit code 0; that case is detected and returned as an error before parsing.
 func (c *Client) HumanLabeledBeads(ctx context.Context) (map[string]bool, error) {
 	out, err := c.Runner.Run(ctx, "query", "label=human", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("bd query label=human --json: %w", err)
 	}
 	trimmed := strings.TrimSpace(out)
-	if trimmed == "" || trimmed == "[]" {
+	if trimmed == "" {
 		return map[string]bool{}, nil
 	}
-	// bd query may surface errors as a JSON object {"error":"..."} on stdout
-	// with exit code 0. Detect by checking the first non-space byte.
-	if trimmed[0] == '{' {
+	// bd may surface errors as {"error":"..."} with exit code 0. Detect by
+	// trying to decode an error object first; the envelope shape has "data"
+	// not "error", so a non-empty error field is unambiguous.
+	if len(trimmed) > 0 && trimmed[0] == '{' {
 		var errObj struct {
 			Error string `json:"error"`
 		}
 		if jerr := json.Unmarshal([]byte(trimmed), &errObj); jerr == nil && errObj.Error != "" {
 			return nil, fmt.Errorf("bd query label=human: %s", errObj.Error)
 		}
-		return nil, fmt.Errorf("bd query label=human: unexpected JSON object: %s", trimmed)
+		// Otherwise it's the standard {"data":[...],"schema_version":N} envelope;
+		// fall through to parseBDList.
 	}
-	var raw []struct {
-		ID string `json:"id"`
+	issues, err := parseBDList(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("decode bd query label=human json: %w", err)
 	}
-	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-		return nil, fmt.Errorf("decode bd query json: %w", err)
-	}
-	set := make(map[string]bool, len(raw))
-	for _, r := range raw {
-		if r.ID != "" {
-			set[r.ID] = true
+	set := make(map[string]bool, len(issues))
+	for _, iss := range issues {
+		if iss.ID != "" {
+			set[iss.ID] = true
 		}
 	}
 	return set, nil

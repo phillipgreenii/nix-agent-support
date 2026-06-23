@@ -241,25 +241,10 @@ func (r *cannedRunner) Run(_ context.Context, args ...string) (string, error) {
 	return r.out, nil
 }
 
-func TestPRFeedbackInSubtree_FromDepTree(t *testing.T) {
-	// Mimics `bd dep tree <pr> --direction=up --json`: a flat array whose
-	// nodes share the bd list node shape (id/issue_type/status/metadata).
-	fixture := `[
-	  {"id":"pr-1","issue_type":"merge-request","status":"open","metadata":{"repo":"o/r"}},
-	  {"id":"cyc-1","issue_type":"task","status":"open","metadata":null},
-	  {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread","external_id":"ext-1"}},
-	  {"id":"fb-2","issue_type":"feedback","status":"closed","metadata":{"fingerprint":"fp-bbb"}},
-	  {"id":"fb-3","issue_type":"feedback","status":"open","metadata":{}},
-	  {"id":"act-1","issue_type":"task","status":"open","metadata":null}
-	]`
-	r := &cannedRunner{out: fixture}
-	c := NewClientWithRunner(r)
-
-	fbs, err := c.PRFeedbackInSubtree(context.Background(), "pr-1")
-	if err != nil {
-		t.Fatalf("PRFeedbackInSubtree: %v", err)
-	}
-
+// checkPRFeedbackSubtreeResult is the shared assertion helper used by
+// TestPRFeedbackInSubtree_FromDepTree and its legacy-shape variant.
+func checkPRFeedbackSubtreeResult(t *testing.T, fbs []Feedback) {
+	t.Helper()
 	// All three feedback nodes returned (status-agnostic); non-feedback excluded.
 	if len(fbs) != 3 {
 		t.Fatalf("want 3 feedback nodes, got %d: %+v", len(fbs), fbs)
@@ -279,12 +264,58 @@ func TestPRFeedbackInSubtree_FromDepTree(t *testing.T) {
 	if fb3, ok := byID["fb-3"]; !ok || fb3.Fields.Fingerprint != "" {
 		t.Fatalf("fb-3 should have empty fingerprint: %+v", byID["fb-3"])
 	}
+}
+
+func TestPRFeedbackInSubtree_FromDepTree(t *testing.T) {
+	// Mimics real bd 1.0.4 `bd dep tree <pr> --direction=up --json` output:
+	// an envelope {"data":[...],"schema_version":1} whose nodes share the
+	// bd list node shape (id/issue_type/status/metadata).
+	fixture := `{
+	  "data": [
+	    {"id":"pr-1","issue_type":"merge-request","status":"open","metadata":{"repo":"o/r"}},
+	    {"id":"cyc-1","issue_type":"task","status":"open","metadata":null},
+	    {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread","external_id":"ext-1"}},
+	    {"id":"fb-2","issue_type":"feedback","status":"closed","metadata":{"fingerprint":"fp-bbb"}},
+	    {"id":"fb-3","issue_type":"feedback","status":"open","metadata":{}},
+	    {"id":"act-1","issue_type":"task","status":"open","metadata":null}
+	  ],
+	  "schema_version": 1
+	}`
+	r := &cannedRunner{out: fixture}
+	c := NewClientWithRunner(r)
+
+	fbs, err := c.PRFeedbackInSubtree(context.Background(), "pr-1")
+	if err != nil {
+		t.Fatalf("PRFeedbackInSubtree: %v", err)
+	}
+	checkPRFeedbackSubtreeResult(t, fbs)
 	if len(r.calls) != 1 {
 		t.Fatalf("want exactly 1 bd call, got %d: %v", len(r.calls), r.calls)
 	}
 	if got, want := strings.Join(r.calls[0], " "), "dep tree pr-1 --direction=up --json"; got != want {
 		t.Fatalf("bd args: got %q want %q", got, want)
 	}
+}
+
+// TestPRFeedbackInSubtree_BareArrayFallback verifies the parser still handles
+// the legacy bare-array shape emitted by bd builds prior to 1.0.4.
+func TestPRFeedbackInSubtree_BareArrayFallback(t *testing.T) {
+	fixture := `[
+	  {"id":"pr-1","issue_type":"merge-request","status":"open","metadata":{"repo":"o/r"}},
+	  {"id":"cyc-1","issue_type":"task","status":"open","metadata":null},
+	  {"id":"fb-1","issue_type":"feedback","status":"open","metadata":{"fingerprint":"fp-aaa","kind":"comment-thread","external_id":"ext-1"}},
+	  {"id":"fb-2","issue_type":"feedback","status":"closed","metadata":{"fingerprint":"fp-bbb"}},
+	  {"id":"fb-3","issue_type":"feedback","status":"open","metadata":{}},
+	  {"id":"act-1","issue_type":"task","status":"open","metadata":null}
+	]`
+	r := &cannedRunner{out: fixture}
+	c := NewClientWithRunner(r)
+
+	fbs, err := c.PRFeedbackInSubtree(context.Background(), "pr-1")
+	if err != nil {
+		t.Fatalf("PRFeedbackInSubtree (bare array): %v", err)
+	}
+	checkPRFeedbackSubtreeResult(t, fbs)
 }
 
 func TestPRFeedbackInSubtree_EmptyID(t *testing.T) {
