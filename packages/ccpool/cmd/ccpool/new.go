@@ -25,10 +25,11 @@ func runNew(args []string) int {
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
+	allowedTools := fs.String("allowed-tools", "", "claude --allowed-tools allowlist forwarded verbatim (comma/space-separated, e.g. \"Bash(git *),Edit\"); empty omits the flag")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--effort v]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v]")
 		return 2
 	}
 	externalID := pos[0]
@@ -73,6 +74,7 @@ func runNew(args []string) int {
 		Env:            env,
 		Name:           *displayName,
 		PermissionMode: launch.PermissionMode(*permMode),
+		AllowedTools:   *allowedTools,
 		Effort:         *effort,
 	})
 	if err != nil {

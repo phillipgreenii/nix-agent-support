@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"reflect"
 	"testing"
 
@@ -28,6 +29,21 @@ func TestRunNew_acceptsEachValidPermissionMode(t *testing.T) {
 				t.Fatalf("%q should validate", mode)
 			}
 		})
+	}
+}
+
+func TestRunNew_acceptsAllowedToolsFlag(t *testing.T) {
+	// --allowed-tools is a free-form passthrough: any value parses (no validation).
+	// A missing external_id is the only usage error here; with the id present and
+	// the flag set, parsing must succeed past the flag stage.
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	allowed := fs.String("allowed-tools", "", "")
+	pos := parseInterspersed(fs, []string{"zr-abc", "--allowed-tools", "Bash(git *),Edit"})
+	if len(pos) != 1 || pos[0] != "zr-abc" {
+		t.Fatalf("positional parse = %v, want [zr-abc]", pos)
+	}
+	if *allowed != "Bash(git *),Edit" {
+		t.Errorf("allowed-tools = %q, want %q", *allowed, "Bash(git *),Edit")
 	}
 }
 
