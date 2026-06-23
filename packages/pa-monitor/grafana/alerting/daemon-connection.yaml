@@ -1,0 +1,48 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pa-monitor-connection
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pa-monitor-daemon-connection-lost
+        title: pa-monitor lost connection to daemon
+        condition: C
+        for: 1m # alert only after >1m of inability to reach the daemon
+        noDataState: OK # a closed pane / exited process => stale series => no alarm
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pa-monitor cannot reach the daemon (>1m)"
+          description: "A pa-monitor component (cmux-bridge or tui) has not reached the daemon for over a minute. Check that the pa-monitor daemon is running (launchctl / pa-monitor status)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              # NOTE: deliberately no `or vector(0)` — absence must fall through
+              # to noDataState: OK, not synthesize a 0 and fire.
+              expr: min by (component) (pa_monitor_daemon_connected)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
