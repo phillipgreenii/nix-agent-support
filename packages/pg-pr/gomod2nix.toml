@@ -13,6 +13,10 @@ schema = 3
     version = 'v2.3.0'
     hash = 'sha256-7hRlwSR+fos1kx4VZmJ/7snR7zHh8ZFKX+qqqqGcQpY='
 
+  [mod.'github.com/dustin/go-humanize']
+    version = 'v1.0.1'
+    hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
+
   [mod.'github.com/go-logr/logr']
     version = 'v1.4.3'
     hash = 'sha256-Nnp/dEVNMxLp3RSPDHZzGbI8BkSNuZMX0I0cjWKXXLA='
@@ -33,9 +37,17 @@ schema = 3
     version = 'v1.1.0'
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
 
+  [mod.'github.com/mattn/go-isatty']
+    version = 'v0.0.20'
+    hash = 'sha256-qhw9hWtU5wnyFyuMbKx+7RB8ckQaFQ8D+8GKPkN3HHQ='
+
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
+
+  [mod.'github.com/ncruces/go-strftime']
+    version = 'v1.0.0'
+    hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.23.2'
@@ -52,6 +64,10 @@ schema = 3
   [mod.'github.com/prometheus/procfs']
     version = 'v0.20.1'
     hash = 'sha256-L6RuVGYgdBCCke8BibA7cXgfwizGE2pA0gNo9dGJ8WQ='
+
+  [mod.'github.com/remyoudompheng/bigfft']
+    version = 'v0.0.0-20230129092748-24d4a6f8daec'
+    hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
 
   [mod.'github.com/spf13/cobra']
     version = 'v1.10.2'
@@ -148,3 +164,19 @@ schema = 3
   [mod.'gopkg.in/yaml.v3']
     version = 'v3.0.1'
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
+
+  [mod.'modernc.org/libc']
+    version = 'v1.73.4'
+    hash = 'sha256-YN3m9MDZ2GRZznT5ErWZJdap+E5xOwOyKlZ/ixyGT+0='
+
+  [mod.'modernc.org/mathutil']
+    version = 'v1.7.1'
+    hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
+
+  [mod.'modernc.org/memory']
+    version = 'v1.11.0'
+    hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
+
+  [mod.'modernc.org/sqlite']
+    version = 'v1.53.0'
+    hash = 'sha256-G8pXCpu2jJlPxd+7p1vQd8GzWGCTnKQug58fnQzTVRY='
