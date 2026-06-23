@@ -81,12 +81,24 @@ func b2i(b bool) int {
 	return 0
 }
 
+// nullStr returns nil when s is empty so that optional constrained TEXT columns
+// receive SQL NULL instead of an empty string (which may violate CHECK constraints).
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // UpsertFeedback inserts or updates a feedback row by (pr_id, fingerprint),
 // returning its id. On update it overwrites only upstream-sourced fields, never
 // the agent-owned disposition/reply columns.
 func (db *DB) UpsertFeedback(ctx context.Context, f Feedback) (int64, error) {
 	if f.PRID == 0 || f.Kind == "" || f.Fingerprint == "" {
 		return 0, errors.New("store: UpsertFeedback requires pr_id, kind, fingerprint")
+	}
+	if f.Kind == "code-comment-thread" && f.File == "" {
+		return 0, errors.New("store: code-comment-thread requires file")
 	}
 	if f.Status == "" {
 		f.Status = "new"
@@ -114,7 +126,7 @@ ON CONFLICT(pr_id, fingerprint) DO UPDATE SET
   link=excluded.link, updated_at=excluded.updated_at`,
 		f.PRID, f.Kind, f.ExternalID, f.Fingerprint, f.Status, f.Title, f.Body,
 		f.SubjectSHA, f.FirstSeenHeadSHA, b2i(f.IsOutdated), b2i(f.IsMinimized), f.MinimizedReason,
-		f.AuthorLogin, f.AuthorKind, f.AgentName, b2i(f.IsOurs), f.AuthorRole,
+		f.AuthorLogin, nullStr(f.AuthorKind), f.AgentName, b2i(f.IsOurs), f.AuthorRole,
 		f.Severity, b2i(f.ManagedUpstream),
 		f.File, f.Line, b2i(f.ThreadResolved), f.CommentNodeID, f.RunID, f.CheckName, f.Conclusion, b2i(f.Related), f.RetryCount, f.Link,
 		now, now,
@@ -146,11 +158,12 @@ func scanFeedback(s interface{ Scan(...any) error }) (*Feedback, error) {
 		minReason, subjectSHA, firstSeen                   sql.NullString
 		file, commentNode, runID, checkName, concl, link   sql.NullString
 		severity                                           sql.NullString
+		authorLogin, authorKind, agentName, authorRole     sql.NullString
 		line, retry                                        sql.NullInt64
 	)
 	err := s.Scan(&f.ID, &f.PRID, &f.Kind, &f.ExternalID, &f.Fingerprint, &f.Status, &f.Title, &f.Body,
 		&subjectSHA, &firstSeen, &isOutdated, &isMin, &minReason,
-		&f.AuthorLogin, &f.AuthorKind, &f.AgentName, &isOurs, &f.AuthorRole,
+		&authorLogin, &authorKind, &agentName, &isOurs, &authorRole,
 		&dispAction, &dispNote, &replyBody, &responseID, &severity, &managed,
 		&file, &line, &threadResolved, &commentNode, &runID, &checkName, &concl, &related, &retry, &link)
 	if err != nil {
@@ -158,6 +171,7 @@ func scanFeedback(s interface{ Scan(...any) error }) (*Feedback, error) {
 	}
 	f.SubjectSHA, f.FirstSeenHeadSHA, f.MinimizedReason = subjectSHA.String, firstSeen.String, minReason.String
 	f.IsOutdated, f.IsMinimized, f.IsOurs = isOutdated == 1, isMin == 1, isOurs == 1
+	f.AuthorLogin, f.AuthorKind, f.AgentName, f.AuthorRole = authorLogin.String, authorKind.String, agentName.String, authorRole.String
 	f.DispositionAction, f.DispositionNote = dispAction.String, dispNote.String
 	f.ReplyBody, f.ResponseID, f.Severity = replyBody.String, responseID.String, severity.String
 	f.ManagedUpstream, f.ThreadResolved, f.Related = managed == 1, threadResolved == 1, related == 1
@@ -206,4 +220,67 @@ func (db *DB) ListFeedback(ctx context.Context, prID int64, filter ListFilter) (
 		out = append(out, *f)
 	}
 	return out, rows.Err()
+}
+
+// SetDisposition records the agent's decision and (optionally) a queued reply.
+// Moves status to "dispositioned".
+func (db *DB) SetDisposition(ctx context.Context, id int64, action, note, reply string) error {
+	now := nowRFC3339()
+	res, err := db.sql.ExecContext(ctx, `
+UPDATE feedback SET disposition_action=?, disposition_note=?, reply_body=?, status='dispositioned', updated_at=?
+WHERE id=?`, action, note, reply, now, id)
+	if err != nil {
+		return fmt.Errorf("store: set disposition %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("store: feedback %d not found", id)
+	}
+	return nil
+}
+
+// MarkReplied records the upstream response id and moves status to "replied".
+func (db *DB) MarkReplied(ctx context.Context, id int64, responseID string) error {
+	now := nowRFC3339()
+	_, err := db.sql.ExecContext(ctx,
+		"UPDATE feedback SET response_id=?, status='replied', updated_at=? WHERE id=?",
+		responseID, now, id)
+	if err != nil {
+		return fmt.Errorf("store: mark replied %d: %w", id, err)
+	}
+	return nil
+}
+
+// ListPendingReplies returns items with a queued reply_body but no response_id
+// yet — the durable reply-delivery work list (re-scanned each reconcile).
+func (db *DB) ListPendingReplies(ctx context.Context) ([]Feedback, error) {
+	rows, err := db.sql.QueryContext(ctx, "SELECT "+feedbackCols+
+		" FROM feedback WHERE reply_body IS NOT NULL AND reply_body <> '' AND (response_id IS NULL OR response_id='') ORDER BY id")
+	if err != nil {
+		return nil, fmt.Errorf("store: list pending replies: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Feedback
+	for rows.Next() {
+		f, err := scanFeedback(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *f)
+	}
+	return out, rows.Err()
+}
+
+// ReconcileStaleness marks ci-failure rows whose subject_sha != the PR head as
+// superseded. Code-thread is_outdated comes from the provider (set on upsert),
+// so it is NOT touched here.
+func (db *DB) ReconcileStaleness(ctx context.Context, prID int64, headSHA string) error {
+	_, err := db.sql.ExecContext(ctx, `
+UPDATE feedback SET status='superseded', updated_at=?
+WHERE pr_id=? AND kind='ci-failure' AND subject_sha IS NOT NULL AND subject_sha <> ?
+  AND status NOT IN ('superseded','resolved')`,
+		nowRFC3339(), prID, headSHA)
+	if err != nil {
+		return fmt.Errorf("store: reconcile staleness pr=%d: %w", prID, err)
+	}
+	return nil
 }

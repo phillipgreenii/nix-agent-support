@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -103,6 +103,66 @@ CREATE TABLE outbox (
     completed_at TEXT
 );
 CREATE INDEX idx_outbox_pending ON outbox(id) WHERE status = 'pending';
+`,
+	// v1 -> v2: allow NULL author_kind in feedback (the IN check rejected NULL in modernc/sqlite).
+	// Rebuild feedback table with the relaxed constraint, preserving all data.
+	`
+PRAGMA foreign_keys = OFF;
+CREATE TABLE feedback_new (
+    id                 INTEGER PRIMARY KEY,
+    pr_id              INTEGER NOT NULL REFERENCES pull_request(id) ON DELETE CASCADE,
+    kind               TEXT NOT NULL CHECK (kind IN
+                         ('code-comment-thread','pr-comments','ci-failure','review-request','jira-link')),
+    external_id        TEXT,
+    fingerprint        TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'new' CHECK (status IN
+                         ('new','presented','dispositioned','replied','resolved','superseded')),
+    title              TEXT,
+    body               TEXT,
+
+    subject_sha        TEXT,
+    first_seen_head_sha TEXT,
+    is_outdated        INTEGER NOT NULL DEFAULT 0,
+    is_minimized       INTEGER NOT NULL DEFAULT 0,
+    minimized_reason   TEXT,
+
+    author_login       TEXT,
+    author_kind        TEXT CHECK (author_kind IS NULL OR author_kind IN ('human','agent')),
+    agent_name         TEXT,
+    is_ours            INTEGER NOT NULL DEFAULT 0,
+    author_role        TEXT,
+
+    disposition_action TEXT CHECK (disposition_action IS NULL OR disposition_action IN
+                         ('will-fix','wont-fix','no-action')),
+    disposition_note   TEXT,
+    reply_body         TEXT,
+    response_id        TEXT,
+    severity           TEXT,
+    managed_upstream   INTEGER NOT NULL DEFAULT 0,
+
+    file               TEXT,
+    line               INTEGER,
+    thread_resolved    INTEGER,
+    comment_node_id    TEXT,
+    run_id             TEXT,
+    check_name         TEXT,
+    conclusion         TEXT,
+    related            INTEGER,
+    retry_count        INTEGER,
+    link               TEXT,
+
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    resolved_at        TEXT,
+
+    UNIQUE (pr_id, fingerprint),
+    CHECK (kind <> 'code-comment-thread' OR file IS NOT NULL)
+);
+INSERT INTO feedback_new SELECT * FROM feedback;
+DROP TABLE feedback;
+ALTER TABLE feedback_new RENAME TO feedback;
+CREATE INDEX idx_feedback_pr ON feedback(pr_id);
+PRAGMA foreign_keys = ON;
 `,
 }
 
