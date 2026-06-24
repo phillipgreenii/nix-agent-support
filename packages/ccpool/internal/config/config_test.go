@@ -31,6 +31,9 @@ func TestLoad_poolMode(t *testing.T) {
 	if c.EventLogPath() != filepath.Join(poolCanon, "events.jsonl") {
 		t.Errorf("EventLogPath = %q, want events.jsonl beside hook.log", c.EventLogPath())
 	}
+	if c.DiagLogPath() != filepath.Join(poolCanon, "diagnostics.jsonl") {
+		t.Errorf("DiagLogPath = %q, want diagnostics.jsonl beside events.jsonl", c.DiagLogPath())
+	}
 	if c.Pool.MaxSessions != 6 || c.Tmux.Prefix != "cc-" {
 		t.Errorf("no-config pool must use built-in defaults: max=%d prefix=%q", c.Pool.MaxSessions, c.Tmux.Prefix)
 	}

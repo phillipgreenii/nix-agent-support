@@ -176,3 +176,9 @@ func (c Config) DoneTTL() time.Duration { return time.Duration(c.List.DoneTTL) }
 // EventLogPath is the active pool's append-only JSONL event log
 // (<state-dir>/events.jsonl), sitting beside hook.log. See internal/eventlog.
 func (c Config) EventLogPath() string { return filepath.Join(c.StateDir, "events.jsonl") }
+
+// DiagLogPath is the active pool's append-only JSONL operator-diagnostic log
+// (<state-dir>/diagnostics.jsonl), sitting beside events.jsonl and replacing the
+// old plain-text hook.log. See internal/diaglog; tailed into Loki by the otelcol
+// filelog receiver registered in darwin/modules/ccpool.
+func (c Config) DiagLogPath() string { return filepath.Join(c.StateDir, "diagnostics.jsonl") }
