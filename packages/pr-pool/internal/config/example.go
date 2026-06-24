@@ -68,6 +68,15 @@ func emitRole(b *strings.Builder, r roles.Role) {
 		// so the decoded value equals PromptBody exactly (PromptBody has no trailing
 		// newline). PromptBody never contains ''' so no escaping is needed.
 		fmt.Fprintf(b, "prompt = '''\n%s'''\n", cc.PromptBody)
+		// Emit the budget EXPLICITLY so a print-defaults reload reproduces the in-memory
+		// budget. Without it, buildCCPool seeds every role from the pool default
+		// (Time=25m), silently giving the feedback role an unwanted watchdog (pg2-yt0n).
+		// tokens/cost are Limit (<=0 == unlimited); time uses Duration.String()
+		// ("0s" for unlimited), which time.ParseDuration round-trips.
+		b.WriteString("[role.ccpool.budget]\n")
+		fmt.Fprintf(b, "tokens = %d\n", int64(cc.Budget.Tokens))
+		fmt.Fprintf(b, "cost = %d\n", int64(cc.Budget.Cost))
+		fmt.Fprintf(b, "time = %q\n", cc.Budget.Time.String())
 	}
 	b.WriteString("\n")
 }
