@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 )
 
 // SetMeta upserts value for (externalID, key). An empty key is an error; an
@@ -66,4 +67,57 @@ func (s *Store) DeleteMeta(ctx context.Context, externalID, key string) error {
 		return fmt.Errorf("delete meta %q/%q: %w", externalID, key, err)
 	}
 	return nil
+}
+
+// ListExternalIDsByMeta returns external_ids whose metadata matches ALL filters
+// (AND across keys; exact value match per key), sorted ascending. An empty
+// filters map returns every external_id that has ANY metadata row (distinct).
+func (s *Store) ListExternalIDsByMeta(ctx context.Context, filters map[string]string) ([]string, error) {
+	if len(filters) == 0 {
+		return s.scanExternalIDs(ctx,
+			`SELECT DISTINCT external_id FROM session_metadata ORDER BY external_id ASC`)
+	}
+	// Build "(key,value) IN ((?,?),(?,?),...)" then require a row per filter via
+	// HAVING COUNT(*) = len(filters). PRIMARY KEY(external_id,key) guarantees a
+	// session contributes at most one matching row per key, so the count is exact.
+	placeholders := ""
+	args := make([]any, 0, len(filters)*2+1)
+	i := 0
+	for k, v := range filters {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += "(?,?)"
+		args = append(args, k, v)
+		i++
+	}
+	args = append(args, len(filters))
+	q := `SELECT external_id FROM session_metadata
+	      WHERE (key, value) IN (` + placeholders + `)
+	      GROUP BY external_id
+	      HAVING COUNT(*) = ?
+	      ORDER BY external_id ASC`
+	return s.scanExternalIDs(ctx, q, args...)
+}
+
+// scanExternalIDs runs q and collects the single-column external_id result.
+func (s *Store) scanExternalIDs(ctx context.Context, q string, args ...any) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list external_ids by meta: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(out) // ORDER BY already sorts; belt-and-suspenders for determinism
+	return out, nil
 }

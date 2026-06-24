@@ -102,3 +102,64 @@ func TestDeleteMeta_removesKeyIdempotently(t *testing.T) {
 		t.Fatalf("DeleteMeta(absent) must be nil, got %v", err)
 	}
 }
+
+func TestListExternalIDsByMeta_singleFilter(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	_ = st.SetMeta(ctx, "ext-a", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-b", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-c", "role", "feedback")
+	got, err := st.ListExternalIDsByMeta(ctx, map[string]string{"role": "worker"})
+	if err != nil {
+		t.Fatalf("ListExternalIDsByMeta: %v", err)
+	}
+	want := []string{"ext-a", "ext-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v (sorted)", got, want)
+	}
+}
+
+func TestListExternalIDsByMeta_andCombinesFilters(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	// ext-a matches BOTH; ext-b only role; ext-c only pool.
+	_ = st.SetMeta(ctx, "ext-a", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-a", "pool", "pr-pool")
+	_ = st.SetMeta(ctx, "ext-b", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-c", "pool", "pr-pool")
+	got, err := st.ListExternalIDsByMeta(ctx, map[string]string{"role": "worker", "pool": "pr-pool"})
+	if err != nil {
+		t.Fatalf("ListExternalIDsByMeta: %v", err)
+	}
+	want := []string{"ext-a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AND filter got %v, want %v", got, want)
+	}
+}
+
+func TestListExternalIDsByMeta_emptyFiltersReturnsAllWithMeta(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	_ = st.SetMeta(ctx, "ext-a", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-a", "pool", "p") // ext-a has 2 keys; must appear ONCE
+	_ = st.SetMeta(ctx, "ext-b", "role", "feedback")
+	got, err := st.ListExternalIDsByMeta(ctx, map[string]string{})
+	if err != nil {
+		t.Fatalf("ListExternalIDsByMeta: %v", err)
+	}
+	want := []string{"ext-a", "ext-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("empty filter got %v, want %v (distinct, sorted)", got, want)
+	}
+}
+
+func TestListExternalIDsByMeta_noMatchReturnsEmpty(t *testing.T) {
+	st := newTestStore(t)
+	got, err := st.ListExternalIDsByMeta(context.Background(), map[string]string{"role": "ghost"})
+	if err != nil {
+		t.Fatalf("ListExternalIDsByMeta: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
