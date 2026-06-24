@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -232,12 +231,8 @@ func runFeedbackDisposition(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	payload, _ := json.Marshal(map[string]any{"feedback_id": id})
 	if err := db.InTx(ctx, func(tx *store.Tx) error {
-		if err := tx.SetDisposition(id, fbF.action, fbF.note, fbF.reply); err != nil {
-			return err
-		}
-		return tx.EnqueueEvent(store.EventFeedbackDisposed, payload)
+		return tx.SetDisposition(id, fbF.action, fbF.note, fbF.reply)
 	}); err != nil {
 		return fmt.Errorf("feedback disposition: %w", err)
 	}

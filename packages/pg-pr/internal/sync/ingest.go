@@ -94,9 +94,12 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			continue
 		}
 
-		// Inline (diff/code) comment vs top-level PR comment.
+		// Classify as code-comment-thread ONLY when c.Path is non-empty so the
+		// store's file guard is never triggered. Path-less thread comments
+		// (e.g. file-level / collapsed review threads with Line>0 or ThreadID
+		// set but no Path) route to pr-comments instead.
 		kind := "pr-comments"
-		if c.Path != "" || c.Line > 0 || c.ThreadID != "" {
+		if c.Path != "" {
 			kind = "code-comment-thread"
 		}
 
@@ -127,6 +130,11 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			IsMinimized:     c.IsMinimized,
 			MinimizedReason: c.MinimizedReason,
 		}
+		// For pr-comments (non-code-anchored), use the PR head SHA as the
+		// revision proxy for first_seen_head_sha (spec: D4).
+		if kind == "pr-comments" {
+			f.FirstSeenHeadSHA = pr.HeadSHA
+		}
 
 		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
 			if _, err := tx.UpsertFeedback(f); err != nil {
@@ -134,7 +142,11 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			}
 			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
 		}); err != nil {
-			return fmt.Errorf("ingest: upsert comment %s: %w", c.ID, err)
+			// A single item failure must NOT abort the rest. Record the error
+			// and continue so that subsequent comments, CI ingestion, and
+			// ReconcileStaleness all still run.
+			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert comment %s: %v (continuing)\n", c.ID, err)
+			continue
 		}
 	}
 
@@ -171,7 +183,10 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			}
 			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
 		}); err != nil {
-			return fmt.Errorf("ingest: upsert ci run %s: %w", r.ID, err)
+			// A single CI run failure must NOT abort the rest (including
+			// ReconcileStaleness). Record the error and continue.
+			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert ci run %s: %v (continuing)\n", r.ID, err)
+			continue
 		}
 	}
 

@@ -64,6 +64,12 @@ func (p *Poster) Reconcile(ctx context.Context) error {
 			p.log.WarnContext(ctx, "replyposter: pr not found, skipping", "pr_id", fb.PRID, "feedback_id", fb.ID)
 			continue
 		}
+		// Only auto-reply on PRs we own. Team-owned PRs are monitored but
+		// replies are not auto-posted (M2: ownership gate).
+		if pr.Ownership != "mine" {
+			p.log.DebugContext(ctx, "replyposter: skip team-owned pr", "pr_id", fb.PRID, "feedback_id", fb.ID, "ownership", pr.Ownership)
+			continue
+		}
 
 		body := marker.Stamp(fb.ReplyBody)
 

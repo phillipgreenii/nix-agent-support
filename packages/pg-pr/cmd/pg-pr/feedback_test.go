@@ -206,6 +206,10 @@ func TestFeedbackDisposition_WillFix(t *testing.T) {
 	}
 }
 
+// TestFeedbackDisposition_EnqueuesEvent verifies that the disposition command
+// records the disposition in the store and does NOT enqueue a feedback.disposed
+// outbox row (the dead-event removal from M3: the disposed event had no
+// consumer and accumulated never-dispatched pending rows).
 func TestFeedbackDisposition_EnqueuesEvent(t *testing.T) {
 	storePath, _, fbID1, _ := seedFeedbackStore(t)
 	idStr := strconv.FormatInt(fbID1, 10)
@@ -215,10 +219,27 @@ func TestFeedbackDisposition_EnqueuesEvent(t *testing.T) {
 		t.Fatalf("feedback disposition: %v", err)
 	}
 
-	// Verify outbox contains a feedback.disposed row.
+	// Disposition must be recorded in the store.
+	db, err := store.Open(storePath)
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	f, err := db.GetFeedback(context.Background(), fbID1)
+	if err != nil || f == nil {
+		t.Fatalf("GetFeedback after disposition: %v / nil=%v", err, f == nil)
+	}
+	if f.DispositionAction != "no-action" {
+		t.Errorf("DispositionAction = %q, want no-action", f.DispositionAction)
+	}
+	if f.Status != "dispositioned" {
+		t.Errorf("Status = %q, want dispositioned", f.Status)
+	}
+
+	// NO feedback.disposed outbox row must be enqueued (dead event removed in M3).
 	n := countOutboxRows(t, storePath, store.EventFeedbackDisposed)
-	if n == 0 {
-		t.Fatal("expected at least one feedback.disposed outbox row, got 0")
+	if n != 0 {
+		t.Fatalf("expected 0 feedback.disposed outbox rows (dead event removed), got %d", n)
 	}
 }
 

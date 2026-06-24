@@ -68,3 +68,43 @@ func TestReconcileSkipsManagedUpstream(t *testing.T) {
 		t.Fatal("managed_upstream feedback should not be replied to")
 	}
 }
+
+// TestReconcileOwnershipGate verifies M2: pending replies on team-owned PRs are
+// NOT posted; only mine-owned PRs trigger auto-reply.
+func TestReconcileOwnershipGate(t *testing.T) {
+	db := store.OpenForTest(t)
+	ctx := context.Background()
+
+	// team-owned PR: reply must be skipped.
+	teamPRID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 2, Ownership: "team", State: "open"})
+	teamFBID, _ := db.UpsertFeedback(ctx, store.Feedback{PRID: teamPRID, Kind: "pr-comments", Fingerprint: "f-team", ExternalID: "ct1"})
+	_ = db.SetDisposition(ctx, teamFBID, "wont-fix", "noted", "Not acting on team PR.")
+
+	// mine-owned PR: reply must be posted.
+	minePRID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 3, Ownership: "mine", State: "open"})
+	mineFBID, _ := db.UpsertFeedback(ctx, store.Feedback{PRID: minePRID, Kind: "pr-comments", Fingerprint: "f-mine", ExternalID: "cm1"})
+	_ = db.SetDisposition(ctx, mineFBID, "wont-fix", "noted", "Not acting — intentional.")
+
+	fake := &fakeReplier{id: "resp-mine"}
+	p := New(db, fake)
+	if err := p.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// Only the mine-owned PR's reply should have been posted (1 comment post).
+	if fake.commentPosts != 1 {
+		t.Fatalf("commentPosts = %d, want 1 (only mine-owned PR)", fake.commentPosts)
+	}
+	if fake.threadPosts != 0 {
+		t.Fatalf("threadPosts = %d, want 0", fake.threadPosts)
+	}
+
+	// Team-owned PR's feedback must still be pending (response_id unset).
+	teamFB, err := db.GetFeedback(ctx, teamFBID)
+	if err != nil || teamFB == nil {
+		t.Fatalf("GetFeedback team: %v", err)
+	}
+	if teamFB.ResponseID != "" {
+		t.Errorf("team-owned PR feedback must not have response_id set, got %q", teamFB.ResponseID)
+	}
+}

@@ -347,6 +347,109 @@ func TestIngestCIFailure_PerRevision(t *testing.T) {
 	}
 }
 
+// TestIngestPathlessThreadComment_DoesNotAbort is the I1 regression test.
+// A path-less thread comment (ThreadID set, Path empty) previously caused
+// ingestFeedbackToStore to abort via return — dropping subsequent CI ingestion
+// and ReconcileStaleness. The fix:
+//  1. classifies path-less comments as pr-comments (not code-comment-thread),
+//  2. continues on per-item errors instead of returning,
+//  3. stores the comment as pr-comments with first_seen_head_sha set (D4).
+func TestIngestPathlessThreadComment_DoesNotAbort(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	// Path-less thread comment: ThreadID set but Path is empty.
+	pathlessComment := api.Comment{
+		ID:       "c-pathless",
+		Author:   "reviewer",
+		Body:     "Overall looks good to me.",
+		ThreadID: "thread-42",
+		// Path is intentionally empty — this triggers the bug without the fix.
+	}
+	// CI failure follows the path-less comment.
+	failRun := api.CIRun{
+		ID:         "run-pathless",
+		Name:       "unit-tests",
+		Status:     "completed",
+		Conclusion: "failure",
+		URL:        "https://github.com/o/r/actions/runs/runX",
+		Provider:   "github-actions",
+		HeadSHA:    "sha-pathless",
+	}
+
+	pr := api.PR{
+		Repo:    "o/r",
+		Number:  99,
+		State:   "open",
+		Branch:  "feat/pathless",
+		Base:    "main",
+		Author:  "alice",
+		URL:     "https://github.com/o/r/pull/99",
+		HeadSHA: "sha-pathless",
+	}
+	enriched := &vcs.EnrichedPR{
+		PR:       pr,
+		Comments: []api.Comment{pathlessComment},
+		CIRuns:   []api.CIRun{failRun},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "bot",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Must not return an error — the path-less comment must not abort ingestion.
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore must not abort on path-less comment: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 99)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v / nil=%v", err, storedPR == nil)
+	}
+
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+
+	byExtID := map[string]store.Feedback{}
+	for _, r := range rows {
+		byExtID[r.ExternalID] = r
+	}
+
+	// The path-less comment must be stored as pr-comments (not code-comment-thread).
+	pc, ok := byExtID["c-pathless"]
+	if !ok {
+		t.Fatal("path-less comment c-pathless must be stored (not dropped)")
+	}
+	if pc.Kind != "pr-comments" {
+		t.Errorf("path-less comment kind: got %q want \"pr-comments\"", pc.Kind)
+	}
+	// D4: first_seen_head_sha must be set for pr-comments.
+	if pc.FirstSeenHeadSHA != "sha-pathless" {
+		t.Errorf("path-less comment first_seen_head_sha: got %q want \"sha-pathless\"", pc.FirstSeenHeadSHA)
+	}
+
+	// CI failure must also be stored — ingestion must NOT have aborted.
+	ci, ok := byExtID["run-pathless"]
+	if !ok {
+		t.Fatal("CI failure run-pathless must be stored; ingestion must not abort on path-less comment")
+	}
+	if ci.Kind != "ci-failure" {
+		t.Errorf("CI failure kind: got %q want \"ci-failure\"", ci.Kind)
+	}
+}
+
 // TestIngestCIFailure_SubjectSHASet verifies the basic contract that a CI run
 // with a HeadSHA produces a feedback row with that subject_sha populated.
 func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
