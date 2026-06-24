@@ -379,6 +379,101 @@ func TestIngestThreadGrouping(t *testing.T) {
 
 // TestIngestFeedbackToStore_NilEnrichedIsNoop verifies that ingestFeedbackToStore
 // is a no-op when enriched is nil (edge-case guard).
+// TestIngestThreadGrouping_OursFirstPicksReviewerRep verifies that when the
+// oldest comment in a thread is one of ours (marker-stamped), the feedback
+// row's representative author is the first NON-ours comment (the reviewer we
+// must address), not us — and our comment is excluded from the stored messages.
+func TestIngestThreadGrouping_OursFirstPicksReviewerRep(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	// Oldest comment in the thread is ours (marker-stamped, posted under self).
+	ourComment := api.Comment{
+		ID:         "ours1",
+		Author:     "self",
+		AuthorRole: "member",
+		Body:       marker.Stamp("Earlier note from pg-pr."),
+		Path:       "pkg/baz/baz.go",
+		Line:       5,
+		ThreadID:   "thread-ours-first",
+	}
+	// Later comment from a human reviewer — this is the feedback to address.
+	reviewerComment := api.Comment{
+		ID:         "rev1",
+		Author:     "carol",
+		AuthorRole: "member",
+		Body:       "This still needs a guard clause.",
+		Path:       "pkg/baz/baz.go",
+		Line:       5,
+		ThreadID:   "thread-ours-first",
+	}
+
+	pr := api.PR{
+		Repo: "o/r", Number: 99, State: "open", Branch: "feat/q", Base: "main",
+		Author: "someone", URL: "https://github.com/o/r/pull/99", HeadSHA: "sha-q",
+	}
+	enriched := &vcs.EnrichedPR{
+		PR:       pr,
+		Comments: []api.Comment{ourComment, reviewerComment},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "self",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 99)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v / nil=%v", err, storedPR == nil)
+	}
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 thread feedback row, got %d: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	// Representative author must be the reviewer, NOT our self-posted comment.
+	if row.AuthorLogin != "carol" {
+		t.Errorf("representative author_login: got %q want \"carol\"", row.AuthorLogin)
+	}
+	if row.AuthorKind != "human" {
+		t.Errorf("representative author_kind: got %q want \"human\"", row.AuthorKind)
+	}
+	if row.Body != "This still needs a guard clause." {
+		t.Errorf("representative body: got %q want the reviewer's body", row.Body)
+	}
+
+	// Messages must contain only the non-ours comment.
+	msgs, err := db.ListMessages(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message (ours excluded), got %d: %+v", len(msgs), msgs)
+	}
+	if msgs[0].ExternalID != "rev1" {
+		t.Errorf("message external_id: got %q want \"rev1\"", msgs[0].ExternalID)
+	}
+	// PostedAt must be empty (no timestamp source; never a commit SHA).
+	if msgs[0].PostedAt != "" {
+		t.Errorf("message posted_at: got %q want empty", msgs[0].PostedAt)
+	}
+}
+
 func TestIngestFeedbackToStore_NilEnrichedIsNoop(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)

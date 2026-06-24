@@ -187,8 +187,17 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			continue
 		}
 
-		// Representative comment: first in the thread (oldest).
+		// Representative comment: the oldest non-ours comment in the thread
+		// (the feedback we must address). Falls back to items[0] in the
+		// degenerate case where every comment is ours — but the allOurs guard
+		// above already skips that, so a non-ours comment is guaranteed here.
 		rep := items[0]
+		for _, item := range items {
+			if !item.author.IsOurs {
+				rep = item
+				break
+			}
+		}
 		repC := rep.comment
 		repA := rep.author
 
@@ -233,7 +242,10 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 				IsOurs:      false,
 				AuthorRole:  item.comment.AuthorRole,
 				Body:        item.comment.Body,
-				PostedAt:    item.comment.OriginalCommitOID, // best proxy for ordering; actual timestamp not in api.Comment
+				// PostedAt left empty: api.Comment carries no timestamp, and
+				// storing a commit SHA in a timestamp column would be wrong.
+				// Ordering is preserved by insertion order (ListMessages
+				// returns ORDER BY id) rather than by posted_at.
 			})
 		}
 

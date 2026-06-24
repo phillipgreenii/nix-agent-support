@@ -78,8 +78,9 @@ type FPParts struct {
 // Fingerprint computes a stable dedup key for a feedback item, per-kind:
 //   - ci-failure: revision-SCOPED (check_name + subject_sha) — each failure per
 //     revision is distinct (build-failure history).
-//   - code-comment-thread: revision-STABLE (file + normalized body) — one row
-//     survives force-pushes; staleness is tracked separately via is_outdated.
+//   - code-comment-thread: revision-STABLE (thread id when present, else
+//     file + normalized body) — one row survives force-pushes; staleness is
+//     tracked separately via is_outdated.
 //   - pr-comments: revision-stable (external id if present, else normalized body).
 //   - review-request / jira-link: keyed by external id.
 //
