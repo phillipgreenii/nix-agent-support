@@ -50,3 +50,24 @@ func TestMigrateRefusesNewerSchema(t *testing.T) {
 	}
 	_ = db.Close()
 }
+
+func TestMigrate_V2EnrichmentColumns(t *testing.T) {
+	db := OpenForTest(t)
+	var v int
+	if err := db.sql.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("user_version: %v", err)
+	}
+	if v != schemaVersion || schemaVersion != 2 {
+		t.Fatalf("user_version=%d schemaVersion=%d; want both 2", v, schemaVersion)
+	}
+	for _, col := range []string{"kind", "languages", "size", "urgency", "urgency_score", "urgency_reasons"} {
+		var cnt int
+		if err := db.sql.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('pull_request') WHERE name=?", col).Scan(&cnt); err != nil {
+			t.Fatalf("pragma_table_info %s: %v", col, err)
+		}
+		if cnt != 1 {
+			t.Errorf("column %q missing from pull_request", col)
+		}
+	}
+}

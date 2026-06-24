@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -103,6 +103,17 @@ CREATE TABLE outbox (
     completed_at TEXT
 );
 CREATE INDEX idx_outbox_pending ON outbox(id) WHERE status = 'pending';
+`,
+	// v1 -> v2: PR enrichment columns (kind/languages/size/urgency). One
+	// column per ALTER (SQLite limit); defaults backfill existing rows so
+	// the new Scan targets are never NULL.
+	`
+ALTER TABLE pull_request ADD COLUMN kind            TEXT    NOT NULL DEFAULT '';
+ALTER TABLE pull_request ADD COLUMN languages       TEXT    NOT NULL DEFAULT '[]';
+ALTER TABLE pull_request ADD COLUMN size            TEXT    NOT NULL DEFAULT '';
+ALTER TABLE pull_request ADD COLUMN urgency         TEXT    NOT NULL DEFAULT '';
+ALTER TABLE pull_request ADD COLUMN urgency_score   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pull_request ADD COLUMN urgency_reasons TEXT    NOT NULL DEFAULT '[]';
 `,
 }
 
