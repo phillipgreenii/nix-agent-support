@@ -21,8 +21,8 @@ func doctorPoolHeader(cfg config.Config) string {
 	if root == "" {
 		root = "default (XDG)"
 	}
-	return fmt.Sprintf("pool: %s\n  db:     %s\n  socket: %s\n  hook.log: %s\n  events.jsonl: %s\n",
-		root, cfg.DBPath, cfg.Tmux.Socket, filepath.Join(cfg.StateDir, "hook.log"), cfg.EventLogPath())
+	return fmt.Sprintf("pool: %s\n  db:     %s\n  socket: %s\n  diagnostics.jsonl: %s\n  events.jsonl: %s\n",
+		root, cfg.DBPath, cfg.Tmux.Socket, cfg.DiagLogPath(), cfg.EventLogPath())
 }
 
 func runDoctor(args []string) int {
@@ -68,10 +68,11 @@ func runDoctor(args []string) int {
 			report(r)
 		}
 	}
-	// hook.log tail.
-	logPath := filepath.Join(cfg.StateDir, "hook.log")
+	// diagnostics.jsonl tail (structured JSONL; printed raw so an operator sees
+	// the recent error lines verbatim).
+	logPath := cfg.DiagLogPath()
 	if b, err := os.ReadFile(logPath); err == nil && len(b) > 0 {
-		fmt.Println("--- recent hook.log ---")
+		fmt.Println("--- recent diagnostics.jsonl ---")
 		fmt.Print(string(tailBytes(b, 2000)))
 	}
 	return 0
