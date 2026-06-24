@@ -1,7 +1,7 @@
 # pg-pr feedback #5 — beadsbridge PR-lifecycle event ownership (Decision A)
 
 **Date**: 2026-06-24
-**Status**: Draft
+**Status**: Draft (revised after adversarial review, 2026-06-24)
 **Bead**: `pg2-4c5i.9` (subsumes `pg2-4c5i.14` / follow-up #6)
 **Epic**: `pg2-4c5i` — Phase 2 roadmap: `docs/superpowers/plans/2026-06-23-pg-pr-feedback-phase2-roadmap.md`
 **Foundation**: `docs/superpowers/specs/2026-06-23-pg-pr-feedback-datastore-design.md` (storage move, "Decision A")
@@ -9,33 +9,36 @@
 ## Context
 
 The storage move shipped an in-process event dispatcher + transactional outbox
-and `internal/beadsbridge`, the handler that projects pg-pr's beads. The
-original design ("Decision A") intended the beads handler to project the **PR
-(merge-request) bead** from `pr.*` lifecycle events, with the store
-`pull_request` row as the authoritative PR state.
+and `internal/beadsbridge`, the handler that projects pg-pr's beads. "Decision A"
+intended the beads handler to project the **PR (merge-request) bead** from `pr.*`
+lifecycle events, with the store `pull_request` row as the authoritative PR state.
 
 That is only half-realized today:
 
-- Only `feedback.created` is ever enqueued (`internal/sync/ingest.go`, 3 sites).
+- Only `feedback.created` is ever enqueued (`internal/sync/ingest.go:153,260,299`).
   Its bridge handler (`ensureProcessFeedbackBead`) creates the process-feedback
   cycle bead and **requires the PR bead to already exist**
-  (`FindByRepoAndNumber` → errors if absent).
-- The PR bead is still created/updated/closed by the **inline** path in
-  `internal/sync/sync.go` and `internal/sync/refresh.go`, calling the `bd`
-  client directly.
+  (`FindByRepoAndNumber` → errors "no merge-request bead" if absent,
+  `bridge.go:88-89`).
+- The PR bead is still created/updated/closed by the **inline** path:
+  `sync.go:417` (`EnsureMergeRequest`), `sync.go:1000` (`applyFetchedPR`, the
+  daemon's create path), `refresh.go:68` (hidden team draft); closed inline at
+  `sync.go:513/523`, `sync.go:931/937`, `refresh.go:47/48`.
 - The bridge's `pr.opened/updated → EnsureMergeRequest` and
-  `pr.closed/merged → cascadeClose` branches are **dead in production** —
-  exercised only in `bridge_test.go` / `dispatcher_test.go`.
-- Evidence the dead handlers were never finished: their `PRPayload` carries only
+  `pr.closed/merged → cascadeClose` branches are **dead in production**.
+  `bridge_test.go` covers only `EventPROpened` + `EventFeedbackCreated`; there is
+  **no test** for `EventPRUpdated`, `EventPRClosed`, `EventPRMerged`, or
+  `cascadeClose`.
+- Evidence the dead handlers were never finished: `PRPayload` carries only
   `{Repo, Number, Title, Ownership, Merged}` and the handler passes only
-  `{Repo, PRNumber}` to `EnsureMergeRequest` — it would create a **degraded**
-  bead vs. the inline path, which sets `State, Branch, Base, Author, URL, Draft,
-LastSyncedAt`.
+  `{Repo, PRNumber}` to `EnsureMergeRequest` (`bridge.go:60-62`) — it would create
+  a **degraded** bead vs. the inline path, which sets `State, Branch, Base, Author,
+URL, Draft, LastSyncedAt`.
 
 The PR bead is the parent of the process-feedback beads, and Phase 2's headline
 features (#1 diff-review, #3 teammate-attention) will project **new** beads.
-Whichever ownership model we pick here is the pattern those features follow, so
-this is the architectural root of Phase 2.
+Whichever ownership model we pick is the pattern those features follow — this is
+the architectural root of Phase 2.
 
 ## Decision
 
@@ -46,177 +49,236 @@ The store `pull_request` row is the authoritative PR state. `sync`/`refresh`
 becomes the **single** code path that creates, updates, and closes the PR bead.
 The inline bead-writes are removed; the dead `pr.*` handlers become live.
 
-Rejected alternatives:
+Rejected: **A1** (pure store-projection reconciler + new `pr_bead_id` column +
+migration — more than this step needs; A2 can evolve into it later); **A3**
+(half measure — create stays inline — does not realize Decision A).
 
-- **A1 (pure store-projection / reconciler).** `sync` writes only store rows; a
-  new reconciler diffs store state vs. projected beads, tracked by a new
-  `pr_bead_id` column (migration). Most faithful to "DB authoritative" and fully
-  decouples projection from sync's control flow, but adds a new component +
-  schema change + more tests. A2 can evolve into A1 later if projection grows;
-  it is more than this step needs. **Out of scope.**
-- **A3 (half measure).** Keep bead creation inline; route only close/draft
-  through events. Does not realize Decision A. **Rejected.**
+**Fold follow-up #6 (`Summary.RepliesPosted`)** in: same class of fix (a Summary
+count the code never populates), same surface (`reconcileReplies`/`Summary`).
+Bead `pg2-4c5i.14` is subsumed.
 
-**Fold follow-up #6 (`Summary.RepliesPosted`) into this work.** It is the same
-class of fix — a Summary count that the current code never populates — and lives
-in the same `reconcileReplies`/`Summary` area this change already touches. Doing
-it separately would touch the Summary-counts surface twice. Bead `pg2-4c5i.14`
-is closed as subsumed.
+## Why A2 is tractable (verified findings)
 
-## Why A2 is tractable (key findings)
-
-- **The store row already exists.** `ingestFeedbackToStore` (`ingest.go:56`)
-  already calls `store.UpsertPR`. The authoritative row is written today; A2
-  only makes it unconditional and earlier.
+- **The store row already exists.** `ingestFeedbackToStore` (`ingest.go:56`) calls
+  `store.UpsertPR` (today gated behind `prBeadID != ""`, `enriched != nil`, and
+  `Deps.Store != nil`). A2 makes it unconditional and earlier.
 - **The bridge is already repo-routed.** `newBeadsBridgeHandler`
-  (`cmd/pg-pr/sync.go:80`) reads `payload.repo` and constructs the correct
-  per-repo `bd` client (`beads.NewClientForRepo(path)`). Emitted `pr.*` events
-  land in the right `bd` workspace with **no new routing**.
-- **The `prBeadID` coupling is light.** `processFeedback` uses `prBeadID` only as
-  a boolean gate (`if prBeadID == "" { return nil }`, `sync.go:1348`); the actual
-  ingestion is keyed by repo/number and never uses the id. `maybePromoteDraft`'s
-  only synchronous use is `UpdateMergeRequest(prBeadID, {State:"open"})`
-  (`sync.go:1418`) — a bead write that becomes a `pr.updated` event.
-- **The outbox is FIFO and flushed once per Sync** (`sync.go:548`). Ordering is
-  preserved as long as `pr.opened` is enqueued before that PR's
-  `feedback.created`.
+  (`cmd/pg-pr/sync.go:80-102`) reads `payload.repo` → `repoPaths` →
+  `beads.NewClientForRepo(path)`. Emitted `pr.*` events land in the right `bd`
+  workspace with **no new routing**.
+- **The `prBeadID` coupling is light.** `processFeedback` uses `prBeadID` only as a
+  boolean gate (`sync.go:1348`); ingestion is keyed by repo/number. `maybePromoteDraft`'s
+  only synchronous bead use is `UpdateMergeRequest(prBeadID, {State:"open"})`
+  (`sync.go:1418`).
+- **`EnsureMergeRequest` and `cascadeClose` are idempotent.** `EnsureMergeRequest`
+  finds existing by repo+PR (including closed), returns `(id, alreadyClosed=true)`
+  for a closed bead **without reopening it**, else updates, else creates.
+  `cascadeClose` re-closing a closed bead is a no-op. Safe under at-least-once
+  delivery.
+- **No migration needed.** The `pull_request` table already exists
+  (`migrate.go`, schemaVersion 1); the only store addition is a `ListOpenPRs`
+  **query**.
+- **`api.PR` already carries every payload field** (`Title, State, Branch, Base,
+Author, URL, Draft, Merged, HeadSHA`) **except `Ownership`**, which sync derives
+  (`mineSet`, `sync.go:361`; `isSelfAuthored`, `refresh.go:56`; `ingest.go:48-51`).
+
+## Execution model (corrected — this drove the rework)
+
+There are **two** paths, and they are NOT "concurrent goroutines within one Sync
+tick flushed once":
+
+1. **One-shot CLI `pg-pr sync`** (`Engine.Sync`): PRs processed **serially** (the
+   per-PR block at `sync.go:384` is an immediately-invoked `func(){…}()`, not a
+   goroutine); the outbox is flushed **once** at `sync.go:548`; **no maintenance
+   ticker runs**. This is the **only** path that produces a user-facing `Summary`
+   (printed at `cmd/pg-pr/sync.go:200`).
+2. **Daemon** (`StartDaemon`): **two concurrent workers** (`mineQ`/`teamQ`,
+   `daemon.go:208-209`) each run `refreshPR` (per-PR flush at `refresh.go:81`),
+   **plus** a `runMaintenance` goroutine that also flushes (`daemon.go:348` →
+   `maintenanceCycle`). The daemon's PR-bead writes live in `refresh.go` +
+   `applyFetchedPR` (`sync.go:1000`), not in `Sync`. Each `refreshPR` builds a
+   **throwaway** `Summary` (`refresh.go:37`) that is discarded — the daemon emits
+   **no per-tick Summary**.
+
+Consequence: multiple `RunOutbox` drainers run **concurrently** in the daemon (2
+workers + maintenance), all draining the **shared** outbox. The design's
+correctness and counting must hold under that, not under a single-flush model.
 
 ## Architecture / data flow
 
-Per observed PR, within one sync tick (per-PR goroutine):
+Per observed PR (one goroutine handles a given PR end-to-end; mine/team queues are
+disjoint, so no PR is processed by two workers):
 
 ```
-observed PR ─▶ store.UpsertPR              (authoritative state; unconditional)
-            ─▶ enqueue pr.opened | pr.updated   (full payload)
-            ─▶ processFeedback → ingest → enqueue feedback.created
-            ─▶ maybePromoteDraft (mine only) → SetDraft(false)
-                                            → enqueue pr.updated {State: open}
-
-close phase ─▶ store open-PRs NOT in observed set
-            ─▶ enqueue pr.closed | pr.merged
-
-end of Sync ─▶ flushOutbox → dispatcher → beadsbridge:
+observed PR ─▶ store.UpsertPR  +  enqueue pr.opened|pr.updated    ┐ SAME goroutine,
+              (committed BEFORE any feedback for this PR)          │ committed in
+            ─▶ processFeedback → ingest → enqueue feedback.created │ this order
+            ─▶ maybePromoteDraft (mine) → SetDraft(false)          │
+                                        → enqueue pr.updated{State:open}
+close phase ─▶ store.ListOpenPRs(healthy repo) − observed
+            ─▶ enqueue pr.closed|pr.merged
+flush       ─▶ RunOutbox (FIFO by id) → beadsbridge:
                  pr.opened/updated → EnsureMergeRequest (full fields)
-                 feedback.created  → ensureProcessFeedbackBead (PR bead exists ✓)
+                 feedback.created  → ensureProcessFeedbackBead (parent exists ✓)
                  pr.closed/merged  → cascadeClose
 ```
 
-`pr.opened` vs `pr.updated` is chosen by `sync` from `repoPreExisting` (the
-pre-existing-bead set it already computes at `sync.go:432`): not-pre-existing →
-`pr.opened`, pre-existing → `pr.updated`.
+`pr.opened` vs `pr.updated`: chosen from `repoPreExisting` (`sync.go:432`) —
+not-pre-existing → opened, else updated.
+
+### Ordering invariant (load-bearing — fixes review blockers #1/#2)
+
+Removing the inline `EnsureMergeRequest` removes the only thing that currently
+guarantees the PR bead exists before `feedback.created` is handled. Under A2 that
+guarantee becomes:
+
+> For a given PR, `pr.opened`/`pr.updated` **must be enqueued and committed before
+> any of that PR's `feedback.created` events are enqueued.**
+
+This holds naturally because a single goroutine processes a PR sequentially
+(`UpsertPR` + `pr.opened` enqueue, _then_ `processFeedback`). Therefore any
+`feedback.created` for that PR has a strictly higher outbox id than its
+`pr.opened`, and `RunOutbox` (`ORDER BY id`, `outbox.go:67`) always projects the
+PR bead first — **even** if a concurrent daemon `RunOutbox` drains mid-cycle (it
+either sees both in id order, or sees only `pr.opened`, never only
+`feedback.created`). Cross-PR interleaving is irrelevant (each PR is
+self-consistent). **Hardening option:** enqueue `pr.opened` + the PR's
+`feedback.created` in one `InTx` so they commit atomically; the strict-order
+guarantee above is sufficient on its own and is the required invariant. A test
+must run ingestion against a **competing concurrent `RunOutbox`** and assert no
+"no merge-request bead" error ever occurs.
 
 ## Component changes
 
 ### 1. `internal/beadsbridge/bridge.go`
 
-- Enrich `PRPayload` to carry the full bead fields:
-  `{Repo, Number, Title, Ownership, Merged, State, Branch, Base, Author, URL,
-Draft, LastSyncedAt}`.
-- `EventPROpened/Updated` handler passes the full `beads.MergeRequestFields`
-  (not just Repo+PRNumber) to `EnsureMergeRequest`.
-- `EventPRClosed/Merged` → `cascadeClose` (already implemented) — `Merged`
-  selects reason `upstream-merged` vs `pr-closed`.
-- No interface methods are removed (this is realization, not removal); the
-  bridge's `BeadClient` keeps `EnsureMergeRequest`, `cascadeClose` deps, etc.
+- Enrich `PRPayload`: `{Repo, Number, Title, Ownership, Merged, State, Branch,
+Base, Author, URL, Draft, LastSyncedAt}`.
+- `EventPROpened/Updated` handler passes the **full** `beads.MergeRequestFields`
+  to `EnsureMergeRequest` (not just Repo+PRNumber).
+- **No-resurrection guard (fixes review #3):** `ensureProcessFeedbackBead` must
+  **skip** creating a processing cycle when the resolved PR bead is **closed**
+  (so a `feedback.created` for a PR whose bead was manually/cascade-closed does
+  not attach a live cycle under a closed parent). `EnsureMergeRequest` already
+  refuses to reopen a closed bead (returns `alreadyClosed`); the bridge must
+  surface/honor that rather than discard it (`bridge.go:60`). This requires
+  `FindByRepoAndNumber` (or a sibling) to expose the bead's open/closed status —
+  add it if absent.
+- `EventPRClosed/Merged → cascadeClose` (implemented but currently **untested** —
+  add coverage incl. `Merged`→`upstream-merged` reason).
 
 ### 2. `internal/store` — new `ListOpenPRs`
 
-Add a query returning open `pull_request` rows (optionally filtered by repo) so
-close-detection reads the **store** rather than `bd ListMergeRequests`. Fields
-needed: repo, number, ownership, state, head info — enough to build the
-`pr.closed`/`pr.merged` payload.
+`ListOpenPRs(ctx, repo)` returns open `pull_request` rows for a repo (state in
+`open`/`draft`), with enough fields (repo, number, ownership, state) to build the
+`pr.closed`/`pr.merged` payload. Query only — no migration.
 
-### 3. `internal/sync/sync.go`
+### 3. `internal/sync/sync.go` (one-shot `Sync` path)
 
-- **UpsertPR unconditional**: write the authoritative row for every observed PR,
-  independent of any bead id (move/hoist out of the `prBeadID`-gated path).
-- **Replace inline `EnsureMergeRequest` (`:417`)** with
-  `EnqueueEvent(pr.opened|pr.updated, fullPayload)`. Remove the synchronous
-  `prBeadID`/`alreadyClosed` return dependence (see Edge cases).
-- **`processFeedback` gate**: replace `prBeadID == ""` with "repo is configured
-  & PR observed" (it no longer needs an id).
-- **`maybePromoteDraft`**: keep the external `SetDraft(false)` write; replace
-  `UpdateMergeRequest(prBeadID, …)` with `EnqueueEvent(pr.updated, {State:open})`.
-- **Close phase (`:489–525`)**: replace `ListMergeRequests` iteration with
-  `store.ListOpenPRs` minus the observed set → `EnqueueEvent(pr.closed|pr.merged)`.
+- **`UpsertPR` unconditional** for every observed PR (hoist out of the
+  `prBeadID`-gated path); commit it before processing feedback.
+- **Replace inline `EnsureMergeRequest` (`:417`)** with `EnqueueEvent(pr.opened|
+pr.updated, fullPayload)`. Drop the `prBeadID`/`alreadyClosed` synchronous
+  return.
+- **`processFeedback` gate** (`:1348`): replace `prBeadID == ""` with "repo
+  configured & PR observed."
+- **`maybePromoteDraft`**: keep `SetDraft(false)`; replace `UpdateMergeRequest`
+  (`:1418`) with `EnqueueEvent(pr.updated, {…full payload…, State:open})`. Note
+  this is a **second** `pr.updated` for the PR — see counting dedupe.
+- **Close phase (`:489–525`)**: for each **healthy** repo, `store.ListOpenPRs(repo)`
+  minus the observed set → `EnqueueEvent(pr.closed|pr.merged)`. Preserves
+  today's "only close beads for repos that synced successfully" guard
+  (`sync.go:482-489`).
 
-### 4. `internal/sync/refresh.go`
+### 4. `internal/sync/refresh.go` + `applyFetchedPR` (daemon path)
 
-Single-PR refresh (`:47–68`) gets the same transformation: emit `pr.*` events
-instead of inline `EnsureMergeRequest`/`CloseMergeRequest`/`cascadeClose`.
+The daemon's PR-bead writes are here, not in `Sync` — convert them too:
+
+- `applyFetchedPR` (`sync.go:1000`, the active-PR create/update) → emit
+  `pr.opened|pr.updated` (same ordering invariant: committed before feedback).
+- Hidden-team-draft `EnsureMergeRequest` (`refresh.go:68`) → emit `pr.updated`
+  with `State:draft`.
+- Closed/merged branch (`refresh.go:41-52`) → emit `pr.closed|pr.merged`; **remove
+  the inline `CloseMergeRequest`+`cascadeClose`** so the bridge is the sole
+  closer (no double-cascade).
+- The per-PR `flushOutbox` (`refresh.go:81`) stays; the throwaway `Summary` is
+  irrelevant (daemon emits no Summary).
 
 ### 5. `internal/replyposter` + `reconcileReplies` (folded #6)
 
-`Reconcile` returns `(int, error)` — the count of replies posted.
-`reconcileReplies` (`sync.go:475`) propagates the count into
-`summary.RepliesPosted`.
+`Reconcile` → `(int, error)` returning replies posted. Update all call sites
+(`sync.go:475`, `sync.go:958`, `daemon.go:345` via `reconcileReplies`,
+`sync.go:1274-1288`) and `poster_test.go`. `reconcileReplies` propagates the count
+into `summary.RepliesPosted`.
 
-## Summary counts (emit-time, not flush-time)
+## Summary counts — flush-time tally (revised; fixes review #4/#5)
 
-Counting at flush-time is **wrong in daemon mode**: the maintenance ticker
-(`daemon.go:348`) can flush the outbox before the per-Sync flush (`sync.go:548`),
-so a Sync would under-report. Instead, **count at emit-time** — `sync` already
-knows created-vs-updated (`repoPreExisting`) and which PRs it is closing:
+The earlier "emit-time" plan was wrong: (a) it would count enqueued-but-not-yet-
+projected events, regressing today's "count only after a **successful** bead
+write" fidelity (`sync.go:429-436`, `:520`); (b) its justification (daemon
+flush-timing) was moot because the **daemon produces no Summary**. Only the
+**one-shot serial `Sync`** produces a Summary, and that path has **no concurrent
+flusher** — so counting at its single flush is accurate.
 
-- `BeadsCreated` ← count of `pr.opened` emitted (PR not pre-existing).
-- `BeadsUpdated` ← count of `pr.updated` emitted for the PR row.
-- `BeadsClosed` ← count of `pr.closed`/`pr.merged` emitted (PR-level).
-- `RepliesPosted` ← `Reconcile`'s returned count.
+- `flushOutbox`/`RunOutbox` returns a per-type tally of **successfully dispatched
+  and completed** events.
+- `Sync` folds the tally into `Summary`:
+  - `BeadsCreated` ← distinct PRs with a projected `pr.opened`.
+  - `BeadsUpdated` ← distinct PRs with a projected `pr.updated` **(deduped per
+    `repo#number`** so `maybePromoteDraft`'s second update doesn't double-count).
+  - `BeadsClosed` ← distinct PRs with a projected `pr.closed`/`pr.merged`
+    (PR-level; cascade children implied, not itemized — deliberate, see below).
+- `RepliesPosted` ← `Reconcile`'s returned count (synchronous, set in
+  `reconcileReplies` before flush; independent of the tally).
 
-The existing inline increments (`:433/:435/:520`) **relocate** to the emit sites;
-the counting logic is essentially unchanged.
+**Deliberate simplification:** `BeadsClosed` counts PR-bead closures only;
+cascade-child closes execute in the bridge and are not itemized (today they are,
+`sync.go:1458`). The child closure is implied by the parent. Accepted.
 
-**Decided simplification:** `BeadsClosed` counts PR-bead closures only;
-cascade-child closures execute in the bridge at flush and are **not**
-individually itemized (today they are, at `sync.go:1458`). The child closure is
-implied by the parent close, so the user-facing "closed N PR beads" line stays
-meaningful. Documented fallback if exact child counts are ever required: have
-`flushOutbox`/`RunOutbox` return a per-type tally for the closes the bridge
-performs — acceptable for cascade children specifically, since they only ever
-close (never create), so the daemon flush-timing caveat does not distort a
-"created" count.
+The daemon ignores the tally (no Summary). `refreshPR`'s throwaway `Summary`
+remains discarded.
 
 ## Edge cases & behaviors to preserve (test targets)
 
-- **Outbox ordering**: a PR's `pr.opened` must precede its `feedback.created` so
-  the feedback handler finds the bead. Assert FIFO ordering end-to-end.
-- **Idempotent re-dispatch**: at-least-once delivery must not duplicate beads
-  (`EnsureMergeRequest` upsert, `cascadeClose` close-already-closed are no-ops).
-- **`alreadyClosed` skip**: today `EnsureMergeRequest` returning `alreadyClosed`
-  skips downstream processing for a PR whose bead is already closed. Re-express
-  as: do **not** emit `pr.opened` when the store row is already closed/merged and
-  the PR is not re-observed-as-active; rely on `observed = active upstream` +
-  idempotent upsert otherwise. Cover with a test (closed bead must not be
-  resurrected by a stale observation).
-- **`feedback.created` with no PR bead**: still an error, but now structurally
-  prevented by ordering rather than the inline create.
-- **Store/dispatch become required for the PR bead.** Today the inline
-  `EnsureMergeRequest` (`:417`) is unconditional, so a nil-`Store` config still
-  gets a PR bead; only feedback ingestion is store-gated. Under A2 the PR bead is
-  projected from events, so **a nil `Store`/`Dispatch` no longer produces a PR
-  bead**. This is acceptable: the production CLI path always wires the store
-  (`cmd/pg-pr/sync.go:138` `SetStoreAndDispatch`); the nil path was only ever
-  test/legacy. Decision: A2 makes the store the required backing for the PR bead;
-  `sync`/`refresh` emit events unconditionally and skip PR-bead work (degrade
-  safely, no panic) when `Store`/`Dispatch` are nil. Tests that assert on the PR
-  bead must wire the store (or drive the bridge directly).
+- **Ordering invariant** (above): `pr.opened` committed before that PR's
+  `feedback.created`; verified under a competing concurrent `RunOutbox`.
+- **Idempotent re-dispatch**: double-flush leaves exactly one bead; re-closing is
+  a no-op.
+- **No-resurrection** (review #3): a PR whose bead is **closed** but reappears /
+  is force-pushed / reopened must not get a live processing cycle re-parented
+  under a closed bead. `EnsureMergeRequest` won't reopen; `ensureProcessFeedbackBead`
+  skips when the parent is closed. Tests: close→reappear, force-push, reopen.
+- **`feedback.created` with no PR bead**: now structurally prevented by the
+  ordering invariant.
+- **Store/Dispatch become required for the PR bead.** Today inline
+  `EnsureMergeRequest` is unconditional, so a nil-`Store` config still gets a PR
+  bead. Under A2 the PR bead is projected from events, so **nil `Store`/`Dispatch`
+  produces no PR bead**. Acceptable: production always wires the store
+  (`cmd/pg-pr/sync.go:138`); the nil path is test/legacy. `sync`/`refresh` must
+  degrade safely (no panic) and skip PR-bead emission when `Store`/`Dispatch` are
+  nil. Tests asserting on the PR bead must wire the store.
 
 ## Testing strategy
 
-- Bridge unit tests already cover the `pr.*` handlers; extend them for the
-  enriched `PRPayload` (all fields land on the bead).
-- `store.ListOpenPRs` unit test.
-- `sync` integration test (in-memory `bd` + store): one tick creates the PR bead
-  **via the outbox**, not inline; `feedback.created` finds it; counts match;
-  a disappeared PR closes via `pr.closed`.
-- Ordering test: `pr.opened` id < `feedback.created` id for the same PR.
-- Idempotency test: double-flush leaves one bead.
-- `alreadyClosed`/no-resurrection test.
-- `replyposter.Reconcile` count test (folded #6 acceptance).
+- **Rewrite `integration_test.go`** to drive the **real** ingest→`pr.opened`→flush
+  path (the current fake hard-codes `findResult` non-nil, masking the ordering
+  dependency — it cannot catch a regression).
+- **Concurrency test**: ingestion racing a competing `RunOutbox` ⇒ never "no
+  merge-request bead."
+- **Ordering test**: `pr.opened` outbox id < that PR's `feedback.created` id.
+- **Idempotency test**: double-flush ⇒ one bead.
+- **No-resurrection tests**: close→reappear, force-push, reopen.
+- **Bridge tests**: enriched `PRPayload` lands all fields; add `EventPRUpdated`,
+  `EventPRClosed`, `EventPRMerged`, `cascadeClose`, `Merged`→reason coverage
+  (currently untested).
+- **`store.ListOpenPRs`** unit test + healthy-repo / observed-set scoping.
+- **Counts test**: one-shot `Sync` Summary reflects projected (not merely
+  enqueued) bead ops, deduped per PR.
+- **`replyposter.Reconcile`** count test (folded #6 acceptance).
 
 ## Non-goals
 
-- No A1 reconciler or `pr_bead_id` column.
+- No A1 reconciler or `pr_bead_id` column / migration.
 - No new event types beyond the existing four `pr.*`.
-- No change to feedback-bead or process-cycle semantics.
-- No change to the `feedback.disposed`/`feedback.resolved` events.
+- No change to feedback-bead / process-cycle semantics, or to
+  `feedback.disposed`/`feedback.resolved`.
