@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
@@ -114,15 +117,15 @@ func TestPRShow_JSONOutput(t *testing.T) {
 	}
 }
 
-func TestPRInfo_AliasOfShow(t *testing.T) {
+func TestPRInfo_NoStoreEntry(t *testing.T) {
 	resetPRFlags()
-	prev := vcsProviderFor
-	t.Cleanup(func() { vcsProviderFor = prev })
-	vcsProviderFor = func(string) vcs.Provider {
-		return &fakeVCS{pr: &api.PR{
-			Repo: "foo/bar", State: "open",
-		}}
+	// Point XDG_STATE_HOME at an empty temp dir so the store is always empty.
+	// DefaultPath() appends "pg-pr/store.db", so create that subdirectory.
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "pg-pr"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
+	t.Setenv("XDG_STATE_HOME", tmp)
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -133,8 +136,53 @@ func TestPRInfo_AliasOfShow(t *testing.T) {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "number: 7") {
-		t.Fatalf("expected number: 7 in output: %q", got)
+	if !strings.Contains(got, "not yet synced") {
+		t.Fatalf("expected 'not yet synced' in output: %q", got)
+	}
+}
+
+func TestPRInfo_WithStoreEntry(t *testing.T) {
+	resetPRFlags()
+	// Seed the store with an enriched PR and point XDG_STATE_HOME at it.
+	// DefaultPath() appends "pg-pr/store.db", so create that subdirectory.
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "pg-pr"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", tmp)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open", Author: "phillipg",
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.SetEnrichment(ctx, "foo/bar", 7, store.Enrichment{
+		Kind: "bugfix", Size: "M", Urgency: "high",
+		Languages:      []string{"Go"},
+		UrgencyReasons: []string{"label:p0"},
+	}); err != nil {
+		t.Fatalf("set enrichment: %v", err)
+	}
+	_ = db.Close()
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "info", "7", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{"bugfix", "M", "high", "Go", "label:p0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output: %q", want, got)
+		}
 	}
 }
 
@@ -147,5 +195,22 @@ func TestPRShow_InvalidNumber(t *testing.T) {
 
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatalf("expected error for non-numeric PR id")
+	}
+}
+
+func TestRenderEnrichment(t *testing.T) {
+	pr := &store.PullRequest{
+		Repo: "o/r", Number: 7, Kind: "bugfix", Size: "M", Urgency: "high",
+		Languages: []string{"Go", "Nix"}, UrgencyReasons: []string{"label:p0"},
+	}
+	var b strings.Builder
+	if err := renderEnrichment(&b, pr); err != nil {
+		t.Fatalf("renderEnrichment: %v", err)
+	}
+	out := b.String()
+	for _, want := range []string{"bugfix", "M", "high", "Go", "Nix", "label:p0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered output missing %q:\n%s", want, out)
+		}
 	}
 }

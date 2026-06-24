@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/gitlocal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
@@ -146,12 +147,32 @@ var prShowCmd = &cobra.Command{
 var prInfoCmd = &cobra.Command{
 	Use:     "info <pr>",
 	Aliases: []string{"pr-info"},
-	Short:   "Show full PR metadata (alias of show with extra fields)",
+	Short:   "Show persisted enrichment for a PR (kind, size, languages, urgency)",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// In Phase 2, info is the same as show. Phase 3 will add labels /
-		// reviewers / checks pulled from a richer API call.
-		return prShowCmd.RunE(cmd, args)
+		ctx := cmd.Context()
+		repo, err := resolveRepo(ctx, prF.repo)
+		if err != nil {
+			return err
+		}
+		num, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid PR number %q: %w", args[0], err)
+		}
+		db, err := store.Open(store.DefaultPath())
+		if err != nil {
+			return fmt.Errorf("open store: %w", err)
+		}
+		defer func() { _ = db.Close() }()
+		pr, err := db.GetPR(ctx, repo, num)
+		if err != nil {
+			return err
+		}
+		if pr == nil {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "PR %s#%d not yet synced (no enrichment)\n", repo, num)
+			return err
+		}
+		return renderEnrichment(cmd.OutOrStdout(), pr)
 	},
 }
 
@@ -208,6 +229,24 @@ func renderPR(w io.Writer, p *api.PR) error {
 		"repo:   %s\nnumber: %d\nstate:  %s\nbranch: %s\nbase:   %s\nauthor: %s\nmerged: %s\nurl:    %s\n",
 		p.Repo, p.Number, state, p.Branch, p.Base, p.Author, merged, p.URL)
 	return err
+}
+
+// renderEnrichment writes the persisted enrichment fields for a PR.
+func renderEnrichment(w io.Writer, pr *store.PullRequest) error {
+	urgency := orDash(pr.Urgency)
+	if len(pr.UrgencyReasons) > 0 {
+		urgency = fmt.Sprintf("%s (%s)", urgency, strings.Join(pr.UrgencyReasons, ", "))
+	}
+	_, err := fmt.Fprintf(w, "Kind:      %s\nSize:      %s\nLanguages: %s\nUrgency:   %s\n",
+		orDash(pr.Kind), orDash(pr.Size), orDash(strings.Join(pr.Languages, ", ")), urgency)
+	return err
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func renderFiles(w io.Writer, files []gitlocal.FileChange) error {
