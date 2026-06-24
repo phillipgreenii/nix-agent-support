@@ -49,3 +49,36 @@ func TestUpsertPRInsertsThenUpdates(t *testing.T) {
 		t.Fatalf("GetPR = %+v, want head_sha def456", got)
 	}
 }
+
+func TestGetPRByID(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	pr := PullRequest{
+		Repo: "owner/repo", Number: 7, Ownership: "mine", State: "open",
+	}
+	id, err := db.UpsertPR(ctx, pr)
+	if err != nil {
+		t.Fatalf("UpsertPR: %v", err)
+	}
+
+	got, err := db.GetPRByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetPRByID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetPRByID returned nil, want row")
+	}
+	if got.Repo != "owner/repo" || got.Number != 7 {
+		t.Fatalf("GetPRByID = %+v, want repo=owner/repo number=7", got)
+	}
+
+	// Unknown id returns nil, no error.
+	missing, err := db.GetPRByID(ctx, 99999)
+	if err != nil {
+		t.Fatalf("GetPRByID(unknown): %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("GetPRByID(unknown) = %+v, want nil", missing)
+	}
+}

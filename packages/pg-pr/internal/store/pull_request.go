@@ -83,3 +83,20 @@ FROM pull_request WHERE repo=? AND number=?`, repo, number)
 	}
 	return &pr, nil
 }
+
+// GetPRByID returns the PR by its row id, or nil if not found.
+func (db *DB) GetPRByID(ctx context.Context, id int64) (*PullRequest, error) {
+	row := db.sql.QueryRowContext(ctx, `
+SELECT id, repo, number, ownership, author, state, branch, base, url, head_sha, last_synced_at
+FROM pull_request WHERE id=?`, id)
+	var pr PullRequest
+	err := row.Scan(&pr.ID, &pr.Repo, &pr.Number, &pr.Ownership, &pr.Author,
+		&pr.State, &pr.Branch, &pr.Base, &pr.URL, &pr.HeadSHA, &pr.LastSyncedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get pr id=%d: %w", id, err)
+	}
+	return &pr, nil
+}
