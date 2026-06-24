@@ -1385,11 +1385,9 @@ func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.Tic
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
 // are green, promotes the PR to ready (SetDraft=false upstream).
 //
-// The merge-request bead's new state is no longer persisted here (the inline
-// bead update was removed in the event-ownership refactor). Bead-state
-// projection for draft-promote lands in Task 7 via an emitted event; until
-// then the next sync tick self-heals the bead state. SetDraft is the
-// authoritative upstream effect and still fires immediately.
+// SetDraft is the authoritative upstream effect and fires immediately. The
+// merge-request bead's new state is projected via an emitted pr.updated event
+// (the beadsbridge updates the bead at outbox flush), not written inline.
 //
 // enriched, when non-nil, supplies the PR's CI runs from the GraphQL
 // bulk fetch — replaces per-PR ListRuns. When nil, the helper falls
@@ -1443,7 +1441,6 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 	if err := e.emitPREvent(ctx, store.EventPRUpdated, repo, promoted, "mine"); err != nil {
 		return fmt.Errorf("emit pr.updated (draft-promote): %w", err)
 	}
-	// summary.DraftPromoted++ already present from Task 6 — keep it, don't duplicate
 	summary.DraftPromoted++
 	return nil
 }
