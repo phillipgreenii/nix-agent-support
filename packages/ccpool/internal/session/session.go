@@ -49,6 +49,12 @@ type Waiter interface {
 type Transcript interface {
 	LastAssistantText(path string) (string, error)
 	IsAwaitingInput(path string) (bool, error)
+	// FirstMessageActivity reports the timestamp of the most recent real message
+	// event in the transcript and whether one exists. ok=false means the
+	// transcript has no user/assistant message yet (the model has not started a
+	// turn). Backed by claude-transcript.LastMessageActivity. A missing/half-
+	// written transcript yields (zero, false) — tolerated, never an error.
+	FirstMessageActivity(path string) (time.Time, bool)
 }
 
 // Mode selects send behavior when (and how) to deliver.

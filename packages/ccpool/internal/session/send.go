@@ -14,6 +14,13 @@ import (
 // Callers map it to the dedicated "busy" exit code (spec §12/§20).
 var ErrBusy = errors.New("session busy")
 
+// ErrPromptNotIngested is returned by SendWithConfirm when an ingestion-confirmed
+// delivery (a non-zero confirm window) delivers the prompt but the session never
+// starts a turn within the window — i.e. the paste/Enter did not reach the model
+// (a dropped initial nudge). Callers map it to the dedicated exit code 7. This is
+// DISTINCT from a turn that started but timed out (TimedOut) or refused (ErrBusy).
+var ErrPromptNotIngested = errors.New("prompt delivered but model never started a turn (not ingested)")
+
 // Send delivers prompt to the live session externalID and (unless ModeNoWait)
 // blocks for the turn outcome, returning the assistant reply. Spec §8.3.
 func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode) (Result, error) {

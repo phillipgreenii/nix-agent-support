@@ -33,10 +33,17 @@ func (s *sendTmux) CapturePane(string) (string, error) { return s.pane, nil }
 type fakeTranscript struct {
 	reply    string
 	awaiting bool
+	// firstAt/firstOK back FirstMessageActivity. Zero firstOK means "no model
+	// turn yet" (the dropped-prompt case).
+	firstAt time.Time
+	firstOK bool
 }
 
 func (f fakeTranscript) LastAssistantText(string) (string, error) { return f.reply, nil }
 func (f fakeTranscript) IsAwaitingInput(string) (bool, error)     { return f.awaiting, nil }
+func (f fakeTranscript) FirstMessageActivity(string) (time.Time, bool) {
+	return f.firstAt, f.firstOK
+}
 
 func newSendService(t *testing.T, st *store.Store, tm Tmux, tr Transcript, w Waiter) *Service {
 	t.Helper()
@@ -194,5 +201,16 @@ func TestSend_fallbackFiresNotifier(t *testing.T) {
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
 		t.Errorf("fallback must fire exactly one needs_input notification; got %+v", rn.events)
+	}
+}
+
+func TestErrPromptNotIngested_isExported(t *testing.T) {
+	// A sentinel the CLI maps to a distinct exit code; must be a stable value
+	// callers can errors.Is against.
+	if ErrPromptNotIngested == nil {
+		t.Fatal("ErrPromptNotIngested must be a non-nil sentinel error")
+	}
+	if !strings.Contains(ErrPromptNotIngested.Error(), "ingest") {
+		t.Errorf("error text = %q, want it to mention ingest", ErrPromptNotIngested.Error())
 	}
 }
