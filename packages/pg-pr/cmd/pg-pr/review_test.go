@@ -128,13 +128,13 @@ func TestReviewPost_AppliesMarkerAndPosts(t *testing.T) {
 		t.Fatalf("post: %v (stderr=%s)", err, stderr.String())
 	}
 
-	if !strings.Contains(fake.postedBody, marker.Glyph) {
+	if !marker.IsOurs(fake.postedBody) {
 		t.Fatalf("body should have marker: %q", fake.postedBody)
 	}
 	if len(fake.postedComments) != 1 {
 		t.Fatalf("expected 1 comment, got %d", len(fake.postedComments))
 	}
-	if !strings.Contains(fake.postedComments[0].Body, marker.Glyph) {
+	if !marker.IsOurs(fake.postedComments[0].Body) {
 		t.Fatalf("comment should have marker: %q", fake.postedComments[0].Body)
 	}
 	// Staged draft should be cleared.
@@ -163,7 +163,7 @@ func TestReviewSubmit_NoStaging(t *testing.T) {
 		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
 	}
 
-	if !strings.Contains(fake.postedBody, marker.Glyph) {
+	if !marker.IsOurs(fake.postedBody) {
 		t.Fatalf("body should have marker: %q", fake.postedBody)
 	}
 	// No staging file produced.
@@ -187,7 +187,7 @@ func TestCommentAdd_AppliesMarker(t *testing.T) {
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("comment add: %v (stderr=%s)", err, stderr.String())
 	}
-	if !strings.Contains(fake.addBody, marker.Glyph) {
+	if !marker.IsOurs(fake.addBody) {
 		t.Fatalf("AddComment body missing marker: %q", fake.addBody)
 	}
 }
@@ -277,7 +277,7 @@ func TestCommentRespond_CommentThread_Replies(t *testing.T) {
 	if fake.replyRepo != "foo/bar" {
 		t.Fatalf("repo: got %q want foo/bar", fake.replyRepo)
 	}
-	if !strings.Contains(fake.replyBody, marker.Glyph) {
+	if !marker.IsOurs(fake.replyBody) {
 		t.Fatalf("reply body missing marker: %q", fake.replyBody)
 	}
 	if !strings.Contains(fake.replyBody, "ack") {
