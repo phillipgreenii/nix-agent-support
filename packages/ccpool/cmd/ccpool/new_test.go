@@ -47,6 +47,27 @@ func TestRunNew_acceptsAllowedToolsFlag(t *testing.T) {
 	}
 }
 
+func TestRunNew_parsesAutonomousFlag(t *testing.T) {
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	autonomous := fs.Bool("autonomous", false, "")
+	pos := parseInterspersed(fs, []string{"zr-1", "--autonomous"})
+	if len(pos) != 1 || pos[0] != "zr-1" {
+		t.Fatalf("positional parse = %v, want [zr-1]", pos)
+	}
+	if !*autonomous {
+		t.Error("--autonomous should parse to true")
+	}
+}
+
+func TestRunNew_autonomousDefaultsFalse(t *testing.T) {
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	autonomous := fs.Bool("autonomous", false, "")
+	_ = parseInterspersed(fs, []string{"zr-1"})
+	if *autonomous {
+		t.Error("--autonomous must default to false (attended)")
+	}
+}
+
 func TestEnvFlag_parsesAndAccumulatesRepeated(t *testing.T) {
 	e := envFlag{}
 	for _, kv := range []string{"BEADS_ACTOR=worker-1", "BEADS_DIR=/repo/.beads", "WORKSPACE_ROOT=/repo"} {

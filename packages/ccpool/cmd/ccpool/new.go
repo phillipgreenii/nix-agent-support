@@ -27,9 +27,10 @@ func runNew(args []string) int {
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
 	allowedTools := fs.String("allowed-tools", "", "claude --allowed-tools allowlist forwarded verbatim (comma/space-separated, e.g. \"Bash(git *),Edit\"); empty omits the flag")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
+	autonomous := fs.Bool("autonomous", false, "autonomous mode: block AskUserQuestion (the hook denies it so a human-less worker never stalls on the picker); injects CCPOOL_AUTONOMOUS into the session")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v] [--autonomous]")
 		return 2
 	}
 	externalID := pos[0]
@@ -76,6 +77,7 @@ func runNew(args []string) int {
 		PermissionMode: launch.PermissionMode(*permMode),
 		AllowedTools:   *allowedTools,
 		Effort:         *effort,
+		Autonomous:     *autonomous,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new:", err)
