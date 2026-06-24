@@ -160,7 +160,7 @@ func (db *DB) ListOpenPRs(ctx context.Context, repo string) ([]PullRequest, erro
 	for rows.Next() {
 		pr, err := scanPR(rows)
 		if err != nil {
-			return nil, fmt.Errorf("store: scan open pr: %w", err)
+			return nil, fmt.Errorf("store: scan open pr %s: %w", repo, err)
 		}
 		out = append(out, pr)
 	}
