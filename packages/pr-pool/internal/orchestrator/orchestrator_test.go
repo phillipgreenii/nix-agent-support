@@ -489,3 +489,26 @@ func TestTeardownAll_returnsClosedCount(t *testing.T) {
 		t.Errorf("teardownAll closed count = %d, want 2 (pr-pool- sessions only); closed=%v", n, cc.Closed)
 	}
 }
+
+// TestTeardownAll_preservesNeedsInput: a pr-pool session in needs_input is left
+// alive (NOT closed) so the operator can still attach after the pass; other
+// pr-pool sessions are still reaped, and the returned count excludes the
+// preserved one. (pg2-th35)
+func TestTeardownAll_preservesNeedsInput(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
+		{ExternalID: "pr-pool-worker-zr-need", Live: true, State: ccpool.StateNeedsInput},
+		{ExternalID: "pr-pool-worker-zr-done", Live: true, State: ccpool.StateIdle},
+		{ExternalID: "cc-unrelated", Live: true, State: ccpool.StateWorking},
+	}}}
+	o := newOrch(cc, &dtest.ScriptBD{}, fastCfg())
+	n := o.teardownAll(context.Background())
+	if n != 1 {
+		t.Errorf("teardownAll closed count = %d, want 1 (needs_input preserved, stray excluded); closed=%v", n, cc.Closed)
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pr-pool-worker-zr-done" {
+		t.Fatalf("teardown must close the idle pr-pool session only; closed=%v", cc.Closed)
+	}
+	if dtest.Contains(cc.Closed, "pr-pool-worker-zr-need") {
+		t.Errorf("teardown must NOT close a needs_input session; closed=%v", cc.Closed)
+	}
+}

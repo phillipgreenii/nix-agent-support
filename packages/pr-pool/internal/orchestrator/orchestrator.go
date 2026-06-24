@@ -261,7 +261,9 @@ func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchCon
 
 // teardownAll closes every session whose name carries pr-pool's prefix — this
 // pass's sessions AND strays left by a crashed prior run (the only self-healing
-// behavior). Sessions outside the prefix are left untouched.
+// behavior) — EXCEPT sessions in needs_input, which are preserved (left alive)
+// so the operator can still `ccpool attach` after the pass (pg2-th35). Sessions
+// outside the prefix are left untouched. Returns the number actually closed.
 func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
 	sessions, err := o.CC.List(ctx)
 	if err != nil {
@@ -269,13 +271,23 @@ func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
 		return 0
 	}
 	for _, s := range sessions {
-		if strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
-			if err := o.CC.Close(ctx, s.ExternalID, true); err != nil {
-				slog.Warn("teardown close failed", "session", s.ExternalID, "err", err)
-				continue
-			}
-			closed++
+		if !strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
+			continue
 		}
+		// Preserve a needs_input session: it is paused awaiting a human who must
+		// still be able to `ccpool attach <external_id>` after the pass ends.
+		// Closing it here would kill the session before the operator can attach.
+		// (pg2-th35; the alert that points the operator here fires in waitDone.)
+		if s.State == ccpool.StateNeedsInput {
+			slog.Info("teardown preserving needs_input session for operator attach",
+				"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
+			continue
+		}
+		if err := o.CC.Close(ctx, s.ExternalID, true); err != nil {
+			slog.Warn("teardown close failed", "session", s.ExternalID, "err", err)
+			continue
+		}
+		closed++
 	}
 	slog.Info("teardown", "closed", closed)
 	return closed
