@@ -142,6 +142,24 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	return out, nil
 }
 
+// decodeGlobalBudget reads the XDG-global config file and applies ONLY its
+// [pool].budget over c (budget-only scope: self_login, worktree_dir, [[role]] and
+// every other key are intentionally ignored — roles/scalars stay repo-local +
+// built-in per spec C). A present-but-malformed file is a hard error, matching
+// decodeRoleSet. Caller stats the path first; this assumes the file exists.
+func (r *Registry) decodeGlobalBudget(path string, c *Config) error {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var shape fileShape
+	if _, err := toml.Decode(string(body), &shape); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	overlayConfigBudget(c, shape.Pool.Budget)
+	return nil
+}
+
 func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c Config) (roles.Role, error) {
 	if rt.Name == "" {
 		return roles.Role{}, fmt.Errorf("name is required")
