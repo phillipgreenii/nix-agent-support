@@ -751,7 +751,7 @@ func TestProcessFeedback_NoStoreIsNoop(t *testing.T) {
 	enriched := &vcs.EnrichedPR{Comments: []api.Comment{comment}}
 	summary := &Summary{}
 	if err := e.processFeedback(ctx, &refreshFakeBeads{}, nil, enriched, "o/r",
-		api.PR{Repo: "o/r", Number: 1}, "pr-bead-1", summary); err != nil {
+		api.PR{Repo: "o/r", Number: 1}, summary); err != nil {
 		t.Fatalf("processFeedback: %v", err)
 	}
 

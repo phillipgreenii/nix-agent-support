@@ -9,6 +9,25 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
+// prToStoreRow maps an observed PR + ownership into the authoritative
+// store.PullRequest row. Written for EVERY observed PR (regardless of
+// enrichment) so Task 8's close-detection (store.ListOpenPRs) can later find
+// PRs that disappeared upstream.
+func (e *Engine) prToStoreRow(repo string, pr api.PR, ownership string) store.PullRequest {
+	return store.PullRequest{
+		Repo:         repo,
+		Number:       pr.Number,
+		Ownership:    ownership,
+		Author:       pr.Author,
+		State:        stateForPR(pr),
+		Branch:       pr.Branch,
+		Base:         pr.Base,
+		URL:          pr.URL,
+		HeadSHA:      pr.HeadSHA,
+		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
+	}
+}
+
 // prPayload builds the enriched bridge payload for an observed PR.
 func (e *Engine) prPayload(repo string, pr api.PR, ownership string) store.PRPayload {
 	return store.PRPayload{

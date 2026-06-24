@@ -402,37 +402,49 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				return
 			}
 
-			fields := beads.MergeRequestFields{
-				Repo:         key.Repo,
-				PRNumber:     pr.Number,
-				State:        stateForPR(pr),
-				Branch:       pr.Branch,
-				Base:         pr.Base,
-				Author:       pr.Author,
-				URL:          pr.URL,
-				LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
-				Draft:        pr.Draft,
+			// Event-ownership refactor (Task 6): the PR (merge-request) bead is
+			// no longer created inline. Instead we (a) write the authoritative
+			// store row for EVERY observed PR and (b) emit pr.opened/pr.updated;
+			// the beadsbridge handler projects the bead at outbox flush.
+			ownership := "team"
+			if mineSet[key] {
+				ownership = "mine"
 			}
-			bdCtx, bdSpan := startBeadsSpan(prCtx, "EnsureMergeRequest", key.Repo, pr.Number)
-			prBeadID, alreadyClosed, err := bdc.EnsureMergeRequest(bdCtx, pr.URL, fields)
-			recordSpanErr(bdSpan, err)
-			bdSpan.End()
-			if err != nil {
+			// Authoritative store row for every observed PR (drives Task 8
+			// close-detection via store.ListOpenPRs). Guarded by Store != nil
+			// so test/legacy configs without event projection still run.
+			if e.deps.Store != nil {
+				if _, err := e.deps.Store.UpsertPR(prCtx, e.prToStoreRow(key.Repo, pr, ownership)); err != nil {
+					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
+					recordSpanErr(prSpan, err)
+					summary.Errors = append(summary.Errors, SummaryError{
+						Repo:    key.Repo,
+						Message: fmt.Sprintf("PR #%d upsert: %v", pr.Number, err),
+					})
+					return
+				}
+			}
+			// Emit pr.opened/pr.updated BEFORE this PR's feedback.created events
+			// (enqueued inside processFeedback) so the bridge ensures the PR
+			// bead before attaching a processing cycle. The serial loop within
+			// one goroutine preserves this ordering.
+			eventType := store.EventPROpened
+			if _, was := repoPreExisting[key.Repo][key]; was {
+				eventType = store.EventPRUpdated
+			}
+			if err := e.emitPREvent(prCtx, eventType, key.Repo, pr, ownership); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
 					Repo:    key.Repo,
-					Message: fmt.Sprintf("PR #%d: %v", pr.Number, err),
+					Message: fmt.Sprintf("PR #%d emit: %v", pr.Number, err),
 				})
 				return
 			}
-			if alreadyClosed {
-				return
-			}
-			if _, was := repoPreExisting[key.Repo][key]; was {
-				summary.BeadsUpdated++
-			} else {
+			if eventType == store.EventPROpened {
 				summary.BeadsCreated++
+			} else {
+				summary.BeadsUpdated++
 			}
 
 			// Pluck this PR's bulk-fetched VCS data (reviews/comments/CI
@@ -445,7 +457,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				}
 			}
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
-			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], prEnriched, key.Repo, pr, prBeadID, summary); err != nil {
+			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], prEnriched, key.Repo, pr, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -456,7 +468,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			// Upstream-write phase: only for self-authored PRs.
 			// See partition above.
 			if mineSet[key] {
-				if err := e.maybePromoteDraft(prCtx, bdc, prEnriched, key.Repo, pr, prBeadID, summary); err != nil {
+				if err := e.maybePromoteDraft(prCtx, prEnriched, key.Repo, pr, summary); err != nil {
 					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 					recordSpanErr(prSpan, err)
 					summary.Errors = append(summary.Errors, SummaryError{
@@ -1008,11 +1020,17 @@ func (e *Engine) applyFetchedPR(ctx context.Context, bdc BeadClient, rcfg config
 	summary.BeadsUpdated = 1
 	// Phase 3: feedback + draft pipelines. enriched (when non-nil) carries the
 	// PR's comments/CI runs so these helpers skip their own per-PR fetches.
-	if err := e.processFeedback(ctx, bdc, nil, enriched, rcfg.Remote, *pr, id, summary); err != nil {
+	//
+	// NOTE (event-ownership refactor): the daemon path's full conversion to
+	// the outbox event model is Task 9. For now these calls are adjusted to the
+	// new signatures (processFeedback/maybePromoteDraft no longer take a
+	// prBeadID) so the package compiles; the inline bead create above is
+	// untouched until Task 9.
+	if err := e.processFeedback(ctx, bdc, nil, enriched, rcfg.Remote, *pr, summary); err != nil {
 		return id, false, err
 	}
 	if e.isSelfAuthored(pr.Author) {
-		if err := e.maybePromoteDraft(ctx, bdc, enriched, rcfg.Remote, *pr, id, summary); err != nil {
+		if err := e.maybePromoteDraft(ctx, enriched, rcfg.Remote, *pr, summary); err != nil {
 			return id, false, err
 		}
 	}
@@ -1348,10 +1366,7 @@ func saveState(path string, sf stateFile) error {
 //
 // Errors from ingestion are recorded into summary.Errors (non-fatal); the
 // function always returns nil so the surrounding pipeline keeps progressing.
-func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.TickCache, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
-	if prBeadID == "" {
-		return nil
-	}
+func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.TickCache, enriched *vcs.EnrichedPR, repo string, pr api.PR, summary *Summary) error {
 	if _, err := e.repoConfig(repo); err != nil {
 		// Not in config (single-PR ad-hoc) — feedback pipeline is repo-driven.
 		return nil
@@ -1369,13 +1384,18 @@ func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.Tic
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
-// are green, promotes the PR to ready. bdc is the per-repo bd client whose
-// workspace holds the merge-request bead being updated.
+// are green, promotes the PR to ready (SetDraft=false upstream).
+//
+// The merge-request bead's new state is no longer persisted here (the inline
+// bead update was removed in the event-ownership refactor). Bead-state
+// projection for draft-promote lands in Task 7 via an emitted event; until
+// then the next sync tick self-heals the bead state. SetDraft is the
+// authoritative upstream effect and still fires immediately.
 //
 // enriched, when non-nil, supplies the PR's CI runs from the GraphQL
 // bulk fetch — replaces per-PR ListRuns. When nil, the helper falls
 // back to per-CICD-provider ListRuns calls.
-func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR, repo string, pr api.PR, summary *Summary) error {
 	if !pr.Draft {
 		return nil
 	}
@@ -1418,12 +1438,10 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, enriched
 	if err := dt.SetDraft(ctx, repo, pr.Number, false); err != nil {
 		return fmt.Errorf("set-draft=false: %w", err)
 	}
-	// Persist the new state on the merge-request bead.
-	_ = bdc.UpdateMergeRequest(ctx, prBeadID, beads.MergeRequestFields{
-		Repo:     repo,
-		PRNumber: pr.Number,
-		State:    "open",
-	})
+	// NOTE: the merge-request bead's state is no longer updated inline here.
+	// Task 7 emits a draft-promote event that the bridge projects onto the
+	// bead; until then the next sync tick re-emits pr.updated with the new
+	// (non-draft) state, self-healing the bead.
 	summary.DraftPromoted++
 	return nil
 }

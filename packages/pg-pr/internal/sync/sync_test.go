@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -237,7 +240,51 @@ func makeEngine(t *testing.T, vcs *fakeVCS) *Engine {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// Event-ownership refactor: the PR (merge-request) bead is now projected
+	// by the beadsbridge handler at outbox flush, not created inline. Wire a
+	// real store + a per-repo routing bridge (mirrors production cmd wiring) so
+	// the bead still lands in the engine's bd workspace and the workspace-based
+	// assertions (BeadsClosed, idempotent re-run, isolation) keep holding.
+	wireOutboxBridge(t, e)
 	return e
+}
+
+// wireOutboxBridge attaches a fresh store.DB + a per-repo routing bridge
+// dispatcher onto the engine, mirroring the production wiring in
+// cmd/pg-pr/sync.go (newBeadsBridgeHandler). Each event is routed to the bd
+// client for its repo: the shared Deps.Beads when set, else a per-repo
+// NewClientForRepo(path). Errors are swallowed by the dispatcher (as in prod).
+func wireOutboxBridge(t *testing.T, e *Engine) {
+	t.Helper()
+	db := store.OpenForTest(t)
+	disp := event.New()
+	disp.Register(func(ctx context.Context, ev store.Event) error {
+		var head struct {
+			Repo string `json:"repo"`
+		}
+		if err := json.Unmarshal(ev.Payload, &head); err != nil || head.Repo == "" {
+			return nil
+		}
+		var client beadsbridge.BeadClient
+		if e.deps.Beads != nil {
+			if bc, ok := e.deps.Beads.(beadsbridge.BeadClient); ok {
+				client = bc
+			}
+		}
+		if client == nil {
+			for _, r := range e.cfg().Repos {
+				if r.Remote == head.Repo && r.Path != "" {
+					client = beads.NewClientForRepo(r.Path)
+					break
+				}
+			}
+		}
+		if client == nil {
+			return nil
+		}
+		return beadsbridge.New(client).Handle(ctx, ev)
+	})
+	e.SetStoreAndDispatch(db, disp.Dispatch)
 }
 
 func samplePR(n int, repo, branch string) api.PR {
@@ -490,6 +537,11 @@ func TestSync_PerRepoWorkspaceIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// Event-ownership refactor: the per-repo bead is projected by the bridge at
+	// outbox flush, routed to each repo's own .beads/ workspace by Path
+	// (mirrors production newBeadsBridgeHandler). wireOutboxBridge handles the
+	// Deps.Beads==nil + per-repo Path case.
+	wireOutboxBridge(t, e)
 
 	if _, err := e.Sync(ctx); err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -865,6 +917,94 @@ func TestSync_TreatsEmptySelfLoginAsTeammate(t *testing.T) {
 	// Beads still upserted.
 	if sum.BeadsCreated != 2 {
 		t.Fatalf("BeadsCreated: got %d want 2", sum.BeadsCreated)
+	}
+}
+
+// inlineGuardBeads is the engine's per-repo bd client for the
+// outbox-projection test. It embeds noopBeads (which returns empty/nil for
+// every method) and overrides EnsureMergeRequest to RECORD + FAIL — proving
+// the inline create path is gone. ListMergeRequests is left as noopBeads's
+// (nil, nil) so listExistingByKey and the close-detection loop still work.
+type inlineGuardBeads struct {
+	noopBeads
+	ensureCalled int
+}
+
+func (g *inlineGuardBeads) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	g.ensureCalled++
+	return "", false, errors.New("inlineGuardBeads: EnsureMergeRequest must NOT be called inline; the PR bead is projected via the outbox bridge")
+}
+
+// TestSyncCreatesBeadViaOutbox proves Task 6's core invariant: the one-shot
+// Engine.Sync per-PR path no longer creates the PR (merge-request) bead inline.
+// Instead it emits a pr.opened event whose outbox flush drives the beadsbridge
+// handler's EnsureMergeRequest. We assert:
+//   - the engine's own per-repo bd client (inlineGuardBeads) is NEVER asked to
+//     EnsureMergeRequest (the inline path is removed),
+//   - the bridge's bd client DID receive EnsureMergeRequest with full PR fields
+//     during flushOutbox,
+//   - summary.BeadsCreated == 1.
+func TestSyncCreatesBeadViaOutbox(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	vcs := newFakeVCS()
+	pr := samplePR(7, "foo/bar", "feat/outbox")
+	pr.Title = "outbox-projected PR"
+	pr.HeadSHA = "sha-outbox"
+	vcs.my["foo/bar"] = []api.PR{pr}
+
+	guard := &inlineGuardBeads{}
+
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    guard,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Wire the REAL bridge over a fake bd client behind the REAL dispatcher.
+	// FindByRepoAndNumber returns nil so ensureProcessFeedbackBead (if a
+	// feedback.created event ever fires) is a no-op; here there is no feedback.
+	bridgeClient := &fullChainBeadClient{}
+	dispatcher := event.New()
+	dispatcher.Register(beadsbridge.New(bridgeClient).Handle)
+	e.SetStoreAndDispatch(db, dispatcher.Dispatch)
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	if guard.ensureCalled != 0 {
+		t.Fatalf("inline EnsureMergeRequest must not be called; got %d call(s)", guard.ensureCalled)
+	}
+	if len(bridgeClient.ensureCalls) != 1 {
+		t.Fatalf("expected bridge EnsureMergeRequest called once via outbox; got %d", len(bridgeClient.ensureCalls))
+	}
+	got := bridgeClient.ensureCalls[0]
+	if got.Repo != "foo/bar" || got.PRNumber != 7 {
+		t.Fatalf("bridge EnsureMergeRequest fields: got %+v want foo/bar#7", got)
+	}
+	if got.Branch != "feat/outbox" || got.URL == "" || got.Author != "phillipg" {
+		t.Fatalf("bridge EnsureMergeRequest fields incomplete: %+v", got)
+	}
+	if sum.BeadsCreated != 1 {
+		t.Fatalf("BeadsCreated: got %d want 1", sum.BeadsCreated)
+	}
+
+	// And the authoritative store row was written for the observed PR
+	// (drives Task 8 close-detection via ListOpenPRs).
+	open, err := db.ListOpenPRs(ctx, "foo/bar")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(open) != 1 || open[0].Number != 7 {
+		t.Fatalf("expected one open store PR row for foo/bar#7; got %+v", open)
 	}
 }
 
