@@ -76,6 +76,8 @@ func TestRoute(t *testing.T) {
 		{"help-short-flag", []string{"pr-pool", "-h"}, routeHelp},
 		{"unknown-flag-is-usage-error", []string{"pr-pool", "--bogus"}, routeUsageErr},
 		{"unknown-subcommand-is-usage-error", []string{"pr-pool", "bogus"}, routeUsageErr},
+		{"sessions-subcommand", []string{"pr-pool", "sessions"}, routeSessions},
+		{"sessions-with-arg-is-usage-error", []string{"pr-pool", "sessions", "x"}, routeUsageErr},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

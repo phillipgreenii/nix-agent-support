@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show)]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -23,6 +23,7 @@ Subcommands:
   run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
   config --show           print the resolved config path and effective role set
+  sessions                list this pool's sessions (bead/role) from session metadata (read-only)
   version                 print the version and exit
   help                    print this help and exit
 
@@ -63,6 +64,7 @@ const (
 	routeRunRole                   // dispatch one bead through a role (.role, .bead)
 	routeRunQuery                  // run a role's discovery query read-only (.role)
 	routeConfig                    // print/show config (.configMode)
+	routeSessions                  // list this pool's sessions from metadata (read-only)
 )
 
 type routeResult struct {
@@ -103,6 +105,8 @@ func route(argv []string) routeResult {
 		return parseRunQueryArgs(args[1:])
 	case "config":
 		return parseConfigArgs(args[1:])
+	case "sessions":
+		return parseSessionsArgs(args[1:])
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -161,6 +165,14 @@ func parseRunQueryArgs(args []string) routeResult {
 		return routeResult{kind: routeUsageErr, msg: "run-query: unexpected argument: " + args[1]}
 	}
 	return routeResult{kind: routeRunQuery, role: args[0]}
+}
+
+// parseSessionsArgs validates `sessions` (no args; read-only).
+func parseSessionsArgs(args []string) routeResult {
+	if len(args) > 0 {
+		return routeResult{kind: routeUsageErr, msg: "sessions: unexpected argument: " + args[0]}
+	}
+	return routeResult{kind: routeSessions}
 }
 
 // parseConfigArgs validates `config (--print-defaults | --show)`.

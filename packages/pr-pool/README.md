@@ -14,10 +14,16 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 | `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test) |
 | `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start) |
 | `config --show`           | print the resolved config path and effective role set         |
+| `sessions`                | list this pool's sessions (bead/role) from session metadata   |
 | `version`                 | print the version and exit                                    |
 | `help`                    | print help and exit                                           |
 
 `<role>` is the role's configured `name`.
+
+At dispatch, pr-pool stamps each ccpool session with metadata under the `prpool.*`
+namespace (`prpool.bead`, `prpool.role`, `prpool.pool`) via `ccpool new --meta`, so a
+session's bead/role/owner are first-class and queryable. `pr-pool sessions` reads them
+back (`ListByMeta`/`Meta`) from the pool `CCPOOL_POOL` resolves (default XDG pool).
 
 ## Roles, prompts & queries (`config.toml`)
 

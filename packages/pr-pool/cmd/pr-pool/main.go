@@ -25,6 +25,8 @@ func main() {
 		os.Exit(runRunQuery(r.role))
 	case routeConfig:
 		os.Exit(runConfig(r.configMode))
+	case routeSessions:
+		os.Exit(runSessions())
 	}
 }
 
