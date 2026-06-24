@@ -726,11 +726,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1782221606,
-        "narHash": "sha256-kpXqNpzdseOA1p5ArC+8S2OUVPhWIt15RS5NnZQ7lVE=",
+        "lastModified": 1782337352,
+        "narHash": "sha256-A6IamCp8QUu+EH6rv9pbeO0iBH8APQ8ECSGa/8lh+rI=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "a5b0cbf8896a81368e0ccb0d5d448ece54c79937",
+        "rev": "043d66d3d9741133fe841128e421b09fd468feed",
         "type": "github"
       },
       "original": {
