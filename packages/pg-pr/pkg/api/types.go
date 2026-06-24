@@ -14,6 +14,11 @@ type Comment struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	Resolved   bool   `json:"resolved"`
 
+	// CreatedAt is the comment's creation timestamp (GraphQL createdAt,
+	// RFC3339). Empty when the provider does not supply one. Flows through
+	// ingestion into code_comment_message.posted_at for message ordering.
+	CreatedAt string `json:"created_at,omitempty"`
+
 	// Review-thread staleness fields (populated for inline thread comments only).
 	//
 	// ThreadIsOutdated mirrors PullRequestReviewThread.isOutdated: true when

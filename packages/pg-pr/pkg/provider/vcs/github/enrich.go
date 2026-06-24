@@ -436,6 +436,7 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 			Author:     c.Author.canonicalLogin(),
 			AuthorRole: strings.ToLower(c.AuthorAssociation),
 			Body:       c.Body,
+			CreatedAt:  c.CreatedAt,
 		})
 	}
 	for _, t := range n.ReviewThreads.Nodes {
@@ -453,6 +454,7 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 				Author:            c.Author.canonicalLogin(),
 				AuthorRole:        strings.ToLower(c.AuthorAssociation),
 				Body:              c.Body,
+				CreatedAt:         c.CreatedAt,
 				Path:              c.Path,
 				Line:              line,
 				ThreadID:          t.ID,

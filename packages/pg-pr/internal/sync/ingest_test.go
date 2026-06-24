@@ -406,6 +406,7 @@ func TestIngestThreadGrouping_OursFirstPicksReviewerRep(t *testing.T) {
 		Path:       "pkg/baz/baz.go",
 		Line:       5,
 		ThreadID:   "thread-ours-first",
+		CreatedAt:  "2024-03-04T05:06:07Z",
 	}
 
 	pr := api.PR{
@@ -468,9 +469,9 @@ func TestIngestThreadGrouping_OursFirstPicksReviewerRep(t *testing.T) {
 	if msgs[0].ExternalID != "rev1" {
 		t.Errorf("message external_id: got %q want \"rev1\"", msgs[0].ExternalID)
 	}
-	// PostedAt must be empty (no timestamp source; never a commit SHA).
-	if msgs[0].PostedAt != "" {
-		t.Errorf("message posted_at: got %q want empty", msgs[0].PostedAt)
+	// PostedAt is populated from the comment's GraphQL createdAt.
+	if msgs[0].PostedAt != "2024-03-04T05:06:07Z" {
+		t.Errorf("message posted_at: got %q want %q", msgs[0].PostedAt, "2024-03-04T05:06:07Z")
 	}
 }
 

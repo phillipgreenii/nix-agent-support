@@ -339,7 +339,7 @@ ON CONFLICT(feedback_id, external_id) DO UPDATE SET
 func (db *DB) ListMessages(ctx context.Context, feedbackID int64) ([]Message, error) {
 	rows, err := db.sql.QueryContext(ctx, `
 SELECT id, feedback_id, external_id, author_login, author_kind, agent_name, is_ours, author_role, body, posted_at
-FROM code_comment_message WHERE feedback_id=? ORDER BY id`, feedbackID)
+FROM code_comment_message WHERE feedback_id=? ORDER BY posted_at, id`, feedbackID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list messages feedback=%d: %w", feedbackID, err)
 	}

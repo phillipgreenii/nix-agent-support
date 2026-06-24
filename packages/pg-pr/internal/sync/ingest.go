@@ -235,10 +235,10 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 				IsOurs:      false,
 				AuthorRole:  item.comment.AuthorRole,
 				Body:        item.comment.Body,
-				// PostedAt left empty: api.Comment carries no timestamp, and
-				// storing a commit SHA in a timestamp column would be wrong.
-				// Ordering is preserved by insertion order (ListMessages
-				// returns ORDER BY id) rather than by posted_at.
+				// PostedAt comes from the comment's GraphQL createdAt
+				// (RFC3339); empty when the provider supplies none.
+				// ListMessages orders by posted_at, then id as a tiebreaker.
+				PostedAt: item.comment.CreatedAt,
 			})
 		}
 
