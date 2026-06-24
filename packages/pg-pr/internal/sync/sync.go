@@ -444,6 +444,12 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					prEnriched = &ep
 				}
 			}
+			// Compute and persist enrichment (kind/languages/size/urgency) for
+			// this PR. Runs after emitPREvent so the store row already exists.
+			// Non-fatal: errors are recorded into summary.Errors and self-heal.
+			if err := e.enrichAndStore(prCtx, key.Repo, pr, prEnriched); err != nil {
+				summary.Errors = append(summary.Errors, SummaryError{Repo: key.Repo, Message: err.Error()})
+			}
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
 			if err := e.processFeedback(prCtx, bdc, cachesByRepo[key.Repo], prEnriched, key.Repo, pr, summary); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
@@ -1017,6 +1023,12 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	// feedback.created) so the bridge projects the PR bead first.
 	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownership); err != nil {
 		return err
+	}
+	// Compute and persist enrichment (kind/languages/size/urgency) for this PR.
+	// Runs after emitPREvent so the store row already exists. Non-fatal: errors
+	// are recorded into summary.Errors and self-heal on the next tick.
+	if err := e.enrichAndStore(ctx, rcfg.Remote, *pr, enriched); err != nil {
+		summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: err.Error()})
 	}
 	// Phase 3: feedback + draft pipelines. enriched (when non-nil) carries the
 	// PR's comments/CI runs so these helpers skip their own per-PR fetches.
