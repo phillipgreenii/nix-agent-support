@@ -40,7 +40,9 @@ func TestEnsure_argv(t *testing.T) {
 		"--env", "BEADS_ACTOR=pgii-pool__worker",
 		"--env", "BEADS_DIR=/repo/.beads",
 		"--env", "WORKSPACE_ROOT=/repo",
-		"--permission-mode", "dontAsk", "--effort", "max",
+		"--permission-mode", "dontAsk",
+		"--allowed-tools", config.Default().AllowedTools,
+		"--effort", "max",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
 		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
@@ -52,6 +54,7 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model = "claude-opus-4-8"
 	cfg.PermissionMode = ""
+	cfg.AllowedTools = ""
 	cfg.Effort = "high"
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
@@ -65,6 +68,47 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 	want := []string{"new", "s", "--cwd", "/r", "--effort", "high", "--model", "claude-opus-4-8"}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("argv = %v, want %v", got[0], want)
+	}
+}
+
+func TestEnsure_allowedTools(t *testing.T) {
+	// Non-default allowlist is forwarded verbatim, positioned after --permission-mode.
+	var got [][]string
+	cfg := config.Default()
+	cfg.PermissionMode = "dontAsk"
+	cfg.AllowedTools = "Read,Bash(git *)"
+	cfg.Effort = ""
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r", "--permission-mode", "dontAsk", "--allowed-tools", "Read,Bash(git *)"}
+	if !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v, want %v", got[0], want)
+	}
+}
+
+func TestEnsure_allowedToolsEmptyOmitsFlag(t *testing.T) {
+	var got [][]string
+	cfg := config.Default()
+	cfg.PermissionMode = ""
+	cfg.AllowedTools = "" // empty => no --allowed-tools flag
+	cfg.Effort = ""
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r"}
+	if !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v, want %v (empty AllowedTools must omit the flag)", got[0], want)
 	}
 }
 

@@ -40,6 +40,7 @@ type CLIRunner struct {
 	Effort         string
 	Model          string
 	PermissionMode string // claude --permission-mode; emitted on `ccpool new` when non-empty
+	AllowedTools   string // claude --allowed-tools allowlist; emitted on `ccpool new` when non-empty
 	bin            string // ccpool binary name/path (resolved on PATH by execCmd)
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
@@ -48,7 +49,7 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, bin: "ccpool"}
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, bin: "ccpool"}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
 		return execCmd(ctx, c.bin, args)
 	}
@@ -105,9 +106,9 @@ func argSummary(args []string) string {
 }
 
 // Ensure: ccpool new <external_id> --cwd <cwd> [--name <name>] --env K=V…
-// --permission-mode <mode> --effort <effort> [--model <model>]. The session is
-// addressed by external_id; name is an optional display label (omitted when
-// empty). env keys sorted for deterministic argv.
+// --permission-mode <mode> [--allowed-tools <list>] --effort <effort> [--model <model>].
+// The session is addressed by external_id; name is an optional display label
+// (omitted when empty). env keys sorted for deterministic argv.
 func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, env map[string]string) error {
 	args := []string{"new", externalID, "--cwd", cwd}
 	if name != "" {
@@ -123,6 +124,9 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	}
 	if c.PermissionMode != "" {
 		args = append(args, "--permission-mode", c.PermissionMode)
+	}
+	if c.AllowedTools != "" {
+		args = append(args, "--allowed-tools", c.AllowedTools)
 	}
 	if c.Effort != "" {
 		args = append(args, "--effort", c.Effort)
