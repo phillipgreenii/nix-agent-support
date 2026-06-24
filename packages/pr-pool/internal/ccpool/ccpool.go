@@ -4,7 +4,23 @@
 // session.Service is a drop-in replacement behind this same interface.
 package ccpool
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrPromptNotIngested mirrors ccpool's exit code 7: a fire-and-forget delivery
+// whose model never started a turn within the confirm window (a dropped nudge).
+var ErrPromptNotIngested = errors.New("ccpool: prompt not ingested")
+
+// IsNotIngested reports whether err is (or wraps) a ccpool exit-code-7 outcome.
+func IsNotIngested(err error) bool {
+	if errors.Is(err, ErrPromptNotIngested) {
+		return true
+	}
+	var ec exitCoder
+	return errors.As(err, &ec) && ec.ExitCode() == 7
+}
 
 // SessionState mirrors ccpool's store states — observed session FACTS only, not
 // work judgments (ADR 0015). idle (Claude Stop hook: the turn ended) and errored

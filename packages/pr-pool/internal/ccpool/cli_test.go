@@ -123,6 +123,7 @@ func TestSend_modes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cli, got, _ := newSpy()
+		cli.ConfirmIngest = 0 // isolate the mode→flag mapping from the ingestion guard
 		if err := cli.Send(context.Background(), "s", "hello world", tc.mode); err != nil {
 			t.Fatal(err)
 		}
@@ -130,6 +131,61 @@ func TestSend_modes(t *testing.T) {
 		if !reflect.DeepEqual((*got)[0], want) {
 			t.Errorf("mode %d argv = %v, want %v", tc.mode, (*got)[0], want)
 		}
+	}
+}
+
+// pg2-yukh #1: a worker's initial fire-and-forget nudge (ModeNoWait) must forward
+// --confirm-ingest <dur> when a confirm window is configured, so ccpool can detect
+// a dropped prompt and exit 7. A queued budget message (ModeQueue) must NOT carry
+// it (the model is already mid-turn by then).
+func TestSend_forwardsConfirmIngest(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 90 * time.Second
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--no-wait", "--confirm-ingest", "1m30s"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("no-wait argv = %v, want %v", (*got)[0], want)
+	}
+}
+
+func TestSend_confirmIngestOnlyForNoWait(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 90 * time.Second
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeQueue); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--queue-message"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("queue argv = %v, want %v (no --confirm-ingest on a queued message)", (*got)[0], want)
+	}
+}
+
+func TestSend_zeroConfirmIngestOmitsFlag(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 0 // a zero window must omit the flag entirely
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--no-wait"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("zero window argv = %v, want %v (no flag)", (*got)[0], want)
+	}
+}
+
+func TestSend_notIngestedExit7(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.ConfirmIngest = 90 * time.Second
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("prompt not ingested"), &fakeExit{code: 7}
+	}
+	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
+	if !errors.Is(err, ErrPromptNotIngested) {
+		t.Errorf("exit 7 should map to ErrPromptNotIngested, got %v", err)
+	}
+	if !IsNotIngested(err) {
+		t.Errorf("IsNotIngested must report true for a code-7 send error; got %v", err)
 	}
 }
 

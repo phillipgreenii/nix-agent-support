@@ -78,8 +78,18 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report
 	_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-launch-fail")
 	nudge := r.renderNudge(cc, d, wt)
 	if err := r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
-		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		var res report.Result
+		// A confirmed dropped nudge (exit 7): the model never ingested the task, so
+		// hand the bead back unclaimed regardless of on_dispatch_fail — leaving it
+		// claimed would let the budget watchdog later nudge a context-less model
+		// (the pg2-yukh incident). The session never did anything, so no other bead
+		// can have been touched.
+		if ccpool.IsNotIngested(err) {
+			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+			res = failureAction(report.Unclaimed, d.Item.ID)
+			return res, fmt.Errorf("send %s: prompt not ingested: %w", r.deps.ExternalID, err)
+		}
+		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		if cc.OnDispatchFail == roles.DispatchUnclaim {
 			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
 			res = failureAction(report.Unclaimed, d.Item.ID)

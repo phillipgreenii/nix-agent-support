@@ -64,6 +64,12 @@ type Config struct {
 	LogDir       string
 	ReminderMsg  string
 	WrapUpMsg    string
+
+	// ConfirmIngest is the worker's initial-nudge ingestion-guard window, forwarded
+	// to `ccpool reply --confirm-ingest`. If the model never starts a turn within it
+	// the dispatch fails fast and hands the bead back unclaimed (pg2-yukh #1).
+	// Bounded well under BudgetTime so a dropped nudge is caught early. 0 disables.
+	ConfirmIngest time.Duration
 }
 
 // Default returns the built-in defaults (mirrors pr-pool.sh's ${VAR:-default}).
@@ -99,6 +105,7 @@ func Default() Config {
 		LogDir:         state + "/pr-pool",
 		ReminderMsg:    "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
 		WrapUpMsg:      "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:  90 * time.Second, // catch a dropped initial nudge well under BudgetTime
 	}
 }
 
@@ -127,6 +134,7 @@ func Load() (Config, error) {
 	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PR_POOL_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PR_POOL_BUDGET_TIME", c.BudgetTime)
+	c.ConfirmIngest = envSecs("PR_POOL_CONFIRM_INGEST", c.ConfirmIngest)
 	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
 
 	path := envStr("PR_POOL_CONFIG", filepath.Join(c.RepoRoot, ".pr-pool", "config.toml"))

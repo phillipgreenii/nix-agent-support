@@ -41,7 +41,12 @@ type CLIRunner struct {
 	Model          string
 	PermissionMode string // claude --permission-mode; emitted on `ccpool new` when non-empty
 	AllowedTools   string // claude --allowed-tools allowlist; emitted on `ccpool new` when non-empty
-	bin            string // ccpool binary name/path (resolved on PATH by execCmd)
+	// ConfirmIngest is the post-delivery ingestion-guard window forwarded as
+	// `ccpool reply --confirm-ingest` on the worker's initial fire-and-forget nudge
+	// (ModeNoWait). >0 makes ccpool exit 7 when the model never starts a turn (a
+	// dropped nudge); 0 keeps the old fire-and-forget behavior (pg2-yukh #1).
+	ConfirmIngest time.Duration
+	bin           string // ccpool binary name/path (resolved on PATH by execCmd)
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
 	// pg2-x6ef) plus the run error.
@@ -49,7 +54,7 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, bin: "ccpool"}
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, bin: "ccpool"}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
 		return execCmd(ctx, c.bin, args)
 	}
@@ -138,7 +143,7 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	return err
 }
 
-// Send: ccpool reply <external_id> <prompt> <mode-flag>.
+// Send: ccpool reply <external_id> <prompt> <mode-flag> [--confirm-ingest dur].
 func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode SendMode) error {
 	flag := "--no-wait"
 	switch mode {
@@ -147,8 +152,24 @@ func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode Se
 	case ModeQueue:
 		flag = "--queue-message"
 	}
-	_, err := c.ccpool(ctx, quickCallTimeout, "reply", externalID, prompt, flag)
-	return err
+	args := []string{"reply", externalID, prompt, flag}
+	// Confirm ingestion only for the worker's initial fire-and-forget nudge
+	// (no-wait); a queued budget message is intentionally fire-and-forget with no
+	// confirmation (the model is already mid-turn by then). (pg2-yukh #1)
+	if c.ConfirmIngest > 0 && mode == ModeNoWait {
+		args = append(args, "--confirm-ingest", c.ConfirmIngest.String())
+	}
+	_, err := c.ccpool(ctx, quickCallTimeout, args...)
+	if err != nil {
+		// Surface a confirmed dropped nudge (exit 7) as ErrPromptNotIngested so the
+		// executor can fail-fast and hand the bead back (mirror Cancel's code-6 wrap).
+		var ec exitCoder
+		if errors.As(err, &ec) && ec.ExitCode() == 7 {
+			return fmt.Errorf("%w: %s", ErrPromptNotIngested, externalID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *CLIRunner) Cancel(ctx context.Context, externalID string) error {

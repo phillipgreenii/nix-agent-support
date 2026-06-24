@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,6 +437,34 @@ func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
 	res, _ := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if v := verbOf(res); v != report.Unclaimed {
 		t.Errorf("feedback send-fail (unclaim) must report Unclaimed, got %q", v)
+	}
+}
+
+// pg2-yukh #1: a CONFIRMED dropped nudge (ccpool.ErrPromptNotIngested) must hand
+// the worker bead back UNCLAIMED even though the worker role's on_dispatch_fail is
+// "leave" — leaving it claimed would let the budget watchdog later nudge a
+// context-less model. The session did nothing, so NO other bead may be touched.
+func TestDispatch_droppedNudge_handsBackNoOtherBeadTouched(t *testing.T) {
+	cfg := fastCfg() // worker on_dispatch_fail = leave
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{SendErr: ccpool.ErrPromptNotIngested}
+	res, err := dispatchWorker(t, cc, bd, cfg, "pr-pool-worker-zr-w")
+	if err == nil {
+		t.Fatal("dropped nudge must return an error")
+	}
+	if v := verbOf(res); v != report.Unclaimed {
+		t.Errorf("dropped nudge must hand the bead back unclaimed; verb=%q res=%+v", v, res)
+	}
+	if !dtest.HasUpdate(bd, "update zr-w --status=open --assignee=") {
+		t.Errorf("dropped nudge must unclaim zr-w; updates=%v", bd.Updates)
+	}
+	// The ONLY bead mutation may be on zr-w (the unclaim). No comment, no update to
+	// any other id.
+	for _, c := range bd.Updates {
+		if strings.Contains(c, "comment") || !strings.Contains(c, "zr-w") {
+			t.Errorf("no other bead may be touched on a dropped nudge; got %q", c)
+		}
 	}
 }
 
