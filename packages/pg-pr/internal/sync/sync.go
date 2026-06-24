@@ -1438,10 +1438,13 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 	if err := dt.SetDraft(ctx, repo, pr.Number, false); err != nil {
 		return fmt.Errorf("set-draft=false: %w", err)
 	}
-	// NOTE: the merge-request bead's state is no longer updated inline here.
-	// Task 7 emits a draft-promote event that the bridge projects onto the
-	// bead; until then the next sync tick re-emits pr.updated with the new
-	// (non-draft) state, self-healing the bead.
+	promoted := pr
+	promoted.Draft = false
+	promoted.State = "open"
+	if err := e.emitPREvent(ctx, store.EventPRUpdated, repo, promoted, "mine"); err != nil {
+		return fmt.Errorf("emit pr.updated (draft-promote): %w", err)
+	}
+	// summary.DraftPromoted++ already present from Task 6 — keep it, don't duplicate
 	summary.DraftPromoted++
 	return nil
 }

@@ -1008,6 +1008,87 @@ func TestSyncCreatesBeadViaOutbox(t *testing.T) {
 	}
 }
 
+// TestMaybePromoteDraftEmitsUpdate verifies that when a self-authored draft PR
+// has all CI runs green, maybePromoteDraft (called via Sync) emits a
+// store.EventPRUpdated event whose payload has State=="open" and Draft==false.
+// This is the Task 7 contract: bead-state projection for draft-promote arrives
+// via the bridge (event-driven), not via an inline bead write.
+func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Self-authored draft PR with all CI green — conditions for draft promotion.
+	pr := selfDraftPR(55, "foo/bar", "feat/draft-promote")
+	pr.State = "open"
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 55)] = []api.CIRun{successRun()}
+
+	bd := newRealBDClient(t)
+	db := store.OpenForTest(t)
+
+	e, err := New(Deps{
+		Cfg:      cfgWithCICD(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Do NOT wire the bridge dispatcher — we want to inspect the raw outbox
+	// rows, not have them consumed by the bridge handler.
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	// SetDraft must have fired (pre-existing behaviour).
+	if len(vcs.setDraftCalls) != 1 {
+		t.Fatalf("expected 1 SetDraft call; got %d: %+v", len(vcs.setDraftCalls), vcs.setDraftCalls)
+	}
+	if sum.DraftPromoted != 1 {
+		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
+	}
+
+	// Drain the outbox and find the pr.updated event emitted by draft-promote.
+	var events []store.Event
+	if err := db.RunOutbox(ctx, func(_ context.Context, ev store.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+
+	// There may be multiple events (e.g. pr.opened from the initial upsert path).
+	// We need at least one pr.updated with State=="open" and Draft==false.
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRUpdated {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.State == "open" && !p.Draft {
+			found = true
+			// Also verify repo/number match.
+			if p.Repo != "foo/bar" || p.Number != 55 {
+				t.Errorf("pr.updated payload repo/number mismatch: got %s#%d want foo/bar#55", p.Repo, p.Number)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.updated event with State=open Draft=false in outbox; events: %+v", events)
+	}
+}
+
 func TestBuildEnrichedSearchQuery(t *testing.T) {
 	cases := []struct {
 		name string
