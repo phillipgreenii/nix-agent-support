@@ -29,9 +29,9 @@ func TestIngestFeedbackToStore(t *testing.T) {
 		Body:       "Please add a unit test here.",
 	}
 	// Bot inline (code-comment-thread) comment — author ends with "[bot]" so it
-	// classifies as agent via the [bot]-suffix fast-path inside commentAuthorRole,
-	// but Classify uses typename; we use a known-bot login to make it classify as
-	// "agent" via the [bot] suffix check in Classify.
+	// classifies as agent via the [bot]-suffix fast-path: ingestFeedbackToStore
+	// derives a "Bot" typename from the suffix and feedbackclassify.Classify
+	// maps that to author_kind=agent.
 	botComment := api.Comment{
 		ID:         "c2",
 		Author:     "coderabbit[bot]",
@@ -386,33 +386,33 @@ func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
 	}
 }
 
-// TestIngestFeedbackToStore_StoreGuardInProcessFeedback verifies that the
-// existing processFeedback bead path still runs when Deps.Store is not set
-// (no regression to the bead-creation path).
-func TestIngestFeedbackToStore_StoreGuardInProcessFeedback(t *testing.T) {
+// TestProcessFeedback_NoStoreIsNoop verifies that processFeedback does nothing
+// when Deps.Store is unset: the bead-feedback path is gone, so a PR with
+// enriched feedback produces no errors and no side effects. (The store-backed
+// ingest path is covered by TestIngestFeedbackToStore above.)
+func TestProcessFeedback_NoStoreIsNoop(t *testing.T) {
 	ctx := context.Background()
 	comment := api.Comment{ID: "c1", Author: "bot", Body: "needs tests"}
-	bdc := &fpCountBeads{} // from feedback_dedup_test.go; records created beads
 	e := newRefreshEngine(t, "me", &refreshFakeBeads{}, api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"})
 
-	// No Deps.Store — ingest path must be a no-op.
+	// No Deps.Store — processFeedback must be a no-op.
 	if e.deps.Store != nil {
 		t.Fatal("this test requires Deps.Store == nil")
 	}
 
 	enriched := &vcs.EnrichedPR{Comments: []api.Comment{comment}}
 	summary := &Summary{}
-	if err := e.processFeedback(ctx, bdc, nil, enriched, "o/r",
+	if err := e.processFeedback(ctx, &refreshFakeBeads{}, nil, enriched, "o/r",
 		api.PR{Repo: "o/r", Number: 1}, "pr-bead-1", summary); err != nil {
 		t.Fatalf("processFeedback: %v", err)
 	}
 
-	// Bead path must have created a feedback bead.
-	if len(bdc.created) != 1 {
-		t.Fatalf("expected 1 feedback bead created via bead path, got %d", len(bdc.created))
-	}
-	// No store errors.
+	// No store errors and no feedback counters moved.
 	if len(summary.Errors) != 0 {
 		t.Errorf("unexpected summary errors: %+v", summary.Errors)
+	}
+	if summary.FeedbackCreated != 0 || summary.CyclesCreated != 0 {
+		t.Errorf("processFeedback with no store must not create beads/cycles; got FeedbackCreated=%d CyclesCreated=%d",
+			summary.FeedbackCreated, summary.CyclesCreated)
 	}
 }

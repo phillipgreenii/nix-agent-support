@@ -68,24 +68,7 @@ func (s *stubBeads) CloseProcessingCycle(_ context.Context, _, _ string) error {
 func (s *stubBeads) ListChildrenOfPR(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (s *stubBeads) CreateFeedback(_ context.Context, _ beads.CreateFeedbackInput) (string, error) {
-	return "", nil
-}
-func (s *stubBeads) MarkFeedbackResolvedUpstream(_ context.Context, _ string) error { return nil }
-func (s *stubBeads) ListFeedback(_ context.Context, _ string, _ bool) ([]beads.Feedback, error) {
-	return nil, nil
-}
-func (s *stubBeads) FindFeedbackByFingerprint(_ context.Context, _, _ string) (*beads.Feedback, error) {
-	return nil, nil
-}
 func (s *stubBeads) CloseFeedback(_ context.Context, _, _ string) error { return nil }
-func (s *stubBeads) ListFeedbackPendingReply(_ context.Context) ([]beads.Feedback, error) {
-	return nil, nil
-}
-func (s *stubBeads) SetResponseID(_ context.Context, _, _ string) error { return nil }
-func (s *stubBeads) FindMergeRequestForFeedback(_ context.Context, _ string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
 
 // ----------------------------------------------------------------------
 // Test helpers

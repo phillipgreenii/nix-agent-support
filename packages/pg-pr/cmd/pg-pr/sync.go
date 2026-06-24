@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
@@ -23,6 +24,12 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs/github"
 	"github.com/spf13/cobra"
 )
+
+// Compile-time check: the github VCS provider must satisfy the reply-poster's
+// Replier interface. The sync engine type-asserts e.deps.VCS["github"] to
+// replyposter.Replier at runtime (see Engine.reconcileReplies); this guards the
+// assertion at build time so a provider regression fails the build, not a tick.
+var _ replyposter.Replier = (*github.Provider)(nil)
 
 // syncFlags holds the parsed CLI flags for `pg-pr sync`.
 type syncFlags struct {

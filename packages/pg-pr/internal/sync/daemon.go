@@ -338,31 +338,14 @@ func NewJSONLogger() *slog.Logger { return slog.New(NewJSONHandler()) }
 func NewTextLogger() *slog.Logger { return slog.New(NewTextHandler()) }
 
 // maintenanceCycle runs one pass of the off-critical-path workspace work:
-// refresh the human-label set and drain queued reply drafts. Called by
-// runMaintenance each tick and directly by tests.
+// refresh the human-label set, reconcile queued replies from the store, and
+// flush the outbox. Called by runMaintenance each tick and directly by tests.
 func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
 	e.refreshHumanLabels(ctx)
-	e.drainReplies(ctx, log)
-	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
-}
-
-// drainReplies posts queued reply drafts for every configured repo. It uses a
-// throwaway Summary per repo and logs its errors/warnings, since daemon mode has
-// no aggregate Summary to return.
-func (e *Engine) drainReplies(ctx context.Context, log *slog.Logger) {
-	for _, rcfg := range e.cfg().Repos {
-		bdc := e.bdClientFor(rcfg)
-		summary := &Summary{}
-		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
-			log.Warn("reply drain failed", "repo", rcfg.Remote, "err", err.Error())
-		}
-		for _, se := range summary.Errors {
-			log.Warn("reply drain error", "repo", se.Repo, "msg", se.Message)
-		}
-		for _, se := range summary.Warnings {
-			log.Warn("reply drain warning", "repo", se.Repo, "msg", se.Message)
-		}
+	if err := e.reconcileReplies(ctx); err != nil {
+		log.Warn("reply reconcile failed", "err", err.Error())
 	}
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 }
 
 // runMaintenance runs maintenanceCycle on its own ticker until ctx is cancelled.

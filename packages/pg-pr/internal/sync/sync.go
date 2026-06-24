@@ -25,8 +25,6 @@ package sync
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +37,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
@@ -79,13 +77,6 @@ type DraftToggler interface {
 	SetDraft(ctx context.Context, repo string, number int, draft bool) error
 }
 
-// ThreadReplier is the optional subset of VCSProvider used by the B3
-// reply-sync pass. A provider that implements ThreadReplier can post
-// queued reply_draft bodies back to upstream review/comment threads.
-type ThreadReplier interface {
-	ReplyToThread(ctx context.Context, repo string, threadID, body string) (*api.Comment, error)
-}
-
 // CICDProvider is the subset of pkg/provider/cicd.Provider the sync engine
 // uses to fetch CI runs.
 type CICDProvider interface {
@@ -114,16 +105,10 @@ type BeadClient interface {
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
 
-	CreateFeedback(ctx context.Context, in beads.CreateFeedbackInput) (string, error)
-	MarkFeedbackResolvedUpstream(ctx context.Context, id string) error
-	ListFeedback(ctx context.Context, cycleID string, includeClosed bool) ([]beads.Feedback, error)
-	FindFeedbackByFingerprint(ctx context.Context, cycleID, fingerprint string) (*beads.Feedback, error)
+	// CloseFeedback closes a child feedback bead during cascade-close. Feedback
+	// is now stored in internal/store, but the cascade still closes any legacy
+	// feedback beads left under a PR's subtree.
 	CloseFeedback(ctx context.Context, id, reason string) error
-
-	// Reply pipeline (B3).
-	ListFeedbackPendingReply(ctx context.Context) ([]beads.Feedback, error)
-	SetResponseID(ctx context.Context, id, responseID string) error
-	FindMergeRequestForFeedback(ctx context.Context, feedbackID string) (*beads.MergeRequest, error)
 }
 
 // Deps bundles the engine's dependencies.
@@ -320,9 +305,6 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// summary counters stay accurate even when each workspace holds its
 	// own beads.
 	repoPreExisting := map[string]map[prKey]beads.MergeRequest{}
-	// Per-repo config lookup, populated alongside repoClients so downstream
-	// passes (replies + close-stale) don't have to re-look-up.
-	repoCfgs := map[string]config.RepoConfig{}
 	// Per-repo per-PR bulk-fetched enrichment (reviews, comments, CI
 	// runs). Populated only when the VCS provider supports
 	// EnrichedPRsProvider; downstream readers fall through to per-PR REST
@@ -359,7 +341,6 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			// participate in the rest of the pipeline.
 			bdc := e.bdClientFor(rcfg)
 			repoClients[rcfg.Remote] = bdc
-			repoCfgs[rcfg.Remote] = rcfg
 			if enriched != nil {
 				enrichByRepo[rcfg.Remote] = enriched
 			}
@@ -487,24 +468,15 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		}()
 	}
 
-	// Phase 6 B3: process queued replies (LLM stored reply_draft; we post +
-	// record response_id). Runs once per healthy repo — the helper filters
-	// feedback beads to only those whose merge-request belongs to that repo.
-	for repo := range healthyRepos {
-		rcfg, ok := repoCfgs[repo]
-		if !ok {
-			continue
-		}
-		bdc := repoClients[repo]
-		if bdc == nil {
-			continue
-		}
-		if err := e.processReplyDrafts(ctx, bdc, rcfg, summary); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    repo,
-				Message: fmt.Sprintf("reply pipeline: %v", err),
-			})
-		}
+	// Process queued replies from the store: the reply-poster reads
+	// store.ListPendingReplies and posts via the github provider, recording
+	// response_id for idempotency. Store-backed and repo-agnostic, so it runs
+	// once per Sync (not per repo).
+	if err := e.reconcileReplies(ctx); err != nil {
+		summary.Errors = append(summary.Errors, SummaryError{
+			Repo:    "(replies)",
+			Message: fmt.Sprintf("reply pipeline: %v", err),
+		})
 	}
 
 	// Close beads whose PR is no longer in the observed set, but only
@@ -650,14 +622,6 @@ type depTreeReader interface {
 // satisfies it; test-injected clients that don't are skipped.
 type humanLabelReader interface {
 	HumanLabeledBeads(ctx context.Context) (map[string]bool, error)
-}
-
-// feedbackSubtreeReader is the narrow capability for reading every feedback
-// bead in a PR's recursive parent-child subtree in one scoped bd call. The
-// real *beads.Client satisfies it; test fakes that don't are treated as "no
-// existing feedback" (empty slice).
-type feedbackSubtreeReader interface {
-	PRFeedbackInSubtree(ctx context.Context, prBeadID string) ([]beads.Feedback, error)
 }
 
 // humanLabelsFor returns the last-pulled `human`-label set for repo, or nil if
@@ -989,8 +953,9 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	if err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 	} else if !alreadyClosed {
-		// One-shot reply drain (the shared apply path no longer does it).
-		if rerr := e.processReplyDrafts(ctx, bdc, rcfg, summary); rerr != nil {
+		// One-shot store-backed reply reconcile (the shared apply path no
+		// longer does it).
+		if rerr := e.reconcileReplies(ctx); rerr != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: rerr.Error()})
 		}
 	}
@@ -1299,6 +1264,29 @@ func defaultStoreFile() string {
 	return filepath.Join(home, ".local", "state", "pg-pr", "store.db")
 }
 
+// reconcileReplies posts queued replies from the SQLite store to upstream via
+// the store-backed reply-poster. It reads store.ListPendingReplies and posts
+// through the github VCS provider (idempotent via response_id).
+//
+// It is a no-op when Deps.Store is unset, or when the configured github VCS
+// provider does not satisfy replyposter.Replier (e.g. a test stub that isn't a
+// real provider) — reply reconciliation is skipped gracefully in that case.
+func (e *Engine) reconcileReplies(ctx context.Context) error {
+	if e.deps.Store == nil {
+		return nil
+	}
+	vp := e.deps.VCS["github"]
+	if vp == nil {
+		return nil
+	}
+	replier, ok := vp.(replyposter.Replier)
+	if !ok {
+		// Provider lacks the reply capability (e.g. a test stub). Skip.
+		return nil
+	}
+	return replyposter.New(e.deps.Store, replier).Reconcile(ctx)
+}
+
 // flushOutbox drains the store's outbox through the dispatcher. Called at the
 // end of each one-shot Sync and each daemon maintenance cycle. No-op until
 // ingestion (a later phase) starts enqueuing events.
@@ -1341,274 +1329,39 @@ func saveState(path string, sf stateFile) error {
 // Phase 3: feedback + processing-cycle + draft auto-promote pipelines.
 // ---------------------------------------------------------------------
 
-// processFeedback inspects upstream events for a PR and ensures the bd
-// feedback beads (and a parent processing-cycle bead) reflect them.
+// processFeedback ingests a PR's upstream feedback (comments, CI failures)
+// into the SQLite store and enqueues feedback.created outbox events. The
+// process-feedback (processing-cycle) bead is no longer created here — it is
+// ensured by the beadsbridge handler reacting to those events. Feedback beads
+// themselves are gone entirely; feedback lives in internal/store.
 //
-// Workflow:
-//
-//  1. Collect events from configured providers (comments, CI runs).
-//  2. For each event, compute a stable fingerprint. Dedup against any
-//     feedback bead already created under any cycle for this PR.
-//  3. New events: ensure a processing-cycle exists, create the feedback
-//     bead under it. CI events whose conclusion changed from failure →
-//     success close the matching feedback with reason resolved-upstream.
-//
-// Returns the first error encountered after best-effort processing.
-//
-// bdc is the per-repo bd client used for all feedback / processing-cycle
-// operations — bound to the monorepo's bd workspace by the caller.
-//
-// cache, when non-nil, answers the workspace-wide lookups (open processing
-// cycles, feedback under each cycle, fingerprint dedup) from a single
-// per-tick bulk fetch — typically replacing ~5-8 bd calls per PR with
-// in-memory map lookups. When nil, the original per-PR live-call path is
-// used, which is the path tests with mocked BeadClients exercise.
+// bdc and cache are retained in the signature for call-site compatibility but
+// are unused now that the bead-feedback path is removed.
 //
 // enriched, when non-nil, supplies the PR's comments and CI runs from the
-// per-repo GraphQL bulk fetch — replaces per-PR ListComments + ListRuns
-// REST calls. When nil, the helper falls back to the original per-PR
-// gh-CLI calls; tests with mocked providers continue to work.
-func (e *Engine) processFeedback(ctx context.Context, bdc BeadClient, cache *beads.TickCache, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
+// per-repo GraphQL bulk fetch. When nil (or Deps.Store is unset), this is a
+// no-op.
+//
+// Errors from ingestion are recorded into summary.Errors (non-fatal); the
+// function always returns nil so the surrounding pipeline keeps progressing.
+func (e *Engine) processFeedback(ctx context.Context, _ BeadClient, _ *beads.TickCache, enriched *vcs.EnrichedPR, repo string, pr api.PR, prBeadID string, summary *Summary) error {
 	if prBeadID == "" {
 		return nil
 	}
-	rcfg, err := e.repoConfig(repo)
-	if err != nil {
+	if _, err := e.repoConfig(repo); err != nil {
 		// Not in config (single-PR ad-hoc) — feedback pipeline is repo-driven.
 		return nil
 	}
 
-	// Store-path: ingest feedback into SQLite in parallel with the bead path.
-	// Only runs when Deps.Store is set; errors are non-fatal (recorded into
-	// summary.Errors) so the existing bead/processing-cycle path is unaffected.
+	// Store-path: ingest feedback into SQLite and enqueue feedback.created
+	// outbox events. Only runs when Deps.Store is set; errors are non-fatal
+	// (recorded into summary.Errors).
 	if e.deps.Store != nil {
 		if err := e.ingestFeedbackToStore(ctx, repo, pr, enriched); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: "ingestFeedbackToStore: " + err.Error()})
 		}
 	}
-
-	// Gather events.
-	var events []feedbackEvent
-	if enriched != nil {
-		for _, c := range enriched.Comments {
-			events = append(events, commentEvent(c))
-		}
-		for _, r := range enriched.CIRuns {
-			events = append(events, ciRunEvent(r))
-		}
-	} else {
-		provider, _ := e.providerFor(rcfg)
-		if reader, ok := provider.(CommentReader); ok {
-			commCtx, commSpan := startVCSSpan(ctx, "ListComments", repo, pr.Number)
-			comments, err := reader.ListComments(commCtx, repo, pr.Number)
-			recordSpanErr(commSpan, err)
-			commSpan.End()
-			if err != nil {
-				return fmt.Errorf("list comments: %w", err)
-			}
-			for _, c := range comments {
-				events = append(events, commentEvent(c))
-			}
-		}
-		for _, cicdName := range rcfg.CICD {
-			cp, ok := e.deps.CICD[cicdName]
-			if !ok {
-				continue
-			}
-			ciCtx, ciSpan := startCICDSpan(ctx, "ListRuns", repo, pr.Number, "")
-			runs, err := cp.ListRuns(ciCtx, repo, pr.Number)
-			recordSpanErr(ciSpan, err)
-			ciSpan.End()
-			if err != nil {
-				// CI errors are non-fatal — the rest of the cycle should still
-				// progress.
-				continue
-			}
-			for _, r := range runs {
-				events = append(events, ciRunEvent(r))
-			}
-		}
-	}
-
-	if len(events) == 0 {
-		return nil
-	}
-
-	// Find or create the active processing-cycle for new feedback. The
-	// cache is authoritative when present — it listed every open cycle
-	// in the workspace, so a cache miss means no open cycle exists.
-	var cycleID string
-	var found bool
-	if cache != nil {
-		cycleID, found = cache.OpenCycleFor(prBeadID)
-	} else {
-		var err error
-		cycleID, found, err = bdc.FindOpenProcessingCycle(ctx, prBeadID)
-		if err != nil {
-			return fmt.Errorf("find processing-cycle: %w", err)
-		}
-	}
-
-	// Read the PR's feedback subtree ONCE (cache-less path) — a single
-	// `bd dep tree <pr> --direction=up` — and serve BOTH the first-pass
-	// CI-success resolver and the second-pass dedup from it. This replaces the
-	// first pass's O(workspace-feedback) ListFeedback(cycleID) isChildOf scan;
-	// the cache path keeps reading from the in-memory TickCache.
-	var subtreeFeedback []beads.Feedback
-	if cache == nil {
-		var err error
-		subtreeFeedback, err = e.prFeedbackSubtree(ctx, bdc, prBeadID)
-		if err != nil {
-			// Can't read the PR's feedback — skip this tick rather than risk
-			// duplicate beads (second-pass concern) or mis-resolving CI
-			// feedback (first-pass concern). A later tick retries. (This
-			// unifies the two reads' prior error handling onto the more
-			// conservative skip-the-tick behavior.)
-			return nil
-		}
-	}
-
-	// First pass: handle CI events whose conclusion is success and close
-	// any matching prior ci-failure feedback (resolved-upstream).
-	if found {
-		var open []beads.Feedback
-		if cache != nil {
-			// FeedbackUnder returns open + closed; the ci-failure
-			// resolver only wants currently-open beads.
-			for _, fb := range cache.FeedbackUnder(cycleID) {
-				if fb.Status != "closed" {
-					open = append(open, fb)
-				}
-			}
-		} else {
-			// Same Status!=closed filter, served from the single subtree read
-			// above instead of an O(F) ListFeedback(cycleID) scan. The source
-			// widens from one open cycle to the PR's whole subtree (all
-			// cycles) — safe by design: the resolver only closes on a unique CI
-			// ExternalID match and MarkFeedbackResolvedUpstream is idempotent.
-			for _, fb := range subtreeFeedback {
-				if fb.Status != "closed" {
-					open = append(open, fb)
-				}
-			}
-		}
-		{
-			closedSet := map[string]bool{}
-			for _, ev := range events {
-				if ev.kind != beads.FeedbackKindCIFailure || ev.ciConclusion != "success" {
-					continue
-				}
-				for _, fb := range open {
-					if closedSet[fb.ID] {
-						continue
-					}
-					// Match by the CI run's "name" carried as external_id
-					// or by fingerprint stem.
-					if fb.Fields.ExternalID != "" && fb.Fields.ExternalID == ev.externalID {
-						_ = bdc.MarkFeedbackResolvedUpstream(ctx, fb.ID)
-						summary.FeedbackClosed++
-						closedSet[fb.ID] = true
-					}
-				}
-			}
-		}
-	}
-
-	// Build the PR's existing-feedback fingerprint set for the second-pass
-	// dedup. Cache-less path derives it from the single subtree read above (all
-	// statuses, non-empty fingerprints) — same contents the prior
-	// PRFeedbackFingerprints map produced, now with zero extra bd calls.
-	var seen map[string]bool
-	if cache == nil {
-		seen = make(map[string]bool, len(subtreeFeedback))
-		for _, fb := range subtreeFeedback {
-			if fb.Fields.Fingerprint != "" {
-				seen[fb.Fields.Fingerprint] = true
-			}
-		}
-	}
-
-	// Second pass: create new feedback beads for net-new events.
-	for _, ev := range events {
-		// Skip CI success-events (they only close prior failures).
-		if ev.kind == beads.FeedbackKindCIFailure && ev.ciConclusion != "failure" {
-			continue
-		}
-		// Dedup: if a feedback with this fingerprint already exists under
-		// any cycle for this PR, skip. The cache-less path consults `seen`
-		// (built once above) instead of re-listing the PR's cycles per event.
-		if cache != nil {
-			if _, ok := cache.FindFeedbackForPR(prBeadID, ev.fingerprint); ok {
-				continue
-			}
-		} else if ev.fingerprint != "" && seen[ev.fingerprint] {
-			continue
-		}
-
-		if !found {
-			// Lazily create a processing-cycle on first new feedback.
-			id, err := bdc.CreateProcessingCycle(ctx, prBeadID,
-				fmt.Sprintf("%s#%d", repo, pr.Number), e.isSelfAuthored(pr.Author))
-			if err != nil {
-				return fmt.Errorf("create processing-cycle: %w", err)
-			}
-			cycleID = id
-			found = true
-			summary.CyclesCreated++
-			if cache != nil {
-				cache.OpenProcessingByPR[prBeadID] = cycleID
-			}
-		}
-
-		bdCtx, bdSpan := startBeadsSpan(ctx, "CreateFeedback", repo, pr.Number)
-		newID, err := bdc.CreateFeedback(bdCtx, beads.CreateFeedbackInput{
-			ProcessingCycleID: cycleID,
-			Kind:              ev.kind,
-			ExternalID:        ev.externalID,
-			Fingerprint:       ev.fingerprint,
-			AuthorRole:        ev.authorRole,
-			Title:             ev.title,
-			Body:              ev.body,
-		})
-		recordSpanErr(bdSpan, err)
-		bdSpan.End()
-		if err != nil {
-			return fmt.Errorf("create feedback: %w", err)
-		}
-		summary.FeedbackCreated++
-		telemetry.FeedbackCreatedTotal.WithLabelValues(repo, string(ev.kind)).Inc()
-		// Augment the cache so same-tick events with duplicate
-		// fingerprints dedup against this newly-created feedback rather
-		// than triggering another bd CreateFeedback.
-		if cache != nil {
-			cache.FeedbackByCycle[cycleID] = append(cache.FeedbackByCycle[cycleID], beads.Feedback{
-				ID:     newID,
-				Status: "hooked",
-				Fields: beads.FeedbackFields{
-					Kind:        string(ev.kind),
-					ExternalID:  ev.externalID,
-					Fingerprint: ev.fingerprint,
-					AuthorRole:  string(ev.authorRole),
-				},
-			})
-		}
-	}
 	return nil
-}
-
-// prFeedbackSubtree returns every feedback bead in prBeadID's recursive
-// parent-child subtree (MR -> processing-cycle -> feedback) in ONE scoped bd
-// call (PRFeedbackInSubtree, a single `bd dep tree --direction=up`). Built once
-// per refresh and consulted by both processFeedback passes: the CI-success
-// resolver (open feedback) and the dedup (fingerprints of all statuses). A bd
-// client that doesn't implement the capability (test fakes) yields an empty
-// slice; the production daemon client is *beads.Client, which does implement it.
-func (e *Engine) prFeedbackSubtree(ctx context.Context, bdc BeadClient, prBeadID string) ([]beads.Feedback, error) {
-	r, ok := bdc.(feedbackSubtreeReader)
-	if !ok {
-		return nil, nil
-	}
-	return r.PRFeedbackInSubtree(ctx, prBeadID)
 }
 
 // maybePromoteDraft inspects the PR's draft state and, when all CI runs
@@ -1671,125 +1424,6 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, bdc BeadClient, enriched
 	return nil
 }
 
-// processReplyDrafts iterates feedback beads whose LLM-authored reply_draft
-// is queued for posting and posts each via vcs.ReplyToThread. The returned
-// upstream comment id is stored back on the bead as response_id, which is
-// the idempotency marker — subsequent sync passes skip beads whose
-// response_id is set.
-//
-// Scope: only feedback beads whose enclosing merge-request belongs to rcfg
-// are processed by this call. Other repos handle their own beads in their
-// own loop iteration.
-//
-// Per-bead failures (VCS errors, walker errors, missing external_id) are
-// recorded into summary.Errors but do not abort the loop — next sync
-// retries because response_id is still empty.
-//
-// bdc is the per-repo bd client whose workspace is queried for pending
-// replies. Beads belonging to other repos are filtered out (defensive
-// guard in case clients share a workspace).
-func (e *Engine) processReplyDrafts(ctx context.Context, bdc BeadClient, rcfg config.RepoConfig, summary *Summary) error {
-	provider, err := e.providerFor(rcfg)
-	if err != nil {
-		return nil
-	}
-	replier, ok := provider.(ThreadReplier)
-	if !ok {
-		// No reply capability — skip silently (e.g., a Phase 0 stub provider).
-		return nil
-	}
-	pending, err := bdc.ListFeedbackPendingReply(ctx)
-	if err != nil {
-		return fmt.Errorf("list pending replies: %w", err)
-	}
-	for _, fb := range pending {
-		// Walk up: feedback → processing-cycle → merge-request.
-		mr, err := bdc.FindMergeRequestForFeedback(ctx, fb.ID)
-		if err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: find merge-request: %v", fb.ID, err),
-			})
-			continue
-		}
-		if mr == nil {
-			// Orphan feedback — no merge-request anchor. Skip silently;
-			// another component should clean this up.
-			continue
-		}
-		// Scope to current repo — other repos will handle their own beads.
-		if mr.Fields.Repo != rcfg.Remote {
-			continue
-		}
-
-		// Ownership guard: never post replies to threads on PRs we don't
-		// own. ReplyDraft staged on a team-mate's feedback bead is a bug
-		// class — emit a warning so the user can investigate, but skip
-		// the post. The local ReplyDraft is left in place; the user can
-		// inspect / delete / retarget it via bd or pg-pr verbs.
-		if !e.isSelfAuthored(mr.Fields.Author) {
-			summary.Warnings = append(summary.Warnings, SummaryError{
-				Repo: rcfg.Remote,
-				Message: fmt.Sprintf(
-					"reply %s skipped: parent PR #%d authored by %q (not self) — ReplyDraft should not have been staged",
-					fb.ID, mr.Fields.PRNumber, mr.Fields.Author),
-			})
-			continue
-		}
-
-		// Only comment- and review-thread feedback can be replied to.
-		switch fb.Fields.Kind {
-		case string(beads.FeedbackKindCommentThread), string(beads.FeedbackKindReviewThread):
-			// supported
-		default:
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: cannot reply to %s", fb.ID, fb.Fields.Kind),
-			})
-			continue
-		}
-
-		if fb.Fields.ExternalID == "" {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: missing external_id (thread id)", fb.ID),
-			})
-			continue
-		}
-
-		resp, err := replier.ReplyToThread(ctx, mr.Fields.Repo, fb.Fields.ExternalID, marker.Stamp(fb.Fields.ReplyDraft))
-		if err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: ReplyToThread: %v", fb.ID, err),
-			})
-			continue
-		}
-		var respID string
-		if resp != nil {
-			respID = resp.ID
-		}
-		if respID == "" {
-			// VCS returned nil/empty id — without an idempotency marker we
-			// would re-post next sync. Record an error and move on.
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: ReplyToThread returned empty response id", fb.ID),
-			})
-			continue
-		}
-		if err := bdc.SetResponseID(ctx, fb.ID, respID); err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    rcfg.Remote,
-				Message: fmt.Sprintf("reply %s: SetResponseID: %v", fb.ID, err),
-			})
-			continue
-		}
-		summary.RepliesPosted++
-	}
-	return nil
-}
-
 // allRunsSuccessful returns true when there is at least one run and every
 // completed run has conclusion=success.
 func allRunsSuccessful(runs []api.CIRun) bool {
@@ -1823,123 +1457,6 @@ func (e *Engine) cascadeClose(ctx context.Context, bdc BeadClient, prBeadID, rea
 		_ = bdc.CloseProcessingCycle(ctx, childID, reason)
 		summary.BeadsClosed++
 	}
-}
-
-// ---------------------------------------------------------------------
-// Feedback event normalization
-// ---------------------------------------------------------------------
-
-// feedbackEvent is the engine's normalized view of an upstream signal.
-type feedbackEvent struct {
-	kind         beads.FeedbackKind
-	externalID   string
-	fingerprint  string
-	authorRole   beads.AuthorRole
-	title        string
-	body         string
-	ciConclusion string // populated only for CI events
-}
-
-// commentEvent converts an api.Comment into a feedbackEvent. The fingerprint
-// covers the (author, path, line, body) tuple so the same comment posted on
-// different lines still dedups per-line.
-//
-// CodeRabbit walkthrough summaries embed a base64-encoded internal-state
-// block that is 98% of the comment body (~127KB of ~129KB observed on
-// the zr workspace). bd's description column is TEXT (64KB), so the
-// block must be stripped before assignment. The fingerprint also uses
-// the stripped body — since CodeRabbit comments never previously fit in
-// bd, there are no existing feedback beads with full-body fingerprints
-// to dedup against.
-func commentEvent(c api.Comment) feedbackEvent {
-	body := stripCodeRabbitInternalState(c.Body)
-	kind := beads.FeedbackKindCommentThread
-	if c.Path != "" || c.Line > 0 || c.ThreadID != "" {
-		kind = beads.FeedbackKindReviewThread
-	}
-	fingerprint := fingerprintOf("comment", c.Author, c.Path, fmt.Sprintf("%d", c.Line), body)
-	role := commentAuthorRole(c)
-	title := strings.TrimSpace(strings.SplitN(body, "\n", 2)[0])
-	if title == "" {
-		title = "comment from " + c.Author
-	}
-	return feedbackEvent{
-		kind:        kind,
-		externalID:  c.ID,
-		fingerprint: fingerprint,
-		authorRole:  role,
-		title:       title,
-		body:        body,
-	}
-}
-
-// stripCodeRabbitInternalState removes the `<!-- internal state start
-// --> ... <!-- internal state end -->` block CodeRabbit embeds in
-// walkthrough summary comments. The block is a base64-encoded bot
-// state blob (no human-readable content) that runs ~120KB and exceeds
-// bd's description column limit. Comments without the marker are
-// returned unchanged.
-func stripCodeRabbitInternalState(body string) string {
-	const startMarker = "<!-- internal state start -->"
-	const endMarker = "<!-- internal state end -->"
-	start := strings.Index(body, startMarker)
-	if start < 0 {
-		return body
-	}
-	rel := strings.Index(body[start:], endMarker)
-	if rel < 0 {
-		// Unmatched start — leave the body alone so we don't drop
-		// the rest of the comment on a malformed marker.
-		return body
-	}
-	end := start + rel + len(endMarker)
-	return body[:start] + "[CodeRabbit internal state elided]" + body[end:]
-}
-
-// commentAuthorRole maps GitHub's author_association string to our
-// AuthorRole enum. "MEMBER" / "OWNER" / "COLLABORATOR" → team_member;
-// "FIRST_TIMER" / "NONE" → org_member; bots are detected by [bot] suffix.
-func commentAuthorRole(c api.Comment) beads.AuthorRole {
-	if strings.HasSuffix(c.Author, "[bot]") {
-		return beads.AuthorRoleBot
-	}
-	switch strings.ToLower(c.AuthorRole) {
-	case "member", "owner", "collaborator":
-		return beads.AuthorRoleTeamMember
-	case "first_timer", "first_time_contributor", "none", "contributor":
-		return beads.AuthorRoleOrgMember
-	default:
-		return beads.AuthorRoleOrgMember
-	}
-}
-
-// ciRunEvent converts an api.CIRun into a feedbackEvent. The fingerprint
-// covers (name, conclusion) so a workflow that flips green → red → green
-// surfaces a fresh feedback bead each time.
-func ciRunEvent(r api.CIRun) feedbackEvent {
-	fingerprint := fingerprintOf("ci", r.Provider, r.Name, r.Conclusion)
-	title := fmt.Sprintf("CI %s: %s", r.Conclusion, r.Name)
-	return feedbackEvent{
-		kind:         beads.FeedbackKindCIFailure,
-		externalID:   r.ID,
-		fingerprint:  fingerprint,
-		authorRole:   beads.AuthorRoleSelf,
-		title:        title,
-		body:         fmt.Sprintf("%s run %q concluded with %q (%s)", r.Provider, r.Name, r.Conclusion, r.URL),
-		ciConclusion: r.Conclusion,
-	}
-}
-
-// fingerprintOf builds a stable sha256 fingerprint from the given parts.
-func fingerprintOf(parts ...string) string {
-	h := sha256.New()
-	for i, p := range parts {
-		if i > 0 {
-			h.Write([]byte{0})
-		}
-		h.Write([]byte(p))
-	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // ---------------------------------------------------------------------
