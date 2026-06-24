@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,5 +251,31 @@ func TestHook_unresolvable_isNoErrorNoRow(t *testing.T) {
 	list, _ := st.List(context.Background())
 	if len(list) != 0 {
 		t.Errorf("rows = %d, want 0", len(list))
+	}
+}
+
+func TestLogHook_writesStructuredJSONLAtErrorLevel(t *testing.T) {
+	dir := t.TempDir()
+	logHook(dir, "hook stop: store open: boom")
+	b, err := os.ReadFile(filepath.Join(dir, "diagnostics.jsonl"))
+	if err != nil {
+		t.Fatalf("read diagnostics.jsonl: %v", err)
+	}
+	var got struct {
+		Time  string `json:"time"`
+		Level string `json:"level"`
+		Msg   string `json:"msg"`
+	}
+	if err := json.Unmarshal(b[:len(b)-1], &got); err != nil { // strip trailing \n
+		t.Fatalf("logHook wrote non-JSON %q: %v", b, err)
+	}
+	if got.Level != "error" {
+		t.Errorf("level = %q, want error (every old hook.log line was a failure)", got.Level)
+	}
+	if got.Msg != "hook stop: store open: boom" {
+		t.Errorf("msg = %q, want the diagnostic text", got.Msg)
+	}
+	if got.Time == "" {
+		t.Error("time must be set (RFC3339)")
 	}
 }

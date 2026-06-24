@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/diaglog"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
@@ -257,12 +258,16 @@ func resolveExternalID(ctx context.Context, st *store.Store, sessionID, envExter
 	return "", false, nil
 }
 
+// logHook appends one structured JSONL diagnostic line to
+// <state-dir>/diagnostics.jsonl. Every logHook call records a hook FAILURE, so
+// the level is always "error". Best-effort: an Open/write error is swallowed (a
+// wedged hook must never block Claude — spec §9/§15), mirroring the prior
+// hook.log behavior. The lowercase time/level/msg schema is what the otelcol
+// filelog receiver parses (see internal/diaglog).
 func logHook(stateDir, msg string) {
-	_ = os.MkdirAll(stateDir, 0o700)
-	f, err := os.OpenFile(filepath.Join(stateDir, "hook.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	lg, err := diaglog.Open(filepath.Join(stateDir, "diagnostics.jsonl"))
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintln(f, msg)
+	_ = lg.Log(time.Now(), "error", msg)
 }
