@@ -211,32 +211,38 @@ The daemon's PR-bead writes are here, not in `Sync` — convert them too:
 `sync.go:1274-1288`) and `poster_test.go`. `reconcileReplies` propagates the count
 into `summary.RepliesPosted`.
 
-## Summary counts — flush-time tally (revised; fixes review #4/#5)
+## Summary counts — emit-time in the one-shot `Sync` (revised; addresses review #4/#5)
 
-The earlier "emit-time" plan was wrong: (a) it would count enqueued-but-not-yet-
-projected events, regressing today's "count only after a **successful** bead
-write" fidelity (`sync.go:429-436`, `:520`); (b) its justification (daemon
-flush-timing) was moot because the **daemon produces no Summary**. Only the
-**one-shot serial `Sync`** produces a Summary, and that path has **no concurrent
-flusher** — so counting at its single flush is accurate.
+Counting is **scoped to the one-shot serial `Sync`** — the only path that produces
+a user-facing `Summary`. That path processes PRs serially and flushes once, so
+there is no concurrent-flusher hazard; the disproven "single flush per daemon
+tick" model the earlier draft leaned on is irrelevant here.
 
-- `flushOutbox`/`RunOutbox` returns a per-type tally of **successfully dispatched
-  and completed** events.
-- `Sync` folds the tally into `Summary`:
-  - `BeadsCreated` ← distinct PRs with a projected `pr.opened`.
-  - `BeadsUpdated` ← distinct PRs with a projected `pr.updated` **(deduped per
-    `repo#number`** so `maybePromoteDraft`'s second update doesn't double-count).
-  - `BeadsClosed` ← distinct PRs with a projected `pr.closed`/`pr.merged`
-    (PR-level; cascade children implied, not itemized — deliberate, see below).
-- `RepliesPosted` ← `Reconcile`'s returned count (synchronous, set in
-  `reconcileReplies` before flush; independent of the tally).
+A flush-time tally was considered and rejected: the dispatcher **swallows handler
+errors** (`dispatcher.go:38` returns nil) and `RunOutbox` ignores dispatch
+outcomes by design (fire-once, `outbox.go:90-91`), so flush-time cannot observe
+whether the bridge actually wrote the bead **either** — it offers no fidelity gain
+over emit-time, while additionally miscounting any stale leftover pending rows
+from a prior crashed run and requiring a `RunOutbox` signature change.
 
-**Deliberate simplification:** `BeadsClosed` counts PR-bead closures only;
-cascade-child closes execute in the bridge and are not itemized (today they are,
-`sync.go:1458`). The child closure is implied by the parent. Accepted.
+`Sync` therefore tallies the lifecycle ops **it emits**, deduped per PR:
 
-The daemon ignores the tally (no Summary). `refreshPR`'s throwaway `Summary`
-remains discarded.
+- `BeadsCreated` ← distinct PRs emitted with `pr.opened` (not pre-existing,
+  `repoPreExisting`).
+- `BeadsUpdated` ← distinct PRs emitted with `pr.updated`, **minus** those counted
+  as created, so `maybePromoteDraft`'s second `pr.updated` does not double-count.
+- `BeadsClosed` ← distinct PRs emitted with `pr.closed`/`pr.merged` (PR-level).
+- `RepliesPosted` ← `Reconcile`'s new returned count, set in `reconcileReplies`
+  (synchronous, before flush).
+
+**Documented semantics:** the count reflects "PRs for which `Sync` emitted a
+create/update/close," not a confirmed bridge write. Given fire-once + error-
+swallowing dispatch, that is the most faithful count available. Residual
+over-count: a `pr.opened` for an already-closed bead that the bridge no-ops via
+`alreadyClosed` is still counted — acceptable, and rare. `BeadsClosed` counts
+PR-bead closures only; cascade children are implied, not itemized (today they
+are, `sync.go:1458`). The daemon emits no Summary; `refreshPR`'s throwaway
+`Summary` stays discarded and is not counted.
 
 ## Edge cases & behaviors to preserve (test targets)
 
@@ -272,8 +278,9 @@ remains discarded.
   `EventPRClosed`, `EventPRMerged`, `cascadeClose`, `Merged`→reason coverage
   (currently untested).
 - **`store.ListOpenPRs`** unit test + healthy-repo / observed-set scoping.
-- **Counts test**: one-shot `Sync` Summary reflects projected (not merely
-  enqueued) bead ops, deduped per PR.
+- **Counts test**: one-shot `Sync` Summary reflects emitted bead ops, deduped per
+  PR (a created PR isn't also counted as updated; `maybePromoteDraft`'s second
+  `pr.updated` doesn't double-count).
 - **`replyposter.Reconcile`** count test (folded #6 acceptance).
 
 ## Non-goals
