@@ -368,6 +368,72 @@
           checks = {
             test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
+            # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
+            # must render on daemon.enable even when the TUI (enable/
+            # claude.enable) is off, and must NOT render when nothing is
+            # enabled. Pure module eval — no HM/NixOS harness, no package build.
+            test-pa-monitor-config-gating =
+              let
+                evalCfg =
+                  cfg:
+                  (lib.evalModules {
+                    specialArgs = { inherit pkgs lib; };
+                    modules = [
+                      ./home/programs/pa-monitor/default.nix
+                      (
+                        { lib, ... }:
+                        {
+                          options = {
+                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
+                            home.packages = lib.mkOption {
+                              type = lib.types.listOf lib.types.anything;
+                              default = [ ];
+                            };
+                            xdg.configFile = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                        }
+                      )
+                      cfg
+                    ];
+                  }).config;
+                hasConfig = c: c.xdg.configFile ? "pa-monitor/config.toml";
+                endpoint = {
+                  otel.endpoint = "http://127.0.0.1:4317";
+                };
+                daemonOnly = evalCfg {
+                  phillipgreenii.programs.pa-monitor = {
+                    daemon.enable = true;
+                    settings = endpoint;
+                  };
+                };
+                tuiOnly = evalCfg {
+                  phillipgreenii.programs.claude.enable = true;
+                  phillipgreenii.programs.pa-monitor = {
+                    enable = true;
+                    settings = endpoint;
+                  };
+                };
+                neither = evalCfg {
+                  phillipgreenii.programs.pa-monitor.settings = endpoint;
+                };
+                bothEnabled = evalCfg {
+                  phillipgreenii.programs.claude.enable = true;
+                  phillipgreenii.programs.pa-monitor = {
+                    enable = true;
+                    daemon.enable = true;
+                    settings = endpoint;
+                  };
+                };
+              in
+              assert hasConfig daemonOnly; # the fix: daemon.enable alone ⇒ config rendered
+              assert hasConfig tuiOnly; # TUI path unchanged ⇒ still rendered
+              assert !(hasConfig neither); # nothing enabled ⇒ no file
+              assert hasConfig bothEnabled; # both gates ⇒ still rendered
+              pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
+
             test-ollama-wrapper =
               let
                 wrapper = import ./home/programs/ollama/wrapper.nix {
