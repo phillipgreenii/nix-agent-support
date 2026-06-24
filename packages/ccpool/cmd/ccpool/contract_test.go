@@ -391,6 +391,101 @@ func (sb *sandbox) listRow(externalID string) (listJSON, bool) {
 	return listJSON{}, false
 }
 
+// listRowsFiltered runs `list --all --json` with the given `--filter k=v` args and
+// returns the parsed rows. Reuses the subprocess + JSON-parse mechanics of listRow.
+func (sb *sandbox) listRowsFiltered(filters ...string) []listJSON {
+	args := []string{"list", "--all", "--json"}
+	for _, f := range filters {
+		args = append(args, "--filter", f)
+	}
+	out, _ := sb.ccp(args...)
+	var rows []listJSON
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+		scaffoldFail(sb.t, "list --filter --json did not parse (output mechanics broken): %v\n%s", err, out)
+		return nil
+	}
+	return rows
+}
+
+// TestContract_Meta_cliRoundTripAndListFilter pins the metadata CLI surface
+// (pg2-01ys) end-to-end against the REAL store the shipped binary opens: a session
+// launched by real claude (`new` reaches ready) is stamped via `ccpool meta set`,
+// the stamped values surface in `list --json` (meta object) and in `meta list`,
+// and `list --filter role=worker` includes the stamped row while a row WITHOUT
+// the tag is excluded. The real-claude observation: a `new` session reaching ready
+// is the seed; the metadata is then store-backed CLI plumbing over that real row.
+func TestContract_Meta_cliRoundTripAndListFilter(t *testing.T) {
+	sb := newSandbox(t)
+	sb.withFakeClaude()
+
+	// Two real session rows so the filter has a positive and a negative case.
+	if _, code := sb.ccp("new", "tagged"); code != 0 {
+		scaffoldFail(t, "new tagged failed (launch mechanics broken)")
+	}
+	if _, code := sb.ccp("new", "untagged"); code != 0 {
+		scaffoldFail(t, "new untagged failed (launch mechanics broken)")
+	}
+
+	// Stamp metadata via the CLI.
+	if _, code := sb.ccp("meta", "set", "tagged", "role", "worker"); code != 0 {
+		t.Fatalf("meta set role rc=%d", code)
+	}
+	if _, code := sb.ccp("meta", "set", "tagged", "pool", "pr-pool"); code != 0 {
+		t.Fatalf("meta set pool rc=%d", code)
+	}
+
+	// meta get returns the stored value (exit 0).
+	if out, code := sb.ccp("meta", "get", "tagged", "role"); code != 0 || strings.TrimSpace(out) != "worker" {
+		t.Errorf("meta get role = (%q, rc=%d), want worker/0", strings.TrimSpace(out), code)
+	}
+
+	// list --json surfaces the meta object on the tagged row.
+	row, ok := sb.listRow("tagged")
+	liveAssert(t, "tagged row present in list", ok, true)
+	if row.Meta["role"] != "worker" || row.Meta["pool"] != "pr-pool" {
+		t.Errorf("meta object = %v, want role=worker pool=pr-pool", row.Meta)
+	}
+
+	// list --filter role=worker includes the tagged row and EXCLUDES the untagged one.
+	filtered := sb.listRowsFiltered("role=worker")
+	var sawTagged, sawUntagged bool
+	for _, r := range filtered {
+		switch r.ExternalID {
+		case "tagged":
+			sawTagged = true
+		case "untagged":
+			sawUntagged = true
+		}
+	}
+	liveAssert(t, "filter role=worker includes the tagged row", sawTagged, true)
+	liveAssert(t, "filter role=worker excludes the untagged row", sawUntagged, false)
+
+	// AND-combined filter still matches; a mismatched value matches nothing.
+	if rows := sb.listRowsFiltered("role=worker", "pool=pr-pool"); len(rows) != 1 || rows[0].ExternalID != "tagged" {
+		t.Errorf("AND filter rows = %v, want exactly [tagged]", externalIDsOf(rows))
+	}
+	if rows := sb.listRowsFiltered("role=ghost"); len(rows) != 0 {
+		t.Errorf("no-match filter rows = %v, want empty", externalIDsOf(rows))
+	}
+
+	// meta rm is idempotent and removes the key from subsequent reads.
+	if _, code := sb.ccp("meta", "rm", "tagged", "role"); code != 0 {
+		t.Errorf("meta rm rc=%d", code)
+	}
+	if _, code := sb.ccp("meta", "get", "tagged", "role"); code != 1 {
+		t.Errorf("meta get after rm rc=%d, want 1 (no such key)", code)
+	}
+}
+
+// externalIDsOf projects the external_ids of rows for error messages.
+func externalIDsOf(rows []listJSON) []string {
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ExternalID)
+	}
+	return ids
+}
+
 // TestContract_Resume_NewResumesExistingClaudeSession pins the ADR-0015 resume
 // path against REAL claude: `ccpool new <id>` on a row whose tmux is gone but
 // whose Claude session still exists on disk must RESUME that conversation
