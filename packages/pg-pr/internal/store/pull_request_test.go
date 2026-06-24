@@ -63,12 +63,36 @@ func TestListOpenPRs(t *testing.T) {
 	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/other", Number: 3, Ownership: "mine", State: "open"}); err != nil {
 		t.Fatal(err)
 	}
+	// A draft PR must also be returned: ListOpenPRs selects state IN ('open','draft').
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 4, Ownership: "mine", State: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	// A merged PR must be absent, like closed.
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 5, Ownership: "team", State: "merged"}); err != nil {
+		t.Fatal(err)
+	}
 	got, err := db.ListOpenPRs(ctx, "o/r")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Number != 1 {
-		t.Fatalf("want only o/r#1 open, got %+v", got)
+	gotNums := map[int]bool{}
+	for _, pr := range got {
+		gotNums[pr.Number] = true
+	}
+	if !gotNums[1] {
+		t.Errorf("open o/r#1 missing from %+v", got)
+	}
+	if !gotNums[4] {
+		t.Errorf("draft o/r#4 missing from %+v", got)
+	}
+	if gotNums[2] {
+		t.Errorf("closed o/r#2 should be absent, got %+v", got)
+	}
+	if gotNums[5] {
+		t.Errorf("merged o/r#5 should be absent, got %+v", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want exactly o/r#1 (open) and o/r#4 (draft), got %+v", got)
 	}
 }
 
