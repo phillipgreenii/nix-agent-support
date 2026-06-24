@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 )
 
 // connExportInterval is how often the PeriodicReader scrapes the connection
@@ -41,17 +42,46 @@ type ConnEmitter struct {
 	connectedKnown bool
 }
 
+// connDeps holds the constructors NewConnectionEmitter depends on. Splitting
+// them out lets tests inject failures into the exporter-construction and
+// gauge-registration error branches, which are otherwise unreachable: the gRPC
+// exporter New() funcs swallow bad-endpoint errors (they fall back to the
+// default target and report parse errors via the global handler, not the
+// return value).
+type connDeps struct {
+	buildResource func(ctx context.Context, name, version string) (*resource.Resource, error)
+	newMetricExp  func(ctx context.Context) (sdkmetric.Exporter, error)
+	newLogExp     func(ctx context.Context) (sdklog.Exporter, error)
+	registerGauge func(e *ConnEmitter, mp *sdkmetric.MeterProvider) error
+}
+
+func defaultConnDeps() connDeps {
+	return connDeps{
+		buildResource: buildResource,
+		newMetricExp:  func(ctx context.Context) (sdkmetric.Exporter, error) { return otlpmetricgrpc.New(ctx) },
+		newLogExp:     func(ctx context.Context) (sdklog.Exporter, error) { return otlploggrpc.New(ctx) },
+		registerGauge: (*ConnEmitter).registerGauge,
+	}
+}
+
 // NewConnectionEmitter returns (nil, nil) when OTEL_EXPORTER_OTLP_ENDPOINT is
 // unset, matching otel.New's disabled-state contract.
 func NewConnectionEmitter(ctx context.Context, opts ConnOptions) (*ConnEmitter, error) {
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" {
 		return nil, nil
 	}
-	res, err := buildResource(ctx, opts.ServiceName, opts.ServiceVersion)
+	return newConnectionEmitter(ctx, opts, defaultConnDeps())
+}
+
+// newConnectionEmitter is the dependency-injected core of NewConnectionEmitter.
+// It assumes the endpoint gate has already been checked; tests call it directly
+// with a fault-injecting connDeps to exercise the error branches.
+func newConnectionEmitter(ctx context.Context, opts ConnOptions, deps connDeps) (*ConnEmitter, error) {
+	res, err := deps.buildResource(ctx, opts.ServiceName, opts.ServiceVersion)
 	if err != nil {
 		return nil, err
 	}
-	metricExp, err := otlpmetricgrpc.New(ctx)
+	metricExp, err := deps.newMetricExp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +90,7 @@ func NewConnectionEmitter(ctx context.Context, opts ConnOptions) (*ConnEmitter, 
 			sdkmetric.WithInterval(connExportInterval))),
 		sdkmetric.WithResource(res),
 	)
-	logExp, err := otlploggrpc.New(ctx)
+	logExp, err := deps.newLogExp(ctx)
 	if err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, err
@@ -75,7 +105,7 @@ func NewConnectionEmitter(ctx context.Context, opts ConnOptions) (*ConnEmitter, 
 		logger:          lp.Logger("pa-monitor"),
 		component:       opts.Component,
 	}
-	if err := e.registerGauge(mp); err != nil {
+	if err := deps.registerGauge(e, mp); err != nil {
 		_ = mp.Shutdown(ctx)
 		_ = lp.Shutdown(ctx)
 		return nil, err
