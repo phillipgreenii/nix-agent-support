@@ -117,15 +117,22 @@ func TestPRShow_JSONOutput(t *testing.T) {
 	}
 }
 
-func TestPRInfo_NoStoreEntry(t *testing.T) {
+// TestPRInfo_AliasOfShow verifies that `pr info` renders the base PR metadata
+// exactly like `pr show` (the historical alias behavior), even when no store
+// exists. XDG_STATE_HOME points at an empty temp dir so DefaultPath() does not
+// resolve, exercising the stat-guard skip path in appendEnrichment.
+func TestPRInfo_AliasOfShow(t *testing.T) {
 	resetPRFlags()
-	// Point XDG_STATE_HOME at an empty temp dir so the store is always empty.
-	// DefaultPath() appends "pg-pr/store.db", so create that subdirectory.
-	tmp := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmp, "pg-pr"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // no pg-pr/store.db inside → stat-guard skips
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	vcsProviderFor = func(string) vcs.Provider {
+		return &fakeVCS{pr: &api.PR{
+			Repo: "foo/bar", State: "open", Branch: "feat/x", Base: "main",
+			Author: "phillipg", URL: "https://github.com/foo/bar/pull/7",
+		}}
 	}
-	t.Setenv("XDG_STATE_HOME", tmp)
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -136,12 +143,18 @@ func TestPRInfo_NoStoreEntry(t *testing.T) {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "not yet synced") {
-		t.Fatalf("expected 'not yet synced' in output: %q", got)
+	if !strings.Contains(got, "number: 7") {
+		t.Fatalf("expected number: 7 in output: %q", got)
+	}
+	if !strings.Contains(got, "author: phillipg") {
+		t.Fatalf("expected author: phillipg in output: %q", got)
 	}
 }
 
-func TestPRInfo_WithStoreEntry(t *testing.T) {
+// TestPRInfo_ShowPlusEnrichment seeds the store with an enriched row AND wires a
+// fake VCS provider so the show render succeeds. The output must contain BOTH
+// the base PR metadata and the enrichment section.
+func TestPRInfo_ShowPlusEnrichment(t *testing.T) {
 	resetPRFlags()
 	// Seed the store with an enriched PR and point XDG_STATE_HOME at it.
 	// DefaultPath() appends "pg-pr/store.db", so create that subdirectory.
@@ -170,6 +183,15 @@ func TestPRInfo_WithStoreEntry(t *testing.T) {
 	}
 	_ = db.Close()
 
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	vcsProviderFor = func(string) vcs.Provider {
+		return &fakeVCS{pr: &api.PR{
+			Repo: "foo/bar", State: "open", Branch: "feat/x", Base: "main",
+			Author: "phillipg", URL: "https://github.com/foo/bar/pull/7",
+		}}
+	}
+
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
@@ -179,10 +201,51 @@ func TestPRInfo_WithStoreEntry(t *testing.T) {
 		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
 	}
 	got := stdout.String()
-	for _, want := range []string{"bugfix", "M", "high", "Go", "label:p0"} {
+	// Base PR metadata (from the show render) AND enrichment fields.
+	for _, want := range []string{"number: 7", "author: phillipg", "bugfix", "M", "high", "Go", "label:p0"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in output: %q", want, got)
 		}
+	}
+}
+
+// TestPRInfo_NoStore verifies that `pr info` still works (renders the PR, no
+// enrichment) when no store file exists at all.
+func TestPRInfo_NoStore(t *testing.T) {
+	resetPRFlags()
+	// Empty temp dir with no pg-pr/store.db → stat-guard in appendEnrichment
+	// skips, and nothing is created.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	vcsProviderFor = func(string) vcs.Provider {
+		return &fakeVCS{pr: &api.PR{
+			Repo: "foo/bar", State: "open", Branch: "feat/x", Base: "main",
+			Author: "phillipg", URL: "https://github.com/foo/bar/pull/7",
+		}}
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "info", "7", "--repo", "foo/bar"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	got := stdout.String()
+	if !strings.Contains(got, "number: 7") {
+		t.Fatalf("expected number: 7 in output: %q", got)
+	}
+	// No enrichment section appended (store absent); "Kind:" is the enrichment
+	// renderer's first line.
+	if strings.Contains(got, "Kind:") {
+		t.Errorf("did not expect enrichment section without a store: %q", got)
+	}
+	// The stat-guard must not have created the store file.
+	if _, statErr := os.Stat(store.DefaultPath()); statErr == nil {
+		t.Errorf("appendEnrichment created a store file at %s; it must not", store.DefaultPath())
 	}
 }
 

@@ -147,33 +147,49 @@ var prShowCmd = &cobra.Command{
 var prInfoCmd = &cobra.Command{
 	Use:     "info <pr>",
 	Aliases: []string{"pr-info"},
-	Short:   "Show persisted enrichment for a PR (kind, size, languages, urgency)",
+	Short:   "Show full PR metadata plus persisted enrichment (kind, size, languages, urgency)",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prF.repo)
-		if err != nil {
+		// First render the live PR exactly as `pr show` does. Phase 3 may add
+		// labels / reviewers / checks here.
+		if err := prShowCmd.RunE(cmd, args); err != nil {
 			return err
 		}
-		num, err := strconv.Atoi(args[0])
-		if err != nil {
-			return fmt.Errorf("invalid PR number %q: %w", args[0], err)
-		}
-		db, err := store.Open(store.DefaultPath())
-		if err != nil {
-			return fmt.Errorf("open store: %w", err)
-		}
-		defer func() { _ = db.Close() }()
-		pr, err := db.GetPR(ctx, repo, num)
-		if err != nil {
-			return err
-		}
-		if pr == nil {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "PR %s#%d not yet synced (no enrichment)\n", repo, num)
-			return err
-		}
-		return renderEnrichment(cmd.OutOrStdout(), pr)
+		// Then best-effort append the persisted enrichment section. This must
+		// never fail the command and must not create a store file as a side
+		// effect: if no store exists yet, skip silently.
+		return appendEnrichment(cmd, args)
 	},
+}
+
+// appendEnrichment writes the persisted enrichment section for the PR named by
+// args[0] to cmd's stdout. It is best-effort: a missing store, a missing row,
+// or any read error yields no output and no error (the PR metadata has already
+// been rendered by the caller). It deliberately stat-guards DefaultPath() first
+// so it never creates a store file as a side effect.
+func appendEnrichment(cmd *cobra.Command, args []string) error {
+	if _, statErr := os.Stat(store.DefaultPath()); statErr != nil {
+		return nil // no store yet → just the PR render
+	}
+	ctx := cmd.Context()
+	repo, err := resolveRepo(ctx, prF.repo)
+	if err != nil {
+		return nil
+	}
+	num, err := strconv.Atoi(args[0])
+	if err != nil {
+		return nil
+	}
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = db.Close() }()
+	pr, err := db.GetPR(ctx, repo, num)
+	if err != nil || pr == nil {
+		return nil
+	}
+	return renderEnrichment(cmd.OutOrStdout(), pr)
 }
 
 var prFilesCmd = &cobra.Command{
