@@ -69,29 +69,6 @@ func startCICDSpan(ctx context.Context, method, repo string, prNumber int, runID
 	)
 }
 
-// startBeadsSpan opens a span for a bd write. op is the BeadClient method
-// name (e.g., "EnsureMergeRequest"); prNumber may be 0 when the write is
-// not PR-scoped (e.g., ListMergeRequests).
-//
-// Temporarily uncalled: the one-shot Sync inline bead-write was removed in the
-// event-ownership refactor (the bead is now projected by beadsbridge at outbox
-// flush). The daemon path conversion (Tasks 9-10) re-instruments bd writes
-// through this helper.
-//
-//nolint:unused // see comment above (re-wired by the daemon-path conversion).
-func startBeadsSpan(ctx context.Context, op, repo string, prNumber int) (context.Context, trace.Span) {
-	attrs := []attribute.KeyValue{}
-	if repo != "" {
-		attrs = append(attrs, attribute.String("repo_name", repo))
-	}
-	if prNumber > 0 {
-		attrs = append(attrs, attribute.Int("pr_number", prNumber))
-	}
-	return telemetry.Tracer().Start(ctx, "pg-pr.beads."+op,
-		trace.WithAttributes(attrs...),
-	)
-}
-
 // recordSpanErr stamps an error onto the span. No-op when err is nil.
 func recordSpanErr(span trace.Span, err error) {
 	if err == nil {

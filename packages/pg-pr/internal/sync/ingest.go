@@ -46,10 +46,12 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	// UpsertPR once, outside the per-feedback transactions, so we capture
 	// prID before the item loop. This is idempotent with the authoritative
 	// UpsertPR the Sync per-PR loop already performs for every observed PR;
-	// reusing prToStoreRow keeps both writes byte-identical (same state,
-	// ownership, last_synced_at) so the second write never clobbers the first.
-	// It is still required here because ingestFeedbackToStore is also called
-	// directly (e.g. the full-chain integration test) without a prior upsert.
+	// reusing prToStoreRow keeps both writes equivalent (last-writer-wins;
+	// both derive state/ownership from stateForPR — last_synced_at may differ
+	// since each call invokes Now() separately) so the second write never
+	// meaningfully clobbers the first. It is still required here because
+	// ingestFeedbackToStore is also called directly (e.g. the full-chain
+	// integration test) without a prior upsert.
 	ownership := "team"
 	if mine {
 		ownership = "mine"

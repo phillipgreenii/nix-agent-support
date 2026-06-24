@@ -79,8 +79,8 @@ func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 //   - lastState: the State passed to the most recent EnsureMergeRequest.
 //   - closed: whether CloseMergeRequest was called.
 //
-// existing, when non-nil, is returned by ListMergeRequests so findBeadByPR
-// locates a pre-existing open bead to close on the merged path.
+// existing, when non-nil, is returned by ListMergeRequests so the engine's
+// pre-existing-bead index (listExistingByKey) finds a bead for this PR.
 type refreshFakeBeads struct {
 	noopBeads
 	existing     *beads.MergeRequest

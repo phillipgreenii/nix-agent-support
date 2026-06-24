@@ -250,10 +250,12 @@ func makeEngine(t *testing.T, vcs *fakeVCS) *Engine {
 }
 
 // wireOutboxBridge attaches a fresh store.DB + a per-repo routing bridge
-// dispatcher onto the engine, mirroring the production wiring in
-// cmd/pg-pr/sync.go (newBeadsBridgeHandler). Each event is routed to the bd
-// client for its repo: the shared Deps.Beads when set, else a per-repo
-// NewClientForRepo(path). Errors are swallowed by the dispatcher (as in prod).
+// dispatcher onto the engine. The per-repo NewClientForRepo(path) routing
+// follows the production wiring in cmd/pg-pr/sync.go (newBeadsBridgeHandler),
+// but this helper ALSO adds a test-only branch that prefers a shared
+// Deps.Beads client when set — production has no such branch (it always routes
+// by repo Path). That branch lets tests share one in-memory/real bd workspace
+// across repos. Errors are swallowed by the dispatcher (as in prod).
 func wireOutboxBridge(t *testing.T, e *Engine) {
 	t.Helper()
 	db := store.OpenForTest(t)
@@ -394,6 +396,114 @@ func TestSync_ClosesBeadsWhenPRDisappears(t *testing.T) {
 	}
 	if sum.BeadsClosed != 1 {
 		t.Fatalf("BeadsClosed: got %d want 1", sum.BeadsClosed)
+	}
+}
+
+// TestSyncSummaryCounts exercises all three per-PR summary counters in a
+// single one-shot Engine.Sync, proving they are mutually exclusive and
+// correctly attributed:
+//
+//   - PR #1 is NEW (no pre-existing bead in the workspace) → pr.opened →
+//     BeadsCreated.
+//   - PR #2 is PRE-EXISTING (an open merge-request bead already lives in the
+//     bd workspace at sync start, so repoPreExisting finds it) → pr.updated →
+//     BeadsUpdated.
+//   - PR #3 has DISAPPEARED (an open store row that is not in the observed
+//     set) → pr.closed → BeadsClosed.
+//
+// It uses the makeEngine harness (real bd client via Deps.Beads + real store
+// + routing bridge) so the pre-existing-bead index reflects the workspace.
+func TestSyncSummaryCounts(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	// PR #1 (new) and PR #2 (pre-existing) are both observed this tick.
+	// PR #3 is intentionally NOT observed (it disappeared upstream).
+	vcs.my["foo/bar"] = []api.PR{
+		samplePR(1, "foo/bar", "feat/new"),
+		samplePR(2, "foo/bar", "feat/existing"),
+	}
+	e := makeEngine(t, vcs)
+
+	// Pre-existing: seed an OPEN merge-request bead for PR #2 directly in the
+	// engine's bd workspace BEFORE Sync, so listExistingByKey records it in
+	// repoPreExisting and the per-PR block classifies #2 as pr.updated.
+	if _, _, err := e.deps.Beads.EnsureMergeRequest(ctx, "foo/bar#2", beads.MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 2, State: "open", Branch: "feat/existing",
+		Base: "main", Author: "phillipg",
+	}); err != nil {
+		t.Fatalf("seed pre-existing bead: %v", err)
+	}
+
+	// Disappeared: seed an OPEN store row for PR #3 that is NOT observed, so
+	// the close-detection loop emits pr.closed and counts BeadsClosed.
+	if _, err := e.deps.Store.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 3, Ownership: "mine", Author: "phillipg",
+		State: "open", Branch: "feat/gone", Base: "main",
+		URL: "https://github.com/foo/bar/pull/3",
+	}); err != nil {
+		t.Fatalf("seed disappeared store row: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+	if sum.BeadsCreated != 1 {
+		t.Fatalf("BeadsCreated: got %d want 1 (errors=%+v)", sum.BeadsCreated, sum.Errors)
+	}
+	if sum.BeadsUpdated != 1 {
+		t.Fatalf("BeadsUpdated: got %d want 1 (errors=%+v)", sum.BeadsUpdated, sum.Errors)
+	}
+	if sum.BeadsClosed != 1 {
+		t.Fatalf("BeadsClosed: got %d want 1 (errors=%+v)", sum.BeadsClosed, sum.Errors)
+	}
+}
+
+// TestSyncSummaryCountsDraftPromoteNoDoubleCount proves a draft-promote does
+// NOT double-count BeadsUpdated for a PR already counted by the per-PR block.
+// maybePromoteDraft emits an extra pr.updated event, but the summary counter is
+// bumped exactly once per PR by the per-PR block (the draft-promote emit is not
+// counted), so a single newly-observed self-authored draft PR yields exactly
+// one create and zero updates.
+func TestSyncSummaryCountsDraftPromoteNoDoubleCount(t *testing.T) {
+	ctx := context.Background()
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Self-authored draft PR with all CI green — draft-promote fires and emits
+	// an extra pr.updated, mirroring TestMaybePromoteDraftEmitsUpdate's setup.
+	pr := selfDraftPR(55, "foo/bar", "feat/draft-promote")
+	pr.State = "open"
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 55)] = []api.CIRun{successRun()}
+
+	bd := newRealBDClient(t)
+	e, err := New(Deps{
+		Cfg:      cfgWithCICD(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	wireOutboxBridge(t, e)
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+	if sum.DraftPromoted != 1 {
+		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
+	}
+	// The PR was newly observed → counted once as a create. The draft-promote's
+	// extra pr.updated must NOT be counted, so BeadsUpdated stays 0.
+	if sum.BeadsCreated != 1 {
+		t.Fatalf("BeadsCreated: got %d want 1 (draft-promote should not change this)", sum.BeadsCreated)
+	}
+	if sum.BeadsUpdated != 0 {
+		t.Fatalf("BeadsUpdated: got %d want 0 (draft-promote must not double-count)", sum.BeadsUpdated)
 	}
 }
 
@@ -555,7 +665,13 @@ func TestSyncPR_SingleRefresh(t *testing.T) {
 	if sum.TotalPRs != 1 {
 		t.Fatalf("TotalPRs: %d", sum.TotalPRs)
 	}
-	if sum.BeadsUpdated != 1 {
+	// First observation of PR #42 via SyncPR → pr.opened → BeadsCreated.
+	// (Pre-fix, applyFetchedPR set BeadsUpdated=1 unconditionally, which
+	// mislabeled a first-seen PR as "updated"; that expectation was wrong.)
+	if sum.BeadsCreated != 1 {
+		t.Fatalf("BeadsCreated: %d", sum.BeadsCreated)
+	}
+	if sum.BeadsUpdated != 0 {
 		t.Fatalf("BeadsUpdated: %d", sum.BeadsUpdated)
 	}
 }

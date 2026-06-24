@@ -1029,7 +1029,11 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 			return err
 		}
 	}
-	summary.BeadsUpdated = 1
+	if eventType == store.EventPROpened {
+		summary.BeadsCreated++
+	} else {
+		summary.BeadsUpdated++
+	}
 	// Emit pr.opened/updated BEFORE processFeedback (which enqueues
 	// feedback.created) so the bridge projects the PR bead first.
 	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownership); err != nil {
@@ -1204,28 +1208,6 @@ func (e *Engine) listExistingByKey(ctx context.Context, bdc BeadClient) (map[prK
 		out[prKey{Repo: mr.Fields.Repo, Number: mr.Fields.PRNumber}] = mr
 	}
 	return out, nil
-}
-
-// findBeadByPR returns the open or closed merge-request bead for a given
-// (repo, pr_number) or nil if not found. Caller passes the bd client whose
-// workspace should be searched.
-//
-// Now uncalled: Task 10 converted the last inline close branches (refreshPR +
-// SyncPR) to event emission, so the beadsbridge locates the bead instead.
-// Removal is consolidated into Task 14.
-//
-//nolint:unused // orphaned by Task 10; removed in Task 14 cleanup.
-func (e *Engine) findBeadByPR(ctx context.Context, bdc BeadClient, repo string, pr int) (*beads.MergeRequest, error) {
-	all, err := bdc.ListMergeRequests(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	for i := range all {
-		if all[i].Fields.Repo == repo && all[i].Fields.PRNumber == pr {
-			return &all[i], nil
-		}
-	}
-	return nil, nil
 }
 
 // stateForPR derives the bead state value from an api.PR.
@@ -1481,30 +1463,6 @@ func allRunsSuccessful(runs []api.CIRun) bool {
 		}
 	}
 	return true
-}
-
-// cascadeClose closes all descendants of prBeadID with the given reason.
-// Errors are absorbed into summary.Errors; the cascade is best-effort.
-// bdc is the per-repo bd client whose workspace holds the descendants.
-//
-// Now uncalled: Task 10 moved the cascade-on-close into the beadsbridge
-// (Handler.cascadeClose), which fires on pr.closed/pr.merged. Removal is
-// consolidated into Task 14.
-//
-//nolint:unused // orphaned by Task 10; removed in Task 14 cleanup.
-func (e *Engine) cascadeClose(ctx context.Context, bdc BeadClient, prBeadID, reason string, summary *Summary) {
-	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
-	if err != nil {
-		return
-	}
-	for _, childID := range children {
-		// Close as a feedback bead first (works for feedback bd type) — if
-		// that fails because the bead is a task or action, fall back to a
-		// generic close via the same wrapper.
-		_ = bdc.CloseFeedback(ctx, childID, reason)
-		_ = bdc.CloseProcessingCycle(ctx, childID, reason)
-		summary.BeadsClosed++
-	}
 }
 
 // ---------------------------------------------------------------------
