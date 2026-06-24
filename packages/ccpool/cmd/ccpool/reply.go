@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/phillipgreenii/ccpool/internal/clock"
@@ -20,15 +21,19 @@ type transcriptAdapter struct{}
 
 func (transcriptAdapter) LastAssistantText(p string) (string, error) { return ct.LastAssistantText(p) }
 func (transcriptAdapter) IsAwaitingInput(p string) (bool, error)     { return ct.IsAwaitingInput(p) }
+func (transcriptAdapter) FirstMessageActivity(p string) (time.Time, bool) {
+	return ct.LastMessageActivity(p)
+}
 
 func runReply(args []string) int {
 	fs := flag.NewFlagSet("reply", flag.ExitOnError)
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
 	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
 	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
+	confirmIngest := fs.Duration("confirm-ingest", 0, "after a fire-and-forget delivery, confirm the model started a turn within this window; exit 7 if not (0 = no check)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id/prompt
 	if len(pos) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool reply <external_id> <prompt> [--no-wait] [--queue-message] [--interrupt]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool reply <external_id> <prompt> [--no-wait] [--queue-message] [--interrupt] [--confirm-ingest dur]")
 		return 2
 	}
 	externalID := pos[0]
@@ -67,7 +72,7 @@ func runReply(args []string) int {
 	case *noWait:
 		mode = session.ModeNoWait
 	}
-	res, err := svc.Send(context.Background(), externalID, prompt, mode)
+	res, err := svc.SendWithConfirm(context.Background(), externalID, prompt, mode, *confirmIngest)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "reply:", err)
 		return replyExitCode(err)
@@ -114,6 +119,8 @@ func replyExitCode(err error) int {
 		return 5
 	case errors.Is(err, session.ErrCancelUnconfirmed):
 		return 6
+	case errors.Is(err, session.ErrPromptNotIngested):
+		return 7
 	default:
 		return 1
 	}
