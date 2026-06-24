@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -246,6 +247,72 @@ func TestPRInfo_NoStore(t *testing.T) {
 	// The stat-guard must not have created the store file.
 	if _, statErr := os.Stat(store.DefaultPath()); statErr == nil {
 		t.Errorf("appendEnrichment created a store file at %s; it must not", store.DefaultPath())
+	}
+}
+
+// TestPRInfo_JSONIsValid verifies that `pr info --json` produces valid JSON
+// (the show render only), with NO trailing plain-text enrichment lines, even
+// when a seeded store row exists. The JSON-flag guard in appendEnrichment must
+// skip the plain-text append so the output stays parseable.
+func TestPRInfo_JSONIsValid(t *testing.T) {
+	resetPRFlags()
+	// Seed an enriched store row so, without the JSON guard, appendEnrichment
+	// would otherwise emit plain-text lines after the JSON object.
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "pg-pr"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", tmp)
+
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 7, Ownership: "mine", State: "open", Author: "phillipg",
+	}); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if err := db.SetEnrichment(ctx, "foo/bar", 7, store.Enrichment{
+		Kind: "bugfix", Size: "M", Urgency: "high",
+		Languages:      []string{"Go"},
+		UrgencyReasons: []string{"label:p0"},
+	}); err != nil {
+		t.Fatalf("set enrichment: %v", err)
+	}
+	_ = db.Close()
+
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	vcsProviderFor = func(string) vcs.Provider {
+		return &fakeVCS{pr: &api.PR{
+			Repo: "foo/bar", State: "open", Branch: "feat/x", Base: "main",
+			Author: "phillipg", URL: "https://github.com/foo/bar/pull/7",
+		}}
+	}
+
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"pr", "info", "7", "--repo", "foo/bar", "--json"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	got := stdout.String()
+
+	// Whole output must be valid JSON — no trailing plain-text enrichment.
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(got), &obj); err != nil {
+		t.Fatalf("pr info --json output is not valid JSON: %v\noutput:\n%s", err, got)
+	}
+	if got, want := obj["number"], float64(7); got != want {
+		t.Errorf("number = %v, want %v", got, want)
+	}
+	// The plain-text enrichment renderer's first line must NOT appear.
+	if strings.Contains(got, "Kind:") {
+		t.Errorf("--json output must not contain plain-text enrichment lines: %q", got)
 	}
 }
 

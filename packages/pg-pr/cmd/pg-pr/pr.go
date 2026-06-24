@@ -168,6 +168,13 @@ var prInfoCmd = &cobra.Command{
 // been rendered by the caller). It deliberately stat-guards DefaultPath() first
 // so it never creates a store file as a side effect.
 func appendEnrichment(cmd *cobra.Command, args []string) error {
+	// When JSON output is requested, the show render already emitted a JSON
+	// object; appending plain-text enrichment lines would corrupt it. Skip so
+	// `pr info --json` is valid JSON identical to `pr show --json`. Mirror the
+	// show path's JSON resolution exactly (output.Resolve(prF.jsonOutput)).
+	if output.Resolve(prF.jsonOutput) {
+		return nil
+	}
 	if _, statErr := os.Stat(store.DefaultPath()); statErr != nil {
 		return nil // no store yet → just the PR render
 	}
