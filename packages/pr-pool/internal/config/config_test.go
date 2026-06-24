@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,6 +47,36 @@ func TestDefault(t *testing.T) {
 	}
 	if d.SessionPrefix != "pr-pool-" {
 		t.Errorf("SessionPrefix = %q, want pr-pool-", d.SessionPrefix)
+	}
+}
+
+func TestDefault_allowedTools(t *testing.T) {
+	d := Default()
+	if d.AllowedTools == "" {
+		t.Fatal("AllowedTools default must be a non-empty allowlist (deny-by-default needs an allowlist to be useful)")
+	}
+	// Sanity: the conservative default must grant the worker its core verbs and
+	// must NOT be a blanket "Bash" (which would re-open arbitrary RCE).
+	for _, must := range []string{"Read", "Edit", "Write", "Bash(git "} {
+		if !strings.Contains(d.AllowedTools, must) {
+			t.Errorf("AllowedTools default %q missing required entry %q", d.AllowedTools, must)
+		}
+	}
+	if strings.Contains(d.AllowedTools, "Bash(*)") || strings.Contains(d.AllowedTools, ",Bash,") ||
+		strings.HasSuffix(d.AllowedTools, ",Bash") || d.AllowedTools == "Bash" {
+		t.Errorf("AllowedTools must not grant unrestricted Bash: %q", d.AllowedTools)
+	}
+}
+
+func TestLoad_allowedToolsEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PR_POOL_ALLOWED_TOOLS", "Read,Edit")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AllowedTools != "Read,Edit" {
+		t.Errorf("AllowedTools = %q, want Read,Edit (PR_POOL_ALLOWED_TOOLS overlay)", c.AllowedTools)
 	}
 }
 

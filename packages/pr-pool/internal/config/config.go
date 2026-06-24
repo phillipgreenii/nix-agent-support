@@ -35,7 +35,14 @@ type Config struct {
 	Effort         string
 	Model          string
 	PermissionMode string
-	SessionPrefix  string
+	// AllowedTools is the claude --allowed-tools allowlist forwarded verbatim to
+	// `ccpool new --allowed-tools`. Combined with PermissionMode=dontAsk it is the
+	// worker's security boundary: any tool NOT matching an entry here is
+	// auto-denied (no human prompt). Empty omits the flag (claude's own default
+	// tool policy applies — used only when an operator deliberately clears it).
+	// SECURITY-SENSITIVE: the default value in Default() requires human sign-off.
+	AllowedTools  string
+	SessionPrefix string
 
 	// SelfLogin is the GitHub login the worker safety preamble asserts authorship
 	// against. From [pool].self_login; falls back to `pg-pr config show` at the
@@ -78,7 +85,11 @@ func Default() Config {
 		Effort:         "max",
 		Model:          "",
 		PermissionMode: "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PR_POOL_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
-		SessionPrefix:  "pr-pool-",
+		// SECURITY-SENSITIVE default allowlist (HUMAN SIGN-OFF REQUIRED — see plan).
+		// Minimum verbs an autonomous worker needs; deliberately NOT blanket Bash.
+		// Per-entry rationale is in docs/superpowers/plans/2026-06-23-pr-pool-deny-by-default-allowlist.md.
+		AllowedTools:  "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
+		SessionPrefix: "pr-pool-",
 		BudgetTokens:   0,                // unlimited until ccpool N3
 		BudgetCost:     0,                // unlimited until ccpool N3
 		BudgetTime:     25 * time.Minute, // strictly < MaxWait (30m)
@@ -111,6 +122,7 @@ func Load() (Config, error) {
 	c.Effort = envStr("PR_POOL_EFFORT", c.Effort)
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
 	c.PermissionMode = envStr("PR_POOL_PERMISSION_MODE", c.PermissionMode)
+	c.AllowedTools = envStr("PR_POOL_ALLOWED_TOOLS", c.AllowedTools)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
 	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PR_POOL_BUDGET_COST", int(c.BudgetCost)))
