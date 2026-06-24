@@ -57,3 +57,28 @@ func TestCodeCommentThreadRequiresFile(t *testing.T) {
 		t.Fatal("expected CHECK violation for code-comment-thread without file")
 	}
 }
+
+// TestListMessagesEmpty verifies that ListMessages returns an empty (non-error)
+// result for a feedback item that has no rows in code_comment_message. This is
+// the expected state today — ingestion writes feedback rows but not thread
+// messages. The show command must handle the empty slice gracefully.
+func TestListMessagesEmpty(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	prID, _ := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 1, Ownership: "mine", State: "open"})
+	fbID, err := db.UpsertFeedback(ctx, Feedback{
+		PRID: prID, Kind: "pr-comments", Fingerprint: "fp-m",
+	})
+	if err != nil {
+		t.Fatalf("UpsertFeedback: %v", err)
+	}
+
+	msgs, err := db.ListMessages(ctx, fbID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("expected 0 messages (none ingested yet), got %d", len(msgs))
+	}
+}

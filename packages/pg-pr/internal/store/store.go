@@ -5,9 +5,21 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
 )
+
+// DefaultPath returns the canonical store file path, honouring XDG_STATE_HOME.
+// Fallback: ~/.local/state/pg-pr/store.db.
+func DefaultPath() string {
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pg-pr", "store.db")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "pg-pr", "store.db")
+}
 
 // DB wraps the sql.DB handle plus pg-pr store operations.
 type DB struct {

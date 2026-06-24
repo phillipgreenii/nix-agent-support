@@ -53,8 +53,6 @@ type Feedback struct {
 }
 
 // Message is one comment within a code-comment-thread feedback item.
-//
-//nolint:unused // used by the messages task
 type Message struct {
 	ID          int64
 	FeedbackID  int64
@@ -298,6 +296,38 @@ func (db *DB) ListPendingReplies(ctx context.Context) ([]Feedback, error) {
 			return nil, err
 		}
 		out = append(out, *f)
+	}
+	return out, rows.Err()
+}
+
+// ListMessages returns the thread messages for a single feedback item, oldest
+// first. The code_comment_message table is not yet populated by ingestion so
+// this returns an empty slice today; callers must handle that gracefully.
+func (db *DB) ListMessages(ctx context.Context, feedbackID int64) ([]Message, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+SELECT id, feedback_id, external_id, author_login, author_kind, agent_name, is_ours, author_role, body, posted_at
+FROM code_comment_message WHERE feedback_id=? ORDER BY id`, feedbackID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list messages feedback=%d: %w", feedbackID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		var (
+			authorLogin, authorKind, agentName, authorRole sql.NullString
+			isOurs                                         int
+			postedAt                                       sql.NullString
+		)
+		if err := rows.Scan(&m.ID, &m.FeedbackID, &m.ExternalID,
+			&authorLogin, &authorKind, &agentName, &isOurs, &authorRole,
+			&m.Body, &postedAt); err != nil {
+			return nil, fmt.Errorf("store: scan message: %w", err)
+		}
+		m.AuthorLogin, m.AuthorKind, m.AgentName, m.AuthorRole = authorLogin.String, authorKind.String, agentName.String, authorRole.String
+		m.IsOurs = isOurs == 1
+		m.PostedAt = postedAt.String
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }
