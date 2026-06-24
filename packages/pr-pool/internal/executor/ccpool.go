@@ -339,3 +339,21 @@ func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
 	}
 	return false // absent ⇒ gone
 }
+
+// sessionState returns the current ccpool state of the session addressed by
+// externalID and whether it was present in the list. Unlike active() (which
+// collapses state to a keep-waiting bool), this preserves the raw state so the
+// caller can detect the EDGE into needs_input. A list error returns ("", false)
+// — can't tell ⇒ no edge fires this poll (the next poll retries).
+func (r *ccpoolRun) sessionState(ctx context.Context, externalID string) (ccpool.SessionState, bool) {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State, true
+		}
+	}
+	return "", false
+}

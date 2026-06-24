@@ -348,6 +348,28 @@ func TestActive_stateMapping(t *testing.T) {
 	}
 }
 
+func TestSessionState_lookup(t *testing.T) {
+	cases := []struct {
+		name      string
+		sess      []ccpool.Session
+		wantState ccpool.SessionState
+		wantOK    bool
+	}{
+		{"present-needs-input", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateNeedsInput}}, ccpool.StateNeedsInput, true},
+		{"present-working", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}, ccpool.StateWorking, true},
+		{"absent", []ccpool.Session{{ExternalID: "other", Live: true, State: ccpool.StateWorking}}, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newExec(&dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sess}}, &dtest.ScriptBD{}, fastCfg())
+			gotState, gotOK := e.sessionState(context.Background(), "s")
+			if gotState != tc.wantState || gotOK != tc.wantOK {
+				t.Errorf("sessionState(%s) = (%q, %v), want (%q, %v)", tc.name, gotState, gotOK, tc.wantState, tc.wantOK)
+			}
+		})
+	}
+}
+
 // --- pg2-kj7j: Dispatch reports the failure verb actually taken ---
 
 func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (report.Result, error) {
