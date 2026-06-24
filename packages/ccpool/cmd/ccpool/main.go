@@ -21,6 +21,7 @@ func pickSubcommand(args []string) (cmd string, rest []string) {
 		"doctor":   true,
 		"hook":     true,
 		"list":     true,
+		"meta":     true,
 		"new":      true,
 		"reap":     true,
 		"reap-all": true,
@@ -101,6 +102,8 @@ func main() {
 		os.Exit(runHook(rest))
 	case "list":
 		os.Exit(runList(rest))
+	case "meta":
+		os.Exit(runMeta(rest))
 	case "new":
 		os.Exit(runNew(rest))
 	case "reap":
