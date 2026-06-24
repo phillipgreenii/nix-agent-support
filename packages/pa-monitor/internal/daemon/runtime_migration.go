@@ -14,11 +14,16 @@ import (
 // legacyRuntimeToggles is the subset of the PRE-migration runtime.json schema
 // that carried the user toggles. RuntimeState no longer holds these fields
 // (the ToggleStore is their single source of truth), but the one-shot
-// migration must still read them out of any legacy file. Kept decoupled from
-// RuntimeState so dropping those fields does not change migration behavior.
+// migration must still read them out of any legacy file.
+//
+// Fields are *bool so absence is distinguishable from false: a post-migration
+// runtime.json holds only nudger state (no toggle keys → both nil) and must NOT
+// be treated as a legacy file, or the migration would zero the DB toggles and
+// delete the live nudger-state file on every boot (the WatermarkStore re-creates
+// the file each run, so the migration sees it every time).
 type legacyRuntimeToggles struct {
-	CaffeinateOn      bool `json:"caffeinate_on"`
-	AutoResumeEnabled bool `json:"auto_resume_enabled"`
+	CaffeinateOn      *bool `json:"caffeinate_on"`
+	AutoResumeEnabled *bool `json:"auto_resume_enabled"`
 }
 
 // readLegacyRuntimeToggles reads the legacy toggle keys from a pre-migration
@@ -35,8 +40,12 @@ func readLegacyRuntimeToggles(path string) (legacyRuntimeToggles, error) {
 	return lt, nil
 }
 
-// MigrateRuntimeJSON reads runtime.json (if present), writes the toggle values
-// into ToggleStore, and then deletes the file. A missing file is a no-op.
+// MigrateRuntimeJSON performs the one-shot legacy-runtime.json -> ToggleStore
+// migration. If the file is a legacy file (carries caffeinate_on and/or
+// auto_resume_enabled keys), it copies the present toggle values into the
+// ToggleStore and deletes the file. A missing file — or a post-migration file
+// that carries only nudger state (no toggle keys) — is a no-op: the file is
+// left untouched and the toggle store is not written.
 //
 // Nudge watermark seeding is skipped (option b): the NudgeStore requires the
 // surrogate int64 session row id, which is not exposed on SessionStore without
@@ -67,11 +76,24 @@ func MigrateRuntimeJSON(
 		return fmt.Errorf("read runtime.json: %w", err)
 	}
 
-	if err := ts.Set(ctx, "caffeinate_on", rs.CaffeinateOn); err != nil {
-		return fmt.Errorf("set caffeinate_on: %w", err)
+	// No toggle keys at all → this is a post-migration nudger-state file, not a
+	// legacy file. Leave it completely alone: writing the toggle store would
+	// zero the user's real DB values, and removing the file would wipe live
+	// nudger state — both on every boot.
+	if rs.CaffeinateOn == nil && rs.AutoResumeEnabled == nil {
+		return nil
 	}
-	if err := ts.Set(ctx, "auto_resume_enabled", rs.AutoResumeEnabled); err != nil {
-		return fmt.Errorf("set auto_resume_enabled: %w", err)
+
+	// Genuine legacy file: migrate the toggle keys that are present.
+	if rs.CaffeinateOn != nil {
+		if err := ts.Set(ctx, "caffeinate_on", *rs.CaffeinateOn); err != nil {
+			return fmt.Errorf("set caffeinate_on: %w", err)
+		}
+	}
+	if rs.AutoResumeEnabled != nil {
+		if err := ts.Set(ctx, "auto_resume_enabled", *rs.AutoResumeEnabled); err != nil {
+			return fmt.Errorf("set auto_resume_enabled: %w", err)
+		}
 	}
 
 	// Nudge watermark rows are intentionally not seeded here — see function
