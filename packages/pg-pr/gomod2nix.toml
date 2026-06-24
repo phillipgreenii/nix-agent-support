@@ -46,8 +46,8 @@ schema = 3
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
 
   [mod.'github.com/mattn/go-isatty']
-    version = 'v0.0.20'
-    hash = 'sha256-qhw9hWtU5wnyFyuMbKx+7RB8ckQaFQ8D+8GKPkN3HHQ='
+    version = 'v0.0.22'
+    hash = 'sha256-6O/0jc33pKUzlzUGpH8Ekk54XgJvx6Qe7kJtbcNJAV4='
 
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
