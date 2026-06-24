@@ -397,6 +397,105 @@ func TestSync_ClosesBeadsWhenPRDisappears(t *testing.T) {
 	}
 }
 
+// TestSyncEmitsCloseForDisappearedPR verifies the Task 8 store-driven
+// close-detection path: a store PR row that is open but no longer in the
+// observed set is (a) emitted as a pr.closed event, (b) counted in
+// summary.BeadsClosed, and (c) marked closed in the store so it is not
+// re-detected on the next tick.
+//
+// This test does NOT wire the bridge dispatcher: it inspects the raw outbox
+// rows so it can prove the close event was enqueued (the bridge would consume
+// them and we'd only see the bead side-effect).
+func TestSyncEmitsCloseForDisappearedPR(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	// VCS returns NO PRs for foo/bar — enumeration succeeds (so foo/bar is
+	// healthy and close-detection runs for it) but the observed set is empty.
+	vcs := newFakeVCS()
+
+	bd := newRealBDClient(t)
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No SetStoreAndDispatch / bridge: we want raw outbox inspection.
+
+	// Pre-seed an OPEN store row for a PR that is no longer observed upstream.
+	if _, err := db.UpsertPR(ctx, store.PullRequest{
+		Repo: "foo/bar", Number: 1, Ownership: "mine", Author: "phillipg",
+		State: "open", Branch: "feat/gone", Base: "main",
+		URL: "https://github.com/foo/bar/pull/1",
+	}); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	// (b) close was counted.
+	if sum.BeadsClosed != 1 {
+		t.Fatalf("BeadsClosed: got %d want 1 (errors=%+v)", sum.BeadsClosed, sum.Errors)
+	}
+
+	// (c) the store row was marked closed, so ListOpenPRs no longer returns it.
+	open, err := db.ListOpenPRs(ctx, "foo/bar")
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("expected no open store rows after close; got %+v", open)
+	}
+
+	// (a) a pr.closed event was enqueued for foo/bar#1. Drain the outbox.
+	var events []store.Event
+	if err := db.RunOutbox(ctx, func(_ context.Context, ev store.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRClosed {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.Repo == "foo/bar" && p.Number == 1 {
+			found = true
+			if p.Merged {
+				t.Errorf("pr.closed payload should have Merged=false; got %+v", p)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.closed event for foo/bar#1 in outbox; events: %+v", events)
+	}
+
+	// A SECOND Sync must NOT re-emit a close (the row is already closed, so
+	// ListOpenPRs no longer returns it). This proves marking-closed prevents
+	// re-detection every tick.
+	sum2, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("second Sync: %v (errors=%+v)", err, sum2.Errors)
+	}
+	if sum2.BeadsClosed != 0 {
+		t.Fatalf("second Sync BeadsClosed: got %d want 0 (re-emission not prevented)", sum2.BeadsClosed)
+	}
+}
+
 func TestSync_DoesNotCloseBeadsForFailedRepo(t *testing.T) {
 	ctx := context.Background()
 	vcs := newFakeVCS()

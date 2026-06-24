@@ -55,8 +55,6 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 
 // emitPRClosed enqueues pr.closed (or pr.merged when merged) for a stored PR row
 // that is no longer observed upstream.
-//
-//nolint:unused // called by Phase B/C wiring (not yet wired)
 func (e *Engine) emitPRClosed(ctx context.Context, row store.PullRequest, merged bool) error {
 	if e.deps.Store == nil {
 		return nil

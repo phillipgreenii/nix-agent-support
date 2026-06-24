@@ -493,48 +493,53 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		summary.RepliesPosted += n
 	}
 
-	// Close beads whose PR is no longer in the observed set, but only
-	// among repos that synced successfully. This prevents us from closing
-	// beads in a repo whose sync failed (we'd have no authoritative view).
+	// Close PRs whose row is no longer in the observed set, but only among
+	// repos that synced successfully. This prevents us from closing rows in a
+	// repo whose sync failed (we'd have no authoritative view).
 	//
-	// Each repo's bd workspace is queried independently via its own
-	// per-repo client — otherwise we'd miss beads that live in a sibling
-	// monorepo's workspace.
-	for repo := range healthyRepos {
-		bdc := repoClients[repo]
-		if bdc == nil {
-			continue
-		}
-		all, err := bdc.ListMergeRequests(ctx, false /* open only */)
-		if err != nil {
-			summary.Errors = append(summary.Errors, SummaryError{
-				Repo:    repo,
-				Message: fmt.Sprintf("list open beads: %v", err),
-			})
-			continue
-		}
-		for _, mr := range all {
-			// Defensive: a repo's workspace should only hold beads tagged
-			// with its own remote, but old data may leak. Skip beads that
-			// don't match this repo.
-			if mr.Fields.Repo != repo {
-				continue
-			}
-			k := prKey{Repo: mr.Fields.Repo, Number: mr.Fields.PRNumber}
-			if _, watched := observed[k]; watched {
-				continue
-			}
-			if err := bdc.CloseMergeRequest(ctx, mr.ID, "upstream-not-watched"); err != nil {
+	// Store-driven: read open PR rows from store.ListOpenPRs and, for each PR
+	// no longer observed, mark the row closed (so it isn't re-detected next
+	// tick) and emit pr.closed. The beadsbridge handler performs the actual
+	// bead close + cascade at outbox flush.
+	if e.deps.Store != nil {
+		for repo := range healthyRepos {
+			open, err := e.deps.Store.ListOpenPRs(ctx, repo)
+			if err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{
-					Repo:    mr.Fields.Repo,
-					Message: fmt.Sprintf("close stale bead %s: %v", mr.ID, err),
+					Repo:    repo,
+					Message: fmt.Sprintf("list open prs: %v", err),
 				})
 				continue
 			}
-			summary.BeadsClosed++
-			// Cascade: close all descendants (processing-cycles, feedback,
-			// actions) with reason pr-closed.
-			e.cascadeClose(ctx, bdc, mr.ID, "pr-closed", summary)
+			for _, row := range open {
+				k := prKey{Repo: row.Repo, Number: row.Number}
+				if _, watched := observed[k]; watched {
+					continue
+				}
+				// Mark the store row closed so ListOpenPRs stops returning it
+				// next tick (otherwise pr.closed would re-fire every tick
+				// forever).
+				row.State = "closed"
+				if _, err := e.deps.Store.UpsertPR(ctx, row); err != nil {
+					summary.Errors = append(summary.Errors, SummaryError{
+						Repo:    repo,
+						Message: fmt.Sprintf("mark closed %s#%d: %v", row.Repo, row.Number, err),
+					})
+					continue
+				}
+				// merged is false: Sync close-detection can't distinguish
+				// merged-vs-closed (the daemon's refresh.go handles merged).
+				// This matches the old behaviour (close reason
+				// upstream-not-watched, not merged).
+				if err := e.emitPRClosed(ctx, row, false); err != nil {
+					summary.Errors = append(summary.Errors, SummaryError{
+						Repo:    repo,
+						Message: fmt.Sprintf("emit close %s#%d: %v", row.Repo, row.Number, err),
+					})
+					continue
+				}
+				summary.BeadsClosed++
+			}
 		}
 	}
 
