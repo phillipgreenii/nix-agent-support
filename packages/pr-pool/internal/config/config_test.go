@@ -212,6 +212,7 @@ func TestWorkerBudget_defaults(t *testing.T) {
 
 func TestWorkerBudget_envOverrides(t *testing.T) {
 	absentConfig(t)
+	absentGlobalConfig(t) // the XDG-global budget layer sits above env; neutralize a real ~/.config so it can't override these env values
 	t.Setenv("PR_POOL_BUDGET_TOKENS", "1000000")
 	t.Setenv("PR_POOL_BUDGET_TIME", "600")
 	c, err := Load()
