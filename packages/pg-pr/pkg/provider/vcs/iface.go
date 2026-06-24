@@ -62,6 +62,12 @@ type EnrichedPR struct {
 	Reviews  []api.Review
 	Comments []api.Comment
 	CIRuns   []api.CIRun
+	// Files are the changed-file paths (for language detection). Empty when
+	// not fetched (REST fallback) or truncated on a very large PR.
+	Files []string
+	// Commits are the PR's commit messages (for kind/urgency). Empty on the
+	// REST fallback path.
+	Commits []string
 
 	// Truncated reports the embedded connections whose pagination cap was
 	// hit during the bulk fetch (so the caller can decide whether to fall

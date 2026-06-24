@@ -21,4 +21,6 @@ type PR struct {
 	// Body is the PR description text. Added for urgency keyword scanning;
 	// fully populated in Task 8.
 	Body string `json:"body,omitempty"`
+	// Labels are the PR's label names. Used by enrichment's urgency signal.
+	Labels []string `json:"labels,omitempty"`
 }
