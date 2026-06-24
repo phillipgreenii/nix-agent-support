@@ -300,9 +300,42 @@ func (db *DB) ListPendingReplies(ctx context.Context) ([]Feedback, error) {
 	return out, rows.Err()
 }
 
+// ReplaceMessages upserts a set of messages for a code-comment-thread feedback
+// row. Each message is keyed by (feedback_id, external_id); on conflict the
+// row is updated so re-ingestion is idempotent. The method is on *Tx so it
+// runs in the same transaction as the parent UpsertFeedback call.
+func (t *Tx) ReplaceMessages(feedbackID int64, msgs []Message) error {
+	for _, m := range msgs {
+		if m.ExternalID == "" {
+			return fmt.Errorf("store: ReplaceMessages: message missing external_id (feedback=%d)", feedbackID)
+		}
+		_, err := t.Exec(`
+INSERT INTO code_comment_message
+  (feedback_id, external_id, author_login, author_kind, agent_name, is_ours, author_role, body, posted_at)
+VALUES (?,?,?,?,?,?,?,?,?)
+ON CONFLICT(feedback_id, external_id) DO UPDATE SET
+  author_login=excluded.author_login, author_kind=excluded.author_kind,
+  agent_name=excluded.agent_name, is_ours=excluded.is_ours,
+  author_role=excluded.author_role, body=excluded.body, posted_at=excluded.posted_at`,
+			feedbackID,
+			m.ExternalID,
+			nullStr(m.AuthorLogin),
+			nullStr(m.AuthorKind),
+			nullStr(m.AgentName),
+			b2i(m.IsOurs),
+			nullStr(m.AuthorRole),
+			m.Body,
+			nullStr(m.PostedAt),
+		)
+		if err != nil {
+			return fmt.Errorf("store: upsert message %s (feedback=%d): %w", m.ExternalID, feedbackID, err)
+		}
+	}
+	return nil
+}
+
 // ListMessages returns the thread messages for a single feedback item, oldest
-// first. The code_comment_message table is not yet populated by ingestion so
-// this returns an empty slice today; callers must handle that gracefully.
+// first.
 func (db *DB) ListMessages(ctx context.Context, feedbackID int64) ([]Message, error) {
 	rows, err := db.sql.QueryContext(ctx, `
 SELECT id, feedback_id, external_id, author_login, author_kind, agent_name, is_ours, author_role, body, posted_at

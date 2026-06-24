@@ -79,73 +79,176 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	}
 
 	// --- Comments ---
+	//
+	// Split enriched.Comments into two groups:
+	//   1. Top-level (pr-comments): Path == "" — one feedback row per comment.
+	//   2. Inline thread (code-comment-thread): Path != "" — one feedback row
+	//      per unique ThreadID, with all per-thread comments stored as
+	//      code_comment_message rows.
+	//
+	// Group inline comments by ThreadID, preserving the order they appear in
+	// the slice (which matches GraphQL creation order within each thread).
+	type threadGroup struct {
+		comments []api.Comment
+	}
+	threadOrder := []string{} // thread ids in first-seen order
+	threads := map[string]*threadGroup{}
+
 	for _, c := range enriched.Comments {
-		// api.Comment has no __typename field; derive "Bot" typename from the
-		// [bot] login suffix (GitHub's canonical bot indicator) so Classify
-		// can use the Bot/Mannequin typename path when the bot is not in the
-		// registry.
+		if c.Path == "" {
+			// Top-level pr-comment — handle inline below after grouping.
+			continue
+		}
+		tid := c.ThreadID
+		if tid == "" {
+			// Shouldn't happen for path-bearing comments, but be defensive.
+			// Treat each as its own pseudo-thread keyed by comment id.
+			tid = "comment-" + c.ID
+		}
+		if _, exists := threads[tid]; !exists {
+			threadOrder = append(threadOrder, tid)
+			threads[tid] = &threadGroup{}
+		}
+		threads[tid].comments = append(threads[tid].comments, c)
+	}
+
+	// Ingest top-level (pr-comments) — unchanged from prior behaviour.
+	for _, c := range enriched.Comments {
+		if c.Path != "" {
+			continue // handled in the thread loop below
+		}
+
 		typename := ""
 		if strings.HasSuffix(c.Author, "[bot]") {
 			typename = "Bot"
 		}
 		a := reg.Classify(c.Author, typename, c.Body, self)
 		if a.IsOurs {
-			// Skip pg-pr's own marker'd replies — do not re-ingest.
 			continue
 		}
 
-		// Classify as code-comment-thread ONLY when c.Path is non-empty so the
-		// store's file guard is never triggered. Path-less thread comments
-		// (e.g. file-level / collapsed review threads with Line>0 or ThreadID
-		// set but no Path) route to pr-comments instead.
-		kind := "pr-comments"
-		if c.Path != "" {
-			kind = "code-comment-thread"
-		}
-
-		fp := feedbackclassify.Fingerprint(kind, feedbackclassify.FPParts{
-			File:       c.Path,
-			Line:       c.Line,
+		fp := feedbackclassify.Fingerprint("pr-comments", feedbackclassify.FPParts{
 			Body:       c.Body,
 			ExternalID: c.ID,
 		})
-
 		f := store.Feedback{
-			PRID:            prID,
-			Kind:            kind,
-			ExternalID:      c.ID,
-			Fingerprint:     fp,
-			Body:            c.Body,
-			AuthorLogin:     c.Author,
-			AuthorKind:      a.Kind,
-			AgentName:       a.AgentName,
-			IsOurs:          false,
-			AuthorRole:      c.AuthorRole,
-			Severity:        a.DefaultSeverity,
-			ManagedUpstream: a.ManagedUpstream,
-			File:            c.Path,
-			Line:            c.Line,
-			SubjectSHA:      c.OriginalCommitOID,
-			IsOutdated:      c.ThreadIsOutdated,
-			IsMinimized:     c.IsMinimized,
-			MinimizedReason: c.MinimizedReason,
+			PRID:             prID,
+			Kind:             "pr-comments",
+			ExternalID:       c.ID,
+			Fingerprint:      fp,
+			Body:             c.Body,
+			AuthorLogin:      c.Author,
+			AuthorKind:       a.Kind,
+			AgentName:        a.AgentName,
+			IsOurs:           false,
+			AuthorRole:       c.AuthorRole,
+			Severity:         a.DefaultSeverity,
+			ManagedUpstream:  a.ManagedUpstream,
+			FirstSeenHeadSHA: pr.HeadSHA,
 		}
-		// For pr-comments (non-code-anchored), use the PR head SHA as the
-		// revision proxy for first_seen_head_sha (spec: D4).
-		if kind == "pr-comments" {
-			f.FirstSeenHeadSHA = pr.HeadSHA
-		}
-
 		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
 			if _, err := tx.UpsertFeedback(f); err != nil {
 				return err
 			}
 			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
 		}); err != nil {
-			// A single item failure must NOT abort the rest. Record the error
-			// and continue so that subsequent comments, CI ingestion, and
-			// ReconcileStaleness all still run.
 			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert comment %s: %v (continuing)\n", c.ID, err)
+			continue
+		}
+	}
+
+	// Ingest inline thread groups — one feedback row per thread.
+	for _, tid := range threadOrder {
+		grp := threads[tid]
+		if len(grp.comments) == 0 {
+			continue
+		}
+
+		// Classify all comments in the thread. Skip the thread entirely only
+		// if ALL comments are ours.
+		type classified struct {
+			comment api.Comment
+			author  feedbackclassify.Author
+		}
+		var items []classified
+		allOurs := true
+		for _, c := range grp.comments {
+			typename := ""
+			if strings.HasSuffix(c.Author, "[bot]") {
+				typename = "Bot"
+			}
+			a := reg.Classify(c.Author, typename, c.Body, self)
+			items = append(items, classified{c, a})
+			if !a.IsOurs {
+				allOurs = false
+			}
+		}
+		if allOurs {
+			continue
+		}
+
+		// Representative comment: first in the thread (oldest).
+		rep := items[0]
+		repC := rep.comment
+		repA := rep.author
+
+		fp := feedbackclassify.Fingerprint("code-comment-thread", feedbackclassify.FPParts{
+			ThreadID: tid,
+			File:     repC.Path,
+			Body:     repC.Body,
+		})
+
+		f := store.Feedback{
+			PRID:            prID,
+			Kind:            "code-comment-thread",
+			ExternalID:      tid, // thread id, not comment id
+			Fingerprint:     fp,
+			Body:            repC.Body,
+			AuthorLogin:     repC.Author,
+			AuthorKind:      repA.Kind,
+			AgentName:       repA.AgentName,
+			IsOurs:          false,
+			AuthorRole:      repC.AuthorRole,
+			Severity:        repA.DefaultSeverity,
+			ManagedUpstream: repA.ManagedUpstream,
+			File:            repC.Path,
+			Line:            repC.Line,
+			SubjectSHA:      repC.OriginalCommitOID,
+			IsOutdated:      repC.ThreadIsOutdated,
+			IsMinimized:     repC.IsMinimized,
+			MinimizedReason: repC.MinimizedReason,
+		}
+
+		// Build messages from all non-ours comments (the agent's context).
+		var msgs []store.Message
+		for _, item := range items {
+			if item.author.IsOurs {
+				continue
+			}
+			msgs = append(msgs, store.Message{
+				ExternalID:  item.comment.ID,
+				AuthorLogin: item.comment.Author,
+				AuthorKind:  item.author.Kind,
+				AgentName:   item.author.AgentName,
+				IsOurs:      false,
+				AuthorRole:  item.comment.AuthorRole,
+				Body:        item.comment.Body,
+				PostedAt:    item.comment.OriginalCommitOID, // best proxy for ordering; actual timestamp not in api.Comment
+			})
+		}
+
+		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
+			fbID, err := tx.UpsertFeedback(f)
+			if err != nil {
+				return err
+			}
+			if err := tx.ReplaceMessages(fbID, msgs); err != nil {
+				return err
+			}
+			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
+		}); err != nil {
+			// A single thread failure must NOT abort the rest.
+			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert thread %s: %v (continuing)\n", tid, err)
 			continue
 		}
 	}

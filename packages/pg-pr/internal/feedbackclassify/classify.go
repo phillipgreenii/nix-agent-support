@@ -69,6 +69,10 @@ type FPParts struct {
 	CheckName  string
 	SubjectSHA string
 	ExternalID string
+	// ThreadID, when set, is used as the primary key for code-comment-thread
+	// fingerprints instead of file+body. This makes the fingerprint stable
+	// across force-pushes and body edits for the same review thread.
+	ThreadID string
 }
 
 // Fingerprint computes a stable dedup key for a feedback item, per-kind:
@@ -87,7 +91,11 @@ func Fingerprint(kind string, p FPParts) string {
 	case "ci-failure":
 		key = "ci-failure\x00" + p.CheckName + "\x00" + p.SubjectSHA
 	case "code-comment-thread":
-		key = "code-comment-thread\x00" + p.File + "\x00" + norm
+		if p.ThreadID != "" {
+			key = "code-comment-thread\x00thread\x00" + p.ThreadID
+		} else {
+			key = "code-comment-thread\x00" + p.File + "\x00" + norm
+		}
 	case "pr-comments":
 		key = "pr-comments\x00" + p.ExternalID + "\x00" + norm
 	case "review-request":

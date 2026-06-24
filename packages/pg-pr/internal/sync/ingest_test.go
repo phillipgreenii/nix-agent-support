@@ -145,22 +145,22 @@ func TestIngestFeedbackToStore(t *testing.T) {
 		t.Errorf("human comment author_login: got %q want \"alice\"", h.AuthorLogin)
 	}
 
-	// Bot comment: kind=code-comment-thread, author_kind=agent.
-	b, ok := byExtID["c2"]
+	// Bot comment: keyed by ThreadID "t-1" (one feedback row per thread).
+	b, ok := byExtID["t-1"]
 	if !ok {
-		t.Fatal("bot comment c2 missing from store")
+		t.Fatal("bot thread t-1 missing from store (expected ExternalID=thread id)")
 	}
 	if b.Kind != "code-comment-thread" {
-		t.Errorf("bot comment kind: got %q want \"code-comment-thread\"", b.Kind)
+		t.Errorf("bot thread kind: got %q want \"code-comment-thread\"", b.Kind)
 	}
 	if b.AuthorKind != "agent" {
-		t.Errorf("bot comment author_kind: got %q want \"agent\"", b.AuthorKind)
+		t.Errorf("bot thread author_kind: got %q want \"agent\"", b.AuthorKind)
 	}
 	if b.File != "pkg/foo/foo.go" {
-		t.Errorf("bot comment file: got %q want \"pkg/foo/foo.go\"", b.File)
+		t.Errorf("bot thread file: got %q want \"pkg/foo/foo.go\"", b.File)
 	}
 	if b.Line != 42 {
-		t.Errorf("bot comment line: got %d want 42", b.Line)
+		t.Errorf("bot thread line: got %d want 42", b.Line)
 	}
 
 	// CI run: kind=ci-failure.
@@ -224,6 +224,156 @@ func TestIngestFeedbackToStore(t *testing.T) {
 	}
 	if feedbackCreatedCount != 3 {
 		t.Errorf("feedback.created events: got %d want 3", feedbackCreatedCount)
+	}
+}
+
+// TestIngestThreadGrouping verifies the core M1 behaviour:
+//   - A review thread with 2 comments sharing the same ThreadID produces exactly
+//     ONE code-comment-thread feedback row (not two).
+//   - Both comments are stored as code_comment_message rows.
+//   - A top-level pr-comment produces ONE pr-comments feedback row with 0 messages.
+func TestIngestThreadGrouping(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	// Two inline comments on the same thread (same ThreadID, same Path).
+	threadComment1 := api.Comment{
+		ID:         "tc1",
+		Author:     "reviewer",
+		AuthorRole: "member",
+		Body:       "This method is too long.",
+		Path:       "pkg/bar/bar.go",
+		Line:       10,
+		ThreadID:   "thread-abc",
+	}
+	threadComment2 := api.Comment{
+		ID:         "tc2",
+		Author:     "coderabbit[bot]",
+		AuthorRole: "none",
+		Body:       "Agreed, consider splitting at line 25.",
+		Path:       "pkg/bar/bar.go",
+		Line:       10,
+		ThreadID:   "thread-abc",
+	}
+	// Top-level (pr-comments) comment — no Path.
+	topComment := api.Comment{
+		ID:         "top1",
+		Author:     "alice",
+		AuthorRole: "contributor",
+		Body:       "Overall LGTM.",
+	}
+
+	pr := api.PR{
+		Repo:    "o/r",
+		Number:  42,
+		State:   "open",
+		Branch:  "feat/thread",
+		Base:    "main",
+		Author:  "someone",
+		URL:     "https://github.com/o/r/pull/42",
+		HeadSHA: "sha-thread",
+	}
+	enriched := &vcs.EnrichedPR{
+		PR:       pr,
+		Comments: []api.Comment{threadComment1, threadComment2, topComment},
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "bot",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 42)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v / nil=%v", err, storedPR == nil)
+	}
+
+	rows, err := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{})
+	if err != nil {
+		t.Fatalf("ListFeedback: %v", err)
+	}
+
+	// Must be exactly 2 rows: one code-comment-thread (for "thread-abc") and one pr-comments.
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 feedback rows (1 thread + 1 top-level), got %d: %+v", len(rows), rows)
+	}
+
+	byExtID := map[string]store.Feedback{}
+	for _, r := range rows {
+		byExtID[r.ExternalID] = r
+	}
+
+	// Thread row: ExternalID must be the ThreadID "thread-abc", not a comment id.
+	threadRow, ok := byExtID["thread-abc"]
+	if !ok {
+		t.Fatalf("expected feedback row with ExternalID=\"thread-abc\"; got keys: %v", func() []string {
+			var ks []string
+			for k := range byExtID {
+				ks = append(ks, k)
+			}
+			return ks
+		}())
+	}
+	if threadRow.Kind != "code-comment-thread" {
+		t.Errorf("thread row kind: got %q want \"code-comment-thread\"", threadRow.Kind)
+	}
+	if threadRow.File != "pkg/bar/bar.go" {
+		t.Errorf("thread row file: got %q want \"pkg/bar/bar.go\"", threadRow.File)
+	}
+	// There must NOT be a separate row for the individual comment ids.
+	if _, ok := byExtID["tc1"]; ok {
+		t.Error("tc1 must not be its own feedback row (should be a message in thread-abc)")
+	}
+	if _, ok := byExtID["tc2"]; ok {
+		t.Error("tc2 must not be its own feedback row (should be a message in thread-abc)")
+	}
+
+	// Messages: both comments must be stored as code_comment_message rows.
+	msgs, err := db.ListMessages(ctx, threadRow.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages for thread-abc, got %d: %+v", len(msgs), msgs)
+	}
+	msgByExtID := map[string]store.Message{}
+	for _, m := range msgs {
+		msgByExtID[m.ExternalID] = m
+	}
+	if _, ok := msgByExtID["tc1"]; !ok {
+		t.Error("message tc1 missing from code_comment_message")
+	}
+	if _, ok := msgByExtID["tc2"]; !ok {
+		t.Error("message tc2 missing from code_comment_message")
+	}
+
+	// Top-level pr-comments row: ExternalID = "top1", no messages.
+	topRow, ok := byExtID["top1"]
+	if !ok {
+		t.Fatal("top-level comment top1 missing from store")
+	}
+	if topRow.Kind != "pr-comments" {
+		t.Errorf("top row kind: got %q want \"pr-comments\"", topRow.Kind)
+	}
+	topMsgs, err := db.ListMessages(ctx, topRow.ID)
+	if err != nil {
+		t.Fatalf("ListMessages for top row: %v", err)
+	}
+	if len(topMsgs) != 0 {
+		t.Errorf("pr-comments row must have 0 messages, got %d", len(topMsgs))
 	}
 }
 
