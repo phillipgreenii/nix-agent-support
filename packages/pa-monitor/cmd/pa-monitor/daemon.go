@@ -231,10 +231,15 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 			opts.WriteService = ws
 			opts.ReadService = rs
 
-			// Read the persisted caffeinate toggle from the DB (primary source
-			// of truth since the runtime.json -> SQLite migration).
-			if v, ok, err := sqlite.NewToggleStore(db).Get(context.Background(), "caffeinate_on"); err == nil && ok {
+			// Read the persisted toggles from the DB (primary source of truth
+			// since the runtime.json -> SQLite migration). Both seed the live
+			// daemon state at startup so user toggles survive restarts.
+			toggles := sqlite.NewToggleStore(db)
+			if v, ok, err := toggles.Get(context.Background(), "caffeinate_on"); err == nil && ok {
 				opts.InitialCaffeinateOn = v
+			}
+			if v, ok, err := toggles.Get(context.Background(), "auto_resume_enabled"); err == nil && ok {
+				opts.InitialAutoResumeEnabled = v
 			}
 		}
 

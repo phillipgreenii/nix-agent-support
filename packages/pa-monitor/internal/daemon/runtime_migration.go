@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,6 +10,30 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
+
+// legacyRuntimeToggles is the subset of the PRE-migration runtime.json schema
+// that carried the user toggles. RuntimeState no longer holds these fields
+// (the ToggleStore is their single source of truth), but the one-shot
+// migration must still read them out of any legacy file. Kept decoupled from
+// RuntimeState so dropping those fields does not change migration behavior.
+type legacyRuntimeToggles struct {
+	CaffeinateOn      bool `json:"caffeinate_on"`
+	AutoResumeEnabled bool `json:"auto_resume_enabled"`
+}
+
+// readLegacyRuntimeToggles reads the legacy toggle keys from a pre-migration
+// runtime.json. Used only by MigrateRuntimeJSON.
+func readLegacyRuntimeToggles(path string) (legacyRuntimeToggles, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return legacyRuntimeToggles{}, err
+	}
+	var lt legacyRuntimeToggles
+	if err := json.Unmarshal(b, &lt); err != nil {
+		return legacyRuntimeToggles{}, err
+	}
+	return lt, nil
+}
 
 // MigrateRuntimeJSON reads runtime.json (if present), writes the toggle values
 // into ToggleStore, and then deletes the file. A missing file is a no-op.
@@ -34,7 +59,7 @@ func MigrateRuntimeJSON(
 		return fmt.Errorf("stat runtime.json: %w", err)
 	}
 
-	rs, err := ReadRuntimeState(path)
+	rs, err := readLegacyRuntimeToggles(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil

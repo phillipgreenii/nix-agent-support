@@ -36,6 +36,11 @@ type Recorder interface {
 	// the D5 error keep-awake releases after the first attempt (even a failed
 	// one). Only called for groups carrying a SourceDisrupted intent.
 	RecordDisruptAttempt(sid string, at time.Time)
+	// RecordSendFailed reports that Signaler.Send returned an error for sid,
+	// so the failed delivery is observable (OTel counter + log) instead of
+	// being silently swallowed. errorKind is the disrupt cause's kind (empty
+	// for non-disrupt nudges); errText is the signaler error string.
+	RecordSendFailed(sid string, sources []Source, errorKind, errText string)
 	// RecordQueued increments pa_monitor.nudge.queued_total once for each
 	// newly-added intent. Called by Nudger.Reconcile after diffing the
 	// pre/post pending-store key sets.
@@ -119,20 +124,33 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			store.RemoveKeys(observedKeys)
 			continue
 		}
-		// A disrupt attempt is recorded on BOTH the success and failure path
-		// (see RecordDisruptAttempt) so the D5 error keep-awake releases after
-		// the first attempt, even a failed one.
+		// Extract disrupt metadata before sending so both the success and the
+		// failure path can label their observability events with the cause kind.
+		// A disrupt attempt is then recorded on BOTH paths (see
+		// RecordDisruptAttempt) so the D5 error keep-awake releases after the
+		// first attempt, even a failed one.
 		hasDisrupt := false
+		var cause *transcript.ErrorRecord
+		var kind string
+		var causeAt *time.Time
 		for _, in := range group {
-			if in.Key.Source == SourceDisrupted {
-				hasDisrupt = true
-				break
+			if in.Key.Source != SourceDisrupted {
+				continue
+			}
+			hasDisrupt = true
+			if cause == nil && in.Cause != nil {
+				cause = in.Cause
+				kind = string(in.Cause.Kind)
+				t := in.Cause.At
+				causeAt = &t
 			}
 		}
 		text := resolveText(group)
 		if err := d.Signaler.Send(view.PID, text); err != nil {
-			// Record the attempt even though delivery failed, then leave the
-			// intents in place to retry next tick.
+			// Delivery failed. Surface it for observability (OTel counter + log)
+			// — otherwise the error is swallowed and the miss is invisible — then
+			// record the attempt and leave the intents in place to retry next tick.
+			d.Recorder.RecordSendFailed(sid, sources, kind, err.Error())
 			if hasDisrupt {
 				d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
 			}
@@ -140,18 +158,6 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 		}
 		if hasDisrupt {
 			d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
-		}
-		var cause *transcript.ErrorRecord
-		var kind string
-		var causeAt *time.Time
-		for _, in := range group {
-			if in.Key.Source == SourceDisrupted && in.Cause != nil {
-				cause = in.Cause
-				kind = string(in.Cause.Kind)
-				t := in.Cause.At
-				causeAt = &t
-				break
-			}
 		}
 		wm := ctx.Watermarks.SessionWatermark(sid)
 		escalated := wm.DisruptEscalated

@@ -3,6 +3,7 @@ package nudger
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,8 +40,16 @@ type fakeRecorder struct {
 	sent           []string
 	watermarkOps   []string
 	windowLatchOps []time.Time
-	queuedOps      []string // "sid:source" pairs recorded by RecordQueued
-	attemptOps     []string // sids recorded by RecordDisruptAttempt
+	queuedOps      []string     // "sid:source" pairs recorded by RecordQueued
+	attemptOps     []string     // sids recorded by RecordDisruptAttempt
+	sendFailed     []failedSend // recorded by RecordSendFailed
+}
+
+// failedSend captures one RecordSendFailed call for assertions.
+type failedSend struct {
+	sid       string
+	errorKind string
+	errText   string
 }
 
 func (r *fakeRecorder) RecordSuppressed(sid string, sources []Source, cause string) {
@@ -72,6 +81,11 @@ func (r *fakeRecorder) RecordDisruptAttempt(sid string, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attemptOps = append(r.attemptOps, sid)
+}
+func (r *fakeRecorder) RecordSendFailed(sid string, sources []Source, errorKind, errText string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sendFailed = append(r.sendFailed, failedSend{sid: sid, errorKind: errorKind, errText: errText})
 }
 
 func TestDispatcherFiresOnceAndClears(t *testing.T) {
@@ -130,6 +144,46 @@ func TestDispatcherSendFailureLeavesIntent(t *testing.T) {
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if !store.HasAny("sid-1") {
 		t.Error("store cleared after send failure; should retry next tick")
+	}
+}
+
+// TestDispatcherSendFailureRecordsFailure verifies that when Signaler.Send
+// returns an error the dispatcher reports it via Recorder.RecordSendFailed
+// (carrying the error text and the cause's error kind) so the failure is
+// observable in OTel — instead of being silently swallowed. It must NOT
+// record a successful send.
+func TestDispatcherSendFailureRecordsFailure(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{
+		Key:       IntentKey{"sid-1", SourceDisrupted},
+		Text:      "continue",
+		EmittedAt: now,
+		Cause:     &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now},
+	})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{err: errors.New("cmux send: exit status 1")}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.sendFailed) != 1 {
+		t.Fatalf("RecordSendFailed called %d times, want 1", len(rec.sendFailed))
+	}
+	got := rec.sendFailed[0]
+	if got.sid != "sid-1" {
+		t.Errorf("failed sid = %q, want sid-1", got.sid)
+	}
+	if got.errorKind != string(transcript.ErrServerError) {
+		t.Errorf("failed errorKind = %q, want %q", got.errorKind, transcript.ErrServerError)
+	}
+	if !strings.Contains(got.errText, "cmux send: exit status 1") {
+		t.Errorf("failed errText = %q, want it to contain the signaler error", got.errText)
+	}
+	if len(rec.sent) != 0 {
+		t.Errorf("RecordSent called %d times on failure path, want 0", len(rec.sent))
 	}
 }
 

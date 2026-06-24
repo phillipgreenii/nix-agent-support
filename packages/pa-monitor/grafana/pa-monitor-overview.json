@@ -808,7 +808,7 @@
       "gridPos": {
         "x": 0,
         "y": 53,
-        "w": 24,
+        "w": 16,
         "h": 6
       },
       "targets": [
@@ -826,6 +826,34 @@
           "expr": "sum(rate(pa_monitor_nudge_suppressed_total[5m]))",
           "legendFormat": "suppressed",
           "refId": "C"
+        },
+        {
+          "expr": "sum(rate(pa_monitor_signal_send_failures_total[5m]))",
+          "legendFormat": "send failed",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "title": "Nudge send failures (1h)",
+      "type": "stat",
+      "description": "Signaler.Send errors (e.g. cmux delivery failed) — a non-zero value means an auto-resume nudge was generated but never delivered.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 53,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(pa_monitor_signal_send_failures_total[1h]))",
+          "legendFormat": "send failures",
+          "refId": "A"
         }
       ]
     },

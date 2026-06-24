@@ -26,8 +26,8 @@ type capturedNudge struct {
 	Text string
 }
 
-func (c *captureSignaler) Name() string       { return "capture" }
-func (c *captureSignaler) Detect(_ int) bool  { return true }
+func (c *captureSignaler) Name() string      { return "capture" }
+func (c *captureSignaler) Detect(_ int) bool { return true }
 func (c *captureSignaler) Send(pid int, text string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -55,11 +55,6 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 		Socket:  filepath.Join(dir, "daemon.sock"),
 	}
 	runtimePath := filepath.Join(dir, "runtime.json")
-
-	// Pre-write runtime.json with auto_resume_enabled=true.
-	if err := WriteRuntimeState(runtimePath, RuntimeState{AutoResumeEnabled: true}); err != nil {
-		t.Fatalf("WriteRuntimeState: %v", err)
-	}
 
 	errorAt := time.Now().Add(-1 * time.Second)
 
@@ -104,10 +99,11 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 					return tree, true, nil
 				},
 			},
-			NudgerSignalers:   []signal.Signaler{cap},
-			DisruptGrace:      0, // fire immediately after first sighting
-			EscalationAfter:   60 * time.Second,
-			AutoResumeMessage: "continue",
+			InitialAutoResumeEnabled: true,
+			NudgerSignalers:          []signal.Signaler{cap},
+			DisruptGrace:             0, // fire immediately after first sighting
+			EscalationAfter:          60 * time.Second,
+			AutoResumeMessage:        "continue",
 		})
 	}()
 
@@ -217,10 +213,6 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 	}
 	runtimePath := filepath.Join(dir, "runtime.json")
 
-	if err := WriteRuntimeState(runtimePath, RuntimeState{AutoResumeEnabled: true}); err != nil {
-		t.Fatalf("WriteRuntimeState: %v", err)
-	}
-
 	errorAt := time.Now().Add(-1 * time.Second)
 	tree := &aggregate.Tree{
 		Dirs: []*aggregate.Directory{
@@ -265,7 +257,8 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 					return tree, true, nil
 				},
 			},
-			NudgerSignalers: []signal.Signaler{cap},
+			InitialAutoResumeEnabled: true,
+			NudgerSignalers:          []signal.Signaler{cap},
 			// DisruptGrace=0: tick 1 primes firstSeen, tick 2 adds intent +
 			// annotation runs before dispatch, so TreeObserver sees PendingNudge.
 			DisruptGrace:      0,
@@ -396,6 +389,65 @@ func TestRunWith_SetAutoResumePersistsViaGetState(t *testing.T) {
 	}
 	if state2.GetAutoResumeEnabled() {
 		t.Errorf("after SetAutoResume(false), GetState.AutoResumeEnabled = true")
+	}
+}
+
+// TestRunWith_SeedsAutoResumeFromOption is the regression guard for the
+// toggle-persistence bug: auto_resume_enabled is persisted in the DB
+// (ToggleStore), and the daemon must SEED the live WatermarkStore from that
+// persisted value at startup. Previously the value was only loaded from
+// runtime.json — which the SQLite migration deletes — so every restart reset
+// auto-resume to false. Here we pass the persisted value via
+// InitialAutoResumeEnabled (the same field the daemon populates from the DB)
+// and assert GetState reflects it WITHOUT any SetAutoResume RPC or runtime.json.
+func TestRunWith_SeedsAutoResumeFromOption(t *testing.T) {
+	dir := shortTempDir(t)
+	paths := Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+	runtimePath := filepath.Join(dir, "runtime.json")
+
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Path: "/p"}}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunWith(ctx, RunOptions{
+			Paths:       paths,
+			Tick:        30 * time.Millisecond,
+			RuntimePath: runtimePath,
+			// Persisted toggle = on; the daemon must seed the live store from it.
+			InitialAutoResumeEnabled: true,
+			Poller: &stubPoller{
+				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
+					return tree, false, nil
+				},
+			},
+			NudgerSignalers: []signal.Signaler{&captureSignaler{}},
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("RunWith did not return after cancel")
+		}
+	})
+
+	waitForFile(t, paths.Socket)
+	conn := dialUnix(t, paths.Socket)
+	defer conn.Close()
+	client := pb.NewPaMonitorClient(conn)
+
+	state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if !state.GetAutoResumeEnabled() {
+		t.Error("GetState.AutoResumeEnabled = false; daemon did not seed the live store from the persisted toggle")
 	}
 }
 

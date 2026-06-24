@@ -14,9 +14,9 @@ func TestMigrateRuntimeJSON_PopulatesToggles(t *testing.T) {
 	dir := t.TempDir()
 	rtPath := filepath.Join(dir, "runtime.json")
 
-	// Write a runtime.json with caffeinate_on=true, auto_resume_enabled=false.
-	rs := RuntimeState{CaffeinateOn: true, AutoResumeEnabled: false}
-	if err := WriteRuntimeState(rtPath, rs); err != nil {
+	// Write a legacy (pre-migration) runtime.json carrying the toggle keys:
+	// caffeinate_on=true, auto_resume_enabled=false.
+	if err := os.WriteFile(rtPath, []byte(`{"caffeinate_on":true,"auto_resume_enabled":false}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,8 +90,7 @@ func TestMigrateRuntimeJSON_Idempotent_AfterDelete(t *testing.T) {
 	dir := t.TempDir()
 	rtPath := filepath.Join(dir, "runtime.json")
 
-	rs := RuntimeState{CaffeinateOn: true, AutoResumeEnabled: true}
-	if err := WriteRuntimeState(rtPath, rs); err != nil {
+	if err := os.WriteFile(rtPath, []byte(`{"caffeinate_on":true,"auto_resume_enabled":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

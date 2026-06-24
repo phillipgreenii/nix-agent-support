@@ -28,6 +28,8 @@ func TestEmitter_NilSafeMethods(t *testing.T) {
 	e.RecordCaffeinateGraceExpired(nil)
 	e.RecordContextLimitHit(nil)
 	e.RecordNudgeSent(nil)
+	e.RecordNudgeSendFailed(nil)
+	e.RecordNudgeSendFailed(map[string]string{"session_id": "sid", "error": "boom"})
 	e.RecordNudgeSuppressed(nil)
 	e.RecordNudgeQueued(nil)
 	e.RecordApiErrorObserved(nil)

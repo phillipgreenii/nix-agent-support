@@ -13,12 +13,17 @@ import (
 )
 
 // RuntimeState is the on-disk shape of $XDG_STATE_HOME/pa-monitor/runtime.json.
-// Holds toggles that should survive a daemon restart, e.g. user-requested
-// caffeinate. Persisted via atomic write (write-tmp + rename).
+// Holds nudger watermarks + pending intents that should survive a daemon
+// restart. Persisted via atomic write (write-tmp + rename).
+//
+// User toggles (caffeinate_on, auto_resume_enabled) are NOT stored here: the
+// ToggleStore (SQLite) is their single source of truth since the runtime.json
+// -> SQLite migration. Storing them here too caused a split-brain where the
+// daemon read a stale file value instead of the DB. The one-shot migration
+// still reads the legacy toggle keys from any pre-migration runtime.json — see
+// legacyRuntimeToggles in runtime_migration.go.
 type RuntimeState struct {
-	CaffeinateOn      bool        `json:"caffeinate_on"`
-	AutoResumeEnabled bool        `json:"auto_resume_enabled,omitempty"`
-	Nudger            NudgerState `json:"nudger,omitempty"`
+	Nudger NudgerState `json:"nudger,omitempty"`
 }
 
 // NudgerState holds all nudger-related fields that must survive a restart.
@@ -91,6 +96,11 @@ type WatermarkStore struct {
 	path    string
 	state   RuntimeState
 	emitter *otel.Emitter
+	// autoResumeEnabled is the live auto-resume toggle. Its persistent home is
+	// the ToggleStore (DB), written by the SetAutoResume RPC; this field is the
+	// in-memory value seeded from the DB at startup (RunWith ->
+	// SetAutoResumeEnabled). NOT persisted to runtime.json.
+	autoResumeEnabled bool
 }
 
 // Compile-time interface checks.
@@ -184,10 +194,25 @@ func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKi
 		escalatedStr = "true"
 	}
 	w.emitter.RecordNudgeSent(map[string]string{
-		"session_id":  sid,
-		"sources":     joinSources(sources),
-		"error_kind":  errorKind,
-		"escalated":   escalatedStr,
+		"session_id": sid,
+		"sources":    joinSources(sources),
+		"error_kind": errorKind,
+		"escalated":  escalatedStr,
+	})
+}
+
+// RecordSendFailed implements nudger.Recorder. It surfaces a failed nudge
+// delivery to OTel (pa_monitor.signal.send_failures_total + nudge.send_failed
+// log event) so swallowed Signaler.Send errors stop being invisible.
+func (w *WatermarkStore) RecordSendFailed(sid string, sources []nudger.Source, errorKind, errText string) {
+	if w.emitter == nil {
+		return
+	}
+	w.emitter.RecordNudgeSendFailed(map[string]string{
+		"session_id": sid,
+		"sources":    joinSources(sources),
+		"error_kind": errorKind,
+		"error":      errText,
 	})
 }
 
@@ -275,14 +300,17 @@ func (w *WatermarkStore) RecordDisruptAttempt(sid string, at time.Time) {
 func (w *WatermarkStore) AutoResumeEnabled() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.state.AutoResumeEnabled
+	return w.autoResumeEnabled
 }
 
+// SetAutoResumeEnabled updates the in-memory toggle. Persistence is the
+// ToggleStore (DB), written by the SetAutoResume RPC; this is NOT persisted to
+// runtime.json. Called both to seed the value from the DB at startup and to
+// apply a live RPC toggle.
 func (w *WatermarkStore) SetAutoResumeEnabled(enabled bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.state.AutoResumeEnabled = enabled
-	_ = WriteRuntimeState(w.path, w.state)
+	w.autoResumeEnabled = enabled
 }
 
 func (w *WatermarkStore) SaveIntents(intents []nudger.NudgeIntent) {

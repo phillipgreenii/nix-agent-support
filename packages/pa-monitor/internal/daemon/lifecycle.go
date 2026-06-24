@@ -146,6 +146,11 @@ type RunOptions struct {
 	Caffeinate *caffeinate.Manager
 	// InitialCaffeinateOn applies the persisted user toggle at startup.
 	InitialCaffeinateOn bool
+	// InitialAutoResumeEnabled applies the persisted auto-resume toggle at
+	// startup. Read from the ToggleStore (DB) — the single source of truth
+	// since the runtime.json -> SQLite migration. RunWith seeds the live
+	// WatermarkStore from it so the toggle survives daemon restarts.
+	InitialAutoResumeEnabled bool
 	// RuntimePath is the runtime.json file path. Empty disables persistence
 	// of caffeinate toggle changes from Caffeinate RPC.
 	RuntimePath string
@@ -280,6 +285,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		if err != nil {
 			return fmt.Errorf("read runtime.json: %w", err)
 		}
+		// Seed the live auto-resume toggle from the persisted value (DB →
+		// InitialAutoResumeEnabled). Previously this was loaded only from
+		// runtime.json, which the SQLite migration deletes — so the toggle
+		// silently reset to false on every daemon restart.
+		watermarks.SetAutoResumeEnabled(opts.InitialAutoResumeEnabled)
 		sig := &SignalerAdapter{Signalers: opts.NudgerSignalers}
 		var nr nudger.NudgeRecorder
 		if opts.WriteService != nil && opts.DB != nil {

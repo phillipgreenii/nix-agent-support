@@ -79,6 +79,7 @@ type Emitter struct {
 	caffeinateGrace    metric.Int64Counter
 	contextLimitHits   metric.Int64Counter
 	nudgesSent         metric.Int64Counter
+	nudgeSendFailures  metric.Int64Counter
 	nudgeSuppressed    metric.Int64Counter
 	nudgeQueued        metric.Int64Counter
 	apiErrorObserved   metric.Int64Counter
@@ -235,6 +236,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 	if e.nudgesSent, err = meter.Int64Counter("pa_monitor.signal.sends_total"); err != nil {
+		return err
+	}
+	if e.nudgeSendFailures, err = meter.Int64Counter("pa_monitor.signal.send_failures_total"); err != nil {
 		return err
 	}
 	if e.nudgeSuppressed, err = meter.Int64Counter("pa_monitor.nudge.suppressed_total"); err != nil {
@@ -506,6 +510,20 @@ func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
 		e.nudgesSent.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("nudge.sent", attrs)
+}
+
+// RecordNudgeSendFailed increments pa_monitor.signal.send_failures_total and
+// emits the nudge.send_failed log event. Fired when Signaler.Send returns an
+// error so a failed delivery is observable rather than silently swallowed.
+// nil-safe.
+func (e *Emitter) RecordNudgeSendFailed(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.nudgeSendFailures != nil {
+		e.nudgeSendFailures.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("nudge.send_failed", attrs)
 }
 
 // RecordNudgeSuppressed increments pa_monitor.nudge.suppressed_total and
