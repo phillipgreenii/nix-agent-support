@@ -31,6 +31,19 @@ func TestOpen_migratesSessionsTable(t *testing.T) {
 	}
 }
 
+func TestOpen_migratesSessionMetadataTable(t *testing.T) {
+	st := newTestStore(t)
+	var n int
+	err := st.db.QueryRowContext(context.Background(),
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='session_metadata'").Scan(&n)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("session_metadata table count = %d, want 1", n)
+	}
+}
+
 // TestState_idleErroredReplaceDoneFailed pins the ADR 0015 state vocabulary: the
 // settled turn-end states are `idle` (Claude Stop) and `errored` (Claude
 // StopFailure) — there is no `done`/`failed` and no Terminal() concept.
