@@ -6,6 +6,8 @@ package enrich
 import (
 	"regexp"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
 // bucketSize maps a total changed-line count (additions+deletions) to a
@@ -98,4 +100,92 @@ func mapCCType(t string) string {
 		return "chore"
 	}
 	return ""
+}
+
+// Input is everything the enrichment computation needs, decoupled from how it
+// was fetched. Files/Commits/Labels may be empty (partial data degrades, never
+// errors).
+type Input struct {
+	PR      api.PR
+	Files   []string    // changed-file paths
+	Commits []string    // commit messages
+	Labels  []string    // PR label names
+	CIRuns  []api.CIRun // the PR's own CI runs
+}
+
+var urgencyLabels = map[string]bool{
+	"urgent": true, "p0": true, "p1": true, "hotfix": true,
+	"security": true, "incident": true, "critical": true, "sev1": true, "sev2": true,
+}
+
+var urgencyKeywords = []string{
+	"production incident", "outage", "hotfix", "sev1", "sev2",
+	"regression", "revert", "asap", "urgent", "critical",
+}
+
+// scoreUrgency returns an urgency level (low|medium|high), the additive score
+// behind it, and the list of signals that fired (for transparency). Scoring:
+// urgency label +3, title/body keyword +2, failing CI +2, bugfix commit +1.
+// high at score>=3, medium at score>=1, else low.
+func scoreUrgency(in Input) (string, int, []string) {
+	score := 0
+	var reasons []string
+
+	for _, l := range in.Labels {
+		ll := strings.ToLower(strings.TrimSpace(l))
+		if urgencyLabels[ll] {
+			score += 3
+			reasons = append(reasons, "label:"+ll)
+			break
+		}
+	}
+
+	hay := strings.ToLower(in.PR.Title + "\n" + in.PR.Body)
+	for _, kw := range urgencyKeywords {
+		if strings.Contains(hay, kw) {
+			score += 2
+			reasons = append(reasons, "keyword:"+kw)
+			break
+		}
+	}
+
+	if anyCIFailing(in.CIRuns) {
+		score += 2
+		reasons = append(reasons, "ci-failing")
+	}
+
+	for _, c := range in.Commits {
+		first := strings.SplitN(c, "\n", 2)[0]
+		if kindFromConventional(first) == "bugfix" {
+			score++
+			reasons = append(reasons, "bugfix-commit")
+			break
+		}
+	}
+
+	level := "low"
+	switch {
+	case score >= 3:
+		level = "high"
+	case score >= 1:
+		level = "medium"
+	}
+	return level, score, reasons
+}
+
+// anyCIFailing reports whether any completed run has a non-success conclusion
+// (failure/timed_out/cancelled/action_required/...). Pending/neutral/skipped
+// runs do not count as failing.
+func anyCIFailing(runs []api.CIRun) bool {
+	for _, r := range runs {
+		if !strings.EqualFold(r.Status, "completed") {
+			continue
+		}
+		switch strings.ToLower(r.Conclusion) {
+		case "", "success", "neutral", "skipped":
+		default:
+			return true
+		}
+	}
+	return false
 }
