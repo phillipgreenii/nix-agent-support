@@ -50,6 +50,27 @@ func TestUpsertPRInsertsThenUpdates(t *testing.T) {
 	}
 }
 
+func TestListOpenPRs(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 1, Ownership: "mine", State: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/r", Number: 2, Ownership: "team", State: "closed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertPR(ctx, PullRequest{Repo: "o/other", Number: 3, Ownership: "mine", State: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.ListOpenPRs(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Number != 1 {
+		t.Fatalf("want only o/r#1 open, got %+v", got)
+	}
+}
+
 func TestGetPRByID(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

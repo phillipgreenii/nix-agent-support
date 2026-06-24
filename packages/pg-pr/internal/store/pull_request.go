@@ -67,6 +67,28 @@ ON CONFLICT(repo, number) DO UPDATE SET
 	return id, nil
 }
 
+// ListOpenPRs returns the open/draft PRs for a repo — used by sync to detect
+// PRs that have disappeared upstream so it can emit pr.closed/pr.merged.
+func (db *DB) ListOpenPRs(ctx context.Context, repo string) ([]PullRequest, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+SELECT id, repo, number, ownership, author, state, branch, base, url, head_sha, last_synced_at
+FROM pull_request WHERE repo=? AND state IN ('open','draft')`, repo)
+	if err != nil {
+		return nil, fmt.Errorf("store: list open prs %s: %w", repo, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PullRequest
+	for rows.Next() {
+		var pr PullRequest
+		if err := rows.Scan(&pr.ID, &pr.Repo, &pr.Number, &pr.Ownership, &pr.Author,
+			&pr.State, &pr.Branch, &pr.Base, &pr.URL, &pr.HeadSHA, &pr.LastSyncedAt); err != nil {
+			return nil, fmt.Errorf("store: scan open pr: %w", err)
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
 // GetPR returns the PR by (repo, number), or nil if not found.
 func (db *DB) GetPR(ctx context.Context, repo string, number int) (*PullRequest, error) {
 	row := db.sql.QueryRowContext(ctx, `
