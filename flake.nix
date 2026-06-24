@@ -757,6 +757,22 @@
               gc-dolt-maintenance
               gascity
               ;
+            # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
+            # Pattern-B consumers (bead pg2-wtjz). phillipg-nix-ziprecruiter's
+            # modules/pg-pr-zr has a `replace => …/packages/pg-pr` in its go.mod;
+            # a hermetic build there cannot see this sibling repo, so we hand it
+            # the source as a store path it copies into its build sandbox. This
+            # is the WHOLE pg-pr module tree (go.mod + go.sum + gomod2nix.toml +
+            # cmd/internal/pkg) — NOT a built binary. ADR 0008 §Decision.4.
+            pg-pr-src = pkgs.runCommand "pg-pr-src" { } ''
+              mkdir -p $out
+              cp -R ${
+                lib.fileset.toSource {
+                  root = ./packages/pg-pr;
+                  fileset = lib.fileset.fromSource (lib.sources.cleanSource ./packages/pg-pr);
+                }
+              }/. $out/
+            '';
             fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
               ${lib.getExe pkgs.statix} fix ${./.}
             '';
