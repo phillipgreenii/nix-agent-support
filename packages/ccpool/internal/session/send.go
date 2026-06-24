@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
@@ -31,6 +32,66 @@ func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode
 		return e
 	})
 	return res, err
+}
+
+// confirmIngestPoll is the gap between transcript checks while confirming the
+// model started a turn. Small relative to the caller window so the bound is the
+// window, not the poll granularity.
+const confirmIngestPoll = 250 * time.Millisecond
+
+// SendWithConfirm is Send with a post-delivery ingestion guard. When window > 0
+// and mode is a fire-and-forget mode (ModeNoWait/ModeQueue), after delivering the
+// prompt it polls the session transcript for a first model turn; if none appears
+// within window it returns ErrPromptNotIngested (the dropped-nudge case). A zero
+// window, or a waiting mode, behaves exactly like Send.
+func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string, mode Mode, window time.Duration) (Result, error) {
+	var res Result
+	err := s.withLock(externalID, func() error {
+		var e error
+		res, e = s.sendLocked(ctx, externalID, prompt, mode)
+		if e != nil {
+			return e
+		}
+		if window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
+			return s.confirmIngested(ctx, externalID, window)
+		}
+		return nil
+	})
+	return res, err
+}
+
+// confirmIngested polls the session's transcript until a real message event
+// appears (the model started a turn) or the window's worth of polls elapses.
+// Returns nil on the first observed turn, ErrPromptNotIngested otherwise. A row
+// without a transcript path (the hook has not stamped one yet) is tolerated — the
+// resolver returns (zero,false) and we keep polling until the bound, then fail (no
+// transcript ⇒ no turn observed ⇒ treat as not ingested, the safe direction for a
+// worker). Bounded by iteration count (window/poll, min 1) so a fixed test clock
+// still terminates; production uses the same bound with a real injected sleep so
+// the wall time is ~window.
+func (s *Service) confirmIngested(ctx context.Context, externalID string, window time.Duration) error {
+	iters := int(window / confirmIngestPoll)
+	if iters < 1 {
+		iters = 1
+	}
+	for i := 0; i < iters; i++ {
+		row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+		if err != nil {
+			return fmt.Errorf("confirm ingest: %w", err)
+		}
+		if ok && row.TranscriptPath != "" {
+			if _, started := s.d.Transcript.FirstMessageActivity(row.TranscriptPath); started {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		s.sleep(confirmIngestPoll)
+	}
+	return ErrPromptNotIngested
 }
 
 func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mode Mode) (Result, error) {

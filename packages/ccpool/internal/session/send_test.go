@@ -204,6 +204,58 @@ func TestSend_fallbackFiresNotifier(t *testing.T) {
 	}
 }
 
+func TestSend_confirmIngest_dropped_returnsNotIngested(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	tm := &sendTmux{live: true}
+	// firstOK=false ⇒ no model turn ever appears in the window.
+	tr := fakeTranscript{firstOK: false}
+	s := newSendService(t, st, tm, tr, waitFunc(nil))
+	// confirm window 30ms ⇒ a single bounded check that observes no turn.
+	_, err := s.SendWithConfirm(ctx, "a", "do the task", ModeNoWait, 30*time.Millisecond)
+	if !errors.Is(err, ErrPromptNotIngested) {
+		t.Fatalf("dropped prompt must yield ErrPromptNotIngested, got %v", err)
+	}
+	// The prompt was still pasted (delivery happened; only confirmation failed).
+	if len(tm.pasted) != 1 {
+		t.Errorf("prompt should still have been delivered; pasted=%v", tm.pasted)
+	}
+}
+
+func TestSend_confirmIngest_ingested_ok(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	tm := &sendTmux{live: true}
+	// firstOK=true ⇒ a model turn is present ⇒ ingested.
+	tr := fakeTranscript{firstOK: true, firstAt: time.Unix(100, 0)}
+	s := newSendService(t, st, tm, tr, waitFunc(nil))
+	res, err := s.SendWithConfirm(ctx, "a", "do the task", ModeNoWait, 30*time.Millisecond)
+	if err != nil {
+		t.Fatalf("ingested prompt must succeed, got %v", err)
+	}
+	if res.State != store.Working {
+		t.Errorf("no-wait confirmed result state = %q, want working", res.State)
+	}
+}
+
+func TestSend_noConfirmWindow_skipsCheck(t *testing.T) {
+	// A zero window keeps today's fire-and-forget behavior: no transcript read,
+	// no ErrPromptNotIngested even when firstOK=false.
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	s := newSendService(t, st, &sendTmux{live: true}, fakeTranscript{firstOK: false}, waitFunc(nil))
+	res, err := s.SendWithConfirm(ctx, "a", "do it", ModeNoWait, 0)
+	if err != nil {
+		t.Fatalf("zero window must skip the ingestion check, got %v", err)
+	}
+	if res.State != store.Working {
+		t.Errorf("state = %q, want working", res.State)
+	}
+}
+
 func TestErrPromptNotIngested_isExported(t *testing.T) {
 	// A sentinel the CLI maps to a distinct exit code; must be a stable value
 	// callers can errors.Is against.
