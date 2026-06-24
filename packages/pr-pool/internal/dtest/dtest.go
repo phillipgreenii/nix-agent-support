@@ -87,7 +87,7 @@ func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	return f.ListSeq[i], nil
 }
 
-// ScriptBD serves a status sequence per bead id and records update calls.
+// ScriptBD serves a status sequence per bead id and records update + comment calls.
 // mu guards shared state so Run is safe for concurrent goroutines
 // (workerWaitWithWatchdog runs waitDone + watchdog in parallel; both call BD.Run).
 type ScriptBD struct {
@@ -95,6 +95,7 @@ type ScriptBD struct {
 	StatusSeq   map[string][]string
 	Idx         map[string]int
 	Updates     []string
+	Comments    []string          // joined `comment <id> <text>` calls (so tests can prove no comment to an unrelated bead)
 	Ready       map[string]string // keyed by "feedback"/"worker"
 	ReadyErr    error             // if set, every `bd ready` returns this error
 	Show        map[string]string
@@ -138,6 +139,8 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 		return `{"id":"` + id + `","status":"` + seq[i] + `"}`, nil
 	case "update":
 		s.Updates = append(s.Updates, join(args))
+	case "comment":
+		s.Comments = append(s.Comments, join(args))
 	}
 	return "", nil
 }

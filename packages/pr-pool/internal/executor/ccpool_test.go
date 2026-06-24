@@ -499,14 +499,28 @@ func TestRegression_droppedNudge_noWriteToOtherBead_pg2yukh(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-6bq.3 --status=open --assignee=") {
 		t.Errorf("must unclaim zr-6bq.3; updates=%v", bd.Updates)
 	}
-	for _, c := range bd.Updates {
-		// No comment to ANY bead, and no update to any id other than zr-6bq.3.
-		if strings.Contains(c, "comment") {
-			t.Errorf("dropped nudge must write NO comment to any bead; got %q", c)
+	// The unclaim is the ONLY permitted update; no update may touch another id.
+	for _, u := range bd.Updates {
+		if !strings.Contains(u, "zr-6bq.3") {
+			t.Errorf("no update may touch a bead other than zr-6bq.3; got %q", u)
+		}
+		for _, other := range []string{"zr-o8el2", "zr-n6uo", "zr-meaz"} {
+			if strings.Contains(u, other) {
+				t.Errorf("must not update unrelated bead %s; got %q", other, u)
+			}
+		}
+	}
+	// The incident shape: the lost-nudge worker wrote a wrap-up COMMENT to an
+	// unrelated bead (zr-o8el2). ScriptBD now records comment calls, so this
+	// assertion has teeth — it fails if ANY comment lands on a bead other than the
+	// assigned zr-6bq.3 (and a dropped nudge should produce no comment at all).
+	for _, c := range bd.Comments {
+		if !strings.Contains(c, "zr-6bq.3") {
+			t.Errorf("dropped nudge must write NO comment to any bead other than zr-6bq.3; got %q", c)
 		}
 		for _, other := range []string{"zr-o8el2", "zr-n6uo", "zr-meaz"} {
 			if strings.Contains(c, other) {
-				t.Errorf("must not touch unrelated bead %s; got %q", other, c)
+				t.Errorf("must not comment on unrelated bead %s; got %q", other, c)
 			}
 		}
 	}
