@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +120,30 @@ func TestRun_firesEachLevelOnceThenHardStop(t *testing.T) {
 		if c == "update zr-1 --add-label human" {
 			t.Errorf("hard stop must NOT add human")
 		}
+	}
+}
+
+// pg2-yukh #3a: the budget reminder a worker receives MUST name the bead so a
+// context-less model cannot guess a different target. Assert the queued reminder
+// contains the bead id and does NOT contain the ambiguous bare phrase "this bead".
+func TestRun_reminderIsBeadExplicit(t *testing.T) {
+	// Ramp crosses 72.5% (reminder) then on to 100% (hard stop) so Run terminates.
+	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 730}, {OutputTokens: 1000}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+	wd := newWD(r, cc, bd, tokBudget(1000))
+	// Use the bead-explicit template form (set by config in Step 3).
+	wd.ReminderMsg = "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}."
+	_ = wd.Run(context.Background(), "s", "zr-6bq.3")
+	if len(cc.sent) == 0 {
+		t.Fatal("expected a queued reminder")
+	}
+	got := cc.sent[0] // "queue:<prompt>"
+	if !strings.Contains(got, "zr-6bq.3") {
+		t.Errorf("reminder must name the bead; got %q", got)
+	}
+	if strings.Contains(got, "this bead") {
+		t.Errorf("reminder must not use the ambiguous 'this bead'; got %q", got)
 	}
 }
 

@@ -4,6 +4,8 @@ package watchdog
 import (
 	"context"
 	"errors"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
@@ -50,6 +52,22 @@ func (w *Watchdog) now() time.Time {
 	return time.Now()
 }
 
+// renderMsg substitutes {{.BeadID}} in a budget message. A message with no
+// template action is returned unchanged. A malformed template falls back to the
+// raw string (the reminder still fires; it just may carry the literal token) —
+// never blocks the hard-stop path.
+func renderMsg(tmpl, beadID string) string {
+	t, err := template.New("budget").Parse(tmpl)
+	if err != nil {
+		return tmpl
+	}
+	var sb strings.Builder
+	if err := t.Execute(&sb, struct{ BeadID string }{beadID}); err != nil {
+		return tmpl
+	}
+	return sb.String()
+}
+
 func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
 	if w.Log != nil {
 		_ = w.Log.Emit(level, kind, msg, fields)
@@ -69,12 +87,12 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 			highest = level
 			switch level {
 			case budget.Reminder:
-				_ = w.CC.Send(ctx, sessionName, w.ReminderMsg, ccpool.ModeQueue)
+				_ = w.CC.Send(ctx, sessionName, renderMsg(w.ReminderMsg, beadID), ccpool.ModeQueue)
 				w.emit("info", "reminder", "budget reminder threshold reached",
 					map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Cancel:
 				_ = w.CC.Cancel(ctx, sessionName)
-				_ = w.CC.Send(ctx, sessionName, w.WrapUpMsg, ccpool.ModeQueue)
+				_ = w.CC.Send(ctx, sessionName, renderMsg(w.WrapUpMsg, beadID), ccpool.ModeQueue)
 				w.emit("warn", "cancel", "budget cancel threshold reached",
 					map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Hard:
