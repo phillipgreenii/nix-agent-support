@@ -123,3 +123,113 @@ func (c *capturingClient) FindOpenProcessingCycle(context.Context, string) (stri
 }
 func (c *capturingClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (c *capturingClient) CloseFeedback(context.Context, string, string) error        { return nil }
+
+func TestFeedbackSkippedWhenParentClosed(t *testing.T) {
+	created := 0
+	client := &closedParentClient{createInc: func() { created++ }}
+	h := New(client)
+	payload, _ := json.Marshal(FeedbackPayload{Repo: "o/r", Number: 7, Mine: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventFeedbackCreated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("expected no cycle created under a closed parent, got %d", created)
+	}
+}
+
+// closedParentClient returns a closed merge-request from FindByRepoAndNumber.
+type closedParentClient struct{ createInc func() }
+
+func (c *closedParentClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	return "mr-1", true, nil
+}
+func (c *closedParentClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return &beads.MergeRequest{ID: "mr-1", Status: "closed"}, nil
+}
+func (c *closedParentClient) CloseMergeRequest(context.Context, string, string) error { return nil }
+func (c *closedParentClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (c *closedParentClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+	c.createInc()
+	return "cycle-1", nil
+}
+func (c *closedParentClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (c *closedParentClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (c *closedParentClient) CloseFeedback(context.Context, string, string) error        { return nil }
+
+func TestPRMergedCascadeCloses(t *testing.T) {
+	var closedReason string
+	closedChildren := 0
+	client := &cascadeClient{
+		find:         &beads.MergeRequest{ID: "mr-1", Status: "open"},
+		children:     []string{"c1", "c2"},
+		onCloseMR:    func(reason string) { closedReason = reason },
+		onCloseChild: func() { closedChildren++ },
+	}
+	h := New(client)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Merged: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRMerged, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if closedReason != "upstream-merged" || closedChildren != 2 {
+		t.Fatalf("reason=%q children=%d", closedReason, closedChildren)
+	}
+}
+
+func TestPRClosedReasonPRClosed(t *testing.T) {
+	var closedReason string
+	client := &cascadeClient{
+		find:         &beads.MergeRequest{ID: "mr-1", Status: "open"},
+		children:     []string{},
+		onCloseMR:    func(reason string) { closedReason = reason },
+		onCloseChild: func() {},
+	}
+	h := New(client)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Merged: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRClosed, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if closedReason != "pr-closed" {
+		t.Fatalf("expected reason %q, got %q", "pr-closed", closedReason)
+	}
+}
+
+// cascadeClient is a minimal BeadClient fake for cascade-close tests.
+type cascadeClient struct {
+	find         *beads.MergeRequest
+	children     []string
+	onCloseMR    func(string)
+	onCloseChild func()
+}
+
+func (c *cascadeClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	return "mr-1", false, nil
+}
+func (c *cascadeClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return c.find, nil
+}
+func (c *cascadeClient) CloseMergeRequest(_ context.Context, _ string, reason string) error {
+	if c.onCloseMR != nil {
+		c.onCloseMR(reason)
+	}
+	return nil
+}
+func (c *cascadeClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return c.children, nil
+}
+func (c *cascadeClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
+func (c *cascadeClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (c *cascadeClient) CloseProcessingCycle(context.Context, string, string) error {
+	if c.onCloseChild != nil {
+		c.onCloseChild()
+	}
+	return nil
+}
+func (c *cascadeClient) CloseFeedback(context.Context, string, string) error { return nil }

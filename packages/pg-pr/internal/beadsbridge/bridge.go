@@ -81,6 +81,9 @@ func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPaylo
 	if mr == nil {
 		return fmt.Errorf("beadsbridge: no merge-request bead for %s#%d", p.Repo, p.Number)
 	}
+	if mr.Status == "closed" {
+		return nil // do not attach a live cycle under a closed PR bead
+	}
 	_, open, err := h.client.FindOpenProcessingCycle(ctx, mr.ID)
 	if err != nil {
 		return err // propagate — do NOT treat as "no open cycle"
