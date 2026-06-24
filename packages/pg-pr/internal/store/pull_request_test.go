@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -101,5 +102,47 @@ func TestGetPRByID(t *testing.T) {
 	}
 	if missing != nil {
 		t.Fatalf("GetPRByID(unknown) = %+v, want nil", missing)
+	}
+}
+
+func TestSetEnrichment_RoundTripAndNoClobber(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+
+	base := PullRequest{Repo: "o/r", Number: 5, Ownership: "mine", Author: "me", State: "open", Branch: "b"}
+	if _, err := db.UpsertPR(ctx, base); err != nil {
+		t.Fatalf("seed UpsertPR: %v", err)
+	}
+
+	enr := Enrichment{
+		Kind: "bugfix", Languages: []string{"Go", "Nix"}, Size: "M",
+		Urgency: "high", UrgencyScore: 5, UrgencyReasons: []string{"label:p0", "ci-failing"},
+	}
+	if err := db.SetEnrichment(ctx, "o/r", 5, enr); err != nil {
+		t.Fatalf("SetEnrichment: %v", err)
+	}
+
+	got, err := db.GetPR(ctx, "o/r", 5)
+	if err != nil || got == nil {
+		t.Fatalf("GetPR: %v %v", got, err)
+	}
+	if got.Kind != "bugfix" || got.Size != "M" || got.Urgency != "high" || got.UrgencyScore != 5 {
+		t.Fatalf("enrichment not persisted: %+v", got)
+	}
+	if !reflect.DeepEqual(got.Languages, []string{"Go", "Nix"}) || !reflect.DeepEqual(got.UrgencyReasons, []string{"label:p0", "ci-failing"}) {
+		t.Fatalf("json columns not persisted: langs=%v reasons=%v", got.Languages, got.UrgencyReasons)
+	}
+
+	// A subsequent plain UpsertPR (as the lifecycle emit / ingest does) MUST
+	// NOT clobber the enrichment columns.
+	if _, err := db.UpsertPR(ctx, base); err != nil {
+		t.Fatalf("re-UpsertPR: %v", err)
+	}
+	got2, err := db.GetPR(ctx, "o/r", 5)
+	if err != nil || got2 == nil {
+		t.Fatalf("GetPR2: %v %v", got2, err)
+	}
+	if got2.Kind != "bugfix" || got2.Urgency != "high" || !reflect.DeepEqual(got2.Languages, []string{"Go", "Nix"}) {
+		t.Fatalf("UpsertPR clobbered enrichment: %+v", got2)
 	}
 }
