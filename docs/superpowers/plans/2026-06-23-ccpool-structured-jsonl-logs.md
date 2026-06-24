@@ -26,6 +26,7 @@
 ### Task 1: New `internal/diaglog` package — structured JSONL diagnostic writer
 
 **Files:**
+
 - Create: `packages/ccpool/internal/diaglog/diaglog.go`
 - Create: `packages/ccpool/internal/diaglog/diaglog_test.go`
 
@@ -214,6 +215,7 @@ git commit -m "feat(ccpool): add internal/diaglog structured JSONL diagnostic wr
 ### Task 2: Add `DiagLogPath()` to config (beside events.jsonl)
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/config/config.go:176-178` (add accessor after `EventLogPath`)
 - Test: `packages/ccpool/internal/config/config_test.go:31-33` (extend the existing pool-mode assertion)
 
@@ -264,6 +266,7 @@ git commit -m "feat(ccpool): add Config.DiagLogPath (diagnostics.jsonl beside ev
 **Why:** In pool-dir mode `StateDir == Root`, so the diagnostic log lands inside the pool directory. `ValidatePoolDir` (`pool.go:113-124`) rejects a pool dir containing any file not on the `poolFileOK` allowlist (`pool.go:97-107`), which `reap-all`'s GC uses to detect a "foreign" dir. Without adding `diagnostics.jsonl`, the first diagnostic write would make the pool dir fail validation and get unregistered.
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/config/pool.go:99`
 - Test: `packages/ccpool/internal/config/pool_test.go` (extend the existing valid-files list)
 
@@ -315,6 +318,7 @@ git commit -m "feat(ccpool): allow diagnostics.jsonl in the pool-dir file allowl
 ### Task 4: Rewrite `hook.go` `logHook` to emit structured JSONL
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/hook.go:260-268` (the `logHook` function), `:5-17` (imports)
 - Test: `packages/ccpool/cmd/ccpool/hook_test.go` (add a focused test)
 
@@ -417,6 +421,7 @@ git commit -m "feat(ccpool): emit structured JSONL diagnostics from hook logHook
 **Why:** `doctor.go` prints the configured diagnostic-log path and tails it for the operator. It currently references `hook.log`; after Task 4 nothing writes `hook.log`, so the doctor tail would always be empty/misleading.
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/doctor.go:24-25` (header), `:71-76` (tail)
 
 - [ ] **Step 1: Update the doctor header line**
@@ -481,6 +486,7 @@ git commit -m "refactor(ccpool): point doctor diagnostic tail at diagnostics.jso
 **Why:** The `observability.logSources.<name>` option is declared at darwin/system scope in `phillipgreenii-nix-support-apps` (`darwin/modules/observability/registration.nix:73-118`), with a cross-flake stub in that flake's `flake.nix` `crossFlakeOptionStubs` (dep `pg2-45ab.3`, CLOSED) that lets sibling modules type-check standalone. ccpool's `darwin/modules/ccpool/default.nix` mirrors `darwin/modules/pr-pool/default.nix` exactly: register from darwin (NOT home-manager — setting it from HM targets an undeclared option and fails eval), guarded on `obs.enable or false`. The default `path` glob (`${env:XDG_STATE_HOME}/<name>/*.jsonl`) would also match `events.jsonl`, so we OVERRIDE `path` to the exact diagnostics file to keep the domain event log out of the diagnostics pipeline.
 
 **Files:**
+
 - Modify: `packages/../darwin/modules/ccpool/default.nix` (`/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/darwin/modules/ccpool/default.nix`)
 
 - [ ] **Step 1: Add the `obs` binding to the `let` block**
@@ -582,6 +588,7 @@ Expected: all PASS, no vet diagnostics. (No new module deps were added, so `go.m
 - [ ] **Step 2: Manual smoke — a hook failure produces a parseable JSONL error line**
 
 Run:
+
 ```bash
 cd packages/ccpool
 TMP="$(mktemp -d)"
@@ -590,6 +597,7 @@ TMP="$(mktemp -d)"
 # a line via a tiny throwaway, OR just assert the unit test artifact:
 go test ./internal/diaglog/ ./cmd/ccpool/ -run 'JSONL|Diag' -v
 ```
+
 Expected: PASS. (Optional deeper smoke: `printf '{}' | CCPOOL_POOL=/nonexistent/parent/pool go run ./cmd/ccpool hook stop; cat /nonexistent.../diagnostics.jsonl` is non-hermetic; the unit tests are the hermetic proof.)
 
 - [ ] **Step 3: Confirm reap launchd paths are unchanged (AC #3)**
@@ -600,10 +608,12 @@ Expected: the diff shows the `StandardOutPath`/`StandardErrorPath` lines are CON
 - [ ] **Step 4: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. (No `gomod2nix.toml` change — no new deps. If a pre-commit hook config changed, re-run `nix run .#install-pre-commit-hooks` first — it did NOT here, so this is a no-op.)
 
 - [ ] **Step 5: Close the bead**
@@ -623,17 +633,22 @@ bd comment pg2-yvnp "Hermetic AC done: internal/diaglog emits time/level/msg JSO
 **Operator runbook:**
 
 1. **Build & switch** the darwin host so the new ccpool + the otelcol filelog receiver are live:
+
    ```bash
    sudo darwin-rebuild switch --flake <your-machine-flake>
    ```
+
    Confirm the collector picked up the new receiver:
+
    ```bash
    grep -A6 'filelog/ccpool' "${XDG_STATE_HOME:-$HOME/.local/state}/.../otelcol-config.yaml" 2>/dev/null \
      || launchctl print gui/$(id -u)/com.phillipg... | grep -i otelcol
    ```
+
    Expected: a `filelog/ccpool` receiver whose `include` is `${env:XDG_STATE_HOME}/ccpool/diagnostics.jsonl`, with a `json_parser` (`timestamp.parse_from: attributes.time`, gotime `2006-01-02T15:04:05Z07:00`) and a `severity.parse_from: attributes.level`.
 
 2. **Write a `level:error` diagnostic line** as ccpool. Either trigger a real hook failure, or append one directly (the filelog `start_at: beginning` + json_parser will ingest it):
+
    ```bash
    printf '{"time":"%s","level":"error","msg":"pg2-yvnp manual loki verification"}\n' \
      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -641,10 +656,12 @@ bd comment pg2-yvnp "Hermetic AC done: internal/diaglog emits time/level/msg JSO
    ```
 
 3. **Query Loki** (the logs signal endpoint is `127.0.0.1:<signals.logs.port>` per `config.yaml.nix:86-87`; default Grafana explore or `logcli`):
+
    ```bash
    logcli query --addr=http://127.0.0.1:<loki-http-port> \
      '{service_name="ccpool"} |= "pg2-yvnp manual loki verification"'
    ```
+
    (Or in Grafana → Explore → Loki, run `{service_name="ccpool"}`.)
 
    **PASS criteria (all three):**
@@ -674,4 +691,7 @@ bd comment pg2-yvnp "Hermetic AC done: internal/diaglog emits time/level/msg JSO
 - **Type/name consistency:** package `diaglog`, type `Logger`, method `Log(ts, level, msg)`, accessor `Config.DiagLogPath()`, filename `diagnostics.jsonl`, flag none — used identically across Tasks 1, 2, 4, 5. JSON keys `time`/`level`/`msg` match the otelcol `json_parser`/`severity_parser` field names (`attributes.time`/`attributes.level`).
 - **No new deps:** stdlib only → `go.mod`/`gomod2nix.toml` untouched → `nix flake check` needs no `gomod2nix generate`.
 - **Frequent commits:** one commit per task (7 code/nix commits + bead close).
+
+```
+
 ```

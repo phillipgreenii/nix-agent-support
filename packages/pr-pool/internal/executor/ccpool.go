@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
@@ -18,7 +19,6 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
 	"github.com/phillipgreenii/pr-pool/internal/worktree"
-	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 type ccpoolExecutor struct{}
@@ -211,7 +211,7 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d discover.Dispa
 		WorktreeDir: worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
 		ReminderMsg: r.deps.Cfg.ReminderMsg,
 		WrapUpMsg:   r.deps.Cfg.WrapUpMsg,
-		Git: r.deps.git(),
+		Git:         r.deps.git(),
 		// FirstTurnStarted gates the budget NUDGES on a real model turn so a worker
 		// that never ingested its task is never prompted (pg2-yukh #3b). The hard
 		// STOP is NOT gated — it unclaims, it does not nudge.

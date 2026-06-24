@@ -26,6 +26,7 @@
 ### Task 1: Failing round-trip test — feedback budget must be unlimited
 
 **Files:**
+
 - Test: `packages/pr-pool/internal/config/example_test.go:8-21` (extend the existing `TestExampleTOML_roundTrips`)
 
 - [ ] **Step 1: Create the branch off main**
@@ -90,6 +91,7 @@ git commit -m "test(pr-pool): assert ExampleTOML feedback budget round-trips to 
 ### Task 2: Emit `[role.ccpool.budget]` from `emitRole`
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/example.go:56-73` (`emitRole`)
 
 - [ ] **Step 1: Emit each role's actual budget field-by-field**

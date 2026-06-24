@@ -17,6 +17,7 @@
 ### Task 1: `launch.Spec.AllowedTools` + `appendFlags` emits `--allowed-tools`
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/launch/launch.go:43-94`
 - Test: `packages/ccpool/internal/launch/launch_test.go`
 
@@ -107,6 +108,7 @@ git commit -m "feat(ccpool): emit --allowed-tools passthrough in launch.appendFl
 ### Task 2: Thread `AllowedTools` through `session.EnsureOpts`
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/session/session.go:143-160` (EnsureOpts) and the three `launch.Spec` construction sites (`:241`, `:268`, `:288`)
 - Test: `packages/ccpool/internal/session/session_test.go` (add if a focused unit test fits; otherwise the launch test + CLI test in Task 3 cover behavior)
 
@@ -148,6 +150,7 @@ git commit -m "feat(ccpool): thread AllowedTools through session.EnsureOpts to l
 ### Task 3: `ccpool new --allowed-tools` CLI flag
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/new.go:20-85`
 - Test: `packages/ccpool/cmd/ccpool/new_test.go`
 
@@ -227,10 +230,12 @@ Expected: the usage line lists `--allowed-tools`.
 - [ ] **Step 3: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. (No `gomod2nix.toml` change — no new deps were added.)
 
 - [ ] **Step 4: Close the bead**
@@ -244,6 +249,7 @@ bd close pg2-sjrl
 ---
 
 ## Self-review checklist (done while writing)
+
 - **Spec coverage:** all four AC bullets covered — passthrough to claude (Tasks 1+3), `EnsureOpts.AllowedTools` + `BuildNew`/`BuildResume` emit + omit-when-empty (Tasks 1+2), unit test present+absent (Task 1), no behavior change unset (Task 1 Step 5).
 - **Type consistency:** field name `AllowedTools` (Go) ↔ flag `--allowed-tools` (claude) ↔ `*allowedTools` (CLI var) used consistently; `appendFlags` order is permission-mode → allowed-tools → effort → model everywhere.
 - **No placeholders:** every code step shows the actual edit.

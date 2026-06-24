@@ -38,6 +38,7 @@ CREATE INDEX session_metadata_key_value ON session_metadata(key, value);
 ```
 
 Notes:
+
 - `PRIMARY KEY (external_id, key)` makes set an UPSERT (`ON CONFLICT(external_id,key) DO UPDATE`).
 - Keyed by `external_id` (TEXT) not the surrogate `sessions.id`, matching how `turns` is keyed (ADR 0015) and how every CLI/library caller addresses sessions.
 - No FK constraint: SQLite FKs are off by default in this codebase and `sessions` rows are pruned/recreated under a stable `external_id`. Cleanup is explicit in `store.Delete` (Task 5).
@@ -103,7 +104,11 @@ ccpool list --filter role=worker --filter pool=pr-pool [--json] [--all] [--state
 `--filter` is repeatable (`flag.Value`, same pattern as `new`'s `--env`); multiple filters are AND-combined; each is an exact `key=value` match. When any `--filter` is present, `list` first resolves the matching `external_id` set via `ListExternalIDsByMeta`, then shows only rows whose `external_id` is in that set (intersected with the existing state/retention view). The `--json` shape additionally gains a `meta` object per row so a consumer gets metadata in one call:
 
 ```json
-{ "external_id": "zr-abc", "...": "...", "meta": {"role":"worker","bead":"zr-abc"} }
+{
+  "external_id": "zr-abc",
+  "...": "...",
+  "meta": { "role": "worker", "bead": "zr-abc" }
+}
 ```
 
 Exit conventions match the existing read commands: `0` success, `1` config/store/no-such-key, `2` usage.
@@ -187,6 +192,7 @@ pr-pool's actual adoption (wiring `sessionmeta` into the orchestrator) is a SEPA
 ### Task 1: Migration 006 creates `session_metadata`
 
 **Files:**
+
 - Create: `packages/ccpool/internal/store/migrations/006_session_metadata.sql`
 - Test: `packages/ccpool/internal/store/store_test.go` (add a migration-presence test next to `TestOpen_migratesSessionsTable`)
 
@@ -252,6 +258,7 @@ git commit -m "feat(ccpool): add session_metadata table (migration 006)"
 ### Task 2: Store `SetMeta`/`GetMeta`/`Meta`/`DeleteMeta`
 
 **Files:**
+
 - Create: `packages/ccpool/internal/store/meta.go`
 - Test: `packages/ccpool/internal/store/meta_test.go`
 
@@ -464,6 +471,7 @@ git commit -m "feat(ccpool): store SetMeta/GetMeta/Meta/DeleteMeta"
 ### Task 3: Store `ListExternalIDsByMeta` (AND-filter)
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/store/meta.go`
 - Test: `packages/ccpool/internal/store/meta_test.go`
 
@@ -619,6 +627,7 @@ git commit -m "feat(ccpool): store ListExternalIDsByMeta AND-filter query"
 ### Task 4: `Delete` cascades metadata
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/store/ops.go:215-221` (the `Delete` method)
 - Test: `packages/ccpool/internal/store/meta_test.go`
 
@@ -689,6 +698,7 @@ git commit -m "feat(ccpool): Delete cascades session metadata"
 ### Task 5: `ccpool meta` subcommand (set/get/list/rm)
 
 **Files:**
+
 - Create: `packages/ccpool/cmd/ccpool/meta.go`
 - Modify: `packages/ccpool/cmd/ccpool/main.go:16-33` (known-set), `:88-125` (switch)
 - Test: `packages/ccpool/cmd/ccpool/meta_test.go`
@@ -966,6 +976,7 @@ git commit -m "feat(ccpool): add 'ccpool meta set/get/list/rm' subcommand"
 ### Task 6: `ccpool list --filter k=v` + `meta` in `--json`
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/list.go:19-64` (`runList`), `:129-193` (`listJSON` struct + `renderListJSON`)
 - Test: `packages/ccpool/cmd/ccpool/list_test.go`
 
@@ -1164,6 +1175,7 @@ git commit -m "feat(ccpool): ccpool list --filter key=value + meta object in --j
 ### Task 7: End-to-end contract test (store-backed CLI roundtrip)
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/contract_test.go` (add a metadata roundtrip using the existing `sandbox` harness)
 
 - [ ] **Step 1: Inspect the harness**
@@ -1221,6 +1233,7 @@ git commit -m "test(ccpool): contract test for meta set + list --filter roundtri
 ### Task 8: Public `sessionmeta` package + cross-process concurrency test
 
 **Files:**
+
 - Create: `packages/ccpool/sessionmeta/sessionmeta.go`
 - Test: `packages/ccpool/sessionmeta/sessionmeta_test.go`
 
@@ -1454,6 +1467,7 @@ git commit -m "feat(ccpool): public sessionmeta package (Option 2 library surfac
 ### Task 9: pr-pool depends on ccpool (go.mod require + sibling replace)
 
 **Files:**
+
 - Modify: `packages/pr-pool/go.mod`
 - Modify: `packages/pr-pool/go.sum` (regenerated)
 - Create: `packages/pr-pool/internal/sessionmeta_smoke_test.go` (a minimal import + build proof; the real orchestrator wiring is a separate pr-pool bead)
@@ -1516,9 +1530,11 @@ func TestSessionmeta_importable(t *testing.T) {
 - [ ] **Step 3: Tidy + verify the dependency edge resolves**
 
 Run:
+
 ```bash
 cd packages/pr-pool && go mod tidy && go test ./... -run Sessionmeta_importable -v
 ```
+
 Expected: `go mod tidy` resolves `../ccpool` via the replace (and transitively `../claude-transcript`, which pr-pool already replaces); the smoke test PASSES.
 
 - [ ] **Step 4: Commit**
@@ -1533,6 +1549,7 @@ git commit -m "feat(pr-pool): depend on ccpool, import sessionmeta (Option 2)"
 ### Task 10: pr-pool nix build — gomod2nix Pattern B includes ../ccpool
 
 **Files:**
+
 - Modify: `packages/pr-pool/default.nix` (src fileset + modRoot)
 - Modify: `packages/pr-pool/gomod2nix.toml` (regenerated)
 
@@ -1564,18 +1581,22 @@ Update the comment to note BOTH siblings are present because pr-pool replaces `.
 - [ ] **Step 3: Regenerate gomod2nix.toml**
 
 Run (from `packages/pr-pool`):
+
 ```bash
 go mod tidy
 nix run github:nix-community/gomod2nix -- generate
 ```
+
 Expected: `gomod2nix.toml` updated. Per ADR 0008 Case B, first-party local-replace modules (`ccpool`, `claude-transcript`) are symlinked from source by `buildGoApplication` and are intentionally ABSENT from the toml (only third-party deps are tracked). Confirm no `ccpool`/`claude-transcript` entry appears in the regenerated toml.
 
 - [ ] **Step 4: Build pr-pool via nix**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 nix build .#pr-pool 2>&1 | tail -20
 ```
+
 Expected: builds clean (the sandbox now contains `pr-pool` + `ccpool` + `claude-transcript` at their relative positions; ccpool's `../claude-transcript` replace resolves).
 
 - [ ] **Step 5: Commit**
@@ -1590,6 +1611,7 @@ git commit -m "build(pr-pool): gomod2nix Pattern B includes ../ccpool sibling"
 ### Task 11: Docs — `ccpool --help`/README metadata surface
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/main.go` usage/help text IF it enumerates subcommands; and `packages/ccpool/README.md` (or the nearest ccpool doc) — confirm which exists first.
 
 - [ ] **Step 1: Find the doc surface**

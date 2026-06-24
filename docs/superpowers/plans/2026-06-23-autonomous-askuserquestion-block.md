@@ -7,7 +7,8 @@
 **Goal:** Give autonomous (human-less) pr-pool workers a structural guarantee they never stall on an `AskUserQuestion` picker — via a ccpool **`--autonomous` launch flag** that makes the existing `ccpool hook ask` PreToolUse hook emit a blocking `permissionDecision:"deny"` for that session, PLUS a **mandatory prompt-forbid** lever in the worker prompt so the model treats the denial as "proceed autonomously" rather than "user channel closed."
 
 **Architecture (D2 design — both levers required):**
-- ccpool's `AskUserQuestion` detection is wired in ONE static plugin file (`ccpool-plugin/hooks/hooks.json`) shared by every session, invoking `ccpool hook ask`. There is **no per-session hooks.json rendering** — the plugin dir is a single configured path. Therefore the autonomous-vs-attended choice is carried by a **per-session env var** (`CCPOOL_AUTONOMOUS=1`) injected at launch, which the *same* `ccpool hook ask` command reads.
+
+- ccpool's `AskUserQuestion` detection is wired in ONE static plugin file (`ccpool-plugin/hooks/hooks.json`) shared by every session, invoking `ccpool hook ask`. There is **no per-session hooks.json rendering** — the plugin dir is a single configured path. Therefore the autonomous-vs-attended choice is carried by a **per-session env var** (`CCPOOL_AUTONOMOUS=1`) injected at launch, which the _same_ `ccpool hook ask` command reads.
   - **Attended (default, env unset):** `hook ask` behaves exactly as today — records the `needs_input` edge, fires the notifier, exits 0 NON-blocking, picker renders for a human (`pg2-7a5b` preserved untouched).
   - **Autonomous (`CCPOOL_AUTONOMOUS=1`):** `hook ask` ADDITIONALLY prints the blocking deny JSON (`hookSpecificOutput.permissionDecision:"deny"` + a reason that tells the model it is autonomous) to stdout and exits 0. The tool never executes, no picker appears, the session does not idle, and the model gets the reason as feedback and continues. For autonomous workers the blocking-deny **supersedes** the non-blocking detection for that session; the `needs_input` record is harmless (the picker never blocks).
 - The `--autonomous` flag threads through the established passthrough seam: `cmd/ccpool/new.go` → `session.EnsureOpts` → injected into the session env at `launchAndWait` (alongside `CCPOOL_EXTERNAL_ID`/`CCPOOL_POOL`). It is **not** a `claude` argv flag and **not** part of `launch.Spec` — it is a ccpool session-env marker, exactly like `CCPOOL_POOL`.
@@ -16,9 +17,17 @@
 **Why a session-env marker, not a claude flag or a forked plugin dir:** rendering a second plugin dir per session would duplicate the whole `ccpool-plugin` tree and fork the hooks.json contract that `plugin_test.go` pins; a `claude` argv flag can't change a static hook's behavior. The env-var seam reuses the exact mechanism (`launchAndWait` env map) that already carries `CCPOOL_POOL`, and the hook already reads env (`CCPOOL_EXTERNAL_ID`).
 
 **PreToolUse deny contract (verified via claude-code-guide, docs `code.claude.com/docs/en/hooks.md`, claude 2.1.x):**
+
 ```json
-{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "<text>" } }
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "<text>"
+  }
+}
 ```
+
 Exit 0 with this JSON on stdout = structured deny: tool does NOT run, no picker, model gets the reason as feedback and continues. (Exit 2 + stderr is the alternative binary-block; we use the JSON/exit-0 form so the reason text is carried explicitly.)
 
 **Tech Stack:** Go (stdlib `flag`, `encoding/json`, table tests). Repos: `phillipgreenii-nix-agent-support/packages/{ccpool,pr-pool}`.
@@ -29,26 +38,27 @@ Exit 0 with this JSON on stdout = structured deny: tool does NOT run, no picker,
 
 ## File Structure
 
-| File | Component | Responsibility / change |
-|---|---|---|
-| `packages/ccpool/cmd/ccpool/hook.go` | ccpool | `handleAskHook` gains an `autonomous bool`; when true ALSO emits deny JSON to a writer. New helper `writeAskDenyJSON`. `runHook` reads `CCPOOL_AUTONOMOUS`. |
-| `packages/ccpool/cmd/ccpool/hook_test.go` | ccpool | Tests: autonomous emits deny JSON to the writer; attended emits nothing; deny JSON is well-formed with the exact field names. |
-| `packages/ccpool/internal/session/session.go` | ccpool | `EnsureOpts` gains `Autonomous bool`; `launchAndWait` injects `CCPOOL_AUTONOMOUS=1` when set. |
-| `packages/ccpool/internal/session/session_test.go` | ccpool | Test: the launch env carries `CCPOOL_AUTONOMOUS=1` iff `EnsureOpts.Autonomous`. |
-| `packages/ccpool/cmd/ccpool/new.go` | ccpool | `--autonomous` bool flag → `EnsureOpts.Autonomous`; usage string updated. |
-| `packages/ccpool/cmd/ccpool/new_test.go` | ccpool | Test: `--autonomous` parses interspersed with the positional id. |
-| `packages/pr-pool/internal/config/config.go` | pr-pool | `Config.Autonomous bool` (default true for workers) + `PR_POOL_AUTONOMOUS` env overlay. |
-| `packages/pr-pool/internal/config/config_test.go` | pr-pool | Test: default + env overlay of `Autonomous`. |
-| `packages/pr-pool/internal/ccpool/cli.go` | pr-pool | `CLIRunner.Autonomous bool`; `Ensure` appends `--autonomous` when set. |
-| `packages/pr-pool/internal/ccpool/cli_test.go` | pr-pool | Test: `Ensure` argv includes `--autonomous`. |
-| `packages/pr-pool/internal/roles/builtin.go` | pr-pool | Append the prompt-forbid sentence to `workerPromptBody`. |
-| `packages/pr-pool/internal/roles/roles_test.go` | pr-pool | Test: worker prompt body forbids AskUserQuestion. |
+| File                                               | Component | Responsibility / change                                                                                                                                     |
+| -------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/ccpool/cmd/ccpool/hook.go`               | ccpool    | `handleAskHook` gains an `autonomous bool`; when true ALSO emits deny JSON to a writer. New helper `writeAskDenyJSON`. `runHook` reads `CCPOOL_AUTONOMOUS`. |
+| `packages/ccpool/cmd/ccpool/hook_test.go`          | ccpool    | Tests: autonomous emits deny JSON to the writer; attended emits nothing; deny JSON is well-formed with the exact field names.                               |
+| `packages/ccpool/internal/session/session.go`      | ccpool    | `EnsureOpts` gains `Autonomous bool`; `launchAndWait` injects `CCPOOL_AUTONOMOUS=1` when set.                                                               |
+| `packages/ccpool/internal/session/session_test.go` | ccpool    | Test: the launch env carries `CCPOOL_AUTONOMOUS=1` iff `EnsureOpts.Autonomous`.                                                                             |
+| `packages/ccpool/cmd/ccpool/new.go`                | ccpool    | `--autonomous` bool flag → `EnsureOpts.Autonomous`; usage string updated.                                                                                   |
+| `packages/ccpool/cmd/ccpool/new_test.go`           | ccpool    | Test: `--autonomous` parses interspersed with the positional id.                                                                                            |
+| `packages/pr-pool/internal/config/config.go`       | pr-pool   | `Config.Autonomous bool` (default true for workers) + `PR_POOL_AUTONOMOUS` env overlay.                                                                     |
+| `packages/pr-pool/internal/config/config_test.go`  | pr-pool   | Test: default + env overlay of `Autonomous`.                                                                                                                |
+| `packages/pr-pool/internal/ccpool/cli.go`          | pr-pool   | `CLIRunner.Autonomous bool`; `Ensure` appends `--autonomous` when set.                                                                                      |
+| `packages/pr-pool/internal/ccpool/cli_test.go`     | pr-pool   | Test: `Ensure` argv includes `--autonomous`.                                                                                                                |
+| `packages/pr-pool/internal/roles/builtin.go`       | pr-pool   | Append the prompt-forbid sentence to `workerPromptBody`.                                                                                                    |
+| `packages/pr-pool/internal/roles/roles_test.go`    | pr-pool   | Test: worker prompt body forbids AskUserQuestion.                                                                                                           |
 
 ---
 
 ### Task 1 (ccpool): `handleAskHook` emits blocking deny JSON in autonomous mode
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/hook.go` (`runHook` ~line 92, `handleHookN` ~line 108, `handleAskHook` ~line 186)
 - Test: `packages/ccpool/cmd/ccpool/hook_test.go`
 
@@ -242,6 +252,7 @@ git commit -m "feat(ccpool): autonomous-mode AskUserQuestion blocking deny in ho
 ### Task 2 (ccpool): inject `CCPOOL_AUTONOMOUS` into the session env
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/session/session.go` (`EnsureOpts` ~line 143-160; `launchAndWait` ~line 343-355; the three `EnsureOpts`-consuming `launch.Spec` sites are unchanged — autonomous is NOT a claude flag)
 - Test: `packages/ccpool/internal/session/session_test.go`
 
@@ -335,6 +346,7 @@ git commit -m "feat(ccpool): EnsureOpts.Autonomous injects CCPOOL_AUTONOMOUS env
 ### Task 3 (ccpool): `ccpool new --autonomous` flag
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/new.go` (flag block lines 22-28; usage line 31; `EnsureOpts` literal lines 72-77)
 - Test: `packages/ccpool/cmd/ccpool/new_test.go`
 
@@ -409,6 +421,7 @@ git commit -m "feat(ccpool): add 'ccpool new --autonomous' flag"
 ### Task 4 (pr-pool): config `Autonomous` + `--autonomous` passthrough + prompt-forbid
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go` (`Config` struct ~line 37, `Default()` ~line 80, `Load()` env overlay ~line 113)
 - Modify: `packages/pr-pool/internal/ccpool/cli.go` (`CLIRunner` ~line 39-48, `NewCLIRunner` ~line 50-56, `Ensure` ~line 111-135)
 - Modify: `packages/pr-pool/internal/roles/builtin.go` (`workerPromptBody` line 26)
@@ -618,10 +631,12 @@ git commit -m "feat(pr-pool): set ccpool --autonomous for workers + forbid AskUs
 - [ ] **Step 1: Full Go test + vet for both packages**
 
 Run:
+
 ```bash
 cd packages/ccpool && go test ./... && go vet ./...
 cd ../pr-pool && go test ./... && go vet ./...
 ```
+
 Expected: all PASS. (No new third-party deps were added, so no `gomod2nix.toml` change in either package.)
 
 - [ ] **Step 2: Manual smoke — `ccpool new` help lists the flag**
@@ -636,18 +651,22 @@ This is covered deterministically by `TestEnsure_argv_includesAutonomous` (Task 
 - [ ] **Step 4: Confirm the attended-detection contract is untouched (`pg2-7a5b`)**
 
 Run:
+
 ```bash
 cd packages/ccpool && go test ./cmd/ccpool/ -run 'Plugin|NeedsInput|Ask|Notify' -v
 ```
+
 Expected: PASS — `TestPluginHooksJSON_hasWrapperAndAllEvents` (the hooks.json still wires `PreToolUse`/`AskUserQuestion`→`ccpool hook ask`, unchanged), and the contract/notify tests for non-blocking detection still pass. **The hooks.json file is intentionally NOT modified by this plan.**
 
 - [ ] **Step 5: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. (Per-source content digests rebuild only the two changed Go packages; no `vendorHash`/`gomod2nix.toml` churn since no deps changed.)
 
 - [ ] **Step 6: Close the bead**
@@ -662,16 +681,16 @@ bd close pg2-2f9d
 
 ## Live-verification gap (cannot be fully closed by a subagent)
 
-- AC "autonomous workers no longer stall indefinitely on an AskUserQuestion picker" is fully exercised by deterministic unit tests (hook emits the exact deny JSON; the flag/env/prompt all wire through). A true end-to-end confirmation — a live worker that *attempts* AskUserQuestion, is denied, and continues without idling — needs a running pool and is flagged for the operator. The deterministic tests plus the verified deny-JSON contract (claude-code-guide, docs `code.claude.com/docs/en/hooks.md`) substitute for the live repro.
+- AC "autonomous workers no longer stall indefinitely on an AskUserQuestion picker" is fully exercised by deterministic unit tests (hook emits the exact deny JSON; the flag/env/prompt all wire through). A true end-to-end confirmation — a live worker that _attempts_ AskUserQuestion, is denied, and continues without idling — needs a running pool and is flagged for the operator. The deterministic tests plus the verified deny-JSON contract (claude-code-guide, docs `code.claude.com/docs/en/hooks.md`) substitute for the live repro.
 
 ---
 
 ## Self-review checklist (done while writing)
 
 - **Spec coverage (3 ACs):**
-  1. *Autonomous workers no longer stall on AskUserQuestion* — ccpool blocking-deny (Task 1) + flag/env wiring (Tasks 2-3) + pr-pool sets it (Task 4). ✅
-  2. *Chosen approach implemented (prompt-forbid AND/OR blocking hook)* — BOTH levers per D2: blocking hook (Task 1) AND mandatory prompt-forbid (Task 4 Steps 9-12). ✅
-  3. *Does not break ccpool's non-blocking needs_input detection (pg2-7a5b)* — attended path (env unset) is byte-for-byte the old behavior; hooks.json is NOT modified; verified by Task 5 Step 4 + the attended-emits-no-JSON test (Task 1). ✅
+  1. _Autonomous workers no longer stall on AskUserQuestion_ — ccpool blocking-deny (Task 1) + flag/env wiring (Tasks 2-3) + pr-pool sets it (Task 4). ✅
+  2. _Chosen approach implemented (prompt-forbid AND/OR blocking hook)_ — BOTH levers per D2: blocking hook (Task 1) AND mandatory prompt-forbid (Task 4 Steps 9-12). ✅
+  3. _Does not break ccpool's non-blocking needs_input detection (pg2-7a5b)_ — attended path (env unset) is byte-for-byte the old behavior; hooks.json is NOT modified; verified by Task 5 Step 4 + the attended-emits-no-JSON test (Task 1). ✅
 - **D2 caveat coverage:** the deny `permissionDecisionReason` is NOT bare — it states "autonomous mode, proceed / bd comment," and is paired with the prompt-forbid lever (both mandatory). ✅
 - **Coexist/supersede:** the SAME static `ccpool hook ask` command branches on `CCPOOL_AUTONOMOUS`; autonomous = detection-record (harmless) + blocking-deny (supersedes); attended = detection only. No per-session hooks.json fork, no plugin-dir duplication. ✅
 - **Placeholder scan:** the only intentional non-literals are test-helper names (`newTestStore`/`mustSeedRow`/`newTestService`/`fake.lastEnv`/`newSpy`) flagged with explicit "use the existing helper, grep here" implementer notes, because the exact helper names live in test files not fully read — every PRODUCTION edit is a literal. ✅

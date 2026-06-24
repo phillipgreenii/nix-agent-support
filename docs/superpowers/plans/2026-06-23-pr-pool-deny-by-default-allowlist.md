@@ -10,13 +10,13 @@
 
 **Goal:** Harden pr-pool against a prompt-injection→RCE path by (1) flipping the default `PermissionMode` from `bypassPermissions` (permissionless) to `dontAsk` (deny-by-default, non-interactive), and (2) constraining every dispatched worker to a conservative default tool allowlist emitted via the new ccpool `--allowed-tools` flag.
 
-**Architecture:** Worker prompts are derived from external PR-reviewer comments, so a malicious comment is an injection vector into a Claude session that can `git push`. Two layers close it together: `dontAsk` makes Claude **auto-deny** any tool not pre-approved (instead of stalling on a human-less permission prompt), and `--allowed-tools` defines the pre-approved set. `dontAsk` is what makes an allowlist both *safe* (un-listed tools are denied, not silently allowed) **and** *non-interactive* (a denial returns to the model as feedback rather than hanging on an unanswerable prompt). `PR_POOL_PERMISSION_MODE` remains the operator's opt-in escape back to `bypassPermissions` for an attended/trusted run. The new `AllowedTools` config scalar mirrors the existing `PermissionMode`/`Effort`/`Model` plumbing exactly: a `Config` field → carried on `CLIRunner` → emitted by `Ensure` as `--allowed-tools <value>` (the `pg2-sjrl` ccpool flag) when non-empty.
+**Architecture:** Worker prompts are derived from external PR-reviewer comments, so a malicious comment is an injection vector into a Claude session that can `git push`. Two layers close it together: `dontAsk` makes Claude **auto-deny** any tool not pre-approved (instead of stalling on a human-less permission prompt), and `--allowed-tools` defines the pre-approved set. `dontAsk` is what makes an allowlist both _safe_ (un-listed tools are denied, not silently allowed) **and** _non-interactive_ (a denial returns to the model as feedback rather than hanging on an unanswerable prompt). `PR_POOL_PERMISSION_MODE` remains the operator's opt-in escape back to `bypassPermissions` for an attended/trusted run. The new `AllowedTools` config scalar mirrors the existing `PermissionMode`/`Effort`/`Model` plumbing exactly: a `Config` field → carried on `CLIRunner` → emitted by `Ensure` as `--allowed-tools <value>` (the `pg2-sjrl` ccpool flag) when non-empty.
 
 **Tech Stack:** Go (stdlib, `reflect`-based table tests). Package `phillipgreenii-nix-agent-support/packages/pr-pool`. Consumes the ccpool `--allowed-tools` flag delivered by `pg2-sjrl` (assumed to exist; plan `2026-06-23-ccpool-allowed-tools-flag.md`). `claude` accepts `--allowed-tools <tools...>` (comma/space-separated, e.g. `"Bash(git *)"`; verified via `claude --help`, 2026-06-23).
 
 **Branch:** `pr-pool-deny-by-default` (off `main`).
 
-**Why coupled (and why this order):** With `bypassPermissions`, an allowlist is moot (everything is allowed). With claude's *default* mode, an un-pre-approved tool prompts a human who never arrives → the worker stalls until `MaxWait` kills it. Only `dontAsk` gives auto-deny, so Task 1 (mode flip) and Task 2 (allowlist) ship together. The ccpool `--allowed-tools` flag (`pg2-sjrl`) MUST already be merged — this plan only emits it.
+**Why coupled (and why this order):** With `bypassPermissions`, an allowlist is moot (everything is allowed). With claude's _default_ mode, an un-pre-approved tool prompts a human who never arrives → the worker stalls until `MaxWait` kills it. Only `dontAsk` gives auto-deny, so Task 1 (mode flip) and Task 2 (allowlist) ship together. The ccpool `--allowed-tools` flag (`pg2-sjrl`) MUST already be merged — this plan only emits it.
 
 **Dependency precondition (verify first):** `pg2-sjrl` is merged: `ccpool new --allowed-tools <list>` exists and forwards `--allowed-tools` to claude. Confirm with `cd ../ccpool && go run ./cmd/ccpool new 2>&1 | grep -- --allowed-tools` (expect the usage line to list `--allowed-tools`). If absent, STOP — this plan cannot be completed.
 
@@ -24,12 +24,12 @@
 
 ## File map
 
-| File | Responsibility | Change |
-|---|---|---|
-| `packages/pr-pool/internal/config/config.go` | pool-scalar config: struct, defaults, env overlay | Flip `PermissionMode` default; add `AllowedTools` field + default + env overlay |
-| `packages/pr-pool/internal/config/config_test.go` | config unit tests | Assert new default mode + default allowlist + env override |
-| `packages/pr-pool/internal/ccpool/cli.go` | `CLIRunner` seam to `ccpool new` | Add `AllowedTools` field; emit `--allowed-tools` in `Ensure` |
-| `packages/pr-pool/internal/ccpool/cli_test.go` | `CLIRunner` argv tests | Assert `--allowed-tools` argv position; update existing default-argv expectations |
+| File                                              | Responsibility                                    | Change                                                                            |
+| ------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `packages/pr-pool/internal/config/config.go`      | pool-scalar config: struct, defaults, env overlay | Flip `PermissionMode` default; add `AllowedTools` field + default + env overlay   |
+| `packages/pr-pool/internal/config/config_test.go` | config unit tests                                 | Assert new default mode + default allowlist + env override                        |
+| `packages/pr-pool/internal/ccpool/cli.go`         | `CLIRunner` seam to `ccpool new`                  | Add `AllowedTools` field; emit `--allowed-tools` in `Ensure`                      |
+| `packages/pr-pool/internal/ccpool/cli_test.go`    | `CLIRunner` argv tests                            | Assert `--allowed-tools` argv position; update existing default-argv expectations |
 
 No `example.go` change: `PermissionMode`/`Effort`/`Model` are pool scalars and are NOT serialized by `emitRole` (which emits per-role fields only). `AllowedTools` follows the same pattern — confirmed by reading `internal/config/example.go` (`emitRole` lines 56-73 emit only role/query fields).
 
@@ -38,6 +38,7 @@ No `example.go` change: `PermissionMode`/`Effort`/`Model` are pool scalars and a
 ### Task 1: Flip the default `PermissionMode` to `dontAsk`
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go:80`
 - Modify: `packages/pr-pool/internal/config/config_test.go:44-46`
 - Modify: `packages/pr-pool/internal/ccpool/cli_test.go:43` (the existing argv test bakes in the old default)
@@ -100,11 +101,12 @@ escape stays: PR_POOL_PERMISSION_MODE=bypassPermissions. Refs pg2-3msk."
 ### Task 2: Add a constrained default `AllowedTools` config scalar
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go` — `Config` struct (after line 37), `Default()` (after line 80), `Load()` env overlay (after line 113)
 - Modify: `packages/pr-pool/internal/config/config_test.go` — add default + env-override assertions
 - Test: `packages/pr-pool/internal/config/config_test.go`
 
-> **⚠️ The literal in Step 3 is the security boundary. It MUST be human-reviewed before merge** (see "BLOCKING — human sign-off"). Treat the value below as the *proposed* default pending sign-off.
+> **⚠️ The literal in Step 3 is the security boundary. It MUST be human-reviewed before merge** (see "BLOCKING — human sign-off"). Treat the value below as the _proposed_ default pending sign-off.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -204,6 +206,7 @@ Refs pg2-3msk."
 ### Task 3: Emit `--allowed-tools` through the CLIRunner seam
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/ccpool/cli.go:39-56` (`CLIRunner` struct + `NewCLIRunner`), `:124-126` (`Ensure` flag emission), `:107-110` (doc comment)
 - Modify: `packages/pr-pool/internal/ccpool/cli_test.go` — argv assertions
 - Test: `packages/pr-pool/internal/ccpool/cli_test.go`
@@ -352,15 +355,17 @@ Expected: the usage line lists `--allowed-tools`. (If empty, `pg2-sjrl` is not m
 - [ ] **Step 3: Grep for any other consumer of the old default**
 
 Run: `cd packages/pr-pool && grep -rn "bypassPermissions" . --include='*.go'`
-Expected: only `internal/config/config.go` (the `validPermissionModes` map entry + the `Validate` error string) and `internal/config/config_test.go` (the `TestValidate_permissionMode` valid-set list). NO remaining `bypassPermissions` as a *default* or a hard-coded dispatch value. If a non-test file hard-codes it as the launch value, that is a bug — convert it to read `Config.PermissionMode`.
+Expected: only `internal/config/config.go` (the `validPermissionModes` map entry + the `Validate` error string) and `internal/config/config_test.go` (the `TestValidate_permissionMode` valid-set list). NO remaining `bypassPermissions` as a _default_ or a hard-coded dispatch value. If a non-test file hard-codes it as the launch value, that is a bug — convert it to read `Config.PermissionMode`.
 
 - [ ] **Step 4: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. No `gomod2nix.toml` change (no new Go deps). If `nix flake check` rebuilds pr-pool, that is expected (source digest changed); it must still pass.
 
 - [ ] **Step 5: Final review against the bead's acceptance criteria**
@@ -388,20 +393,20 @@ Confirm against `pg2-3msk` AC: (a) skip-permissions/permissionless OFF by defaul
 
 The `Default().AllowedTools` literal (Task 2 Step 4) is the security boundary for every autonomous worker and **must be reviewed and approved by a human before this branch merges.** Proposed default and per-entry rationale:
 
-| Entry | Rationale | Risk if included |
-|---|---|---|
-| `Read`, `Glob`, `Grep` | Read-only inspection — the worker must read the bead's target files. | None (read-only). |
-| `Edit`, `Write` | The worker's core job: implement the change the bead describes. | Can write anywhere in the worktree; bounded by the per-bead worktree (`pg2-yukh` work) + authorship guard. |
-| `Bash(git status\|diff\|log\|add\|commit\|checkout\|switch\|branch\|worktree\|rev-parse\|fetch :*)` | The worker resolves a branch, works in a worktree, and commits. **`git push` is deliberately EXCLUDED** — pushing is gated by the authorship preamble and the worker prompt ("push ONLY if the bead says to"); a denied push is the safe default. | `git commit` is local-only; no remote mutation without `push` (excluded). |
-| `Bash(bd:*)` | Beads issue tracker — claim/comment/close the bead (the worker's required workflow per `workerPromptBody`). | Mutates the local beads DB only. |
-| `Bash(go build\|test\|vet\|mod :*)`, `Bash(gofmt:*)` | Build/test/format the Go change before commit. | Runs project code under test — acceptable for a worker on its own worktree. |
-| `Bash(nix flake check\|nix fmt:*)`, `Bash(prek\|pre-commit:*)` | The repo's "before complete" gates (per agent-support CLAUDE.md). | Local checks only. |
+| Entry                                                                                               | Rationale                                                                                                                                                                                                                                         | Risk if included                                                                                           |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Read`, `Glob`, `Grep`                                                                              | Read-only inspection — the worker must read the bead's target files.                                                                                                                                                                              | None (read-only).                                                                                          |
+| `Edit`, `Write`                                                                                     | The worker's core job: implement the change the bead describes.                                                                                                                                                                                   | Can write anywhere in the worktree; bounded by the per-bead worktree (`pg2-yukh` work) + authorship guard. |
+| `Bash(git status\|diff\|log\|add\|commit\|checkout\|switch\|branch\|worktree\|rev-parse\|fetch :*)` | The worker resolves a branch, works in a worktree, and commits. **`git push` is deliberately EXCLUDED** — pushing is gated by the authorship preamble and the worker prompt ("push ONLY if the bead says to"); a denied push is the safe default. | `git commit` is local-only; no remote mutation without `push` (excluded).                                  |
+| `Bash(bd:*)`                                                                                        | Beads issue tracker — claim/comment/close the bead (the worker's required workflow per `workerPromptBody`).                                                                                                                                       | Mutates the local beads DB only.                                                                           |
+| `Bash(go build\|test\|vet\|mod :*)`, `Bash(gofmt:*)`                                                | Build/test/format the Go change before commit.                                                                                                                                                                                                    | Runs project code under test — acceptable for a worker on its own worktree.                                |
+| `Bash(nix flake check\|nix fmt:*)`, `Bash(prek\|pre-commit:*)`                                      | The repo's "before complete" gates (per agent-support CLAUDE.md).                                                                                                                                                                                 | Local checks only.                                                                                         |
 
 **Open questions for the human reviewer (each must be answered before merge):**
 
 1. **`git push` exclusion** — confirmed correct to EXCLUDE? Workers must not push by default (prompt + authorship guard already say so); a denied push is the safe failure. If some roles legitimately push, that should be a per-role override, not the pool default.
 2. **`Bash(git *)` granularity** — is the per-subcommand allowlist (above) the right shape, or is a single coarser `Bash(git *)` acceptable? Per-subcommand is tighter (recommended) but more brittle if a worker needs an unlisted git verb; coarse `Bash(git *)` re-opens `git push`/`git config`/`git remote`.
-3. **Build-tool breadth** — should `go`/`nix`/`prek` build verbs be in the *pool* default, or only granted per-role to roles that build? Including them pool-wide is convenient but widens the autonomous worker's surface.
+3. **Build-tool breadth** — should `go`/`nix`/`prek` build verbs be in the _pool_ default, or only granted per-role to roles that build? Including them pool-wide is convenient but widens the autonomous worker's surface.
 4. **Allowlist grammar** — confirm the exact claude `--allowed-tools` matcher syntax for scoped Bash (e.g. `Bash(git commit:*)` vs `Bash(git commit *)`). The roadmap pins `claude --allowed-tools` accepts `"Bash(git *)"`; the per-subcommand `:*` form must be verified against `claude --help`/docs at implementation time — if the `:*` matcher is wrong, fall back to the coarser form the docs confirm and re-flag for sign-off.
 5. **MCP / built-in tools not listed** — `TodoWrite`, `WebFetch`, `WebSearch`, `Task`, MCP tools are all OMITTED (auto-denied under `dontAsk`). Confirm no worker role needs any of them; if one does, add it explicitly.
 

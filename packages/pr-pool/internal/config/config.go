@@ -96,16 +96,16 @@ func Default() Config {
 		// Per-entry rationale is in docs/superpowers/plans/2026-06-23-pr-pool-deny-by-default-allowlist.md.
 		AllowedTools:  "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
 		SessionPrefix: "pr-pool-",
-		BudgetTokens:   0,                // unlimited until ccpool N3
-		BudgetCost:     0,                // unlimited until ccpool N3
-		BudgetTime:     25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:    0.725,
-		CancelPct:      0.90,
-		HardPct:        1.00,
-		LogDir:         state + "/pr-pool",
-		ReminderMsg:    "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
-		WrapUpMsg:      "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
-		ConfirmIngest:  90 * time.Second, // catch a dropped initial nudge well under BudgetTime
+		BudgetTokens:  0,                // unlimited until ccpool N3
+		BudgetCost:    0,                // unlimited until ccpool N3
+		BudgetTime:    25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:   0.725,
+		CancelPct:     0.90,
+		HardPct:       1.00,
+		LogDir:        state + "/pr-pool",
+		ReminderMsg:   "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:     "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest: 90 * time.Second, // catch a dropped initial nudge well under BudgetTime
 	}
 }
 

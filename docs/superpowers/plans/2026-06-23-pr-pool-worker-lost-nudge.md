@@ -7,6 +7,7 @@
 **Goal:** Stop a pr-pool worker from silently burning a budget window doing nothing when its initial nudge is dropped, and stop a context-less worker from mutating an unrelated bead — by (1) confirming in ccpool that the model actually ingested a delivered prompt, (2) running each worker in a fresh per-bead worktree, and (3) gating the budget reminder so it never fires before the first model turn and naming the bead it refers to.
 
 **Architecture:** Three independent root causes across two Go modules; this is ONE bead but two commit/PR streams.
+
 - **ccpool — ingestion guard.** `internal/session/send.go` delivers a prompt (paste + Enter) and, in the fire-and-forget `ModeNoWait`/`ModeQueue` paths, returns immediately with no confirmation the model ever started a turn. We add an OPT-IN, bounded post-delivery confirmation: after delivery, poll the session's transcript for a first-turn advance within a caller-supplied window; if none, surface a DISTINCT error (`ErrPromptNotIngested`) mapped to a DISTINCT `ccpool reply` exit code (7). The detector reuses the `claude-transcript` library (`LastMessageActivity`) through the existing `session.Transcript` port (no new module dependency, no hard dependency on the `pg2-oois.5` registry adoption — see "Blocking unknown" at the end).
 - **pr-pool — fresh per-bead worktree.** `internal/executor/ccpool.go:44` launches EVERY session at `Cfg.RepoRoot` (the monorepo on whatever branch it happens to be on). We create/assign a fresh per-bead git worktree at dispatch and launch the session there, threading that path into the prompt's `{{.WorktreeDir}}` and into the watchdog's reset boundary.
 - **pr-pool — safe budget reminder.** `ReminderMsg`/`WrapUpMsg` fire on a timer (`internal/watchdog/watchdog.go:72,77`) regardless of whether the model ever took a turn, and say "this bead" (no id). We (a) gate both messages on a first-model-turn having occurred, and (b) make them bead-explicit by templating the bead id in.
@@ -16,6 +17,7 @@
 **Branch:** `pr-pool-lost-nudge` (off `main`).
 
 **Commit/PR split (one bead, two streams):**
+
 - **Stream A — ccpool ingestion guard** (Tasks A1–A4): self-contained; can merge first.
 - **Stream B — pr-pool worktree + reminder + regression** (Tasks B1–B6): depends on Stream A's `ccpool reply --confirm-ingest` flag + exit code 7 being available, but the worktree and reminder halves (B1–B4) are independent of A and could land in either order.
 - **Task R** (final): repo-wide checks + bead close.
@@ -25,12 +27,14 @@
 ## File Structure
 
 **ccpool (Stream A):**
+
 - `packages/ccpool/internal/session/send.go` — add `ErrPromptNotIngested`; add `confirmIngested` post-delivery poll; call it from `sendLocked` for `ModeNoWait`/`ModeQueue` when a confirm window is set.
 - `packages/ccpool/internal/session/session.go` — extend `Transcript` port with `FirstMessageActivity`; add `ConfirmIngestWindow` + `Now`-driven poll dep already present; add `EnsureOpts`-independent `Send` window plumbing via a new `Mode`-adjacent field is NOT used — the window is carried on `Deps` + a per-call argument (see Task A2).
 - `packages/ccpool/cmd/ccpool/reply.go` — add `--confirm-ingest <dur>` flag; map `ErrPromptNotIngested` to exit code 7; extend `transcriptAdapter` with `FirstMessageActivity`.
 - Tests: `internal/session/send_test.go`, `cmd/ccpool/reply_test.go` (create if absent; mirror existing `cmd/ccpool` table tests).
 
 **pr-pool (Stream B):**
+
 - `packages/pr-pool/internal/worktree/worktree.go` (CREATE) — `Ensure(ctx, git, worktreeDir, repoRoot, beadID) (path string, err error)`: create/reuse a per-bead worktree dir; pure-ish, git injected.
 - `packages/pr-pool/internal/executor/ccpool.go` — at dispatch, ensure the per-bead worktree, launch the session in it (not `Cfg.RepoRoot`), thread the worktree path into `renderNudge`'s `WorktreeDir` and the watchdog.
 - `packages/pr-pool/internal/executor/executor.go` — add a `Git watchdog.GitRunner` seam to `Deps` (nil ⇒ `watchdog.OSGit{}`) so the worktree creation is testable.
@@ -45,6 +49,7 @@
 ### Task A1: `Transcript.FirstMessageActivity` port + `ErrPromptNotIngested`
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/session/session.go:48-51` (the `Transcript` interface)
 - Modify: `packages/ccpool/internal/session/send.go:13-15` (error vars)
 - Test: `packages/ccpool/internal/session/send_test.go`
@@ -141,6 +146,7 @@ git commit -m "feat(ccpool): add Transcript.FirstMessageActivity port + ErrPromp
 ### Task A2: `confirmIngested` bounded post-delivery poll
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/session/session.go:102-126` (the `Deps` struct — add the poll knobs)
 - Modify: `packages/ccpool/internal/session/send.go` (add `confirmIngested`, wire it into `sendLocked`)
 - Test: `packages/ccpool/internal/session/send_test.go`
@@ -352,6 +358,7 @@ git commit -m "feat(ccpool): SendWithConfirm post-delivery ingestion guard (ErrP
 ### Task A3: `ccpool reply --confirm-ingest` flag + exit code 7
 
 **Files:**
+
 - Modify: `packages/ccpool/cmd/ccpool/reply.go:24-104`
 - Test: `packages/ccpool/cmd/ccpool/reply_test.go` (CREATE if absent; mirror `cmd/ccpool` table-test style)
 
@@ -499,6 +506,7 @@ git add -A && git commit -m "chore(ccpool): vet/test clean for ingestion guard" 
 ### Task B1: `worktree.Ensure` — fresh per-bead worktree
 
 **Files:**
+
 - Create: `packages/pr-pool/internal/worktree/worktree.go`
 - Test: `packages/pr-pool/internal/worktree/worktree_test.go`
 
@@ -657,6 +665,7 @@ git commit -m "feat(pr-pool): worktree.Ensure assigns a fresh per-bead worktree"
 ### Task B2: Launch the worker session in the per-bead worktree
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/executor/executor.go:32-42` (add `Git` seam to `Deps`)
 - Modify: `packages/pr-pool/internal/executor/ccpool.go:36-79,110-132,168-189`
 - Test: `packages/pr-pool/internal/executor/ccpool_test.go`
@@ -817,6 +826,7 @@ git commit -m "feat(pr-pool): launch worker in a fresh per-bead worktree (pg2-yu
 ### Task B3: Bead-explicit reminder/wrap-up messages
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go:89-90` (default messages)
 - Modify: `packages/pr-pool/internal/watchdog/watchdog.go:53-97` (render bead id into the message)
 - Test: `packages/pr-pool/internal/watchdog/watchdog_test.go`
@@ -915,6 +925,7 @@ git commit -m "feat(pr-pool): bead-explicit budget reminder/wrap-up messages (pg
 ### Task B4: Gate the reminder/wrap-up on a first model turn
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/watchdog/watchdog.go:24-97`
 - Test: `packages/pr-pool/internal/watchdog/watchdog_test.go`
 
@@ -1039,6 +1050,7 @@ git commit -m "feat(pr-pool): gate budget nudges on a first model turn (pg2-yukh
 ### Task B5: Wire `--confirm-ingest` into the worker dispatch (consume Stream A)
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/ccpool/cli.go:138-148` (`Send` forwards a confirm window)
 - Modify: `packages/pr-pool/internal/ccpool/ccpool.go` (Runner.Send signature or a new SendConfirm)
 - Modify: `packages/pr-pool/internal/executor/ccpool.go:61-69` (handle a not-ingested failure)
@@ -1198,6 +1210,7 @@ git commit -m "feat(pr-pool): fail-fast hand-back on a confirmed dropped worker 
 ### Task B6: Deterministic dropped-prompt regression (AC#4) + manual-repro note
 
 **Files:**
+
 - Test: `packages/pr-pool/internal/executor/ccpool_test.go` (an end-to-end-ish dispatch regression)
 - Doc: append a "MANUAL repro" note to this plan (already below in §"Manual / live verification")
 
@@ -1261,6 +1274,7 @@ git commit -m "test(pr-pool): regression — dropped nudge hands bead back, no w
 The deterministic regression (Task B6) substitutes for the live repro. The LIVE path cannot be exercised by an agent (it needs a real `claude` TUI and a real tmux paste race). Record this runbook for the operator:
 
 > **MANUAL repro (operator, real monorepo):**
+>
 > 1. `pr-pool drain` (or a single worker dispatch) against a repo with several in-progress beads.
 > 2. To force the dropped-prompt condition, launch the worker's `claude` with a deliberate startup delay (e.g. a wrapper that `sleep`s before the TUI is ready) so the paste lands before the input box exists.
 > 3. Expected with the fix: ccpool `reply --confirm-ingest` returns exit 7 within the confirm window (~90s); pr-pool unclaims the assigned bead; the budget watchdog never nudges (no first turn); NO other bead is mutated. Verify with `bd show <assigned-bead>` (status open, unassigned) and `bd comments <each-other-in-progress-bead>` (no new comment).
@@ -1272,19 +1286,23 @@ The deterministic regression (Task B6) substitutes for the live repro. The LIVE 
 - [ ] **Step 1: Both modules green**
 
 Run:
+
 ```bash
 cd packages/ccpool && go test ./... && go vet ./...
 cd ../pr-pool   && go test ./... && go vet ./...
 ```
+
 Expected: all PASS.
 
 - [ ] **Step 2: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. (No new deps ⇒ no `gomod2nix.toml` change for either package; confirm `git status` shows no untracked `gomod2nix.toml` diff.)
 
 - [ ] **Step 3: Close the bead**
@@ -1300,6 +1318,7 @@ bd close pg2-yukh
 ## Self-review checklist (run while writing)
 
 **1. Spec coverage (the 4 ACs + 3 root causes):**
+
 - AC#1 (detect a worker that never ingested its nudge, fail fast) → Tasks A1–A3 (ccpool guard + exit 7), B5 (pr-pool consumes it, unclaims). ✓
 - AC#2 (reminder never the first prompt + bead-explicit) → B3 (bead-explicit) + B4 (gate on first turn). ✓
 - AC#3 (fresh per-bead worktree) → B1 + B2. ✓

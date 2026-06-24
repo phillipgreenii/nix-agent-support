@@ -29,16 +29,17 @@ The library functions are already in `packages/claude-transcript/registry.go`:
 
 **Mapping table (`claude-transcript` Activity ↔ ccpool `state.State`) — document this in code and here:**
 
-| `claudetranscript.Activity` | ccpool `state.State` | Notes |
-|---|---|---|
-| `Active` | `Working` | TRUSTED once pid-gated; substate (`thinking`/`streaming`) still comes ONLY from the pane. |
-| `WaitingForHuman` | `WaitingForHuman` | A fresh registry `waiting` flag or dangling AskUserQuestion. |
-| `Idle` | `Idle` | Turn finished, or a stale `waiting` that failed the freshness check. |
-| (no live registry row found) | — | No verdict; classifier falls back to the existing pane+row precedence unchanged. |
+| `claudetranscript.Activity`  | ccpool `state.State` | Notes                                                                                     |
+| ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| `Active`                     | `Working`            | TRUSTED once pid-gated; substate (`thinking`/`streaming`) still comes ONLY from the pane. |
+| `WaitingForHuman`            | `WaitingForHuman`    | A fresh registry `waiting` flag or dangling AskUserQuestion.                              |
+| `Idle`                       | `Idle`               | Turn finished, or a stale `waiting` that failed the freshness check.                      |
+| (no live registry row found) | —                    | No verdict; classifier falls back to the existing pane+row precedence unchanged.          |
 
 **Reference consumer to mirror:** `packages/pa-monitor/internal/core/poller/poller.go:210-247` — `if !PidAlive { keep last-known, never Working } else { reg := RegistrySession{...}; verdict := ClassifyActivity(...); switch verdict.Activity { Active→Working; WaitingForHuman→WaitingForHuman; default→Idle } }`. And `packages/pa-monitor/internal/core/session/discovery.go:36-91` for the sweep+match+pid-gate idiom and `DefaultSessionsDir()` (`~/.claude/sessions`).
 
 **The go.mod / gomod2nix wiring is ALREADY DONE — verify, do not re-add:**
+
 - `go.mod:32` already requires `github.com/phillipgreenii/claude-transcript v0.0.0` and `go.mod:40` already has `replace ... => ../claude-transcript`. (Used today by `cmd/ccpool/reply.go:15`, `retry.go`.)
 - `packages/ccpool/default.nix:14-27` already roots `src` at `./..` unioning `./.` + `../claude-transcript` with `modRoot = "ccpool"` (Pattern B per ADR 0008).
 - `gomod2nix.toml` tracks only third-party deps; `claude-transcript` is intentionally absent (the local replace is symlinked from source). `registry.go` imports only stdlib (`bufio`/`encoding/json`/`os`/`path/filepath`/`syscall`/`time`), so adding these calls introduces **no new third-party transitive dep** → `gomod2nix.toml` need not change. Task 6 still runs `go mod tidy` + `gomod2nix generate` to PROVE the toml is unchanged (a non-empty diff there is a BLOCKING signal that something unexpected was pulled in).
@@ -48,6 +49,7 @@ The library functions are already in `packages/claude-transcript/registry.go`:
 ### Task 1: Add the registry verdict to `state.Inputs` + `state.Result` (no behavior change yet)
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/state/state.go:69-86` (`Inputs`), `:42-59` (`Result`), imports `:13-19`
 - Test: `packages/ccpool/internal/state/state_test.go`
 
@@ -162,6 +164,7 @@ git commit -m "feat(ccpool): carry claude-transcript registry verdict on state I
 ### Task 2: `Classify` consults the registry verdict at a defined precedence
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/state/state.go:134-194` (`Classify` doc + body)
 - Test: `packages/ccpool/internal/state/state_test.go`
 
@@ -344,6 +347,7 @@ git commit -m "feat(ccpool): consult registry verdict in Classify (cross-check, 
 ### Task 3: `Gather` resolves the registry verdict via an injected resolver
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/state/state.go:196-267` (`Gather` signature + body + doc)
 - Test: `packages/ccpool/internal/state/state_test.go`
 
@@ -466,6 +470,7 @@ git commit -m "feat(ccpool): inject registry resolver into state.Gather"
 ### Task 4: cmd-layer registry adapter + wire it into `ccpool state`
 
 **Files:**
+
 - Create: `packages/ccpool/cmd/ccpool/registry.go`
 - Modify: `packages/ccpool/cmd/ccpool/state.go:55-74` (build + pass the resolver)
 - Test: `packages/ccpool/cmd/ccpool/registry_test.go`
@@ -709,6 +714,7 @@ git commit -m "feat(ccpool): registry-verdict adapter + wire into 'ccpool state'
 ### Task 5: Document the mapping in the package + a regression check for needs_input
 
 **Files:**
+
 - Modify: `packages/ccpool/internal/state/state.go:1-11` (package doc — add the mapping table)
 - Test: `packages/ccpool/internal/state/state_test.go` (an explicit `needs_input` regression assertion)
 
@@ -828,10 +834,12 @@ Expected: shows `../claude-transcript` in the union (`:18`) and `modRoot = "ccpo
 - [ ] **Step 4: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. `nix flake check` builds the `ccpool` package (exercising the Pattern-B sibling build) and runs its Go test suite under nix.
 
 - [ ] **Step 5: Manual smoke of `ccpool state` (optional, non-hermetic)**
@@ -854,6 +862,7 @@ Expected: `pg2-oois.5` closes; epic `pg2-oois` auto-closes (last of 4 children).
 ## Self-review checklist (run while writing)
 
 **1. Spec coverage (against `bd show pg2-oois.5` AC + the roadmap C1 corrected scope):**
+
 - AC(1) "ccpool can consume the shared registry reader" → Tasks 3+4 (resolver in `Gather`, `registryVerdict` adapter calling `ReadSessionRegistry`/`PidAlive`/`ClassifyActivity`).
 - AC(2) "documented mapping between registry status and ccpool's state enum" → Task 5 Step 3 (package doc table) + Task 2 Step 3 (`Classify` precedence comment) + the Pre-flight mapping table here.
 - AC(3) "no regression to needs_input/pending-question handling" → Task 5 Steps 1-2 (`TestClassify_needsInputUnregressedByRegistry`, four registry states) + Task 2's branch ordering (NeedsInput precedence 3, before both registry branches).

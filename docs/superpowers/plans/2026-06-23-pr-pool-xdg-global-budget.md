@@ -19,6 +19,7 @@
 ### Task 1: `configHome()` XDG helper (mirrors `stateHome()`)
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go` (add helper next to `stateHome()` at `:200-205`)
 - Test: `packages/pr-pool/internal/config/config_test.go`
 
@@ -80,6 +81,7 @@ git commit -m "feat(pr-pool): add configHome() XDG helper for global config"
 ### Task 2: `decodeGlobalBudget` — budget-only decode of the XDG-global file
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/registry.go` (add method after `decodeRoleSet`, before `buildRole` at `:145`)
 - Test: `packages/pr-pool/internal/config/registry_test.go` (new file)
 
@@ -188,6 +190,7 @@ git commit -m "feat(pr-pool): add decodeGlobalBudget (budget-only XDG-global ove
 ### Task 3: Wire the XDG-global layer into `Load()` (between env and repo-local)
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/config/config.go:119-121` (insert the global-file step right after the env overlay block, before the repo-local path is resolved at `:120`)
 - Test: covered by Task 4's integration tests
 
@@ -232,6 +235,7 @@ git commit -m "feat(pr-pool): read XDG-global budget layer in Load() (env < glob
 ### Task 4: Integration tests — precedence across all four layers
 
 **Files:**
+
 - Test: `packages/pr-pool/internal/config/config_test.go` (add a test helper + four tests)
 
 Add a `writeGlobalCfg` helper mirroring the existing `writeCfg` (`config_test.go:17-25`), but pointing `PR_POOL_GLOBAL_CONFIG`. To keep tests hermetic (so a stray real `~/.config/pr-pool/config.toml` can't leak in), every new test that should see NO global file sets `PR_POOL_GLOBAL_CONFIG` to an absent temp path — add a `absentGlobalConfig` helper too. Tests use `Load()` + `WorkerBudget()` to assert end-to-end precedence.
@@ -361,10 +365,12 @@ Expected: no diff — `BurntSushi/toml` was already a dep; no new modules added.
 - [ ] **Step 3: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS.
 
 - [ ] **Step 4: Close the bead**

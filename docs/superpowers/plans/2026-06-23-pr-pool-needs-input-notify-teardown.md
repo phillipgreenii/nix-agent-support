@@ -7,7 +7,8 @@
 **Goal:** When a dispatched ccpool session enters `needs_input`, pr-pool alerts the operator exactly once (distinct eventlog record + log line naming the session and the `ccpool attach` command), and the end-of-pass teardown preserves `needs_input` sessions so a human can still attach.
 
 **Architecture:** Two surgical changes, no new packages, leaning on ccpool's existing desktop notifier (we do NOT rebuild notification mechanics).
-1. **Edge-fire-once alert (executor):** `waitDone` already polls per-`PollInterval` and calls `active()` to read session state. `active()` only returns a bool, so it cannot see the *transition* into `needs_input`. We add a tiny `sessionState(ctx, externalID)` lookup that returns the session's `ccpool.SessionState` (and whether it was present), and a local `alerted bool` latch in `waitDone`: on the FIRST poll where the state is `StateNeedsInput`, emit a distinct eventlog record (`kind:"needs_input"`) plus an `slog.Warn` naming the external_id and the `ccpool attach <id>` command, then set the latch so later polls stay silent. **Non-terminal semantics are unchanged**: the loop keeps polling to `MaxWait` exactly as today (`active()` still treats `needs_input` as active).
+
+1. **Edge-fire-once alert (executor):** `waitDone` already polls per-`PollInterval` and calls `active()` to read session state. `active()` only returns a bool, so it cannot see the _transition_ into `needs_input`. We add a tiny `sessionState(ctx, externalID)` lookup that returns the session's `ccpool.SessionState` (and whether it was present), and a local `alerted bool` latch in `waitDone`: on the FIRST poll where the state is `StateNeedsInput`, emit a distinct eventlog record (`kind:"needs_input"`) plus an `slog.Warn` naming the external_id and the `ccpool attach <id>` command, then set the latch so later polls stay silent. **Non-terminal semantics are unchanged**: the loop keeps polling to `MaxWait` exactly as today (`active()` still treats `needs_input` as active).
 2. **Teardown survival (orchestrator):** `teardownAll()` closes every `<SessionPrefix>*` session unconditionally. We make it inspect each session's `State` first and **skip** (preserve, leave alive) any session in `StateNeedsInput`, logging a distinct "preserved" line. Strays and all other states are still reaped exactly as today. (Per the AC this is the recommended skip+preserve option; TTL is intentionally out of scope — see "Decisions" below.)
 
 **Tech Stack:** Go (stdlib `log/slog`, `testing`). Repo: `phillipgreenii-nix-agent-support` (package `packages/pr-pool`). Existing seams reused: `ccpool.SessionState` (`internal/ccpool/ccpool.go:13-22`), `eventlog.Writer.Emit` (`internal/eventlog/eventlog.go:50`), the `dtest.FakeCC` fake (`internal/dtest/dtest.go:44-86`), `ManualClock` (`internal/dtest/dtest.go:180-203`).
@@ -25,10 +26,12 @@
 - [ ] **Step 1: Create the working branch**
 
 Run (from repo root `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support`):
+
 ```bash
 git switch main && git pull --ff-only
 git switch -c pr-pool-needs-input-notify
 ```
+
 Expected: now on a fresh `pr-pool-needs-input-notify` branch off the latest `main`.
 
 ---
@@ -38,6 +41,7 @@ Expected: now on a fresh `pr-pool-needs-input-notify` branch off the latest `mai
 `active()` collapses session state to a bool, so the edge-alert logic can't reuse it to see the `needs_input` transition. Add a sibling helper that returns the raw state. We do NOT change `active()`'s behavior.
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/executor/ccpool.go` (add helper after `active()`, currently ending at line 302)
 - Test: `packages/pr-pool/internal/executor/ccpool_test.go`
 
@@ -117,6 +121,7 @@ git commit -m "feat(pr-pool): add sessionState lookup helper (raw state, for edg
 `waitDone` (`internal/executor/ccpool.go:213-275`) is the poll loop. We add an `alerted` latch and, at the top of each iteration (after the `ctx.Err()` guard, before reading bead status), check the raw session state and fire the alert exactly once on the edge into `needs_input`. The alert is a distinct eventlog record + `slog.Warn`. **We touch nothing that decides terminal outcome**: `active()`, the deadline, `DoneSignal`, and the watchdog race are all unchanged, so `needs_input` stays non-terminal and the loop still runs to `MaxWait`.
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/executor/ccpool.go` (the `waitDone` loop, `:223-274`)
 - Test: `packages/pr-pool/internal/executor/ccpool_test.go`
 
@@ -298,7 +303,7 @@ Then, INSIDE the `for {` loop, right after the existing `ctx.Err()` guard block 
 		}
 ```
 
-`ccpool` is already imported (line 13). Note: this adds one `List` call per poll *until* the latch trips; after it trips, the extra call stops (the `if !alertedNeedsInput` guard short-circuits). `active()`'s own `List` call later in the loop is unchanged. The `cc.ListIdx` assertions in the existing fast-stop tests (`TestWaitDone_workerDoneStopsFast_failure` expects `ListIdx == 1`) are NOT affected because those sessions are `idle`/`errored`, never `needs_input`, so the pre-status `sessionState` call is the FIRST List call and `active()` is the second — see Step 5 note.
+`ccpool` is already imported (line 13). Note: this adds one `List` call per poll _until_ the latch trips; after it trips, the extra call stops (the `if !alertedNeedsInput` guard short-circuits). `active()`'s own `List` call later in the loop is unchanged. The `cc.ListIdx` assertions in the existing fast-stop tests (`TestWaitDone_workerDoneStopsFast_failure` expects `ListIdx == 1`) are NOT affected because those sessions are `idle`/`errored`, never `needs_input`, so the pre-status `sessionState` call is the FIRST List call and `active()` is the second — see Step 5 note.
 
 - [ ] **Step 4: Run the needs_input tests to verify they pass**
 
@@ -348,6 +353,7 @@ git commit -m "feat(pr-pool): edge-fire-once operator alert on needs_input (even
 `teardownAll()` (`internal/orchestrator/orchestrator.go:262-279`) closes every `<SessionPrefix>*` session unconditionally. We make it SKIP (preserve, leave alive) sessions whose `State == ccpool.StateNeedsInput`, so an operator can still attach after the pass. Everything else (strays, idle, errored, working) is still reaped exactly as today; the returned closed-count still counts only the sessions actually closed.
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/orchestrator/orchestrator.go:259-279` (the `teardownAll` doc comment + body)
 - Test: `packages/pr-pool/internal/orchestrator/orchestrator_test.go`
 
@@ -461,6 +467,7 @@ git commit -m "feat(pr-pool): teardownAll preserves needs_input sessions for ope
 The AC permits either preserve-or-document. We chose preserve; record it so a future reader knows it was deliberate (and that TTL was considered and deferred). The pr-pool package has a package doc comment at the top of `orchestrator.go`; that is the right home (no separate ADR — this is an implementation choice, not a cross-project convention).
 
 **Files:**
+
 - Modify: `packages/pr-pool/internal/orchestrator/orchestrator.go:1-10` (package doc)
 
 - [ ] **Step 1: Extend the package doc comment**
@@ -499,10 +506,12 @@ Expected: all PASS.
 - [ ] **Step 2: Repo checks required before "complete" (per agent-support CLAUDE.md)**
 
 Run (from repo root `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support`):
+
 ```bash
 prek run --all-files || pre-commit run --all-files
 nix flake check
 ```
+
 Expected: both PASS. (No new Go dependencies were added, so there is NO `gomod2nix.toml` change. No nix module changed.)
 
 - [ ] **Step 3: Manual confirmation that the alert text is operator-actionable**
@@ -523,6 +532,7 @@ bd close pg2-th35
 ## Self-review checklist (done while writing)
 
 **1. Spec coverage (against bead AC):**
+
 - AC "Investigation resolved" — already done in grooming; restated in plan Architecture. ✓
 - AC "pr-pool actively alerts the operator … names the tmux session to attach to" — Task 2 emits a distinct eventlog `kind:"needs_input"` + `slog.Warn` carrying `session=<external_id>` and `attach=ccpool attach <external_id>` (the verified attach command). ✓
 - AC "fires once on the edge … does not change non-terminal semantics" — Task 2's `alertedNeedsInput` latch (fire-once) + tests `alertsOnceOnEdge`/`edgeNotEveryPoll`; non-terminal proven by `cc.ListIdx >= 10` + timeout in `alertsOnceOnEdge`, and `active()`/deadline/`DoneSignal` untouched. ✓
