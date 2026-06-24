@@ -147,6 +147,39 @@ func TestRun_reminderIsBeadExplicit(t *testing.T) {
 	}
 }
 
+// pg2-yukh #3b: when the model has NOT started a turn (the dropped-nudge case),
+// the watchdog MUST NOT send the reminder or wrap-up — those would be the model's
+// FIRST prompt, the exact incident. It may still hard-stop the budget (that path
+// unclaims, it does not nudge).
+func TestRun_noReminderBeforeFirstModelTurn(t *testing.T) {
+	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 700}, {OutputTokens: 730}, {OutputTokens: 920}, {OutputTokens: 1000}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+	wd := newWD(r, cc, bd, tokBudget(1000))
+	// Model never started a turn ⇒ no first-turn signal.
+	wd.FirstTurnStarted = func(string) bool { return false }
+	err := wd.Run(context.Background(), "s", "zr-1")
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("hard stop must still fire, got %v", err)
+	}
+	// No reminder/wrap-up was QUEUED to the model (those are the harmful first prompt).
+	for _, s := range cc.sent {
+		t.Errorf("no model nudge may be sent before the first turn; got %q", s)
+	}
+}
+
+func TestRun_reminderFiresAfterFirstModelTurn(t *testing.T) {
+	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 730}, {OutputTokens: 1000}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+	wd := newWD(r, cc, bd, tokBudget(1000))
+	wd.FirstTurnStarted = func(string) bool { return true } // a turn happened
+	_ = wd.Run(context.Background(), "s", "zr-1")
+	if len(cc.sent) == 0 {
+		t.Error("reminder must fire once the model has taken a turn")
+	}
+}
+
 func TestRun_ctxCancelReturnsCtxErr(t *testing.T) {
 	r := &fakeReader{seq: []usage.Snapshot{{OutputTokens: 0}}}
 	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true}}}
