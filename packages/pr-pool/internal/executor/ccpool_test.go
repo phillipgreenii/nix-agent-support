@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
+	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -266,10 +270,10 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
 		t.Errorf("worker done-without-close must add human; updates=%v", bd.Updates)
 	}
-	// active() is the ONLY List caller in waitDone, so a single List call proves
-	// the loop stopped on the first check instead of polling to MaxWait.
-	if cc.ListIdx != 1 {
-		t.Errorf("done must stop on first check (listIdx=1), got %d (looped to MaxWait?)", cc.ListIdx)
+	// sessionState (edge check) + active() each call List once on the single
+	// stopping poll, so 2 List calls proves the loop stopped immediately.
+	if cc.ListIdx != 2 {
+		t.Errorf("done must stop on first poll (listIdx=2: sessionState+active), got %d (looped to MaxWait?)", cc.ListIdx)
 	}
 }
 
@@ -285,8 +289,8 @@ func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
 		t.Errorf("feedback done-without-close must unclaim; updates=%v", bd.Updates)
 	}
-	if cc.ListIdx != 1 {
-		t.Errorf("done must stop on first check (listIdx=1), got %d", cc.ListIdx)
+	if cc.ListIdx != 2 {
+		t.Errorf("done must stop on first poll (listIdx=2), got %d", cc.ListIdx)
 	}
 }
 
@@ -367,6 +371,124 @@ func TestSessionState_lookup(t *testing.T) {
 				t.Errorf("sessionState(%s) = (%q, %v), want (%q, %v)", tc.name, gotState, gotOK, tc.wantState, tc.wantOK)
 			}
 		})
+	}
+}
+
+// readEventLog returns the parsed JSONL records written to path.
+func readEventLog(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		return nil // no file ⇒ no records emitted
+	}
+	defer func() { _ = f.Close() }()
+	var recs []map[string]any
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var m map[string]any
+		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+			t.Fatalf("invalid JSONL line %q: %v", sc.Text(), err)
+		}
+		recs = append(recs, m)
+	}
+	return recs
+}
+
+// countKind returns how many records carry kind == k.
+func countKind(recs []map[string]any, k string) int {
+	n := 0
+	for _, r := range recs {
+		if r["kind"] == k {
+			n++
+		}
+	}
+	return n
+}
+
+// newExecWithLog is newExec plus an eventlog.Writer at logPath on deps.Log.
+func newExecWithLog(cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, logPath string) *ccpoolRun {
+	clk := &dtest.ManualClock{T: time.Unix(0, 0)}
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		panic(err)
+	}
+	lw.Now = clk.Now
+	return &ccpoolRun{deps: Deps{
+		CC: cc, BD: bd, Cfg: cfg, Log: lw,
+		Now: clk.Now, Tick: clk.TickAdvancing(),
+	}}
+}
+
+// A session that sits in needs_input until MaxWait must emit EXACTLY ONE
+// needs_input alert (edge-fire-once), naming the external_id, and must still
+// run to MaxWait then time out (non-terminal semantics unchanged).
+func TestWaitDone_needsInput_alertsOnceOnEdge(t *testing.T) {
+	cfg := fastCfg()
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
+	e := newExecWithLog(cc, bd, cfg, logPath)
+	d := discover.DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
+	if err := e.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err == nil {
+		t.Fatal("needs_input that never resolves must still time out (non-terminal)")
+	}
+	if cc.ListIdx < 10 {
+		t.Errorf("needs_input must keep polling to MaxWait; listIdx=%d", cc.ListIdx)
+	}
+	recs := readEventLog(t, logPath)
+	if n := countKind(recs, "needs_input"); n != 1 {
+		t.Fatalf("needs_input alert must fire exactly once on the edge; got %d records: %v", n, recs)
+	}
+	var alert map[string]any
+	for _, r := range recs {
+		if r["kind"] == "needs_input" {
+			alert = r
+		}
+	}
+	if got, _ := alert["session"].(string); got != "pr-pool-feedback-zr-c" {
+		t.Errorf("alert must name the external_id session; session=%q rec=%v", got, alert)
+	}
+	if lvl, _ := alert["level"].(string); lvl != "warn" {
+		t.Errorf("needs_input alert level = %q, want warn", lvl)
+	}
+}
+
+// A session that is working first, THEN goes needs_input, THEN resolves to a
+// closed bead must alert once (only on the working→needs_input edge) and end
+// successfully.
+func TestWaitDone_needsInput_edgeNotEveryPoll(t *testing.T) {
+	cfg := fastCfg()
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	// status stays in_progress, then closed on the last read.
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "in_progress", "in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateWorking}},
+		{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}},
+		{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}},
+		{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateWorking}},
+	}}
+	e := newExecWithLog(cc, bd, cfg, logPath)
+	d := discover.DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
+	_ = e.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c")
+	recs := readEventLog(t, logPath)
+	if n := countKind(recs, "needs_input"); n != 1 {
+		t.Fatalf("alert must fire once across two consecutive needs_input polls, got %d: %v", n, recs)
+	}
+}
+
+// A session that NEVER reaches needs_input must emit NO needs_input alert.
+func TestWaitDone_noNeedsInput_noAlert(t *testing.T) {
+	cfg := fastCfg()
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-feedback-zr-c", Live: true, State: ccpool.StateWorking}}}}
+	e := newExecWithLog(cc, bd, cfg, logPath)
+	d := discover.DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
+	if err := e.waitDone(context.Background(), nil, d, "pr-pool-feedback-zr-c"); err != nil {
+		t.Fatalf("working→closed should succeed, got %v", err)
+	}
+	if n := countKind(readEventLog(t, logPath), "needs_input"); n != 0 {
+		t.Errorf("no needs_input ⇒ no alert; got %d", n)
 	}
 }
 

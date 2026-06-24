@@ -253,6 +253,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d d
 	completion := d.Role.CCPool.Completion
 	deadline := r.deps.clock().Add(r.deps.Cfg.MaxWait)
 	seenClaimed := false
+	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
 	// won reports whether this loop owns the single terminal outcome.
 	won := func() bool { return claimTerminal == nil || claimTerminal() }
 	// lose is the loser's exit: take NO bead action, wait for the orchestrator to
@@ -265,6 +266,15 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d d
 		// would look like an "open" hand-back), and run no failure action.
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// Edge-detect needs_input and alert the operator exactly once. Pure
+		// observation: it does not affect the terminal decision below (active()
+		// still treats needs_input as keep-waiting, bounded by MaxWait).
+		if !alertedNeedsInput {
+			if st, ok := r.sessionState(ctx, name); ok && st == ccpool.StateNeedsInput {
+				r.alertNeedsInput(name, d.Item.ID)
+				alertedNeedsInput = true
+			}
 		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
 		status, _ := beads.Status(ctx, r.deps.BD, d.Item.ID)
@@ -356,4 +366,22 @@ func (r *ccpoolRun) sessionState(ctx context.Context, externalID string) (ccpool
 		}
 	}
 	return "", false
+}
+
+// alertNeedsInput fires the one-shot operator alert when a dispatched session
+// enters needs_input: a distinct eventlog record (kind "needs_input") plus a
+// warn log line that NAMES the session and the attach command. It does NOT
+// change completion semantics — needs_input stays non-terminal and waitDone
+// keeps polling to MaxWait. ccpool's own desktop notifier still fires
+// independently (internal/notify, On=[needs_input,failed]); this surfaces the
+// same event into pr-pool's log/eventlog so an operator watching pr-pool sees
+// which session to attach to. (pg2-th35)
+func (r *ccpoolRun) alertNeedsInput(externalID, beadID string) {
+	slog.Warn("session needs input — attach to continue",
+		"session", externalID, "bead", beadID, "attach", "ccpool attach "+externalID)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("warn", "needs_input",
+			"session needs input; operator must attach",
+			map[string]any{"session": externalID, "bead": beadID, "attach": "ccpool attach " + externalID})
+	}
 }
