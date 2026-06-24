@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +116,7 @@ func TestRenderListJSON_fieldsAndLiveness(t *testing.T) {
 		}
 		return gitfacet.Facets{}
 	}
-	out, err := renderListJSON(rows, false, "", liveFn, pathFn, gitFn, "ccpool", now, time.Hour, 24*time.Hour)
+	out, err := renderListJSON(rows, false, "", liveFn, pathFn, gitFn, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("renderListJSON: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestRenderListJSON_gitFacetsNullWhenNotInRepo(t *testing.T) {
 	}
 	liveFn := func(_, _ string) bool { return true }
 	pathFn := func(_, _ string) (string, error) { return "/tmp/scratch", nil }
-	out, err := renderListJSON(rows, false, "", liveFn, pathFn, nilGit, "ccpool", now, time.Hour, 24*time.Hour)
+	out, err := renderListJSON(rows, false, "", liveFn, pathFn, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("renderListJSON: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestRenderListJSON_notLiveFallsBackToLaunchDir(t *testing.T) {
 		gitCalled = true
 		return gitfacet.Facets{RepoRoot: strptr("/x"), Worktree: strptr("/x"), Branch: strptr("b")}
 	}
-	out, _ := renderListJSON(rows, true, "", liveFn, pathFn, gitFn, "ccpool", now, time.Hour, 24*time.Hour)
+	out, _ := renderListJSON(rows, true, "", liveFn, pathFn, gitFn, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	var got []map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", out, err)
@@ -229,7 +230,7 @@ func TestRenderListJSON_liveButPathQueryFails(t *testing.T) {
 		}
 		return gitfacet.Facets{}
 	}
-	out, _ := renderListJSON(rows, false, "", liveFn, noPath, gitFn, "ccpool", now, time.Hour, 24*time.Hour)
+	out, _ := renderListJSON(rows, false, "", liveFn, noPath, gitFn, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	var got []map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", out, err)
@@ -250,7 +251,7 @@ func TestRenderListJSON_allBypassesRetention(t *testing.T) {
 	}
 	liveFn := func(_, _ string) bool { return false }
 
-	out, _ := renderListJSON(rows, false, "", liveFn, noPath, nilGit, "ccpool", now, time.Hour, 24*time.Hour)
+	out, _ := renderListJSON(rows, false, "", liveFn, noPath, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	var def []map[string]any
 	if err := json.Unmarshal([]byte(out), &def); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -259,7 +260,7 @@ func TestRenderListJSON_allBypassesRetention(t *testing.T) {
 		t.Errorf("default JSON view should hide old cold done, got %q", out)
 	}
 
-	outAll, _ := renderListJSON(rows, true, "", liveFn, noPath, nilGit, "ccpool", now, time.Hour, 24*time.Hour)
+	outAll, _ := renderListJSON(rows, true, "", liveFn, noPath, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	var all []map[string]any
 	if err := json.Unmarshal([]byte(outAll), &all); err != nil {
 		t.Fatalf("unmarshal --all: %v", err)
@@ -279,7 +280,7 @@ func TestRenderListJSON_transcriptPathEmptyStillPresentAndEmptyIsArray(t *testin
 	}
 	liveFn := func(_, _ string) bool { return true }
 	pathFn := func(_, _ string) (string, error) { return "/cwd", nil }
-	out, _ := renderListJSON(rows, false, "", liveFn, pathFn, nilGit, "ccpool", now, time.Hour, 24*time.Hour)
+	out, _ := renderListJSON(rows, false, "", liveFn, pathFn, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	var got []map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", out, err)
@@ -292,8 +293,51 @@ func TestRenderListJSON_transcriptPathEmptyStillPresentAndEmptyIsArray(t *testin
 	}
 
 	// No visible rows must marshal as [] (a JSON array), never null.
-	emptyOut, _ := renderListJSON(nil, false, "", liveFn, pathFn, nilGit, "ccpool", now, time.Hour, 24*time.Hour)
+	emptyOut, _ := renderListJSON(nil, false, "", liveFn, pathFn, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
 	if strings.TrimSpace(emptyOut) != "[]" {
 		t.Errorf("empty list = %q, want []", emptyOut)
+	}
+}
+
+func TestFilterRowsByExternalIDSet(t *testing.T) {
+	rows := []store.Session{
+		{ExternalID: "ext-a", State: store.Idle},
+		{ExternalID: "ext-b", State: store.Idle},
+		{ExternalID: "ext-c", State: store.Idle},
+	}
+	got := filterRowsByExternalIDSet(rows, map[string]bool{"ext-a": true, "ext-c": true})
+	if len(got) != 2 || got[0].ExternalID != "ext-a" || got[1].ExternalID != "ext-c" {
+		t.Fatalf("filtered = %+v, want ext-a,ext-c", got)
+	}
+}
+
+func TestParseFilters_keyValuePairs(t *testing.T) {
+	got, err := parseFilters([]string{"role=worker", "pool=pr-pool"})
+	if err != nil {
+		t.Fatalf("parseFilters: %v", err)
+	}
+	want := map[string]string{"role": "worker", "pool": "pr-pool"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseFilters_rejectsMissingEquals(t *testing.T) {
+	if _, err := parseFilters([]string{"role"}); err == nil {
+		t.Fatal("filter without '=' must error")
+	}
+}
+
+func TestRenderListJSON_includesMetaObject(t *testing.T) {
+	rows := []store.Session{{ExternalID: "ext-a", State: store.Idle, CWD: "/w"}}
+	liveFn := func(_, _ string) bool { return false }
+	metaFn := func(ext string) map[string]string { return map[string]string{"role": "worker"} }
+	out, err := renderListJSON(rows, true, "", liveFn, nil, nil, metaFn, "ccpool",
+		time.Unix(2000, 0), time.Hour, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("renderListJSON: %v", err)
+	}
+	if !strings.Contains(out, `"meta":{"role":"worker"}`) {
+		t.Errorf("meta not in JSON: %s", out)
 	}
 }

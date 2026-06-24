@@ -16,11 +16,54 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/tmux"
 )
 
+// filterFlag collects repeated `--filter key=value` into a map (mirrors new.go's
+// envFlag). Implements flag.Value so `ccpool list` can take --filter repeatedly.
+type filterFlag map[string]string
+
+func (f filterFlag) String() string { return "" }
+
+func (f filterFlag) Set(kv string) error {
+	k, v, ok := strings.Cut(kv, "=")
+	if !ok {
+		return fmt.Errorf("invalid --filter %q, want key=value", kv)
+	}
+	f[k] = v
+	return nil
+}
+
+// parseFilters validates raw "key=value" strings into a map (used by tests and as
+// the flag-free parse path). Pure.
+func parseFilters(raw []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, kv := range raw {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid filter %q, want key=value", kv)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// filterRowsByExternalIDSet keeps only rows whose ExternalID is in keep,
+// preserving input order. Pure.
+func filterRowsByExternalIDSet(rows []store.Session, keep map[string]bool) []store.Session {
+	var out []store.Session
+	for _, r := range rows {
+		if keep[r.ExternalID] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func runList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	all := fs.Bool("all", false, "show cold terminal rows hidden by retention")
 	stateFilter := fs.String("state", "", "only show rows in this state")
 	jsonOut := fs.Bool("json", false, "emit a JSON array of sessions instead of the text table")
+	filters := filterFlag{}
+	fs.Var(filters, "filter", "only show sessions whose metadata matches key=value (repeatable, AND-combined)")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -41,13 +84,36 @@ func runList(args []string) int {
 		return 1
 	}
 
+	if len(filters) > 0 {
+		ids, err := st.ListExternalIDsByMeta(context.Background(), filters)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "list filter:", err)
+			return 1
+		}
+		keep := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			keep[id] = true
+		}
+		rows = filterRowsByExternalIDSet(rows, keep)
+	}
+
+	// metaFn reads each row's metadata from the store so the JSON shape carries a
+	// `meta` object per row (consumers get metadata in one call).
+	metaFn := func(externalID string) map[string]string {
+		m, err := st.Meta(context.Background(), externalID)
+		if err != nil {
+			return nil
+		}
+		return m
+	}
+
 	if *jsonOut {
 		// cwd is the LIVE pane current path (tmux display-message), falling back
 		// to the launch cwd when the session is not live; the git facets resolve
 		// against that cwd (fail-soft to null outside a repo). Resolvers are
 		// injected so the renderer stays pure (pg2-gxxl).
 		out, err := renderListJSON(rows, *all, *stateFilter,
-			tmux.HasSession, tmux.PaneCurrentPath, gitfacet.Resolve, cfg.Tmux.Socket,
+			tmux.HasSession, tmux.PaneCurrentPath, gitfacet.Resolve, metaFn, cfg.Tmux.Socket,
 			time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "list:", err)
@@ -127,17 +193,18 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 // transcript_path, launch_dir and cwd are always present (no omitempty) so
 // consumers get a stable schema.
 type listJSON struct {
-	ExternalID      string  `json:"external_id"`
-	Name            string  `json:"name"`
-	State           string  `json:"state"`
-	Live            bool    `json:"live"`
-	TranscriptPath  string  `json:"transcript_path"`
-	ClaudeSessionID string  `json:"claude_session_id"`
-	LaunchDir       string  `json:"launch_dir"`
-	CWD             string  `json:"cwd"`
-	GitRepoRoot     *string `json:"git_repo_root,omitempty"`
-	Worktree        *string `json:"worktree,omitempty"`
-	Branch          *string `json:"branch,omitempty"`
+	ExternalID      string            `json:"external_id"`
+	Name            string            `json:"name"`
+	State           string            `json:"state"`
+	Live            bool              `json:"live"`
+	TranscriptPath  string            `json:"transcript_path"`
+	ClaudeSessionID string            `json:"claude_session_id"`
+	LaunchDir       string            `json:"launch_dir"`
+	CWD             string            `json:"cwd"`
+	GitRepoRoot     *string           `json:"git_repo_root,omitempty"`
+	Worktree        *string           `json:"worktree,omitempty"`
+	Branch          *string           `json:"branch,omitempty"`
+	Meta            map[string]string `json:"meta,omitempty"`
 }
 
 // renderListJSON marshals the visible rows as a JSON array (one object per
@@ -156,6 +223,7 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 	liveFn func(socket, target string) bool,
 	pathFn func(socket, target string) (string, error),
 	gitFn func(cwd string) gitfacet.Facets,
+	metaFn func(externalID string) map[string]string,
 	socket string,
 	now time.Time, doneTTL, failedTTL time.Duration) (string, error) {
 
@@ -182,6 +250,11 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 			item.GitRepoRoot = f.RepoRoot
 			item.Worktree = f.Worktree
 			item.Branch = f.Branch
+		}
+		if metaFn != nil {
+			if m := metaFn(r.ExternalID); len(m) > 0 {
+				item.Meta = m
+			}
 		}
 		out = append(out, item)
 	}
