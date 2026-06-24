@@ -104,10 +104,16 @@ const enrichedPRsQuery = `query($search: String!) {
             }
           }
         }
-        commits(last: 1) {
+        body
+        labels(first: 20) { totalCount pageInfo { hasNextPage } nodes { name } }
+        files(first: 100) { totalCount pageInfo { hasNextPage } nodes { path } }
+        commits(last: 20) {
+          totalCount
+          pageInfo { hasNextPage }
           nodes {
             commit {
               oid
+              message
               statusCheckRollup {
                 state
                 contexts(first: 30) {
@@ -211,13 +217,31 @@ type ghPRNode struct {
 	Repository   struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
+	Body   string `json:"body"`
+	Labels struct {
+		TotalCount int        `json:"totalCount"`
+		PageInfo   ghPageInfo `json:"pageInfo"`
+		Nodes      []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
+	Files struct {
+		TotalCount int        `json:"totalCount"`
+		PageInfo   ghPageInfo `json:"pageInfo"`
+		Nodes      []struct {
+			Path string `json:"path"`
+		} `json:"nodes"`
+	} `json:"files"`
 	Reviews       ghReviewsConn       `json:"reviews"`
 	Comments      ghCommentsConn      `json:"comments"`
 	ReviewThreads ghReviewThreadsConn `json:"reviewThreads"`
 	Commits       struct {
-		Nodes []struct {
+		TotalCount int        `json:"totalCount"`
+		PageInfo   ghPageInfo `json:"pageInfo"`
+		Nodes      []struct {
 			Commit struct {
 				OID               string `json:"oid"`
+				Message           string `json:"message"`
 				StatusCheckRollup *struct {
 					State    string         `json:"state"`
 					Contexts ghContextsConn `json:"contexts"`
@@ -337,6 +361,12 @@ func parseEnrichedPRs(raw []byte, repo string) ([]vcs.EnrichedPR, error) {
 		ep.Reviews = reviewsFromGHNode(n)
 		ep.Comments = commentsFromGHNode(n)
 		ep.CIRuns = ciRunsFromGHNode(n)
+		for _, f := range n.Files.Nodes {
+			ep.Files = append(ep.Files, f.Path)
+		}
+		for _, c := range n.Commits.Nodes {
+			ep.Commits = append(ep.Commits, c.Commit.Message)
+		}
 		ep.Truncated = truncationFlags(n)
 		out = append(out, ep)
 	}
@@ -349,11 +379,13 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 	if owner == "" {
 		owner = repo
 	}
+	// With commits(last: 20), nodes are in ascending chronological order;
+	// the last element is the newest (head) commit.
 	var headSHA string
 	if len(n.Commits.Nodes) > 0 {
-		headSHA = n.Commits.Nodes[0].Commit.OID
+		headSHA = n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.OID
 	}
-	return api.PR{
+	pr := api.PR{
 		Repo:         owner,
 		Number:       n.Number,
 		Title:        n.Title,
@@ -368,7 +400,12 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 		Deletions:    n.Deletions,
 		ChangedFiles: n.ChangedFiles,
 		HeadSHA:      headSHA,
+		Body:         n.Body,
 	}
+	for _, l := range n.Labels.Nodes {
+		pr.Labels = append(pr.Labels, l.Name)
+	}
+	return pr
 }
 
 func reviewsFromGHNode(n ghPRNode) []api.Review {
@@ -439,11 +476,13 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 // this is the PR's current head commit, which is the SHA all the CI
 // contexts in the rollup were evaluated against.
 func ciRunsFromGHNode(n ghPRNode) []api.CIRun {
-	if len(n.Commits.Nodes) == 0 || n.Commits.Nodes[0].Commit.StatusCheckRollup == nil {
+	// With commits(last: 20), nodes are in ascending chronological order;
+	// the last element is the newest (head) commit where CI runs live.
+	if len(n.Commits.Nodes) == 0 || n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.StatusCheckRollup == nil {
 		return nil
 	}
-	headSHA := n.Commits.Nodes[0].Commit.OID
-	rollup := n.Commits.Nodes[0].Commit.StatusCheckRollup
+	headSHA := n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.OID
+	rollup := n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.StatusCheckRollup
 	out := make([]api.CIRun, 0, len(rollup.Contexts.Nodes))
 	for _, c := range rollup.Contexts.Nodes {
 		switch c.Typename {
@@ -496,9 +535,18 @@ func truncationFlags(n ghPRNode) []string {
 			break
 		}
 	}
-	if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil &&
-		n.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.PageInfo.HasNextPage {
+	if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.StatusCheckRollup != nil &&
+		n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.StatusCheckRollup.Contexts.PageInfo.HasNextPage {
 		flags = append(flags, "ciContexts")
+	}
+	if n.Files.PageInfo.HasNextPage {
+		flags = append(flags, "files")
+	}
+	if n.Commits.PageInfo.HasNextPage {
+		flags = append(flags, "commits")
+	}
+	if n.Labels.PageInfo.HasNextPage {
+		flags = append(flags, "labels")
 	}
 	return flags
 }

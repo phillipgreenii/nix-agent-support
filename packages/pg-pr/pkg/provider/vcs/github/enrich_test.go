@@ -383,6 +383,101 @@ func TestParseEnrichedPRs_HeadSHAEmptyWhenNoCommits(t *testing.T) {
 	}
 }
 
+// TestParseEnrichedPRs_BodyLabelsFilesCommits verifies that the GraphQL
+// response fields body, labels, files, and commits are mapped onto the
+// vcs.EnrichedPR and api.PR structs.
+func TestParseEnrichedPRs_BodyLabelsFilesCommits(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":42,"title":"fix","author":{"__typename":"User","login":"alice"},
+	   "headRefName":"fix/thing","baseRefName":"main","url":"https://gh/42","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":1,"deletions":0,"changedFiles":2,
+	   "repository":{"nameWithOwner":"x/y"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "commits":{"nodes":[]},
+	   "body":"production incident",
+	   "labels":{"nodes":[{"name":"p0"}]},
+	   "files":{"nodes":[{"path":"a.go"},{"path":"b.py"}]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	ep := got[0]
+
+	if ep.PR.Body != "production incident" {
+		t.Errorf("PR.Body = %q, want %q", ep.PR.Body, "production incident")
+	}
+	wantLabels := []string{"p0"}
+	if !sliceEq(ep.PR.Labels, wantLabels) {
+		t.Errorf("PR.Labels = %v, want %v", ep.PR.Labels, wantLabels)
+	}
+	wantFiles := []string{"a.go", "b.py"}
+	if !sliceEq(ep.Files, wantFiles) {
+		t.Errorf("Files = %v, want %v", ep.Files, wantFiles)
+	}
+}
+
+// TestParseEnrichedPRs_CommitMessages verifies that commit messages from the
+// commits connection are mapped onto vcs.EnrichedPR.Commits.
+func TestParseEnrichedPRs_CommitMessages(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":43,"title":"fix","author":{"__typename":"User","login":"alice"},
+	   "headRefName":"fix/thing","baseRefName":"main","url":"https://gh/43","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":1,"deletions":0,"changedFiles":1,
+	   "repository":{"nameWithOwner":"x/y"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "body":"",
+	   "labels":{"nodes":[]},"files":{"nodes":[]},
+	   "commits":{"nodes":[
+	     {"commit":{"oid":"abc","message":"fix: x","statusCheckRollup":null}}
+	   ]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	ep := got[0]
+
+	wantCommits := []string{"fix: x"}
+	if !sliceEq(ep.Commits, wantCommits) {
+		t.Errorf("Commits = %v, want %v", ep.Commits, wantCommits)
+	}
+}
+
+// TestTruncationFlags_NewConnections verifies that files, commits, and labels
+// connections set the appropriate truncation flags when hasNextPage is true.
+func TestTruncationFlags_NewConnections(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":1,
+	   "reviews":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "comments":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]},
+	   "commits":{"pageInfo":{"hasNextPage":true},"nodes":[]},
+	   "files":{"pageInfo":{"hasNextPage":true},"nodes":[]},
+	   "labels":{"pageInfo":{"hasNextPage":true},"nodes":[]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	want := []string{"files", "commits", "labels"}
+	if !sliceEq(got[0].Truncated, want) {
+		t.Errorf("Truncated = %v, want %v", got[0].Truncated, want)
+	}
+}
+
 // Compile-time check that ghGraphQLResponse decodes the recorded fixture
 // shape so silent schema drift gets caught here, not in production.
 var _ = func() bool {
