@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -350,9 +351,11 @@ func TestActive_stateMapping(t *testing.T) {
 
 func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (report.Result, error) {
 	t.Helper()
+	cfg.WorktreeDir = t.TempDir() // isolate the per-bead worktree to a throwaway dir
 	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = ext
+	deps.Git = &dtest.NoopGit{} // never shell out to real git in tests
 	return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 }
 
@@ -361,6 +364,28 @@ func verbOf(res report.Result) report.Verb {
 		return ""
 	}
 	return res.Actions[0].Verb
+}
+
+// pg2-yukh #2: the worker session must launch in a FRESH per-bead worktree
+// (<WorktreeDir>/<beadID>), never the shared monorepo at Cfg.RepoRoot.
+func TestDispatch_launchesInFreshPerBeadWorktree(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	// Bead closes fast so run() returns cleanly (mirror TestWaitDone_workerCloses).
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pr-pool-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err != nil {
+		t.Fatalf("dispatch should succeed (bead closed), got %v", err)
+	}
+	want := filepath.Join(cfg.WorktreeDir, "zr-w")
+	if cc.EnsuredCwd != want {
+		t.Errorf("session launched at %q, want fresh worktree %q (not RepoRoot %q)", cc.EnsuredCwd, want, cfg.RepoRoot)
+	}
 }
 
 func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
@@ -401,11 +426,13 @@ func TestDispatch_sendFailWorkerLeave_noVerb(t *testing.T) {
 
 func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
 	cfg := fastCfg() // feedback on_dispatch_fail = unclaim
+	cfg.WorktreeDir = t.TempDir()
 	bd := &dtest.ScriptBD{}
 	cc := &dtest.FakeCC{SendErr: dtest.ErrSend}
 	d := discover.DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-feedback-zr-c"
+	deps.Git = &dtest.NoopGit{}
 	res, _ := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if v := verbOf(res); v != report.Unclaimed {
 		t.Errorf("feedback send-fail (unclaim) must report Unclaimed, got %q", v)
@@ -425,11 +452,13 @@ func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	cfg := fastCfg()
 	cfg.BudgetTokens = 1000 // finite cap so the ramp trips it
+	cfg.WorktreeDir = t.TempDir()
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
 	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "pr-pool-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
 	deps.UsageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately >100%
 	res, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 	if err == nil {

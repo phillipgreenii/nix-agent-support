@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/watchdog"
+	"github.com/phillipgreenii/pr-pool/internal/worktree"
 )
 
 type ccpoolExecutor struct{}
@@ -36,12 +37,29 @@ type ccpoolRun struct{ deps Deps }
 func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report.Result, error) {
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
-	env := map[string]string{
-		"BEADS_ACTOR":    cc.Actor,
-		"BEADS_DIR":      r.deps.Cfg.RepoRoot + "/.beads",
-		"WORKSPACE_ROOT": r.deps.Cfg.RepoRoot,
+
+	// Fresh per-bead worktree so the worker never runs on a stale unrelated branch
+	// (pg2-yukh root cause #2). On failure to create one, treat it like a launch
+	// failure (escalate per ADR 0015) — running in the shared monorepo is exactly
+	// the bug we are fixing, so we do NOT silently fall back to RepoRoot.
+	wt, wtErr := worktree.Ensure(ctx, r.deps.git(), r.deps.Cfg.WorktreeDir, r.deps.Cfg.RepoRoot, d.Item.ID)
+	if wtErr != nil {
+		var res report.Result
+		if r.escalateLaunchFailure(ctx, d.Item.ID) {
+			res = failureAction(report.Escalated, d.Item.ID)
+		}
+		return res, fmt.Errorf("worktree %s: %w", d.Item.ID, wtErr)
 	}
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, r.deps.Cfg.RepoRoot, env); err != nil {
+
+	env := map[string]string{
+		"BEADS_ACTOR": cc.Actor,
+		// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
+		// is repo-rooted, so the worker must read/write the SAME bead store, just on
+		// its own working tree (pg2-yukh).
+		"BEADS_DIR":      r.deps.Cfg.RepoRoot + "/.beads",
+		"WORKSPACE_ROOT": wt,
+	}
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
@@ -57,7 +75,7 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report
 	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
 	// 0015). Best-effort.
 	_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-launch-fail")
-	nudge := r.renderNudge(cc, d)
+	nudge := r.renderNudge(cc, d, wt)
 	if err := r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
 		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		var res report.Result
@@ -73,7 +91,7 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report
 	if budgetUnlimited(cc.Budget) {
 		werr = r.waitDone(ctx, nil, d, r.deps.ExternalID)
 	} else {
-		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID)
+		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt)
 	}
 	return r.waitFailureResult(cc, d.Item.ID, werr), werr
 }
@@ -107,10 +125,10 @@ func budgetUnlimited(b budget.Budget) bool {
 // renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety
 // preamble when authorship_guard is set, then the role's rendered task prompt, then
 // the budget prompt-line (empty when the budget is unlimited).
-func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d discover.DispatchContext) string {
+func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d discover.DispatchContext, worktreeDir string) string {
 	pctx := prompt.Context{
 		Item:        d.Item,
-		WorktreeDir: r.deps.Cfg.WorktreeDir,
+		WorktreeDir: worktreeDir,
 		SkillMD:     cc.SkillMD,
 		SelfLogin:   r.deps.Cfg.SelfLogin,
 		RepoRoot:    r.deps.Cfg.RepoRoot,
@@ -165,7 +183,7 @@ func (r *ccpoolRun) escalateLaunchFailure(ctx context.Context, beadID string) bo
 // and waitDone's add-human could both fire (bead ends open AND human), or the
 // watchdog's unclaim could be misread by waitDone as a successful hand-back
 // (a budget hard-stop reported as success). (pg2-c1vp)
-func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d discover.DispatchContext, name string) error {
+func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d discover.DispatchContext, name, worktreeDir string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -173,16 +191,16 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d discover.Dispa
 	claimTerminal := func() bool { return owner.CompareAndSwap(false, true) }
 
 	wd := &watchdog.Watchdog{
-		Reader:        r.deps.reader(),
-		CC:            r.deps.CC,
-		BD:            r.deps.BD,
-		Log:           r.deps.Log,
-		Budget:        d.Role.CCPool.Budget,
-		RepoRoot:      r.deps.Cfg.RepoRoot,
-		WorktreeDir:   r.deps.Cfg.WorktreeDir,
-		ReminderMsg:   r.deps.Cfg.ReminderMsg,
-		WrapUpMsg:     r.deps.Cfg.WrapUpMsg,
-		Git:           watchdog.OSGit{},
+		Reader:      r.deps.reader(),
+		CC:          r.deps.CC,
+		BD:          r.deps.BD,
+		Log:         r.deps.Log,
+		Budget:      d.Role.CCPool.Budget,
+		RepoRoot:    r.deps.Cfg.RepoRoot,
+		WorktreeDir: worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
+		ReminderMsg: r.deps.Cfg.ReminderMsg,
+		WrapUpMsg:   r.deps.Cfg.WrapUpMsg,
+		Git:           r.deps.git(),
 		Now:           r.deps.Now,
 		Poll:          r.deps.Cfg.PollInterval,
 		ClaimTerminal: claimTerminal,

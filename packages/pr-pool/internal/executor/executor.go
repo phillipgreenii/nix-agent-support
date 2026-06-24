@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/report"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
+	"github.com/phillipgreenii/pr-pool/internal/watchdog"
 )
 
 // Executor dispatches one item for a role and reports the failure action it took.
@@ -39,6 +40,16 @@ type Deps struct {
 	Tick        func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
 	UsageReader usage.Reader                               // nil ⇒ usage.NewTranscriptReader()
 	ExternalID  string                                     // resolved once by the orchestrator
+	// Git creates the per-bead worktree at dispatch (nil ⇒ watchdog.OSGit{}). Shared
+	// with the watchdog so the worktree it resets is the one the worker ran in.
+	Git watchdog.GitRunner
+}
+
+func (d Deps) git() watchdog.GitRunner {
+	if d.Git != nil {
+		return d.Git
+	}
+	return watchdog.OSGit{}
 }
 
 func (d Deps) clock() time.Time {

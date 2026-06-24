@@ -47,6 +47,7 @@ type FakeCC struct {
 	mu          sync.Mutex
 	Ensured     []string
 	EnsureNames []string
+	EnsuredCwd  string // the cwd of the last Ensure call (the per-bead worktree)
 	Sent        []string
 	Closed      []string
 	ClosedPurge []bool
@@ -56,9 +57,10 @@ type FakeCC struct {
 	ListIdx     int
 }
 
-func (f *FakeCC) Ensure(_ context.Context, externalID, name, _ string, _ map[string]string) error {
+func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _ map[string]string) error {
 	f.Ensured = append(f.Ensured, externalID)
 	f.EnsureNames = append(f.EnsureNames, name)
+	f.EnsuredCwd = cwd
 	return f.EnsureErr
 }
 func (f *FakeCC) Send(_ context.Context, externalID, _ string, _ ccpool.SendMode) error {
@@ -138,6 +140,27 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 		s.Updates = append(s.Updates, join(args))
 	}
 	return "", nil
+}
+
+// NoopGit is a recording GitRunner/worktree.Git that performs no real git
+// commands — so executor tests exercise the worktree path without touching any
+// real repo. rev-parse returns nil (the path "exists") so worktree.Ensure reuses
+// the per-bead path rather than running `worktree add`; tests that need a fresh
+// add should set NoopGit.AddOnly true to force the create path.
+type NoopGit struct {
+	mu      sync.Mutex
+	Calls   [][]string
+	AddOnly bool // when true, rev-parse fails so Ensure takes the `worktree add` path
+}
+
+func (g *NoopGit) Run(_ context.Context, dir string, args ...string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.Calls = append(g.Calls, append([]string{dir}, args...))
+	if g.AddOnly && len(args) > 0 && args[0] == "rev-parse" {
+		return errors.New("not a git worktree")
+	}
+	return nil
 }
 
 // Contains reports whether a is in the slice x.
