@@ -16,3 +16,26 @@ func TestBucketSize(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyKind(t *testing.T) {
+	cases := []struct {
+		name    string
+		title   string
+		branch  string
+		commits []string
+		want    string
+	}{
+		{"title conventional fix", "fix(store): wrong scan", "anything", nil, "bugfix"},
+		{"title feat with bang", "feat!: breaking change", "x", nil, "feature"},
+		{"branch prefix when title plain", "tidy things up", "refactor/cleanup", nil, "refactor"},
+		{"branch feature alias", "stuff", "feature/new-ui", nil, "feature"},
+		{"commit majority when title+branch plain", "wip", "wip", []string{"fix: a", "fix: b", "docs: c"}, "bugfix"},
+		{"fallback other", "random work", "wip", nil, "other"},
+		{"title wins over branch", "docs: readme", "fix/typo", nil, "docs"},
+	}
+	for _, c := range cases {
+		if got := classifyKind(c.title, c.branch, c.commits); got != c.want {
+			t.Errorf("%s: classifyKind(%q,%q,%v) = %q; want %q", c.name, c.title, c.branch, c.commits, got, c.want)
+		}
+	}
+}
