@@ -26,7 +26,7 @@ func TestPROpenedCreatesPRBead(t *testing.T) {
 	client := beads.NewClientWithRunner(fr)
 	h := New(client)
 
-	payload, _ := json.Marshal(PRPayload{Repo: "o/r", Number: 7, Title: "https://x/7"})
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Title: "https://x/7"})
 	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -78,3 +78,48 @@ func TestEnsureProcessFeedbackPropagatesFindError(t *testing.T) {
 		t.Fatal("expected FindOpenProcessingCycle error to propagate, got nil (would re-create cycles)")
 	}
 }
+
+func TestPROpenedWritesFullFields(t *testing.T) {
+	var got beads.MergeRequestFields
+	client := &capturingClient{onEnsure: func(f beads.MergeRequestFields) { got = f }}
+	h := New(client)
+	payload, _ := json.Marshal(store.PRPayload{
+		Repo: "o/r", Number: 7, Title: "t", Ownership: "team",
+		State: "open", Branch: "feat", Base: "main", Author: "alice",
+		URL: "https://x/7", Draft: true, LastSyncedAt: "2026-06-24T00:00:00Z",
+	})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got.State != "open" || got.Branch != "feat" || got.Base != "main" ||
+		got.Author != "alice" || got.URL != "https://x/7" || !got.Draft {
+		t.Fatalf("fields not propagated: %+v", got)
+	}
+}
+
+// capturingClient is a minimal BeadClient capturing EnsureMergeRequest fields.
+type capturingClient struct {
+	onEnsure func(beads.MergeRequestFields)
+}
+
+func (c *capturingClient) EnsureMergeRequest(_ context.Context, _ string, f beads.MergeRequestFields) (string, bool, error) {
+	if c.onEnsure != nil {
+		c.onEnsure(f)
+	}
+	return "mr-1", false, nil
+}
+func (c *capturingClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (c *capturingClient) CloseMergeRequest(context.Context, string, string) error { return nil }
+func (c *capturingClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (c *capturingClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
+func (c *capturingClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (c *capturingClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (c *capturingClient) CloseFeedback(context.Context, string, string) error        { return nil }

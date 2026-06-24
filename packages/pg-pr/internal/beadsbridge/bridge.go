@@ -32,15 +32,6 @@ type Handler struct{ client BeadClient }
 // New constructs the handler.
 func New(client BeadClient) *Handler { return &Handler{client: client} }
 
-// PRPayload is the JSON payload for pr.* events.
-type PRPayload struct {
-	Repo      string `json:"repo"`
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	Ownership string `json:"ownership"`
-	Merged    bool   `json:"merged"`
-}
-
 // FeedbackPayload is the JSON payload for feedback.created events.
 type FeedbackPayload struct {
 	Repo   string `json:"repo"`
@@ -53,12 +44,14 @@ type FeedbackPayload struct {
 func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 	switch e.Type {
 	case store.EventPROpened, store.EventPRUpdated:
-		var p PRPayload
+		var p store.PRPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("beadsbridge: decode pr payload: %w", err)
 		}
 		_, _, err := h.client.EnsureMergeRequest(ctx, p.Title, beads.MergeRequestFields{
-			Repo: p.Repo, PRNumber: p.Number,
+			Repo: p.Repo, PRNumber: p.Number, State: p.State, Branch: p.Branch,
+			Base: p.Base, Author: p.Author, URL: p.URL, Draft: p.Draft,
+			LastSyncedAt: p.LastSyncedAt,
 		})
 		return err
 	case store.EventFeedbackCreated:
@@ -68,7 +61,7 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		}
 		return h.ensureProcessFeedbackBead(ctx, p)
 	case store.EventPRClosed, store.EventPRMerged:
-		var p PRPayload
+		var p store.PRPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("beadsbridge: decode pr payload: %w", err)
 		}
@@ -100,7 +93,7 @@ func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPaylo
 }
 
 // cascadeClose closes the PR bead and its descendants.
-func (h *Handler) cascadeClose(ctx context.Context, p PRPayload) error {
+func (h *Handler) cascadeClose(ctx context.Context, p store.PRPayload) error {
 	mr, err := h.client.FindByRepoAndNumber(ctx, p.Repo, p.Number)
 	if err != nil || mr == nil {
 		return err

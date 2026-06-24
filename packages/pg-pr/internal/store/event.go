@@ -9,6 +9,23 @@ type Event struct {
 	Payload json.RawMessage
 }
 
+// PRPayload is the JSON body of pr.* lifecycle events. It carries everything
+// the beadsbridge handler needs to project a complete merge-request bead.
+type PRPayload struct {
+	Repo         string `json:"repo"`
+	Number       int    `json:"number"`
+	Title        string `json:"title"`
+	Ownership    string `json:"ownership"`
+	Merged       bool   `json:"merged"`
+	State        string `json:"state,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Base         string `json:"base,omitempty"`
+	Author       string `json:"author,omitempty"`
+	URL          string `json:"url,omitempty"`
+	Draft        bool   `json:"draft,omitempty"`
+	LastSyncedAt string `json:"last_synced_at,omitempty"`
+}
+
 // Event type constants.
 const (
 	EventPROpened         = "pr.opened"
