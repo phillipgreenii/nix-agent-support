@@ -60,7 +60,7 @@ func (r *ccpoolRun) run(ctx context.Context, d discover.DispatchContext) (report
 		"BEADS_DIR":      r.deps.Cfg.RepoRoot + "/.beads",
 		"WORKSPACE_ROOT": wt,
 	}
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env); err != nil {
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name)); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the

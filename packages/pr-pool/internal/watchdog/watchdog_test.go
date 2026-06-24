@@ -34,7 +34,7 @@ type fakeCC struct {
 	list    []ccpool.Session
 }
 
-func (f *fakeCC) Ensure(context.Context, string, string, string, map[string]string) error {
+func (f *fakeCC) Ensure(context.Context, string, string, string, map[string]string, map[string]string) error {
 	return nil
 }
 func (f *fakeCC) Send(_ context.Context, _, prompt string, m ccpool.SendMode) error {

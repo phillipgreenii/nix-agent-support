@@ -111,11 +111,12 @@ func argSummary(args []string) string {
 	return strings.Join(parts, " ")
 }
 
-// Ensure: ccpool new <external_id> --cwd <cwd> [--name <name>] --env K=V…
+// Ensure: ccpool new <external_id> --cwd <cwd> [--name <name>] --env K=V… --meta K=V…
 // --permission-mode <mode> [--allowed-tools <list>] --effort <effort> [--model <model>].
 // The session is addressed by external_id; name is an optional display label
-// (omitted when empty). env keys sorted for deterministic argv.
-func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, env map[string]string) error {
+// (omitted when empty). env and meta keys are sorted for deterministic argv. meta is
+// stamped atomically as part of `ccpool new` (no separate `ccpool meta set` call).
+func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error {
 	args := []string{"new", externalID, "--cwd", cwd}
 	if name != "" {
 		args = append(args, "--name", name)
@@ -127,6 +128,14 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	sort.Strings(keys)
 	for _, k := range keys {
 		args = append(args, "--env", k+"="+env[k])
+	}
+	mkeys := make([]string, 0, len(meta))
+	for k := range meta {
+		mkeys = append(mkeys, k)
+	}
+	sort.Strings(mkeys)
+	for _, k := range mkeys {
+		args = append(args, "--meta", k+"="+meta[k])
 	}
 	if c.PermissionMode != "" {
 		args = append(args, "--permission-mode", c.PermissionMode)

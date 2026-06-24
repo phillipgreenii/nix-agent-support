@@ -62,7 +62,7 @@ const (
 // Close takes purge: pr-pool always purges (it never resumes — continuity lives
 // in bd). Cancel is present only as a chunk-B seam (90/100% budget cancels).
 type Runner interface {
-	Ensure(ctx context.Context, externalID, name, cwd string, env map[string]string) error
+	Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error
 	Send(ctx context.Context, externalID, prompt string, mode SendMode) error
 	Cancel(ctx context.Context, externalID string) error
 	Close(ctx context.Context, externalID string, purge bool) error

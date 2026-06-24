@@ -47,7 +47,8 @@ type FakeCC struct {
 	mu          sync.Mutex
 	Ensured     []string
 	EnsureNames []string
-	EnsuredCwd  string // the cwd of the last Ensure call (the per-bead worktree)
+	EnsuredCwd  string            // the cwd of the last Ensure call (the per-bead worktree)
+	EnsuredMeta map[string]string // the meta of the last Ensure call
 	Sent        []string
 	Closed      []string
 	ClosedPurge []bool
@@ -57,10 +58,11 @@ type FakeCC struct {
 	ListIdx     int
 }
 
-func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _ map[string]string) error {
+func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _, meta map[string]string) error {
 	f.Ensured = append(f.Ensured, externalID)
 	f.EnsureNames = append(f.EnsureNames, name)
 	f.EnsuredCwd = cwd
+	f.EnsuredMeta = meta
 	return f.EnsureErr
 }
 func (f *FakeCC) Send(_ context.Context, externalID, _ string, _ ccpool.SendMode) error {

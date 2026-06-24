@@ -29,7 +29,7 @@ func newSpy() (*CLIRunner, *[][]string, func(out []byte)) {
 func TestEnsure_argv(t *testing.T) {
 	cli, got, _ := newSpy()
 	err := cli.Ensure(context.Background(), "pr-pool-worker-zr-1-20260616T010203", "pr-pool-worker-zr-1", "/repo",
-		map[string]string{"WORKSPACE_ROOT": "/repo", "BEADS_ACTOR": "pgii-pool__worker", "BEADS_DIR": "/repo/.beads"})
+		map[string]string{"WORKSPACE_ROOT": "/repo", "BEADS_ACTOR": "pgii-pool__worker", "BEADS_DIR": "/repo/.beads"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 		return nil, nil, nil
 	}
 	// empty name => no --name flag emitted.
-	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"new", "s", "--cwd", "/r", "--effort", "high", "--model", "claude-opus-4-8"}
@@ -76,7 +76,7 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 
 func TestEnsure_argv_includesAutonomous(t *testing.T) {
 	cli, got, _ := newSpy() // config.Default() => Autonomous true, PermissionMode dontAsk, Effort max
-	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"new", "s", "--cwd", "/r",
@@ -99,7 +99,7 @@ func TestEnsure_argv_omitsAutonomousWhenDisabled(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range got[0] {
@@ -122,7 +122,7 @@ func TestEnsure_allowedTools(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"new", "s", "--cwd", "/r", "--permission-mode", "dontAsk", "--allowed-tools", "Read,Bash(git *)"}
@@ -143,7 +143,7 @@ func TestEnsure_allowedToolsEmptyOmitsFlag(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"new", "s", "--cwd", "/r"}
@@ -398,3 +398,29 @@ type fakeExit struct{ code int }
 
 func (e *fakeExit) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 func (e *fakeExit) ExitCode() int { return e.code }
+
+func TestEnsure_argv_includesMeta(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{PermissionMode: "dontAsk"}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	meta := map[string]string{"prpool.role": "worker", "prpool.bead": "zr-1", "prpool.pool": "pr-pool"}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	joined := strings.Join(got[0], " ")
+	for _, want := range []string{
+		"--meta prpool.bead=zr-1",
+		"--meta prpool.pool=pr-pool",
+		"--meta prpool.role=worker",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv missing %q; got %v", want, got[0])
+		}
+	}
+	if i, j := strings.Index(joined, "prpool.bead"), strings.Index(joined, "prpool.pool"); i > j {
+		t.Errorf("--meta keys not sorted: %v", got[0])
+	}
+}
