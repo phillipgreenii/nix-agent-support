@@ -41,8 +41,8 @@ func TestDefault(t *testing.T) {
 	if d.Effort != "max" {
 		t.Errorf("Effort = %q, want max", d.Effort)
 	}
-	if d.PermissionMode != "bypassPermissions" {
-		t.Errorf("PermissionMode = %q, want bypassPermissions (preserves worker bypass behavior)", d.PermissionMode)
+	if d.PermissionMode != "dontAsk" {
+		t.Errorf("PermissionMode = %q, want dontAsk (deny-by-default: auto-deny un-allowlisted tools, non-interactive)", d.PermissionMode)
 	}
 	if d.SessionPrefix != "pr-pool-" {
 		t.Errorf("SessionPrefix = %q, want pr-pool-", d.SessionPrefix)

@@ -77,7 +77,7 @@ func Default() Config {
 		CICDDown:       "",
 		Effort:         "max",
 		Model:          "",
-		PermissionMode: "bypassPermissions",
+		PermissionMode: "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PR_POOL_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
 		SessionPrefix:  "pr-pool-",
 		BudgetTokens:   0,                // unlimited until ccpool N3
 		BudgetCost:     0,                // unlimited until ccpool N3

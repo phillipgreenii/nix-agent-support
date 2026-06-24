@@ -40,7 +40,7 @@ func TestEnsure_argv(t *testing.T) {
 		"--env", "BEADS_ACTOR=pgii-pool__worker",
 		"--env", "BEADS_DIR=/repo/.beads",
 		"--env", "WORKSPACE_ROOT=/repo",
-		"--permission-mode", "bypassPermissions", "--effort", "max",
+		"--permission-mode", "dontAsk", "--effort", "max",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
 		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
