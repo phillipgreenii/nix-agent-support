@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -361,7 +362,7 @@ func TestHookFail_retriesKeepsWorking(t *testing.T) {
 	nudger := &fakeNudger{}
 	ra := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: nudger, now: clk.Now, sleep: func(time.Duration) {}}
 	payload := fmt.Sprintf(failPayloadRetry, tp)
-	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra); err != nil {
+	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN fail: %v", err)
 	}
 	got, _, _ := st.GetByExternalID(ctx, "ext-a")
@@ -387,7 +388,7 @@ func TestHookFail_exhaustedBudgetGoesErrored(t *testing.T) {
 	nudger := &fakeNudger{}
 	ra := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: nudger, now: clk.Now, sleep: func(time.Duration) {}}
 	payload := fmt.Sprintf(failPayloadRetry, tp)
-	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra); err != nil {
+	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN fail: %v", err)
 	}
 	got, _, _ := st.GetByExternalID(ctx, "ext-a")
@@ -410,7 +411,7 @@ func TestHookFail_nudgeErrorFallsBackToErrored(t *testing.T) {
 	nudger := &fakeNudger{err: errors.New("tmux boom")}
 	ra := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: nudger, now: clk.Now, sleep: func(time.Duration) {}}
 	payload := fmt.Sprintf(failPayloadRetry, tp)
-	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra); err != nil {
+	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, ra, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN fail must never error: %v", err)
 	}
 	got, _, _ := st.GetByExternalID(ctx, "ext-a")
@@ -429,7 +430,7 @@ func TestHookFail_nilActuatorGoesErrored(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := fmt.Sprintf(failPayloadRetry, tp)
-	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, nil); err != nil {
+	if err := handleHookN("fail", strings.NewReader(payload), st, "", nil, nil, nil, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN fail: %v", err)
 	}
 	got, _, _ := st.GetByExternalID(ctx, "ext-a")
@@ -448,7 +449,7 @@ func TestHookStop_resetsRetryBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	const stopP = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","hook_event_name":"Stop"}`
-	if err := handleHookN("stop", strings.NewReader(stopP), st, "", nil, nil, nil); err != nil {
+	if err := handleHookN("stop", strings.NewReader(stopP), st, "", nil, nil, nil, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN stop: %v", err)
 	}
 	got, _, _ := st.GetByExternalID(ctx, "ext-a")

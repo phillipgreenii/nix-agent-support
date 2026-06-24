@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
+	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -251,6 +252,68 @@ func TestHook_unresolvable_isNoErrorNoRow(t *testing.T) {
 	list, _ := st.List(context.Background())
 	if len(list) != 0 {
 		t.Errorf("rows = %d, want 0", len(list))
+	}
+}
+
+// TestHandleAskHook_autonomous_emitsDenyJSON: when the autonomous marker is set,
+// handleAskHook must emit a well-formed PreToolUse deny JSON to the writer so
+// the claude hook runtime never stalls on the picker (pg2-2f9d).
+func TestHandleAskHook_autonomous_emitsDenyJSON(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := handleAskHook(strings.NewReader(askPayload), st, "", notify.None{}, nil, true, &out); err != nil {
+		t.Fatalf("handleAskHook: %v", err)
+	}
+	var got struct {
+		HookSpecificOutput struct {
+			HookEventName            string `json:"hookEventName"`
+			PermissionDecision       string `json:"permissionDecision"`
+			PermissionDecisionReason string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("deny JSON malformed: %v\nraw: %s", err, out.String())
+	}
+	if got.HookSpecificOutput.HookEventName != "PreToolUse" {
+		t.Errorf("hookEventName = %q, want PreToolUse", got.HookSpecificOutput.HookEventName)
+	}
+	if got.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Errorf("permissionDecision = %q, want deny", got.HookSpecificOutput.PermissionDecision)
+	}
+	if got.HookSpecificOutput.PermissionDecisionReason == "" {
+		t.Error("permissionDecisionReason must be non-empty (the autonomous-mode guidance)")
+	}
+	// Also verify the needs_input transition still occurred (harmless detection record).
+	row, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if row.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input even in autonomous mode (record is harmless)", row.State)
+	}
+}
+
+// TestHandleAskHook_attended_emitsNoDenyJSON: in attended mode (autonomous=false),
+// handleAskHook must emit NOTHING to the writer — non-blocking detection only
+// (pg2-7a5b preserved).
+func TestHandleAskHook_attended_emitsNoDenyJSON(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid-x", State: store.Working}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := handleAskHook(strings.NewReader(askPayload), st, "", notify.None{}, nil, false, &out); err != nil {
+		t.Fatalf("handleAskHook: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("attended mode must emit NO stdout (non-blocking detection only); got %q", out.String())
+	}
+	// Verify needs_input still recorded.
+	row, _, _ := st.GetByExternalID(ctx, "ext-alpha")
+	if row.State != store.NeedsInput {
+		t.Errorf("state = %q, want needs_input (non-blocking detection must still fire)", row.State)
 	}
 }
 

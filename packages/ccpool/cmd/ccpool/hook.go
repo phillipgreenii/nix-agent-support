@@ -90,27 +90,29 @@ func runHook(args []string) int {
 		now:    time.Now,
 		sleep:  time.Sleep,
 	}
-	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On, ra); err != nil {
+	autonomous := os.Getenv("CCPOOL_AUTONOMOUS") == "1"
+	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On, ra, autonomous, os.Stdout); err != nil {
 		logHook(stateDir, fmt.Sprintf("hook %s: %v", event, err))
 	}
 	return 0
 }
 
-// handleHook is the production entrypoint (no notifier wired = None). Kept so
-// existing tests calling handleHook still compile. envExternalID is the
+// handleHook is the production entrypoint (no notifier wired = None, attended mode).
+// Kept so existing tests calling handleHook still compile. envExternalID is the
 // launch-injected CCPOOL_EXTERNAL_ID fallback (ADR 0015).
 func handleHook(event string, stdin io.Reader, st *store.Store, envExternalID string) error {
-	return handleHookN(event, stdin, st, envExternalID, notify.None{}, nil, nil)
+	return handleHookN(event, stdin, st, envExternalID, notify.None{}, nil, nil, false, io.Discard)
 }
 
 // handleHookN parses the payload, resolves the row by claude_session_id (else the
 // launch-env external_id), transitions, and fires the notifier on an edge into an
-// On state (spec §9/§10).
-func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string, ra *retryActuator) error {
+// On state (spec §9/§10). autonomous and denyOut are forwarded to handleAskHook;
+// for non-ask events they are unused.
+func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string, ra *retryActuator, autonomous bool, denyOut io.Writer) error {
 	// The `ask` event (PreToolUse/AskUserQuestion) is NOT a plain eventState entry —
 	// it must additionally parse the question text — so it is handled separately.
 	if event == "ask" {
-		return handleAskHook(stdin, st, envExternalID, n, on)
+		return handleAskHook(stdin, st, envExternalID, n, on, autonomous, denyOut)
 	}
 	to, ok := eventState[event]
 	if !ok {
@@ -180,11 +182,17 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 
 // handleAskHook handles the PreToolUse/AskUserQuestion `ask` event: it records the
 // deterministic needs_input edge the instant the model invokes the tool (claude
-// 2.1.177), persists the question text, and fires the notifier on the edge — all
-// NON-BLOCKING (the caller exits 0) so the picker still renders for a human to
-// attend (pg2-7a5b, pg2-r0zz). It resolves the session the same way the other
-// events do (by claude_session_id, else CCPOOL_EXTERNAL_ID).
-func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string) error {
+// 2.1.177), persists the question text, and fires the notifier on the edge.
+//
+// Attended mode (autonomous=false, env CCPOOL_AUTONOMOUS unset): NON-BLOCKING —
+// the caller exits 0 and the picker still renders for a human to attend
+// (pg2-7a5b, pg2-r0zz). denyOut is ignored.
+//
+// Autonomous mode (autonomous=true, env CCPOOL_AUTONOMOUS=1): ADDITIONALLY emits a
+// blocking PreToolUse deny JSON to denyOut (typically os.Stdout) so the tool
+// never executes and no picker stalls the human-less worker. The needs_input
+// record above is harmless — the picker never appears. (pg2-2f9d, D2 design.)
+func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string, autonomous bool, denyOut io.Writer) error {
 	var p hookPayload
 	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
@@ -201,6 +209,11 @@ func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n not
 		return err
 	}
 	if !ok {
+		// Even with no resolvable row, an autonomous session must still be UNBLOCKED:
+		// emit the deny so the picker never stalls a human-less worker.
+		if autonomous {
+			writeAskDenyJSON(denyOut)
+		}
 		return nil
 	}
 	// Record the deterministic needs_input edge. Transition leaves pending_question
@@ -217,7 +230,41 @@ func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n not
 	if notify.ShouldNotify(on, string(prior), string(store.NeedsInput)) {
 		_ = n.Notify(notify.Event{Name: externalID, UUID: p.SessionID, State: string(store.NeedsInput), CWD: p.CWD})
 	}
+	// Autonomous mode: the blocking deny SUPERSEDES the non-blocking detection for
+	// this session (the record above is harmless — the picker never blocks because
+	// the tool never executes). Attended sessions skip this and keep today's
+	// non-blocking behavior (pg2-7a5b).
+	if autonomous {
+		writeAskDenyJSON(denyOut)
+	}
 	return nil
+}
+
+// askDenyReason is the autonomous-mode denial fed back to the model. It MUST tell
+// the model the channel is intentionally closed (autonomous mode) and what to do
+// instead — a BARE denial can read as "user went away" and make the model give up
+// (D2 caveat). Pairs with pr-pool's prompt-forbid lever.
+const askDenyReason = "Autonomous mode: AskUserQuestion is disabled — there is no human to answer. Do NOT ask; proceed with your best judgment. If a decision genuinely needs a human, record the question with `bd comment` on your bead and continue or hand the bead back."
+
+// writeAskDenyJSON emits the PreToolUse structured-deny payload (claude hooks
+// spec: code.claude.com/docs/en/hooks.md). Printed to stdout with exit 0, it
+// makes claude skip the tool, show no picker, and feed the reason back to the
+// model so it continues the turn. Best-effort: an encode error must not fail the
+// hook (never-fail policy, spec §9/§15).
+func writeAskDenyJSON(w io.Writer) {
+	type hookSpecificOutput struct {
+		HookEventName            string `json:"hookEventName"`
+		PermissionDecision       string `json:"permissionDecision"`
+		PermissionDecisionReason string `json:"permissionDecisionReason"`
+	}
+	payload := struct {
+		HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
+	}{HookSpecificOutput: hookSpecificOutput{
+		HookEventName:            "PreToolUse",
+		PermissionDecision:       "deny",
+		PermissionDecisionReason: askDenyReason,
+	}}
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // askQuestionText extracts the human-facing question text from an AskUserQuestion
