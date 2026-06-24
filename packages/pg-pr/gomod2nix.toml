@@ -17,6 +17,14 @@ schema = 3
     version = 'v1.0.1'
     hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
 
+  [mod.'github.com/go-enry/go-enry/v2']
+    version = 'v2.9.6'
+    hash = 'sha256-iQWIFp+ddOsKdLn7ObdMmshEMJFcGw9hEzwQH2RNyF4='
+
+  [mod.'github.com/go-enry/go-oniguruma']
+    version = 'v1.2.1'
+    hash = 'sha256-DoCNyX75CuCgFnfSZs63VB4+HAIMDBgwcQglXXHRj/I='
+
   [mod.'github.com/go-logr/logr']
     version = 'v1.4.3'
     hash = 'sha256-Nnp/dEVNMxLp3RSPDHZzGbI8BkSNuZMX0I0cjWKXXLA='
