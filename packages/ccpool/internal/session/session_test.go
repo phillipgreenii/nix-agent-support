@@ -436,6 +436,60 @@ func TestEnsure_reusesLiveTmux_noLaunch(t *testing.T) {
 	}
 }
 
+// TestEnsure_autonomous_injectsCCPOOLAutonomousEnv: EnsureOpts.Autonomous=true must
+// inject CCPOOL_AUTONOMOUS=1 into the launched session env (pg2-2f9d).
+func TestEnsure_autonomous_injectsCCPOOLAutonomousEnv(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "zr-1", t.TempDir(), "", EnsureOpts{Autonomous: true}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	if got := ft.newCalls[0].env["CCPOOL_AUTONOMOUS"]; got != "1" {
+		t.Errorf("CCPOOL_AUTONOMOUS = %q, want \"1\"", got)
+	}
+}
+
+// TestEnsure_attended_omitsCCPOOLAutonomousEnv: EnsureOpts.Autonomous=false (default)
+// must NOT set CCPOOL_AUTONOMOUS in the launched session env (pg2-2f9d).
+func TestEnsure_attended_omitsCCPOOLAutonomousEnv(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "zr-1", t.TempDir(), "", EnsureOpts{}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
+	}
+	if _, present := ft.newCalls[0].env["CCPOOL_AUTONOMOUS"]; present {
+		t.Errorf("attended launch must not set CCPOOL_AUTONOMOUS; env = %v", ft.newCalls[0].env)
+	}
+}
+
 func newMemStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.Open(":memory:", fixedClock{})

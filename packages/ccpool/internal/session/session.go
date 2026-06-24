@@ -167,6 +167,12 @@ type EnsureOpts struct {
 	// --allowed-tools). Empty omits the flag. Set by pr-pool to constrain a
 	// dontAsk worker to an allowlist.
 	AllowedTools string
+
+	// Autonomous, when true, injects CCPOOL_AUTONOMOUS=1 into the session env so
+	// the `ccpool hook ask` PreToolUse hook BLOCKS AskUserQuestion (emits a deny)
+	// instead of only recording the needs_input edge. Set by pr-pool for human-less
+	// workers; unset for attended sessions (which keep pg2-7a5b detection).
+	Autonomous bool
 }
 
 // tmuxSafe maps the characters tmux treats as target separators ('.' and ':',
@@ -253,7 +259,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 				Model:          orDefault(model, row.Model),
 				PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 			})
-			return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env)
+			return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous)
 		}
 		// 4. Claude session is GONE. Prune the phantom row UNLESS it is a fresh
 		// `starting` row that hasn't had a chance to write a transcript yet.
@@ -280,7 +286,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			Model:          orDefault(model, row.Model),
 			PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 		})
-		return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env)
+		return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous)
 	}
 
 	// 5. Brand new.
@@ -299,7 +305,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		ClaudeBin: s.d.ClaudeBin, ClaudeSessionID: csid, Name: opts.Name, PluginDir: s.d.PluginDir, Model: model,
 		PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 	})
-	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env)
+	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env, opts.Autonomous)
 }
 
 // claudeSessionResumable reports whether the row's Claude session still exists on
@@ -350,13 +356,18 @@ func (s *Service) currentGeneration(ctx context.Context, externalID string) (int
 // extraEnv (caller-supplied) is injected first; ccpool's own correlation markers
 // are written last so they are authoritative — hooks key the store row off
 // CCPOOL_EXTERNAL_ID, so a caller must never be able to clobber it.
-func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid, name, cwd string, since int64, argv []string, extraEnv map[string]string) (Handle, error) {
-	env := make(map[string]string, len(extraEnv)+len(claudeChildMarkers)+3)
+// autonomous injects CCPOOL_AUTONOMOUS=1 when true so the hook ask path emits a
+// blocking deny for human-less sessions (pg2-2f9d).
+func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid, name, cwd string, since int64, argv []string, extraEnv map[string]string, autonomous bool) (Handle, error) {
+	env := make(map[string]string, len(extraEnv)+len(claudeChildMarkers)+4)
 	maps.Copy(env, extraEnv)
 	env["CCPOOL_EXTERNAL_ID"] = externalID
 	env["PA_MONITOR_NO_NUDGE"] = "1"
 	if s.d.PoolPath != "" {
 		env["CCPOOL_POOL"] = s.d.PoolPath
+	}
+	if autonomous {
+		env["CCPOOL_AUTONOMOUS"] = "1"
 	}
 	// Blank the Claude child-session markers (authoritatively, after the caller
 	// env) so the launched claude persists its transcript (pg2-lki6).

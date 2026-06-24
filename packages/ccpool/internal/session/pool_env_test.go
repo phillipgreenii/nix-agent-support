@@ -36,7 +36,7 @@ func TestLaunchAndWait_injectsPool(t *testing.T) {
 		}),
 		Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	if _, err := s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil); err != nil {
+	if _, err := s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil, false); err != nil {
 		t.Fatalf("launchAndWait: %v", err)
 	}
 	if tm.env["CCPOOL_POOL"] != "/pools/alpha" {
@@ -56,7 +56,7 @@ func TestLaunchAndWait_defaultModeNoPool(t *testing.T) {
 		}),
 		Now: func() time.Time { return time.Unix(1, 0) },
 	})
-	_, _ = s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil)
+	_, _ = s.launchAndWait(ctx, "a", "cc-a", "csid", "name-a", "/cwd", 0, []string{"claude"}, nil, false)
 	if _, ok := tm.env["CCPOOL_POOL"]; ok {
 		t.Error("default mode must NOT set CCPOOL_POOL")
 	}
