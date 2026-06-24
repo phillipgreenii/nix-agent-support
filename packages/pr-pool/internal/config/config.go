@@ -137,6 +137,20 @@ func Load() (Config, error) {
 	c.ConfirmIngest = envSecs("PR_POOL_CONFIRM_INGEST", c.ConfirmIngest)
 	c.LogDir = envStr("PR_POOL_LOG_DIR", c.LogDir)
 
+	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
+	// Contributes [pool].budget only; absent/empty file = no change. The path is
+	// overridable via PR_POOL_GLOBAL_CONFIG (test seam, mirrors PR_POOL_CONFIG).
+	globalReg := NewRegistry()
+	globalPath := envStr("PR_POOL_GLOBAL_CONFIG", filepath.Join(configHome(), "pr-pool", "config.toml"))
+	if _, statErr := os.Stat(globalPath); statErr == nil {
+		if err := globalReg.decodeGlobalBudget(globalPath, &c); err != nil {
+			return Config{}, err
+		}
+		slog.Info("loaded pr-pool global budget config", "path", globalPath)
+	} else if !os.IsNotExist(statErr) {
+		return Config{}, fmt.Errorf("stat %s: %w", globalPath, statErr)
+	}
+
 	path := envStr("PR_POOL_CONFIG", filepath.Join(c.RepoRoot, ".pr-pool", "config.toml"))
 	c.ConfigPath = path
 	reg := NewRegistry()
