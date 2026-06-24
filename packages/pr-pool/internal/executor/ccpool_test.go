@@ -468,6 +468,50 @@ func TestDispatch_droppedNudge_handsBackNoOtherBeadTouched(t *testing.T) {
 	}
 }
 
+// pg2-yukh AC#4: the deterministic stand-in for the live lost-prompt repro. A
+// worker dispatched for zr-6bq.3 whose initial nudge is dropped (zero model turns)
+// must end with the bead handed back and NO write to any other bead (the incident
+// wrote to zr-o8el2). The store is pre-loaded with tempting in-progress targets a
+// context-less guess WOULD reach for; none may be touched.
+func TestRegression_droppedNudge_noWriteToOtherBead_pg2yukh(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	// The incident's tempting targets — present in the store but must stay untouched.
+	bd := &dtest.ScriptBD{
+		StatusSeq: map[string][]string{
+			"zr-o8el2": {"in_progress"},
+			"zr-n6uo":  {"in_progress"},
+			"zr-meaz":  {"in_progress"},
+		},
+	}
+	cc := &dtest.FakeCC{SendErr: ccpool.ErrPromptNotIngested}
+	d := discover.DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-6bq.3"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pr-pool-worker-zr-6bq.3"
+	deps.Git = &dtest.NoopGit{}
+	res, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatal("dropped nudge must fail the dispatch")
+	}
+	if v := verbOf(res); v != report.Unclaimed {
+		t.Errorf("bead must be handed back unclaimed; verb=%q res=%+v", v, res)
+	}
+	if !dtest.HasUpdate(bd, "update zr-6bq.3 --status=open --assignee=") {
+		t.Errorf("must unclaim zr-6bq.3; updates=%v", bd.Updates)
+	}
+	for _, c := range bd.Updates {
+		// No comment to ANY bead, and no update to any id other than zr-6bq.3.
+		if strings.Contains(c, "comment") {
+			t.Errorf("dropped nudge must write NO comment to any bead; got %q", c)
+		}
+		for _, other := range []string{"zr-o8el2", "zr-n6uo", "zr-meaz"} {
+			if strings.Contains(c, other) {
+				t.Errorf("must not touch unrelated bead %s; got %q", other, c)
+			}
+		}
+	}
+}
+
 func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	cfg := fastCfg() // worker on_failure = add-human
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
