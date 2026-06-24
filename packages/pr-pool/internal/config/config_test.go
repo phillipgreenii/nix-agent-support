@@ -25,6 +25,23 @@ func writeCfg(t *testing.T, body string) {
 	t.Setenv("PR_POOL_CONFIG", p)
 }
 
+// writeGlobalCfg writes a global config.toml and points PR_POOL_GLOBAL_CONFIG at it.
+func writeGlobalCfg(t *testing.T, body string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "global.toml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PR_POOL_GLOBAL_CONFIG", p)
+}
+
+// absentGlobalConfig points PR_POOL_GLOBAL_CONFIG at a non-existent path so Load()
+// never picks up a real ~/.config/pr-pool/config.toml on the dev machine.
+func absentGlobalConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("PR_POOL_GLOBAL_CONFIG", filepath.Join(t.TempDir(), "absent-global.toml"))
+}
+
 func TestDefault(t *testing.T) {
 	d := Default()
 	if d.BeadsPrefix != "zr" {
@@ -304,6 +321,73 @@ foo = "bar"
 `)
 	if _, err := Load(); err == nil {
 		t.Fatal("unknown role type must error")
+	}
+}
+
+// XDG-global-only: budget defaults come from the global file when no repo-local
+// file and no env override are present.
+func TestLoad_globalBudget_appliesWhenAlone(t *testing.T) {
+	absentConfig(t) // no repo-local file => built-in roles
+	writeGlobalCfg(t, "[pool.budget]\ntokens = 750000\ncost = 1200\ntime = \"45m\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.WorkerBudget()
+	if int64(b.Tokens) != 750000 || int64(b.Cost) != 1200 || b.Time != 45*time.Minute {
+		t.Errorf("global-only budget = %+v, want tokens=750000 cost=1200 time=45m", b)
+	}
+}
+
+// Repo-local overrides XDG-global (repo-local is most specific).
+func TestLoad_repoLocalBudget_overridesGlobal(t *testing.T) {
+	writeGlobalCfg(t, "[pool.budget]\ntokens = 100\ntime = \"10m\"\n")
+	writeCfg(t, "[pool.budget]\ntokens = 999\n") // repo-local sets tokens only
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.WorkerBudget()
+	if int64(b.Tokens) != 999 {
+		t.Errorf("Tokens = %d, want 999 (repo-local overrides global)", int64(b.Tokens))
+	}
+	// time: repo-local omits it, so the global value survives (global < repo-local,
+	// each overlay is field-by-field).
+	if b.Time != 10*time.Minute {
+		t.Errorf("Time = %v, want 10m (global time survives when repo-local omits it)", b.Time)
+	}
+}
+
+// Either file overrides env (shipped file > env precedence; do NOT flip it).
+func TestLoad_globalBudget_overridesEnv(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PR_POOL_BUDGET_TOKENS", "111")
+	t.Setenv("PR_POOL_BUDGET_TIME", "120") // 120s
+	writeGlobalCfg(t, "[pool.budget]\ntokens = 222\ntime = \"30m\"\n")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.WorkerBudget()
+	if int64(b.Tokens) != 222 || b.Time != 30*time.Minute {
+		t.Errorf("budget = %+v, want tokens=222 time=30m (file wins over env)", b)
+	}
+}
+
+// Absent files = unchanged defaults (today's behavior byte-for-byte).
+func TestLoad_noFiles_unchangedDefaults(t *testing.T) {
+	absentConfig(t)
+	absentGlobalConfig(t)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.WorkerBudget()
+	if !b.Tokens.Unlimited() || !b.Cost.Unlimited() {
+		t.Error("absent files: token/cost must stay unlimited (default)")
+	}
+	if b.Time != 25*time.Minute {
+		t.Errorf("absent files: Time = %v, want 25m (default)", b.Time)
 	}
 }
 
