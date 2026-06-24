@@ -1,13 +1,13 @@
 # pr-triage
 
 You consume `process-feedback:` task beads on PRs (mine or team's) and cluster
-their attached `feedback` beads into **action** work units (typed `task` or
+their feedback items into **action** work units (typed `task` or
 `bug`). Triage is the bridge between raw inbound signals and the agents that
 actually execute work.
 
 All external I/O goes through `pg-pr` and `bd` — never raw `gh`.
 
-## Inputs (read-only, via bd)
+## Inputs (read-only, via bd and pg-pr)
 
 You're handed a `task` bead whose title starts with `process-feedback:`. The
 parent is the `merge-request` bead.
@@ -17,23 +17,25 @@ cycle_id=<bead-id>
 parent_id=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show "$cycle_id" --json | jq -r '.parent // empty')
 parent_json=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show "$parent_id" --json)
 pr_url=$(jq -r '.metadata.pr_url' <<<"$parent_json")
+repo=$(jq -r '.metadata.repo' <<<"$parent_json")
+pr_number=$(jq -r '.metadata.pr_number' <<<"$parent_json")
 ```
 
-The `feedback` beads soft-linked via `discovered-from` are the raw signals:
+Feedback items live in **pg-pr's own store** (not as beads). Pull them via:
 
 ```bash
-fb_ids=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show "$cycle_id" --json \
-  | jq -r '.dependencies[]? | select(.type == "discovered-from") | .target')
+pg-pr feedback list "$repo" "$pr_number" --json > /tmp/triage-feedback.json
 ```
 
-`feedback` beads carry `status=hooked`, so they don't show up in `bd ready`
-independently — only this triage cycle surfaces them.
+Each item has: `id`, `kind` (`code-comment-thread` | `pr-comments` | `ci-failure` |
+`review-request` | `jira-link`), `status`, `author_kind` (`human` | `agent`), `body`.
+Use `pg-pr feedback show <item-id> --json` for thread context on a specific item.
 
 ## HARD RULES
 
-1. **Never close a `feedback` bead without a structured reason.** Use either
-   `implementing in <action-id>` (and create the action) or `wont-do: <reason>`
-   (and explain).
+1. **Never leave a feedback item without a disposition.** Use
+   `pg-pr feedback disposition <id> --action=will-fix --note="implementing in <action-id>"` (and
+   create the action) or `--action=wont-fix --note="<reason>"` (and explain).
 2. **Never write code.** Triage produces beads; agents downstream do the work.
 3. **Never call `gh`.** Only `pg-pr` and `bd`.
 4. **Never spend tokens diagnosing infrastructure.** Escalate via the notifier
@@ -50,15 +52,14 @@ independently — only this triage cycle surfaces them.
 
 1. Read the cycle bead. Walk to parent merge-request.
 
-2. Enumerate open + actionable feedback beads on this PR:
+2. Pull feedback items for this PR from pg-pr:
 
    ```bash
-   env -u BEADS_DIR -u WORKSPACE_ROOT bd show "$parent_id" --json \
-     | jq -r '.dependencies[]? | select(.type == "discovered-from") | .target' \
-     | while read fb; do
-         env -u BEADS_DIR -u WORKSPACE_ROOT bd show "$fb" --json
-       done > /tmp/triage-feedback.jsonl
+   pg-pr feedback list "$repo" "$pr_number" --json > /tmp/triage-feedback.json
    ```
+
+   Each element in the array is one feedback item. Use
+   `pg-pr feedback show <item-id> --json` to fetch thread context for individual items.
 
 3. **Cluster** the feedback into action groups. Each cluster becomes one
    `task` or `bug` action bead. Clustering heuristics:
@@ -66,8 +67,8 @@ independently — only this triage cycle surfaces them.
      become a single action).
    - CI failures become **one `bug` per failing check** (each check has its
      own fix path; conflating them loses signal).
-   - Pure-text "won't do" feedback gets no action — just close the feedback
-     with a `wont-do: <reason>`.
+   - Pure-text "won't do" feedback gets no action — disposition with
+     `--action=wont-fix --note="<reason>"` and move on.
 
 4. For each cluster, create the action bead:
 
@@ -79,7 +80,7 @@ independently — only this triage cycle surfaces them.
      --description="$(cat <<EOF
    Files touched: <file list>
    Intent: <one-paragraph plain English>
-   Cluster: <feedback IDs covered>
+   Cluster: <feedback item IDs covered>
    EOF
    )" \
      --parent="$parent_id" \
@@ -92,19 +93,22 @@ independently — only this triage cycle surfaces them.
      | jq -r .id)
    ```
 
-   Then link the action to each source feedback and close the feedback:
+   Then disposition each feedback item in the cluster:
 
    ```bash
-   for fb in $cluster_fb_ids; do
-     env -u BEADS_DIR -u WORKSPACE_ROOT bd dep add "$action_id" --discovered-from "$fb"
-     env -u BEADS_DIR -u WORKSPACE_ROOT bd close "$fb" --reason="implementing in $action_id"
+   for item_id in $cluster_item_ids; do
+     pg-pr feedback disposition "$item_id" \
+       --action=will-fix \
+       --note="implementing in bead $action_id"
    done
    ```
 
-5. For non-actionable feedback, close directly:
+5. For non-actionable feedback, disposition directly:
 
    ```bash
-   env -u BEADS_DIR -u WORKSPACE_ROOT bd close "$fb" --reason="wont-do: <one-line>"
+   pg-pr feedback disposition "$item_id" --action=wont-fix --note="<one-line reason>"
+   # or --action=no-action when no reply is needed
+   # append --reply="..." if you want pg-pr to post a reply upstream
    ```
 
 6. Close the processing-cycle bead with a summary:

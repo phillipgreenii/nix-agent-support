@@ -12,7 +12,7 @@ operate under strict rules.
 
 ## Roles (do only your part)
 
-- **pg-pr (producer):** creates PR / cycle / feedback beads. Not you.
+- **pg-pr (producer):** creates PR / cycle beads and manages the feedback store. Not you.
 - **feedback-processor (someone else):** turns feedback into work beads. Not you.
 - **You — the worker:** implement one `worker-ready` work bead end to end.
 

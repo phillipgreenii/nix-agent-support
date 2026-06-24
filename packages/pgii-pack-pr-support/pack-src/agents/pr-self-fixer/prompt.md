@@ -23,13 +23,17 @@ The parent is a `merge-request` bead. Useful fields on the parent:
 - `metadata.author` — PR author login.
 - `metadata.role` — should be `mine` for this agent.
 
-Soft-linked `feedback` beads (via `discovered-from`) are the raw signals the
-sync engine captured (CI failures, comments, reviews). Walk them via:
+The PR's feedback items live in **pg-pr's own store** (not as beads). Retrieve them via:
 
 ```bash
-env -u BEADS_DIR -u WORKSPACE_ROOT bd show <processing-cycle-id> --json \
-  | jq -r '.dependencies[]? | select(.type == "discovered-from") | .target'
+repo=$(jq -r '.metadata.repo' <<<"$parent_json")
+pr_number=$(jq -r '.metadata.pr_number' <<<"$parent_json")
+pg-pr feedback list "$repo" "$pr_number" --json
 ```
+
+Each item has: `id`, `kind` (`code-comment-thread` | `pr-comments` | `ci-failure` |
+`review-request` | `jira-link`), `status`, `author_kind` (`human` | `agent`), `body`.
+Use `pg-pr feedback show <item-id> --json` for thread context on a specific item.
 
 ## HARD RULES (never violate)
 
@@ -48,9 +52,9 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bd show <processing-cycle-id> --json \
    verbs per the spec; agents are forbidden to invoke them. Auto-merge is set
    by humans; sync auto-promotes draft → ready when CI goes green.
 3. **Never push to `main` or `release/*`.** Same guard as rule 1.
-4. **Never reply to PR comments via `gh`.** Use `pg-pr comment respond
-<feedback-id>` if you need to post a reply — that goes through pg-pr so the
-   feedback bead is closed in lockstep.
+4. **Never reply to PR comments via `gh`.** Use `pg-pr feedback disposition
+<item-id> --action=... --note=... --reply="..."` — that goes through pg-pr so
+   the reply and disposition are recorded in lockstep.
 5. **Never spend tokens diagnosing gascity infrastructure.** If the city / dolt
    / bd / git / pg-pr misbehaves, close the processing-cycle bead with
    `--reason="infra-block: <one-line>"`. Mayor's daily summary surfaces
@@ -92,30 +96,37 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bd show <processing-cycle-id> --json \
 
 3. **Verify branch ownership** (rule 1) on the rig's current branch.
 
-4. **Read the feedback beads via `pg-pr changes`.** The sync engine already
-   ingested everything; just enumerate what's actionable on this PR:
+4. **Pull feedback from pg-pr:**
 
    ```bash
-   pg-pr pr show "$pr_url" --json | jq '.feedback // []'
+   repo=$(jq -r '.metadata.repo' <<<"$parent_json")
+   pr_number=$(jq -r '.metadata.pr_number' <<<"$parent_json")
+   pg-pr feedback list "$repo" "$pr_number" --json
    ```
 
-5. **For each actionable feedback:**
-   - `source=github-ci` + conclusion in `(failure|error|timed_out)` and the
-     check is not in the org skip-list (e.g. `policy-bot`):
+5. **For each feedback item:**
+   - `kind=ci-failure` and the check is not in the org skip-list (e.g. `policy-bot`):
 
      ```bash
      pg-pr ci rerun-failed "$pr_url"
-     pg-pr comment respond <feedback-id> --body-stdin <<<"rerunning failed checks"
+     pg-pr feedback disposition <item-id> --action=will-fix \
+       --note="rerunning failed checks" --reply="rerunning failed checks"
      ```
 
-   - `source=github-comment` or `source=github-review`:
+   - `kind=code-comment-thread` or `kind=pr-comments`:
      - If the suggestion is a clear code edit, apply it in the worktree, commit
        with a descriptive message, then `git push --force-with-lease`.
-     - Use `pg-pr comment respond <feedback-id>` to close the bead with the
-       fix commit SHA in the body.
-   - If a feedback is non-actionable (off-topic, already addressed, etc.),
-     close it with a structured reason via `pg-pr comment respond` with body
-     like `"won't-do: <one-line>"`.
+     - Record the disposition with the fix commit SHA:
+       ```bash
+       pg-pr feedback disposition <item-id> --action=will-fix \
+         --note="applied in <SHA>" --reply="applied in <SHA>"
+       ```
+   - If a feedback item is non-actionable (off-topic, already addressed, etc.):
+     ```bash
+     pg-pr feedback disposition <item-id> --action=wont-fix \
+       --note="<reason>" --reply="<reply text if needed>"
+     # or --action=no-action when no reply is warranted
+     ```
 
 6. **Close the processing-cycle bead** with a summary:
 
@@ -134,9 +145,9 @@ env -u BEADS_DIR -u WORKSPACE_ROOT bd show <processing-cycle-id> --json \
 
 ## Why `pg-pr`, not `gh` / `bd` raw?
 
-- `pg-pr comment respond` closes the feedback bead **and** posts the upstream
-  reply in lockstep — no chance of a half-state where bead is closed but the
-  reply never went out.
+- `pg-pr feedback disposition` records the decision **and** queues the upstream
+  reply (when `--reply` is given) in lockstep — no chance of a half-state where
+  the item is dispositioned but the reply never went out.
 - `pg-pr ci rerun-failed` routes through the org's configured CICD providers
   (GitHub Actions + Captain's Log at ZR) so it covers checks that `gh` can't
   see.
