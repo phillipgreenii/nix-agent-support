@@ -49,6 +49,24 @@ let
     text = builtins.readFile ./install-plugin.sh;
   };
 
+  registerMarketplaceScript = pkgs.writeShellApplication {
+    name = "claude-settings-register-marketplace";
+    runtimeInputs = [
+      pkgs.coreutils
+    ];
+    text = builtins.readFile ./register-marketplace.sh;
+  };
+
+  # DIRECTORY-source marketplaces from extraKnownMarketplaces. `claude plugin
+  # marketplace update` only refreshes marketplaces already in the registry, so
+  # a freshly-added nix directory marketplace must be `marketplace add`ed before
+  # the per-plugin install loop or `install <plugin>@<mkt>` fails "Plugin not
+  # found". github-source marketplaces are intentionally excluded — they are
+  # left to the existing update + install flow.
+  directoryMarketplaces = lib.filterAttrs (
+    _name: entry: (entry.source.source or null) == "directory" && (entry.source.path or null) != null
+  ) cfg.extraKnownMarketplaces;
+
   hasManagedKeys = cfg.enabledPlugins != { } || cfg.extraKnownMarketplaces != { };
 
   hasSettings = filters != [ ];
@@ -206,6 +224,18 @@ in
 
         echo "claude-settings: updating marketplaces"
         $CLAUDE plugin marketplace update 2>/dev/null || true
+
+        ${lib.optionalString (directoryMarketplaces != { }) ''
+          echo "claude-settings: registering directory marketplaces"
+          ${lib.concatStringsSep "\n" (
+            lib.mapAttrsToList (name: entry: ''
+              ${registerMarketplaceScript}/bin/claude-settings-register-marketplace \
+                "$CLAUDE" \
+                "${name}" \
+                "${entry.source.path}"
+            '') directoryMarketplaces
+          )}
+        ''}
 
         ${lib.concatStringsSep "\n" (
           map (plugin: ''

@@ -496,6 +496,120 @@
               assert disabled.home.file == { };
               pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
 
+            # Regression guard for pg2-1ygj: the claude-settings activation must
+            # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
+            # BEFORE the per-plugin install loop (otherwise the first apply fails
+            # "Plugin not found"), and must NOT add github-source marketplaces
+            # (those are left to the existing update + install flow). Pure module
+            # eval inspecting the generated activation string — no HM harness.
+            test-claude-settings-activation-marketplace-add =
+              let
+                # The module calls `lib.hm.dag.entryAfter` (home-manager's
+                # extended lib). Stub it to return the raw activation text so we
+                # can inspect the generated script without a full HM harness.
+                hmLib = lib // {
+                  hm = (lib.hm or { }) // {
+                    dag = (lib.hm.dag or { }) // {
+                      entryAfter = _deps: text: text;
+                    };
+                  };
+                };
+                evalActivation =
+                  cfg:
+                  (lib.evalModules {
+                    specialArgs = {
+                      inherit pkgs;
+                      lib = hmLib;
+                    };
+                    modules = [
+                      ./home/programs/claude-settings/default.nix
+                      (
+                        { lib, ... }:
+                        {
+                          options = {
+                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                            home.activation = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                        }
+                      )
+                      cfg
+                    ];
+                  }).config;
+
+                # A directory marketplace + a github marketplace + the matching
+                # plugin so the install loop (and thus the CLAUDE block) renders.
+                activation =
+                  (evalActivation {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      settings = {
+                        claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                        plugins = [ "some-plugin@dir-mkt" ];
+                        extraKnownMarketplaces = {
+                          dir-mkt.source = {
+                            source = "directory";
+                            path = "/home/test/.local/share/pgii-marketplaces/dir-mkt";
+                          };
+                          gh-mkt.source = {
+                            source = "github";
+                            repo = "x/y";
+                          };
+                        };
+                      };
+                    };
+                  }).home.activation.claude-settings;
+
+                # When there is no directory marketplace, no register-marketplace
+                # invocation should be emitted at all.
+                activationNoDir =
+                  (evalActivation {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      settings = {
+                        claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                        plugins = [ "some-plugin@gh-mkt" ];
+                        extraKnownMarketplaces = {
+                          gh-mkt.source = {
+                            source = "github";
+                            repo = "x/y";
+                          };
+                        };
+                      };
+                    };
+                  }).home.activation.claude-settings;
+
+                hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                # The register-marketplace invocation block (everything after the
+                # "registering directory marketplaces" echo, up to the install
+                # loop). github marketplace names CAN legitimately appear elsewhere
+                # in the activation (e.g. the extraKnownMarketplaces JSON passed to
+                # the replace script), so target the register block specifically.
+                registerBlock =
+                  let
+                    afterEcho = lib.last (
+                      lib.splitString "echo \"claude-settings: registering directory marketplaces\"" activation
+                    );
+                  in
+                  lib.head (lib.splitString "claude-settings-install-plugin" afterEcho);
+              in
+              # The directory marketplace is registered (name + on-disk path appear
+              # as arguments to the register-marketplace script).
+              assert hasSub "claude-settings-register-marketplace" activation;
+              assert hasSub ''"dir-mkt"'' registerBlock;
+              assert hasSub "/home/test/.local/share/pgii-marketplaces/dir-mkt" registerBlock;
+              # The github marketplace is NOT passed to register-marketplace.
+              assert !(hasSub ''"gh-mkt"'' registerBlock);
+              # The existing global `marketplace update` call is preserved.
+              assert hasSub "plugin marketplace update" activation;
+              # No directory marketplaces ⇒ no register-marketplace invocation at all.
+              assert !(hasSub "claude-settings-register-marketplace" activationNoDir);
+              assert hasSub "plugin marketplace update" activationNoDir;
+              pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
+
             # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
             # must render on daemon.enable even when the TUI (enable/
             # claude.enable) is off, and must NOT render when nothing is
@@ -625,6 +739,20 @@
               tests = ./home/programs/claude-settings/tests/test_install_plugin.bats;
               extraInputs = [
                 pkgs.jq
+                pkgs.coreutils
+              ];
+            };
+
+            test-claude-settings-register-marketplace = checksHelpers.testBashScripts {
+              package = pkgs.writeShellApplication {
+                name = "claude-settings-register-marketplace";
+                runtimeInputs = [
+                  pkgs.coreutils
+                ];
+                text = builtins.readFile ./home/programs/claude-settings/register-marketplace.sh;
+              };
+              tests = ./home/programs/claude-settings/tests/test_register_marketplace.bats;
+              extraInputs = [
                 pkgs.coreutils
               ];
             };
