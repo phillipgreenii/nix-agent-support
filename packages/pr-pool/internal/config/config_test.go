@@ -260,6 +260,21 @@ prompt = "do {{.BeadID}}"
 	}
 }
 
+func TestConfigHome_xdgWins(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
+	if got := configHome(); got != "/xdg/config" {
+		t.Errorf("configHome() = %q, want /xdg/config (XDG_CONFIG_HOME must win)", got)
+	}
+}
+
+func TestConfigHome_defaultsToHomeDotConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/me")
+	if got := configHome(); got != "/home/me/.config" {
+		t.Errorf("configHome() = %q, want /home/me/.config (default ~/.config)", got)
+	}
+}
+
 func TestLoad_malformedIsHardError(t *testing.T) {
 	writeCfg(t, "this is = not valid toml [[[")
 	if _, err := Load(); err == nil {

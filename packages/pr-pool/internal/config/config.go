@@ -224,6 +224,15 @@ func stateHome() string {
 	return os.Getenv("HOME") + "/.local/state"
 }
 
+// configHome resolves the XDG config base dir for the pr-pool global config file,
+// mirroring stateHome(). XDG_CONFIG_HOME wins; otherwise ~/.config.
+func configHome() string {
+	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+		return v
+	}
+	return os.Getenv("HOME") + "/.config"
+}
+
 func envStr(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok {
 		return v
