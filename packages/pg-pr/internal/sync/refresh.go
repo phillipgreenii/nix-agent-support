@@ -70,14 +70,18 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	}
 
 	// Active PR: fetch this PR's enrichment once and reuse it across the
-	// feedback pipeline and the snapshot input, threading the upserted bead id
-	// so buildPRInput skips a redundant FindByRepoAndNumber.
+	// feedback pipeline and the snapshot input.
+	//
+	// applyFetchedPR now EMITS pr.opened/updated rather than creating the bead
+	// inline (the beadsbridge projects it at outbox flush). So the outbox MUST
+	// be flushed BEFORE buildPRInput, whose dep path locates the bead via
+	// FindByRepoAndNumber — the bead does not exist until the flush projects it.
+	// Passing "" as the known id lets buildPRInput run that lookup post-flush.
 	enriched := e.enrichOnePR(ctx, rcfg, *pr)
-	id, _, err := e.applyFetchedPR(ctx, bdc, rcfg, pr, enriched, summary)
-	if err != nil {
+	if err := e.applyFetchedPR(ctx, rcfg, pr, enriched, summary); err != nil {
 		return nil, err
 	}
-	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, id)
 	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
+	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, "")
 	return &in, nil
 }

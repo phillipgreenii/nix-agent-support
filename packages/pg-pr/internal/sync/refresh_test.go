@@ -4,7 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -216,6 +219,154 @@ func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
 	// path fetched once; the PR identity must round-trip.
 	if in.PR.Number != 9 || in.PR.Repo != "o/r" {
 		t.Fatalf("input PR mismatch: got %s#%d", in.PR.Repo, in.PR.Number)
+	}
+}
+
+// outboxFakeBeads is the bead client shared between the engine (Deps.Beads,
+// used by buildPRInput's dep path via FindByRepoAndNumber) and the beadsbridge
+// (which projects the PR bead at outbox flush). It records every
+// EnsureMergeRequest call so the test can prove the bead is created by the
+// OUTBOX (the bridge) and NOT inline by applyFetchedPR.
+//
+// It satisfies both sync.BeadClient (via embedded noopBeads) and
+// beadsbridge.BeadClient (via FindByRepoAndNumber + the cycle/close methods on
+// noopBeads), and adds depTreeReader (FindByRepoAndNumber/DepTreeUp/
+// HumanLabeledBeads) so buildPRInput's dep path engages and the bead lookup runs.
+type outboxFakeBeads struct {
+	noopBeads
+	ensureFields []beads.MergeRequestFields // every EnsureMergeRequest call's fields
+	created      bool                       // set once EnsureMergeRequest has run
+}
+
+func (f *outboxFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
+	f.ensureFields = append(f.ensureFields, fields)
+	f.created = true
+	return "mr-1", false, nil
+}
+
+// FindByRepoAndNumber returns the projected bead only AFTER EnsureMergeRequest
+// has run — modelling that the bead exists once the bridge projected it from
+// the outbox event. This proves buildPRInput finds the bead only because the
+// outbox was flushed BEFORE buildPRInput ran.
+func (f *outboxFakeBeads) FindByRepoAndNumber(_ context.Context, _ string, _ int) (*beads.MergeRequest, error) {
+	if !f.created {
+		return nil, nil
+	}
+	return &beads.MergeRequest{ID: "mr-1"}, nil
+}
+
+func (f *outboxFakeBeads) DepTreeUp(_ context.Context, _ string) ([]beads.DepNode, error) {
+	return nil, nil
+}
+
+func (f *outboxFakeBeads) HumanLabeledBeads(_ context.Context) (map[string]bool, error) {
+	return nil, nil
+}
+
+// compile-time check: the same fake serves the bridge interface too.
+var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)
+
+// recordingHandler records the event types it is dispatched, proving a
+// pr.opened/updated event reached the dispatcher via the outbox.
+type recordingHandler struct{ types []string }
+
+func (h *recordingHandler) Handle(_ context.Context, e store.Event) error {
+	h.types = append(h.types, e.Type)
+	return nil
+}
+
+// TestRefreshPREmitsOpen drives the daemon's per-PR refresh for an active,
+// non-draft, open PR through the REAL store → outbox → dispatcher → beadsbridge
+// chain. It proves the event-ownership conversion of the daemon create path:
+//
+//   - applyFetchedPR does NOT create the bead inline; the bead is created by
+//     the OUTBOX (the bridge's EnsureMergeRequest, projecting pr.opened).
+//   - a pr.opened event is enqueued and dispatched.
+//   - refreshPR still yields a non-nil snapshot input whose dep path found the
+//     bead — proving the outbox was flushed BEFORE buildPRInput ran.
+func TestRefreshPREmitsOpen(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	bdc := &outboxFakeBeads{}
+	pr := api.PR{
+		Repo: "o/r", Number: 7, State: "open",
+		Branch: "feat/x", Base: "main",
+		Author: "me", URL: "https://github.com/o/r/pull/7",
+	}
+	vcs := newFakeVCS()
+	vcs.views[keyOf("o/r", pr.Number)] = pr
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", VCS: "github", TeamMembers: []string{"teammate"}},
+			},
+		},
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Wire the REAL dispatcher: the beadsbridge (projects the bead) + a
+	// recording handler (proves the event type was dispatched).
+	rec := &recordingHandler{}
+	dispatcher := event.New()
+	dispatcher.Register(beadsbridge.New(bdc).Handle)
+	dispatcher.Register(rec.Handle)
+	e.SetStoreAndDispatch(db, dispatcher.Dispatch)
+
+	in, err := e.refreshPR(ctx, "o/r", pr.Number)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+
+	// The bead must be created exactly once, and only by the bridge (outbox).
+	if len(bdc.ensureFields) != 1 {
+		t.Fatalf("EnsureMergeRequest call count: got %d want 1 (bead must be created only by the outbox bridge)", len(bdc.ensureFields))
+	}
+	if got := bdc.ensureFields[0].State; got != "open" {
+		t.Fatalf("projected bead State: got %q want \"open\"", got)
+	}
+	if bdc.ensureFields[0].PRNumber != 7 {
+		t.Fatalf("projected bead PRNumber: got %d want 7", bdc.ensureFields[0].PRNumber)
+	}
+
+	// A pr.opened event must have been enqueued and dispatched.
+	sawOpened := false
+	for _, ty := range rec.types {
+		if ty == store.EventPROpened {
+			sawOpened = true
+		}
+	}
+	if !sawOpened {
+		t.Fatalf("expected a %s event to be dispatched; got %v", store.EventPROpened, rec.types)
+	}
+
+	// The snapshot input must still be produced and the dep path must have
+	// found the bead (only possible because the outbox flushed before
+	// buildPRInput ran).
+	if in == nil {
+		t.Fatal("active self PR must yield a non-nil snapshot input")
+	}
+	if in.PR.Number != 7 {
+		t.Fatalf("input PR.Number: got %d want 7", in.PR.Number)
+	}
+
+	// The authoritative store row must have been written.
+	row, err := db.GetPR(ctx, "o/r", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected the authoritative store row to be written by applyFetchedPR")
+	}
+	if row.Ownership != "mine" {
+		t.Fatalf("store row Ownership: got %q want \"mine\"", row.Ownership)
 	}
 }
 

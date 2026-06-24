@@ -962,16 +962,15 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, nil
 	}
 
-	// Open PR: run the shared bead-upsert + feedback + (self) draft-promote
-	// pipeline. Per-bead errors are accumulated into summary.Errors so the
-	// single-PR command reports partial failures the same way it always did.
-	// applyFetchedPR returns early (alreadyClosed) with err==nil when the bead
-	// is already closed upstream, leaving BeadsUpdated at 0.
-	var alreadyClosed bool
-	_, alreadyClosed, err = e.applyFetchedPR(ctx, bdc, rcfg, pr, nil, summary)
-	if err != nil {
+	// Open PR: run the shared store-write + emit + feedback + (self)
+	// draft-promote pipeline. Per-bead errors are accumulated into
+	// summary.Errors so the single-PR command reports partial failures the
+	// same way it always did. The PR bead is no longer created inline here —
+	// applyFetchedPR emits pr.opened/updated and the beadsbridge projects the
+	// bead at the flushOutbox below.
+	if err = e.applyFetchedPR(ctx, rcfg, pr, nil, summary); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-	} else if !alreadyClosed {
+	} else {
 		// One-shot store-backed reply reconcile (the shared apply path no
 		// longer does it).
 		if n, rerr := e.reconcileReplies(ctx); rerr != nil {
@@ -987,59 +986,64 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	return summary, nil
 }
 
-// applyFetchedPR runs the bead-upsert + feedback + (self) draft-promote
-// pipeline for an OPEN, active PR. Caller handles closed/merged separately.
-// It is the single place the CLI one-shot (SyncPR) and the daemon per-PR
-// refresh (refreshPR) share this open-PR logic.
+// applyFetchedPR runs the create/update pipeline for an OPEN, active PR.
+// Caller handles closed/merged separately. It is the single place the CLI
+// one-shot (SyncPR) and the daemon per-PR refresh (refreshPR) share this
+// open-PR logic.
 //
-// Reply draining is NOT performed here. The daemon will drain replies once
-// per tick from a maintenance goroutine (a later task); the CLI SyncPR
-// drains explicitly after this call returns.
+// Event-ownership model (Task 9): the PR (merge-request) bead is NO LONGER
+// created inline here. applyFetchedPR writes the authoritative store row and
+// EMITS pr.opened (first observation) or pr.updated (already-stored). The
+// beadsbridge projects the bead from that event when the outbox is flushed.
+// Callers MUST flush the outbox before any step that reads the bead back (e.g.
+// buildPRInput's FindByRepoAndNumber).
 //
-// Returns (id, alreadyClosed, err). When EnsureMergeRequest reports the bead
-// is already closed, it returns early with (id, true, nil) and does NOT bump
-// summary.BeadsUpdated or run the downstream pipelines. Callers can use
-// alreadyClosed to skip reply draining when the bead is closed.
+// Ordering invariants:
+//   - opened-vs-updated is decided from GetPR BEFORE UpsertPR writes the row
+//     (UpsertPR would otherwise make every observation look "updated").
+//   - pr.opened/updated is emitted BEFORE processFeedback enqueues
+//     feedback.created, so the bridge has a PR bead to attach the cycle to.
 //
-// Note: unlike the pre-refactor SyncPR (which ran the feedback, draft-promote,
-// and reply phases independently, accumulating each phase's error), this
-// returns on the FIRST hard error and skips the later phases. Hard errors are
+// Reply draining is NOT performed here. The daemon drains replies once per
+// tick from a maintenance goroutine; the CLI SyncPR drains explicitly after
+// this call returns.
+//
+// Returns on the FIRST hard error and skips the later phases. Hard errors are
 // rare — most issues are recorded into summary.Errors and return nil — and
 // fail-fast is the intended shape for the daemon's per-PR refresh.
-func (e *Engine) applyFetchedPR(ctx context.Context, bdc BeadClient, rcfg config.RepoConfig, pr *api.PR, enriched *vcs.EnrichedPR, summary *Summary) (string, bool, error) {
-	fields := beads.MergeRequestFields{
-		Repo:         rcfg.Remote,
-		PRNumber:     pr.Number,
-		State:        stateForPR(*pr),
-		Branch:       pr.Branch,
-		Base:         pr.Base,
-		Author:       pr.Author,
-		URL:          pr.URL,
-		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
-		Draft:        pr.Draft,
+func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr *api.PR, enriched *vcs.EnrichedPR, summary *Summary) error {
+	ownership := "team"
+	if e.isSelfAuthored(pr.Author) {
+		ownership = "mine"
 	}
-	id, alreadyClosed, err := bdc.EnsureMergeRequest(ctx, pr.URL, fields)
-	if err != nil || alreadyClosed {
-		return id, alreadyClosed, err
+	// Decide opened-vs-updated from existing store state BEFORE writing the
+	// row — UpsertPR below would otherwise make GetPR always find the row.
+	eventType := store.EventPROpened
+	if e.deps.Store != nil {
+		if existing, _ := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); existing != nil {
+			eventType = store.EventPRUpdated
+		}
+		if _, err := e.deps.Store.UpsertPR(ctx, e.prToStoreRow(rcfg.Remote, *pr, ownership)); err != nil {
+			return err
+		}
 	}
 	summary.BeadsUpdated = 1
+	// Emit pr.opened/updated BEFORE processFeedback (which enqueues
+	// feedback.created) so the bridge projects the PR bead first.
+	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownership); err != nil {
+		return err
+	}
 	// Phase 3: feedback + draft pipelines. enriched (when non-nil) carries the
 	// PR's comments/CI runs so these helpers skip their own per-PR fetches.
-	//
-	// NOTE (event-ownership refactor): the daemon path's full conversion to
-	// the outbox event model is Task 9. For now these calls are adjusted to the
-	// new signatures (processFeedback/maybePromoteDraft no longer take a
-	// prBeadID) so the package compiles; the inline bead create above is
-	// untouched until Task 9.
-	if err := e.processFeedback(ctx, bdc, nil, enriched, rcfg.Remote, *pr, summary); err != nil {
-		return id, false, err
+	if err := e.processFeedback(ctx, nil, nil, enriched, rcfg.Remote, *pr, summary); err != nil {
+		return err
 	}
 	if e.isSelfAuthored(pr.Author) {
 		if err := e.maybePromoteDraft(ctx, enriched, rcfg.Remote, *pr, summary); err != nil {
-			return id, false, err
+			return err
 		}
 	}
-	return id, false, nil
+	return nil
 }
 
 // enumerate lists watched PRs for a single repo. Phase 1: self + team
