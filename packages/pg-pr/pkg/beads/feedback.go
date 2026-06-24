@@ -76,6 +76,25 @@ func feedbackFieldsFromMetadata(m map[string]any) FeedbackFields {
 	return f
 }
 
+// ListFeedbackBeadIDs returns the IDs of all beads with type=feedback, in any
+// status (open or closed). It is used by the migrate-feedback command to find
+// legacy feedback beads that predate the store and should be closed.
+func (c *Client) ListFeedbackBeadIDs(ctx context.Context) ([]string, error) {
+	out, err := c.Runner.Run(ctx, "list", "--type=feedback", "--all", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("list feedback beads: %w", err)
+	}
+	issues, err := parseBDList(out)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(issues))
+	for _, iss := range issues {
+		ids = append(ids, iss.ID)
+	}
+	return ids, nil
+}
+
 // Package-level convenience wrapper using the default Client.
 
 // CloseFeedback closes a feedback bead using the default Client.
