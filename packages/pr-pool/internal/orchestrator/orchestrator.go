@@ -7,6 +7,12 @@
 // command roles run a configured executable. The pg2-c1vp single-terminal race
 // between waitDone and the watchdog is unchanged — only its data source moved from
 // the deleted RoleKind enum to the role's typed config.
+//
+// needs_input is intentionally non-terminal: the executor keeps polling such a
+// session to MaxWait and alerts the operator once on the edge (executor.waitDone),
+// and teardownAll preserves needs_input sessions (does not close them) so a human
+// can still `ccpool attach` after the pass. A reaper TTL for preserved sessions
+// was considered and deferred (pg2-th35).
 package orchestrator
 
 import (
