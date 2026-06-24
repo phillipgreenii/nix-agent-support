@@ -317,6 +317,11 @@ func TestWorkOne_usesPerAttemptExternalID(t *testing.T) {
 	if !dtest.Contains(cc.EnsureNames, "pr-pool-worker-zr-w") {
 		t.Errorf("Ensure must pass the stable DisplayName as --name; names=%v", cc.EnsureNames)
 	}
+	// Ensure must carry the prpool.* dispatch metadata (bead/role/pool) so ccpool
+	// stamps it atomically via `new --meta` (pg2-5o5i).
+	if cc.EnsuredMeta["prpool.bead"] != "zr-w" || cc.EnsuredMeta["prpool.role"] != "worker" || cc.EnsuredMeta["prpool.pool"] != "pr-pool" {
+		t.Errorf("Ensure must pass prpool.* dispatch metadata; got %v", cc.EnsuredMeta)
+	}
 }
 
 // TestTeardownAll_purges: teardownAll closes pr-pool-prefixed sessions with purge=true.
