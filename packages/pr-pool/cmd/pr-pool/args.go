@@ -39,7 +39,8 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_BUDGET_TIME      per-worker wall-clock budget in seconds (default 1500)
   PR_POOL_MODEL            claude model override (default: ccpool's default)
   PR_POOL_EFFORT           claude --effort value (default max)
-  PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default bypassPermissions)
+  PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default dontAsk; bypassPermissions is the opt-in escape)
+  PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
   PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
 
 REMOVED (now configured per-role in config.toml, not via env): PR_POOL_MAX_WORKER,
