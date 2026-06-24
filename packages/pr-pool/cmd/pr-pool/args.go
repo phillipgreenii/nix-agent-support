@@ -22,7 +22,7 @@ Subcommands:
   run-query <role>        run a role's discovery query and print matches (read-only)
   run-role <role> <bead>  dispatch one bead through a role, then tear down (smoke test)
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
-  config --show           print the resolved config path and effective role set
+  config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
   sessions                list this pool's sessions (bead/role) from session metadata (read-only)
   version                 print the version and exit
   help                    print this help and exit

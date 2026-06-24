@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/query"
@@ -24,17 +27,74 @@ func runConfig(mode string) int {
 			fmt.Fprintln(os.Stderr, "config:", err)
 			return exitGeneric
 		}
-		fmt.Printf("config path: %s\n", cfg.ConfigPath)
-		fmt.Printf("roles (%d):\n", len(cfg.Roles))
-		for _, r := range cfg.Roles {
-			stub := ""
-			if r.Query != nil && query.IsStub(r.Query) {
-				stub = "  (query type is a stub: not yet implemented)"
-			}
-			fmt.Printf("  - %-12s type=%-8s cap=%d enabled=%t%s\n", r.Name, r.Type, r.Cap, r.Enabled, stub)
-		}
+		renderConfigShow(os.Stdout, cfg)
 		return exitOK
 	}
 	printUsageErr("config: unknown mode " + mode)
 	return exitUsage
+}
+
+// renderConfigShow prints the resolved config: path, role set (flagging stub query
+// types), and the pool DISPATCH SCALARS every worker is launched with. The scalars
+// are the security-critical audit surface (pg2-ju3r): an operator can confirm
+// PermissionMode=dontAsk (deny-by-default) and read the AllowedTools allowlist
+// VERBATIM (so "git push absent" is auditable) without launching a worker or
+// bypassing the nix wrapper to intercept ccpool.
+func renderConfigShow(w io.Writer, cfg config.Config) {
+	_, _ = fmt.Fprintf(w, "config path: %s\n", cfg.ConfigPath)
+	_, _ = fmt.Fprintf(w, "roles (%d):\n", len(cfg.Roles))
+	for _, r := range cfg.Roles {
+		stub := ""
+		if r.Query != nil && query.IsStub(r.Query) {
+			stub = "  (query type is a stub: not yet implemented)"
+		}
+		_, _ = fmt.Fprintf(w, "  - %-12s type=%-8s cap=%d enabled=%t%s\n", r.Name, r.Type, r.Cap, r.Enabled, stub)
+	}
+	_, _ = fmt.Fprintln(w, "dispatch (workers):")
+	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
+	_, _ = fmt.Fprintf(w, "  allowed-tools:   %s\n", cfg.AllowedTools)
+	_, _ = fmt.Fprintf(w, "  autonomous:      %t\n", cfg.Autonomous)
+	_, _ = fmt.Fprintf(w, "  confirm-ingest:  %s\n", cfg.ConfirmIngest)
+	_, _ = fmt.Fprintf(w, "  effort:          %s\n", orNone(cfg.Effort))
+	_, _ = fmt.Fprintf(w, "  model:           %s\n", orDefault(cfg.Model))
+	_, _ = fmt.Fprintf(w, "  budget:          tokens=%s cost=%s time=%s\n",
+		limitStr(cfg.BudgetTokens), centsStr(cfg.BudgetCost), durStr(cfg.BudgetTime))
+}
+
+// limitStr renders a token/count budget: <=0 means unlimited.
+func limitStr(n int64) string {
+	if n <= 0 {
+		return "unlimited"
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+// centsStr renders a cost budget in cents: <=0 means unlimited.
+func centsStr(cents int64) string {
+	if cents <= 0 {
+		return "unlimited"
+	}
+	return strconv.FormatInt(cents, 10) + "c"
+}
+
+// durStr renders a time budget: <=0 means unlimited.
+func durStr(d time.Duration) string {
+	if d <= 0 {
+		return "unlimited"
+	}
+	return d.String()
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}
+
+func orDefault(s string) string {
+	if s == "" {
+		return "(ccpool default)"
+	}
+	return s
 }

@@ -7,16 +7,16 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 
 ## Subcommands
 
-| Command                   | Description                                                   |
-| ------------------------- | ------------------------------------------------------------- |
-| `drain`                   | run one drain pass (the default when omitted)                 |
-| `run-query <role>`        | run a role's discovery query and print matches (read-only)    |
-| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test) |
-| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start) |
-| `config --show`           | print the resolved config path and effective role set         |
-| `sessions`                | list this pool's sessions (bead/role) from session metadata   |
-| `version`                 | print the version and exit                                    |
-| `help`                    | print help and exit                                           |
+| Command                   | Description                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `drain`                   | run one drain pass (the default when omitted)                                                                |
+| `run-query <role>`        | run a role's discovery query and print matches (read-only)                                                   |
+| `run-role <role> <bead>`  | dispatch one bead through a role, then tear down (smoke test)                                                |
+| `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                |
+| `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget) |
+| `sessions`                | list this pool's sessions (bead/role) from session metadata                                                  |
+| `version`                 | print the version and exit                                                                                   |
+| `help`                    | print help and exit                                                                                          |
 
 `<role>` is the role's configured `name`.
 
@@ -69,7 +69,9 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PR_POOL_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)
 - `PR_POOL_MODEL` — claude model override (default: ccpool's default)
 - `PR_POOL_EFFORT` — claude `--effort` value (default `max`)
-- `PR_POOL_PERMISSION_MODE` — claude `--permission-mode` for workers (default `bypassPermissions`)
+- `PR_POOL_PERMISSION_MODE` — claude `--permission-mode` for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
+- `PR_POOL_ALLOWED_TOOLS` — claude `--allowed-tools` allowlist for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
+- `PR_POOL_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
 - `PR_POOL_LOG_DIR` — override the event-log directory (default: the standard path below)
 
 **Removed** (now per-role in `config.toml`, not env): `PR_POOL_MAX_WORKER`,
