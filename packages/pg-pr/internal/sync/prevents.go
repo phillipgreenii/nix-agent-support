@@ -38,8 +38,12 @@ func (e *Engine) prPayload(repo string, pr api.PR, ownership string) store.PRPay
 	}
 }
 
-// emitPREvent enqueues a pr.* lifecycle event in its own committed transaction.
-// No-op when the store is nil (test/legacy configs without event projection).
+// emitPREvent atomically writes the authoritative pull_request row AND enqueues
+// the pr.* lifecycle event in a SINGLE transaction, so the state change and the
+// event that announces it commit (or roll back) together. If the enqueue fails,
+// the row write is rolled back too, so the next observation re-emits it — no
+// lost event (pg2-4c5i.17). No-op when the store is nil (test/legacy configs
+// without event projection).
 func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api.PR, ownership string) error {
 	if e.deps.Store == nil {
 		return nil
@@ -48,20 +52,30 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 	if err != nil {
 		return err
 	}
+	row := e.prToStoreRow(repo, pr, ownership)
 	return e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
+		if _, err := tx.UpsertPR(row); err != nil {
+			return err
+		}
 		return tx.EnqueueEvent(eventType, payload)
 	})
 }
 
-// emitPRClosed enqueues pr.closed (or pr.merged when merged) for a stored PR row
-// that is no longer observed upstream.
+// emitPRClosed atomically marks the stored PR row closed (or merged) AND
+// enqueues pr.closed (or pr.merged) in a SINGLE transaction. Combining the
+// state mutation with the enqueue closes the lost-event window from #5: if the
+// enqueue fails, the close is rolled back and ListOpenPRs re-detects the PR next
+// tick, so the close-detection path can no longer permanently drop a pr.closed
+// event (pg2-4c5i.17). No-op when the store is nil.
 func (e *Engine) emitPRClosed(ctx context.Context, row store.PullRequest, merged bool) error {
 	if e.deps.Store == nil {
 		return nil
 	}
 	eventType := store.EventPRClosed
+	row.State = "closed"
 	if merged {
 		eventType = store.EventPRMerged
+		row.State = "merged"
 	}
 	payload, err := json.Marshal(store.PRPayload{
 		Repo: row.Repo, Number: row.Number, Ownership: row.Ownership, Merged: merged,
@@ -70,6 +84,9 @@ func (e *Engine) emitPRClosed(ctx context.Context, row store.PullRequest, merged
 		return err
 	}
 	return e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
+		if _, err := tx.UpsertPR(row); err != nil {
+			return err
+		}
 		return tx.EnqueueEvent(eventType, payload)
 	})
 }

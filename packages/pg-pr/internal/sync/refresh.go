@@ -45,12 +45,11 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 			ownership = "mine"
 		}
 		row := e.prToStoreRow(repo, *pr, ownership) // state resolves to closed/merged via stateForPR
-		if e.deps.Store != nil {
-			_, _ = e.deps.Store.UpsertPR(ctx, row) // keep store authoritative (best-effort)
-		}
-		// The emit is critical: a dropped pr.closed/pr.merged event also drops
-		// the bridge cascade. Propagate (matching emitPREvent in the draft
-		// branch below) rather than silencing it.
+		// emitPRClosed atomically upserts the closed/merged row AND enqueues the
+		// event in one tx (keeping the store authoritative). The emit is
+		// critical: a dropped pr.closed/pr.merged event also drops the bridge
+		// cascade. Propagate (matching emitPREvent in the draft branch below)
+		// rather than silencing it.
 		if err := e.emitPRClosed(ctx, row, merged); err != nil {
 			return nil, err
 		}
@@ -62,11 +61,10 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	// bead in sync — we can react when it leaves draft — but don't surface it on
 	// the dashboard. The engine no longer EnsureMergeRequests inline.
 	if !e.isSelfAuthored(pr.Author) && pr.Draft {
+		// emitPREvent atomically upserts the row (state=draft) AND enqueues
+		// pr.updated in one tx so the bridge keeps the bead in sync.
 		if err := e.emitPREvent(ctx, store.EventPRUpdated, repo, *pr, "team"); err != nil {
 			return nil, err
-		}
-		if e.deps.Store != nil {
-			_, _ = e.deps.Store.UpsertPR(ctx, e.prToStoreRow(repo, *pr, "team"))
 		}
 		flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 		return nil, nil

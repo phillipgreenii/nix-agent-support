@@ -403,26 +403,14 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			}
 
 			// Event-ownership refactor (Task 6): the PR (merge-request) bead is
-			// no longer created inline. Instead we (a) write the authoritative
-			// store row for EVERY observed PR and (b) emit pr.opened/pr.updated;
-			// the beadsbridge handler projects the bead at outbox flush.
+			// no longer created inline. emitPREvent writes the authoritative
+			// store row for EVERY observed PR AND emits pr.opened/pr.updated in
+			// one transaction (drives Task 8 close-detection via
+			// store.ListOpenPRs); the beadsbridge handler projects the bead at
+			// outbox flush. It no-ops when Store is nil (test/legacy configs).
 			ownership := "team"
 			if mineSet[key] {
 				ownership = "mine"
-			}
-			// Authoritative store row for every observed PR (drives Task 8
-			// close-detection via store.ListOpenPRs). Guarded by Store != nil
-			// so test/legacy configs without event projection still run.
-			if e.deps.Store != nil {
-				if _, err := e.deps.Store.UpsertPR(prCtx, e.prToStoreRow(key.Repo, pr, ownership)); err != nil {
-					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
-					recordSpanErr(prSpan, err)
-					summary.Errors = append(summary.Errors, SummaryError{
-						Repo:    key.Repo,
-						Message: fmt.Sprintf("PR #%d upsert: %v", pr.Number, err),
-					})
-					return
-				}
 			}
 			// Emit pr.opened/pr.updated BEFORE this PR's feedback.created events
 			// (enqueued inside processFeedback) so the bridge ensures the PR
@@ -516,25 +504,17 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				if _, watched := observed[k]; watched {
 					continue
 				}
-				// Mark the store row closed so ListOpenPRs stops returning it
-				// next tick (otherwise pr.closed would re-fire every tick
-				// forever).
-				row.State = "closed"
-				if _, err := e.deps.Store.UpsertPR(ctx, row); err != nil {
-					summary.Errors = append(summary.Errors, SummaryError{
-						Repo:    repo,
-						Message: fmt.Sprintf("mark closed %s#%d: %v", row.Repo, row.Number, err),
-					})
-					continue
-				}
-				// merged is false: Sync close-detection can't distinguish
-				// merged-vs-closed (the daemon's refresh.go handles merged).
-				// This matches the old behaviour (close reason
-				// upstream-not-watched, not merged).
+				// emitPRClosed atomically marks the store row closed (so
+				// ListOpenPRs stops returning it next tick) AND emits pr.closed
+				// in one transaction. If the enqueue fails the mark-closed rolls
+				// back, so the row is re-detected next tick rather than silently
+				// dropping the event. merged is false: Sync close-detection can't
+				// distinguish merged-vs-closed (the daemon's refresh.go handles
+				// merged); this matches the old close reason upstream-not-watched.
 				if err := e.emitPRClosed(ctx, row, false); err != nil {
 					summary.Errors = append(summary.Errors, SummaryError{
 						Repo:    repo,
-						Message: fmt.Sprintf("emit close %s#%d: %v", row.Repo, row.Number, err),
+						Message: fmt.Sprintf("close %s#%d: %v", row.Repo, row.Number, err),
 					})
 					continue
 				}
@@ -945,12 +925,11 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 			ownership = "mine"
 		}
 		row := e.prToStoreRow(repo, *pr, ownership) // state resolves to closed/merged via stateForPR
-		if e.deps.Store != nil {
-			_, _ = e.deps.Store.UpsertPR(ctx, row) // keep store authoritative (best-effort)
-		}
-		// The emit is critical: a dropped pr.closed/pr.merged event also drops
-		// the bridge cascade. Propagate (matching this function's other error
-		// paths) rather than silencing it.
+		// emitPRClosed atomically upserts the closed/merged row AND enqueues the
+		// event in one tx (keeping the store authoritative). The emit is
+		// critical: a dropped pr.closed/pr.merged event also drops the bridge
+		// cascade. Propagate (matching this function's other error paths) rather
+		// than silencing it.
 		if err := e.emitPRClosed(ctx, row, merged); err != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 			summary.FinishedAt = e.deps.Now()
@@ -1018,15 +997,14 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	if e.isSelfAuthored(pr.Author) {
 		ownership = "mine"
 	}
-	// Decide opened-vs-updated from existing store state BEFORE writing the
-	// row — UpsertPR below would otherwise make GetPR always find the row.
+	// Decide opened-vs-updated from existing store state BEFORE emitPREvent
+	// writes the row — its UpsertPR would otherwise make GetPR always find the
+	// row. GetPR is a read, so the decision is consistent with the atomic
+	// upsert+emit that follows.
 	eventType := store.EventPROpened
 	if e.deps.Store != nil {
 		if existing, _ := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); existing != nil {
 			eventType = store.EventPRUpdated
-		}
-		if _, err := e.deps.Store.UpsertPR(ctx, e.prToStoreRow(rcfg.Remote, *pr, ownership)); err != nil {
-			return err
 		}
 	}
 	if eventType == store.EventPROpened {
@@ -1034,7 +1012,8 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	} else {
 		summary.BeadsUpdated++
 	}
-	// Emit pr.opened/updated BEFORE processFeedback (which enqueues
+	// emitPREvent atomically writes the authoritative store row AND emits
+	// pr.opened/updated — BEFORE processFeedback (which enqueues
 	// feedback.created) so the bridge projects the PR bead first.
 	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownership); err != nil {
 		return err
