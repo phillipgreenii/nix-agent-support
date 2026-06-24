@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/feedbackclassify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -27,7 +29,17 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		return nil
 	}
 
-	reg := feedbackclassify.NewRegistry(nil)
+	// Build a classify registry from the configured agent entries.
+	// On a bad regex, log to stderr and fall back to an empty registry so
+	// ingestion still runs (the broken entry was already rejected at startup,
+	// but we are defensive here).
+	var reg feedbackclassify.Registry
+	if ar, err := agentregistry.New(e.cfg().Agents); err != nil {
+		fmt.Fprintf(os.Stderr, "pg-pr: ingest: building agent registry failed, falling back to empty classify registry: %v\n", err)
+		reg = feedbackclassify.NewRegistry(nil)
+	} else {
+		reg = ar.ToClassifyRegistry()
+	}
 	self := e.cfg().SelfLogin
 	mine := e.isSelfAuthored(pr.Author)
 
