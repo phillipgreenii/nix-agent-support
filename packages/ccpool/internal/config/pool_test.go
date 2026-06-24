@@ -123,7 +123,7 @@ func TestResolvePool_defaultMode(t *testing.T) {
 func TestEnsurePoolDir_allowlist(t *testing.T) {
 	dir := t.TempDir()
 	// allowlist-only contents → OK
-	for _, f := range []string{"config.toml", "store.db", "store.db-wal", "store.db-shm", "store.db-journal", "alpha.lock", "beta.lock", "hook.log", "events.jsonl"} {
+	for _, f := range []string{"config.toml", "store.db", "store.db-wal", "store.db-shm", "store.db-journal", "alpha.lock", "beta.lock", "hook.log", "events.jsonl", "diagnostics.jsonl"} {
 		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}

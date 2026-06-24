@@ -96,7 +96,7 @@ func canonicalize(p string) string {
 // poolFileOK reports whether a dir entry name is one ccpool writes.
 func poolFileOK(name string) bool {
 	switch {
-	case name == "config.toml", name == "hook.log", name == "events.jsonl":
+	case name == "config.toml", name == "hook.log", name == "events.jsonl", name == "diagnostics.jsonl":
 		return true
 	case name == "store.db" || name == "store.db-wal" || name == "store.db-shm" || name == "store.db-journal":
 		return true
