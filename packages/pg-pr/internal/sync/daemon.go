@@ -342,7 +342,7 @@ func NewTextLogger() *slog.Logger { return slog.New(NewTextHandler()) }
 // flush the outbox. Called by runMaintenance each tick and directly by tests.
 func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
 	e.refreshHumanLabels(ctx)
-	if err := e.reconcileReplies(ctx); err != nil {
+	if _, err := e.reconcileReplies(ctx); err != nil {
 		log.Warn("reply reconcile failed", "err", err.Error())
 	}
 	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)

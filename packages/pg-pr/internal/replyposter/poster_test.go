@@ -36,7 +36,7 @@ func TestReconcilePostsPendingReplyOnce(t *testing.T) {
 
 	fake := &fakeReplier{id: "resp-9"}
 	p := New(db, fake)
-	if err := p.Reconcile(ctx); err != nil {
+	if _, err := p.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if fake.commentPosts != 1 {
@@ -47,7 +47,7 @@ func TestReconcilePostsPendingReplyOnce(t *testing.T) {
 	}
 
 	// Idempotent: response_id now set, second reconcile posts nothing.
-	_ = p.Reconcile(ctx)
+	_, _ = p.Reconcile(ctx)
 	if fake.commentPosts != 1 {
 		t.Fatalf("second reconcile posted again: commentPosts = %d", fake.commentPosts)
 	}
@@ -61,11 +61,34 @@ func TestReconcileSkipsManagedUpstream(t *testing.T) {
 	_ = db.SetDisposition(ctx, id, "no-action", "", "noted")
 
 	fake := &fakeReplier{id: "x"}
-	if err := New(db, fake).Reconcile(ctx); err != nil {
+	if _, err := New(db, fake).Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if fake.commentPosts != 0 || fake.threadPosts != 0 {
 		t.Fatal("managed_upstream feedback should not be replied to")
+	}
+}
+
+func TestReconcileReturnsCount(t *testing.T) {
+	db := store.OpenForTest(t)
+	ctx := context.Background()
+
+	// Two pending replies on mine-owned PRs.
+	prID1, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 10, Ownership: "mine", State: "open"})
+	id1, _ := db.UpsertFeedback(ctx, store.Feedback{PRID: prID1, Kind: "pr-comments", Fingerprint: "f1", ExternalID: "c10"})
+	_ = db.SetDisposition(ctx, id1, "wont-fix", "intentional", "Not acting — intentional.")
+
+	prID2, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 11, Ownership: "mine", State: "open"})
+	id2, _ := db.UpsertFeedback(ctx, store.Feedback{PRID: prID2, Kind: "pr-comments", Fingerprint: "f2", ExternalID: "c11"})
+	_ = db.SetDisposition(ctx, id2, "wont-fix", "intentional", "Not acting — intentional.")
+
+	fake := &fakeReplier{id: "resp-count"}
+	n, err := New(db, fake).Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("want 2 replies posted, got %d", n)
 	}
 }
 
@@ -87,7 +110,7 @@ func TestReconcileOwnershipGate(t *testing.T) {
 
 	fake := &fakeReplier{id: "resp-mine"}
 	p := New(db, fake)
-	if err := p.Reconcile(ctx); err != nil {
+	if _, err := p.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 

@@ -472,11 +472,13 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	// store.ListPendingReplies and posts via the github provider, recording
 	// response_id for idempotency. Store-backed and repo-agnostic, so it runs
 	// once per Sync (not per repo).
-	if err := e.reconcileReplies(ctx); err != nil {
+	if n, err := e.reconcileReplies(ctx); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{
 			Repo:    "(replies)",
 			Message: fmt.Sprintf("reply pipeline: %v", err),
 		})
+	} else {
+		summary.RepliesPosted += n
 	}
 
 	// Close beads whose PR is no longer in the observed set, but only
@@ -955,8 +957,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	} else if !alreadyClosed {
 		// One-shot store-backed reply reconcile (the shared apply path no
 		// longer does it).
-		if rerr := e.reconcileReplies(ctx); rerr != nil {
+		if n, rerr := e.reconcileReplies(ctx); rerr != nil {
 			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: rerr.Error()})
+		} else {
+			summary.RepliesPosted += n
 		}
 	}
 	summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
@@ -1271,18 +1275,18 @@ func defaultStoreFile() string {
 // It is a no-op when Deps.Store is unset, or when the configured github VCS
 // provider does not satisfy replyposter.Replier (e.g. a test stub that isn't a
 // real provider) — reply reconciliation is skipped gracefully in that case.
-func (e *Engine) reconcileReplies(ctx context.Context) error {
+func (e *Engine) reconcileReplies(ctx context.Context) (int, error) {
 	if e.deps.Store == nil {
-		return nil
+		return 0, nil
 	}
 	vp := e.deps.VCS["github"]
 	if vp == nil {
-		return nil
+		return 0, nil
 	}
 	replier, ok := vp.(replyposter.Replier)
 	if !ok {
 		// Provider lacks the reply capability (e.g. a test stub). Skip.
-		return nil
+		return 0, nil
 	}
 	return replyposter.New(e.deps.Store, replier).Reconcile(ctx)
 }

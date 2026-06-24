@@ -42,13 +42,15 @@ func New(db *store.DB, replier Replier) *Poster {
 // Reconcile scans for pending replies and posts each one to GitHub.
 // Best-effort: a post error is logged and the loop continues (the row stays
 // pending and will be retried on the next reconcile).
-// Returns an error only if the store scan itself fails.
-func (p *Poster) Reconcile(ctx context.Context) error {
+// Returns the number of replies successfully posted and an error only if the
+// store scan itself fails.
+func (p *Poster) Reconcile(ctx context.Context) (int, error) {
 	pending, err := p.db.ListPendingReplies(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
+	var count int
 	for _, fb := range pending {
 		if fb.ManagedUpstream {
 			p.log.DebugContext(ctx, "replyposter: skip managed_upstream", "feedback_id", fb.ID)
@@ -86,8 +88,11 @@ func (p *Poster) Reconcile(ctx context.Context) error {
 
 		if markErr := p.db.MarkReplied(ctx, fb.ID, resp.ID); markErr != nil {
 			p.log.ErrorContext(ctx, "replyposter: mark replied", "feedback_id", fb.ID, "err", markErr)
+			// Don't count as success if we couldn't persist the response_id.
+			continue
 		}
+		count++
 	}
 
-	return nil
+	return count, nil
 }
