@@ -23,6 +23,10 @@ func newOrch(cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config) *Orchestra
 	o.now = clk.Now
 	o.tick = clk.TickAdvancing()
 	o.stamp = func() string { return dtest.TestStamp }
+	// SAFETY: a no-op git so the per-bead worktree.Ensure never shells out to real
+	// git against the real repo (pg2-yukh #2). Combined with fastCfg's tempdir
+	// WorktreeDir, dispatch tests leave no worktree/branch state behind.
+	o.git = &dtest.NoopGit{}
 	return o
 }
 
@@ -60,6 +64,13 @@ func fastCfg() config.Config {
 	c := config.Default()
 	c.MaxWait = 50 * time.Millisecond
 	c.PollInterval = time.Millisecond
+	// SAFETY: never the real ~/.local/state worktree dir — keep worktree.Ensure's
+	// MkdirAll inside an isolated throwaway path (the no-op git in newOrch already
+	// prevents any real `git worktree add`). os.MkdirTemp is used (not t.TempDir)
+	// to preserve fastCfg's no-arg signature; the OS reaps it.
+	if d, err := os.MkdirTemp("", "pr-pool-orch-wt-"); err == nil {
+		c.WorktreeDir = d
+	}
 	return c
 }
 
