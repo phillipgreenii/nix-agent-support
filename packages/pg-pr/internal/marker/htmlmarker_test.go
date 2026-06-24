@@ -7,7 +7,7 @@ func TestIsOursMatchesNewAndLegacyMarkers(t *testing.T) {
 		t.Fatal("new HTML marker not recognized")
 	}
 	// Legacy glyph-marked bodies still recognized during transition.
-	if !IsOurs(Markerify("an old pg-pr reply")) {
+	if !IsOurs("an old pg-pr reply\n\n" + Glyph) {
 		t.Fatal("legacy glyph marker not recognized")
 	}
 	if IsOurs("a human comment with no marker") {

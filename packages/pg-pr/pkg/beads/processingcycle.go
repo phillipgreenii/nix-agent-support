@@ -128,23 +128,6 @@ func (c *Client) FindOpenProcessingCycle(ctx context.Context, prBeadID string) (
 	return "", false, nil
 }
 
-// isChildOf returns true when childID has a parent-child dependency on
-// parentID. Best-effort: errors silently return false so we never claim
-// a wrong match.
-func (c *Client) isChildOf(ctx context.Context, childID, parentID string) bool {
-	out, err := c.Runner.Run(ctx, "dep", "list", childID, "--json")
-	if err != nil {
-		return false
-	}
-	if !strings.Contains(out, parentID) {
-		return false
-	}
-	// Coarse string match is good enough because parentID is a deterministic
-	// bd id (e.g., "beads_pg2-299"); collisions are essentially impossible
-	// across the project's prefix space.
-	return true
-}
-
 // CloseProcessingCycle closes a processing-cycle bead with the given
 // reason. Idempotent: closing an already-closed bead is a no-op.
 func (c *Client) CloseProcessingCycle(ctx context.Context, id, reason string) error {

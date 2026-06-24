@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func TestLoadTickCache_EmptyWorkspace(t *testing.T) {
 }
 
 func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
-	c, _ := newBDWorkspace(t)
+	c, runner := newBDWorkspace(t)
 	ctx := context.Background()
 
 	// Workspace setup: one PR bead, one open processing-cycle under it,
@@ -39,14 +40,21 @@ func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
-		ProcessingCycleID: cycleID,
-		Kind:              FeedbackKindCommentThread,
-		Fingerprint:       "fp-abc",
-		Title:             "test feedback",
-	})
+	// Create a feedback bead directly via bd CLI so the cache can find it
+	// under TypeFeedback. We store fingerprint as metadata so FindFeedbackForPR works.
+	out, err := runner.Run(ctx,
+		"create", "--type=feedback", "--title", "test feedback",
+		"--metadata", `{"kind":"comment-thread","fingerprint":"fp-abc"}`,
+		"--silent")
 	if err != nil {
 		t.Fatal(err)
+	}
+	fbID := strings.TrimSpace(out)
+	if fbID == "" {
+		t.Fatal("bd create returned empty id")
+	}
+	if _, err := runner.Run(ctx, "dep", "add", fbID, cycleID, "--type=parent-child", "--no-cycle-check"); err != nil {
+		t.Fatalf("dep add: %v", err)
 	}
 
 	cache := c.LoadTickCache(ctx)

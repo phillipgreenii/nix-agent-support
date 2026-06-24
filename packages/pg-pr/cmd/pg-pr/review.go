@@ -8,31 +8,12 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
-
-// beadsClientForComment is overridable so tests can swap an in-memory client.
-//
-// The factory takes the absolute monorepo root the bd Client should target
-// so bd discovers the right .beads/ workspace. Production callers resolve
-// the path via resolveRepoPath (using the --repo flag or branch.Detect);
-// tests typically ignore the argument and return a shared in-memory fake.
-var beadsClientForComment = func(dir string) beadsFeedbackClient {
-	return beads.NewClientForRepo(dir)
-}
-
-// beadsFeedbackClient narrows beads.Client to the methods comment respond
-// needs.
-type beadsFeedbackClient interface {
-	GetFeedback(ctx context.Context, id string) (*beads.Feedback, error)
-	FindMergeRequestForFeedback(ctx context.Context, feedbackID string) (*beads.MergeRequest, error)
-}
 
 // reviewFlags holds the parsed CLI flags for the `pg-pr review` subcommands.
 type reviewFlags struct {
@@ -265,93 +246,6 @@ var commentAddCmd = &cobra.Command{
 	},
 }
 
-var commentRespondCmd = &cobra.Command{
-	Use:   "respond <feedback-id>",
-	Short: "Reply to a review thread by feedback bead id",
-	Long: `Resolve a feedback bead id to (repo, upstream-thread-id) by reading
-the feedback bead's metadata and walking parent-child deps up to the
-merge-request bead, then reply on the upstream VCS via ReplyToThread.
-
-Supports kind=comment-thread and kind=review-thread. Other kinds
-(ci-failure, review-request, jira-link) cannot be responded to and
-return an error.
-
-The reply body comes from --body, --body-file, or stdin (exactly one).`,
-	Args: cobra.ExactArgs(1),
-	RunE: runCommentRespond,
-}
-
-func runCommentRespond(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	feedbackID := args[0]
-	body, err := loadCommentBody(cmd, rvF.body, rvF.fromFile)
-	if err != nil {
-		return err
-	}
-
-	// The bd workspace holding the feedback bead is repo-scoped, so we
-	// need a repo identifier before issuing any bd op. Priority:
-	//   1. --repo flag.
-	//   2. branch.Detect against cwd.
-	// If neither resolves we error: writing to the wrong workspace would
-	// silently corrupt state, so failing loud is the safer default.
-	bdWorkspace, err := resolveCommentBdWorkspace(ctx, rvF.repo)
-	if err != nil {
-		return fmt.Errorf("comment respond: %w", err)
-	}
-
-	bdc := beadsClientForComment(bdWorkspace)
-	if bdc == nil {
-		return errors.New("comment respond: beads client not available")
-	}
-	fb, err := bdc.GetFeedback(ctx, feedbackID)
-	if err != nil {
-		return fmt.Errorf("comment respond: lookup feedback %s: %w", feedbackID, err)
-	}
-	if fb == nil {
-		return fmt.Errorf("comment respond: feedback bead %s not found", feedbackID)
-	}
-
-	kind := fb.Fields.Kind
-	switch kind {
-	case string(beads.FeedbackKindCommentThread), string(beads.FeedbackKindReviewThread):
-		// proceed
-	case "":
-		return fmt.Errorf("comment respond: feedback bead %s has no kind metadata", feedbackID)
-	default:
-		return fmt.Errorf("comment respond: cannot respond to %s feedback", kind)
-	}
-
-	externalID := fb.Fields.ExternalID
-	if externalID == "" {
-		return fmt.Errorf("comment respond: feedback bead %s missing external_id metadata", feedbackID)
-	}
-
-	mr, err := bdc.FindMergeRequestForFeedback(ctx, feedbackID)
-	if err != nil {
-		return fmt.Errorf("comment respond: resolve merge-request for feedback %s: %w", feedbackID, err)
-	}
-	if mr == nil {
-		return fmt.Errorf("comment respond: no merge-request bead found for feedback %s", feedbackID)
-	}
-	repo := mr.Fields.Repo
-	if repo == "" {
-		return fmt.Errorf("comment respond: merge-request bead %s missing repo metadata", mr.ID)
-	}
-
-	body = marker.Stamp(body)
-	c, err := vcsProviderFor(repo).ReplyToThread(ctx, repo, externalID, body)
-	if err != nil {
-		return fmt.Errorf("comment respond: reply to thread %s: %w", externalID, err)
-	}
-	if output.Resolve(rvF.json) {
-		return writeJSON(cmd.OutOrStdout(), c)
-	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Replied to %s thread %s on PR %s#%d\n",
-		kind, externalID, repo, mr.Fields.PRNumber)
-	return err
-}
-
 var commentResolveCmd = &cobra.Command{
 	Use:   "resolve <thread-id>",
 	Short: "Mark a review thread as resolved upstream",
@@ -369,42 +263,6 @@ var commentResolveCmd = &cobra.Command{
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Resolved thread %s\n", args[0])
 		return err
 	},
-}
-
-// resolveCommentBdWorkspace returns the absolute monorepo path whose bd
-// workspace holds the feedback bead under modification. Because a feedback
-// id alone doesn't tell us which repo owns it (multiple monorepos may use
-// distinct bd workspaces), we require either an explicit --repo flag or
-// the user to be standing inside the right git tree.
-//
-// Resolution order:
-//  1. --repo flag → look up config to get RepoConfig.Path. If the repo is
-//     not in config, an empty path is returned with nil error and the
-//     caller proceeds with bd's cwd-discovered workspace — the explicit
-//     --repo flag is the user's affirmation that they know which workspace
-//     they want, so we trust them.
-//  2. No --repo: branch.Detect(cwd) → use the detected worktree root.
-//
-// Exposed as a var so tests can swap in a fake that returns a fixed path
-// without spawning git or loading config.
-var resolveCommentBdWorkspace = func(ctx context.Context, repoFlag string) (string, error) {
-	if repoFlag != "" {
-		// Best-effort: look up the configured path; an empty result is OK
-		// because the user explicitly opted into this repo via --repo.
-		return resolveRepoPath(ctx, repoFlag), nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get cwd: %w", err)
-	}
-	info, err := branch.Detect(ctx, cwd, branch.Options{})
-	if err != nil {
-		return "", fmt.Errorf("auto-detect repo: %w; pass --repo owner/name or run from inside the repo's git tree", err)
-	}
-	if info.WorktreeRoot == "" {
-		return "", errors.New("could not determine bd workspace: pass --repo owner/name or run from inside the repo's git tree")
-	}
-	return info.WorktreeRoot, nil
 }
 
 // loadCommentBody resolves the comment body from the most-specific source.
@@ -434,7 +292,7 @@ func loadCommentBody(cmd *cobra.Command, bodyFlag, fromFile string) (string, err
 var _ = api.Comment{}
 
 func init() {
-	for _, c := range []*cobra.Command{reviewDraftCmd, reviewPostCmd, reviewSubmitCmd, commentAddCmd, commentRespondCmd, commentResolveCmd} {
+	for _, c := range []*cobra.Command{reviewDraftCmd, reviewPostCmd, reviewSubmitCmd, commentAddCmd, commentResolveCmd} {
 		c.Flags().StringVar(&rvF.repo, "repo", "",
 			"Repository in owner/name form (defaults to auto-detected remote)")
 		c.Flags().BoolVar(&rvF.json, "json", false,
@@ -446,10 +304,8 @@ func init() {
 	}
 	commentAddCmd.Flags().StringVar(&rvF.body, "body", "", "Comment body (alternative to stdin)")
 	commentAddCmd.Flags().StringVar(&rvF.fromFile, "body-file", "", "Read the comment body from this file")
-	commentRespondCmd.Flags().StringVar(&rvF.body, "body", "", "Reply body (alternative to stdin)")
-	commentRespondCmd.Flags().StringVar(&rvF.fromFile, "body-file", "", "Read the reply body from this file")
 
 	reviewCmd.AddCommand(reviewDraftCmd, reviewPostCmd, reviewSubmitCmd)
-	commentCmd.AddCommand(commentAddCmd, commentRespondCmd, commentResolveCmd)
+	commentCmd.AddCommand(commentAddCmd, commentResolveCmd)
 	rootCmd.AddCommand(reviewCmd, commentCmd)
 }

@@ -344,42 +344,6 @@ func TestFindByRepoAndNumber_Validates(t *testing.T) {
 	}
 }
 
-func TestFindMergeRequestForFeedback_WalksUp(t *testing.T) {
-	ctx := context.Background()
-	c, _ := newBDWorkspace(t)
-
-	prID, _, _ := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "w/x", PRNumber: 11})
-	cycleID, _ := c.CreateProcessingCycle(ctx, prID, "w/x#11", false)
-	fbID, err := c.CreateFeedback(ctx, CreateFeedbackInput{
-		ProcessingCycleID: cycleID,
-		Kind:              FeedbackKindCommentThread,
-		ExternalID:        "PRRT_walk",
-		Title:             "walk-up",
-	})
-	if err != nil {
-		t.Fatalf("create feedback: %v", err)
-	}
-
-	mr, err := c.FindMergeRequestForFeedback(ctx, fbID)
-	if err != nil {
-		t.Fatalf("FindMergeRequestForFeedback: %v", err)
-	}
-	if mr == nil {
-		t.Fatalf("expected to find merge-request, got nil")
-	} else if mr.ID != prID {
-		t.Fatalf("expected %s, got %s", prID, mr.ID)
-	} else if mr.Fields.Repo != "w/x" || mr.Fields.PRNumber != 11 {
-		t.Fatalf("metadata not populated: %+v", mr.Fields)
-	}
-}
-
-func TestFindMergeRequestForFeedback_Validates(t *testing.T) {
-	c := NewClientWithRunner(&fakeRunner{})
-	if _, err := c.FindMergeRequestForFeedback(context.Background(), ""); err == nil {
-		t.Fatalf("expected error on empty id")
-	}
-}
-
 // TestNewClientForRepo_SetsRunnerDir verifies the constructed Client's inner
 // CLIRunner has the requested Dir, so bd will be invoked with that path as
 // cwd and pick up the monorepo's `.beads/` workspace.

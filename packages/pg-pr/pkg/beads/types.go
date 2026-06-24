@@ -13,24 +13,3 @@ const (
 	TypeFeedback     = "feedback"
 	// Processing-cycle and action beads use bd builtin task/bug types.
 )
-
-// FeedbackKind enumerates the upstream events feedback beads represent.
-type FeedbackKind string
-
-const (
-	FeedbackKindCommentThread FeedbackKind = "comment-thread"
-	FeedbackKindCIFailure     FeedbackKind = "ci-failure"
-	FeedbackKindReviewThread  FeedbackKind = "review-thread"
-	FeedbackKindReviewRequest FeedbackKind = "review-request"
-	FeedbackKindJiraLink      FeedbackKind = "jira-link"
-)
-
-// AuthorRole enumerates author precedence levels.
-type AuthorRole string
-
-const (
-	AuthorRoleSelf       AuthorRole = "self"
-	AuthorRoleTeamMember AuthorRole = "team_member"
-	AuthorRoleOrgMember  AuthorRole = "org_member"
-	AuthorRoleBot        AuthorRole = "bot"
-)
