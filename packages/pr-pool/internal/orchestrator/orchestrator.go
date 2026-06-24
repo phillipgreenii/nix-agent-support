@@ -106,9 +106,14 @@ func (o *Orchestrator) queryEnv() query.Env {
 func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
 	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
 	defer func() {
-		if err := o.CC.Close(ctx, externalID, true); err != nil {
-			slog.Warn("run-one teardown close failed", "session", externalID, "err", err)
-		}
+		// Tear down the one session we launched — but PRESERVE it if it ended in
+		// needs_input, exactly as drain's teardownAll does, so the operator can
+		// `ccpool attach` (the needs_input alert in waitDone advertises that). Without
+		// this, run-role would print "attach to continue" and then purge the session
+		// out from under the operator (pg2-2yn2). State unknown (absent / list error)
+		// falls through to a purge — closing a gone session is a harmless no-op.
+		state, _ := o.sessionStateByID(ctx, externalID)
+		o.closeUnlessNeedsInput(ctx, externalID, state)
 	}()
 	pre, preOK := o.snapshotIDs(ctx)
 	res, err := o.workOneWithID(ctx, d, externalID)
@@ -280,23 +285,47 @@ func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
 		if !strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
 			continue
 		}
-		// Preserve a needs_input session: it is paused awaiting a human who must
-		// still be able to `ccpool attach <external_id>` after the pass ends.
-		// Closing it here would kill the session before the operator can attach.
-		// (pg2-th35; the alert that points the operator here fires in waitDone.)
-		if s.State == ccpool.StateNeedsInput {
-			slog.Info("teardown preserving needs_input session for operator attach",
-				"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
-			continue
+		if o.closeUnlessNeedsInput(ctx, s.ExternalID, s.State) {
+			closed++
 		}
-		if err := o.CC.Close(ctx, s.ExternalID, true); err != nil {
-			slog.Warn("teardown close failed", "session", s.ExternalID, "err", err)
-			continue
-		}
-		closed++
 	}
 	slog.Info("teardown", "closed", closed)
 	return closed
+}
+
+// closeUnlessNeedsInput tears down one session UNLESS it is in needs_input, which is
+// PRESERVED (left alive) so the operator can still `ccpool attach <external_id>` — the
+// session is paused awaiting a human and the needs_input alert (waitDone) points them
+// here (pg2-th35, pg2-2yn2). Shared by teardownAll's per-session loop and run-role's
+// single-session teardown so the two paths can't drift. Returns true iff the session
+// was actually closed (purged).
+func (o *Orchestrator) closeUnlessNeedsInput(ctx context.Context, externalID string, state ccpool.SessionState) bool {
+	if state == ccpool.StateNeedsInput {
+		slog.Info("teardown preserving needs_input session for operator attach",
+			"session", externalID, "attach", "ccpool attach "+externalID)
+		return false
+	}
+	if err := o.CC.Close(ctx, externalID, true); err != nil {
+		slog.Warn("teardown close failed", "session", externalID, "err", err)
+		return false
+	}
+	return true
+}
+
+// sessionStateByID returns the current ccpool state of externalID, or ("", false) if
+// it is absent from the list or the list errors. The caller treats an unknown state
+// as "not needs_input" (so a gone/unknowable session is still purge-closed).
+func (o *Orchestrator) sessionStateByID(ctx context.Context, externalID string) (ccpool.SessionState, bool) {
+	sessions, err := o.CC.List(ctx)
+	if err != nil {
+		return "", false
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State, true
+		}
+	}
+	return "", false
 }
 
 func (o *Orchestrator) gated() bool {

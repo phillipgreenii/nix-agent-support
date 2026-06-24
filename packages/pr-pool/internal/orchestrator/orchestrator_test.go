@@ -512,3 +512,18 @@ func TestTeardownAll_preservesNeedsInput(t *testing.T) {
 		t.Errorf("teardown must NOT close a needs_input session; closed=%v", cc.Closed)
 	}
 }
+
+// TestRunOne_preservesNeedsInputSession: a run-role dispatch that ends with its
+// session in needs_input must NOT be purged — it is preserved (left alive) so the
+// operator can `ccpool attach` (consistent with teardownAll; pg2-2yn2/pg2-th35).
+func TestRunOne_preservesNeedsInputSession(t *testing.T) {
+	ext := "pr-pool-feedback-zr-c-" + dtest.TestStamp
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateNeedsInput}}}}
+	o := newOrch(cc, bd, fastCfg())
+	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
+	_ = o.RunOne(context.Background(), d) // ends in needs_input (never completes)
+	if dtest.Contains(cc.Closed, ext) {
+		t.Errorf("RunOne must PRESERVE a needs_input session (no close) so the operator can attach; closed=%v", cc.Closed)
+	}
+}
