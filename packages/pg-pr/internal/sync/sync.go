@@ -920,7 +920,6 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	if err != nil {
 		return nil, err
 	}
-	bdc := e.bdClientFor(rcfg)
 
 	summary := &Summary{StartedAt: e.deps.Now()}
 	getCtx, getSpan := startVCSSpan(ctx, "GetPR", repo, number)
@@ -935,26 +934,29 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 		return summary, fmt.Errorf("sync PR: %w", err)
 	}
 
-	// If upstream is closed/merged, close the bead instead of upserting an
-	// open one and cascade-close its descendants.
+	// If upstream is closed/merged, emit pr.closed/pr.merged so the beadsbridge
+	// cascade-closes the bead + its descendants at outbox flush, instead of
+	// upserting an open bead inline. The store row is upserted (closed/merged)
+	// to keep it authoritative.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
-		existing, err := e.findBeadByPR(ctx, bdc, repo, pr.Number)
-		if err != nil {
+		merged := pr.Merged || pr.State == "merged"
+		ownership := "team"
+		if e.isSelfAuthored(pr.Author) {
+			ownership = "mine"
+		}
+		row := e.prToStoreRow(repo, *pr, ownership) // state resolves to closed/merged via stateForPR
+		if e.deps.Store != nil {
+			_, _ = e.deps.Store.UpsertPR(ctx, row) // keep store authoritative (best-effort)
+		}
+		// The emit is critical: a dropped pr.closed/pr.merged event also drops
+		// the bridge cascade. Propagate (matching this function's other error
+		// paths) rather than silencing it.
+		if err := e.emitPRClosed(ctx, row, merged); err != nil {
+			summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
+			summary.FinishedAt = e.deps.Now()
 			return summary, err
 		}
-		if existing != nil {
-			reason := "upstream-" + pr.State
-			if pr.Merged {
-				reason = "upstream-merged"
-			}
-			if err := bdc.CloseMergeRequest(ctx, existing.ID, reason); err != nil {
-				summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
-				summary.FinishedAt = e.deps.Now()
-				return summary, err
-			}
-			summary.BeadsClosed = 1
-			e.cascadeClose(ctx, bdc, existing.ID, "pr-closed", summary)
-		}
+		summary.BeadsClosed = 1
 		summary.Repos = []RepoSummary{{Repo: repo, PRs: 1}}
 		summary.TotalPRs = 1
 		summary.FinishedAt = e.deps.Now()
@@ -1207,6 +1209,12 @@ func (e *Engine) listExistingByKey(ctx context.Context, bdc BeadClient) (map[prK
 // findBeadByPR returns the open or closed merge-request bead for a given
 // (repo, pr_number) or nil if not found. Caller passes the bd client whose
 // workspace should be searched.
+//
+// Now uncalled: Task 10 converted the last inline close branches (refreshPR +
+// SyncPR) to event emission, so the beadsbridge locates the bead instead.
+// Removal is consolidated into Task 14.
+//
+//nolint:unused // orphaned by Task 10; removed in Task 14 cleanup.
 func (e *Engine) findBeadByPR(ctx context.Context, bdc BeadClient, repo string, pr int) (*beads.MergeRequest, error) {
 	all, err := bdc.ListMergeRequests(ctx, true)
 	if err != nil {
@@ -1478,6 +1486,12 @@ func allRunsSuccessful(runs []api.CIRun) bool {
 // cascadeClose closes all descendants of prBeadID with the given reason.
 // Errors are absorbed into summary.Errors; the cascade is best-effort.
 // bdc is the per-repo bd client whose workspace holds the descendants.
+//
+// Now uncalled: Task 10 moved the cascade-on-close into the beadsbridge
+// (Handler.cascadeClose), which fires on pr.closed/pr.merged. Removal is
+// consolidated into Task 14.
+//
+//nolint:unused // orphaned by Task 10; removed in Task 14 cleanup.
 func (e *Engine) cascadeClose(ctx context.Context, bdc BeadClient, prBeadID, reason string, summary *Summary) {
 	children, err := bdc.ListChildrenOfPR(ctx, prBeadID)
 	if err != nil {

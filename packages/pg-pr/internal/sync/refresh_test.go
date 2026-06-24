@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
@@ -129,7 +130,12 @@ func newRefreshEngine(t *testing.T, self string, bdc BeadClient, pr api.PR) *Eng
 	return e
 }
 
+// TestRefreshPR_ClosedMerged_ClosesAndRemoves: a merged PR is genuinely
+// detected as merged and removed from the dashboard (nil input). The bead
+// close now happens via an emitted pr.merged event (the bridge cascade-closes),
+// NOT an inline CloseMergeRequest on the engine's bd client.
 func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
+	db := store.OpenForTest(t)
 	bdc := &refreshFakeBeads{
 		existing: &beads.MergeRequest{
 			ID:     "mr-1",
@@ -140,7 +146,7 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 		Repo: "o/r", Number: 1, State: "merged", Merged: true,
 		Author: "me", URL: "https://github.com/o/r/pull/1",
 	}
-	e := newRefreshEngine(t, "me", bdc, pr)
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
 
 	in, err := e.refreshPR(context.Background(), "o/r", 1)
 	if err != nil {
@@ -149,18 +155,33 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 	if in != nil {
 		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
 	}
-	if !bdc.closed {
-		t.Fatal("expected the existing open bead to be closed")
+	if bdc.closed {
+		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
+	}
+	// Genuine merged detection: a pr.merged event must have been emitted.
+	var sawMerged bool
+	for _, ev := range collectOutboxEvents(t, db) {
+		if ev.Type == store.EventPRMerged {
+			sawMerged = true
+		}
+	}
+	if !sawMerged {
+		t.Fatal("expected a pr.merged event to be emitted for the merged PR")
 	}
 }
 
+// TestRefreshPR_TeamDraft_MarksDraftKeepsBeadHidden: a team-authored draft is
+// genuinely detected as draft and kept off the dashboard (nil input). The
+// draft bead-state now propagates via an emitted pr.updated event (State=draft)
+// rather than an inline EnsureMergeRequest on the engine's bd client.
 func TestRefreshPR_TeamDraft_MarksDraftKeepsBeadHidden(t *testing.T) {
+	db := store.OpenForTest(t)
 	bdc := &refreshFakeBeads{}
 	pr := api.PR{
 		Repo: "o/r", Number: 2, State: "open", Draft: true,
 		Author: "teammate", URL: "https://github.com/o/r/pull/2",
 	}
-	e := newRefreshEngine(t, "me", bdc, pr)
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
 
 	in, err := e.refreshPR(context.Background(), "o/r", 2)
 	if err != nil {
@@ -169,11 +190,29 @@ func TestRefreshPR_TeamDraft_MarksDraftKeepsBeadHidden(t *testing.T) {
 	if in != nil {
 		t.Fatalf("hidden team draft must be removed (nil input); got %+v", in)
 	}
-	if bdc.lastState != "draft" {
-		t.Fatalf("EnsureMergeRequest State: got %q want \"draft\"", bdc.lastState)
+	if bdc.lastState != "" {
+		t.Fatalf("refreshPR must NOT EnsureMergeRequest inline; the bridge does it (got lastState %q)", bdc.lastState)
 	}
 	if bdc.closed {
 		t.Fatal("team draft bead must not be closed")
+	}
+	// Genuine draft detection: a pr.updated event with State=="draft" must have
+	// been emitted (the bead state the bridge will project).
+	var sawDraft bool
+	for _, ev := range collectOutboxEvents(t, db) {
+		if ev.Type != store.EventPRUpdated {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.State == "draft" {
+			sawDraft = true
+		}
+	}
+	if !sawDraft {
+		t.Fatal("expected a pr.updated event with State=draft for the hidden team draft")
 	}
 }
 
@@ -367,6 +406,199 @@ func TestRefreshPREmitsOpen(t *testing.T) {
 	}
 	if row.Ownership != "mine" {
 		t.Fatalf("store row Ownership: got %q want \"mine\"", row.Ownership)
+	}
+}
+
+// newRefreshEngineWithStore builds a refreshPR engine over repo "o/r" wired to
+// a real store (so emitted pr.* events land in the outbox) but WITHOUT a bridge
+// dispatcher, so tests can inspect the raw outbox and prove the engine emits an
+// event rather than closing/ensuring the bead inline on its own bd client.
+func newRefreshEngineWithStore(t *testing.T, self string, bdc BeadClient, pr api.PR, db *store.DB) *Engine {
+	t.Helper()
+	vcs := newFakeVCS()
+	vcs.views[keyOf("o/r", pr.Number)] = pr
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: self,
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", VCS: "github", TeamMembers: []string{"teammate"}},
+			},
+		},
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Intentionally do NOT wire a dispatcher: with Deps.Dispatch nil, the
+	// engine's flushOutbox is a no-op so emitted rows stay pending and can be
+	// inspected via the raw outbox below. The engine's bd client is also left
+	// untouched, so an inline CloseMergeRequest/EnsureMergeRequest would be
+	// detectable (mirrors the Task 8/9 raw-outbox-inspection style).
+	return e
+}
+
+// drainOutboxTypes runs the outbox and collects every event into the slice,
+// returning the decoded PRPayloads keyed by event type for assertion.
+func collectOutboxEvents(t *testing.T, db *store.DB) []store.Event {
+	t.Helper()
+	var events []store.Event
+	if err := db.RunOutbox(context.Background(), func(_ context.Context, ev store.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+	return events
+}
+
+// TestRefreshPRClosedEmitsClose proves a closed (un-merged) PR causes refreshPR
+// to emit a store.EventPRClosed (Merged=false), return (nil,nil), and NOT call
+// CloseMergeRequest/EnsureMergeRequest inline on the engine's bd client (the
+// bridge is now the sole bead writer).
+func TestRefreshPRClosedEmitsClose(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{
+		existing: &beads.MergeRequest{
+			ID:     "mr-1",
+			Fields: beads.MergeRequestFields{Repo: "o/r", PRNumber: 1},
+		},
+	}
+	pr := api.PR{
+		Repo: "o/r", Number: 1, State: "closed",
+		Author: "me", URL: "https://github.com/o/r/pull/1",
+	}
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
+
+	in, err := e.refreshPR(ctx, "o/r", 1)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in != nil {
+		t.Fatalf("closed PR must be removed (nil input); got %+v", in)
+	}
+	if bdc.closed {
+		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
+	}
+
+	events := collectOutboxEvents(t, db)
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRClosed {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.Repo == "o/r" && p.Number == 1 {
+			found = true
+			if p.Merged {
+				t.Errorf("pr.closed payload should have Merged=false; got %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.closed event for o/r#1; events: %+v", events)
+	}
+}
+
+// TestRefreshPRMergedEmitsMerge proves a merged PR causes refreshPR to emit a
+// store.EventPRMerged (Merged=true) instead of closing the bead inline.
+func TestRefreshPRMergedEmitsMerge(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{
+		existing: &beads.MergeRequest{
+			ID:     "mr-2",
+			Fields: beads.MergeRequestFields{Repo: "o/r", PRNumber: 2},
+		},
+	}
+	pr := api.PR{
+		Repo: "o/r", Number: 2, State: "merged", Merged: true,
+		Author: "me", URL: "https://github.com/o/r/pull/2",
+	}
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
+
+	in, err := e.refreshPR(ctx, "o/r", 2)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in != nil {
+		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
+	}
+	if bdc.closed {
+		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
+	}
+
+	events := collectOutboxEvents(t, db)
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRMerged {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.Repo == "o/r" && p.Number == 2 {
+			found = true
+			if !p.Merged {
+				t.Errorf("pr.merged payload should have Merged=true; got %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.merged event for o/r#2; events: %+v", events)
+	}
+}
+
+// TestRefreshPRHiddenDraftEmitsUpdate proves a team-authored draft causes
+// refreshPR to emit a store.EventPRUpdated whose payload has State=="draft",
+// return (nil,nil), and NOT call EnsureMergeRequest inline.
+func TestRefreshPRHiddenDraftEmitsUpdate(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{}
+	pr := api.PR{
+		Repo: "o/r", Number: 3, State: "open", Draft: true,
+		Author: "teammate", URL: "https://github.com/o/r/pull/3",
+	}
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
+
+	in, err := e.refreshPR(ctx, "o/r", 3)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in != nil {
+		t.Fatalf("hidden team draft must be removed (nil input); got %+v", in)
+	}
+	if bdc.lastState != "" {
+		t.Fatalf("refreshPR must NOT EnsureMergeRequest inline; the bridge does it (got lastState %q)", bdc.lastState)
+	}
+
+	events := collectOutboxEvents(t, db)
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRUpdated {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.Repo == "o/r" && p.Number == 3 {
+			found = true
+			if p.State != "draft" {
+				t.Errorf("pr.updated payload State: got %q want \"draft\"; payload %+v", p.State, p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.updated event with State=draft for o/r#3; events: %+v", events)
 	}
 }
 

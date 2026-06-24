@@ -585,6 +585,81 @@ func TestSyncPR_ClosesWhenUpstreamMerged(t *testing.T) {
 	}
 }
 
+// TestSyncPRClosedEmitsClose proves the CLI single-PR path (SyncPR) for a
+// closed PR emits a store.EventPRClosed (so the bridge cascade-closes the bead)
+// instead of closing the bead inline, while still reporting BeadsClosed==1.
+//
+// It wires a real store but a no-op dispatcher (NOT the bridge) so an inline
+// CloseMergeRequest on the engine's bd client would be detectable, and inspects
+// the raw outbox for the close event.
+func TestSyncPRClosedEmitsClose(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	bdc := &refreshFakeBeads{
+		existing: &beads.MergeRequest{
+			ID:     "mr-1",
+			Fields: beads.MergeRequestFields{Repo: "foo/bar", PRNumber: 42},
+		},
+	}
+	closed := samplePR(42, "foo/bar", "feat/z")
+	closed.State = "closed"
+
+	vcs := newFakeVCS()
+	vcs.views[keyOf("foo/bar", 42)] = closed
+	e, err := New(Deps{
+		Cfg:      minimalCfg(),
+		VCS:      map[string]VCSProvider{"github": vcs},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No dispatcher: flushOutbox is a no-op so emitted rows stay pending for raw
+	// inspection, and the engine's bd client stays untouched so an inline
+	// CloseMergeRequest would be detectable.
+
+	sum, err := e.SyncPR(ctx, "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("SyncPR: %v (errors=%+v)", err, sum.Errors)
+	}
+	if sum.BeadsClosed != 1 {
+		t.Fatalf("BeadsClosed: got %d want 1", sum.BeadsClosed)
+	}
+	if bdc.closed {
+		t.Fatal("SyncPR must NOT close the bead inline; the bridge does the cascade")
+	}
+
+	var events []store.Event
+	if err := db.RunOutbox(ctx, func(_ context.Context, ev store.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Type != store.EventPRClosed {
+			continue
+		}
+		var p store.PRPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal PRPayload: %v", err)
+		}
+		if p.Repo == "foo/bar" && p.Number == 42 {
+			found = true
+			if p.Merged {
+				t.Errorf("pr.closed payload should have Merged=false; got %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a pr.closed event for foo/bar#42; events: %+v", events)
+	}
+}
+
 // TestSync_PerRepoWorkspaceIsolation verifies that when the engine's
 // Deps.Beads is unset (production wiring), each repo's bd operations land
 // in its own .beads/ workspace. Two repos point at two distinct temp

@@ -3,10 +3,9 @@ package sync
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
 
 // refreshPR fetches one PR and reconciles its bead + snapshot from real
@@ -36,36 +35,40 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	}
 	summary := &Summary{}
 
-	// Closed/merged: close the existing bead and cascade-close its
-	// descendants, then signal removal from the dashboard.
+	// Closed/merged: emit pr.closed/pr.merged so the beadsbridge cascade-closes
+	// the existing bead + descendants at outbox flush, then signal removal from
+	// the dashboard. The engine no longer closes the bead inline.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
-		if existing, ferr := e.findBeadByPR(ctx, bdc, repo, pr.Number); ferr == nil && existing != nil {
-			reason := "upstream-" + pr.State
-			if pr.Merged {
-				reason = "upstream-merged"
-			}
-			if cerr := bdc.CloseMergeRequest(ctx, existing.ID, reason); cerr == nil {
-				e.cascadeClose(ctx, bdc, existing.ID, "pr-closed", summary)
-			}
+		merged := pr.Merged || pr.State == "merged"
+		ownership := "team"
+		if e.isSelfAuthored(pr.Author) {
+			ownership = "mine"
 		}
+		row := e.prToStoreRow(repo, *pr, ownership) // state resolves to closed/merged via stateForPR
+		if e.deps.Store != nil {
+			_, _ = e.deps.Store.UpsertPR(ctx, row) // keep store authoritative (best-effort)
+		}
+		// The emit is critical: a dropped pr.closed/pr.merged event also drops
+		// the bridge cascade. Propagate (matching emitPREvent in the draft
+		// branch below) rather than silencing it.
+		if err := e.emitPRClosed(ctx, row, merged); err != nil {
+			return nil, err
+		}
+		flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 		return nil, nil
 	}
 
-	// Hidden team draft: keep the bead in sync (state=draft) so we can react
-	// when it leaves draft, but don't surface it on the dashboard.
+	// Hidden team draft: emit pr.updated (state=draft) so the bridge keeps the
+	// bead in sync — we can react when it leaves draft — but don't surface it on
+	// the dashboard. The engine no longer EnsureMergeRequests inline.
 	if !e.isSelfAuthored(pr.Author) && pr.Draft {
-		fields := beads.MergeRequestFields{
-			Repo:         repo,
-			PRNumber:     pr.Number,
-			State:        "draft",
-			Branch:       pr.Branch,
-			Base:         pr.Base,
-			Author:       pr.Author,
-			URL:          pr.URL,
-			LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
-			Draft:        true,
+		if err := e.emitPREvent(ctx, store.EventPRUpdated, repo, *pr, "team"); err != nil {
+			return nil, err
 		}
-		_, _, _ = bdc.EnsureMergeRequest(ctx, pr.URL, fields)
+		if e.deps.Store != nil {
+			_, _ = e.deps.Store.UpsertPR(ctx, e.prToStoreRow(repo, *pr, "team"))
+		}
+		flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 		return nil, nil
 	}
 
