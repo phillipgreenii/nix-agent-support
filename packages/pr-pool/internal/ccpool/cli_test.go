@@ -34,6 +34,7 @@ func TestEnsure_argv(t *testing.T) {
 		t.Fatal(err)
 	}
 	// addressed by external_id; display name passed via --name; env keys sorted.
+	// Default() sets Autonomous=true, so --autonomous must appear at the end.
 	want := []string{
 		"new", "pr-pool-worker-zr-1-20260616T010203", "--cwd", "/repo",
 		"--name", "pr-pool-worker-zr-1",
@@ -43,6 +44,7 @@ func TestEnsure_argv(t *testing.T) {
 		"--permission-mode", "dontAsk",
 		"--allowed-tools", config.Default().AllowedTools,
 		"--effort", "max",
+		"--autonomous",
 	}
 	if !reflect.DeepEqual((*got)[0], want) {
 		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
@@ -56,6 +58,7 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 	cfg.PermissionMode = ""
 	cfg.AllowedTools = ""
 	cfg.Effort = "high"
+	cfg.Autonomous = false // isolate this test to model/effort; not testing autonomous here
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
 		got = append(got, args)
@@ -71,6 +74,41 @@ func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
 	}
 }
 
+func TestEnsure_argv_includesAutonomous(t *testing.T) {
+	cli, got, _ := newSpy() // config.Default() => Autonomous true, PermissionMode dontAsk, Effort max
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r",
+		"--permission-mode", "dontAsk",
+		"--allowed-tools", config.Default().AllowedTools,
+		"--effort", "max",
+		"--autonomous",
+	}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
+	}
+}
+
+func TestEnsure_argv_omitsAutonomousWhenDisabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Autonomous = false
+	var got [][]string
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got[0] {
+		if a == "--autonomous" {
+			t.Fatalf("--autonomous must be omitted when Autonomous=false; argv = %v", got[0])
+		}
+	}
+}
+
 func TestEnsure_allowedTools(t *testing.T) {
 	// Non-default allowlist is forwarded verbatim, positioned after --permission-mode.
 	var got [][]string
@@ -78,6 +116,7 @@ func TestEnsure_allowedTools(t *testing.T) {
 	cfg.PermissionMode = "dontAsk"
 	cfg.AllowedTools = "Read,Bash(git *)"
 	cfg.Effort = ""
+	cfg.Autonomous = false // isolate this test to allowlist positioning
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
 		got = append(got, args)
@@ -98,6 +137,7 @@ func TestEnsure_allowedToolsEmptyOmitsFlag(t *testing.T) {
 	cfg.PermissionMode = ""
 	cfg.AllowedTools = "" // empty => no --allowed-tools flag
 	cfg.Effort = ""
+	cfg.Autonomous = false // isolate this test to allowedTools behavior
 	cli := NewCLIRunner(cfg)
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
 		got = append(got, args)

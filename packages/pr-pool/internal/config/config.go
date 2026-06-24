@@ -44,6 +44,11 @@ type Config struct {
 	AllowedTools  string
 	SessionPrefix string
 
+	// Autonomous, when true, passes `--autonomous` to `ccpool new` so workers'
+	// AskUserQuestion is structurally blocked (no human to answer). Default true.
+	// Can be disabled via PR_POOL_AUTONOMOUS=false for operator debugging.
+	Autonomous bool
+
 	// SelfLogin is the GitHub login the worker safety preamble asserts authorship
 	// against. From [pool].self_login; falls back to `pg-pr config show` at the
 	// orchestrator/precheck layer when unset.
@@ -90,6 +95,7 @@ func Default() Config {
 		CICDDown:       "",
 		Effort:         "max",
 		Model:          "",
+		Autonomous:     true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
 		PermissionMode: "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PR_POOL_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
 		// SECURITY-SENSITIVE default allowlist (HUMAN SIGN-OFF REQUIRED — see plan).
 		// Minimum verbs an autonomous worker needs; deliberately NOT blanket Bash.
@@ -129,6 +135,7 @@ func Load() (Config, error) {
 	c.Effort = envStr("PR_POOL_EFFORT", c.Effort)
 	c.Model = envStr("PR_POOL_MODEL", c.Model)
 	c.PermissionMode = envStr("PR_POOL_PERMISSION_MODE", c.PermissionMode)
+	c.Autonomous = envBool("PR_POOL_AUTONOMOUS", c.Autonomous)
 	c.AllowedTools = envStr("PR_POOL_ALLOWED_TOOLS", c.AllowedTools)
 	c.SessionPrefix = envStr("PR_POOL_SESSION_PREFIX", c.SessionPrefix)
 	c.BudgetTokens = int64(envInt("PR_POOL_BUDGET_TOKENS", int(c.BudgetTokens)))
@@ -252,6 +259,20 @@ func envStr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envBool overlays a bool from env: "false"/"0"/"no" → false, "true"/"1"/"yes" →
+// true; an unset or unparseable value keeps def.
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
 }
 
 func envInt(key string, def int) int {

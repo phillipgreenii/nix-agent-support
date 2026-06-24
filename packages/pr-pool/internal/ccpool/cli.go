@@ -46,6 +46,7 @@ type CLIRunner struct {
 	// (ModeNoWait). >0 makes ccpool exit 7 when the model never starts a turn (a
 	// dropped nudge); 0 keeps the old fire-and-forget behavior (pg2-yukh #1).
 	ConfirmIngest time.Duration
+	Autonomous    bool   // emits --autonomous on `ccpool new` when true (block AskUserQuestion)
 	bin           string // ccpool binary name/path (resolved on PATH by execCmd)
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
@@ -54,7 +55,7 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, bin: "ccpool"}
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: "ccpool"}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
 		return execCmd(ctx, c.bin, args)
 	}
@@ -138,6 +139,9 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	}
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
+	}
+	if c.Autonomous {
+		args = append(args, "--autonomous")
 	}
 	_, err := c.ccpool(ctx, ensureTimeout, args...)
 	return err

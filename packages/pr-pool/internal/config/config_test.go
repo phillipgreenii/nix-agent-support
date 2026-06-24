@@ -391,6 +391,25 @@ func TestLoad_noFiles_unchangedDefaults(t *testing.T) {
 	}
 }
 
+func TestDefault_autonomousTrue(t *testing.T) {
+	if !Default().Autonomous {
+		t.Error("Default().Autonomous should be true (workers are human-less by default)")
+	}
+}
+
+func TestLoad_autonomousEnvOverlay(t *testing.T) {
+	absentConfig(t)
+	absentGlobalConfig(t)
+	t.Setenv("PR_POOL_AUTONOMOUS", "false")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Autonomous {
+		t.Error("PR_POOL_AUTONOMOUS=false should disable autonomous")
+	}
+}
+
 func TestLoad_promptXorPromptFile(t *testing.T) {
 	writeCfg(t, `
 [[role]]

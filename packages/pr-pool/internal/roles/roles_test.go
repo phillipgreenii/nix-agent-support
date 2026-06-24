@@ -32,6 +32,14 @@ func TestBuiltinRoleSet_shape(t *testing.T) {
 	}
 }
 
+func TestBuiltinWorkerPrompt_forbidsAskUserQuestion(t *testing.T) {
+	rs := BuiltinRoleSet(BuiltinParams{WorktreeDir: "/wt", MaxWorker: 1, MaxFeedback: 1})
+	body := rs[1].CCPool.PromptBody
+	if !strings.Contains(body, "AskUserQuestion") {
+		t.Fatalf("worker prompt must explicitly name and forbid AskUserQuestion (D2 prompt-forbid lever); body:\n%s", body)
+	}
+}
+
 func TestBuiltinWorkerPrompt_taskBodyHasNoRails(t *testing.T) {
 	rs := BuiltinRoleSet(BuiltinParams{WorktreeDir: "/wt", MaxWorker: 1, MaxFeedback: 1})
 	body := rs[1].CCPool.PromptBody
