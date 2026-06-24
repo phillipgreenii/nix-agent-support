@@ -373,7 +373,11 @@
               "otel_scope_version 1": true,
               "otel_scope_version 2": true,
               "otel_scope_version 3": true,
-              "Value #A": true
+              "Value #A": true,
+              "host_name 2": true,
+              "host_name 3": true,
+              "os_type 2": true,
+              "os_type 3": true
             },
             "indexByName": {
               "cwd": 0,
@@ -384,7 +388,9 @@
               "model": 5,
               "Value #B": 6,
               "Value #C": 7,
-              "error_kind": 8
+              "error_kind": 8,
+              "host_name 1": 9,
+              "os_type 1": 10
             },
             "renameByName": {
               "cwd": "path",
@@ -393,7 +399,9 @@
               "session_name": "name",
               "Value #B": "tokens",
               "Value #C": "cost",
-              "error_kind": "current error"
+              "error_kind": "current error",
+              "host_name 1": "host",
+              "os_type 1": "os"
             }
           }
         }
