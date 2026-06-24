@@ -53,12 +53,13 @@ func TestListFeedbackBeadIDs_PassesCorrectArgs(t *testing.T) {
 	if len(args) < 3 {
 		t.Fatalf("expected at least 3 args, got %v", args)
 	}
-	// Must include --type=feedback, --all, --json.
+	// Must include --type=feedback, --all, --json, and --limit=0 (so the
+	// migration sees every legacy feedback bead, not just the first page).
 	found := map[string]bool{}
 	for _, a := range args {
 		found[a] = true
 	}
-	for _, want := range []string{"--type=feedback", "--all", "--json"} {
+	for _, want := range []string{"--type=feedback", "--all", "--json", "--limit=0"} {
 		if !found[want] {
 			t.Errorf("expected arg %q in bd call, got %v", want, args)
 		}

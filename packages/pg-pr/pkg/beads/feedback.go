@@ -80,7 +80,9 @@ func feedbackFieldsFromMetadata(m map[string]any) FeedbackFields {
 // status (open or closed). It is used by the migrate-feedback command to find
 // legacy feedback beads that predate the store and should be closed.
 func (c *Client) ListFeedbackBeadIDs(ctx context.Context) ([]string, error) {
-	out, err := c.Runner.Run(ctx, "list", "--type=feedback", "--all", "--json")
+	// --limit=0 disables bd's default result cap so the migration sees every
+	// legacy feedback bead (matches ListMergeRequests); --all includes closed.
+	out, err := c.Runner.Run(ctx, "list", "--type=feedback", "--all", "--json", "--limit=0")
 	if err != nil {
 		return nil, fmt.Errorf("list feedback beads: %w", err)
 	}
