@@ -163,3 +163,24 @@ func TestListExternalIDsByMeta_noMatchReturnsEmpty(t *testing.T) {
 		t.Errorf("got %v, want empty", got)
 	}
 }
+
+func TestDelete_cascadesMetadata(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	// A session row keyed ext-a, with two metadata rows.
+	if err := st.Insert(ctx, Session{ExternalID: "ext-a", State: Starting}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	_ = st.SetMeta(ctx, "ext-a", "role", "worker")
+	_ = st.SetMeta(ctx, "ext-a", "bead", "zr-1")
+	if err := st.Delete(ctx, "ext-a"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	m, err := st.Meta(ctx, "ext-a")
+	if err != nil {
+		t.Fatalf("Meta: %v", err)
+	}
+	if len(m) != 0 {
+		t.Errorf("metadata not cascaded on Delete: %v", m)
+	}
+}

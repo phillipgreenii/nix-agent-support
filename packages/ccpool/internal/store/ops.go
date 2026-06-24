@@ -211,11 +211,14 @@ func (s *Store) Poll(ctx context.Context, externalID string) (int64, State, bool
 	return sess.Generation, sess.State, true, nil
 }
 
-// Delete removes the row for external_id. Deleting a missing row is not an error.
+// Delete removes the row for external_id AND its session metadata. Deleting a
+// missing row is not an error.
 func (s *Store) Delete(ctx context.Context, externalID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE external_id = ?`, externalID)
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE external_id = ?`, externalID); err != nil {
 		return fmt.Errorf("delete %q: %w", externalID, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM session_metadata WHERE external_id = ?`, externalID); err != nil {
+		return fmt.Errorf("delete meta for %q: %w", externalID, err)
 	}
 	return nil
 }
