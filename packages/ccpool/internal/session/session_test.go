@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -548,5 +549,112 @@ func TestEnsure_resume_flipsToStartingBeforeLaunch_thenReady(t *testing.T) {
 	}
 	if h.State != store.Ready {
 		t.Errorf("final state = %q, want ready", h.State)
+	}
+}
+
+// TestEnsure_setsDispatchMetadataOnBrandNew: --meta supplied at dispatch is upserted
+// onto the brand-new session, addressable by external_id (no separate meta set call).
+func TestEnsure_setsDispatchMetadataOnBrandNew(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	ft := &fakeTmux{live: map[string]bool{}}
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-1" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	meta := map[string]string{"prpool.bead": "zr-1", "prpool.role": "worker"}
+	if _, err := s.Ensure(ctx, "ext-meta", "/tmp/proj", "", EnsureOpts{Meta: meta}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	got, err := st.Meta(ctx, "ext-meta")
+	if err != nil {
+		t.Fatalf("Meta: %v", err)
+	}
+	if !reflect.DeepEqual(got, meta) {
+		t.Errorf("Meta = %v, want %v", got, meta)
+	}
+}
+
+// TestEnsure_reuseLivePreservesAndUpsertsMetadata: on the reuse-live path (tmux
+// already up) the session is NOT relaunched, prior metadata is preserved, and the
+// dispatch's --meta keys are upserted on top.
+func TestEnsure_reuseLivePreservesAndUpsertsMetadata(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	if err := st.Insert(ctx, store.Session{
+		ExternalID: "ext-live", ClaudeSessionID: "csid-x", State: store.Ready, TmuxSession: "cc-ext-live",
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := st.SetMeta(ctx, "ext-live", "prpool.role", "old"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	ft := &fakeTmux{live: map[string]bool{"cc-ext-live": true}} // tmux already alive
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+		Now: func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "ext-live", "/tmp/proj", "", EnsureOpts{
+		Meta: map[string]string{"prpool.bead": "zr-2"},
+	}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 0 {
+		t.Fatalf("reuse-live must not relaunch; got %d NewSession calls", len(ft.newCalls))
+	}
+	got, _ := st.Meta(ctx, "ext-live")
+	want := map[string]string{"prpool.role": "old", "prpool.bead": "zr-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Meta = %v, want %v (preserve old + upsert new)", got, want)
+	}
+}
+
+// TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata: when the row's
+// Claude session is gone (not resumable, not fresh-starting), Ensure prunes the
+// phantom row — store.Delete cascade-deletes the metadata — then launches brand-new,
+// so ONLY this dispatch's metadata remains. (Reuse of an external_id whose Claude
+// session is gone is "new"; no stale cross-session metadata.)
+func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	// A row with no resumable Claude session (empty TranscriptPath, nil Exister =>
+	// not resumable) and State != Starting (=> not fresh-starting => prunable).
+	if err := st.Insert(ctx, store.Session{
+		ExternalID: "ext-reuse", ClaudeSessionID: "csid-old", State: store.Ready, TmuxSession: "cc-ext-reuse",
+	}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if err := st.SetMeta(ctx, "ext-reuse", "prpool.bead", "zr-OLD"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	ft := &fakeTmux{live: map[string]bool{}} // tmux NOT alive => not reuse-live
+	waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+		return wait.Outcome{State: store.Ready}, nil
+	})
+	s := New(Deps{
+		Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+		Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+		NewUUID: func() string { return "csid-new" },
+		Now:     func() time.Time { return time.Unix(100, 0) },
+	})
+	if _, err := s.Ensure(ctx, "ext-reuse", "/tmp/proj", "", EnsureOpts{
+		Meta: map[string]string{"prpool.bead": "zr-NEW"},
+	}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if len(ft.newCalls) != 1 {
+		t.Fatalf("expected a brand-new launch after prune; got %d NewSession calls", len(ft.newCalls))
+	}
+	got, _ := st.Meta(ctx, "ext-reuse")
+	want := map[string]string{"prpool.bead": "zr-NEW"} // zr-OLD cleared by the prune cascade
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Meta = %v, want %v (prior metadata cleared on fresh launch)", got, want)
 	}
 }

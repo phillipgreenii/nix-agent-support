@@ -34,6 +34,8 @@ type Store interface {
 	Transition(ctx context.Context, externalID string, to store.State, claudeSessionID, transcriptPath string) (store.State, error)
 	Delete(ctx context.Context, externalID string) error
 	List(ctx context.Context) ([]store.Session, error)
+	// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
+	SetMeta(ctx context.Context, externalID, key, value string) error
 }
 
 // Locker serializes operations on one external_id (spec §15). A nil Locker on
@@ -173,6 +175,12 @@ type EnsureOpts struct {
 	// instead of only recording the needs_input edge. Set by pr-pool for human-less
 	// workers; unset for attended sessions (which keep pg2-7a5b detection).
 	Autonomous bool
+
+	// Meta is caller-supplied session metadata upserted atomically as part of this
+	// dispatch (e.g. pr-pool's prpool.bead/role/pool). Addressed by external_id and
+	// tied to the Claude session lifecycle: preserved across reuse-live/resume,
+	// cleared when a phantom row is pruned (reuse => new). Empty/nil is a no-op.
+	Meta map[string]string
 }
 
 // tmuxSafe maps the characters tmux treats as target separators ('.' and ':',
@@ -205,9 +213,30 @@ func (s *Service) Ensure(ctx context.Context, externalID, cwd, model string, opt
 	err := s.withLock(externalID, func() error {
 		var e error
 		h, e = s.ensureLocked(ctx, externalID, cwd, model, opts)
-		return e
+		if e != nil {
+			return e
+		}
+		// Upsert dispatch metadata atomically within the per-external_id lock, AFTER
+		// ensureLocked has launched/resumed/reused the session. Running here (not inside
+		// ensureLocked) means it lands AFTER the path-4 phantom-row prune, whose
+		// store.Delete cascade already cleared any prior session's metadata — so a fresh
+		// Claude session under a reused external_id keeps only this dispatch's metadata
+		// (reuse => new), while reuse-live/resume preserve prior keys and upsert on top.
+		return s.applyMeta(ctx, externalID, opts.Meta)
 	})
 	return h, err
+}
+
+// applyMeta upserts each (key,value) of meta onto externalID. Empty meta is a no-op.
+// A write error is returned: the dispatch metadata is part of the creation contract,
+// and SetMeta is a single autocommit UPSERT on the DB the row was just written to.
+func (s *Service) applyMeta(ctx context.Context, externalID string, meta map[string]string) error {
+	for k, v := range meta {
+		if err := s.d.Store.SetMeta(ctx, externalID, k, v); err != nil {
+			return fmt.Errorf("set dispatch metadata %q: %w", k, err)
+		}
+	}
+	return nil
 }
 
 // ensureLocked decision order (ADR 0015):
