@@ -368,6 +368,134 @@
           checks = {
             test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
+            # Durable eval test for the claude-marketplaces consumer module
+            # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
+            # passthru shape repo-base's mkClaudeMarketplace produces — no build
+            # needed to read passthru. Asserts: registration (extraKnownMarketplaces
+            # directory source + enabledPlugins resolved from defaultEnabled +
+            # plugins list), the per-plugin override flip, and the per-marketplace
+            # disable removing all keys. Pure module eval — no HM/NixOS harness.
+            test-claude-marketplaces =
+              let
+                # Mock built marketplace: a trivial derivation with the expected
+                # passthru. mkClaudeMarketplace's real output carries identical keys.
+                mockMarketplace = pkgs.runCommand "mock-marketplace" {
+                  passthru = {
+                    marketplaceName = "mock-repo-marketplace-local";
+                    plugins = [
+                      {
+                        name = "on-plugin";
+                        version = "1.0.0+aaaaaaaa";
+                        key = "on-plugin@mock-repo-marketplace-local";
+                        defaultEnabled = true;
+                      }
+                      {
+                        name = "off-plugin";
+                        version = "1.0.0+bbbbbbbb";
+                        key = "off-plugin@mock-repo-marketplace-local";
+                        defaultEnabled = false;
+                      }
+                    ];
+                  };
+                } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
+
+                evalCfg =
+                  cfg:
+                  (lib.evalModules {
+                    specialArgs = { inherit pkgs lib; };
+                    modules = [
+                      ./home/programs/claude-marketplaces/default.nix
+                      (
+                        { lib, ... }:
+                        {
+                          # Minimal stubs for the config surface the module reads
+                          # and contributes to (the real options live in
+                          # claude/claude-settings, not pulled in here).
+                          options = {
+                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                            phillipgreenii.programs.claude.settings = {
+                              extraKnownMarketplaces = lib.mkOption {
+                                type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                default = { };
+                              };
+                              enabledPlugins = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.bool;
+                                default = { };
+                              };
+                              plugins = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                            };
+                            home.homeDirectory = lib.mkOption {
+                              type = lib.types.str;
+                              default = "/home/test";
+                            };
+                            home.file = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                        }
+                      )
+                      cfg
+                    ];
+                  }).config;
+
+                # Baseline: registered, claude enabled, no overrides.
+                base = evalCfg {
+                  phillipgreenii.programs.claude = {
+                    enable = true;
+                    marketplaces.nixProvided = [ mockMarketplace ];
+                  };
+                };
+                baseSettings = base.phillipgreenii.programs.claude.settings;
+
+                # Per-plugin override flips on-plugin off.
+                overridden = evalCfg {
+                  phillipgreenii.programs.claude = {
+                    enable = true;
+                    marketplaces.nixProvided = [ mockMarketplace ];
+                    marketplaces.overrides."on-plugin@mock-repo-marketplace-local" = false;
+                  };
+                };
+
+                # Per-marketplace disable removes all keys.
+                disabled = evalCfg {
+                  phillipgreenii.programs.claude = {
+                    enable = true;
+                    marketplaces.nixProvided = [ mockMarketplace ];
+                    marketplaces.enabled."mock-repo-marketplace-local" = false;
+                  };
+                };
+                disabledSettings = disabled.phillipgreenii.programs.claude.settings;
+              in
+              # Registration: directory source + on-disk path.
+              assert baseSettings.extraKnownMarketplaces ? "mock-repo-marketplace-local";
+              assert
+                baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.source == "directory";
+              assert
+                baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.path
+                == "/home/test/.local/share/pgii-marketplaces/mock-repo-marketplace-local";
+              # enabledPlugins resolved from defaultEnabled.
+              assert baseSettings.enabledPlugins."on-plugin@mock-repo-marketplace-local" == true;
+              assert baseSettings.enabledPlugins."off-plugin@mock-repo-marketplace-local" == false;
+              # plugins lists all keys regardless of enable state.
+              assert lib.elem "on-plugin@mock-repo-marketplace-local" baseSettings.plugins;
+              assert lib.elem "off-plugin@mock-repo-marketplace-local" baseSettings.plugins;
+              # Symlink under the marketplace root.
+              assert base.home.file ? ".local/share/pgii-marketplaces/mock-repo-marketplace-local";
+              # Override flips on-plugin off.
+              assert
+                overridden.phillipgreenii.programs.claude.settings.enabledPlugins."on-plugin@mock-repo-marketplace-local"
+                == false;
+              # Per-marketplace disable removes ALL keys (settings + symlink).
+              assert disabledSettings.extraKnownMarketplaces == { };
+              assert disabledSettings.enabledPlugins == { };
+              assert disabledSettings.plugins == [ ];
+              assert disabled.home.file == { };
+              pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
+
             # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
             # must render on daemon.enable even when the TUI (enable/
             # claude.enable) is off, and must NOT render when nothing is
@@ -890,10 +1018,22 @@
         darwinModules.default = ./darwin;
         nixosModules.default = ./nixos;
         homeModules.default =
-          { lib, ... }:
+          { lib, pkgs, ... }:
           {
             imports = [ ./home ];
             config.phillipgreenii.programs.claude.plugins.local.version = lib.mkDefault self.lib.pluginVersion;
+            # Auto-register repo-base's nix-built Claude marketplace (consumer half
+            # of the pattern documented in repo-base docs/claude-marketplaces.md).
+            #
+            # System-guarded: repo-base publishes the package only on x86_64-linux +
+            # aarch64-darwin (agent-support builds 4 systems), AND the currently-locked
+            # repo-base rev predates the package. The `p ? …` guard makes both cases a
+            # graceful empty no-op instead of an eval error.
+            config.phillipgreenii.programs.claude.marketplaces.nixProvided =
+              let
+                p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
+              in
+              lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace;
           };
         # Shape-B wrapper: imports the producer's HM module and sets options
         # with this flake's self + name. Downstream consumers see the configured
