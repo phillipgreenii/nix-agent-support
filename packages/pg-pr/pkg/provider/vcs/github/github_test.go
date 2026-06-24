@@ -216,6 +216,58 @@ func TestErrStubSentinelStillCompiles(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
+// body + labels on the REST list path
+// ----------------------------------------------------------------------
+
+const samplePRListWithBodyAndLabels = `[
+  {
+    "number": 99,
+    "title": "feat: body and labels",
+    "headRefName": "feat/body-labels",
+    "headRefOid": "abc123",
+    "baseRefName": "main",
+    "url": "https://github.com/foo/bar/pull/99",
+    "author": {"login": "phillipg", "name": "Phillip"},
+    "isDraft": false,
+    "state": "OPEN",
+    "mergedAt": "",
+    "closedAt": "",
+    "additions": 5,
+    "deletions": 2,
+    "changedFiles": 1,
+    "body": "some text",
+    "labels": [{"name": "p0"}, {"name": "bug"}]
+  }
+]`
+
+func TestListMyPRs_BodyAndLabels(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(samplePRListWithBodyAndLabels)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	pr := prs[0]
+	if pr.Body != "some text" {
+		t.Fatalf("Body: got %q, want %q", pr.Body, "some text")
+	}
+	want := []string{"p0", "bug"}
+	if len(pr.Labels) != len(want) {
+		t.Fatalf("Labels: got %v, want %v", pr.Labels, want)
+	}
+	for i, w := range want {
+		if pr.Labels[i] != w {
+			t.Fatalf("Labels[%d]: got %q, want %q", i, pr.Labels[i], w)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------
 // ListComments tests
 // ----------------------------------------------------------------------
 

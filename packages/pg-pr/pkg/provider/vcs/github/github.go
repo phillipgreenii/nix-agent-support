@@ -115,7 +115,7 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles"
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -136,10 +136,14 @@ type ghPR struct {
 	Additions    int    `json:"additions"`
 	Deletions    int    `json:"deletions"`
 	ChangedFiles int    `json:"changedFiles"`
+	Body         string `json:"body"`
+	Labels       []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
-	return api.PR{
+	out := api.PR{
 		Repo:         repo,
 		Number:       p.Number,
 		Title:        p.Title,
@@ -154,7 +158,12 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Deletions:    p.Deletions,
 		ChangedFiles: p.ChangedFiles,
 		HeadSHA:      p.HeadRefOid,
+		Body:         p.Body,
 	}
+	for _, l := range p.Labels {
+		out.Labels = append(out.Labels, l.Name)
+	}
+	return out
 }
 
 // GetPR fetches a single PR's metadata.
