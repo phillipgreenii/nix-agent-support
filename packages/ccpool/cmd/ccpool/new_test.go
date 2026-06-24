@@ -111,3 +111,32 @@ func TestEnvFlag_allowsEmptyValue(t *testing.T) {
 		t.Errorf("EMPTY = %q (present=%v), want empty string present", v, ok)
 	}
 }
+
+func TestMetaFlag_collectsRepeatedPairs(t *testing.T) {
+	m := metaFlag{}
+	for _, kv := range []string{"prpool.bead=zr-1", "prpool.role=worker"} {
+		if err := m.Set(kv); err != nil {
+			t.Fatalf("Set(%q): %v", kv, err)
+		}
+	}
+	want := metaFlag{"prpool.bead": "zr-1", "prpool.role": "worker"}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("metaFlag = %v, want %v", m, want)
+	}
+}
+
+func TestMetaFlag_rejectsMissingEquals(t *testing.T) {
+	if err := (metaFlag{}).Set("noequals"); err == nil {
+		t.Fatal("metaFlag.Set without '=' must error")
+	}
+}
+
+func TestMetaFlag_allowsEmptyValue(t *testing.T) {
+	m := metaFlag{}
+	if err := m.Set("prpool.pinned="); err != nil {
+		t.Fatalf("Set bare tag: %v", err)
+	}
+	if v, ok := m["prpool.pinned"]; !ok || v != "" {
+		t.Errorf("bare tag = (%q,%v), want (\"\",true)", v, ok)
+	}
+}

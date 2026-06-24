@@ -24,13 +24,15 @@ func runNew(args []string) int {
 	displayName := fs.String("name", "", "optional display label for the session (claude --name; nullable)")
 	env := envFlag{}
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
+	meta := metaFlag{}
+	fs.Var(meta, "meta", "session metadata KEY=VAL upserted at dispatch (repeatable)")
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
 	allowedTools := fs.String("allowed-tools", "", "claude --allowed-tools allowlist forwarded verbatim (comma/space-separated, e.g. \"Bash(git *),Edit\"); empty omits the flag")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
 	autonomous := fs.Bool("autonomous", false, "autonomous mode: block AskUserQuestion (the hook denies it so a human-less worker never stalls on the picker); injects CCPOOL_AUTONOMOUS into the session")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v] [--autonomous]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--meta KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v] [--autonomous]")
 		return 2
 	}
 	externalID := pos[0]
@@ -78,6 +80,7 @@ func runNew(args []string) int {
 		AllowedTools:   *allowedTools,
 		Effort:         *effort,
 		Autonomous:     *autonomous,
+		Meta:           meta,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new:", err)
@@ -100,6 +103,22 @@ func (e envFlag) Set(kv string) error {
 		return fmt.Errorf("invalid --env %q, want KEY=VAL", kv)
 	}
 	e[k] = v
+	return nil
+}
+
+// metaFlag collects repeated `--meta KEY=VAL` into a map (mirrors envFlag). An empty
+// value (`--meta k=`) is a valid bare tag. Wired into EnsureOpts.Meta so metadata is
+// set atomically as part of `ccpool new`, not a separate `ccpool meta set` call.
+type metaFlag map[string]string
+
+func (m metaFlag) String() string { return "" }
+
+func (m metaFlag) Set(kv string) error {
+	k, v, ok := strings.Cut(kv, "=")
+	if !ok {
+		return fmt.Errorf("invalid --meta %q, want KEY=VAL", kv)
+	}
+	m[k] = v
 	return nil
 }
 
