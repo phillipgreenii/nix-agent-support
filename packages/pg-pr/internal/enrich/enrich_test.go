@@ -86,3 +86,29 @@ func TestScoreUrgency(t *testing.T) {
 		}
 	})
 }
+
+func TestCompute(t *testing.T) {
+	in := Input{
+		PR:      api.PR{Title: "fix(api): null deref", Body: "production incident", Additions: 40, Deletions: 5, Branch: "fix/null"},
+		Files:   []string{"a.go", "b.go", "c.py"},
+		Commits: []string{"fix: handle nil"},
+		Labels:  []string{"p1"},
+		CIRuns:  []api.CIRun{failingRun()},
+	}
+	got := Compute(in)
+	if got.Kind != "bugfix" {
+		t.Errorf("Kind = %q; want bugfix", got.Kind)
+	}
+	if !reflect.DeepEqual(got.Languages, []string{"Go", "Python"}) {
+		t.Errorf("Languages = %v; want [Go Python]", got.Languages)
+	}
+	if got.Size != "M" { // 45 lines
+		t.Errorf("Size = %q; want M", got.Size)
+	}
+	if got.Urgency != "high" {
+		t.Errorf("Urgency = %q; want high", got.Urgency)
+	}
+	if got.UrgencyScore < 3 || len(got.UrgencyReasons) == 0 {
+		t.Errorf("UrgencyScore=%d reasons=%v; want >=3 and non-empty", got.UrgencyScore, got.UrgencyReasons)
+	}
+}

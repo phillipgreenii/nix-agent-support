@@ -189,3 +189,24 @@ func anyCIFailing(runs []api.CIRun) bool {
 	}
 	return false
 }
+
+// Result is the computed enrichment for a PR.
+type Result struct {
+	Kind           string
+	Languages      []string
+	Size           string
+	Urgency        string
+	UrgencyScore   int
+	UrgencyReasons []string
+}
+
+// Compute derives all four enrichment fields from Input. Pure and deterministic.
+func Compute(in Input) Result {
+	r := Result{
+		Kind:      classifyKind(in.PR.Title, in.PR.Branch, in.Commits),
+		Languages: detectLanguages(in.Files),
+		Size:      bucketSize(in.PR.Additions + in.PR.Deletions),
+	}
+	r.Urgency, r.UrgencyScore, r.UrgencyReasons = scoreUrgency(in)
+	return r
+}
