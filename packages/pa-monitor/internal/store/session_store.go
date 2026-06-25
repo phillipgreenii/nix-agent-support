@@ -9,38 +9,39 @@ import (
 // Mirrors the spec's `sessions` table 1-to-1 (except surrogate id, which
 // is internal to the SQLite impl).
 type Session struct {
-	SessionID            string
-	PID                  *int  // nil when process is dead
-	CommandHash          string
-	Cwd                  string
-	Name                 string
-	Kind                 string
-	Entrypoint           string
-	Model                string
-	TerminalHost         string
-	Branch               string
-	Status               string
-	FirstPrompt          string
-	Labels               map[string]string
-	TranscriptMTime      time.Time
-	StartedAt            time.Time
-	ContextTokens        uint64
-	SessionTokens        uint64
-	SubagentCount        uint32
-	SubshellCount        uint32
-	BurnRateShort        float64
-	BurnRateLong         float64
-	CostUSD              float64
-	AwaitingInput        bool
-	LastErrorKind        string
-	LastErrorText        string
-	LastErrorAt          time.Time
-	LastErrorTerminal    bool
-	LastErrorRetryable   bool
-	LastProcessedAt      time.Time
-	UpdatedAt            time.Time
-	CreatedAt            time.Time
-	DeletedAt            *time.Time
+	SessionID             string
+	PID                   *int // nil when process is dead
+	CommandHash           string
+	Cwd                   string
+	Name                  string
+	Kind                  string
+	Entrypoint            string
+	Model                 string
+	TerminalHost          string
+	Branch                string
+	Status                string
+	FirstPrompt           string
+	Labels                map[string]string
+	TranscriptMTime       time.Time
+	StartedAt             time.Time
+	ContextTokens         uint64
+	SessionTokens         uint64
+	SubagentCount         uint32
+	SubshellCount         uint32
+	BurnRateShort         float64
+	BurnRateLong          float64
+	CostUSD               float64
+	AwaitingInput         bool
+	LastErrorKind         string
+	LastErrorText         string
+	LastErrorAt           time.Time
+	LastErrorTerminal     bool
+	LastErrorRetryable    bool
+	LastErrorFromSubagent bool
+	LastProcessedAt       time.Time
+	UpdatedAt             time.Time
+	CreatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 // SessionStore is the persistence interface for sessions.

@@ -40,8 +40,18 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 		"SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("schema_migrations max version = %d, want 1", version)
+	if version != 2 {
+		t.Errorf("schema_migrations max version = %d, want 2", version)
+	}
+
+	// Migration 002 adds last_error_from_subagent to sessions.
+	var hasCol int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='last_error_from_subagent'").Scan(&hasCol); err != nil {
+		t.Fatalf("pragma_table_info: %v", err)
+	}
+	if hasCol != 1 {
+		t.Errorf("sessions.last_error_from_subagent present = %d, want 1", hasCol)
 	}
 }
 
@@ -63,7 +73,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1 (idempotent)", count)
+	if count != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2 (idempotent)", count)
 	}
 }

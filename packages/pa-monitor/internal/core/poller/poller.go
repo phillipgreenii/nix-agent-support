@@ -45,13 +45,13 @@ type Poller struct {
 	// WaitingFreshWindow bounds the registry-"waiting" freshness cross-check
 	// (claude-transcript.ClassifyActivity). Zero falls back to a small default.
 	WaitingFreshWindow time.Duration
-	BurnWindowShort  time.Duration
-	BurnWindowLong   time.Duration
-	Now              func() time.Time
-	CCUsageFn        func(ctx context.Context) ([]byte, error)
-	CCUsageStateFn   func() (probed bool, err error)
-	PRLookupFn       func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
-	Signalers        []signal.Signaler
+	BurnWindowShort    time.Duration
+	BurnWindowLong     time.Duration
+	Now                func() time.Time
+	CCUsageFn          func(ctx context.Context) ([]byte, error)
+	CCUsageStateFn     func() (probed bool, err error)
+	PRLookupFn         func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
+	Signalers          []signal.Signaler
 	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
 	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
 	// whether a cmux-bridge has registered for the session's cmux server PID.
@@ -378,6 +378,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				ss.LastErrorAt = le.At
 				ss.LastErrorTerminal = le.IsTerminal
 				ss.LastErrorRetryable = sv.SessionEnrichment.LastErrorRetryable
+				ss.LastErrorFromSubagent = le.FromSubagent
 			}
 			// Best-effort write — DB failures must not abort the tick.
 			_ = p.WriteService.UpsertSession(ctx, ss)

@@ -44,10 +44,10 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 			context_tokens, session_tokens, subagent_count, subshell_count,
 			burn_rate_short, burn_rate_long, cost_usd, awaiting_input,
 			last_error_kind, last_error_text, last_error_at,
-			last_error_terminal, last_error_retryable,
+			last_error_terminal, last_error_retryable, last_error_from_subagent,
 			last_processed_at, updated_at, created_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 		ON CONFLICT(session_id) DO UPDATE SET
 			pid = excluded.pid,
@@ -77,6 +77,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 			last_error_at = excluded.last_error_at,
 			last_error_terminal = excluded.last_error_terminal,
 			last_error_retryable = excluded.last_error_retryable,
+			last_error_from_subagent = excluded.last_error_from_subagent,
 			last_processed_at = excluded.last_processed_at,
 			updated_at = excluded.updated_at,
 			deleted_at = NULL
@@ -87,7 +88,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 		sess.ContextTokens, sess.SessionTokens, sess.SubagentCount, sess.SubshellCount,
 		sess.BurnRateShort, sess.BurnRateLong, sess.CostUSD, boolInt(sess.AwaitingInput),
 		sess.LastErrorKind, sess.LastErrorText, formatTime(sess.LastErrorAt),
-		boolInt(sess.LastErrorTerminal), boolInt(sess.LastErrorRetryable),
+		boolInt(sess.LastErrorTerminal), boolInt(sess.LastErrorRetryable), boolInt(sess.LastErrorFromSubagent),
 		formatTime(sess.LastProcessedAt), formatTime(sess.UpdatedAt), formatTime(sess.CreatedAt),
 	)
 	return err
@@ -238,7 +239,7 @@ const sessionSelectColumns = `SELECT
 	s.context_tokens, s.session_tokens, s.subagent_count, s.subshell_count,
 	s.burn_rate_short, s.burn_rate_long, s.cost_usd, s.awaiting_input,
 	s.last_error_kind, s.last_error_text, s.last_error_at,
-	s.last_error_terminal, s.last_error_retryable,
+	s.last_error_terminal, s.last_error_retryable, s.last_error_from_subagent,
 	s.last_processed_at, s.updated_at, s.created_at, s.deleted_at`
 
 type rowScanner interface {
@@ -252,18 +253,19 @@ func scanSession(r rowScanner) (store.Session, error) {
 
 func scanSessionInto(r rowScanner, sess *store.Session, extraCost *float64, extraTokens *uint64) error {
 	var (
-		pid                sql.NullInt64
-		labelsRaw          string
-		transcriptMTime    string
-		startedAt          string
-		lastErrorAt        string
-		lastProcessedAt    string
-		updatedAt          string
-		createdAt          string
-		deletedAt          sql.NullString
-		awaitingInput      int
-		lastErrorTerminal  int
-		lastErrorRetryable int
+		pid                   sql.NullInt64
+		labelsRaw             string
+		transcriptMTime       string
+		startedAt             string
+		lastErrorAt           string
+		lastProcessedAt       string
+		updatedAt             string
+		createdAt             string
+		deletedAt             sql.NullString
+		awaitingInput         int
+		lastErrorTerminal     int
+		lastErrorRetryable    int
+		lastErrorFromSubagent int
 	)
 	dest := []any{
 		&sess.SessionID, &pid, &sess.CommandHash, &sess.Cwd, &sess.Name, &sess.Kind, &sess.Entrypoint,
@@ -272,7 +274,7 @@ func scanSessionInto(r rowScanner, sess *store.Session, extraCost *float64, extr
 		&sess.ContextTokens, &sess.SessionTokens, &sess.SubagentCount, &sess.SubshellCount,
 		&sess.BurnRateShort, &sess.BurnRateLong, &sess.CostUSD, &awaitingInput,
 		&sess.LastErrorKind, &sess.LastErrorText, &lastErrorAt,
-		&lastErrorTerminal, &lastErrorRetryable,
+		&lastErrorTerminal, &lastErrorRetryable, &lastErrorFromSubagent,
 		&lastProcessedAt, &updatedAt, &createdAt, &deletedAt,
 	}
 	if extraCost != nil {
@@ -288,6 +290,7 @@ func scanSessionInto(r rowScanner, sess *store.Session, extraCost *float64, extr
 	sess.AwaitingInput = awaitingInput != 0
 	sess.LastErrorTerminal = lastErrorTerminal != 0
 	sess.LastErrorRetryable = lastErrorRetryable != 0
+	sess.LastErrorFromSubagent = lastErrorFromSubagent != 0
 	if labelsRaw != "" {
 		_ = json.Unmarshal([]byte(labelsRaw), &sess.Labels)
 	}

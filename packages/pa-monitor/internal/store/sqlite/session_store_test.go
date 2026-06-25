@@ -50,6 +50,40 @@ func TestSessionStore_UpsertThenGet(t *testing.T) {
 	}
 }
 
+func TestSessionStore_UpsertThenGet_PreservesLastErrorFromSubagent(t *testing.T) {
+	db := openTestDB(t)
+	ss := NewSessionStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s := store.Session{
+		SessionID:             "sid-subagent",
+		LastErrorKind:         "server_error",
+		LastErrorText:         "API Error: Stream idle timeout",
+		LastErrorAt:           now,
+		LastErrorTerminal:     true,
+		LastErrorRetryable:    false,
+		LastErrorFromSubagent: true,
+		LastProcessedAt:       now,
+		UpdatedAt:             now,
+		CreatedAt:             now,
+	}
+	if err := ss.Upsert(ctx, s); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	got, err := ss.GetByID(ctx, "sid-subagent", store.DefaultFreshness())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetByID returned nil")
+	}
+	if !got.LastErrorFromSubagent {
+		t.Error("LastErrorFromSubagent = false after round-trip, want true (the '(in subagent)' provenance must survive persistence)")
+	}
+}
+
 func TestSessionStore_GetByID_StaleReturnsNil(t *testing.T) {
 	db := openTestDB(t)
 	ss := NewSessionStore(db)

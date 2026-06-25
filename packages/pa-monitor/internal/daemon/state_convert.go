@@ -147,10 +147,11 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 	// not the shared record.
 	if sc.LastErrorKind != "" {
 		en.LastError = &transcript.ErrorRecord{
-			Kind:       transcript.ErrorKind(sc.LastErrorKind),
-			Text:       sc.LastErrorText,
-			At:         sc.LastErrorAt,
-			IsTerminal: sc.LastErrorTerminal,
+			Kind:         transcript.ErrorKind(sc.LastErrorKind),
+			Text:         sc.LastErrorText,
+			At:           sc.LastErrorAt,
+			IsTerminal:   sc.LastErrorTerminal,
+			FromSubagent: sc.LastErrorFromSubagent,
 		}
 		en.LastErrorRetryable = sc.LastErrorRetryable
 	}
