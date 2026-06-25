@@ -62,17 +62,25 @@ Cleanup of the existing duplicate/empty rows is explicitly deferred.
   `ThreadID` (`PRRT_`) and `CreatedAt` mapping as the bulk path.
 - `(*Provider).EnrichPR(ctx, repo string, number int) (*vcs.EnrichedPR, error)`.
 
-**Completeness (pagination).** The bulk query uses `first: 30` and does not
-paginate — it sets `Truncated` flags and lets the engine fall back to REST for
-overflowing PRs (`truncationFlags`). That fallback is exactly what reintroduces
-the divergence for busy PRs (88413 has ~38 thread comments, exceeding 30). So
-the single-PR path must capture complete thread data:
+**Completeness.** The bulk query uses `first: 30` and, on overflow, sets
+`Truncated` flags and lets the engine fall back to REST (`truncationFlags`).
+That REST fallback is exactly what reintroduces the divergence for busy PRs
+(88413 has ~38 thread comments, exceeding 30). The single-PR path avoids it two
+ways:
 
 - Use `first: 100` on the thread-bearing connections (`reviewThreads`, nested
-  thread `comments`, top-level `comments`, `reviews`).
-- For any of those connections reporting `hasNextPage`, paginate with `after`
-  cursors until exhausted, merging nodes into the single `ghPRNode` before
-  parsing.
+  thread `comments`, top-level `comments`, `reviews`). 100 comfortably covers
+  every observed PR (busiest is ~38), so no real PR truncates.
+- The key point is that duplicates come from **thread keying**, not
+  completeness: the GraphQL path always keys threads by the `PRRT_` node id, so
+  even a truncated result produces correctly-keyed, non-duplicated rows. The
+  router therefore falls back to REST **only on a hard error**, never on a mere
+  truncation flag — a truncated GraphQL result is preferred over REST. When a
+  connection does report `hasNextPage`, `EnrichPR` records it in `Truncated` and
+  the router logs WARN, but still uses the (correctly-keyed) GraphQL data.
+- Full `after`-cursor pagination is deferred (YAGNI) — it adds nested-connection
+  paging machinery for a >100-comment case that does not occur today; the WARN
+  makes any future overflow observable so we add paging if it ever happens.
 - Files / commits / labels keep flag-and-fallback behavior (they don't affect
   thread identity or `posted_at`).
 
@@ -122,12 +130,13 @@ EnrichPR (GraphQL)       │            ── both produce vcs.EnrichedPR with
 ## Testing (TDD)
 
 - `parseEnrichedPR`: golden single-PR GraphQL response → `EnrichedPR` with
-  `PRRT_` `ThreadID` and RFC3339 `CreatedAt`; a multi-page fixture asserts
-  merged completeness.
-- `EnrichPR`: fake `gh` runner returning canned JSON, including a paginated
-  case (two pages of thread comments merged).
-- `enrichOnePR` routing: a provider implementing `SinglePREnricher` is used; on
-  `EnrichPR` error and on a provider lacking the capability, the REST path runs.
+  `PRRT_` `ThreadID` and RFC3339 `CreatedAt`; a response with `hasNextPage` sets
+  the matching `Truncated` flag.
+- `EnrichPR`: fake `gh` runner returning canned JSON; asserts the by-number
+  query is issued and the result parses.
+- `enrichOnePR` routing: a provider implementing `SinglePREnricher` is used (and
+  its result returned even when `Truncated` is non-empty); on `EnrichPR` error
+  and on a provider lacking the capability, the REST path runs.
 - `ListComments`: asserts `CreatedAt` populated from `created_at`.
 - Ingest parity: feeding the single-PR `EnrichedPR` through ingest yields **one**
   feedback per thread with non-empty `posted_at` (parity with the bulk path).
