@@ -1,7 +1,14 @@
 {
   "name": "phillipgreenii-nix-agent-support",
-  "owner": { "name": "phillipgreenii" },
+  "owner": {
+    "name": "phillipgreenii"
+  },
   "plugins": [
+    {
+      "name": "agent-rules",
+      "source": "./agent-rules",
+      "description": "Always-on personal agent rules injected into every session via a SessionStart hook"
+    },
     {
       "name": "bash-lsp",
       "source": "./bash-lsp",

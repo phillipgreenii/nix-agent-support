@@ -1,0 +1,6 @@
+{
+  "name": "agent-rules",
+  "description": "Injects always-on personal agent rules into every session via a SessionStart hook",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
