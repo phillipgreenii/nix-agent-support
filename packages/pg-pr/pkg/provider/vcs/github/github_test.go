@@ -276,7 +276,8 @@ const sampleIssueComments = `[
     "node_id": "IC_kwDO_top1",
     "body": "Looks good overall.",
     "user": {"login": "alice"},
-    "author_association": "MEMBER"
+    "author_association": "MEMBER",
+    "created_at": "2026-06-01T10:00:00Z"
   },
   {
     "node_id": "IC_kwDO_top2",
@@ -294,7 +295,8 @@ const sampleReviewComments = `[
     "path": "main.go",
     "line": 42,
     "original_line": 42,
-    "author_association": "MEMBER"
+    "author_association": "MEMBER",
+    "created_at": "2026-06-02T11:00:00Z"
   },
   {
     "node_id": "RC_kwDO_b",
@@ -350,6 +352,29 @@ func TestListComments_CombinesTopLevelAndInline(t *testing.T) {
 
 	// Silence unused linters on gh.
 	_ = gh
+}
+
+func TestListComments_PopulatesCreatedAt(t *testing.T) {
+	p := NewWithRunner(&pathFakeGH{
+		responses: map[string][]byte{
+			"repos/foo/bar/issues/42/comments": []byte(sampleIssueComments),
+			"repos/foo/bar/pulls/42/comments":  []byte(sampleReviewComments),
+		},
+	})
+	cs, err := p.ListComments(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	byID := map[string]string{}
+	for _, c := range cs {
+		byID[c.ID] = c.CreatedAt
+	}
+	if byID["IC_kwDO_top1"] != "2026-06-01T10:00:00Z" {
+		t.Errorf("issue comment CreatedAt = %q, want 2026-06-01T10:00:00Z", byID["IC_kwDO_top1"])
+	}
+	if byID["RC_kwDO_a"] != "2026-06-02T11:00:00Z" {
+		t.Errorf("review comment CreatedAt = %q, want 2026-06-02T11:00:00Z", byID["RC_kwDO_a"])
+	}
 }
 
 func TestListComments_ValidatesInput(t *testing.T) {

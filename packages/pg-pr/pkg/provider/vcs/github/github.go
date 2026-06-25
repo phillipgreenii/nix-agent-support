@@ -484,6 +484,7 @@ type ghIssueComment struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	AuthorAssociation string `json:"author_association"`
+	CreatedAt         string `json:"created_at"`
 }
 
 // ghReviewComment is the JSON shape returned by the pulls comments endpoint
@@ -500,6 +501,7 @@ type ghReviewComment struct {
 	PullRequestReviewID int64  `json:"pull_request_review_id"`
 	InReplyToID         int64  `json:"in_reply_to_id"`
 	AuthorAssociation   string `json:"author_association"`
+	CreatedAt           string `json:"created_at"`
 }
 
 // ListComments returns all PR comments (top-level + inline review-thread).
@@ -535,6 +537,7 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 				Author:     c.User.Login,
 				AuthorRole: strings.ToLower(c.AuthorAssociation),
 				Body:       c.Body,
+				CreatedAt:  c.CreatedAt,
 			})
 		}
 	}
@@ -570,6 +573,7 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 				Path:       c.Path,
 				Line:       line,
 				ThreadID:   c.NodeID,
+				CreatedAt:  c.CreatedAt,
 			})
 		}
 	}
