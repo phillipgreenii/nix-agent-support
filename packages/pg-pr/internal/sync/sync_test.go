@@ -20,7 +20,52 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
+
+// enricherVCS embeds fakeVCS and adds the SinglePREnricher capability so
+// enrichOnePR routing can be exercised.
+type enricherVCS struct {
+	fakeVCS
+	ep        *vcs.EnrichedPR
+	enrichErr error
+	called    bool
+}
+
+func (e *enricherVCS) EnrichPR(_ context.Context, _ string, _ int) (*vcs.EnrichedPR, error) {
+	e.called = true
+	return e.ep, e.enrichErr
+}
+
+func TestEnrichOnePR_PrefersGraphQL(t *testing.T) {
+	vp := &enricherVCS{ep: &vcs.EnrichedPR{
+		Comments:  []api.Comment{{ID: "PRRC_1", ThreadID: "PRRT_abc", Path: "x.go", CreatedAt: "2026-06-03T09:00:00Z"}},
+		Truncated: []string{"reviewThreads"}, // non-empty must NOT trigger REST fallback
+	}}
+	e := &Engine{deps: Deps{VCS: map[string]VCSProvider{"github": vp}}}
+	got := e.enrichOnePR(context.Background(), config.RepoConfig{Remote: "o/r", VCS: "github"}, api.PR{Repo: "o/r", Number: 42})
+	if !vp.called {
+		t.Fatal("expected EnrichPR (GraphQL) to be used")
+	}
+	if len(got.Comments) != 1 || got.Comments[0].ThreadID != "PRRT_abc" {
+		t.Errorf("expected GraphQL comments with PRRT thread id, got %+v", got.Comments)
+	}
+	if got.PR.Number != 42 {
+		t.Errorf("observed PR state should be preserved, got %+v", got.PR)
+	}
+}
+
+func TestEnrichOnePR_FallsBackOnError(t *testing.T) {
+	vp := &enricherVCS{enrichErr: errors.New("graphql boom")}
+	e := &Engine{deps: Deps{VCS: map[string]VCSProvider{"github": vp}}}
+	got := e.enrichOnePR(context.Background(), config.RepoConfig{Remote: "o/r", VCS: "github"}, api.PR{Repo: "o/r", Number: 42})
+	if !vp.called {
+		t.Fatal("expected EnrichPR to be attempted")
+	}
+	if got == nil || got.PR.Number != 42 {
+		t.Fatalf("REST fallback should still return the PR, got %+v", got)
+	}
+}
 
 // ----------------------------------------------------------------------
 // Fakes

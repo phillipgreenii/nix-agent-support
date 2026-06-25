@@ -71,6 +71,16 @@ type ReviewLister interface {
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
 
+// SinglePREnricher is an optional capability: fetch one PR's enrichment
+// (reviews, comments incl. the real review-thread node ids, CI) in a single
+// GraphQL round-trip. enrichOnePR prefers it over the per-PR REST methods so
+// `sync --pr` keys comment threads the same way as the bulk daemon path
+// (by PRRT_ review-thread node id, with createdAt populated) — avoiding the
+// divergent, duplicate, posted_at-less rows the REST path otherwise produces.
+type SinglePREnricher interface {
+	EnrichPR(ctx context.Context, repo string, number int) (*vcs.EnrichedPR, error)
+}
+
 // DraftToggler is the optional subset of VCSProvider needed for the draft
 // auto-promote feature.
 type DraftToggler interface {
@@ -674,6 +684,29 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 	if pr.Repo == "" {
 		pr.Repo = rcfg.Remote
 	}
+
+	// Prefer single-PR GraphQL enrichment so per-PR sync produces the SAME
+	// real review-thread node ids (PRRT_) + createdAt as the bulk daemon path,
+	// avoiding divergent/duplicate feedback rows. Fall back to per-PR REST only
+	// on a hard error — a truncated-but-correctly-keyed GraphQL result is still
+	// preferred over REST (the duplicates come from thread keying, not from
+	// missing the long tail of a >100-comment PR).
+	if vp, err := e.providerFor(rcfg); err == nil {
+		if spe, ok := vp.(SinglePREnricher); ok {
+			ep, eerr := spe.EnrichPR(ctx, pr.Repo, pr.Number)
+			if eerr == nil && ep != nil {
+				if len(ep.Truncated) > 0 {
+					fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL enrichment truncated %v (using partial, correctly-keyed data)\n", pr.Repo, pr.Number, ep.Truncated)
+				}
+				ep.PR = pr // keep the observed PR state over the fetched one
+				return ep
+			}
+			if eerr != nil {
+				fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL enrichment failed (%v); falling back to REST\n", pr.Repo, pr.Number, eerr)
+			}
+		}
+	}
+
 	out := vcs.EnrichedPR{PR: pr}
 	if vp, err := e.providerFor(rcfg); err == nil {
 		if rl, ok := vp.(ReviewLister); ok {
