@@ -228,16 +228,6 @@ func (cache *TickCache) OpenCycleFor(prBeadID string) (string, bool) {
 	return id, ok
 }
 
-// FeedbackUnder returns the feedback beads cached for the given cycle
-// (open + closed). A nil receiver returns nil — the caller should fall
-// back to a live ListFeedback call.
-func (cache *TickCache) FeedbackUnder(cycleID string) []Feedback {
-	if cache == nil {
-		return nil
-	}
-	return cache.FeedbackByCycle[cycleID]
-}
-
 // DepsUpFor returns the cached recursive dep tree for the given PR bead.
 // ok=true means the cache has authoritative data; the empty []DepNode +
 // ok=true case still means "PR exists in the cache but has no

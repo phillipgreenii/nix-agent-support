@@ -41,7 +41,7 @@ func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Create a feedback bead directly via bd CLI so the cache can find it
-	// under TypeFeedback. We store fingerprint as metadata so FindFeedbackForPR works.
+	// under TypeFeedback and attach it to the cycle in FeedbackByCycle.
 	out, err := runner.Run(ctx,
 		"create", "--type=feedback", "--title", "test feedback",
 		"--metadata", `{"kind":"comment-thread","fingerprint":"fp-abc"}`,
@@ -87,13 +87,6 @@ func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
 	if !ok || gotMR.ID != prID {
 		t.Errorf("FindMergeRequest(x/y, 1) = (%+v, %v), want id=%s", gotMR, ok, prID)
 	}
-	gotFB, ok := cache.FindFeedbackForPR(prID, "fp-abc")
-	if !ok || gotFB.ID != fbID {
-		t.Errorf("FindFeedbackForPR(%s, fp-abc) = (%+v, %v), want id=%s", prID, gotFB, ok, fbID)
-	}
-	if _, ok := cache.FindFeedbackForPR(prID, "fp-missing"); ok {
-		t.Error("FindFeedbackForPR with bogus fingerprint should miss")
-	}
 }
 
 func TestTickCache_NilSafe(t *testing.T) {
@@ -101,14 +94,8 @@ func TestTickCache_NilSafe(t *testing.T) {
 	if _, ok := cache.OpenCycleFor("anything"); ok {
 		t.Error("OpenCycleFor on nil cache should return ok=false")
 	}
-	if got := cache.FeedbackUnder("anything"); got != nil {
-		t.Errorf("FeedbackUnder on nil cache should return nil, got %+v", got)
-	}
 	if _, ok := cache.FindMergeRequest("r", 1); ok {
 		t.Error("FindMergeRequest on nil cache should return ok=false")
-	}
-	if _, ok := cache.FindFeedbackForPR("anything", "fp"); ok {
-		t.Error("FindFeedbackForPR on nil cache should return ok=false")
 	}
 }
 
