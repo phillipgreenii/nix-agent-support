@@ -58,12 +58,14 @@ in
   config = lib.mkMerge [
     (lib.mkIf (obs.enable or false) {
       phillipgreenii.observability = {
-        # Pin a stable folder UID so the dashboard provider AND the alert rule
-        # groups (both titled "Claude Agents") resolve to ONE Grafana folder.
-        # Without this, alerting file-provisioning resolves the folder by title
-        # and creates a folder distinct from the dashboard's — two same-named
-        # folders (grafana/grafana#125079). See pg2-h3lr.
-        grafanaFolders."Claude Agents" = "claude-agents";
+        # The dashboard provider AND the alert rule groups are all titled
+        # "Claude Agents" so they converge on ONE Grafana folder BY TITLE. Do
+        # NOT pin a folderUid: Grafana alerting file-provisioning has no
+        # folderUid field and ignores it (grafana/grafana#125079), and alerting
+        # provisions BEFORE dashboards — so a pinned dashboard UID just splits
+        # the folder in two. Title-only converges: alerting creates the folder
+        # (random UID), dashboards reuse it by title. See pg2-h3lr and
+        # phillipgreenii-nix-support-apps ADR 0039.
         dashboardProviders.pa-monitor = {
           folder = "Claude Agents";
           dashboards = [ ../../../packages/pa-monitor/grafana/pa-monitor-overview.json ];
