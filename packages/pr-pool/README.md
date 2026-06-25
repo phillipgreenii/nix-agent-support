@@ -39,8 +39,10 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   executable; completion = exit code).
 - **query `type`**: `beads-ready` / `beads-list` (run `bd` with label filters +
   optional `title_prefix` / `item_type` post-filters), `command` (run an
-  executable that emits items as JSON/JSONL); `github-issues` / `jira-issues` are
-  registered but not yet implemented (they error at dispatch).
+  executable that emits items as JSON/JSONL), `github-issues` (open issues via
+  `gh issue list`, optionally narrowed by `labels`), and `jira-issues` (unresolved
+  issues via the `jira` CLI's raw search — `jql` overrides the `project`/`labels`
+  default). The tracker CLIs (`gh`, `jira`) supply their own authentication.
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
 (`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),

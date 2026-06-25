@@ -57,14 +57,3 @@ func TestCommandQuery_missingIDIsError(t *testing.T) {
 		t.Fatal("record missing id must error")
 	}
 }
-
-func TestStubQuery_runNotImplemented(t *testing.T) {
-	for _, q := range []Query{GitHubIssues{Repo: "o/r"}, JiraIssues{Project: "P"}} {
-		if err := q.Validate(); err != nil {
-			t.Fatalf("stub Validate must pass: %v", err)
-		}
-		if _, err := q.Run(context.Background(), Env{}); err == nil {
-			t.Fatal("stub Run must return not-implemented error")
-		}
-	}
-}
