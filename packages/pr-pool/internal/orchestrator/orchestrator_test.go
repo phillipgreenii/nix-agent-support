@@ -245,9 +245,27 @@ func TestWorkOne_workerBudgetHardStopUnclaimsNoHuman(t *testing.T) {
 	cfg := fastCfg()
 	cfg.BudgetTokens = 1000                                                        // finite token cap so the ramp can trip it
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}} // never completes on its own
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
+	// The session must be LIVE and addressed by the per-attempt stamped external_id
+	// (the form workOne dispatches under) so waitDone's active() check sees a working
+	// session — otherwise the session reads as absent and waitDone takes the
+	// session-exited death path instead of the budget scenario this test covers.
+	ext := "pr-pool-worker-zr-w-" + dtest.TestStamp
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateWorking, TranscriptPath: "/t", CWD: "/repo"}}}}
 	o := newOrch(cc, bd, cfg)
 	o.usageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately over 100%
+	// Deterministic race resolution (pg2-erfg). The budget watchdog reads over-budget
+	// usage on its very first poll and must own the single terminal outcome (unclaim,
+	// no human). In production waitDone only reaches its MaxWait deadline after a REAL
+	// 50ms of polling, so the watchdog's microsecond-fast hard stop always wins. The
+	// manualClock's TickAdvancing collapses that 50ms to a handful of microsecond
+	// iterations, turning the deterministic production ordering into a scheduling
+	// coin-flip (still ~0.7% under -race -count even after the live-session fix above).
+	// Park waitDone's poll until ctx is cancelled so it cannot reach its deadline
+	// before the watchdog fires — faithful to prod, where the deadline is genuinely far
+	// away when the hard stop trips. (If the watchdog ever stopped firing, waitDone
+	// would block and `go test -timeout` would surface it; the watchdog's own
+	// fire-on-Hard contract is covered directly in watchdog_test.go.)
+	o.tick = func(ctx context.Context, _ time.Duration) error { <-ctx.Done(); return ctx.Err() }
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
 	_, err := o.workOne(context.Background(), d)
 	if err == nil {
