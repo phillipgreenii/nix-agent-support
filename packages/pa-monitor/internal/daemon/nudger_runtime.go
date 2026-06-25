@@ -204,16 +204,67 @@ func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKi
 // RecordSendFailed implements nudger.Recorder. It surfaces a failed nudge
 // delivery to OTel (pa_monitor.signal.send_failures_total + nudge.send_failed
 // log event) so swallowed Signaler.Send errors stop being invisible.
+//
+// The counter carries only bounded labels (error_kind + a coarse reason) to
+// cap series cardinality; the per-session id and the full error string are
+// log-only — putting them on the counter would create a new time series per
+// session and per distinct error string.
 func (w *WatermarkStore) RecordSendFailed(sid string, sources []nudger.Source, errorKind, errText string) {
 	if w.emitter == nil {
 		return
 	}
-	w.emitter.RecordNudgeSendFailed(map[string]string{
-		"session_id": sid,
-		"sources":    joinSources(sources),
+	w.emitter.RecordNudgeSendFailed(
+		sendFailureCounterAttrs(errorKind, errText),
+		map[string]string{
+			"session_id": sid,
+			"sources":    joinSources(sources),
+			"error_kind": errorKind,
+			"reason":     classifySendFailure(errText),
+			"error":      errText,
+		},
+	)
+}
+
+// sendFailureCounterAttrs returns the BOUNDED label set for the
+// send_failures_total counter. It deliberately omits session_id and the raw
+// error string (both unbounded) and instead carries a coarse, fixed-cardinality
+// reason derived from the error text.
+func sendFailureCounterAttrs(errorKind, errText string) map[string]string {
+	return map[string]string{
 		"error_kind": errorKind,
-		"error":      errText,
-	})
+		"reason":     classifySendFailure(errText),
+	}
+}
+
+// classifySendFailure maps a Signaler.Send error string onto a small,
+// fixed set of reason codes so the send_failures_total counter stays
+// bounded. The full error text is preserved on the nudge.send_failed log
+// event for debugging.
+func classifySendFailure(errText string) string {
+	s := strings.ToLower(errText)
+	switch {
+	case s == "":
+		return "unknown"
+	case strings.Contains(s, "no cmux surface"),
+		strings.Contains(s, "no surface"),
+		strings.Contains(s, "surface not found"):
+		return "no_surface"
+	case strings.Contains(s, "send-key"),
+		strings.Contains(s, "send key"):
+		return "send_key"
+	case strings.Contains(s, "enumerate"):
+		return "enumerate"
+	case strings.Contains(s, "timeout"),
+		strings.Contains(s, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(s, "connection"),
+		strings.Contains(s, "connect"),
+		strings.Contains(s, "broken pipe"),
+		strings.Contains(s, "refused"):
+		return "connection"
+	default:
+		return "other"
+	}
 }
 
 func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, sources []nudger.Source, cause *transcript.ErrorRecord, escalated bool) {

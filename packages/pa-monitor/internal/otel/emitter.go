@@ -512,18 +512,20 @@ func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
 	e.LogEvent("nudge.sent", attrs)
 }
 
-// RecordNudgeSendFailed increments pa_monitor.signal.send_failures_total and
-// emits the nudge.send_failed log event. Fired when Signaler.Send returns an
-// error so a failed delivery is observable rather than silently swallowed.
-// nil-safe.
-func (e *Emitter) RecordNudgeSendFailed(attrs map[string]string) {
+// RecordNudgeSendFailed increments pa_monitor.signal.send_failures_total with
+// the BOUNDED counterAttrs and emits the nudge.send_failed log event with the
+// richer logAttrs. The split caps metric series cardinality: high-cardinality
+// fields (session_id, the full error string) belong only on the log event, not
+// on the counter. Fired when Signaler.Send returns an error so a failed
+// delivery is observable rather than silently swallowed. nil-safe.
+func (e *Emitter) RecordNudgeSendFailed(counterAttrs, logAttrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.nudgeSendFailures != nil {
-		e.nudgeSendFailures.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.nudgeSendFailures.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(counterAttrs)...))
 	}
-	e.LogEvent("nudge.send_failed", attrs)
+	e.LogEvent("nudge.send_failed", logAttrs)
 }
 
 // RecordNudgeSuppressed increments pa_monitor.nudge.suppressed_total and

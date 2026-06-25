@@ -8,6 +8,42 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 )
 
+func TestClassifySendFailure(t *testing.T) {
+	cases := []struct{ err, want string }{
+		{"no cmux surface found for pid 123", "no_surface"},
+		{"cmux send-key failed: exit status 1", "send_key"},
+		{"cmux --json top enumerate failed", "enumerate"},
+		{"context deadline exceeded", "timeout"},
+		{"dial unix: connection refused", "connection"},
+		{"", "unknown"},
+		{"something totally unexpected", "other"},
+	}
+	for _, tc := range cases {
+		if got := classifySendFailure(tc.err); got != tc.want {
+			t.Errorf("classifySendFailure(%q) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
+// TestSendFailureCounterAttrs_Bounded guards the metric-cardinality fix: the
+// send_failures_total counter must carry only bounded labels — never the raw
+// per-session id or the full error string, which would explode series count.
+func TestSendFailureCounterAttrs_Bounded(t *testing.T) {
+	attrs := sendFailureCounterAttrs(string(transcript.ErrServerError), "no cmux surface found for pid 99999")
+	if _, ok := attrs["session_id"]; ok {
+		t.Error("counter attrs must not include session_id (unbounded)")
+	}
+	if _, ok := attrs["error"]; ok {
+		t.Error("counter attrs must not include the full error text (unbounded)")
+	}
+	if attrs["reason"] != "no_surface" {
+		t.Errorf("counter attrs reason = %q, want no_surface", attrs["reason"])
+	}
+	if attrs["error_kind"] != string(transcript.ErrServerError) {
+		t.Errorf("counter attrs error_kind = %q, want %q", attrs["error_kind"], transcript.ErrServerError)
+	}
+}
+
 func TestJoinSources_StableSort(t *testing.T) {
 	cases := []struct {
 		in   []nudger.Source

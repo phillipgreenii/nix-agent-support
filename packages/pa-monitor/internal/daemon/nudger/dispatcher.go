@@ -112,21 +112,11 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			store.RemoveKeys(observedKeys)
 			continue
 		}
-		if view.Status == session.Working {
-			d.Recorder.RecordSuppressed(sid, sources, "session_active")
-			store.RemoveKeys(observedKeys)
-			continue
-		}
-		// Never inject "continue" over a permission prompt / AskUserQuestion —
-		// the session is blocked on a human, not on a recoverable error (§6/D3).
-		if view.Status == session.WaitingForHuman {
-			d.Recorder.RecordSuppressed(sid, sources, "waiting_for_human")
-			store.RemoveKeys(observedKeys)
-			continue
-		}
-		// Extract disrupt metadata before sending so both the success and the
-		// failure path can label their observability events with the cause kind.
-		// A disrupt attempt is then recorded on BOTH paths (see
+
+		// Extract disrupt metadata, the resolved text, and the escalation flag up
+		// front so every outcome path (suppressed / failed / sent) can persist a
+		// complete nudge_history row and label its observability events with the
+		// cause kind. A disrupt attempt is recorded on BOTH send paths (see
 		// RecordDisruptAttempt) so the D5 error keep-awake releases after the
 		// first attempt, even a failed one.
 		hasDisrupt := false
@@ -146,11 +136,39 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			}
 		}
 		text := resolveText(group)
+		escalated := ctx.Watermarks.SessionWatermark(sid).DisruptEscalated
+
+		if view.Status == session.Working {
+			d.Recorder.RecordSuppressed(sid, sources, "session_active")
+			d.recordHistory(goCtx, RecordEvent{
+				SessionID: sid, Text: text, Result: "suppressed", ErrorText: "session_active",
+				CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+			})
+			store.RemoveKeys(observedKeys)
+			continue
+		}
+		// Never inject "continue" over a permission prompt / AskUserQuestion —
+		// the session is blocked on a human, not on a recoverable error (§6/D3).
+		if view.Status == session.WaitingForHuman {
+			d.Recorder.RecordSuppressed(sid, sources, "waiting_for_human")
+			d.recordHistory(goCtx, RecordEvent{
+				SessionID: sid, Text: text, Result: "suppressed", ErrorText: "waiting_for_human",
+				CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+			})
+			store.RemoveKeys(observedKeys)
+			continue
+		}
+
 		if err := d.Signaler.Send(view.PID, text); err != nil {
 			// Delivery failed. Surface it for observability (OTel counter + log)
-			// — otherwise the error is swallowed and the miss is invisible — then
-			// record the attempt and leave the intents in place to retry next tick.
+			// — otherwise the error is swallowed and the miss is invisible —
+			// persist a 'failed' nudge_history row, record the attempt, and leave
+			// the intents in place to retry next tick.
 			d.Recorder.RecordSendFailed(sid, sources, kind, err.Error())
+			d.recordHistory(goCtx, RecordEvent{
+				SessionID: sid, Text: text, Result: "failed", ErrorText: err.Error(),
+				CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+			})
 			if hasDisrupt {
 				d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
 			}
@@ -159,26 +177,12 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 		if hasDisrupt {
 			d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
 		}
-		wm := ctx.Watermarks.SessionWatermark(sid)
-		escalated := wm.DisruptEscalated
 		d.Recorder.RecordSent(sid, sources, kind, escalated)
 		d.Recorder.UpdateWatermarks(sid, ctx.Now, sources, cause, escalated)
-		if d.NudgeRecorder != nil {
-			srcStrs := make([]string, len(sources))
-			for i, s := range sources {
-				srcStrs[i] = string(s)
-			}
-			_ = d.NudgeRecorder.Record(goCtx, RecordEvent{
-				SessionID:       sid,
-				Text:            text,
-				Result:          "sent",
-				ErrorText:       kind,
-				CausedByErrorAt: causeAt,
-				Escalated:       escalated,
-				FiredAt:         ctx.Now,
-				Sources:         srcStrs,
-			})
-		}
+		d.recordHistory(goCtx, RecordEvent{
+			SessionID: sid, Text: text, Result: "sent", ErrorText: kind,
+			CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+		})
 		store.RemoveKeys(observedKeys)
 		for _, in := range group {
 			if in.Key.Source == SourceWindowReset {
@@ -191,6 +195,26 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 	if windowResetDispatched && !ctx.Tree.WindowResetsAt.IsZero() {
 		d.Recorder.AdvanceWindowResetFiredFor(ctx.Tree.WindowResetsAt)
 	}
+}
+
+// recordHistory persists one nudge_history row via the NudgeRecorder. No-op
+// when the recorder is unset (early-startup paths and tests). Used for the
+// sent, failed, and suppressed outcomes so historical queries surface misses
+// (failed / suppressed) as well as successful deliveries.
+func (d *Dispatcher) recordHistory(goCtx context.Context, ev RecordEvent) {
+	if d.NudgeRecorder == nil {
+		return
+	}
+	_ = d.NudgeRecorder.Record(goCtx, ev)
+}
+
+// sourceStrings stringifies a []Source for the RecordEvent.Sources field.
+func sourceStrings(sources []Source) []string {
+	out := make([]string, len(sources))
+	for i, s := range sources {
+		out[i] = string(s)
+	}
+	return out
 }
 
 func indexSessions(tree *aggregate.Tree) map[string]*aggregate.SessionView {

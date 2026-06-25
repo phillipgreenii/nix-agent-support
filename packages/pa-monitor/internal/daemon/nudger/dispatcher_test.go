@@ -322,6 +322,91 @@ func TestDispatcher_RecordsOnSend(t *testing.T) {
 	}
 }
 
+// TestDispatcher_RecordsSuppressed verifies that a suppressed nudge
+// (session_active / waiting_for_human) is persisted to nudge_history via the
+// NudgeRecorder with Result="suppressed" and the suppression cause, so
+// historical queries can show suppressed deliveries, not only sent ones.
+func TestDispatcher_RecordsSuppressed(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    session.Status
+		wantCause string
+	}{
+		{"session_active", session.Working, "session_active"},
+		{"waiting_for_human", session.WaitingForHuman, "waiting_for_human"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewPendingStore()
+			now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+			store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+				Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now}})
+			tree := treeWith(time.Time{}, newSV("sid-1", 1234, tc.status))
+			sig := &fakeSignaler{}
+			rec := &fakeRecorder{}
+			nudgeRec := &fakeNudgeRecorder{}
+			d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+			d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+			if len(sig.sent) != 0 {
+				t.Fatalf("len(sent) = %d, want 0 (suppressed)", len(sig.sent))
+			}
+			nudgeRec.mu.Lock()
+			events := nudgeRec.events
+			nudgeRec.mu.Unlock()
+			if len(events) != 1 {
+				t.Fatalf("NudgeRecorder.Record called %d times, want 1 (suppressed persisted)", len(events))
+			}
+			ev := events[0]
+			if ev.Result != "suppressed" {
+				t.Errorf("event.Result = %q, want suppressed", ev.Result)
+			}
+			if ev.ErrorText != tc.wantCause {
+				t.Errorf("event.ErrorText = %q, want %q (suppression cause)", ev.ErrorText, tc.wantCause)
+			}
+			if ev.SessionID != "sid-1" {
+				t.Errorf("event.SessionID = %q, want sid-1", ev.SessionID)
+			}
+			if len(ev.Sources) != 1 || ev.Sources[0] != string(SourceDisrupted) {
+				t.Errorf("event.Sources = %v, want [disrupted]", ev.Sources)
+			}
+		})
+	}
+}
+
+// TestDispatcher_RecordsSendFailure verifies that a failed Signaler.Send is
+// persisted to nudge_history with Result="failed" and the signaler error text,
+// alongside the OTel RecordSendFailed observability signal.
+func TestDispatcher_RecordsSendFailure(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now}})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{err: errors.New("cmux send: exit status 1")}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{}
+	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	nudgeRec.mu.Lock()
+	events := nudgeRec.events
+	nudgeRec.mu.Unlock()
+	if len(events) != 1 {
+		t.Fatalf("NudgeRecorder.Record called %d times, want 1 (failed persisted)", len(events))
+	}
+	ev := events[0]
+	if ev.Result != "failed" {
+		t.Errorf("event.Result = %q, want failed", ev.Result)
+	}
+	if !strings.Contains(ev.ErrorText, "cmux send: exit status 1") {
+		t.Errorf("event.ErrorText = %q, want it to contain the signaler error", ev.ErrorText)
+	}
+	if ev.CausedByErrorAt == nil || !ev.CausedByErrorAt.Equal(now) {
+		t.Errorf("event.CausedByErrorAt = %v, want %v", ev.CausedByErrorAt, now)
+	}
+}
+
 // TestDispatcher_NudgeRecorderNilSafe verifies that a nil NudgeRecorder does
 // not panic on successful dispatch (the Recorder field may be nil in tests
 // and early-startup paths).
