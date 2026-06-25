@@ -57,14 +57,22 @@ in
   # machines without the observability stack.
   config = lib.mkMerge [
     (lib.mkIf (obs.enable or false) {
-      phillipgreenii.observability.dashboardProviders.pa-monitor = {
-        folder = "Claude Agents";
-        dashboards = [ ../../../packages/pa-monitor/grafana/pa-monitor-overview.json ];
+      phillipgreenii.observability = {
+        # Pin a stable folder UID so the dashboard provider AND the alert rule
+        # groups (both titled "Claude Agents") resolve to ONE Grafana folder.
+        # Without this, alerting file-provisioning resolves the folder by title
+        # and creates a folder distinct from the dashboard's — two same-named
+        # folders (grafana/grafana#125079). See pg2-h3lr.
+        grafanaFolders."Claude Agents" = "claude-agents";
+        dashboardProviders.pa-monitor = {
+          folder = "Claude Agents";
+          dashboards = [ ../../../packages/pa-monitor/grafana/pa-monitor-overview.json ];
+        };
+        alertRuleFiles = [
+          ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml
+          ../../../packages/pa-monitor/grafana/alerting/daemon-connection.yaml
+        ];
       };
-      phillipgreenii.observability.alertRuleFiles = [
-        ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml
-        ../../../packages/pa-monitor/grafana/alerting/daemon-connection.yaml
-      ];
 
       # Feed OTel config into each daemon-enabled user's pa-monitor settings via
       # a shared HM module. This reads each user's own daemon.enable and never
