@@ -43,27 +43,39 @@ func TestPROpenedCreatesPRBead(t *testing.T) {
 	}
 }
 
-// errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
-// returns a stub MR; everything else is a no-op. Used to prove the find-error
-// propagates (NOT swallowed as "no open cycle" — that's the duplicate-cycle bug).
-type errFindClient struct{}
+// noopBeadClient is a BeadClient whose every method is a no-op returning zero
+// values. Focused fakes embed it and override only the methods their test path
+// exercises, instead of re-declaring the whole ~8-method interface.
+type noopBeadClient struct{}
 
-func (errFindClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "mr-1", false, nil
+func (noopBeadClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	return "", false, nil
 }
+func (noopBeadClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (noopBeadClient) CloseMergeRequest(context.Context, string, string) error    { return nil }
+func (noopBeadClient) ListChildrenOfPR(context.Context, string) ([]string, error) { return nil, nil }
+func (noopBeadClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
+func (noopBeadClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (noopBeadClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (noopBeadClient) CloseFeedback(context.Context, string, string) error        { return nil }
+
+// errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
+// returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
+// as "no open cycle" — that's the duplicate-cycle bug).
+type errFindClient struct{ noopBeadClient }
+
 func (errFindClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return &beads.MergeRequest{ID: "mr-1"}, nil
-}
-func (errFindClient) CloseMergeRequest(context.Context, string, string) error    { return nil }
-func (errFindClient) ListChildrenOfPR(context.Context, string) ([]string, error) { return nil, nil }
-func (errFindClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
-	return "", nil
 }
 func (errFindClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
 	return "", false, errBoom
 }
-func (errFindClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (errFindClient) CloseFeedback(context.Context, string, string) error        { return nil }
 
 var errBoom = errString("boom")
 
@@ -98,8 +110,9 @@ func TestPROpenedWritesFullFields(t *testing.T) {
 	}
 }
 
-// capturingClient is a minimal BeadClient capturing EnsureMergeRequest fields.
+// capturingClient captures the fields passed to EnsureMergeRequest.
 type capturingClient struct {
+	noopBeadClient
 	onEnsure func(beads.MergeRequestFields)
 }
 
@@ -109,21 +122,6 @@ func (c *capturingClient) EnsureMergeRequest(_ context.Context, _ string, f bead
 	}
 	return "mr-1", false, nil
 }
-func (c *capturingClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (c *capturingClient) CloseMergeRequest(context.Context, string, string) error { return nil }
-func (c *capturingClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (c *capturingClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-func (c *capturingClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-func (c *capturingClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (c *capturingClient) CloseFeedback(context.Context, string, string) error        { return nil }
 
 func TestFeedbackSkippedWhenParentClosed(t *testing.T) {
 	created := 0
@@ -138,28 +136,21 @@ func TestFeedbackSkippedWhenParentClosed(t *testing.T) {
 	}
 }
 
-// closedParentClient returns a closed merge-request from FindByRepoAndNumber.
-type closedParentClient struct{ createInc func() }
-
-func (c *closedParentClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "mr-1", true, nil
+// closedParentClient returns a closed merge-request from FindByRepoAndNumber and
+// counts CreateProcessingCycle calls — which must stay zero under a closed parent
+// (the override is the regression detector for the closed-parent guard).
+type closedParentClient struct {
+	noopBeadClient
+	createInc func()
 }
+
 func (c *closedParentClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return &beads.MergeRequest{ID: "mr-1", Status: "closed"}, nil
-}
-func (c *closedParentClient) CloseMergeRequest(context.Context, string, string) error { return nil }
-func (c *closedParentClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
 }
 func (c *closedParentClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
 	c.createInc()
 	return "cycle-1", nil
 }
-func (c *closedParentClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-func (c *closedParentClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (c *closedParentClient) CloseFeedback(context.Context, string, string) error        { return nil }
 
 func TestPRMergedCascadeCloses(t *testing.T) {
 	var closedReason string
@@ -198,17 +189,16 @@ func TestPRClosedReasonPRClosed(t *testing.T) {
 	}
 }
 
-// cascadeClient is a minimal BeadClient fake for cascade-close tests.
+// cascadeClient is a fake for cascade-close tests: it serves the found MR and
+// its children, and records the close reason + per-child close calls.
 type cascadeClient struct {
+	noopBeadClient
 	find         *beads.MergeRequest
 	children     []string
 	onCloseMR    func(string)
 	onCloseChild func()
 }
 
-func (c *cascadeClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "mr-1", false, nil
-}
 func (c *cascadeClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return c.find, nil
 }
@@ -221,19 +211,12 @@ func (c *cascadeClient) CloseMergeRequest(_ context.Context, _ string, reason st
 func (c *cascadeClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
 	return c.children, nil
 }
-func (c *cascadeClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-func (c *cascadeClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
 func (c *cascadeClient) CloseProcessingCycle(context.Context, string, string) error {
 	if c.onCloseChild != nil {
 		c.onCloseChild()
 	}
 	return nil
 }
-func (c *cascadeClient) CloseFeedback(context.Context, string, string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Scenario tests: idempotency + no-resurrection guarantees
@@ -244,6 +227,7 @@ func (c *cascadeClient) CloseFeedback(context.Context, string, string) error { r
 // logical bead entry. ensureCalls counts all invocations (including re-delivers);
 // beads maps key → ID and grows only on first creation.
 type upsertClient struct {
+	noopBeadClient
 	ensureCalls int
 	beads       map[string]string // key "repo#number" → id
 }
@@ -262,24 +246,6 @@ func (c *upsertClient) EnsureMergeRequest(_ context.Context, _ string, f beads.M
 	c.beads[key] = id
 	return id, false, nil
 }
-func (c *upsertClient) FindByRepoAndNumber(_ context.Context, repo string, number int) (*beads.MergeRequest, error) {
-	key := fmt.Sprintf("%s#%d", repo, number)
-	id, ok := c.beads[key]
-	if !ok {
-		return nil, nil
-	}
-	return &beads.MergeRequest{ID: id, Status: "open"}, nil
-}
-func (c *upsertClient) CloseMergeRequest(context.Context, string, string) error    { return nil }
-func (c *upsertClient) ListChildrenOfPR(context.Context, string) ([]string, error) { return nil, nil }
-func (c *upsertClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
-	return "cycle-1", nil
-}
-func (c *upsertClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-func (c *upsertClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (c *upsertClient) CloseFeedback(context.Context, string, string) error        { return nil }
 
 // TestPROpenedIdempotentSingleBead asserts that dispatching the same pr.opened
 // event twice (simulating at-least-once redelivery) results in exactly ONE
@@ -315,6 +281,7 @@ func TestPROpenedIdempotentSingleBead(t *testing.T) {
 // FindByRepoAndNumber returns Status "closed" — simulating a PR that was
 // previously merged/closed in the bead store.
 type scenarioClosedClient struct {
+	noopBeadClient
 	ensureCalls  int
 	createCycles int
 }
@@ -326,21 +293,10 @@ func (c *scenarioClosedClient) EnsureMergeRequest(context.Context, string, beads
 func (c *scenarioClosedClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return &beads.MergeRequest{ID: "mr-closed-1", Status: "closed"}, nil
 }
-func (c *scenarioClosedClient) CloseMergeRequest(context.Context, string, string) error { return nil }
-func (c *scenarioClosedClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
-}
 func (c *scenarioClosedClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
 	c.createCycles++
 	return "cycle-x", nil
 }
-func (c *scenarioClosedClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-func (c *scenarioClosedClient) CloseProcessingCycle(context.Context, string, string) error {
-	return nil
-}
-func (c *scenarioClosedClient) CloseFeedback(context.Context, string, string) error { return nil }
 
 // TestClosedBeadNotResurrectedByReappearance is a two-event scenario: a PR
 // whose bead is already closed receives both pr.opened (reappearance) and
@@ -385,28 +341,17 @@ func TestClosedBeadNotResurrectedByReappearance(t *testing.T) {
 // scenario: the PR bead exists and is open. createCycles counts how many
 // processing-cycle beads are created.
 type scenarioOpenClient struct {
+	noopBeadClient
 	createCycles int
 }
 
-func (c *scenarioOpenClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "mr-open-1", false, nil // open bead; alreadyClosed = false
-}
 func (c *scenarioOpenClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return &beads.MergeRequest{ID: "mr-open-1", Status: "open"}, nil
-}
-func (c *scenarioOpenClient) CloseMergeRequest(context.Context, string, string) error { return nil }
-func (c *scenarioOpenClient) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
 }
 func (c *scenarioOpenClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
 	c.createCycles++
 	return "cycle-open-1", nil
 }
-func (c *scenarioOpenClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil // no existing open cycle → should create one
-}
-func (c *scenarioOpenClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (c *scenarioOpenClient) CloseFeedback(context.Context, string, string) error        { return nil }
 
 // TestOpenBeadGetsProcessingCycle is the positive-control for
 // TestClosedBeadNotResurrectedByReappearance: an OPEN PR bead receiving
