@@ -41,8 +41,12 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   optional `title_prefix` / `item_type` post-filters), `command` (run an
   executable that emits items as JSON/JSONL), `github-issues` (open issues via
   `gh issue list`, optionally narrowed by `labels`), and `jira-issues` (unresolved
-  issues via the `jira` CLI's raw search — `jql` overrides the `project`/`labels`
-  default). The tracker CLIs (`gh`, `jira`) supply their own authentication.
+  issues via `pg-pr-issues-jira-zr search --jql <jql> --limit 100`, which queries
+  Atlassian's `/rest/api/3/search/jql` endpoint and returns a normalized
+  `{items,truncated}` JSON envelope; `jql` overrides the `project`/`labels`
+  default, and a truncation warning is logged when the backlog exceeds one page).
+  `gh` supplies its own authentication; `pg-pr-issues-jira-zr` reads `JIRA_*` env
+  vars (injected by its nix wrapper).
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
 (`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),
