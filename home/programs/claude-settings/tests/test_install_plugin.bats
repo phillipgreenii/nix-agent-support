@@ -2,9 +2,14 @@
 #
 # Verify install-plugin.sh:
 #   - validates cache manifests; removes corrupt cached versions with warning
-#   - installs the plugin via the supplied claude binary; on install failure
-#     falls back to update; surfaces stderr from both commands only if both
-#     fail
+#   - installs the plugin via the supplied claude binary, then ALWAYS follows a
+#     successful install with an (idempotent) update so content-digest version
+#     bumps are pulled — 'install' short-circuits on an already-installed plugin
+#     and never updates on its own (pg2-cxwj)
+#   - on install failure falls back to update; surfaces stderr from both
+#     commands only if both fail
+#   - a post-install update failure is non-fatal (warning only); the
+#     already-installed copy is preserved
 #   - exits 0 (non-fatal) regardless of install/update outcome
 
 bats_require_minimum_version 1.5.0
@@ -52,16 +57,33 @@ _write_manifest() {
   printf '%s' "$4" > "$dir/plugin.json"
 }
 
-@test "install succeeds: echoes installed status on stdout" {
+@test "install succeeds: also runs update so version bumps are pulled" {
   _mock_claude 0 0 "" ""
 
   run "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"beads@beads-marketplace installed"* ]]
-  # Confirm install was called, update was not
+  [[ "$output" == *"beads@beads-marketplace updated"* ]]
+  # 'install' short-circuits on an already-installed plugin without pulling a
+  # newer marketplace version, so update MUST run too (pg2-cxwj).
   grep -Fxq "plugin install beads@beads-marketplace --scope user" "$CALLS"
-  ! grep -Fq "update" "$CALLS"
+  grep -Fxq "plugin update beads@beads-marketplace --scope user" "$CALLS"
+}
+
+@test "install succeeds, post-install update fails: non-fatal WARNING, install preserved" {
+  _mock_claude 0 1 "" "update boom"
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]   # non-fatal
+  [[ "$output" == *"beads@beads-marketplace installed"* ]]
+  [[ "$output" != *"updated"* ]]
+  [[ "$stderr" == *"WARNING beads@beads-marketplace post-install update failed"* ]]
+  [[ "$stderr" == *"update boom"* ]]
+  # Both commands were attempted.
+  grep -Fxq "plugin install beads@beads-marketplace --scope user" "$CALLS"
+  grep -Fxq "plugin update beads@beads-marketplace --scope user" "$CALLS"
 }
 
 @test "install fails, update succeeds: echoes updated status on stdout, no warning" {
