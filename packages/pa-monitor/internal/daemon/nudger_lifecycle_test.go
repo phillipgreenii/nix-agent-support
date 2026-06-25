@@ -214,31 +214,37 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 	runtimePath := filepath.Join(dir, "runtime.json")
 
 	errorAt := time.Now().Add(-1 * time.Second)
-	tree := &aggregate.Tree{
-		Dirs: []*aggregate.Directory{
-			{
-				Path:  "/p1",
-				IdleN: 1,
-				Sessions: []*aggregate.SessionView{
-					{
-						Session: &session.Session{
-							SessionID: "annotate-sid",
-							PID:       77777,
-							Status:    session.Idle,
-						},
-						SessionEnrichment: aggregate.SessionEnrichment{
-							LastError: &transcript.ErrorRecord{
-								Kind:       transcript.ErrUnknown,
-								Text:       "API Error: The socket connection was closed unexpectedly",
-								At:         errorAt,
-								IsTerminal: true,
+	// Each tick gets a freshly-built tree, mirroring the real *poller.Poller
+	// (every Snapshot returns a newly-allocated aggregate.Tree). Returning a
+	// single shared tree would let tick N+1's annotation (sv.PendingNudge =)
+	// race the test reading sv.PendingNudge off a tree published on tick N.
+	makeTree := func() *aggregate.Tree {
+		return &aggregate.Tree{
+			Dirs: []*aggregate.Directory{
+				{
+					Path:  "/p1",
+					IdleN: 1,
+					Sessions: []*aggregate.SessionView{
+						{
+							Session: &session.Session{
+								SessionID: "annotate-sid",
+								PID:       77777,
+								Status:    session.Idle,
 							},
-							LastErrorRetryable: true,
+							SessionEnrichment: aggregate.SessionEnrichment{
+								LastError: &transcript.ErrorRecord{
+									Kind:       transcript.ErrUnknown,
+									Text:       "API Error: The socket connection was closed unexpectedly",
+									At:         errorAt,
+									IsTerminal: true,
+								},
+								LastErrorRetryable: true,
+							},
 						},
 					},
 				},
 			},
-		},
+		}
 	}
 
 	// treesCh receives annotated tree snapshots from the TreeObserver.
@@ -254,7 +260,7 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 			RuntimePath: runtimePath,
 			Poller: &stubPoller{
 				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
-					return tree, true, nil
+					return makeTree(), true, nil
 				},
 			},
 			InitialAutoResumeEnabled: true,

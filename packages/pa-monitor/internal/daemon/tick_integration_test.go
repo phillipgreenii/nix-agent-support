@@ -15,9 +15,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
-	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
@@ -144,33 +144,56 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 		t.Fatal("timed out waiting for first tick")
 	}
 
-	// Verify GetState reflects synthesised dirs.
+	// Poll until BOTH the DB-derived GetState and the in-memory IsAnyBusy
+	// reflect the synthesised tree. tickReady is signalled mid-tick (inside
+	// Snapshot, before the daemon publishes the post-tick in-memory state), and
+	// the two RPCs read different sources that update at different points in the
+	// tick: GetState/buildState reads the DB (written early, inside Snapshot)
+	// while IsAnyBusy reads the in-memory snapshot (published late in the tick).
+	// A single read of either can therefore race the publish under -race's
+	// slower timing, so wait for both to converge.
 	conn := dialUnix(t, paths.Socket)
 	defer conn.Close()
 	client := pb.NewPaMonitorClient(conn)
-	state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(state.GetDirs()) != 1 || state.GetDirs()[0].GetWorkingN() != 2 {
-		t.Errorf("daemon state did not reflect synthesised tree: %+v", state.GetDirs())
-	}
 
-	// IsAnyBusy should see 2 busy.
-	busy, err := client.IsAnyBusy(context.Background(), &pb.IsAnyBusyRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !busy.GetAnyBusy() || busy.GetBusyCount() != 2 {
-		t.Errorf("IsAnyBusy = %+v, want (true,2)", busy)
-	}
+	var dirCount int
+	var workingN uint32
+	var anyBusy bool
+	var busyCount uint32
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dirs := state.GetDirs()
+		dirCount = len(dirs)
+		workingN = 0
+		if dirCount == 1 {
+			workingN = dirs[0].GetWorkingN()
+		}
 
-	// block.Tracker should have advanced to the synthesised block id.
-	if bt.ID() != "2026-05-20T14Z" {
-		t.Errorf("block.id = %q, want 2026-05-20T14Z", bt.ID())
-	}
+		busy, err := client.IsAnyBusy(context.Background(), &pb.IsAnyBusyRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		anyBusy = busy.GetAnyBusy()
+		busyCount = busy.GetBusyCount()
 
-	_ = hitCount.Load()
+		if dirCount == 1 && workingN == 2 && anyBusy && busyCount == 2 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if dirCount != 1 || workingN != 2 {
+		t.Errorf("daemon state did not reflect synthesised tree: dirs=%d workingN=%d", dirCount, workingN)
+	}
+	if !anyBusy || busyCount != 2 {
+		t.Errorf("IsAnyBusy = (any=%v, count=%d), want (true, 2)", anyBusy, busyCount)
+	}
 
 	cancel()
 	select {
@@ -178,6 +201,15 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunWith did not return")
 	}
+
+	// block.Tracker should have advanced to the synthesised block id. Read
+	// bt.ID() only after RunWith has returned: the tick loop calls
+	// bt.Update() (the sole writer), so reading mid-run would race it.
+	if bt.ID() != "2026-05-20T14Z" {
+		t.Errorf("block.id = %q, want 2026-05-20T14Z", bt.ID())
+	}
+
+	_ = hitCount.Load()
 }
 
 // TestCaffeinate_TogglePersistsAcrossTicks is a regression test for the bug
