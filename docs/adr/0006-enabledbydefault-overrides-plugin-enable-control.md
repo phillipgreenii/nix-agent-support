@@ -1,8 +1,16 @@
 # enabledByDefault + overrides for Per-Plugin Enable Control
 
-**Status**: Accepted
+**Status**: Superseded in part by [0017](0017-static-nix-built-local-plugin-marketplace.md)
 **Date**: 2026-05-01
 **Deciders**: phillipg
+
+> **Superseded in part 2026-06-25 by ADR-0017.** This ADR covered two enable-control
+> surfaces. The **local-plugin half is retired**: `pgii-local-plugins` and the
+> `phillipgreenii.programs.claude.plugins.local.overrides` option no longer exist;
+> local-plugin enable control is now `plugin.json` `defaultEnabled` resolved through
+> `phillipgreenii.programs.claude.marketplaces.overrides`. See ADR-0017. The
+> **third-party half still stands**: `pgii-claude-plugins` continues to use the
+> `enabledByDefault` + `overrides` mechanism described below.
 
 ## Context
 
@@ -23,6 +31,15 @@ option (`attrsOf bool`) at the consumer level. Resolution order:
 This pattern mirrors the `lib.mkForce`/`lib.mkDefault` priority idiom but expressed
 in a domain-specific API that is easier to read in machine configs.
 
+> **Local-plugin update (ADR-0017, 2026-06-25):** `pgii-local-plugins` has been
+> retired in favor of a static `mkClaudeMarketplace`-built tree. The module author
+> default is now the plugin's `plugin.json` `defaultEnabled` field (absent ⇒ `false`)
+> rather than `enabledByDefault`, and the consumer override is
+> `phillipgreenii.programs.claude.marketplaces.overrides` rather than
+> `plugins.local.overrides`. The same two-step resolution order (machine override
+> wins, else the author default) is preserved. The `pgii-claude-plugins` (third-party)
+> mechanism described above is unchanged.
+
 ## Consequences
 
 ### Positive
@@ -40,3 +57,10 @@ Consumer must know to use `overrides` rather than trying to remove from the list
 
 The `enabledPlugins` value written to `settings.json` is computed at evaluation time,
 so there is no runtime indirection.
+
+## Related Decisions
+
+Superseded in part by ADR-0017 (Static nix-built marketplace for agent-support local
+plugins): the local-plugin half of this mechanism moved to `plugin.json`
+`defaultEnabled` + `marketplaces.overrides`; the `pgii-claude-plugins` (third-party)
+half still stands.
