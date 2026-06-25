@@ -1,7 +1,0 @@
-[[orders.overrides]]
-name = "mol-dog-jsonl"
-enabled = false
-
-[[orders.overrides]]
-name = "mol-dog-compactor"
-enabled = false

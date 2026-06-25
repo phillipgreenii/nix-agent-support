@@ -1,1 +1,0 @@
-description = "Alert when pr-* agents wake repeatedly but close zero beads — fast signal that wake-on-work fires but agent is blocked"

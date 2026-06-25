@@ -117,12 +117,6 @@
           pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
             inherit (goBuilders) mkGoApp;
           };
-          pgii-pack-test-fixture = final.callPackage ./packages/pgii-pack-test-fixture { };
-          pgii-pack-pr-support = final.callPackage ./packages/pgii-pack-pr-support { };
-          pgii-pack-dolt-hacks = final.callPackage ./packages/pgii-pack-dolt-hacks { };
-          pgii-pack-workers = final.callPackage ./packages/pgii-pack-workers { };
-          pgii-pack-gastown = final.callPackage ./packages/pgii-pack-gastown { };
-          pgii-pack-foremen = final.callPackage ./packages/pgii-pack-foremen { };
           goccc = final.callPackage ./packages/goccc { };
           toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
@@ -773,157 +767,6 @@
               ];
             };
 
-            test-pgii-packs-activation = checksHelpers.testBashScripts {
-              package = pkgs.writeShellApplication {
-                name = "pgii-packs-activation";
-                runtimeInputs = [
-                  pkgs.bash
-                  pkgs.coreutils
-                  pkgs.jq
-                  pkgs.gnugrep
-                  pkgs.gawk
-                  pkgs.gnused
-                ];
-                text = builtins.readFile ./home/programs/pgii-packs/activation.sh;
-              };
-              tests = ./home/programs/pgii-packs/tests;
-              extraInputs = [
-                pkgs.jq
-                pkgs.coreutils
-                pkgs.gnugrep
-                pkgs.gawk
-                pkgs.gnused
-              ];
-            };
-
-            check-pgii-pack-pr-support-layout = pkgs.runCommand "check-pgii-pack-pr-support-layout" { } ''
-              pack=${pkgs.pgii-pack-pr-support}
-              test -f "$pack/pack.toml"                                   || { echo "missing pack.toml"; exit 1; }
-              test -f "$pack/.pack-meta.json"                             || { echo "missing .pack-meta.json"; exit 1; }
-              test -f "$pack/agents/pr-reviewer/agent.toml"               || { echo "missing pr-reviewer"; exit 1; }
-              test -f "$pack/agents/pr-self-fixer/agent.toml"             || { echo "missing pr-self-fixer"; exit 1; }
-              test -f "$pack/agents/pr-triage/agent.toml"                 || { echo "missing pr-triage"; exit 1; }
-              # pr-watcher order + script and the check-pr-watcher-recent-runs
-              # doctor check were removed 2026-06-08: the standalone
-              # org.nixos.pg-pr-sync launchd daemon owns PR sync now, so the
-              # gas-city order is gone. No longer asserted here.
-              for d in check-pr-agent-woke-no-progress \
-                       check-pr-feedback-backlog \
-                       check-pr-feedback-throughput \
-                       check-pr-orphan-beads \
-                       check-hack-1-still-needed; do
-                test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
-                test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
-              done
-              ! find "$pack" -name "*.template" | grep -q . || { echo "stale .template files in pack"; exit 1; }
-              ! grep -rnE 'zr\.pr-' "$pack/doctor" >/dev/null 2>&1 || { echo "stale zr.pr- refs in doctor/"; exit 1; }
-              touch $out
-            '';
-
-            check-pgii-pack-dolt-hacks-layout = pkgs.runCommand "check-pgii-pack-dolt-hacks-layout" { } ''
-              pack=${pkgs.pgii-pack-dolt-hacks}
-              test -f "$pack/pack.toml"                                   || { echo "missing pack.toml"; exit 1; }
-              test -f "$pack/.pack-meta.json"                             || { echo "missing .pack-meta.json"; exit 1; }
-              test -d "$pack/formulas"                                    || { echo "missing formulas/"; exit 1; }
-              for o in hack-archive-and-compact \
-                       hack-autoclose-completed-mols \
-                       hack-daily-summary \
-                       hack-message-forwarder \
-                       hack-mol-dog-jsonl \
-                       hack-order-override-watchdog \
-                       hack-stale-lock-sweeper; do
-                test -f "$pack/orders/$o.toml" || { echo "missing orders/$o.toml"; exit 1; }
-                test -x "$pack/scripts/$o.sh"  || { echo "scripts/$o.sh not exec"; exit 1; }
-                grep -q "$pack/scripts/$o.sh" "$pack/orders/$o.toml" || { echo "orders/$o.toml exec line not substituted"; exit 1; }
-              done
-              test -f "$pack/scripts/hack-archive-and-compact.RUNBOOK.md" || { echo "missing RUNBOOK"; exit 1; }
-              for d in check-formulas-dir \
-                       check-hack-2-still-needed \
-                       check-hack-10-still-needed \
-                       check-hack-11-still-needed; do
-                test -f "$pack/doctor/$d/doctor.toml" || { echo "missing doctor/$d/doctor.toml"; exit 1; }
-                test -x "$pack/doctor/$d/run.sh"      || { echo "doctor/$d/run.sh not exec"; exit 1; }
-              done
-              test -f "$pack/scripts/tests/hack-daily-summary.bats" || { echo "missing bats"; exit 1; }
-              test -d "$pack/scripts/tests/fixtures"                || { echo "missing fixtures/"; exit 1; }
-              ! find "$pack" -name "*.template" | grep -q . || { echo "stale .template files in pack"; exit 1; }
-              ! grep -rnE '/Users/phillipg/gc/assets/imports' "$pack" >/dev/null 2>&1 || { echo "stale legacy assets paths in pack"; exit 1; }
-              touch $out
-            '';
-
-            check-pgii-pack-workers-layout =
-              pkgs.runCommand "check-pgii-pack-workers-layout" { nativeBuildInputs = [ pkgs.jq ]; }
-                ''
-                  pack=${pkgs.pgii-pack-workers}
-                  test -f "$pack/pack.toml"                                    || { echo "missing pack.toml"; exit 1; }
-                  test -f "$pack/.pack-meta.json"                              || { echo "missing .pack-meta.json"; exit 1; }
-                  test "$(jq -r .scope "$pack/.pack-meta.json")" = "rig"       || { echo ".pack-meta.json scope != rig"; exit 1; }
-                  test -f "$pack/agents/worker/agent.toml"                     || { echo "missing agent.toml"; exit 1; }
-                  test -f "$pack/agents/worker/prompt.template.md"             || { echo "missing prompt.template.md"; exit 1; }
-                  test -x "$pack/agents/worker/scripts/bash-env.sh"            || { echo "bash-env.sh not exec"; exit 1; }
-                  grep -qE '\{\{[[:space:]]*\.Rig(Name|Root|)[[:space:]]*\}\}' "$pack/agents/worker/prompt.template.md" || { echo "go-template markers stripped"; exit 1; }
-                  grep -qE 'BASH_ENV = "/nix/store/[^/]+-pgii-workers-' "$pack/agents/worker/agent.toml" || { echo "PACK_ROOT not substituted in agent.toml"; exit 1; }
-                  ! find "$pack" -name "*.template" -not -name "prompt.template.md" | grep -q . || { echo "stale envsubst .template files"; exit 1; }
-                  ! grep -rnE '/Users/phillipg/gc/assets/imports' "$pack" >/dev/null 2>&1 || { echo "stale legacy assets paths"; exit 1; }
-                  touch $out
-                '';
-
-            check-pgii-pack-gastown-layout =
-              pkgs.runCommand "check-pgii-pack-gastown-layout" { nativeBuildInputs = [ pkgs.jq ]; }
-                ''
-                  pack=${pkgs.pgii-pack-gastown}
-                  test -f "$pack/pack.toml"                                    || { echo "missing pack.toml"; exit 1; }
-                  test -f "$pack/.pack-meta.json"                              || { echo "missing .pack-meta.json"; exit 1; }
-                  test "$(jq -r .scope "$pack/.pack-meta.json")" = "city"      || { echo ".pack-meta.json scope != city"; exit 1; }
-
-                  # Mayor: prompt.md only, NO agent.toml (intentional).
-                  test -f "$pack/agents/mayor/prompt.md"                       || { echo "missing mayor/prompt.md"; exit 1; }
-                  ! test -f "$pack/agents/mayor/agent.toml"                    || { echo "unexpected mayor/agent.toml (legacy has none)"; exit 1; }
-
-                  # Deacon, operator: standard agent.toml + prompt
-                  for a in deacon operator; do
-                    test -f "$pack/agents/$a/agent.toml"                       || { echo "missing $a/agent.toml"; exit 1; }
-                  done
-                  test -f "$pack/agents/deacon/prompt.template.md"             || { echo "missing deacon/prompt.template.md"; exit 1; }
-                  test -f "$pack/agents/operator/prompt.md"                    || { echo "missing operator/prompt.md"; exit 1; }
-
-                  # Legacy foreman was retired 2026-05-29 (triage-extension
-                  # Phase 11). Verify it's gone — its responsibilities are
-                  # now in pgii-pack-foremen's three category foremen.
-                  ! test -e "$pack/agents/foreman"                             || { echo "legacy agents/foreman not removed"; exit 1; }
-
-                  # Formula + 3 doctor checks
-                  test -f "$pack/formulas/mol-deacon-patrol.toml"              || { echo "missing mol-deacon-patrol formula"; exit 1; }
-                  for d in check-gastown-divergence check-misplaced-beads check-stale-beads; do
-                    test -f "$pack/doctor/$d/doctor.toml"                      || { echo "missing doctor/$d/doctor.toml"; exit 1; }
-                    test -x "$pack/doctor/$d/run.sh"                           || { echo "doctor/$d/run.sh not exec"; exit 1; }
-                  done
-
-                  # No leftover envsubst .template files (excluding go-template *.template.md)
-                  ! find "$pack" -name "*.template" -not -name "*.template.md" | grep -q . \
-                    || { echo "stale envsubst .template files"; exit 1; }
-
-                  # No stale legacy assets/imports paths
-                  ! grep -rnE '/Users/phillipg/gc/assets/imports' "$pack" >/dev/null 2>&1 \
-                    || { echo "stale legacy assets paths"; exit 1; }
-                  touch $out
-                '';
-
-            test-pgii-pack-dolt-hacks-bats =
-              pkgs.runCommand "test-pgii-pack-dolt-hacks-bats"
-                {
-                  nativeBuildInputs = [
-                    pkgs.bats
-                    pkgs.bash
-                    pkgs.jq
-                  ];
-                }
-                ''
-                  pack=${pkgs.pgii-pack-dolt-hacks}
-                  bats "$pack/scripts/tests/hack-daily-summary.bats"
-                  touch $out
-                '';
-
             # Validate claude-theme token map: parse as JSON and assert required keys.
             # Uses mock Catppuccin Mocha hex values; actual values come from
             # config.lib.stylix.colors at module evaluation time.
@@ -1107,12 +950,6 @@
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-gc
-              pgii-pack-test-fixture
-              pgii-pack-pr-support
-              pgii-pack-dolt-hacks
-              pgii-pack-workers
-              pgii-pack-gastown
-              pgii-pack-foremen
               pg-pr
               goccc
               toktrack

@@ -1,7 +1,0 @@
-[order]
-description = "pgii-pack-test-fixture: validates mkPgiiPack substitution + activation pipeline."
-trigger     = "cooldown"
-interval    = "1h"
-exec        = "${SCRIPTS_DIR}/noop.sh"
-timeout     = "10s"
-enabled     = false

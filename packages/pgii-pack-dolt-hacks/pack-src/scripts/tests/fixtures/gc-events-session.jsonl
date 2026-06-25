@@ -1,4 +1,0 @@
-{"seq":1,"type":"session.crashed","ts":"2026-05-20T03:14:00Z","actor":"supervisor","subject":"gc-aaa","payload":{"agent_name":"zr.pr-reviewer"}}
-{"seq":2,"type":"session.idle_killed","ts":"2026-05-20T04:00:00Z","actor":"supervisor","subject":"gc-bbb","payload":{"agent_name":"zr.pr-self-fixer"}}
-{"seq":3,"type":"session.crashed","ts":"2026-05-20T05:30:00Z","actor":"supervisor","subject":"gc-ccc","payload":{"agent_name":"zr.pr-reviewer"}}
-{"seq":4,"type":"session.quarantined","ts":"2026-05-20T06:00:00Z","actor":"supervisor","subject":"gc-ddd","payload":{"agent_name":"zr.pr-triage"}}

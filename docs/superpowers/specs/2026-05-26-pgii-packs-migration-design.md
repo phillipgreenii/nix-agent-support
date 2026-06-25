@@ -1,6 +1,12 @@
 # pgii gascity packs — migration to nix-agent-support
 
-- **Status:** Design
+> **SUPERSEDED 2026-06-25 (bead pg2-onli):** Gas City was decommissioned (ADR
+> 0043, 2026-06-11). The `pgii-packs` home-manager module, the
+> `phillipgreenii.programs.pgii` option, `lib/mkPgiiPack.nix`, and all
+> `pgii-pack-*` packages described below have been removed as dead code. This
+> document is retained for historical context only.
+
+- **Status:** Superseded
 - **Date:** 2026-05-26
 - **Owner:** phillipg
 - **Companion repos:** `phillipgreenii-nix-agent-support` (target), `~/gc` (source of legacy packs), `phillipg-nix-ziprecruiter` (source of `pg-pr-zr`)

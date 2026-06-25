@@ -7,7 +7,6 @@
     ./programs/claude-theme
     ./programs/pgii-claude-plugins
     ./programs/claude-marketplaces
-    ./programs/pgii-packs
     ./programs/agent-rules
     ./programs/agentsview
     ./programs/ccusage
