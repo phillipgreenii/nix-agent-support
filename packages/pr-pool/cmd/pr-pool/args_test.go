@@ -78,6 +78,8 @@ func TestRoute(t *testing.T) {
 		{"unknown-subcommand-is-usage-error", []string{"pr-pool", "bogus"}, routeUsageErr},
 		{"sessions-subcommand", []string{"pr-pool", "sessions"}, routeSessions},
 		{"sessions-with-arg-is-usage-error", []string{"pr-pool", "sessions", "x"}, routeUsageErr},
+		{"reconcile-subcommand", []string{"pr-pool", "reconcile"}, routeReconcile},
+		{"reconcile-with-arg-is-usage-error", []string{"pr-pool", "reconcile", "x"}, routeUsageErr},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

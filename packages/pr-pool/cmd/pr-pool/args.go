@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -24,6 +24,7 @@ Subcommands:
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
   config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
   sessions                list this pool's sessions (bead/role) from session metadata (read-only)
+  reconcile               report open process-feedback cycles that are self-owned but unstamped (missing the 'mine' label), which discovery silently skips (read-only)
   version                 print the version and exit
   help                    print this help and exit
 
@@ -57,14 +58,15 @@ prompt in config.toml instead.`
 type routeKind int
 
 const (
-	routeDrain    routeKind = iota // run a drain with .rest as the subcommand args
-	routeVersion                   // print the version and exit 0
-	routeHelp                      // print usage and exit 0
-	routeUsageErr                  // print .msg + usage to stderr and exit 2
-	routeRunRole                   // dispatch one bead through a role (.role, .bead)
-	routeRunQuery                  // run a role's discovery query read-only (.role)
-	routeConfig                    // print/show config (.configMode)
-	routeSessions                  // list this pool's sessions from metadata (read-only)
+	routeDrain     routeKind = iota // run a drain with .rest as the subcommand args
+	routeVersion                    // print the version and exit 0
+	routeHelp                       // print usage and exit 0
+	routeUsageErr                   // print .msg + usage to stderr and exit 2
+	routeRunRole                    // dispatch one bead through a role (.role, .bead)
+	routeRunQuery                   // run a role's discovery query read-only (.role)
+	routeConfig                     // print/show config (.configMode)
+	routeSessions                   // list this pool's sessions from metadata (read-only)
+	routeReconcile                  // report stranded self-owned feedback cycles (read-only)
 )
 
 type routeResult struct {
@@ -107,6 +109,8 @@ func route(argv []string) routeResult {
 		return parseConfigArgs(args[1:])
 	case "sessions":
 		return parseSessionsArgs(args[1:])
+	case "reconcile":
+		return parseReconcileArgs(args[1:])
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -173,6 +177,14 @@ func parseSessionsArgs(args []string) routeResult {
 		return routeResult{kind: routeUsageErr, msg: "sessions: unexpected argument: " + args[0]}
 	}
 	return routeResult{kind: routeSessions}
+}
+
+// parseReconcileArgs validates `reconcile` (no args; read-only).
+func parseReconcileArgs(args []string) routeResult {
+	if len(args) > 0 {
+		return routeResult{kind: routeUsageErr, msg: "reconcile: unexpected argument: " + args[0]}
+	}
+	return routeResult{kind: routeReconcile}
 }
 
 // parseConfigArgs validates `config (--print-defaults | --show)`.

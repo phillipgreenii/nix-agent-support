@@ -27,6 +27,8 @@ func main() {
 		os.Exit(runConfig(r.configMode))
 	case routeSessions:
 		os.Exit(runSessions())
+	case routeReconcile:
+		os.Exit(runReconcile())
 	}
 }
 

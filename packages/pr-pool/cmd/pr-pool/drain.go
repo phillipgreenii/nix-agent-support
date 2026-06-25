@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
+	"github.com/phillipgreenii/pr-pool/internal/reconcile"
 )
 
 // Exit codes (ccpool convention: 1 generic, 2 usage, ≥3 specific).
@@ -67,6 +68,7 @@ func runDrain(args []string) int {
 		cfg.SelfLogin = selfLogin
 	}
 	slog.Info("resolved self", "login", cfg.SelfLogin)
+	warnStrandedFeedback(ctx, br, cfg.SelfLogin)
 
 	o := &orchestrator.Orchestrator{
 		CC:  ccpool.NewCLIRunner(cfg),
@@ -109,6 +111,22 @@ func warnTrackedConfig(ctx context.Context, cfg config.Config) {
 	cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoRoot, "ls-files", "--error-unmatch", ".pr-pool/config.toml")
 	if err := cmd.Run(); err == nil {
 		slog.Warn("`.pr-pool/config.toml` is tracked by git; prompts may be committed — add `.pr-pool/` to .git/info/exclude", "repo", cfg.RepoRoot)
+	}
+}
+
+// warnStrandedFeedback surfaces the pg2-eo4n failure mode: discovery filters the
+// feedback role with `bd ready --label mine`, so a self-owned `process-feedback:`
+// cycle that was never stamped `mine` is silently skipped (indistinguishable from
+// a team cycle) and idles the pool with no signal. This pre-flight guard counts
+// such cycles (parent merge-request author == self, but missing `mine`) and emits
+// a WARN naming them — a loud, observable signal. It is ADDITIVE and read-only:
+// it does not stamp the beads or alter the `--label mine` discovery itself. A bd
+// failure here is logged, not fatal (best-effort observability, like the other
+// pre-flight warns); the propagated error never becomes a false "nothing
+// stranded".
+func warnStrandedFeedback(ctx context.Context, br beads.Runner, self string) {
+	if _, err := reconcile.StrandedSelfCycles(ctx, br, self); err != nil {
+		slog.Warn("stranded-feedback reconcile guard could not run", "err", err)
 	}
 }
 
