@@ -235,6 +235,79 @@ func TestTruncationFlags(t *testing.T) {
 	}
 }
 
+func TestParseEnrichedPR_ThreadIDAndCreatedAt(t *testing.T) {
+	raw := []byte(`{"data":{"repository":{"pullRequest":{
+	  "number":42,"title":"t","author":{"__typename":"User","login":"alice"},
+	  "repository":{"nameWithOwner":"o/r"},
+	  "reviewThreads":{"nodes":[
+	    {"id":"PRRT_abc","isResolved":false,"comments":{"nodes":[
+	      {"id":"PRRC_1","author":{"__typename":"Bot","login":"coderabbitai"},"authorAssociation":"NONE","body":"nit","path":"x.go","line":7,"createdAt":"2026-06-03T09:00:00Z"}
+	    ]}}
+	  ]}}}}}`)
+	ep, err := parseEnrichedPR(raw, "o/r")
+	if err != nil {
+		t.Fatalf("parseEnrichedPR: %v", err)
+	}
+	if ep == nil || ep.PR.Number != 42 {
+		t.Fatalf("unexpected PR: %+v", ep)
+	}
+	if len(ep.Comments) != 1 {
+		t.Fatalf("want 1 comment, got %d", len(ep.Comments))
+	}
+	c := ep.Comments[0]
+	if c.ThreadID != "PRRT_abc" {
+		t.Errorf("ThreadID = %q, want PRRT_abc", c.ThreadID)
+	}
+	if c.CreatedAt != "2026-06-03T09:00:00Z" {
+		t.Errorf("CreatedAt = %q, want 2026-06-03T09:00:00Z", c.CreatedAt)
+	}
+}
+
+func TestParseEnrichedPR_TruncationFlag(t *testing.T) {
+	raw := []byte(`{"data":{"repository":{"pullRequest":{
+	  "number":1,"reviewThreads":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}`)
+	ep, err := parseEnrichedPR(raw, "o/r")
+	if err != nil {
+		t.Fatalf("parseEnrichedPR: %v", err)
+	}
+	if !sliceEq(ep.Truncated, []string{"reviewThreads"}) {
+		t.Errorf("Truncated = %v, want [reviewThreads]", ep.Truncated)
+	}
+}
+
+func TestParseEnrichedPR_NotFound(t *testing.T) {
+	raw := []byte(`{"data":{"repository":{"pullRequest":null}}}`)
+	if _, err := parseEnrichedPR(raw, "o/r"); err == nil {
+		t.Fatal("want error when pullRequest is null")
+	}
+}
+
+func TestParseEnrichedPR_GraphQLError(t *testing.T) {
+	raw := []byte(`{"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a PullRequest"}]}`)
+	if _, err := parseEnrichedPR(raw, "o/r"); err == nil {
+		t.Fatal("want error when response carries a GraphQL errors array")
+	}
+}
+
+func TestEnrichPR_FakeRunner(t *testing.T) {
+	raw := []byte(`{"data":{"repository":{"pullRequest":{"number":7,"title":"t","repository":{"nameWithOwner":"o/r"}}}}}`)
+	p := NewWithRunner(&fakeStdinRunner{out: raw})
+	ep, err := p.EnrichPR(context.Background(), "o/r", 7)
+	if err != nil {
+		t.Fatalf("EnrichPR: %v", err)
+	}
+	if ep.PR.Number != 7 {
+		t.Errorf("PR.Number = %d, want 7", ep.PR.Number)
+	}
+}
+
+func TestEnrichPR_BadRepo(t *testing.T) {
+	p := NewWithRunner(&fakeStdinRunner{out: []byte("{}")})
+	if _, err := p.EnrichPR(context.Background(), "no-slash", 1); err == nil {
+		t.Fatal("want error for repo without owner/name")
+	}
+}
+
 // fakeStdinRunner satisfies ghRunner for tests.
 type fakeStdinRunner struct {
 	out []byte

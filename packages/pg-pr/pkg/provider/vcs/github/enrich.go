@@ -36,13 +36,15 @@ import (
 // case (≤30 comments since last tick) fits in one page. Review threads
 // and thread.comments have no orderBy in GitHub's schema, so they
 // always paginate from creation-time.
-const enrichedPRsQuery = `query($search: String!) {
-  rateLimit { cost remaining resetAt }
-  search(query: $search, type: ISSUE, first: 50) {
-    issueCount
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      ... on PullRequest {
+// prNodeSelection returns the PullRequest field selection shared by the bulk
+// search query (enrichedPRsQuery) and the single-PR by-number query
+// (enrichedPRByNumberQuery). connFirst sets the page size for the
+// thread-bearing connections (reviews, comments, reviewThreads and its nested
+// comments) so the single-PR path can request more (100) than the bulk path
+// (30) without changing bulk cost. Both queries feed the SAME ghPRNode + parse
+// helpers, so ThreadID (PRRT_) and createdAt map identically on both paths.
+func prNodeSelection(connFirst int) string {
+	return fmt.Sprintf(`
         number
         title
         url
@@ -56,7 +58,7 @@ const enrichedPRsQuery = `query($search: String!) {
         deletions
         changedFiles
         repository { nameWithOwner }
-        reviews(first: 30) {
+        reviews(first: %[1]d) {
           totalCount
           pageInfo { hasNextPage }
           nodes {
@@ -67,7 +69,7 @@ const enrichedPRsQuery = `query($search: String!) {
             submittedAt
           }
         }
-        comments(first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        comments(first: %[1]d, orderBy: { field: UPDATED_AT, direction: DESC }) {
           totalCount
           pageInfo { hasNextPage }
           nodes {
@@ -78,14 +80,14 @@ const enrichedPRsQuery = `query($search: String!) {
             createdAt
           }
         }
-        reviewThreads(first: 30) {
+        reviewThreads(first: %[1]d) {
           totalCount
           pageInfo { hasNextPage }
           nodes {
             id
             isResolved
             isOutdated
-            comments(first: 30) {
+            comments(first: %[1]d) {
               totalCount
               pageInfo { hasNextPage }
               nodes {
@@ -139,8 +141,32 @@ const enrichedPRsQuery = `query($search: String!) {
               }
             }
           }
-        }
+        }`, connFirst)
+}
+
+// enrichedPRsQuery is the GraphQL search query EnrichedPRs runs once per repo
+// per tick (thread-bearing connections at first:30). See package comment for
+// node-budget math.
+var enrichedPRsQuery = `query($search: String!) {
+  rateLimit { cost remaining resetAt }
+  search(query: $search, type: ISSUE, first: 50) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {` + prNodeSelection(30) + `
       }
+    }
+  }
+}`
+
+// enrichedPRByNumberQuery fetches a single PR by number (thread-bearing
+// connections at first:100 — ample for any observed PR). EnrichPR uses it so
+// per-PR sync keys threads by the real review-thread node id (PRRT_), matching
+// the bulk daemon path and avoiding divergent/duplicate rows.
+var enrichedPRByNumberQuery = `query($owner: String!, $name: String!, $number: Int!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {` + prNodeSelection(100) + `
     }
   }
 }`
@@ -357,20 +383,81 @@ func parseEnrichedPRs(raw []byte, repo string) ([]vcs.EnrichedPR, error) {
 		if n.Number == 0 {
 			continue // skip non-PullRequest nodes
 		}
-		ep := vcs.EnrichedPR{PR: prFromGHNode(n, repo)}
-		ep.Reviews = reviewsFromGHNode(n)
-		ep.Comments = commentsFromGHNode(n)
-		ep.CIRuns = ciRunsFromGHNode(n)
-		for _, f := range n.Files.Nodes {
-			ep.Files = append(ep.Files, f.Path)
-		}
-		for _, c := range n.Commits.Nodes {
-			ep.Commits = append(ep.Commits, c.Commit.Message)
-		}
-		ep.Truncated = truncationFlags(n)
-		out = append(out, ep)
+		out = append(out, enrichedPRFromNode(n, repo))
 	}
 	return out, nil
+}
+
+// enrichedPRFromNode converts one parsed PullRequest node into an EnrichedPR.
+// Shared by the bulk search parser (parseEnrichedPRs) and the single-PR parser
+// (parseEnrichedPR) so both produce identical ThreadID/CreatedAt mapping.
+func enrichedPRFromNode(n ghPRNode, repo string) vcs.EnrichedPR {
+	ep := vcs.EnrichedPR{PR: prFromGHNode(n, repo)}
+	ep.Reviews = reviewsFromGHNode(n)
+	ep.Comments = commentsFromGHNode(n)
+	ep.CIRuns = ciRunsFromGHNode(n)
+	for _, f := range n.Files.Nodes {
+		ep.Files = append(ep.Files, f.Path)
+	}
+	for _, c := range n.Commits.Nodes {
+		ep.Commits = append(ep.Commits, c.Commit.Message)
+	}
+	ep.Truncated = truncationFlags(n)
+	return ep
+}
+
+// ghSinglePRResponse is the envelope for the by-number query
+// (data.repository.pullRequest).
+type ghSinglePRResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest *ghPRNode `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+	Errors []ghGraphQLError `json:"errors"`
+}
+
+// parseEnrichedPR parses the single-PR by-number GraphQL response into one
+// EnrichedPR, using the same node conversion as the bulk path.
+func parseEnrichedPR(raw []byte, repo string) (*vcs.EnrichedPR, error) {
+	var resp ghSinglePRResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("github: parse single-PR GraphQL response for %s: %w", repo, err)
+	}
+	if len(resp.Errors) > 0 {
+		return nil, fmt.Errorf("github: GraphQL error for %s: %s", repo, resp.Errors[0].Message)
+	}
+	if resp.Data.Repository.PullRequest == nil {
+		return nil, fmt.Errorf("github: PR not found in %s", repo)
+	}
+	ep := enrichedPRFromNode(*resp.Data.Repository.PullRequest, repo)
+	return &ep, nil
+}
+
+// EnrichPR fetches one PR's enrichment in a single GraphQL round-trip, using
+// the same field selection + parsers as the bulk path so review-thread node
+// ids (PRRT_) and comment createdAt match exactly. The sync engine prefers this
+// over per-PR REST (see internal/sync SinglePREnricher) so `sync --pr` keys
+// threads the same way as the daemon and produces no divergent duplicates.
+func (p *Provider) EnrichPR(ctx context.Context, repo string, number int) (*vcs.EnrichedPR, error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" {
+		return nil, fmt.Errorf("github: invalid repo %q (want owner/name)", repo)
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	raw, err := p.gh.RunStdin(ctx, []byte(enrichedPRByNumberQuery),
+		"api", "graphql",
+		"-F", "owner="+owner,
+		"-F", "name="+name,
+		"-F", fmt.Sprintf("number=%d", number),
+		"-F", "query=@-",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github: gh api graphql (pr %s#%d): %w", repo, number, err)
+	}
+	return parseEnrichedPR(raw, repo)
 }
 
 func prFromGHNode(n ghPRNode, repo string) api.PR {
