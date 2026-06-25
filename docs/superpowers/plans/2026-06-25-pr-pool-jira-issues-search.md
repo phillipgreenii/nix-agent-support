@@ -409,7 +409,7 @@ Expected: a flag-parse/`--jql is required` style error and non-zero exit — NOT
 
 - [ ] **Step 1: Replace the jira tests with the envelope contract**
 
-In `issues_test.go`, DELETE `TestJiraIssues_mapsResultsAndRequestsRaw` and `TestJiraIssues_missingKeyIsError`, and add:
+In `issues_test.go`, DELETE the two old tests: `TestJiraIssues_mapsResultsAndRequestsRaw` and the old `TestJiraIssues_missingKeyIsError` (the `--raw`/`{"issues":[…]}` versions). The add-block below RE-CREATES `TestJiraIssues_missingKeyIsError` with a new envelope body — after editing, verify exactly ONE `func TestJiraIssues_missingKeyIsError` exists (a duplicate is a `redeclared in this block` compile error). Then add:
 
 ```go
 func TestJiraIssues_mapsEnvelopeAndBuildsArgs(t *testing.T) {
@@ -467,6 +467,8 @@ Run: `cd ~/phillipg_mbp/phillipgreenii-nix-agent-support/packages/pr-pool && go 
 Expected: FAIL — the new test expects argv `pg-pr-issues-jira-zr search` / envelope mapping the old code doesn't produce.
 
 - [ ] **Step 3: Rewrite `JiraIssues.Run` + types in `issues.go`**
+
+Leave `warnIfTruncated` and `issueListLimit = 200` intact — `GitHubIssues.Run` still uses both (only the jira path stops calling `warnIfTruncated`). Do not "clean them up."
 
 In `issues.go`: add the jira page-cap const near `issueListLimit`:
 
