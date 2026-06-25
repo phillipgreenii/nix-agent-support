@@ -5,11 +5,6 @@
   },
   "plugins": [
     {
-      "name": "agent-rules",
-      "source": "./agent-rules",
-      "description": "Always-on personal agent rules injected into every session via a SessionStart hook"
-    },
-    {
       "name": "bash-lsp",
       "source": "./bash-lsp",
       "description": "Bash/Shell language server for code intelligence"

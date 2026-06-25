@@ -130,24 +130,6 @@
               name = "claude-activity-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
-          # SessionStart hook binary for the always-on agent-rules plugin. The
-          # rules content (single source of truth) is the same markdown the
-          # agent-rules HM module ships; it is baked into the binary as the
-          # AGENT_RULES_FILE store path so the script and the bundled rules never
-          # diverge. The agent-rules HM module installs this on PATH so the
-          # marketplace's bare `agent-rules-session-start` hook command resolves.
-          agent-rules =
-            let
-              result = import ./packages/agent-rules {
-                pkgs = final;
-                inherit bashBuilders;
-                rulesFile = ./home/programs/agent-rules/pgii-agent-rules.md;
-              };
-            in
-            final.symlinkJoin {
-              name = "agent-rules-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
-              paths = result.packages;
-            };
           agent-activity =
             let
               result = import ./packages/agent-activity {
@@ -912,14 +894,6 @@
             inherit pkgs;
             bashBuilders = pkgs._agentSupportBashBuilders;
             inherit (pkgs) gascity;
-          }).checks
-          # Bats check for the agent-rules SessionStart hook script (asserts it
-          # exits 0 and emits the SessionStart additionalContext JSON carrying the
-          # rules content). `nix flake check` runs it.
-          // (import ./packages/agent-rules {
-            inherit pkgs;
-            bashBuilders = pkgs._agentSupportBashBuilders;
-            rulesFile = ./home/programs/agent-rules/pgii-agent-rules.md;
           }).checks;
 
           packages = {

@@ -84,9 +84,20 @@ construction mode.
 ### Neutral
 
 - `pgii-claude-plugins` (the third-party marketplace module) is unaffected.
-- `agent-rules` is not part of this marketplace — it ships always-on rules via
-  the user `~/.claude/CLAUDE.md` (see the agent-rules delivery design, commit
-  5c790bf).
+- `agent-rules` is **not a plugin** and is not part of this marketplace — it is
+  the user-level always-on rules, delivered by writing the personal rules to the
+  user `~/.claude/CLAUDE.md` ("user memory"), which Claude Code loads in every
+  session (interactive and headless `claude -p`, verified against 2.1.186). User
+  `CLAUDE.md` is the single, canonical always-on delivery. See the agent-rules
+  delivery design (commit `5c790bf`).
+- During this migration `agent-rules` was briefly mis-shipped as a SessionStart
+  **hook plugin** (commit `63a696b`, pg2-44sj) added to this marketplace, on the
+  assumption a plugin/hook was needed for always-on rules. That was confusion
+  carried over from the plugin migration, not a new decision: because user
+  `CLAUDE.md` **is** loaded, the hook injected the same ~4 KB of rules a second
+  time (byte-identical double-injection, redundant token cost). pg2-qewh removed
+  the hook plugin and restored user `CLAUDE.md` as the sole delivery; the
+  agent-rules delivery design (commit `5c790bf`) was correct all along.
 
 ## Alternatives Considered
 

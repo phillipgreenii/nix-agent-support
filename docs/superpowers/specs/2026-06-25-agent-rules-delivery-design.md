@@ -1,7 +1,7 @@
 # agent-rules delivery: user-level CLAUDE.md, not a plugin
 
 **Date**: 2026-06-25
-**Bead**: pg2-44sj
+**Bead**: pg2-44sj (delivery design); pg2-qewh (reconciliation — SessionStart hook removed)
 **Status**: Accepted
 
 ## Problem
@@ -48,7 +48,23 @@ Verification (throwaway dirs, real `~/.claude` untouched):
   it stays a soft, in-file instruction (which is how the file is already written).
 
 This also yields a coherent convention: **always-on rules → user `CLAUDE.md`;
-skills/plugins → nix-managed marketplace.**
+skills/plugins → nix-managed marketplace.** `agent-rules` is **not** a plugin: it
+is the module that maps the personal rules onto the user `CLAUDE.md`.
+
+> **SessionStart hook episode (pg2-44sj → reverted by pg2-qewh).** During the
+> static-marketplace migration (ADR-0017) `agent-rules` was briefly re-shipped as
+> a SessionStart **hook plugin** (commit `63a696b`) that injected the rules as
+> `additionalContext`, while the HM module kept writing `~/.claude/CLAUDE.md` as a
+> "redundant fallback." Because user `CLAUDE.md` **is** loaded in 2.1.186 (the
+> verification above), both paths were live and the same ~4 KB of rules were
+> injected **twice** — byte-identical, no behavioral conflict, only redundant
+> token cost. The hook plugin was confusion carried over from the plugin
+> migration, not a new decision; this spec was always correct. pg2-qewh removed
+> the hook plugin (its marketplace entry, `claude-marketplace/agent-rules/`,
+> `packages/agent-rules/`, and the flake overlay/check wiring), restoring the HM
+> module to writing `~/.claude/CLAUDE.md` as the **single, canonical** always-on
+> delivery. The `SessionStart hook` row above stays in the table as the rejected
+> alternative it always was.
 
 ## Scope / non-goals
 
