@@ -7,6 +7,7 @@
     ./modules/pr-pool
     ./modules/ccpool
     ./modules/gc-dolt-maintenance
+    ./modules/ollama
     ./services/beads-web
   ];
 }

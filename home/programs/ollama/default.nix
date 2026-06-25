@@ -11,10 +11,6 @@ let
   # phillipg-mbp-02). Falling back to `pkgs.ollama` keeps standalone
   # evaluation of this module functional.
   defaultOllama = if pkgs ? unstable then pkgs.unstable.ollama else pkgs.ollama;
-  wrapper = import ./wrapper.nix {
-    inherit pkgs lib;
-    ollamaPackage = cfg.package;
-  };
 in
 {
   options.phillipgreenii.programs.ollama = {
@@ -115,27 +111,22 @@ in
     };
   };
 
+  # The ollama LaunchAgent itself is registered in the parallel darwin module
+  # (darwin/modules/ollama/default.nix) via the canonical
+  # `phillipgreenii.system.launchdServices.userAgents` helper. That option is
+  # declared at darwin/system scope (phillipgreenii-nix-personal
+  # lib/options/launchd-services.nix), not HM scope, and per ADR 0049 every
+  # auto-started LaunchAgent MUST go through it (stable-path indirection,
+  # PG_LAUNCHD_WRAPPER restart-on-change, activation health check) — writing
+  # `launchd.agents.ollama` directly from this HM module is forbidden. The
+  # darwin module reads this module's options across `config.home-manager
+  # .users.<u>.phillipgreenii.programs.ollama`. This module keeps only the
+  # user-scope surface: the option API, the on-PATH package, and the
+  # interactive `OLLAMA_HOST` session variable.
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
     # Ensure interactive `ollama` CLI talks to this user's daemon by default.
     home.sessionVariables.OLLAMA_HOST = "${cfg.host}:${toString cfg.port}";
-
-    launchd.agents.ollama = {
-      enable = true;
-      config = {
-        Label = "phillipgreenii.ollama";
-        ProgramArguments = [ "${wrapper}/bin/pgii-ollama-server" ] ++ cfg.loadModels;
-        EnvironmentVariables = {
-          OLLAMA_HOST = "${cfg.host}:${toString cfg.port}";
-        }
-        // cfg.extraEnv;
-        KeepAlive = true;
-        RunAtLoad = true;
-        ProcessType = cfg.processType;
-        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ollama.out.log";
-        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ollama.err.log";
-      };
-    };
   };
 }
