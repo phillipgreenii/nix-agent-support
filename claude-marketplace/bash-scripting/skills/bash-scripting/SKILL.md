@@ -27,11 +27,11 @@ All bash scripts use the **mkBashBuilders framework** at `phillipgreenii-nix-per
 
 Three composable builders:
 
-| Builder         | Purpose                                              | Returns                                                                    |
-| --------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `mkBashLibrary` | Sourceable `.bash` library with dependency chaining  | `{ lib, check }`                                                           |
-| `mkBashScript`  | Complete command (script + man + tldr + completions) | `{ script, manPage, tldr, completion, check, packages, internalPackages }` |
-| `mkBashModule`  | Optional aggregator for multiple scripts/libraries   | `{ packages, checks, tldr, libraries, scripts }`                           |
+| Builder         | Purpose                                              | Returns                                                           |
+| --------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| `mkBashLibrary` | Sourceable `.bash` library with dependency chaining  | `{ lib, check }`                                                  |
+| `mkBashScript`  | Complete command (script + man + tldr + completions) | `{ script, tldr, completion, check, packages, internalPackages }` |
+| `mkBashModule`  | Optional aggregator for multiple scripts/libraries   | `{ packages, checks, tldr, libraries, scripts }`                  |
 
 Instantiate at the flake level (where `self` is available):
 

@@ -40,7 +40,9 @@ Each program module:
 Custom artifacts (Bash, Python, Go) version from a **per-source content digest**, never the repo
 git rev. The `--version` string is `YY.MM.DD.SSSSS+<srcDigest>` (build-time date + an 8-char digest
 of the artifact's own source). It changes iff that artifact's source changes (committed or dirty);
-an unrelated commit elsewhere in the repo leaves it cached. The helpers (`mkSrcDigest`,
+an unrelated commit elsewhere in the repo leaves it cached. As of `phillipg-nix-repo-base` ADR 0011,
+the per-source digest now ALSO appears in the derivation `version` for Bash and Python artifacts
+(matching Go), so it shows up in `nvd` / "Package changes" output. The helpers (`mkSrcDigest`,
 `mkBashScript`/`mkBashBuilders`, `mkGoApp`/`mkGoBinary`, `mkPythonPackage`) do this for you — do
 **not** thread a repo `gitHash` into a package build (that rebuilds every stamped artifact on every
 commit). The repo git rev belongs only in the repo-meta install-metadata module. Third-party deps

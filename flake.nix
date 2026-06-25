@@ -86,7 +86,7 @@
             inherit (final) lib;
             inherit self;
           };
-          pythonBuilders = import ./lib/python-package.nix {
+          pythonBuilders = phillipgreenii-nix-base.lib.mkPythonBuilders {
             pkgs = final;
             inherit (final) lib;
             inherit (phillipgreenii-nix-base.lib) mkSrcDigest;
@@ -127,7 +127,7 @@
               };
             in
             final.symlinkJoin {
-              name = "claude-activity";
+              name = "claude-activity-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
           # SessionStart hook binary for the always-on agent-rules plugin. The
@@ -145,7 +145,7 @@
               };
             in
             final.symlinkJoin {
-              name = "agent-rules";
+              name = "agent-rules-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
           agent-activity =
@@ -157,7 +157,7 @@
               };
             in
             final.symlinkJoin {
-              name = "agent-activity";
+              name = "agent-activity-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
               postBuild = ''
                 ln -s agent-activity-api $out/bin/agent-activity
@@ -172,7 +172,7 @@
               };
             in
             final.symlinkJoin {
-              name = "wait-for-agents";
+              name = "wait-for-agents-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
           git-tools =
@@ -183,7 +183,7 @@
               };
             in
             final.symlinkJoin {
-              name = "git-tools";
+              name = "git-tools-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
@@ -215,7 +215,7 @@
               };
             in
             final.symlinkJoin {
-              name = "gc-bd-import-breaker";
+              name = "gc-bd-import-breaker-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.gc-bd-import-breaker.packages}";
               paths = result.gc-bd-import-breaker.packages;
             };
           gc-dolt-maintenance =
@@ -227,7 +227,7 @@
               };
             in
             final.symlinkJoin {
-              name = "gc-dolt-maintenance";
+              name = "gc-dolt-maintenance-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.gc-dolt-maintenance.packages}";
               paths = result.gc-dolt-maintenance.packages;
             };
         };
