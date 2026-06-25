@@ -168,6 +168,21 @@ func TestJiraIssues_nonZeroExitPropagates(t *testing.T) {
 	}
 }
 
+func TestJiraIssues_emptyEnvelopeIsZeroItems(t *testing.T) {
+	cmd := &recordingCmd{out: []byte(`{"items":[],"truncated":false}`)}
+	items, err := (JiraIssues{Project: "PROJ"}).Run(context.Background(), Env{Cmd: cmd})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("empty envelope = zero items, no error; got items=%v err=%v", items, err)
+	}
+}
+
+func TestJiraIssues_malformedIsError(t *testing.T) {
+	cmd := &recordingCmd{out: []byte(`{not json}`)}
+	if _, err := (JiraIssues{Project: "PROJ"}).Run(context.Background(), Env{Cmd: cmd}); err == nil {
+		t.Fatal("malformed envelope output must error")
+	}
+}
+
 func TestIsStub_noStubTypesRemain(t *testing.T) {
 	for _, q := range []Query{GitHubIssues{Repo: "o/r"}, JiraIssues{Project: "P"}, BeadsReady{}} {
 		if IsStub(q) {

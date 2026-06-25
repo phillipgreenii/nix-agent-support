@@ -165,12 +165,12 @@ func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 	if len(bytes.TrimSpace(out)) == 0 {
 		return nil, nil
 	}
-	var envl jiraSearchEnvelope
-	if err := json.Unmarshal(out, &envl); err != nil {
+	var envelope jiraSearchEnvelope
+	if err := json.Unmarshal(out, &envelope); err != nil {
 		return nil, fmt.Errorf("jira-issues query: parse pg-pr-issues-jira-zr output: %w", err)
 	}
-	items := make([]item.Item, 0, len(envl.Items))
-	for _, ji := range envl.Items {
+	items := make([]item.Item, 0, len(envelope.Items))
+	for _, ji := range envelope.Items {
 		if ji.Key == "" {
 			return nil, fmt.Errorf("jira-issues query: item missing required \"key\"")
 		}
@@ -188,7 +188,7 @@ func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 			},
 		})
 	}
-	if envl.Truncated {
+	if envelope.Truncated {
 		slog.Warn("jira-issues query truncated; backlog exceeds one page",
 			"project", q.Project, "limit", jiraListLimit)
 	}
