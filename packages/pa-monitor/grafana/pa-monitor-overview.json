@@ -304,10 +304,10 @@
         "w": 24,
         "h": 8
       },
-      "description": "One row per active (non-Dormant) session — mirrors the TUI 'active' view. Joined on session_id from pa_monitor_session_info (labels), pa_monitor_session_tokens, and pa_monitor_session_cost_usd.",
+      "description": "One row per active (non-Dormant) session — mirrors the TUI 'active' view. Joined on session_id from pa_monitor_session_info (labels), pa_monitor_session_tokens, and pa_monitor_session_cost_usd. The info query is wrapped in topk(1, timestamp(...)) by (session_id) so that when a mutable label (e.g. status idle->working) spawns a second series, only the freshest one renders — otherwise both stay live within Prometheus staleness and the join shows the session as two rows mid-transition.",
       "targets": [
         {
-          "expr": "pa_monitor_session_info{plan_tier=~\"$plan_tier\", workspace_scope=~\"$scope\"}",
+          "expr": "topk(1, timestamp(pa_monitor_session_info{plan_tier=~\"$plan_tier\", workspace_scope=~\"$scope\"})) by (session_id)",
           "format": "table",
           "instant": true,
           "refId": "A",
