@@ -93,11 +93,11 @@ func TestGitHubIssues_malformedIsError(t *testing.T) {
 
 // --- jira-issues ---
 
-func TestJiraIssues_mapsResultsAndRequestsRaw(t *testing.T) {
-	cmd := &recordingCmd{out: []byte(`{"issues":[
-	  {"key":"PROJ-1","fields":{"summary":"Do X","issuetype":{"name":"Bug"},"status":{"name":"To Do"},"labels":["a","b"]}},
-	  {"key":"PROJ-2","fields":{"summary":"Do Y","issuetype":{"name":"Task"},"status":{"name":"In Progress"},"labels":[]}}
-	]}`)}
+func TestJiraIssues_mapsEnvelopeAndBuildsArgs(t *testing.T) {
+	cmd := &recordingCmd{out: []byte(`{"items":[
+	  {"key":"PROJ-1","summary":"Do X","status":"To Do","issuetype":"Bug","labels":["a","b"],"url":"https://x/browse/PROJ-1"},
+	  {"key":"PROJ-2","summary":"Do Y","status":"In Progress","issuetype":"Task","labels":[],"url":"https://x/browse/PROJ-2"}
+	],"truncated":false}`)}
 	q := JiraIssues{Project: "PROJ", Labels: []string{"worker-ready"}}
 	items, err := q.Run(context.Background(), Env{Cmd: cmd})
 	if err != nil {
@@ -111,11 +111,15 @@ func TestJiraIssues_mapsResultsAndRequestsRaw(t *testing.T) {
 		t.Errorf("item[0] mapped wrong: %+v", got)
 	}
 	if got.Metadata["key"] != "PROJ-1" || got.Metadata["project"] != "PROJ" ||
-		got.Metadata["issuetype"] != "Bug" || got.Metadata["status"] != "To Do" {
+		got.Metadata["issuetype"] != "Bug" || got.Metadata["status"] != "To Do" ||
+		got.Metadata["url"] != "https://x/browse/PROJ-1" {
 		t.Errorf("item[0] metadata wrong: %+v", got.Metadata)
 	}
-	if !slices.Contains(cmd.argv, "--raw") || !slices.Contains(cmd.argv, "--jql") {
-		t.Errorf("argv must request raw JSON via --jql/--raw: %v", cmd.argv)
+	if len(cmd.argv) < 2 || cmd.argv[0] != "pg-pr-issues-jira-zr" || cmd.argv[1] != "search" {
+		t.Errorf("argv must invoke 'pg-pr-issues-jira-zr search': %v", cmd.argv)
+	}
+	if !argvHasPair(cmd.argv, "--limit", "100") || !slices.Contains(cmd.argv, "--jql") {
+		t.Errorf("argv missing --jql/--limit: %v", cmd.argv)
 	}
 }
 
@@ -143,9 +147,17 @@ func TestJiraIssues_validateRequiresProjectOrJQL(t *testing.T) {
 }
 
 func TestJiraIssues_missingKeyIsError(t *testing.T) {
-	cmd := &recordingCmd{out: []byte(`{"issues":[{"fields":{"summary":"no key"}}]}`)}
+	cmd := &recordingCmd{out: []byte(`{"items":[{"summary":"no key"}],"truncated":false}`)}
 	if _, err := (JiraIssues{Project: "PROJ"}).Run(context.Background(), Env{Cmd: cmd}); err == nil {
-		t.Fatal("issue missing key must error")
+		t.Fatal("item missing key must error")
+	}
+}
+
+func TestJiraIssues_truncatedStillReturnsItems(t *testing.T) {
+	cmd := &recordingCmd{out: []byte(`{"items":[{"key":"PROJ-1","summary":"X"}],"truncated":true}`)}
+	items, err := (JiraIssues{Project: "PROJ"}).Run(context.Background(), Env{Cmd: cmd})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("truncated=true must still return items, no error; got items=%v err=%v", items, err)
 	}
 }
 

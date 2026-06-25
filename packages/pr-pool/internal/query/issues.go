@@ -24,6 +24,11 @@ import (
 // for the whole queue (no silent caps).
 const issueListLimit = 200
 
+// jiraListLimit bounds a single jira-issues page. /rest/api/3/search/jql caps a
+// fielded page at 100 regardless of maxResults, so 100 is the effective ceiling;
+// truncation past it is reported via the envelope's flag, not a count.
+const jiraListLimit = 100
+
 // --- github-issues ---
 
 // GitHubIssues lists OPEN issues in Repo via `gh issue list`, optionally narrowed to
@@ -96,10 +101,10 @@ func (q GitHubIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 
 // --- jira-issues ---
 
-// JiraIssues lists unresolved issues via the `jira` CLI (ankitpokhrel/jira-cli),
-// requesting the raw Jira REST search response with `--raw`. JQL takes precedence
-// when set; otherwise a default JQL is built from Project (+ Labels). The CLI's own
-// config supplies the tenant URL and credentials.
+// JiraIssues lists unresolved issues by running `pg-pr-issues-jira-zr search --jql <jql>`,
+// which queries `/rest/api/3/search/jql` and returns a normalized `{items,truncated}` envelope.
+// JQL takes precedence when set; otherwise a default JQL is built from Project (+ Labels).
+// The CLI's own config supplies the tenant URL and credentials.
 type JiraIssues struct {
 	Project string   `toml:"project"`
 	JQL     string   `toml:"jql"`
@@ -129,30 +134,29 @@ func (q JiraIssues) jql() string {
 	return sb.String()
 }
 
-// jiraSearchResult is the subset of the Jira REST /search response (emitted verbatim
-// by `jira issue list --raw`) mapped to Items.
-type jiraSearchResult struct {
-	Issues []struct {
-		Key    string `json:"key"`
-		Fields struct {
-			Summary   string   `json:"summary"`
-			Labels    []string `json:"labels"`
-			IssueType struct {
-				Name string `json:"name"`
-			} `json:"issuetype"`
-			Status struct {
-				Name string `json:"name"`
-			} `json:"status"`
-		} `json:"fields"`
-	} `json:"issues"`
+// jiraSearchItem is one item in pg-pr-issues-jira-zr's search envelope.
+type jiraSearchItem struct {
+	Key       string   `json:"key"`
+	Summary   string   `json:"summary"`
+	Status    string   `json:"status"`
+	IssueType string   `json:"issuetype"`
+	Labels    []string `json:"labels"`
+	URL       string   `json:"url"`
+}
+
+// jiraSearchEnvelope is the stdout contract of `pg-pr-issues-jira-zr search`:
+// normalized items the tool already mapped from Jira's REST response, plus a
+// truncation flag (the tool owns the wire format; pr-pool stays decoupled).
+type jiraSearchEnvelope struct {
+	Items     []jiraSearchItem `json:"items"`
+	Truncated bool             `json:"truncated"`
 }
 
 func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 	argv := []string{
-		"jira", "issue", "list",
+		"pg-pr-issues-jira-zr", "search",
 		"--jql", q.jql(),
-		"--paginate", "0:" + strconv.Itoa(issueListLimit),
-		"--raw",
+		"--limit", strconv.Itoa(jiraListLimit),
 	}
 	out, err := commander(env).Run(ctx, argv)
 	if err != nil {
@@ -161,29 +165,33 @@ func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 	if len(bytes.TrimSpace(out)) == 0 {
 		return nil, nil
 	}
-	var res jiraSearchResult
-	if err := json.Unmarshal(out, &res); err != nil {
-		return nil, fmt.Errorf("jira-issues query: parse jira issue list JSON: %w", err)
+	var envl jiraSearchEnvelope
+	if err := json.Unmarshal(out, &envl); err != nil {
+		return nil, fmt.Errorf("jira-issues query: parse pg-pr-issues-jira-zr output: %w", err)
 	}
-	items := make([]item.Item, 0, len(res.Issues))
-	for _, ji := range res.Issues {
+	items := make([]item.Item, 0, len(envl.Items))
+	for _, ji := range envl.Items {
 		if ji.Key == "" {
-			return nil, fmt.Errorf("jira-issues query: issue missing required \"key\"")
+			return nil, fmt.Errorf("jira-issues query: item missing required \"key\"")
 		}
 		items = append(items, item.Item{
 			ID:    ji.Key,
 			Type:  "jira-issue",
-			Title: ji.Fields.Summary,
+			Title: ji.Summary,
 			Metadata: map[string]any{
 				"project":   q.Project,
 				"key":       ji.Key,
-				"issuetype": ji.Fields.IssueType.Name,
-				"status":    ji.Fields.Status.Name,
-				"labels":    ji.Fields.Labels,
+				"issuetype": ji.IssueType,
+				"status":    ji.Status,
+				"labels":    ji.Labels,
+				"url":       ji.URL,
 			},
 		})
 	}
-	warnIfTruncated("jira-issues", q.Project, len(items))
+	if envl.Truncated {
+		slog.Warn("jira-issues query truncated; backlog exceeds one page",
+			"project", q.Project, "limit", jiraListLimit)
+	}
 	return items, nil
 }
 
