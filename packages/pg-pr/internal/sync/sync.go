@@ -685,41 +685,50 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 		pr.Repo = rcfg.Remote
 	}
 
-	// Prefer single-PR GraphQL enrichment so per-PR sync produces the SAME
-	// real review-thread node ids (PRRT_) + createdAt as the bulk daemon path,
-	// avoiding divergent/duplicate feedback rows. Fall back to per-PR REST only
-	// on a hard error — a truncated-but-correctly-keyed GraphQL result is still
-	// preferred over REST (the duplicates come from thread keying, not from
-	// missing the long tail of a >100-comment PR).
+	out := vcs.EnrichedPR{PR: pr}
+
+	// Reviews + comments: prefer single-PR GraphQL so per-PR sync keys comment
+	// threads by the real review-thread node id (PRRT_) + createdAt, identical
+	// to the bulk daemon path (no divergent/duplicate rows). Fall back to the
+	// per-PR REST methods only on a hard error. CI is fetched separately below
+	// (from the dedicated CICD provider), so only thread-bearing truncation
+	// matters here — ciContexts/files truncation is routine on large PRs and
+	// irrelevant to thread identity.
+	gotGraphQL := false
 	if vp, err := e.providerFor(rcfg); err == nil {
 		if spe, ok := vp.(SinglePREnricher); ok {
 			ep, eerr := spe.EnrichPR(ctx, pr.Repo, pr.Number)
 			if eerr == nil && ep != nil {
-				if len(ep.Truncated) > 0 {
-					fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL enrichment truncated %v (using partial, correctly-keyed data)\n", pr.Repo, pr.Number, ep.Truncated)
+				out.Reviews = ep.Reviews
+				out.Comments = ep.Comments
+				out.Files = ep.Files
+				out.Commits = ep.Commits
+				if tt := threadBearingTruncations(ep.Truncated); len(tt) > 0 {
+					fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL thread data truncated %v (using partial, correctly-keyed data)\n", pr.Repo, pr.Number, tt)
 				}
-				ep.PR = pr // keep the observed PR state over the fetched one
-				return ep
-			}
-			if eerr != nil {
+				gotGraphQL = true
+			} else if eerr != nil {
 				fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL enrichment failed (%v); falling back to REST\n", pr.Repo, pr.Number, eerr)
+			}
+		}
+		if !gotGraphQL {
+			if rl, ok := vp.(ReviewLister); ok {
+				if reviews, rerr := rl.ListReviews(ctx, pr.Repo, pr.Number); rerr == nil {
+					out.Reviews = reviews
+				}
+			}
+			if reader, ok := vp.(CommentReader); ok {
+				if comments, cerr := reader.ListComments(ctx, pr.Repo, pr.Number); cerr == nil {
+					out.Comments = comments
+				}
 			}
 		}
 	}
 
-	out := vcs.EnrichedPR{PR: pr}
-	if vp, err := e.providerFor(rcfg); err == nil {
-		if rl, ok := vp.(ReviewLister); ok {
-			if reviews, rerr := rl.ListReviews(ctx, pr.Repo, pr.Number); rerr == nil {
-				out.Reviews = reviews
-			}
-		}
-		if reader, ok := vp.(CommentReader); ok {
-			if comments, cerr := reader.ListComments(ctx, pr.Repo, pr.Number); cerr == nil {
-				out.Comments = comments
-			}
-		}
-	}
+	// CI runs always come from the dedicated CICD provider (unchanged), so a PR
+	// with many checks keeps complete CI regardless of which enrichment path ran
+	// above — GraphQL statusCheckRollup caps at 30 contexts and is not used for
+	// CI here.
 	if cp := e.firstCICDFor(rcfg); cp != nil {
 		if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
 			if runs, cerr := bl.ListRunsByBranch(ctx, pr.Repo, pr.Branch); cerr == nil {
@@ -730,6 +739,22 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 		}
 	}
 	return &out
+}
+
+// threadBearingTruncations filters EnrichedPR.Truncated to the connections that
+// affect feedback-thread identity/content (reviews, comments, reviewThreads,
+// threadComments). ciContexts/files/labels/commits truncation is routine on
+// large PRs and irrelevant to thread keying, so enrichOnePR ignores it (CI is
+// fetched from the dedicated CICD provider, not GraphQL statusCheckRollup).
+func threadBearingTruncations(truncated []string) []string {
+	var out []string
+	for _, t := range truncated {
+		switch t {
+		case "reviews", "comments", "reviewThreads", "threadComments":
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // buildPRInput assembles the per-PR snapshot input for one observed PR:

@@ -67,6 +67,41 @@ func TestEnrichOnePR_FallsBackOnError(t *testing.T) {
 	}
 }
 
+func TestEnrichOnePR_CIAlwaysFromCICDProvider(t *testing.T) {
+	// Even when single-PR GraphQL succeeds (and carries its own statusCheckRollup
+	// CIRuns), CI must come from the dedicated CICD provider so large PRs keep
+	// complete CI (GraphQL statusCheckRollup caps at 30 contexts).
+	vp := &enricherVCS{ep: &vcs.EnrichedPR{
+		Comments: []api.Comment{{ID: "PRRC_1", ThreadID: "PRRT_abc", Path: "x.go"}},
+		CIRuns:   []api.CIRun{{Name: "from-graphql"}},
+	}}
+	cicd := newFakeCICD()
+	cicd.runs[keyOf("o/r", 42)] = []api.CIRun{{Name: "from-cicd"}}
+	e := &Engine{deps: Deps{
+		VCS:  map[string]VCSProvider{"github": vp},
+		CICD: map[string]CICDProvider{"gh-actions": cicd},
+	}}
+	got := e.enrichOnePR(context.Background(),
+		config.RepoConfig{Remote: "o/r", VCS: "github", CICD: []string{"gh-actions"}},
+		api.PR{Repo: "o/r", Number: 42})
+	if len(got.CIRuns) != 1 || got.CIRuns[0].Name != "from-cicd" {
+		t.Errorf("CI must come from the CICD provider, got %+v", got.CIRuns)
+	}
+	if len(got.Comments) != 1 || got.Comments[0].ThreadID != "PRRT_abc" {
+		t.Errorf("comments should still come from GraphQL, got %+v", got.Comments)
+	}
+}
+
+func TestThreadBearingTruncations(t *testing.T) {
+	got := threadBearingTruncations([]string{"ciContexts", "files", "reviewThreads", "comments", "labels"})
+	if len(got) != 2 || got[0] != "reviewThreads" || got[1] != "comments" {
+		t.Errorf("got %v, want [reviewThreads comments]", got)
+	}
+	if n := len(threadBearingTruncations([]string{"ciContexts", "files"})); n != 0 {
+		t.Errorf("ciContexts/files alone should yield no thread-bearing truncations, got %d", n)
+	}
+}
+
 // ----------------------------------------------------------------------
 // Fakes
 // ----------------------------------------------------------------------
