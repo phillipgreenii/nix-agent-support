@@ -454,6 +454,18 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					prEnriched = &ep
 				}
 			}
+			// Repair CI truncated by the bulk GraphQL first:30 context cap: on a
+			// PR with >30 checks, re-source CI from the dedicated CICD provider
+			// (consistent with the per-PR enrichOnePR path) so BOTH ci-failure
+			// ingestion (processFeedback) and draft auto-promote (maybePromoteDraft)
+			// see the complete check set — no missed failing check beyond context
+			// 30, no wrong promotion. prEnriched is a local copy (&ep), so this
+			// mutation does not affect the shared enrichByRepo map.
+			if prEnriched != nil {
+				if rcfg, rerr := e.repoConfig(key.Repo); rerr == nil {
+					e.reconcileTruncatedCI(prCtx, prEnriched, rcfg)
+				}
+			}
 			// Compute and persist enrichment (kind/languages/size/urgency) for
 			// this PR. Runs after emitPREvent so the store row already exists.
 			// Non-fatal: errors are recorded into summary.Errors and self-heal.
@@ -601,6 +613,10 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 				enriched = &ep
 			}
 		}
+		// Mirror the per-PR loop: repair CI truncated by the bulk GraphQL
+		// first:30 cap from the CICD provider so the snapshot's CI matches what
+		// ingestion/promotion acted on (enriched is a local &ep copy).
+		e.reconcileTruncatedCI(ctx, enriched, rcfg)
 		bdc := repoClients[key.Repo]
 		if bdc == nil {
 			bdc = e.bdClientFor(rcfg)
@@ -901,6 +917,79 @@ func (e *Engine) allTeamMembers() []string {
 func (e *Engine) isSelfAuthored(author string) bool {
 	self := e.cfg().SelfLogin
 	return self != "" && author != "" && author == self
+}
+
+// reconcileTruncatedCI repairs an EnrichedPR whose bulk-fetched CI runs were
+// truncated by the GraphQL statusCheckRollup.contexts(first:30) page cap.
+//
+// The bulk daemon path enumerates CI via a single GraphQL search capped at 30
+// status contexts per PR; on a PR with >30 checks (common on large repos) the
+// enumerated EnrichedPR.CIRuns is incomplete and EnrichedPR.Truncated records
+// "ciContexts". Both downstream consumers read this enumerated set as
+// authoritative: ci-failure ingestion (ingestFeedbackToStore iterates CIRuns
+// for Conclusion==failure) would MISS a failing check beyond context 30, and
+// draft auto-promote (maybePromoteDraft -> allRunsSuccessful over a truncated
+// "all green" set) would WRONGLY promote a draft whose >30 check is failing —
+// maybePromoteDraft does not consult the aggregate rollup .state as a guard.
+//
+// The fix mirrors the per-PR enrichOnePR path (pg2-kiqq): when ciContexts
+// truncated, re-source CI from the dedicated CICD provider (which paginates to
+// completeness), preferring the branch-known path. On success the ciContexts
+// flag is cleared so callers no longer treat the CI as partial. When no CICD
+// provider is configured or the call errors, the (partial) GraphQL CI and the
+// truncation flag are left intact — degrading no worse than before.
+//
+// Non-truncated PRs (the ≤30-context happy path) and absent-entry PRs (nil
+// enriched) are untouched; the latter already fall back to the CICD provider in
+// buildPRInput / maybePromoteDraft's enriched==nil branch.
+func (e *Engine) reconcileTruncatedCI(ctx context.Context, enriched *vcs.EnrichedPR, rcfg config.RepoConfig) {
+	if enriched == nil {
+		return
+	}
+	truncated := false
+	for _, f := range enriched.Truncated {
+		if f == "ciContexts" {
+			truncated = true
+			break
+		}
+	}
+	if !truncated {
+		return
+	}
+	cp := e.firstCICDFor(rcfg)
+	if cp == nil {
+		return
+	}
+	pr := enriched.PR
+	var runs []api.CIRun
+	var cerr error
+	if bl, ok := cp.(CICDBranchLister); ok && strings.TrimSpace(pr.Branch) != "" {
+		runs, cerr = bl.ListRunsByBranch(ctx, pr.Repo, pr.Branch)
+	} else {
+		runs, cerr = cp.ListRuns(ctx, pr.Repo, pr.Number)
+	}
+	if cerr != nil {
+		// Leave the partial GraphQL CI + truncation flag intact: no worse than
+		// the pre-fix behaviour, and self-heals on a later tick.
+		return
+	}
+	enriched.CIRuns = runs
+	// CI is now complete from the CICD provider; drop the stale ciContexts flag
+	// so downstream readers no longer treat CI as truncated.
+	enriched.Truncated = withoutFlag(enriched.Truncated, "ciContexts")
+}
+
+// withoutFlag returns flags with every occurrence of drop removed. Returns nil
+// when the result is empty so callers can use the conventional empty-slice
+// semantics (len==0 means "nothing truncated").
+func withoutFlag(flags []string, drop string) []string {
+	var out []string
+	for _, f := range flags {
+		if f != drop {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // firstCICDFor returns the first CICD provider configured for rcfg, or nil
