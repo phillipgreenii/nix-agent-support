@@ -1,0 +1,6 @@
+{
+  "name": "bead-grooming",
+  "description": "Claude skill: review open beads (bd/beads) and bring them to plan-ready quality.",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}

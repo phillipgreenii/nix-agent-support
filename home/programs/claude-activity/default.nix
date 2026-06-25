@@ -8,8 +8,6 @@
 let
   cfg = config.phillipgreenii.programs.claude-activity;
   pkg = cfg.package;
-  pluginVersion = config.phillipgreenii.programs.claude.plugins.local.version;
-  marketplaceRoot = ".local/share/pgii-local-plugins";
 in
 {
   options.phillipgreenii.programs.claude-activity = {
@@ -18,50 +16,12 @@ in
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
-    phillipgreenii.programs.claude.plugins.local.plugins.claude-activity = {
-      description = "Claude Code activity tracking via hooks";
-      source = "claude-activity";
-      enabledByDefault = true;
-    };
-
     home = {
+      # Plugin registration + content (plugin.json, hooks/hooks.json) now live in
+      # the committed claude-marketplace/ tree, built by the nix marketplace
+      # package. This module only installs the binaries on PATH; the marketplace's
+      # bare `claude-work-start`/`claude-work-end` hook commands resolve to them.
       packages = [ pkg ];
-
-      file."${marketplaceRoot}/claude-activity/.claude-plugin/plugin.json" = {
-        text = builtins.toJSON {
-          name = "claude-activity";
-          description = "Claude Code activity tracking via hooks";
-          version = pluginVersion;
-        };
-      };
-
-      file."${marketplaceRoot}/claude-activity/hooks/hooks.json" = {
-        text = builtins.toJSON {
-          description = "Tracks Claude agent activity sessions";
-          hooks = {
-            UserPromptSubmit = [
-              {
-                hooks = [
-                  {
-                    type = "command";
-                    command = "${pkg}/bin/claude-work-start";
-                  }
-                ];
-              }
-            ];
-            Stop = [
-              {
-                hooks = [
-                  {
-                    type = "command";
-                    command = "${pkg}/bin/claude-work-end";
-                  }
-                ];
-              }
-            ];
-          };
-        };
-      };
     };
 
     programs.tldr.customPages.claude-activity-api = lib.mkIf config.programs.tldr.enable {

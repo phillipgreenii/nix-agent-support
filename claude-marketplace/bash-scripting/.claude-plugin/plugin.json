@@ -1,0 +1,6 @@
+{
+  "name": "bash-scripting",
+  "description": "Claude skill: bash scripting conventions for the mkBashBuilders framework",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}

@@ -1,0 +1,17 @@
+{
+  "name": "bash-lsp",
+  "description": "Bash/Shell language server for code intelligence",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "lspServers": {
+    "bash": {
+      "command": "bash-language-server",
+      "args": ["start"],
+      "extensionToLanguage": {
+        ".sh": "shellscript",
+        ".bash": "shellscript",
+        ".zsh": "shellscript"
+      }
+    }
+  }
+}

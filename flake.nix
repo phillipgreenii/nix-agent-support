@@ -97,11 +97,9 @@
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           _agentSupportPythonBuilders = pythonBuilders; # expose for modules
           inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
-          bash-scripting = final.callPackage ./packages/bash-scripting { };
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit (goBuilders) mkGoApp;
           };
-          pg-pr-plugin = final.callPackage ./packages/pg-pr-plugin { };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -1056,6 +1054,23 @@
           }).checks;
 
           packages = {
+            # This repo's own Claude Code marketplace, bundled into the store with
+            # content-derived per-plugin version stamping by repo-base's
+            # mkClaudeMarketplace (the same builder pn-workspace-rules uses). The
+            # committed `claude-marketplace/` tree holds the marketplace manifest +
+            # per-plugin dirs (plugin.json + skills/commands/agents/hooks). Each
+            # plugin's version is stamped `<declared>+<digest>`; pg-pr ships
+            # defaultEnabled=false, the rest default on. Registered into the
+            # claude-marketplaces consumer module via marketplaces.nixProvided below.
+            phillipgreenii-nix-agent-support-marketplace =
+              (phillipgreenii-nix-base.lib.mkClaudeMarketplaceBuilders { inherit pkgs lib; }).mkClaudeMarketplace
+                {
+                  src = lib.fileset.toSource {
+                    root = ./claude-marketplace;
+                    fileset = ./claude-marketplace;
+                  };
+                };
+
             # Re-export overlay-defined Go packages so `nix-update -F` (used in
             # update-deps.sh) can resolve them via flake.packages.<system>.
             # Without this, nix-update 1.14+ reports `pkg = null` (surfaced as
@@ -1149,19 +1164,23 @@
           { lib, pkgs, ... }:
           {
             imports = [ ./home ];
-            config.phillipgreenii.programs.claude.plugins.local.version = lib.mkDefault self.lib.pluginVersion;
-            # Auto-register repo-base's nix-built Claude marketplace (consumer half
-            # of the pattern documented in repo-base docs/claude-marketplaces.md).
+            # Auto-register repo-base's nix-built Claude marketplace AND this repo's
+            # own (consumer half of the pattern documented in repo-base
+            # docs/claude-marketplaces.md).
             #
-            # System-guarded: repo-base publishes the package only on x86_64-linux +
-            # aarch64-darwin (agent-support builds 4 systems), AND the currently-locked
-            # repo-base rev predates the package. The `p ? …` guard makes both cases a
+            # System-guarded: repo-base publishes its package only on x86_64-linux +
+            # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
+            # rev may predate the package. The `? …` guards make a missing package a
             # graceful empty no-op instead of an eval error.
             config.phillipgreenii.programs.claude.marketplaces.nixProvided =
               let
                 p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
               in
-              lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace;
+              (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
+              ++ (lib.optional (
+                own ? phillipgreenii-nix-agent-support-marketplace
+              ) own.phillipgreenii-nix-agent-support-marketplace);
           };
         # Shape-B wrapper: imports the producer's HM module and sets options
         # with this flake's self + name. Downstream consumers see the configured
@@ -1176,15 +1195,6 @@
             };
           };
         overlays.default = overlay;
-        lib = {
-          pluginVersion =
-            let
-              ts = self.lastModifiedDate or "19700101000000";
-              year = builtins.substring 0 4 ts;
-              rest = builtins.substring 4 10 ts;
-            in
-            "0.${year}.${rest}";
-        };
       };
     };
 }

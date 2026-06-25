@@ -5,13 +5,10 @@
     ./programs/claude-settings
     ./programs/claude-status-line
     ./programs/claude-theme
-    ./programs/pgii-local-plugins
     ./programs/pgii-claude-plugins
     ./programs/claude-marketplaces
     ./programs/pgii-packs
     ./programs/agent-rules
-    ./programs/bash-scripting
-    ./programs/bead-grooming
     ./programs/agentsview
     ./programs/ccusage
     ./programs/ollama
@@ -20,7 +17,6 @@
     ./programs/neovim-claude
     ./programs/cmux-claude
     ./programs/agent-activity
-    ./programs/bash-lsp
     ./programs/claude-activity
     ./programs/pa-monitor
     ./programs/ccpool
@@ -29,7 +25,6 @@
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
     ./programs/pg-pr
-    ./programs/pg-pr-plugin
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena

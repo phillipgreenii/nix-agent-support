@@ -1,0 +1,9 @@
+{
+  "description": "Tracks Claude agent activity sessions",
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "claude-work-start" }] }
+    ],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "claude-work-end" }] }]
+  }
+}

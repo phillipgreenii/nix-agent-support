@@ -1,8 +1,13 @@
 # Single pgii-local-plugins Marketplace
 
-**Status**: Accepted
+**Status**: Superseded by [0017](0017-static-nix-built-local-plugin-marketplace.md)
 **Date**: 2026-05-01
 **Deciders**: phillipg
+
+> **Superseded 2026-06-25 by ADR-0017.** The `pgii-local-plugins` home-manager
+> module and the `phillipgreenii.programs.claude.plugins.local` option are
+> retired; local plugins now ship as a static, content-digest-versioned
+> marketplace built by repo-base's `mkClaudeMarketplace`. See ADR-0017.
 
 ## Context
 

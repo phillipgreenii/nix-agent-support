@@ -16,9 +16,6 @@ mkGoApp {
   versionPath = "main.Version";
 
   postInstall = ''
-    mkdir -p $out/share/claude-extended-tool-approver/skills
-    cp -r ${./skills}/* $out/share/claude-extended-tool-approver/skills/
-
     # Generate shell completions
     mkdir -p $out/share/bash-completion/completions
     mkdir -p $out/share/zsh/site-functions

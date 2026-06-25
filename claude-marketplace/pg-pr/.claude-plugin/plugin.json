@@ -1,5 +1,6 @@
 {
   "name": "pg-pr",
   "description": "PR-work skills, commands, and agents that drive the pg-pr CLI",
-  "version": "0.1.0"
+  "version": "1.0.0",
+  "defaultEnabled": false
 }

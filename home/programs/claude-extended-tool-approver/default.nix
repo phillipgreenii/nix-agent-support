@@ -21,8 +21,6 @@ let
       }
     else
       pkg;
-  pluginVersion = config.phillipgreenii.programs.claude.plugins.local.version;
-  marketplaceRoot = ".local/share/pgii-local-plugins";
 in
 {
   options.phillipgreenii.programs.claude-extended-tool-approver = {
@@ -40,92 +38,14 @@ in
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
-    phillipgreenii.programs.claude.plugins.local.plugins.claude-extended-tool-approver = {
-      description = "Pre-tool permission hook with rule-based evaluation";
-      source = "claude-extended-tool-approver";
-      enabledByDefault = true;
-    };
-
     home = {
-      packages = [ pkg ];
-
-      file = {
-        "${marketplaceRoot}/claude-extended-tool-approver/.claude-plugin/plugin.json" = {
-          text = builtins.toJSON {
-            name = "claude-extended-tool-approver";
-            description = "Pre-tool permission hook with rule-based evaluation";
-            version = pluginVersion;
-          };
-        };
-
-        "${marketplaceRoot}/claude-extended-tool-approver/skills" = {
-          source = "${pkg}/share/claude-extended-tool-approver/skills";
-          recursive = true;
-        };
-
-        "${marketplaceRoot}/claude-extended-tool-approver/hooks/hooks.json" = {
-          text = builtins.toJSON {
-            description = "Pre-tool permission hook with rule-based evaluation and decision logging";
-            hooks = {
-              PreToolUse = [
-                {
-                  hooks = [
-                    {
-                      type = "command";
-                      command = "${hookPkg}/bin/claude-extended-tool-approver";
-                      timeout = 5;
-                    }
-                  ];
-                }
-              ];
-              PermissionRequest = [
-                {
-                  hooks = [
-                    {
-                      type = "command";
-                      command = "${hookPkg}/bin/claude-extended-tool-approver";
-                      timeout = 5;
-                    }
-                  ];
-                }
-              ];
-              PostToolUse = [
-                {
-                  hooks = [
-                    {
-                      type = "command";
-                      command = "${hookPkg}/bin/claude-extended-tool-approver";
-                      timeout = 5;
-                    }
-                  ];
-                }
-              ];
-              PermissionDenied = [
-                {
-                  hooks = [
-                    {
-                      type = "command";
-                      command = "${hookPkg}/bin/claude-extended-tool-approver";
-                      timeout = 5;
-                    }
-                  ];
-                }
-              ];
-              SessionEnd = [
-                {
-                  hooks = [
-                    {
-                      type = "command";
-                      command = "${hookPkg}/bin/claude-extended-tool-approver";
-                      timeout = 5;
-                    }
-                  ];
-                }
-              ];
-            };
-          };
-        };
-      };
+      # Plugin registration + content (plugin.json, skills, hooks/hooks.json) now
+      # live in the committed claude-marketplace/ tree, built by the nix
+      # marketplace package. The marketplace's hooks.json uses a BARE
+      # `claude-extended-tool-approver` command; installing hookPkg here puts the
+      # (possibly rtk/inputProcessor-wrapped) binary on PATH so that bare command
+      # resolves to THIS binary.
+      packages = [ hookPkg ];
     };
   };
 }

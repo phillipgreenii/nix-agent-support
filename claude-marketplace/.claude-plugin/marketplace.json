@@ -1,0 +1,36 @@
+{
+  "name": "phillipgreenii-nix-agent-support",
+  "owner": { "name": "phillipgreenii" },
+  "plugins": [
+    {
+      "name": "bash-lsp",
+      "source": "./bash-lsp",
+      "description": "Bash/Shell language server for code intelligence"
+    },
+    {
+      "name": "bash-scripting",
+      "source": "./bash-scripting",
+      "description": "Claude skill: bash scripting conventions for the mkBashBuilders framework"
+    },
+    {
+      "name": "bead-grooming",
+      "source": "./bead-grooming",
+      "description": "Claude skill: review open beads (bd/beads) and bring them to plan-ready quality."
+    },
+    {
+      "name": "claude-activity",
+      "source": "./claude-activity",
+      "description": "Claude Code activity tracking via hooks"
+    },
+    {
+      "name": "claude-extended-tool-approver",
+      "source": "./claude-extended-tool-approver",
+      "description": "Pre-tool permission hook with rule-based evaluation"
+    },
+    {
+      "name": "pg-pr",
+      "source": "./pg-pr",
+      "description": "PR-work skills, commands, and agents that drive the pg-pr CLI"
+    }
+  ]
+}

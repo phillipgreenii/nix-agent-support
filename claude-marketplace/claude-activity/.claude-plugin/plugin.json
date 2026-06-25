@@ -1,0 +1,6 @@
+{
+  "name": "claude-activity",
+  "description": "Claude Code activity tracking via hooks",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
