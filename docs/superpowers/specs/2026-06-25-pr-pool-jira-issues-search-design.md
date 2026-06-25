@@ -1,9 +1,21 @@
 # pr-pool `jira-issues` query: working JQL source via `pg-pr-issues-jira-zr search`
 
-**Status**: Draft
+**Status**: Accepted (adversarial review incorporated 2026-06-25)
 **Date**: 2026-06-25
 **Deciders**: Phillip Green II
 **Bead**: `pg2-gpao` (blocks verification bead `pg2-5b4l`; follows `pg2-mf4c`)
+
+> **Review note (2026-06-25).** An adversarial review found three blockers, now
+> fixed in this spec: (1) `os.Args[1]` would panic with no args → guarded with a
+> length check; (2) `/rest/api/3/search/jql` caps fielded pages at 100 (and may
+> ignore `maxResults`), so a `len>=limit` truncation check never fires →
+> truncation is now driven by the API's `nextPageToken`/`isLast`; (3) `pr-pool`'s
+> Commander discards a child's stderr on success → truncation now travels on
+> **stdout** as a `{items, truncated}` envelope (replacing the bare array).
+> Also clarified: wrapper lands on the home-manager profile PATH (not
+> `~/.local/bin`), exact `realBinary = "${self.packages…}"` wiring, the
+> exec-recursion invariant, an explicit PATH-reachability check, and the
+> exit-code contract (error → non-zero, never an empty envelope).
 
 ## Context
 
@@ -66,13 +78,19 @@ touches only this tool, not the cross-repo boundary.
 
 `modules/pg-pr-zr/cmd/pg-pr-issues-jira-zr/main.go`:
 
-- **CLI branch in `main()`**: if `os.Args[1] == "search"`, parse a flagset and
-  run the search path; otherwise fall through to the existing
-  `scriptout.ServeIssues` path (untouched, still a stub). Additive — zero risk
-  to existing behaviour.
-- **Flags**: `--jql <string>` (required), `--limit <int>` (default 200).
+- **CLI branch in `main()`**: `if len(os.Args) > 1 && os.Args[1] == "search"`
+  → run the search path; otherwise fall through to the existing
+  `scriptout.ServeIssues` path (which reads its op from **stdin**, takes no
+  argv, and is still a Phase-0 stub). The length guard is mandatory — the
+  current binary is invoked with no args, so a bare `os.Args[1]` would panic.
+  Additive: existing (stub) behaviour is unchanged when `search` is absent.
+- **Testable seam**: factor the search path as
+  `runSearch(ctx, args []string, stdout io.Writer) error` so a unit test can
+  call it directly without `exec`/`os.Args`. `main()` just dispatches to it.
+- **Flags**: `--jql <string>` (required), `--limit <int>` (default 100; see
+  the page-cap note below).
 - **`Provider.SearchIssues(ctx, jql string, limit int) ([]SearchItem, bool, error)`**
-  (the `bool` reports truncation, i.e. more pages exist):
+  — the `bool` is `truncated` (more results exist than this page returned):
   - `POST <base>/rest/api/3/search/jql` with JSON body
     `{"jql": jql, "maxResults": limit, "fields": ["summary","status","labels","issuetype"]}`.
   - Reuses the existing `Provider` / `basicAuth()` — identical auth to
@@ -80,40 +98,64 @@ touches only this tool, not the cross-repo boundary.
   - Parses the response `{ "issues": [ { "key", "fields": { "summary",
 "status": {"name"}, "labels": [], "issuetype": {"name"} } } ],
 "nextPageToken", "isLast" }` (no `total`).
-  - **Single bounded page** — no `nextPageToken` looping. `pr-pool` only drains
-    to a role cap, so one page of `--limit` suffices (mirrors `github-issues`
-    `--limit` + truncation-warn). If `isLast` is false, return `truncated=true`
-    and log a warning to stderr.
-- **Output**: a normalized JSON array to stdout, exit 0:
+  - **Single bounded page** — no `nextPageToken` looping (`pr-pool` only drains
+    to a small role cap). `truncated = (nextPageToken != "" || isLast == false)`
+    — this is the **authoritative** truncation signal from the API, NOT a count
+    heuristic (see the cap note). If a future consumer needs the full set, add
+    `nextPageToken` looping then.
+  - **Page-cap note (verified):** when `fields` is anything beyond keys/ids,
+    `/rest/api/3/search/jql` caps a page at **100 issues regardless of
+    `maxResults`**, and there is an active regression where `maxResults` is
+    sometimes ignored entirely. So a per-page count is NOT a reliable
+    truncation signal — only `nextPageToken`/`isLast` is. `--limit` defaults to
+    100 to match the real fielded-page cap; requesting more is futile for a
+    single page.
+- **Output (envelope, NOT a bare array):** the truncation flag MUST travel on
+  **stdout**, because `pr-pool`'s Commander captures only stdout and discards a
+  child's stderr on success. So emit an envelope to stdout, exit 0:
   ```json
-  [
-    {
-      "key": "FINDEV-123",
-      "summary": "…",
-      "status": "Open",
-      "issuetype": "Bug",
-      "labels": ["x"],
-      "url": "https://ziprecruiter.atlassian.net/browse/FINDEV-123"
-    }
-  ]
+  {
+    "items": [
+      {
+        "key": "FINDEV-123",
+        "summary": "…",
+        "status": "Open",
+        "issuetype": "Bug",
+        "labels": ["x"],
+        "url": "https://ziprecruiter.atlassian.net/browse/FINDEV-123"
+      }
+    ],
+    "truncated": false
+  }
   ```
   `url` is built as `<base>/browse/<key>` (same convention as `GetIssue`).
+- **Exit-code contract:** any failure (missing creds, non-2xx, bad JQL,
+  transport) → write the error to stderr and exit **non-zero**; NEVER print an
+  envelope on error. Empty result → `{"items":[],"truncated":false}`, exit 0.
+  `pr-pool` relies on this to distinguish empty-from-error.
 
 ### B. `pr-pool internal/query/issues.go` (`phillipgreenii-nix-agent-support`)
 
 - **New argv** in `JiraIssues.Run`:
   `["pg-pr-issues-jira-zr", "search", "--jql", q.jql(), "--limit", strconv.Itoa(issueListLimit)]`.
-  Drop `jira issue list … --paginate 0:200 --raw`.
+  Drop `jira issue list … --paginate 0:200 --raw`. Set `issueListLimit` for the
+  jira path to 100 to match the API's fielded-page cap (or thread a separate
+  const; `github-issues` keeps 200).
 - **`q.jql()` is unchanged** — `pr-pool` still owns JQL construction from
   `project` / `labels` / explicit `jql` config; the tool just executes a final
   JQL string.
-- **Replace `jiraSearchResult`** with a `jiraSearchItem` struct matching the
-  normalized array. Map to `item.Item`: `ID=key`, `Type="jira-issue"`,
-  `Title=summary`, `Metadata{project, key, issuetype, status, labels, url}`.
-- **Reuse `warnIfTruncated`** on `len(items) >= issueListLimit` (symmetric with
-  `github-issues`).
+- **Parse the envelope** `{items:[…], truncated:bool}` into a
+  `jiraSearchEnvelope` struct. Map each item to `item.Item`: `ID=key`,
+  `Type="jira-issue"`, `Title=summary`, `Metadata{project, key, issuetype,
+status, labels, url}`. `project` comes from `pr-pool`'s own config (`q.Project`)
+  — it is not in the tool output; the rest come from the envelope item.
+- **Truncation warning is flag-driven, not count-driven.** Do NOT reuse
+  `warnIfTruncated` (its `len>=limit` heuristic is wrong here — the API caps
+  fielded pages at 100). Instead, when the envelope's `truncated` is true,
+  `slog.Warn` that the jira backlog was truncated. (This diverges from
+  `github-issues`, whose count-based warn is correct for `gh`.)
 - Update the contract comment block, the package `README`, and the
-  fake-`Commander` unit test (new argv + normalized JSON input). Keep
+  fake-`Commander` unit test (new argv + envelope JSON input). Keep
   `IsStub()` returning false.
 
 ### C. Deployment (`phillipg-nix-ziprecruiter`)
@@ -124,45 +166,79 @@ touches only this tool, not the cross-repo boundary.
   - `jira.baseUrl = "https://ziprecruiter.atlassian.net"`
   - `jira.email = "phillipg@ziprecruiter.com"`
   - `jira.tokenFile = /Users/phillipg/.jira_api_token` (operator refreshes it)
-  - `jira.realBinary` → the nix-built `pg-pr-issues-jira-zr` (follow the
-    module's existing convention; wire to the flake package rather than a
-    hand-installed path where practical).
-- Ensure the wrapper (`~/.local/bin/pg-pr-issues-jira-zr`) is on the PATH that
-  `pr-pool` runs with, then `zn-self-apply`.
+  - `jira.realBinary = "${self.packages.${pkgs.system}.pg-pr-zr}/bin/pg-pr-issues-jira-zr"`.
+    `self` is already in the machine config's `specialArgs`, and the package is
+    exposed as `packages.pg-pr-zr` in `flake.nix`. (`realBinary` is a plain
+    `types.str`; the module is NOT passed the package, so reference it via
+    `self`.)
+- **Wrapper placement (correction):** when `jira.tokenFile` is set, the module
+  adds the `jiraWrapper` (`writeShellApplication` named `pg-pr-issues-jira-zr`)
+  to `home.packages`, so it lands on the **home-manager profile PATH**
+  (`/etc/profiles/per-user/phillipg/bin` / `~/.nix-profile/bin`) — NOT
+  `~/.local/bin`. (The module's `MIGRATION.md` "path-shadow" diagram is stale on
+  this point; optional cleanup.)
+- **Exec-recursion invariant:** the wrapper and the real binary share the name
+  `pg-pr-issues-jira-zr`. This is safe ONLY because the real binary is
+  referenced by store path (`realBinary`) and never added to any profile PATH.
+  Do NOT add `pgPrZr` to `home.packages` — that would shadow the wrapper and
+  cause `exec` recursion.
+- **PATH reachability (verify, don't assume):** `pr-pool`'s nix wrapper does
+  `wrapProgram … --prefix PATH` (prepend, preserving inherited PATH), so it
+  finds `pg-pr-issues-jira-zr` only if the home-manager profile bin is on
+  `pr-pool`'s inherited PATH at exec time. This holds for interactive
+  `pr-pool run-query` / `drain` from a home-manager shell (no pr-pool launchd
+  daemon exists today). Add an explicit check to the plan
+  (`command -v pg-pr-issues-jira-zr` from pr-pool's runtime context, or
+  `pr-pool run-query` end-to-end). **Caveat:** if `pr-pool` ever moves under
+  launchd/cron with a sanitized PATH, this breaks — revisit then.
+- Then `zn-self-apply` (or `zn-self-build` in a sandbox + manual
+  `darwin-rebuild switch`).
 
 ## Data flow
 
 ```
 pr-pool drain/run-query (jira-issues role)
   → JiraIssues.Run builds JQL (q.jql()) and runs argv via Env.Cmd Commander
-    → pg-pr-issues-jira-zr search --jql <jql> --limit 200   (wrapper injects JIRA_*)
+    → pg-pr-issues-jira-zr search --jql <jql> --limit 100   (wrapper injects JIRA_*)
       → POST /rest/api/3/search/jql  (Atlassian Cloud, basic auth)
-      ← {issues:[…], nextPageToken, isLast}
-    ← normalized JSON array on stdout
-  ← []item.Item  (ID=key, Type=jira-issue, …); warnIfTruncated on full page
+      ← {issues:[…], nextPageToken, isLast}     (no total; page caps at 100 w/ fields)
+    ← {items:[…], truncated:bool} on stdout      (exit 0; non-zero + stderr on error)
+  ← []item.Item (ID=key, Type=jira-issue, …); slog.Warn if truncated
 ```
 
 ## Error handling
 
 - Missing creds: `Provider.New()` already errors clearly when `JIRA_API_TOKEN`
-  / `JIRA_EMAIL` are unset; the search path surfaces the same.
+  / `JIRA_EMAIL` are unset; the search path surfaces the same and exits
+  non-zero.
 - Non-2xx from Jira (401/403/400-bad-JQL): `SearchIssues` returns a wrapped
-  error including status; `pr-pool` surfaces it as a query error (an auth/JQL
-  error, never a stub).
-- Empty result: tool emits `[]`; `pr-pool` returns no items, no error.
-- Truncation: `isLast=false` → stderr warning in the tool + `pr-pool`'s
-  `warnIfTruncated` on a full page. No silent caps.
+  error including status; the tool exits non-zero with the message on stderr;
+  `pr-pool`'s Commander returns that as a query error (an auth/JQL error, never
+  a stub, never an empty envelope).
+- Empty result: tool emits `{"items":[],"truncated":false}`, exit 0; `pr-pool`
+  returns no items, no error. (The exit-code contract is what lets `pr-pool`
+  tell empty from error, since its Commander sees only stdout + exit status.)
+- Truncation: authoritative `nextPageToken`/`isLast` → `truncated:true` in the
+  stdout envelope → `pr-pool` `slog.Warn`s. No count heuristic, no reliance on
+  stderr (which `pr-pool` discards). No silent caps.
 
 ## Testing
 
 - **jira-zr** (`main_test.go`): `httptest` fake of `/rest/api/3/search/jql`
   asserting (a) the request method/path/body and `Authorization` header,
-  (b) mapping to the normalized items, (c) truncation when `isLast=false`,
-  (d) the `search` subcommand prints the expected JSON. Keep existing
-  `GetIssue` tests.
-- **pr-pool** (`issues_test.go`): fake `Commander` returns a normalized JSON
-  array; assert the argv and the `item.Item` mapping. Update/remove the
-  obsolete not-implemented expectation. Keep `TestIsStub_noStubTypesRemain`.
+  (b) mapping to the envelope items, (c) `truncated=true` when the response has
+  a `nextPageToken` / `isLast=false`, (d) `runSearch(ctx, args, &buf)` writes
+  the expected envelope JSON (call the seam directly — do not exec `main()`).
+  Keep existing `GetIssue` tests.
+- **pr-pool** (`issues_test.go`): fake `Commander` returns an envelope JSON;
+  assert the argv (`pg-pr-issues-jira-zr search --jql … --limit …`) and the
+  `item.Item` mapping; assert the `truncated:true` path logs/flows correctly.
+  Update/remove the obsolete not-implemented expectation. Keep
+  `TestIsStub_noStubTypesRemain`.
+- **Build**: no `go.mod` / `go.sum` / `gomod2nix.toml` change is needed —
+  the search path adds only stdlib imports (`flag`, `bytes`, `io`), and
+  `pg-pr-zr`'s single local-replace `go.mod` + empty `gomod2nix.toml` are
+  unaffected (cross-repo Pattern B). Do NOT regenerate the toml.
 - Both Go modules green under `-race`; `pre-commit` / `prek` passes in both
   repos.
 - **End-to-end** (after the token is refreshed + module enabled):
