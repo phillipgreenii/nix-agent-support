@@ -7,9 +7,16 @@
 #     bumps are pulled — 'install' short-circuits on an already-installed plugin
 #     and never updates on its own (pg2-cxwj)
 #   - on install failure falls back to update; surfaces stderr from both
-#     commands only if both fail
+#     commands only if both fail. On that GENUINE both-fail path it ALSO emits
+#     diagnostic context (target scope, installed_plugins.json entries for the
+#     spec, cached version dirs) — but the install-fails-then-update-SUCCEEDS
+#     path stays quiet (pg2-oklb)
 #   - a post-install update failure is non-fatal (warning only); the
 #     already-installed copy is preserved
+#   - warns about a STALE non-user-scope entry (e.g. a project entry for a dead
+#     path) that shadows the user-scope enable; pruning is gated behind
+#     CLAUDE_SETTINGS_PRUNE_STALE_SCOPE and NEVER skips the trailing update
+#     (pg2-oklb / pg2-cxwj)
 #   - exits 0 (non-fatal) regardless of install/update outcome
 
 bats_require_minimum_version 1.5.0
@@ -55,6 +62,18 @@ _write_manifest() {
   local dir="$CACHE_ROOT/$1/$2/$3/.claude-plugin"
   mkdir -p "$dir"
   printf '%s' "$4" > "$dir/plugin.json"
+}
+
+# Helper: write an installed_plugins.json beside the cache dir (where the
+# script derives it: dirname(cache_root)/installed_plugins.json).
+# $1 = raw JSON document.
+_write_installed_plugins() {
+  printf '%s' "$1" > "$(dirname "$CACHE_ROOT")/installed_plugins.json"
+}
+
+# Path the script will derive for installed_plugins.json.
+_installed_plugins_path() {
+  echo "$(dirname "$CACHE_ROOT")/installed_plugins.json"
 }
 
 @test "install succeeds: also runs update so version bumps are pulled" {
@@ -176,4 +195,154 @@ _write_manifest() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"caveman@caveman installed"* ]]
   [[ "$stderr" != *"WARNING"* ]]
+}
+
+# ----------------------------------------------------------------------------
+# pg2-oklb: failure context, stale wrong-scope detection, version-bump regression
+# ----------------------------------------------------------------------------
+
+@test "genuine failure (both fail) emits context: scope, installed entries, cached dirs" {
+  _mock_claude 1 1 "Failed to clone repository:" ""
+  # A user-scope entry recorded for the spec, plus two cached versions present
+  # (the real pg2-oklb scenario: superpowers cache had both 5.1.0 and 6.0.3).
+  _write_installed_plugins '{
+    "version": 2,
+    "plugins": {
+      "superpowers@superpowers-marketplace": [
+        { "scope": "user", "version": "6.0.3" }
+      ]
+    }
+  }'
+  _write_manifest "superpowers-marketplace" "superpowers" "5.1.0" '{"name":"superpowers"}'
+  _write_manifest "superpowers-marketplace" "superpowers" "6.0.3" '{"name":"superpowers"}'
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "superpowers@superpowers-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]   # non-fatal
+  [[ "$stderr" == *"WARNING superpowers@superpowers-marketplace install/update failed"* ]]
+  # Real CLI output is still surfaced...
+  [[ "$stderr" == *"Failed to clone repository:"* ]]
+  # ...plus the new diagnostic context.
+  [[ "$stderr" == *"--- context ---"* ]]
+  [[ "$stderr" == *"target scope: user"* ]]
+  [[ "$stderr" == *"installed_plugins.json entries for superpowers@superpowers-marketplace"* ]]
+  [[ "$stderr" == *"scope=user version=6.0.3"* ]]
+  [[ "$stderr" == *"cached version dirs"* ]]
+  [[ "$stderr" == *"5.1.0"* ]]
+  [[ "$stderr" == *"6.0.3"* ]]
+}
+
+@test "install-fails-then-update-SUCCEEDS stays quiet: no context, no warning" {
+  # Regression guard for the existing quiet fallback path: even with installed
+  # entries and a cache present, a successful fallback update must NOT print a
+  # warning or the failure context.
+  _mock_claude 1 0 "already installed" ""
+  _write_installed_plugins '{
+    "version": 2,
+    "plugins": { "beads@beads-marketplace": [ { "scope": "user", "version": "1.0.5" } ] }
+  }'
+  _write_manifest "beads-marketplace" "beads" "1.0.5" '{"name":"beads"}'
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"beads@beads-marketplace updated"* ]]
+  [[ "$output" != *"WARNING"* ]]
+  [[ "$stderr" != *"WARNING"* ]]
+  [[ "$stderr" != *"--- context ---"* ]]
+}
+
+@test "stale wrong-scope entry (dead project path) warns; default does NOT prune" {
+  _mock_claude 0 0 "" ""
+  local dead="$TMP/does-not-exist/slot-b"
+  _write_installed_plugins "$(jq -n --arg p "$dead" '{
+    version: 2,
+    plugins: {
+      "superpowers@superpowers-marketplace": [
+        { scope: "user", version: "6.0.3" },
+        { scope: "project", projectPath: $p, version: "0.3.1" }
+      ]
+    }
+  }')"
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "superpowers@superpowers-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"WARNING superpowers@superpowers-marketplace has a stale project-scope entry"* ]]
+  [[ "$stderr" == *"$dead"* ]]
+  [[ "$stderr" == *"shadows the user-scope enable"* ]]
+  # Default (no opt-in): the stale entry is NOT removed.
+  [[ "$stderr" != *"pruned stale"* ]]
+  run jq '.plugins["superpowers@superpowers-marketplace"] | length' "$(_installed_plugins_path)"
+  [ "$output" -eq 2 ]
+}
+
+@test "stale wrong-scope entry: opt-in prune removes only the stale entry" {
+  _mock_claude 0 0 "" ""
+  local dead="$TMP/does-not-exist/slot-b"
+  _write_installed_plugins "$(jq -n --arg p "$dead" '{
+    version: 2,
+    plugins: {
+      "superpowers@superpowers-marketplace": [
+        { scope: "user", version: "6.0.3" },
+        { scope: "project", projectPath: $p, version: "0.3.1" }
+      ]
+    }
+  }')"
+
+  CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1 run --separate-stderr \
+    "$SCRIPT" "$CLAUDE_BIN" "superpowers@superpowers-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"pruned stale project-scope entry"* ]]
+  # Only the user-scope entry survives.
+  run jq -r '.plugins["superpowers@superpowers-marketplace"] | [.[].scope] | join(",")' \
+    "$(_installed_plugins_path)"
+  [ "$output" = "user" ]
+}
+
+@test "LIVE non-user-scope entry (existing path) is NOT flagged stale" {
+  _mock_claude 0 0 "" ""
+  local live="$TMP/live-project"
+  mkdir -p "$live"
+  _write_installed_plugins "$(jq -n --arg p "$live" '{
+    version: 2,
+    plugins: {
+      "superpowers@superpowers-marketplace": [
+        { scope: "project", projectPath: $p, version: "0.3.1" }
+      ]
+    }
+  }')"
+
+  run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "superpowers@superpowers-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"stale"* ]]
+}
+
+@test "regression: a cached AND enabled plugin still runs update (no skip-if-cached)" {
+  # pg2-cxwj invariant: 'plugin install' never pulls a newer marketplace
+  # version, so the trailing update is what applies a content-digest bump. Even
+  # though the plugin is already cached (5.1.0) AND recorded as enabled at user
+  # scope, install must STILL be followed by update — a skip-if-cached shortcut
+  # would silently pin the stale 5.1.0 and block the 6.0.3 bump.
+  _mock_claude 0 0 "" ""
+  _write_manifest "superpowers-marketplace" "superpowers" "5.1.0" '{"name":"superpowers"}'
+  _write_installed_plugins '{
+    "version": 2,
+    "plugins": {
+      "superpowers@superpowers-marketplace": [
+        { "scope": "user", "version": "5.1.0" }
+      ]
+    }
+  }'
+
+  run "$SCRIPT" "$CLAUDE_BIN" "superpowers@superpowers-marketplace" "$CACHE_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"superpowers@superpowers-marketplace installed"* ]]
+  [[ "$output" == *"superpowers@superpowers-marketplace updated"* ]]
+  # The update MUST have been attempted despite the cached + enabled state.
+  grep -Fxq "plugin install superpowers@superpowers-marketplace --scope user" "$CALLS"
+  grep -Fxq "plugin update superpowers@superpowers-marketplace --scope user" "$CALLS"
 }
