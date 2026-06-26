@@ -152,6 +152,21 @@ func (db *DB) LatestRevision(ctx context.Context, prID int64) (*Revision, error)
 	return &r, nil
 }
 
+// MarkRevisionReviewed records my submitted review at headSHA on the latest
+// revision whose head_sha matches (a head SHA can recur after a force-push; #3
+// cares about the most recent occurrence). No-op if no revision matches.
+func (db *DB) MarkRevisionReviewed(ctx context.Context, prID int64, headSHA, state, reviewedAt string) error {
+	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
+		SET reviewed_at=?, my_review_state=?
+		WHERE id = (SELECT id FROM pr_revision
+		            WHERE pr_id=? AND head_sha=? ORDER BY seq DESC LIMIT 1)`,
+		reviewedAt, state, prID, headSHA)
+	if err != nil {
+		return fmt.Errorf("store: mark revision reviewed %d %s: %w", prID, headSHA, err)
+	}
+	return nil
+}
+
 // latestRevision returns the highest-seq revision for prID, or nil if none.
 func (t *Tx) latestRevision(prID int64) (*Revision, error) {
 	row := t.QueryRow(`SELECT `+revisionColumns+`
