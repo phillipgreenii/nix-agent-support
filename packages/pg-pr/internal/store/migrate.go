@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -114,6 +114,30 @@ ALTER TABLE pull_request ADD COLUMN size            TEXT    NOT NULL DEFAULT '';
 ALTER TABLE pull_request ADD COLUMN urgency         TEXT    NOT NULL DEFAULT '';
 ALTER TABLE pull_request ADD COLUMN urgency_score   INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pull_request ADD COLUMN urgency_reasons TEXT    NOT NULL DEFAULT '[]';
+`,
+	// v2 -> v3: per-PR revision timeline (head/base SHA + compact CI rollup +
+	// my-submitted-review marker). Append-only; one writer (sync).
+	`
+CREATE TABLE pr_revision (
+    id              INTEGER PRIMARY KEY,
+    pr_id           INTEGER NOT NULL REFERENCES pull_request(id) ON DELETE CASCADE,
+    seq             INTEGER NOT NULL,
+    head_sha        TEXT NOT NULL,
+    base_sha        TEXT,
+    observed_at     TEXT NOT NULL,
+    last_seen_at    TEXT NOT NULL,
+    ci_state        TEXT NOT NULL DEFAULT 'none'
+                      CHECK (ci_state IN ('none','pending','success','failure','error')),
+    ci_passed       INTEGER NOT NULL DEFAULT 0,
+    ci_failed       INTEGER NOT NULL DEFAULT 0,
+    ci_pending      INTEGER NOT NULL DEFAULT 0,
+    ci_captured_at  TEXT,
+    reviewed_at     TEXT,
+    my_review_state TEXT CHECK (my_review_state IS NULL OR
+                      my_review_state IN ('approved','changes-requested','commented')),
+    UNIQUE (pr_id, seq)
+);
+CREATE INDEX idx_pr_revision_pr ON pr_revision(pr_id);
 `,
 }
 
