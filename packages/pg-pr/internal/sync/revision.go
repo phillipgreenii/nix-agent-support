@@ -15,9 +15,15 @@ import (
 //
 // Overall State: any failed → "failure"; else any pending → "pending";
 // else (≥1 run, all passed) → "success"; no runs → "none".
-func ciRollupFromSync(runs []api.CIRun) store.CIRollup {
+//
+// now is an injectable clock; when nil it defaults to time.Now.
+func ciRollupFromSync(runs []api.CIRun, now func() time.Time) store.CIRollup {
+	if now == nil {
+		now = time.Now
+	}
+	capturedAt := now().UTC().Format(time.RFC3339)
 	if len(runs) == 0 {
-		return store.CIRollup{State: "none", CapturedAt: time.Now().UTC().Format(time.RFC3339)}
+		return store.CIRollup{State: "none", CapturedAt: capturedAt}
 	}
 	var passed, failed, pending int
 	for _, r := range runs {
@@ -41,7 +47,7 @@ func ciRollupFromSync(runs []api.CIRun) store.CIRollup {
 		Passed:     passed,
 		Failed:     failed,
 		Pending:    pending,
-		CapturedAt: time.Now().UTC().Format(time.RFC3339),
+		CapturedAt: capturedAt,
 	}
 }
 

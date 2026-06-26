@@ -66,7 +66,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	if err != nil {
 		return fmt.Errorf("ingest: record revision %s#%d: %w", repo, pr.Number, err)
 	}
-	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns)); err != nil {
+	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns, e.deps.Now)); err != nil {
 		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
 	}
 	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {
