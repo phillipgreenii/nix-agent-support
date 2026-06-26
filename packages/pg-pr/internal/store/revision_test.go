@@ -108,3 +108,33 @@ func TestRecordRevision_NullBaseFallsBackToHead(t *testing.T) {
 		}
 	})
 }
+
+func TestSetRevisionCIAndReads(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+	r1, _, _ := db.RecordRevision(ctx, prID, "h1", "b1")
+	_, _, _ = db.RecordRevision(ctx, prID, "h2", "b1")
+
+	if err := db.SetRevisionCI(ctx, r1.ID, CIRollup{
+		State: "failure", Passed: 3, Failed: 1, Pending: 0, CapturedAt: "t",
+	}); err != nil {
+		t.Fatalf("SetRevisionCI: %v", err)
+	}
+
+	revs, err := db.ListRevisions(ctx, prID)
+	if err != nil || len(revs) != 2 {
+		t.Fatalf("ListRevisions: n=%d err=%v", len(revs), err)
+	}
+	if revs[0].Seq != 1 || revs[1].Seq != 2 {
+		t.Fatalf("not ascending: %d,%d", revs[0].Seq, revs[1].Seq)
+	}
+	if revs[0].CIState != "failure" || revs[0].CIFailed != 1 {
+		t.Fatalf("CI not stored: %+v", revs[0])
+	}
+
+	latest, _ := db.LatestRevision(ctx, prID)
+	if latest == nil || latest.Seq != 2 {
+		t.Fatalf("LatestRevision: %+v", latest)
+	}
+}

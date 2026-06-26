@@ -91,6 +91,67 @@ func (db *DB) RecordRevision(ctx context.Context, prID int64, headSHA, baseSHA s
 	return result, appended, err
 }
 
+// CIRollup is the compact CI summary captured for a revision's head SHA.
+type CIRollup struct {
+	State      string // none|pending|success|failure|error
+	Passed     int
+	Failed     int
+	Pending    int
+	CapturedAt string
+}
+
+// SetRevisionCI overwrites the CI rollup on a revision (idempotent).
+func (db *DB) SetRevisionCI(ctx context.Context, revisionID int64, r CIRollup) error {
+	state := r.State
+	if state == "" {
+		state = "none"
+	}
+	var capturedAt any
+	if r.CapturedAt != "" {
+		capturedAt = r.CapturedAt
+	}
+	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
+		SET ci_state=?, ci_passed=?, ci_failed=?, ci_pending=?, ci_captured_at=?
+		WHERE id=?`, state, r.Passed, r.Failed, r.Pending, capturedAt, revisionID)
+	if err != nil {
+		return fmt.Errorf("store: set revision ci %d: %w", revisionID, err)
+	}
+	return nil
+}
+
+// ListRevisions returns a PR's revisions in ascending seq order.
+func (db *DB) ListRevisions(ctx context.Context, prID int64) ([]Revision, error) {
+	rows, err := db.sql.QueryContext(ctx, `SELECT `+revisionColumns+`
+		FROM pr_revision WHERE pr_id=? ORDER BY seq ASC`, prID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list revisions %d: %w", prID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Revision
+	for rows.Next() {
+		r, err := scanRevision(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan revision: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LatestRevision returns the highest-seq revision for a PR, or nil if none.
+func (db *DB) LatestRevision(ctx context.Context, prID int64) (*Revision, error) {
+	row := db.sql.QueryRowContext(ctx, `SELECT `+revisionColumns+`
+		FROM pr_revision WHERE pr_id=? ORDER BY seq DESC LIMIT 1`, prID)
+	r, err := scanRevision(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: latest revision %d: %w", prID, err)
+	}
+	return &r, nil
+}
+
 // latestRevision returns the highest-seq revision for prID, or nil if none.
 func (t *Tx) latestRevision(prID int64) (*Revision, error) {
 	row := t.QueryRow(`SELECT `+revisionColumns+`
