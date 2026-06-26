@@ -9,9 +9,10 @@ import (
 
 // ciRollupFromSync maps []api.CIRun to a store.CIRollup.
 // Classification:
-//   - failed: Status=="completed" && Conclusion=="failure"
-//   - passed: Status=="completed" && Conclusion=="success"
-//   - pending: anything else (not completed)
+//   - passed:  Status=="completed" && Conclusion=="success"
+//   - failed:  Status=="completed" && Conclusion!="success" (covers failure,
+//     error, cancelled, timed_out, neutral, skipped, etc.)
+//   - pending: anything else (Status != "completed")
 //
 // Overall State: any failed → "failure"; else any pending → "pending";
 // else (≥1 run, all passed) → "success"; no runs → "none".
@@ -28,10 +29,11 @@ func ciRollupFromSync(runs []api.CIRun, now func() time.Time) store.CIRollup {
 	var passed, failed, pending int
 	for _, r := range runs {
 		switch {
-		case r.Status == "completed" && r.Conclusion == "failure":
-			failed++
 		case r.Status == "completed" && r.Conclusion == "success":
 			passed++
+		case r.Status == "completed":
+			// conclusion != "success": failure, error, cancelled, timed_out, etc.
+			failed++
 		default:
 			pending++
 		}

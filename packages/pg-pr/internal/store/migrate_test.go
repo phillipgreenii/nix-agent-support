@@ -103,3 +103,24 @@ func TestMigrate_V3RevisionTable(t *testing.T) {
 		t.Fatalf("second migrate: %v", err)
 	}
 }
+
+func TestMigrate_V3MyReviewStateCHECK(t *testing.T) {
+	db := OpenForTest(t)
+
+	// Seed a pull_request row to satisfy the FK.
+	if _, err := db.sql.Exec(`INSERT INTO pull_request
+		(repo,number,ownership,state,head_sha,created_at,updated_at)
+		VALUES ('o/r',99,'mine','open','sha99','t','t')`); err != nil {
+		t.Fatalf("seed pr: %v", err)
+	}
+	var prID int64
+	_ = db.sql.QueryRow("SELECT id FROM pull_request WHERE repo='o/r' AND number=99").Scan(&prID)
+
+	// Valid ci_state + bogus my_review_state: the CHECK on my_review_state must reject it.
+	_, err := db.sql.Exec(`INSERT INTO pr_revision
+		(pr_id,seq,head_sha,observed_at,last_seen_at,ci_state,my_review_state)
+		VALUES (?,?,?,?,?,?,?)`, prID, 1, "sha99", "t", "t", "none", "bogus")
+	if err == nil {
+		t.Fatal("expected my_review_state CHECK to reject 'bogus'")
+	}
+}

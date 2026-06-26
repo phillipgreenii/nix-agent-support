@@ -139,6 +139,88 @@ func TestSetRevisionCIAndReads(t *testing.T) {
 	}
 }
 
+func TestSetRevisionCI_DefaultsAndOverwrite(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+	r1, _, err := db.RecordRevision(ctx, prID, "h1", "b1")
+	if err != nil {
+		t.Fatalf("RecordRevision: %v", err)
+	}
+
+	// Calling SetRevisionCI with an all-empty rollup stores ci_state=="none"
+	// and ci_captured_at=="" (SQL NULL → "" after COALESCE), with zero counts.
+	if err := db.SetRevisionCI(ctx, r1.ID, CIRollup{}); err != nil {
+		t.Fatalf("SetRevisionCI empty: %v", err)
+	}
+	revs, err := db.ListRevisions(ctx, prID)
+	if err != nil || len(revs) != 1 {
+		t.Fatalf("ListRevisions after empty: n=%d err=%v", len(revs), err)
+	}
+	got := revs[0]
+	if got.CIState != "none" {
+		t.Errorf("CIState: got %q want \"none\"", got.CIState)
+	}
+	if got.CICapturedAt != "" {
+		t.Errorf("CICapturedAt: got %q want \"\" (NULL)", got.CICapturedAt)
+	}
+	if got.CIPassed != 0 || got.CIFailed != 0 || got.CIPending != 0 {
+		t.Errorf("counts: got passed=%d failed=%d pending=%d; want all 0",
+			got.CIPassed, got.CIFailed, got.CIPending)
+	}
+
+	// A subsequent SetRevisionCI with a populated rollup OVERWRITES (idempotent).
+	populated := CIRollup{State: "success", Passed: 5, Failed: 0, Pending: 0, CapturedAt: "2026-01-02T03:04:05Z"}
+	if err := db.SetRevisionCI(ctx, r1.ID, populated); err != nil {
+		t.Fatalf("SetRevisionCI populated: %v", err)
+	}
+	latest, err := db.LatestRevision(ctx, prID)
+	if err != nil || latest == nil {
+		t.Fatalf("LatestRevision: %+v err=%v", latest, err)
+	}
+	if latest.CIState != "success" {
+		t.Errorf("overwrite CIState: got %q want \"success\"", latest.CIState)
+	}
+	if latest.CIPassed != 5 {
+		t.Errorf("overwrite CIPassed: got %d want 5", latest.CIPassed)
+	}
+	if latest.CICapturedAt != "2026-01-02T03:04:05Z" {
+		t.Errorf("overwrite CICapturedAt: got %q want \"2026-01-02T03:04:05Z\"", latest.CICapturedAt)
+	}
+}
+
+func TestRevision_FKCascadeOnPRDelete(t *testing.T) {
+	ctx := context.Background()
+	db := OpenForTest(t)
+	prID := seedPR(t, db)
+
+	if _, _, err := db.RecordRevision(ctx, prID, "h1", "b1"); err != nil {
+		t.Fatalf("RecordRevision: %v", err)
+	}
+	if _, _, err := db.RecordRevision(ctx, prID, "h2", "b1"); err != nil {
+		t.Fatalf("RecordRevision seq2: %v", err)
+	}
+
+	// Confirm revisions exist before deletion.
+	before, err := db.ListRevisions(ctx, prID)
+	if err != nil || len(before) != 2 {
+		t.Fatalf("pre-delete ListRevisions: n=%d err=%v", len(before), err)
+	}
+
+	// Delete the parent pull_request row; FK cascade should remove revisions.
+	if _, err := db.sql.Exec("DELETE FROM pull_request WHERE id=?", prID); err != nil {
+		t.Fatalf("DELETE pull_request: %v", err)
+	}
+
+	after, err := db.ListRevisions(ctx, prID)
+	if err != nil {
+		t.Fatalf("post-delete ListRevisions: %v", err)
+	}
+	if len(after) != 0 {
+		t.Errorf("FK cascade: expected 0 revisions after PR delete, got %d", len(after))
+	}
+}
+
 func TestMarkRevisionReviewed_LatestMatchingSHA(t *testing.T) {
 	ctx := context.Background()
 	db := OpenForTest(t)

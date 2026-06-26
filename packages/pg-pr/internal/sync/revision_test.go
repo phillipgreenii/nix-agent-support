@@ -72,6 +72,16 @@ func TestCIRollupFromSync(t *testing.T) {
 			wantFailed:  1,
 			wantPending: 1,
 		},
+		{
+			name: "completed+error alongside success → counted as failed, yields failure",
+			runs: []api.CIRun{
+				{Status: "completed", Conclusion: "success"},
+				{Status: "completed", Conclusion: "error"},
+			},
+			wantState:  "failure",
+			wantPassed: 1,
+			wantFailed: 1,
+		},
 	}
 
 	for _, tc := range tests {
