@@ -111,6 +111,14 @@
             # No top-level bd/beads overlay attr — source it like gascity (flake.nix:181).
             bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
           };
+          pb = final.callPackage ./packages/pb {
+            inherit (goBuilders) mkGoApp;
+            # No top-level bd/beads overlay attr — source it like pr-pool above.
+            bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            # git is pkgs.git (auto via callPackage); `pn` is NOT passed — it is an
+            # ambient runtime PATH dep (agent-support is standalone/no-external-flake-deps
+            # so final.pn does not resolve). See packages/pb/default.nix + ADR 0018.
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
@@ -228,9 +236,9 @@
       extraHooks = {
         gofmt = {
           enable = true;
-          name = "gofmt (pg-pr/pr-pool)";
+          name = "gofmt (pg-pr/pr-pool/pb)";
           entry = "${hookPkgs.go}/bin/gofmt -l -w";
-          files = "^packages/(pg-pr|pr-pool)/.*\\.go$";
+          files = "^packages/(pg-pr|pr-pool|pb)/.*\\.go$";
           types_or = [ "go" ];
         };
         golangci-lint = {
@@ -282,6 +290,29 @@
             ''
           );
           files = "^packages/pr-pool/.*\\.go$";
+          pass_filenames = false;
+        };
+        golangci-lint-pb = {
+          enable = true;
+          name = "golangci-lint (pb)";
+          entry = toString (
+            hookPkgs.writeShellScript "precommit-golangci-lint-pb" ''
+              set -e
+              # golangci-lint shells out to `go`; put it on PATH.
+              export PATH="${hookPkgs.go}/bin:$PATH"
+              # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
+              # pb has external deps (cobra) that golangci-lint cannot download
+              # offline. Lint normally on a dev machine. Mirrors the pg-pr/pr-pool
+              # hook guards above.
+              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                echo "golangci-lint (pb): skipped — nix build sandbox (no network for go module download)"
+                exit 0
+              fi
+              cd packages/pb
+              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+            ''
+          );
+          files = "^packages/pb/.*\\.go$";
           pass_filenames = false;
         };
       };
@@ -921,6 +952,7 @@
             inherit (pkgs)
               ccpool
               pr-pool
+              pb
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-gc
@@ -985,6 +1017,24 @@
                   | tee /tmp/ccpool-contract.json \
                   | jq -r -f contract/classify.jq \
                   | sort | uniq -c
+              '';
+            };
+            # pb-contract runs pb's on-demand, build-tagged (//go:build contract)
+            # suite that pins the REAL bd/git/pn surfaces (bd gate surface, the
+            # co-location invariant, the multi-DB dedupe key, git patch-id
+            # behaviour, pn info schema). It drives real bd + git (and optionally
+            # pn) in an isolated temp HOME/XDG, and is deliberately NOT a flake
+            # check / not in CI. See packages/pb/README.md.
+            pb-contract = pkgs.writeShellApplication {
+              name = "pb-contract";
+              runtimeInputs = [
+                pkgs.go
+                pkgs.git
+                (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+              ];
+              text = ''
+                cd "''${1:-packages/pb}"
+                go test -tags contract -timeout=0 -p 1 ./...
               '';
             };
           };
