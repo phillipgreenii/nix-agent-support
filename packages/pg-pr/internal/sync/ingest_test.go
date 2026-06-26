@@ -735,6 +735,99 @@ func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
 	}
 }
 
+func TestSync_RecordsRevisionWithCIAndReview(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	const headSHA = "head-sha-r1"
+	const baseSHA = "base-sha-r1"
+
+	// A mixed CI set: 2 successes + 1 failure → CIState=="failure", CIFailed==1.
+	ciRuns := []api.CIRun{
+		{ID: "r1", Name: "lint", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+		{ID: "r2", Name: "test", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+		{ID: "r3", Name: "build", Status: "completed", Conclusion: "failure", HeadSHA: headSHA},
+	}
+
+	// One self-authored APPROVED review targeting headSHA.
+	reviews := []api.Review{
+		{
+			ID:          "rev-1",
+			Author:      "phillipg",
+			State:       "APPROVED",
+			CommitOID:   headSHA,
+			SubmittedAt: "2026-06-01T12:00:00Z",
+		},
+	}
+
+	pr := api.PR{
+		Repo:    "o/r",
+		Number:  1,
+		State:   "open",
+		Branch:  "feat/rev",
+		Base:    "main",
+		Author:  "phillipg",
+		URL:     "https://github.com/o/r/pull/1",
+		HeadSHA: headSHA,
+		BaseSHA: baseSHA,
+	}
+	enriched := &vcs.EnrichedPR{
+		PR:      pr,
+		CIRuns:  ciRuns,
+		Reviews: reviews,
+	}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "phillipg",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingestFeedbackToStore: %v", err)
+	}
+
+	storedPR, err := db.GetPR(ctx, "o/r", 1)
+	if err != nil || storedPR == nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+
+	revs, err := db.ListRevisions(ctx, storedPR.ID)
+	if err != nil {
+		t.Fatalf("ListRevisions: %v", err)
+	}
+	if len(revs) != 1 {
+		t.Fatalf("expected 1 revision, got %d: %+v", len(revs), revs)
+	}
+	rev := revs[0]
+	if rev.HeadSHA != headSHA {
+		t.Errorf("HeadSHA: got %q want %q", rev.HeadSHA, headSHA)
+	}
+	if rev.BaseSHA != baseSHA {
+		t.Errorf("BaseSHA: got %q want %q", rev.BaseSHA, baseSHA)
+	}
+	if rev.CIState != "failure" {
+		t.Errorf("CIState: got %q want \"failure\"", rev.CIState)
+	}
+	if rev.CIFailed != 1 {
+		t.Errorf("CIFailed: got %d want 1", rev.CIFailed)
+	}
+	if rev.CIPassed != 2 {
+		t.Errorf("CIPassed: got %d want 2", rev.CIPassed)
+	}
+	if rev.MyReviewState != "approved" {
+		t.Errorf("MyReviewState: got %q want \"approved\"", rev.MyReviewState)
+	}
+}
+
 // TestProcessFeedback_NoStoreIsNoop verifies that processFeedback does nothing
 // when Deps.Store is unset: the bead-feedback path is gone, so a PR with
 // enriched feedback produces no errors and no side effects. (The store-backed

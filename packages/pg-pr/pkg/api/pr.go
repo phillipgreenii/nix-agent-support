@@ -18,6 +18,9 @@ type PR struct {
 	// HeadSHA is the OID of the PR's current head commit. Used to write
 	// store.PullRequest.HeadSHA and to drive ReconcileStaleness.
 	HeadSHA string `json:"head_sha,omitempty"`
+	// BaseSHA is the OID of the PR's base commit. Populated by the GitHub GraphQL
+	// path; empty on the REST fallback path. The revision row stores it.
+	BaseSHA string `json:"base_sha,omitempty"`
 	// Body is the PR description text. Added for urgency keyword scanning;
 	// fully populated in Task 8.
 	Body string `json:"body,omitempty"`

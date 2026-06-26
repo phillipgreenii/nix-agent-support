@@ -61,6 +61,20 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		return fmt.Errorf("ingest: upsert pr %s#%d: %w", repo, pr.Number, err)
 	}
 
+	// Record revision timeline and attach CI + review marker.
+	rev, _, err := e.deps.Store.RecordRevision(ctx, prID, pr.HeadSHA, pr.BaseSHA)
+	if err != nil {
+		return fmt.Errorf("ingest: record revision %s#%d: %w", repo, pr.Number, err)
+	}
+	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns)); err != nil {
+		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
+	}
+	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {
+		if err := e.deps.Store.MarkRevisionReviewed(ctx, prID, rv.CommitSHA, rv.State, rv.SubmittedAt); err != nil {
+			return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
+		}
+	}
+
 	// Encode the shared event payload (identical for every item in this PR).
 	payloadBytes, err := json.Marshal(struct {
 		Repo   string `json:"repo"`

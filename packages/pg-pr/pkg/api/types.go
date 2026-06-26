@@ -43,6 +43,11 @@ type Review struct {
 	State    string    `json:"state"`
 	Body     string    `json:"body"`
 	Comments []Comment `json:"comments,omitempty"`
+	// CommitOID is the SHA of the commit the review was submitted against.
+	// Populated by the GitHub GraphQL path; empty otherwise.
+	CommitOID string `json:"commit_oid,omitempty"`
+	// SubmittedAt is the RFC3339 timestamp when the review was submitted.
+	SubmittedAt string `json:"submitted_at,omitempty"`
 }
 
 // CIRun is the JSON shape for a CI workflow run.

@@ -50,6 +50,7 @@ func prNodeSelection(connFirst int) string {
         url
         author { __typename login }
         baseRefName
+        baseRefOid
         headRefName
         isDraft
         state
@@ -67,6 +68,7 @@ func prNodeSelection(connFirst int) string {
             author { __typename login }
             body
             submittedAt
+            commit { oid }
           }
         }
         comments(first: %[1]d, orderBy: { field: UPDATED_AT, direction: DESC }) {
@@ -233,6 +235,7 @@ type ghPRNode struct {
 	URL          string  `json:"url"`
 	Author       *ghUser `json:"author"`
 	BaseRefName  string  `json:"baseRefName"`
+	BaseRefOid   string  `json:"baseRefOid"`
 	HeadRefName  string  `json:"headRefName"`
 	IsDraft      bool    `json:"isDraft"`
 	State        string  `json:"state"`
@@ -305,6 +308,9 @@ type ghReviewsConn struct {
 		Author      *ghUser `json:"author"`
 		Body        string  `json:"body"`
 		SubmittedAt string  `json:"submittedAt"`
+		Commit      *struct {
+			OID string `json:"oid"`
+		} `json:"commit"`
 	} `json:"nodes"`
 }
 
@@ -487,6 +493,7 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 		Deletions:    n.Deletions,
 		ChangedFiles: n.ChangedFiles,
 		HeadSHA:      headSHA,
+		BaseSHA:      n.BaseRefOid,
 		Body:         n.Body,
 	}
 	for _, l := range n.Labels.Nodes {
@@ -501,11 +508,17 @@ func reviewsFromGHNode(n ghPRNode) []api.Review {
 	}
 	out := make([]api.Review, 0, len(n.Reviews.Nodes))
 	for _, r := range n.Reviews.Nodes {
+		var commitOID string
+		if r.Commit != nil {
+			commitOID = r.Commit.OID
+		}
 		out = append(out, api.Review{
-			ID:     r.ID,
-			Author: r.Author.canonicalLogin(),
-			State:  r.State,
-			Body:   r.Body,
+			ID:          r.ID,
+			Author:      r.Author.canonicalLogin(),
+			State:       r.State,
+			Body:        r.Body,
+			CommitOID:   commitOID,
+			SubmittedAt: r.SubmittedAt,
 		})
 	}
 	return out
