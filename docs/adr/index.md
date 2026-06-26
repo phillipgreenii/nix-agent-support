@@ -20,3 +20,4 @@
 | [0015](0015-ccpool-session-facts-not-work-judgments.md)             | ccpool tracks session facts, not work judgments               | Accepted                                                                        | 2026-06-16 |
 | [0016](0016-pa-monitor-config-sourced-otel-and-connection-alert.md) | pa-monitor OTel from shared config + daemon-connection alert  | Accepted                                                                        | 2026-06-23 |
 | [0017](0017-static-nix-built-local-plugin-marketplace.md)           | Static nix-built marketplace for agent-support local plugins  | Accepted                                                                        | 2026-06-25 |
+| [0018](0018-pb-tool-and-pn-applied-contract.md)                     | pb tool + pn:applied gate contract                            | Accepted                                                                        | 2026-06-26 |
