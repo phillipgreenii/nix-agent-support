@@ -52,7 +52,7 @@ func newGateCreateCmd() *cobra.Command {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 			}
 			for _, g := range out.Gates {
-				fmt.Fprintf(cmd.OutOrStdout(), "created gate %s (await_id=%s baseline=%q)\n", g.GateID, g.AwaitID, g.AppliedBaseline)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created gate %s (await_id=%s baseline=%q)\n", g.GateID, g.AwaitID, g.AppliedBaseline)
 			}
 			return nil
 		},

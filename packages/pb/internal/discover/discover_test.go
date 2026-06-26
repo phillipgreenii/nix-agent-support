@@ -58,7 +58,7 @@ func TestFindBeadsDir_notFoundAtOrBelowRoot(t *testing.T) {
 	// .beads exists ABOVE root — must NOT be discovered.
 	parent := filepath.Dir(root)
 	writeBeads(t, parent, "127.0.0.1", "25252", "pg2", "proj-1")
-	defer os.RemoveAll(filepath.Join(parent, ".beads"))
+	defer func() { _ = os.RemoveAll(filepath.Join(parent, ".beads")) }()
 	if _, ok := FindBeadsDir(repo, root); ok {
 		t.Fatal("must not ascend above root")
 	}

@@ -53,7 +53,7 @@ func newGateCheckCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "resolved=%d would_resolve=%d skipped=%d stale=%d\n",
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolved=%d would_resolve=%d skipped=%d stale=%d\n",
 					len(out.Resolved), len(out.WouldResolve), len(out.Skipped), len(out.StaleActions))
 			}
 			if len(out.Skipped) > 0 {
