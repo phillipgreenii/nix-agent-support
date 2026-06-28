@@ -1,0 +1,6 @@
+{
+  "name": "session-wrapup",
+  "description": "Autonomously wrap up a work session: commit, file/close beads, run gates, integrate, clean up, and hand off to the next session.",
+  "version": "0.1.0",
+  "defaultEnabled": true
+}
