@@ -7,8 +7,8 @@ description: >-
   outstanding changes, closes completed beads and files beads for discovered + unfinished work,
   runs the repo's test/lint/build gates, integrates each touched repo (local ff-merge to main,
   or push branch + open/update PR for PR-based repos), removes spent branches and worktrees,
-  syncs beads to the remote, and — if work remains — writes a P0 next-session bead so the next
-  session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
+  syncs beads to the remote, and — if any work carries over, including work deferred to next
+  session — writes a single P0 next-session bead so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
   leaves everything else untouched. Do NOT use for mid-session commits, for grooming the
   backlog (that's bead-grooming), or for merging someone else's PR.
 ---
@@ -191,20 +191,41 @@ Details and the exact command order are in `references/integration-and-cleanup.m
 
 ### 7. Decide done vs. more-work, and hand off
 
-Now decide, per the in-scope set, whether the session is truly finished:
+The session is "done" only if the workspace is genuinely at rest. Decide it with one question:
+**when someone sits down next, is there anything to pick up?** If yes — for any reason — leave a
+single P0 "continue here" bead pointing at it. If there's truly nothing, don't.
 
-**More work remains** if any of these is true — gates failed, a rebase/merge was stopped, a
-PR is open but unmerged, or there are unfinished/blocked beads still in scope. When work
-remains:
+There's something to pick up when either holds:
+
+- **Interrupted or blocked state:** gates failed, a rebase/merge was stopped, a PR is open but
+  unmerged, or an in-scope task is unfinished or blocked.
+- **Deferred or discovered work you mean to continue:** follow-ups you consciously pushed to
+  "next session," or things you found in phase 2 that carry this thread forward. This counts
+  _even when everything you committed landed clean and green_ — a tidy tree is not the same as no
+  next work, and missing it is the easy mistake: the session ends green, the follow-ups are real,
+  and nobody writes the pointer, so the next session starts cold. The test is intent, not
+  inventory — phase 2 files _every_ loose end, but the P0 is for what you actually mean to resume.
+  A genuinely separate tangent you don't plan to pick up next stays a standalone backlog bead at
+  its own priority; it doesn't by itself become the continuation pointer. When in doubt, write
+  the pointer.
+
+When there's something to pick up:
 
 - Keep the relevant branch(es) and worktree(s) (phase 6 already did, for PR/blocked cases).
-- Write **one P0 bead** holding the next-session prompt — a cold-start brief: where the work
-  stands, which branch/worktree to resume in, what's red or unmerged, and the first concrete
-  step. Format in "Next-session handoff bead" below.
+- Write **one P0 bead** — the single next-session entry point. A cold-start brief: where the
+  work stands, which branch/worktree to resume in, what's red/unmerged/deferred, and the first
+  concrete step. The discovered/deferred beads from phase 2 keep their own (non-P0) identities;
+  this P0 _links_ them and names the one place to start. One pointer, not many — its job is to
+  resume fast and keep the next session from fanning out into parallel threads. Format in
+  "Next-session handoff bead" below.
+- If a prior wrapup already left a P0 "continue here" bead for this thread, update it instead of
+  filing a second (see "Safety and idempotency").
 
-**Everything's done** if all in-scope work is committed, gated green, integrated (merged
-locally or PR opened with nothing else pending), and branches/worktrees retired. Then no P0
-handoff bead is needed — note completion in the summary.
+**Truly done** — and only then skip the P0 — means all in-scope work is committed, gated green,
+integrated (merged locally or PR opened with nothing else pending), branches/worktrees retired,
+_and_ nothing deferred or discovered that you mean to continue. Note completion in the summary.
+When you can't tell which side of the line you're on, write the pointer: a redundant P0 costs one
+line to close, a missing one costs the next session a cold restart.
 
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
@@ -232,14 +253,21 @@ EOF
 )"
 ```
 
-One P0 bead, not many — it's the single entry point for the next session. Discovered side
-work from phase 2 stays as its own (non-P0) beads; this bead is specifically the "start
-here next time" pointer, and it can link to those.
+One P0 bead, not many — it's the single entry point for the next session, created whenever any
+work carries over (interrupted, deferred, or discovered). The other follow-ups from phase 2 keep
+their own (non-P0) beads; this P0 doesn't replace them — it points at the one place to start and
+links them, so the next session sees a single front door instead of a scattered backlog.
 
 ## Safety and idempotency
 
 - **Re-running is safe.** A second wrapup with nothing new to do should find a clean tree,
-  no in-scope unmerged work, and simply report "nothing to wrap up."
+  no in-scope unmerged work, and simply report "nothing to wrap up." If a prior wrapup already
+  left a P0 "continue here" bead for work that's still open, update that bead rather than filing
+  a duplicate — the next session needs one front door, not a stack of them.
+- **Leave a P0 whenever work carries over.** Deferred, blocked, or unfinished in-scope work — or
+  discovered work you mean to resume next — means there's a next session; capture it as the
+  single P0 pointer (linking the rest). Skip the P0 only when nothing carries over at all. When
+  unsure, write it.
 - **Never touch out-of-scope work** — unrelated branches, others' worktrees, pre-existing
   stashes, dirty files you didn't create. Skip and report.
 - **Never auto-merge a PR.** Pushing + opening/updating is the boundary.
