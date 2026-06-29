@@ -487,3 +487,52 @@ func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
 		t.Fatalf("closed-parent guard failed: expected 0 draft-review ensures, got %d", c.drCalls)
 	}
 }
+
+// cascadeChildCapture records the IDs of children closed during cascade.
+type cascadeChildCapture struct {
+	noopBeadClient
+	find         *beads.MergeRequest
+	children     []string
+	onCloseChild func(string)
+}
+
+func (c *cascadeChildCapture) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
+	return c.find, nil
+}
+func (c *cascadeChildCapture) CloseMergeRequest(context.Context, string, string) error { return nil }
+func (c *cascadeChildCapture) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return c.children, nil
+}
+func (c *cascadeChildCapture) CloseProcessingCycle(_ context.Context, id, _ string) error {
+	if c.onCloseChild != nil {
+		c.onCloseChild(id)
+	}
+	return nil
+}
+
+// TestPRMergedCascadeClosesDraftReviewChild discharges the spec MUST that
+// cascadeClose closes an open draft-review child when its PR is merged.
+// cascadeClose is type-blind, so the draft-review child is closed like any
+// other; this test names one explicitly to lock the contract.
+func TestPRMergedCascadeClosesDraftReviewChild(t *testing.T) {
+	var closedChildren []string
+	client := &cascadeChildCapture{
+		find:         &beads.MergeRequest{ID: "mr-1", Status: "open"},
+		children:     []string{"draft-review-child-1"},
+		onCloseChild: func(id string) { closedChildren = append(closedChildren, id) },
+	}
+	h := New(client)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Merged: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRMerged, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	found := false
+	for _, id := range closedChildren {
+		if id == "draft-review-child-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected draft-review child to be closed by cascade, closed: %v", closedChildren)
+	}
+}
