@@ -71,9 +71,9 @@ func TestEnsureDraftReviewCreatesWhenNoChild(t *testing.T) {
 	}
 	// Title carries the prefix; mine adds the label.
 	var createCall []string
-	for _, c := range r.calls {
-		if len(c) > 0 && c[0] == "create" {
-			createCall = c
+	for _, call := range r.calls {
+		if len(call) > 0 && call[0] == "create" {
+			createCall = call
 		}
 	}
 	joined := strings.Join(createCall, " ")
@@ -82,6 +82,9 @@ func TestEnsureDraftReviewCreatesWhenNoChild(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-l mine") {
 		t.Fatalf("expected mine label, got: %v", createCall)
+	}
+	if !strings.Contains(joined, "--silent") {
+		t.Fatalf("expected --silent flag, got: %v", createCall)
 	}
 }
 
