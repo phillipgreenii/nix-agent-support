@@ -347,6 +347,12 @@ git commit -m "feat(pg-pr): EnsureDraftReviewBead wrapper (task + draft-review: 
 
 - Modify: `packages/pg-pr/internal/beadsbridge/bridge.go` (interface `:18-27`; handler branch `:46-56`)
 - Test: `packages/pg-pr/internal/beadsbridge/bridge_test.go` (`noopBeadClient` `:49-66`; new tests)
+- Modify (interface-widening fan-out — see Step 4b): the standalone test fakes that directly implement `beadsbridge.BeadClient` and must gain the no-op method:
+  - `packages/pg-pr/internal/sync/concurrency_test.go` (`concurrentBeadClient`)
+  - `packages/pg-pr/internal/sync/integration_test.go` (`fullChainBeadClient`)
+  - `packages/pg-pr/internal/sync/refresh_test.go` (`outboxFakeBeads`)
+
+  Note: `sync.BeadClient` (sync.go:106) is a SEPARATE interface and is NOT changed; fakes that only implement it (`noopBeads` and its embedders) are unaffected. `cmd/pg-pr` fakes do not implement `beadsbridge.BeadClient`. The compiler is the source of truth — Step 4b iterates `go vet ./...` until clean, so any implementer not listed here is still caught.
 
 **Interfaces:**
 
@@ -490,6 +496,29 @@ In `bridge.go`, inside the `BeadClient` interface (after `CloseFeedback`, `:26`)
 	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
 ```
 
+- [ ] **Step 4b: Add the no-op method to every other `beadsbridge.BeadClient` implementer**
+
+Widening the interface breaks every type that directly implements it. The
+`internal/sync` tests have standalone fakes (passed to `beadsbridge.New` / with
+`var _ beadsbridge.BeadClient` assertions) that now need the method. Add this
+no-op stub (adjust the receiver name + type for each), placed next to that
+fake's other methods:
+
+```go
+func (c *concurrentBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
+```
+
+Add the same stub to `fullChainBeadClient` (integration_test.go) and
+`outboxFakeBeads` (refresh_test.go). Do **not** touch `noopBeads` or fakes that
+only implement `sync.BeadClient` — that interface is unchanged.
+
+Then iterate until the whole module compiles:
+
+Run: `cd packages/pg-pr && go vet ./...`
+Expected: clean. If the compiler reports any other type as `does not implement beadsbridge.BeadClient (missing method EnsureDraftReviewBead)`, add the identical no-op stub to that type and re-run `go vet ./...` until it passes. The compiler is the authoritative list.
+
 - [ ] **Step 5: Wire the draft-review ensure into the handler**
 
 In `bridge.go`, replace the `EventPROpened`/`EventPRUpdated` branch (`:46-56`):
@@ -537,15 +566,27 @@ with:
 		return nil
 ```
 
-- [ ] **Step 6: Run the bridge tests to verify they pass**
+- [ ] **Step 6: Run the bridge + sync tests and vet the whole module**
 
 Run: `cd packages/pg-pr && go test ./internal/beadsbridge/ -v`
 Expected: PASS — new gate tests pass, and all pre-existing tests (`TestPROpenedCreatesPRBead`, `TestPROpenedWritesFullFields`, `TestPROpenedIdempotentSingleBead`, `TestClosedBeadNotResurrectedByReappearance`, etc.) still pass.
 
+Then confirm the interface-widening fan-out (Step 4b) left nothing broken:
+
+Run: `cd packages/pg-pr && go vet ./... && go test ./internal/sync/`
+Expected: `go vet ./...` clean (every `beadsbridge.BeadClient` implementer has the method); the `internal/sync` package still passes (the added no-op stubs don't change behavior).
+
 - [ ] **Step 7: Commit**
 
+Stage bridge.go, bridge_test.go, AND every test file you added the no-op stub to in Step 4b (at least the three sync fakes; add any others the compiler flagged):
+
 ```bash
-git add packages/pg-pr/internal/beadsbridge/bridge.go packages/pg-pr/internal/beadsbridge/bridge_test.go
+git add packages/pg-pr/internal/beadsbridge/bridge.go \
+        packages/pg-pr/internal/beadsbridge/bridge_test.go \
+        packages/pg-pr/internal/sync/concurrency_test.go \
+        packages/pg-pr/internal/sync/integration_test.go \
+        packages/pg-pr/internal/sync/refresh_test.go
+# add any further *_test.go files Step 4b touched, then:
 git commit -m "feat(pg-pr): project draft-review bead on pr.opened/updated (gated by ownership/draft) [pg2-4c5i.12]"
 ```
 
