@@ -38,8 +38,8 @@ schema = 3
     hash = 'sha256-NzRXMSEk6upeudJvUEPVnw6clJ3d8UdC/vdfANWAc8g='
 
   [mod.'modernc.org/libc']
-    version = 'v1.73.4'
-    hash = 'sha256-YN3m9MDZ2GRZznT5ErWZJdap+E5xOwOyKlZ/ixyGT+0='
+    version = 'v1.73.5'
+    hash = 'sha256-WSA5hbn/vXe2exgzcbPdDfgBqInigIFKk6UAk4UCHQc='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
