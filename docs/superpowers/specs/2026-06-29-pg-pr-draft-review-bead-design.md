@@ -32,38 +32,59 @@ The two output-routing concerns are split into their own beads (see
   outbox; `internal/beadsbridge` is the **sole writer** of the merge-request
   (PR) bead, projecting it from those events (`bridge.go`).
 - **PR lifecycle events** carry a `store.PRPayload` that already includes
-  `Ownership` (`mine` / `team`) and `Draft` (`internal/sync/prevents.go:33-38`).
-- **`pr.opened` fires exactly once per PR, on first detection**: `sync.go:429-432`
-  selects `EventPROpened` only when the PR was not already in the store
-  (`repoPreExisting`); the on-demand refresh path makes the same decision via a
-  `store.GetPR` existence check (`refresh.go` / `sync.go:1157-1163`). Subsequent
-  observations emit `pr.updated`.
+  `Ownership` (`mine` / `team`) and `Draft` on the opened/updated events
+  (`internal/sync/prevents.go:32-38`, `internal/store/event.go`). The
+  close/merge payload (`emitPRClosed`, `prevents.go:80-82`) intentionally omits
+  `Draft`/`Title` — but the gate below never runs on that payload (it only runs
+  in the opened/updated handler branch).
+- **`pr.opened` vs `pr.updated`** is decided per observation, and the two code
+  paths use **different existence checks** (see note): the bulk/daemon loop
+  (`sync.go:429-432`) keys off `repoPreExisting`, sourced from open
+  merge-request beads (`ListMergeRequests(false)`, `sync.go:1339-1349`); the
+  on-demand refresh path (`sync.go:1157-1162`, `applyFetchedPR`) keys off the
+  SQL `pull_request` row (`store.GetPR`). The `maybePromoteDraft` path emits
+  `pr.updated` with `Draft=false`, `Ownership=mine` (`sync.go:1576-1581`).
+  **The gate below is invariant to which path fired and to opened-vs-updated
+  misclassification** — it depends only on `Ownership`/`Draft` and on the
+  idempotent ensure — so this divergence is benign for this feature. It is
+  called out so the implementation does not assume a single source of truth.
 - **Enrichment (`#2`, `pg2-4c5i.10`)** and the **revision table (`#4`,
   `pg2-4c5i.11`)** are merged but are **not** consumed by this bead (see
   [Non-dependencies](#non-dependencies)).
 - **Draft staging primitives** (`internal/reviewstage`, `pg-pr review
 draft/post/submit`) already exist and are **not** touched by this bead; they
   belong to the deferred output-routing work.
+- **Bead-type convention**: pg-pr registers only `merge-request` and `feedback`
+  as bd custom types (`pkg/beads/types.go:11-15`); the workspace's
+  `types.custom` config is set imperatively per `.beads/` and is **not** in this
+  repo. `processing-cycle` and `action` beads therefore reuse the builtin `task`
+  type and discriminate by a **title prefix** (`pkg/beads/processingcycle.go:26-52`,
+  `processingCycleTitlePrefix = "process-feedback: "`). This design follows that
+  convention (see [Bead representation](#bead-representation)) so it needs **no**
+  out-of-repo config change.
 
 ## Decision
 
 When `beadsbridge` projects the merge-request (PR) bead from a `pr.opened` /
-`pr.updated` event, it MUST also ensure a child **`draft-review` bead** under
-that PR bead, gated by an ownership/draft rule. pg-pr's responsibility ends at
-bead creation.
+`pr.updated` event, it MUST also ensure a child **draft-review bead** under that
+PR bead, gated by an ownership/draft rule. pg-pr's responsibility ends at bead
+creation.
 
 ### Trigger and gating rule
 
-The bridge MUST ensure the `draft-review` bead in the **same handler branch**
-that already handles `store.EventPROpened` and `store.EventPRUpdated`, after
-`EnsureMergeRequest` has ensured the parent PR bead. The bead MUST be ensured
+The bridge MUST ensure the draft-review bead in the **same handler branch** that
+already handles `store.EventPROpened` and `store.EventPRUpdated`, after
+`EnsureMergeRequest` has ensured the parent PR bead. It MUST ensure the bead
 when, and only when:
 
 ```text
 shouldReview := payload.Ownership == "mine" || !payload.Draft
 ```
 
-| Ownership | GitHub draft? | `draft-review` bead created?  | Event that creates it            |
+…and it MUST skip when `EnsureMergeRequest` reports the parent PR bead is already
+closed (see [closed-parent guard](#bead-representation)).
+
+| Ownership | GitHub draft? | draft-review bead created?    | Event that creates it            |
 | --------- | ------------- | ----------------------------- | -------------------------------- |
 | `mine`    | yes or no     | **MUST** create               | `pr.opened`                      |
 | `team`    | no (ready)    | **MUST** create               | `pr.opened`                      |
@@ -71,9 +92,9 @@ shouldReview := payload.Ownership == "mine" || !payload.Draft
 | `team`    | draft → ready | **MUST** create on transition | `pr.updated` (flips `Draft` off) |
 
 Because the rule is evaluated on every `pr.opened` / `pr.updated`, a teammate PR
-that starts as a draft naturally gets its `draft-review` bead on the
-`pr.updated` that removes the draft flag — no separate watcher is required. My
-own PRs are reviewed even while still in draft.
+that starts as a draft naturally gets its draft-review bead on the `pr.updated`
+that removes the draft flag — no separate watcher is required. My own PRs are
+reviewed even while still in draft (a deliberate product choice).
 
 ### Mechanism (chosen: project inside the existing PR-lifecycle handler)
 
@@ -83,64 +104,113 @@ flowchart TD
     A -->|already known| C["emitPREvent EventPRUpdated"]
     B --> D[outbox]
     C --> D
-    D -->|FIFO drain| E["beadsbridge.Handle\ncase EventPROpened, EventPRUpdated"]
+    D -->|drain| E["beadsbridge.Handle\ncase EventPROpened, EventPRUpdated"]
     E --> F["EnsureMergeRequest\n(parent PR bead)"]
-    F --> G{"shouldReview?\nmine OR not draft"}
+    F --> P{"parent alreadyClosed?"}
+    P -->|yes| Z["skip (no review under closed PR)"]
+    P -->|no| G{"shouldReview?\nmine OR not draft"}
     G -->|yes| H["EnsureDraftReviewBead\n(child of PR bead)"]
     G -->|no| I["skip (teammate draft)"]
     H --> J[agent claims bead, performs review]
 ```
 
-The `BeadClient` interface (`internal/beadsbridge`) gains one method:
+The `BeadClient` interface (`internal/beadsbridge`) gains one method, modelled on
+`CreateProcessingCycle` + a merge-request-style dedup scan:
 
 ```go
-// EnsureDraftReviewBead ensures exactly one open draft-review bead exists as a
-// child of the PR (merge-request) bead identified by repo+number. It is
-// idempotent on re-delivery and MUST NOT resurrect a closed draft-review bead.
-EnsureDraftReviewBead(ctx context.Context, repo string, number int, fields DraftReviewFields) (id string, alreadyClosed bool, err error)
+// EnsureDraftReviewBead ensures exactly one draft-review bead (open OR closed)
+// exists as a child of the PR bead identified by repo+number. Idempotent on
+// re-delivery; MUST NOT resurrect a closed draft-review bead. A lookup error
+// MUST be returned (caller skips and retries next tick) — it MUST NOT be
+// treated as "none exists" (that is the documented duplicate-cycle bug,
+// processingcycle.go:84-90).
+EnsureDraftReviewBead(ctx context.Context, repo string, number int, fields DraftReviewFields) (id string, err error)
 ```
 
-`DraftReviewFields` carries the data the agent needs to start: `HeadSHA`,
-`Ownership`, and a human-facing title (e.g. `Review PR #<n>: <title>`).
+`DraftReviewFields` carries **informational** data for the consuming agent —
+`HeadSHA` (the SHA observed at emission), `Ownership`, and a human-facing title.
+`HeadSHA` is **not** part of the dedup key (see Non-dependencies).
 
-### Bead shape and lifecycle
+### Bead representation
 
-- **Type / parentage**: a distinct work item that is a **child of the
-  merge-request (PR) bead** — separate from the existing _processing-cycle_
-  (feedback) bead, which represents different work.
-- **Idempotency**: at most one **open** `draft-review` bead per PR. Re-fired
-  `pr.opened` / `pr.updated` events (e.g. after a store rebuild, or every poll
-  tick for a ready teammate PR) MUST be no-ops when an open bead already exists.
-  This mirrors `EnsureMergeRequest`'s upsert-by-(repo, number) contract.
-- **No resurrection**: if the `draft-review` bead has been closed (review done),
-  a later `pr.opened` / `pr.updated` MUST NOT recreate it — the same closed-bead
-  guard the merge-request bead uses (`alreadyClosed`).
+- **Type**: the builtin bd `task` type, discriminated by a title prefix
+  `draft-review: ` (mirroring `processing-cycle`'s `process-feedback: `,
+  `processingcycle.go:26-52`). This needs **no** `types.custom` change. A custom
+  `draft-review` type is explicitly rejected: it would require updating every
+  workspace's out-of-repo `types.custom` config, with a silent-miss failure mode
+  if missed.
+- **Parentage**: a child of the merge-request (PR) bead, wired with
+  `dep add <child> <pr> --type=parent-child` (as `CreateProcessingCycle` does).
+  Distinct from the `process-feedback:` (processing-cycle) bead — different work.
+- **Ownership label**: the bead carries a `mine` / `team` label so the deferred
+  output-routing beads (`pg2-4c5i.34` / `.35`) can distinguish without re-deriving
+  ownership.
+- **Dedup key (idempotency + no-resurrection)**: one draft-review bead per parent
+  PR bead, regardless of state. `EnsureDraftReviewBead` MUST: list the PR bead's
+  children (`ListChildrenOfPR`, which returns all children regardless of type —
+  `processingcycle.go:158-183`); intersect with `task` beads whose title has the
+  `draft-review: ` prefix in **both open and closed** states (a merge-request-
+  style scan, `mergerequest.go:227-273`, **not** the open-only
+  `FindOpenProcessingCycle` scan); if any match exists (open or closed), skip
+  creation. This dedups re-delivered events and prevents resurrecting a completed
+  (closed) review.
+- **Closed-parent guard**: if `EnsureMergeRequest` returns `alreadyClosed == true`
+  for the parent PR bead, the handler MUST skip `EnsureDraftReviewBead` — no
+  review bead under a closed PR. This reuses the existing signal and mirrors the
+  processing-cycle guard (`bridge.go:84-86`). It is distinct from the child
+  no-resurrection check above.
 - **Cascade close**: when the PR bead is closed or merged (`pr.closed` /
-  `pr.merged` → `cascadeClose`), any open `draft-review` child MUST be closed
-  too. The implementation MUST verify `ListChildrenOfPR` enumerates the new bead
-  type so `cascadeClose` covers it.
+  `pr.merged` → `cascadeClose`, `bridge.go:99-116`), any open draft-review child
+  is closed automatically — `ListChildrenOfPR` already enumerates all children
+  regardless of type, and `CloseProcessingCycle`/`bd close` works on any type.
+  No new cascade code is required; a test MUST assert it.
 - **Ordering invariant preserved**: the parent PR bead is ensured before the
-  child within the single handler invocation, so the existing
-  parent-before-child guarantee holds without relying on outbox ordering between
-  two events.
+  child within the single handler invocation, so the existing parent-before-child
+  guarantee holds without relying on inter-event outbox ordering.
+
+### Delivery semantics (correction)
+
+The outbox is **fire-once / best-effort**, not at-least-once: `RunOutbox` marks
+each row `complete` regardless of the dispatch outcome and discards handler
+errors (`internal/store/outbox.go:56-59, 90-96`). A draft-review create that
+fails on a transient error is therefore **dropped for that event**, not retried
+by the outbox. Recovery instead comes from the **poll layer**: the next sync tick
+re-observes the PR and re-emits `pr.updated`, re-running the gate and the
+idempotent ensure. This recreation works for a _first_ create (nothing to
+resurrect); it relies on the PR still being observed and still passing the gate.
+This is acceptable — but the design's no-miss reasoning rests on poll-tick
+re-emission, not on outbox redelivery.
 
 ### Non-dependencies
 
 This bead does **not** consume the revision table (`#4`) or enrichment (`#2`):
 
 - **No re-review-on-new-revision**: creating a fresh review obligation when a new
-  head SHA lands after a review is the concern of `#3` (`pg2-4c5i.13`, teammate
-  attention signals), which keys off `reviewed_at_sha` vs `head_sha`. This bead
-  is purely `pr.opened`/`pr.updated`-driven.
+  head SHA lands after a review is the concern of `#3` (`pg2-4c5i.13`). This bead
+  is purely `pr.opened`/`pr.updated`-driven, and dedups by `(repo, number)` —
+  **not** by head SHA. Keying on head SHA would mint a new bead on every
+  force-push, silently pulling in the deferred re-review concern. `HeadSHA` on
+  the bead is informational only.
 - **No reviewer-agent selection from enrichment**: which reviewer agents run is
   an agent-layer concern handled when the bead is picked up, not at emission
-  time. (If selection later proves better computed deterministically in Go, that
-  is an additive change to `DraftReviewFields`, not a precondition here.)
+  time. (If selection later proves better computed in Go, that is an additive
+  change to `DraftReviewFields`, not a precondition here.)
+
+### Known limitations (inherited from the platform)
+
+- **Reopened PRs are not re-reviewed.** There is no `pr.reopened` event
+  (`store/event.go`), and once a PR bead is closed `EnsureMergeRequest` returns
+  `alreadyClosed` permanently. A closed→reopened PR therefore gets neither a new
+  merge-request bead nor a new draft-review bead. Pre-existing gap; out of scope.
+- **`draft → ready → draft` does not withdraw the bead.** The gate only
+  _creates_; it never closes a draft-review bead when a teammate PR reverts to
+  draft. This is intentional — review work may already be underway; withdrawal is
+  out of scope.
 
 ## Out of Scope
 
 Captured as new beads, both **children of epic `pg2-4c5i`** and **blocked by
-`pg2-4c5i.12`** (they need the `draft-review` bead to exist):
+`pg2-4c5i.12`** (they need the draft-review bead to exist):
 
 1. **`pg2-4c5i.34` (H1) — handle review output for _my_ PRs**: review findings
    feed the internal merge loop; not posted to GitHub.
@@ -150,22 +220,29 @@ Captured as new beads, both **children of epic `pg2-4c5i`** and **blocked by
    primitives). Related to `pg2-4c5i.13` (teammate attention signal), but
    distinct: this is the review-_application_ path, not the attention bead.
 
-Also out of scope here: defining the agent/skill workflow that _consumes_ the
-`draft-review` bead and produces the review itself.
+Also out of scope here: the **agent/skill workflow that consumes** the
+draft-review bead and produces the review. This bead only _emits_ the work item;
+what claims and completes it (a `bd ready`-driven loop / an updated
+`pg-pr-review-team-pr` skill) is downstream. **Flagged so it is not forgotten:**
+without a consumer, this feature emits beads nothing acts on — confirm/track the
+consumer as a separate item before declaring the workflow end-to-end.
 
 ## Testing
 
-Bridge-level tests in `internal/beadsbridge`, mirroring the existing
-merge-request bead tests:
+Bridge-level tests in `internal/beadsbridge`, mirroring the merge-request bead
+tests:
 
-- `pr.opened` for a `mine` PR (draft or not) → exactly one `draft-review` bead.
-- `pr.opened` for a `team` **draft** PR → **no** `draft-review` bead; a
-  subsequent `pr.updated` with `Draft=false` → exactly one bead.
+- `pr.opened` for a `mine` PR (draft or not) → exactly one draft-review bead.
+- `pr.opened` for a `team` **draft** PR → **no** draft-review bead; a subsequent
+  `pr.updated` with `Draft=false` → exactly one bead.
 - Re-delivery of the same event → still one bead (idempotent).
-- Closed `draft-review` bead is **not** resurrected by a later event.
-- `pr.closed` / `pr.merged` → open `draft-review` child is closed by
+- A **closed** draft-review bead is **not** resurrected by a later event.
+- A transient **lookup error** during the dedup scan → the handler skips and does
+  **not** create a second bead (returns the error; retries next tick).
+- Parent PR bead already **closed** (`EnsureMergeRequest` → `alreadyClosed`) → no
+  draft-review bead created.
+- `pr.closed` / `pr.merged` → an open draft-review child is closed by
   `cascadeClose`.
-- No `draft-review` bead is created under an already-closed PR bead.
 
 ## Alternatives Considered
 
@@ -178,6 +255,14 @@ existing PR-lifecycle handler already receives. A new event type, emission site,
 and handler add surface area with no behavioral gain, and would require
 re-establishing the parent-before-child ordering across two events rather than
 within one handler.
+
+### A custom `draft-review` bd type
+
+Register `draft-review` in `types.custom`. Rejected: that config lives outside
+this repo (set imperatively per workspace `.beads/`), so there is no
+version-controlled change and a missed rollout fails silently. Reusing the
+builtin `task` type with a title prefix (as `processing-cycle` does) needs no
+config and keeps dedup/cascade consistent with existing machinery.
 
 ### Thick-Go orchestration (pg-pr runs the review)
 
@@ -193,5 +278,7 @@ narrowed scope ("pg-pr stops at bead creation").
   emit → bridge projection pattern this bead extends.
 - `pg2-4c5i.13` (`#3`) — owns re-review-after-approval and teammate attention
   signals; intentionally not handled here.
+- `pg2-4c5i.34` / `pg2-4c5i.35` — the deferred output-routing beads this bead
+  unblocks.
 - `pg2-4c5i.10` (`#2`), `pg2-4c5i.11` (`#4`) — merged foundation, not consumed by
   this bead (see Non-dependencies).
