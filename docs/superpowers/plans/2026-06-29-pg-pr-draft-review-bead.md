@@ -59,8 +59,9 @@ import (
 	"testing"
 )
 
-// scriptedRunner returns canned output per bd subcommand and records calls.
-type scriptedRunner struct {
+// draftReviewRunner returns canned output per bd subcommand and records calls.
+// (Named to avoid colliding with scriptedRunner in processingcycle_test.go.)
+type draftReviewRunner struct {
 	calls     [][]string
 	children  string // output for `dep list <id> --direction=up --json`
 	tasks     string // output for `list --type=task ...`
@@ -68,7 +69,7 @@ type scriptedRunner struct {
 	createID  string // ID returned for `create`
 }
 
-func (r *scriptedRunner) Run(_ context.Context, args ...string) (string, error) {
+func (r *draftReviewRunner) Run(_ context.Context, args ...string) (string, error) {
 	r.calls = append(r.calls, args)
 	switch {
 	case len(args) >= 2 && args[0] == "dep" && args[1] == "list":
@@ -86,7 +87,7 @@ func (r *scriptedRunner) Run(_ context.Context, args ...string) (string, error) 
 	return "", nil
 }
 
-func (r *scriptedRunner) sawCreate() bool {
+func (r *draftReviewRunner) sawCreate() bool {
 	for _, c := range r.calls {
 		if len(c) > 0 && c[0] == "create" {
 			return true
@@ -95,7 +96,7 @@ func (r *scriptedRunner) sawCreate() bool {
 	return false
 }
 
-func (r *scriptedRunner) sawDepAdd() bool {
+func (r *draftReviewRunner) sawDepAdd() bool {
 	for _, c := range r.calls {
 		if len(c) >= 2 && c[0] == "dep" && c[1] == "add" {
 			return true
@@ -105,7 +106,7 @@ func (r *scriptedRunner) sawDepAdd() bool {
 }
 
 func TestEnsureDraftReviewCreatesWhenNoChild(t *testing.T) {
-	r := &scriptedRunner{children: "[]", createID: "dr-1"}
+	r := &draftReviewRunner{children: "[]", createID: "dr-1"}
 	c := NewClientWithRunner(r)
 	id, err := c.EnsureDraftReviewBead(context.Background(), "mr-1", "o/r#7", true)
 	if err != nil {
@@ -138,7 +139,7 @@ func TestEnsureDraftReviewCreatesWhenNoChild(t *testing.T) {
 
 func TestEnsureDraftReviewDedupsExistingChild(t *testing.T) {
 	// An open draft-review child already exists → no create.
-	r := &scriptedRunner{
+	r := &draftReviewRunner{
 		children: `[{"id":"dr-1"}]`,
 		tasks:    `{"data":[{"id":"dr-1","title":"draft-review: o/r#7","status":"open"}]}`,
 		createID: "should-not-be-used",
@@ -158,7 +159,7 @@ func TestEnsureDraftReviewDedupsExistingChild(t *testing.T) {
 
 func TestEnsureDraftReviewDoesNotResurrectClosedChild(t *testing.T) {
 	// A CLOSED draft-review child exists (visible because we list --all) → no create.
-	r := &scriptedRunner{
+	r := &draftReviewRunner{
 		children: `[{"id":"dr-1"}]`,
 		tasks:    `{"data":[{"id":"dr-1","title":"draft-review: o/r#7","status":"closed"}]}`,
 		createID: "should-not-be-used",
@@ -178,7 +179,7 @@ func TestEnsureDraftReviewDoesNotResurrectClosedChild(t *testing.T) {
 
 func TestEnsureDraftReviewPropagatesLookupError(t *testing.T) {
 	// Children exist, but the task-list lookup errors → must NOT create.
-	r := &scriptedRunner{
+	r := &draftReviewRunner{
 		children: `[{"id":"dr-1"}]`,
 		tasksErr: errors.New("boom"),
 		createID: "should-not-be-used",
