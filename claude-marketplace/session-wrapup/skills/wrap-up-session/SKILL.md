@@ -24,14 +24,14 @@ This is the thing you'd otherwise re-type by hand every time you stop. It runs
 for per-step approval. Two things keep autonomy safe, and they are the heart of this skill:
 
 1. **Strict session scope.** You touch only the repos, branches, worktrees, and beads that
-   *this session* worked on. Anything else — a dirty file you didn't create, a branch from
+   _this session_ worked on. Anything else — a dirty file you didn't create, a branch from
    another effort, a stash that predates the session — you leave exactly as you found it and
    note it in the summary. When you can't tell whether something belongs to this session,
    treat it as out of scope. The cost of skipping is a line in the report; the cost of
    guessing wrong is clobbering unrelated work.
 
 2. **Gate before you integrate.** Merging or pushing broken work is the one mistake that's
-   expensive to walk back. So quality gates run *before* any irreversible step, and a failure
+   expensive to walk back. So quality gates run _before_ any irreversible step, and a failure
    stops integration cold (the branch stays, a bead gets filed, the next-session prompt
    explains it) rather than landing red code on main.
 
@@ -39,8 +39,8 @@ for per-step approval. Two things keep autonomy safe, and they are the heart of 
 
 A wrapup that operates on "the repo" is easy and wrong. Real workspaces are messy: a
 half-finished experiment on another branch, a teammate's worktree, a stash you forgot. The
-value of this skill is that the user can say "wrap up" and trust that *their session's* work
-lands and *nothing else moves*. So before doing anything destructive, build an explicit
+value of this skill is that the user can say "wrap up" and trust that _their session's_ work
+lands and _nothing else moves_. So before doing anything destructive, build an explicit
 picture of what this session is, and let that set drive every later step.
 
 Signals that something is in-session (gather these first, read-only):
@@ -66,7 +66,7 @@ The same ritual has to work in three shapes. Detect which you're in, don't assum
 - **Standalone repo** — cwd is (or is under) a single git repo, no `pn-workspace.toml`
   upward. Operate on that one repo.
 - **pn workspace** — a `pn-workspace.toml` exists at/above cwd (or `PN_WORKSPACE_ROOT` is
-  set). Multiple repos share a root and may share coordinated worktree *sets*. Scope still
+  set). Multiple repos share a root and may share coordinated worktree _sets_. Scope still
   applies: act only on the repos this session changed, but be aware that a `pn` worktree set
   spans repos and is removed as a unit. See `references/integration-and-cleanup.md`.
 - **PR-based repo** — a repo where finished work lands via pull request, not a local merge.
@@ -80,7 +80,7 @@ branch:
   merge-request tracker bead (`bd list --type=merge-request`) → **PR flow**: push the branch,
   open or update the PR, do **not** merge it.
 - **Neither** → **local ff-merge flow**: rebase onto `main`, fast-forward merge into `main`,
-  then retire the branch + worktree. **No push** — landing on local `main` *is* the
+  then retire the branch + worktree. **No push** — landing on local `main` _is_ the
   integration; publishing `main` to a remote is not part of wrapup for a merge-to-main repo.
 - Work done **directly on `main`** → just commit; there's nothing to merge, push, or retire.
 
@@ -88,7 +88,7 @@ Pushing is a **PR-flow-only** action: you push a branch so it can be reviewed. A
 repo never pushes during wrapup — that's the single most important thing to get right here, and
 it's why this skill won't trip a "don't push to the default branch" guard.
 
-Why PRs are never auto-merged: a PR is a request for *someone else's* judgment, and merging it
+Why PRs are never auto-merged: a PR is a request for _someone else's_ judgment, and merging it
 is that person's call (this mirrors the `pg-pr` rule that agents never run `pg-pr pr merge`).
 A local ff-merge is different — it's your own linear history on your own checkout, so landing
 it autonomously is exactly the habit this skill automates.
@@ -162,7 +162,7 @@ For each in-scope repo, follow its detected flow from "Reading the terrain", usi
 commands in `references/integration-and-cleanup.md`:
 
 - **Local ff-merge:** rebase the branch onto fresh `main`, fast-forward merge into `main`.
-  That ff-merge *is* the integration — **do not push**. If the rebase hits a non-trivial
+  That ff-merge _is_ the integration — **do not push**. If the rebase hits a non-trivial
   conflict, **stop** for that repo — don't force it; keep the branch and roll it into the
   handoff. (If the `merge-executor` agent is available you may dispatch it for this
   rebase+ff-merge+cleanup step; it has the same stop-on-conflict contract.)
@@ -276,17 +276,17 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                         | command                                                              |
-| ---------------------------- | -------------------------------------------------------------------- |
-| in-progress beads            | `bd list --status in_progress`                                       |
-| PR-tracker beads             | `bd list --type=merge-request`                                       |
-| close finished work          | `bd close <id> [<id>...] --reason="..."`                             |
-| file discovered/unfinished   | `bd create --title=... --description=... --type=... -p <0-4>`        |
-| dirty state                  | `git status` ; ahead of main: `git log main..`                       |
-| detect PR (per repo)         | `gh pr view` / `pg-pr pr show` / `bd list --type=merge-request`      |
-| run gates (nix-* repos)      | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check` |
-| local ff-merge + cleanup     | see `references/integration-and-cleanup.md`                          |
-| push branch (PR flow only)   | `git push -u origin <branch>` (NOT `pn workspace push`)              |
-| remove pn worktree set       | `pn workspace worktree remove <branch>` (only when whole set clean)  |
-| prune stale worktree admin   | `pn workspace worktree prune`                                        |
-| next-session handoff         | one P0 `bd create` (see "Next-session handoff bead")                 |
+| need                       | command                                                                     |
+| -------------------------- | --------------------------------------------------------------------------- |
+| in-progress beads          | `bd list --status in_progress`                                              |
+| PR-tracker beads           | `bd list --type=merge-request`                                              |
+| close finished work        | `bd close <id> [<id>...] --reason="..."`                                    |
+| file discovered/unfinished | `bd create --title=... --description=... --type=... -p <0-4>`               |
+| dirty state                | `git status` ; ahead of main: `git log main..`                              |
+| detect PR (per repo)       | `gh pr view` / `pg-pr pr show` / `bd list --type=merge-request`             |
+| run gates (nix-\* repos)   | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check` |
+| local ff-merge + cleanup   | see `references/integration-and-cleanup.md`                                 |
+| push branch (PR flow only) | `git push -u origin <branch>` (NOT `pn workspace push`)                     |
+| remove pn worktree set     | `pn workspace worktree remove <branch>` (only when whole set clean)         |
+| prune stale worktree admin | `pn workspace worktree prune`                                               |
+| next-session handoff       | one P0 `bd create` (see "Next-session handoff bead")                        |

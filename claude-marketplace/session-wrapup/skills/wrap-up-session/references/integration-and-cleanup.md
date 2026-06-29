@@ -1,7 +1,7 @@
 # Integration and cleanup mechanics
 
 Detailed commands for the integrate (phase 5) and cleanup (phase 6) steps of
-`wrap-up-session`. The SKILL.md decides *which* flow applies per repo; this file is *how* to
+`wrap-up-session`. The SKILL.md decides _which_ flow applies per repo; this file is _how_ to
 execute each one. Everything here is still bound by the session-scope rule — only run these
 against repos this session worked on.
 
@@ -34,7 +34,7 @@ bd list --type=merge-request 2>/dev/null | grep -i "$branch"
 - Any of the PR signals present → **PR** flow.
 - Otherwise → **local ff-merge** flow.
 
-When in doubt between PR and local, prefer the *less* destructive PR flow (push + open PR),
+When in doubt between PR and local, prefer the _less_ destructive PR flow (push + open PR),
 since it doesn't rewrite `main` or delete the branch. Then note the ambiguity in the summary.
 
 ## Local ff-merge flow
@@ -98,7 +98,7 @@ git worktree prune
 
 ### pn coordinated worktree set
 
-A `pn` set is one branch materialized across *all* workspace repos at once, removed as a unit:
+A `pn` set is one branch materialized across _all_ workspace repos at once, removed as a unit:
 
 ```bash
 pn workspace worktree list                 # see the sets and their repos
@@ -123,6 +123,6 @@ A non-trivial rebase/merge conflict means the safe-to-automate window has closed
 - Roll it into the next-session handoff (SKILL.md phase 7): name the repo, the branch, and
   that a rebase onto `main` is pending with conflicts to resolve.
 
-A *trivial* conflict (e.g. both sides added the same import, or a lockfile that regenerates)
+A _trivial_ conflict (e.g. both sides added the same import, or a lockfile that regenerates)
 may be resolved if you're confident, then continue the rebase. When unsure, treat it as
 non-trivial and stop — a stopped wrapup is cheap; a wrong resolution on `main` is not.
