@@ -8,29 +8,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
-// buildPB compiles the pb binary once per test process and returns its path.
-var pbBuildOnce sync.Once
-var pbBinPath string
-
+// buildPB compiles the pb binary into a fresh t.TempDir() on every call.
+// The binary lives for the lifetime of the calling test and is removed when
+// that test's TempDir is cleaned up.  Rebuilding per-test (~1-2 s) is
+// acceptable given only two smoke tests exist and avoids shared-state bugs
+// where the first test's TempDir (and therefore its binary) is deleted before
+// the second test runs.
 func buildPB(t *testing.T) string {
 	t.Helper()
-	pbBuildOnce.Do(func() {
-		dir := t.TempDir()
-		out := filepath.Join(dir, "pb")
-		// Module root is two levels up from internal/gate.
-		cmd := exec.Command("go", "build", "-o", out, "./cmd/pb")
-		cmd.Dir = mustModuleRoot(t)
-		if b, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("go build pb: %v\n%s", err, b)
-		}
-		pbBinPath = out
-	})
-	return pbBinPath
+	dir := t.TempDir()
+	out := filepath.Join(dir, "pb")
+	// Module root is two levels up from internal/gate.
+	cmd := exec.Command("go", "build", "-o", out, "./cmd/pb")
+	cmd.Dir = mustModuleRoot(t)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build pb: %v\n%s", err, b)
+	}
+	return out
 }
 
 // mustModuleRoot returns the pb module root (dir containing go.mod) by walking up.
@@ -209,14 +207,32 @@ func TestSmoke_GateStale_MsPrecision(t *testing.T) {
 	// granularity, so use a wide 5s separation + a sub-second 2500ms threshold:
 	// the older gate (floored age ≥5s) crosses it; the younger (floored age
 	// ≤~2s even with subprocess-spawn jitter) does not.
+	parseGateID := func(out string) string {
+		t.Helper()
+		var cr struct {
+			Gates []struct {
+				GateID string `json:"gate-id"`
+			} `json:"gates"`
+		}
+		if err := json.Unmarshal([]byte(firstJSONLine(out)), &cr); err != nil {
+			t.Fatalf("parse gate create json: %v\n%s", err, out)
+		}
+		if len(cr.Gates) == 0 {
+			t.Fatalf("gate create returned no gates\n%s", out)
+		}
+		return cr.Gates[0].GateID
+	}
+
 	beadOld := createDeferredBead(t, ws, "older gated follow-up")
-	runTool(t, ws, pb, "gate", "create", "--blocks", beadOld, "--repo", "producer")
+	oldOut := runTool(t, ws, pb, "gate", "create", "--blocks", beadOld, "--repo", "producer", "--json")
+	oldGateID := parseGateID(oldOut)
 	runTool(t, ws, "bd", "update", beadOld, "--defer", "")
 
 	time.Sleep(5 * time.Second)
 
 	beadNew := createDeferredBead(t, ws, "newer gated follow-up")
-	runTool(t, ws, pb, "gate", "create", "--blocks", beadNew, "--repo", "producer")
+	newOut := runTool(t, ws, pb, "gate", "create", "--blocks", beadNew, "--repo", "producer", "--json")
+	newGateID := parseGateID(newOut)
 	runTool(t, ws, "bd", "update", beadNew, "--defer", "")
 
 	// Act for real with the default convert-to-human handler at a 2500ms threshold.
@@ -240,5 +256,10 @@ func TestSmoke_GateStale_MsPrecision(t *testing.T) {
 	}
 	if res.StaleActions[0].Action != "convert-to-human" {
 		t.Fatalf("expected convert-to-human action, got %q", res.StaleActions[0].Action)
+	}
+	// The stale gate must be the OLDER one, not the newer one.
+	if res.StaleActions[0].GateID != oldGateID {
+		t.Fatalf("stale gate must be the older gate %q, got %q (newer gate is %q)",
+			oldGateID, res.StaleActions[0].GateID, newGateID)
 	}
 }
