@@ -220,12 +220,11 @@ Captured as new beads, both **children of epic `pg2-4c5i`** and **blocked by
    primitives). Related to `pg2-4c5i.13` (teammate attention signal), but
    distinct: this is the review-_application_ path, not the attention bead.
 
-Also out of scope here: the **agent/skill workflow that consumes** the
-draft-review bead and produces the review. This bead only _emits_ the work item;
-what claims and completes it (a `bd ready`-driven loop / an updated
-`pg-pr-review-team-pr` skill) is downstream. **Flagged so it is not forgotten:**
-without a consumer, this feature emits beads nothing acts on — confirm/track the
-consumer as a separate item before declaring the workflow end-to-end.
+3. **`pg2-4c5i.36` — consume the draft-review bead**: the `bd ready`-driven
+   loop / updated `pg-pr-review-team-pr` skill that claims the bead and produces
+   the review (shared for mine + team). This bead only _emits_ the work item;
+   without `pg2-4c5i.36` the feature emits beads nothing acts on, so `.36` must
+   land before the workflow is end-to-end.
 
 ## Testing
 
@@ -280,5 +279,7 @@ narrowed scope ("pg-pr stops at bead creation").
   signals; intentionally not handled here.
 - `pg2-4c5i.34` / `pg2-4c5i.35` — the deferred output-routing beads this bead
   unblocks.
+- `pg2-4c5i.36` — the consumer (claims the draft-review bead and produces the
+  review); this bead unblocks it.
 - `pg2-4c5i.10` (`#2`), `pg2-4c5i.11` (`#4`) — merged foundation, not consumed by
   this bead (see Non-dependencies).
