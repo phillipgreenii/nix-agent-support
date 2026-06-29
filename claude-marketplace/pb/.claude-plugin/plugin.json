@@ -1,0 +1,6 @@
+{
+  "name": "pb",
+  "description": "Teaches the pn:applied gate lifecycle: gate a follow-up bead on a change until `pn workspace apply` applies it (commit → bd create --defer → pb gate create → un-defer).",
+  "version": "1.0.0",
+  "defaultEnabled": false
+}

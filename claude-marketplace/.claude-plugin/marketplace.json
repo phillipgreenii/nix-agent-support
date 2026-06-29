@@ -38,6 +38,11 @@
       "name": "session-wrapup",
       "source": "./session-wrapup",
       "description": "Claude skill: autonomously wrap up a work session — commit, file/close beads, run gates, integrate per-repo flow, clean up, and hand off to the next session."
+    },
+    {
+      "name": "pb",
+      "source": "./pb",
+      "description": "Teaches the pn:applied gate lifecycle (pb gate create) for agents finishing gated follow-up work"
     }
   ]
 }
