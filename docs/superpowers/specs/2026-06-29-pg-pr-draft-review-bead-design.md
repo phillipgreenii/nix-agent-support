@@ -115,21 +115,24 @@ flowchart TD
 ```
 
 The `BeadClient` interface (`internal/beadsbridge`) gains one method, modelled on
-`CreateProcessingCycle` + a merge-request-style dedup scan:
+`CreateProcessingCycle` + a merge-request-style dedup scan. It takes the parent
+PR bead ID — which `EnsureMergeRequest` already returns in the same handler — so
+there is no redundant `repo`+`number` lookup:
 
 ```go
 // EnsureDraftReviewBead ensures exactly one draft-review bead (open OR closed)
-// exists as a child of the PR bead identified by repo+number. Idempotent on
-// re-delivery; MUST NOT resurrect a closed draft-review bead. A lookup error
-// MUST be returned (caller skips and retries next tick) — it MUST NOT be
-// treated as "none exists" (that is the documented duplicate-cycle bug,
-// processingcycle.go:84-90).
-EnsureDraftReviewBead(ctx context.Context, repo string, number int, fields DraftReviewFields) (id string, err error)
+// exists as a child of prBeadID. title is appended after the "draft-review: "
+// prefix; mine adds the `mine` ownership label. Idempotent on re-delivery;
+// MUST NOT resurrect a closed draft-review bead. A lookup error MUST be
+// returned (caller skips and retries next tick) — it MUST NOT be treated as
+// "none exists" (the documented duplicate-cycle bug, processingcycle.go:84-90).
+EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (id string, err error)
 ```
 
-`DraftReviewFields` carries **informational** data for the consuming agent —
-`HeadSHA` (the SHA observed at emission), `Ownership`, and a human-facing title.
-`HeadSHA` is **not** part of the dedup key (see Non-dependencies).
+The bead records **no head SHA**: `store.PRPayload` does not carry one, it would
+be informational-only and stale by the time an agent reviews, and keying dedup on
+it would (wrongly) mint a new bead per force-push. Ownership is recorded via the
+`mine` label (absent ⇒ `team`), letting `pg2-4c5i.34`/`.35` route output.
 
 ### Bead representation
 
@@ -187,10 +190,10 @@ This bead does **not** consume the revision table (`#4`) or enrichment (`#2`):
 
 - **No re-review-on-new-revision**: creating a fresh review obligation when a new
   head SHA lands after a review is the concern of `#3` (`pg2-4c5i.13`). This bead
-  is purely `pr.opened`/`pr.updated`-driven, and dedups by `(repo, number)` —
-  **not** by head SHA. Keying on head SHA would mint a new bead on every
-  force-push, silently pulling in the deferred re-review concern. `HeadSHA` on
-  the bead is informational only.
+  is purely `pr.opened`/`pr.updated`-driven, and dedups by **parent PR bead**
+  (one draft-review child per PR) — **not** by head SHA. Keying on head SHA would
+  mint a new bead on every force-push, silently pulling in the deferred re-review
+  concern. The bead records no head SHA at all.
 - **No reviewer-agent selection from enrichment**: which reviewer agents run is
   an agent-layer concern handled when the bead is picked up, not at emission
   time. (If selection later proves better computed in Go, that is an additive
