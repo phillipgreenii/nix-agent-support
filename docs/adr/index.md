@@ -21,3 +21,4 @@
 | [0016](0016-pa-monitor-config-sourced-otel-and-connection-alert.md) | pa-monitor OTel from shared config + daemon-connection alert  | Accepted                                                                        | 2026-06-23 |
 | [0017](0017-static-nix-built-local-plugin-marketplace.md)           | Static nix-built marketplace for agent-support local plugins  | Accepted                                                                        | 2026-06-25 |
 | [0018](0018-pb-tool-and-pn-applied-contract.md)                     | pb tool + pn:applied gate contract                            | Accepted                                                                        | 2026-06-26 |
+| [0019](0019-status-line-width-aware-wrapping.md)                    | Status line width-aware wrapping                              | Accepted                                                                        | 2026-06-29 |

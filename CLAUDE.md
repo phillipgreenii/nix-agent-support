@@ -29,6 +29,37 @@ Each program module:
 - Contains all configuration for that program
 - Respects shell enable flags (bash/zsh)
 
+## Status Line (`home/programs/claude-status-line`)
+
+The Claude Code status line is assembled from an ordered list of "part" scripts. The
+wrapper (`scripts.nix` / `mkWrapperScript`) reads Claude's stdin JSON into `CLAUDE_SL_*`
+env vars, runs each part, and width-wraps the non-empty outputs across rows (see
+`docs/adr/0019-status-line-width-aware-wrapping.md`).
+
+- **Extension point**: append part-script store paths to
+  `phillipgreenii.programs.claude.status-line-parts` (a `listOf str` — any module MAY
+  contribute, including downstream flakes like `phillipg-nix-ziprecruiter`). Use
+  `lib.mkBefore` / `lib.mkAfter` to control where your part lands relative to the
+  defaults; plain assignment merges at default priority and order is then import-dependent.
+- **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
+  (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
+  `_CONTEXT_USED_PCT`) or its own environment; prints **one** formatted segment to stdout
+  (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
+  they share rows and the right edge is reserved for notifications.
+- **New JSON field**: extend the wrapper's `jq` extraction in `mkWrapperScript` to export a
+  new `CLAUDE_SL_*` var, then add a part that consumes it.
+- **Colors**: override named ANSI codes via `phillipgreenii.programs.claude.status-line-colors`
+  (the `claude-theme` module injects Stylix truecolor). Do not hardcode new colors in parts
+  without a matching key.
+- **Width / wrapping contract**: the wrapper wraps at `COLUMNS - reserve`, where `reserve`
+  is `phillipgreenii.programs.claude.status-line-notification-reserve` (default 20),
+  applied uniformly to every row. Wrapping is disabled when `COLUMNS` is unset/0/non-numeric.
+  A single segment wider than the budget is emitted whole on its own row (never split). When
+  adding parts, prefer short labels so rows pack well on narrow terminals.
+- **Tests**: `test-claude-status-line.bats`. Width tests MUST pass `COLUMNS` /
+  `CLAUDE_SL_RESERVE` via `env` (the wrapper runs in a pipeline; a plain assignment does not
+  reach it).
+
 ## Development Workflow
 
 - **Format**: Use `nix fmt` for formatting Nix files

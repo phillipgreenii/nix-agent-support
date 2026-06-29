@@ -173,3 +173,66 @@ strip_ansi() {
   # Should still exit 0 and produce output (other segments present)
   [ -n "$output" ]
 }
+
+# --- Width-aware wrapping ---
+# NOTE: claude-status-line is invoked through a pipeline (echo | cmd). A plain shell
+# assignment is NOT inherited by a piped command, so COLUMNS/CLAUDE_SL_RESERVE MUST be
+# passed via `env` (or as a prefix on the piped command) for the wrapper to see them.
+
+@test "wide terminal keeps everything on a single line" {
+  run env COLUMNS=400 bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *" | "* ]]
+}
+
+@test "narrow terminal wraps segments onto multiple lines preserving order" {
+  # COLUMNS 30 - reserve 20 = budget 10; every default segment exceeds that once joined.
+  run env COLUMNS=30 CLAUDE_SL_RESERVE=20 bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -gt 1 ]
+  # First row still begins with the host/container indicator (first part in order).
+  first=$(strip_ansi "${lines[0]}")
+  [[ "$first" == "H"* ]]
+  # No segment dropped: every expected token still present somewhere.
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"abc-123"* ]]
+  [[ "$stripped" == *"Opus 4.6"* ]]
+  [[ "$stripped" == *"ctx:25%"* ]]
+  [[ "$stripped" == *"1.2.3"* ]]
+}
+
+@test "oversized component is placed whole on its own line, not split" {
+  LONG_NAME="this-is-a-very-long-session-name-far-exceeding-the-budget-xxxxxxxx"
+  LONG_JSON='{"session_id":"s1","session_name":"'"$LONG_NAME"'","version":"1.2.3","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus 4.6"},"context_window":{"used_percentage":25}}'
+  run env COLUMNS=30 CLAUDE_SL_RESERVE=20 bash -c "echo '$LONG_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  # The long name appears intact on exactly one line by itself (never split apart).
+  found=0
+  for line in "${lines[@]}"; do
+    [ "$(strip_ansi "$line")" = "$LONG_NAME" ] && found=$((found + 1))
+  done
+  [ "$found" -eq 1 ]
+}
+
+@test "CLAUDE_SL_RESERVE override forces wrapping even on a wide terminal" {
+  # budget = 400 - 399 = 1, so each segment lands on its own line.
+  run env COLUMNS=400 CLAUDE_SL_RESERVE=399 bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -gt 1 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"Opus 4.6"* ]]
+}
+
+@test "non-numeric COLUMNS disables wrapping (single line)" {
+  run env COLUMNS=abc bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+}
+
+@test "unset COLUMNS disables wrapping (single line)" {
+  run env -u COLUMNS bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+}

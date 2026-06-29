@@ -724,7 +724,10 @@
                 slScripts = import ./home/programs/claude-status-line/scripts.nix {
                   inherit pkgs lib;
                 };
-                wrapperScript = slScripts.mkWrapperScript slScripts.defaultParts;
+                wrapperScript = slScripts.mkWrapperScript {
+                  parts = slScripts.defaultParts;
+                  reserve = 20;
+                };
               in
               checksHelpers.testBashScripts {
                 package = pkgs.writeShellScriptBin "claude-status-line" ''

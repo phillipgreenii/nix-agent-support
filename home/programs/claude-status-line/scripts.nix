@@ -86,7 +86,10 @@ let
   # Parts are embedded at Nix eval time; each part is run with exported env vars.
   # A part that exits non-zero is silently skipped.
   mkWrapperScript =
-    parts:
+    {
+      parts,
+      reserve ? 20,
+    }:
     pkgs.writeShellScript "claude-status-line-wrapper" ''
       input=$(cat)
 
@@ -113,16 +116,56 @@ let
         fi
       '') parts}
 
-      result=""
-      for segment in "''${collected[@]}"; do
-        if [ -z "$result" ]; then
-          result="$segment"
+      # Width-aware wrapping. budget = COLUMNS - reserve, applied uniformly to every row.
+      # reserve: nix-baked default, overridable via CLAUDE_SL_RESERVE (test/power-use seam).
+      # COLUMNS unset / 0 / non-numeric => budget 0 => no wrapping (single line, legacy).
+      reserve=''${CLAUDE_SL_RESERVE:-${toString reserve}}
+      cols=''${COLUMNS:-0}
+      case "$cols" in (*[!0-9]*|"") cols=0 ;; esac
+      if [ "$cols" -gt 0 ] && [ "$cols" -gt "$reserve" ]; then
+        budget=$((cols - reserve))
+      else
+        budget=0
+      fi
+
+      # Visible width = segment with ANSI SGR escapes stripped. Pure bash, no subprocess.
+      strip_ansi() {
+        local s=$1 out=""
+        while [ "$s" != "''${s#*$'\033['}" ]; do
+          out=$out''${s%%$'\033['*}
+          s=''${s#*$'\033['}
+          s=''${s#*m}
+        done
+        printf '%s' "$out$s"
+      }
+
+      # Greedily pack segments into " | "-joined rows in list order. A segment is moved to
+      # a new row only when appending it to a NON-empty row would exceed budget; the first
+      # segment of any row is placed unconditionally, so an oversized segment is always
+      # emitted whole on its own row (never split, never dropped).
+      lines=()
+      cur=""
+      cur_w=0
+      for seg in "''${collected[@]}"; do
+        stripped=$(strip_ansi "$seg")
+        seg_w=''${#stripped}
+        if [ -z "$cur" ]; then
+          cur=$seg
+          cur_w=$seg_w
+        elif [ "$budget" -gt 0 ] && [ $((cur_w + 3 + seg_w)) -gt "$budget" ]; then
+          lines+=("$cur")
+          cur=$seg
+          cur_w=$seg_w
         else
-          result="''${result} | ''${segment}"
+          cur="$cur | $seg"
+          cur_w=$((cur_w + 3 + seg_w))
         fi
       done
+      [ -n "$cur" ] && lines+=("$cur")
 
-      printf "%b\n" "$result"
+      for line in "''${lines[@]}"; do
+        printf '%s\n' "$line"
+      done
     '';
 
   defaultParts = [
