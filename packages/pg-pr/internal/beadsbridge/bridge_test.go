@@ -64,6 +64,9 @@ func (noopBeadClient) FindOpenProcessingCycle(context.Context, string) (string, 
 }
 func (noopBeadClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (noopBeadClient) CloseFeedback(context.Context, string, string) error        { return nil }
+func (noopBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
 
 // errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
@@ -374,5 +377,113 @@ func TestOpenBeadGetsProcessingCycle(t *testing.T) {
 
 	if client.createCycles != 1 {
 		t.Fatalf("expected 1 processing cycle for open PR, got %d", client.createCycles)
+	}
+}
+
+// draftReviewClient records EnsureDraftReviewBead calls and controls the
+// alreadyClosed result of EnsureMergeRequest.
+type draftReviewClient struct {
+	noopBeadClient
+	alreadyClosed bool
+	drCalls       int
+	lastPRBeadID  string
+	lastTitle     string
+	lastMine      bool
+}
+
+func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	return "mr-1", c.alreadyClosed, nil
+}
+
+func (c *draftReviewClient) EnsureDraftReviewBead(_ context.Context, prBeadID, title string, mine bool) (string, error) {
+	c.drCalls++
+	c.lastPRBeadID = prBeadID
+	c.lastTitle = title
+	c.lastMine = mine
+	return "dr-1", nil
+}
+
+func TestPROpenedMinePRCreatesDraftReview(t *testing.T) {
+	c := &draftReviewClient{}
+	h := New(c)
+	// My PR, still a GitHub draft → review bead is still created.
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", Draft: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if c.drCalls != 1 {
+		t.Fatalf("expected 1 draft-review ensure, got %d", c.drCalls)
+	}
+	if !c.lastMine {
+		t.Fatalf("expected mine=true for my PR")
+	}
+	if c.lastPRBeadID != "mr-1" {
+		t.Fatalf("expected parent bead id mr-1, got %q", c.lastPRBeadID)
+	}
+	if c.lastTitle != "o/r#7" {
+		t.Fatalf("expected title o/r#7, got %q", c.lastTitle)
+	}
+}
+
+func TestPROpenedTeamDraftSkipsDraftReview(t *testing.T) {
+	c := &draftReviewClient{}
+	h := New(c)
+	// Teammate PR still in draft → NO review bead yet.
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if c.drCalls != 0 {
+		t.Fatalf("expected no draft-review for a teammate draft PR, got %d", c.drCalls)
+	}
+}
+
+func TestPROpenedTeamReadyCreatesDraftReview(t *testing.T) {
+	c := &draftReviewClient{}
+	h := New(c)
+	// Teammate PR, not a draft → review bead created.
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if c.drCalls != 1 {
+		t.Fatalf("expected 1 draft-review ensure for a ready teammate PR, got %d", c.drCalls)
+	}
+	if c.lastMine {
+		t.Fatalf("expected mine=false for a teammate PR")
+	}
+}
+
+func TestPRUpdatedTeamDraftToReadyCreatesDraftReview(t *testing.T) {
+	c := &draftReviewClient{}
+	h := New(c)
+	// First observation: teammate draft → no bead.
+	draftPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: draftPayload}); err != nil {
+		t.Fatalf("Handle (draft): %v", err)
+	}
+	if c.drCalls != 0 {
+		t.Fatalf("expected no draft-review while still draft, got %d", c.drCalls)
+	}
+	// Draft flag removed → pr.updated with Draft=false → bead created.
+	readyPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", Draft: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: readyPayload}); err != nil {
+		t.Fatalf("Handle (ready): %v", err)
+	}
+	if c.drCalls != 1 {
+		t.Fatalf("expected 1 draft-review ensure after draft→ready, got %d", c.drCalls)
+	}
+}
+
+func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
+	c := &draftReviewClient{alreadyClosed: true}
+	h := New(c)
+	// PR bead already closed → no review bead even for my PR.
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", Draft: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if c.drCalls != 0 {
+		t.Fatalf("closed-parent guard failed: expected 0 draft-review ensures, got %d", c.drCalls)
 	}
 }

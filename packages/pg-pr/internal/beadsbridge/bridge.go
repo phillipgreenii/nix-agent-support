@@ -24,6 +24,7 @@ type BeadClient interface {
 	FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error)
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
+	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
 }
 
 // Handler is the beads event handler.
@@ -48,12 +49,25 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
 			return fmt.Errorf("beadsbridge: decode pr payload: %w", err)
 		}
-		_, _, err := h.client.EnsureMergeRequest(ctx, p.Title, beads.MergeRequestFields{
+		mrID, alreadyClosed, err := h.client.EnsureMergeRequest(ctx, p.Title, beads.MergeRequestFields{
 			Repo: p.Repo, PRNumber: p.Number, State: p.State, Branch: p.Branch,
 			Base: p.Base, Author: p.Author, URL: p.URL, Draft: p.Draft,
 			LastSyncedAt: p.LastSyncedAt,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		if alreadyClosed {
+			return nil // closed PR bead: do not attach a draft-review under it
+		}
+		// Emit the review work item. My PRs are reviewed even while a GitHub
+		// draft; teammate PRs wait until the draft flag is removed (which fires
+		// on the pr.updated that flips it). EnsureDraftReviewBead is idempotent.
+		if p.Ownership == "mine" || !p.Draft {
+			_, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), p.Ownership == "mine")
+			return err
+		}
+		return nil
 	case store.EventFeedbackCreated:
 		var p FeedbackPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
