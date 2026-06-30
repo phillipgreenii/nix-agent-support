@@ -97,17 +97,17 @@ git worktree remove <path>        # use --force only if you're certain it's clea
 git worktree prune
 ```
 
-### pn coordinated worktree set
+### pn coordinated workforest set
 
 A `pn` set is one branch materialized across _all_ workspace repos at once, removed as a unit:
 
 ```bash
-pn workspace worktree list                 # see the sets and their repos
-pn workspace worktree remove <branch>      # removes the set across repos; does NOT delete branches
-pn workspace worktree prune                # clear stale admin entries in each canonical repo
+pn workspace workforest list                 # see the sets and their repos
+pn workspace workforest remove <branch>      # removes the set across repos; does NOT delete branches
+pn workspace workforest prune                # clear stale admin entries in each canonical repo
 ```
 
-Critical: `pn workspace worktree remove` deliberately does **not** delete the underlying
+Critical: `pn workspace workforest remove` deliberately does **not** delete the underlying
 branches — delete those per repo with `git branch -d` after the set is removed. And only
 remove the set when **every** repo in it is clean and integrated. If one repo in the set still
 has unmerged or dirty work, keep the whole set and note which repo blocks teardown — removing

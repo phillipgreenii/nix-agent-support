@@ -46,7 +46,7 @@ picture of what this session is, and let that set drive every later step.
 Signals that something is in-session (gather these first, read-only):
 
 - **The branch/worktree you're in.** The cwd's repo, its current branch, and whether it's a
-  git worktree or a `pn` coordinated worktree set. This is almost always the spine of the
+  git worktree or a `pn` coordinated workforest set. This is almost always the spine of the
   session.
 - **Beads you moved.** `bd list --status in_progress` and anything you `--claim`ed or created
   this conversation. These name the work's intent.
@@ -66,8 +66,8 @@ The same ritual has to work in three shapes. Detect which you're in, don't assum
 - **Standalone repo** — cwd is (or is under) a single git repo, no `pn-workspace.toml`
   upward. Operate on that one repo.
 - **pn workspace** — a `pn-workspace.toml` exists at/above cwd (or `PN_WORKSPACE_ROOT` is
-  set). Multiple repos share a root and may share coordinated worktree _sets_. Scope still
-  applies: act only on the repos this session changed, but be aware that a `pn` worktree set
+  set). Multiple repos share a root and may share coordinated workforest _sets_. Scope still
+  applies: act only on the repos this session changed, but be aware that a `pn` workforest set
   spans repos and is removed as a unit. See `references/integration-and-cleanup.md`.
 - **PR-based repo** — a repo where finished work lands via pull request, not a local merge.
   Detected per repo (below), not assumed globally — in this workspace `homelab` and the
@@ -93,7 +93,7 @@ is that person's call (this mirrors the `pg-pr` rule that agents never run `pg-p
 A local ff-merge is different — it's your own linear history on your own checkout, so landing
 it autonomously is exactly the habit this skill automates.
 
-The mechanics of each flow — exact commands, the bitbucket mirror, coordinated worktree
+The mechanics of each flow — exact commands, the bitbucket mirror, coordinated workforest
 teardown, conflict handling — live in **`references/integration-and-cleanup.md`**. Read it
 before running the integrate/cleanup phases.
 
@@ -204,7 +204,7 @@ Cleanup is the most destructive phase, so it's gated on "this work is truly done
 
 - **Local ff-merge repos** whose branch is now merged into `main`: retire the worktree, then
   delete the branch, then prune. For a standalone worktree: `git worktree remove` +
-  `git branch -d`. For a `pn` coordinated set: only `pn workspace worktree remove` the set
+  `git branch -d`. For a `pn` coordinated set: only `pn workspace workforest remove` the set
   once **every** repo in the set is clean and integrated — otherwise keep it and note which
   repo blocks teardown.
 - **PR-flow repos:** keep the branch and worktree — the work isn't merged yet. They get
@@ -403,8 +403,8 @@ If nothing was in scope, say so plainly rather than inventing work.
 | run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`    |
 | local ff-merge + cleanup        | see `references/integration-and-cleanup.md`                                    |
 | push branch (PR flow only)      | `git push -u origin <branch>` (NOT `pn workspace push`)                        |
-| remove pn worktree set          | `pn workspace worktree remove <branch>` (only when whole set clean)            |
-| prune stale worktree admin      | `pn workspace worktree prune`                                                  |
+| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when whole set clean)          |
+| prune stale worktree admin      | `pn workspace workforest prune`                                                |
 | next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                           |
 | record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)") |
 | next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                             |
