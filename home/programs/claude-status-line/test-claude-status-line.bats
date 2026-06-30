@@ -263,6 +263,116 @@ strip_ansi() {
   [[ "$stripped" != *"PR#"* ]]
 }
 
+# --- Mode-flag segments (effort / thinking / output_style / vim / agent) ---
+
+@test "outputs effort level abbreviated (high -> hi)" {
+  EFFORT_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"effort":{"level":"high"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$EFFORT_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"eff:hi"* ]]
+}
+
+@test "outputs effort level abbreviated (xhigh -> xhi)" {
+  EFFORT_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"effort":{"level":"xhigh"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$EFFORT_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"eff:xhi"* ]]
+}
+
+@test "skips effort segment when absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"eff:"* ]]
+}
+
+@test "shows think when thinking enabled" {
+  THINK_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"thinking":{"enabled":true},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$THINK_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"think"* ]]
+}
+
+@test "skips think when thinking disabled" {
+  THINK_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"thinking":{"enabled":false},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$THINK_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"think"* ]]
+}
+
+@test "skips think when thinking absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"think"* ]]
+}
+
+@test "outputs output style name when non-default" {
+  STYLE_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"output_style":{"name":"explanatory"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$STYLE_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"style:explanatory"* ]]
+}
+
+@test "skips output style when default" {
+  STYLE_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"output_style":{"name":"default"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$STYLE_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"style:"* ]]
+}
+
+@test "skips output style when absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"style:"* ]]
+}
+
+@test "outputs vim mode abbreviated (INSERT -> I, green)" {
+  VIM_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"vim":{"mode":"INSERT"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$VIM_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"vim:I"* ]]
+  [[ "$output" == *$'\033[32m'"vim:I"* ]]
+}
+
+@test "outputs vim mode abbreviated (NORMAL -> N)" {
+  VIM_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"vim":{"mode":"NORMAL"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$VIM_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"vim:N"* ]]
+}
+
+@test "skips vim segment when absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"vim:"* ]]
+}
+
+@test "outputs agent name with @ prefix" {
+  AGENT_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"agent":{"name":"security-reviewer"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$AGENT_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"@security-reviewer"* ]]
+}
+
+@test "skips agent segment when absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"@"* ]]
+}
+
 # --- Width-aware wrapping ---
 # NOTE: claude-status-line is invoked through a pipeline (echo | cmd). A plain shell
 # assignment is NOT inherited by a piped command, so COLUMNS/CLAUDE_SL_RESERVE MUST be

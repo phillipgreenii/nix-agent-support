@@ -103,6 +103,57 @@ let
     printf "''${DIM}%s''${RESET}" "$CLAUDE_SL_VERSION"
   '';
 
+  # Reasoning effort level, abbreviated. Skipped when the model doesn't expose effort.
+  effortPart = pkgs.writeShellScript "claude-sl-effort" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_EFFORT" ] || exit 1
+    case "$CLAUDE_SL_EFFORT" in
+      low)    abbr=lo ;;
+      medium) abbr=med ;;
+      high)   abbr=hi ;;
+      xhigh)  abbr=xhi ;;
+      max)    abbr=max ;;
+      *)      abbr="$CLAUDE_SL_EFFORT" ;;
+    esac
+    printf "''${DIM}eff:%s''${RESET}" "$abbr"
+  '';
+
+  # Extended-thinking indicator. Only rendered while thinking is on.
+  thinkingPart = pkgs.writeShellScript "claude-sl-thinking" ''
+    ${ansiColors}
+    [ "$CLAUDE_SL_THINKING" = "true" ] || exit 1
+    printf "''${MAGENTA}think''${RESET}"
+  '';
+
+  # Output style name. Hidden for the implicit "default" style (noise) and when absent.
+  outputStylePart = pkgs.writeShellScript "claude-sl-output-style" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_OUTPUT_STYLE" ] || exit 1
+    [ "$CLAUDE_SL_OUTPUT_STYLE" = "default" ] && exit 1
+    printf "''${DIM}style:%s''${RESET}" "$CLAUDE_SL_OUTPUT_STYLE"
+  '';
+
+  # Vim mode, abbreviated and colored. Skipped when vim mode is disabled.
+  vimPart = pkgs.writeShellScript "claude-sl-vim" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_VIM_MODE" ] || exit 1
+    case "$CLAUDE_SL_VIM_MODE" in
+      INSERT)        m=I;  color="''${GREEN}" ;;
+      NORMAL)        m=N;  color="''${CYAN}" ;;
+      VISUAL)        m=V;  color="''${YELLOW}" ;;
+      "VISUAL LINE") m=VL; color="''${YELLOW}" ;;
+      *)             m="$CLAUDE_SL_VIM_MODE"; color="''${CYAN}" ;;
+    esac
+    printf "''${color}vim:%s''${RESET}" "$m"
+  '';
+
+  # Active subagent name, @-prefixed. Skipped when no agent is running.
+  agentPart = pkgs.writeShellScript "claude-sl-agent" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_AGENT" ] || exit 1
+    printf "''${BOLD}@%s''${RESET}" "$CLAUDE_SL_AGENT"
+  '';
+
   # Build the wrapper script for a given list of part script store paths.
   # Parts are embedded at Nix eval time; each part is run with exported env vars.
   # A part that exits non-zero is silently skipped.
@@ -126,6 +177,11 @@ let
       export CLAUDE_SL_PR_NUMBER
       export CLAUDE_SL_PR_URL
       export CLAUDE_SL_PR_REVIEW_STATE
+      export CLAUDE_SL_EFFORT
+      export CLAUDE_SL_THINKING
+      export CLAUDE_SL_OUTPUT_STYLE
+      export CLAUDE_SL_VIM_MODE
+      export CLAUDE_SL_AGENT
       # Single jq invocation extracts every field at once (one process per render, not one
       # per field). jq emits shell-quoted `VAR=value` assignments via @sh; eval applies them.
       # @sh guarantees each value is safely quoted, so spaces / quotes / $() / backticks in
@@ -143,7 +199,12 @@ let
         @sh "CLAUDE_SL_REPO_NAME=\(.workspace.repo.name // "")",
         @sh "CLAUDE_SL_PR_NUMBER=\(.pr.number // "")",
         @sh "CLAUDE_SL_PR_URL=\(.pr.url // "")",
-        @sh "CLAUDE_SL_PR_REVIEW_STATE=\(.pr.review_state // "")"
+        @sh "CLAUDE_SL_PR_REVIEW_STATE=\(.pr.review_state // "")",
+        @sh "CLAUDE_SL_EFFORT=\(.effort.level // "")",
+        @sh "CLAUDE_SL_THINKING=\(.thinking.enabled // false | tostring)",
+        @sh "CLAUDE_SL_OUTPUT_STYLE=\(.output_style.name // "")",
+        @sh "CLAUDE_SL_VIM_MODE=\(.vim.mode // "")",
+        @sh "CLAUDE_SL_AGENT=\(.agent.name // "")"
       ')"
 
       collected=()
@@ -215,6 +276,11 @@ let
     "${prPart}"
     "${modelPart}"
     "${versionPart}"
+    "${effortPart}"
+    "${thinkingPart}"
+    "${outputStylePart}"
+    "${vimPart}"
+    "${agentPart}"
   ];
 in
 {
@@ -227,6 +293,11 @@ in
     prPart
     modelPart
     versionPart
+    effortPart
+    thinkingPart
+    outputStylePart
+    vimPart
+    agentPart
     mkWrapperScript
     defaultParts
     ;

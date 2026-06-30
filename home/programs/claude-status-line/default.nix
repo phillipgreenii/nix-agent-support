@@ -28,7 +28,9 @@ in
             CLAUDE_SL_SESSION_ID, CLAUDE_SL_WORKTREE, CLAUDE_SL_BRANCH,
             CLAUDE_SL_VERSION, CLAUDE_SL_MODEL, CLAUDE_SL_CONTEXT_USED_PCT,
             CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME, CLAUDE_SL_PR_NUMBER,
-            CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE)
+            CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE, CLAUDE_SL_EFFORT,
+            CLAUDE_SL_THINKING, CLAUDE_SL_OUTPUT_STYLE, CLAUDE_SL_VIM_MODE,
+            CLAUDE_SL_AGENT)
           - prints a single formatted segment to stdout (ANSI colors allowed)
           - exits 0 to include the segment, non-zero to skip it silently
         Segments are joined with " | ".
