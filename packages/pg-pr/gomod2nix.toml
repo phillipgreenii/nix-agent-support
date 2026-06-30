@@ -70,8 +70,8 @@ schema = 3
     hash = 'sha256-rqui1G7KMtVtGXDFY7XpWD9tA721UtoPC+/JLh8axrA='
 
   [mod.'github.com/prometheus/procfs']
-    version = 'v0.21.0'
-    hash = 'sha256-q6ZRm1gKRUcksCPQld0a11BGEAwhoAlw+rbj8c2eJpc='
+    version = 'v0.21.1'
+    hash = 'sha256-5SpWprdX29oVntHJyadiICOk9UAP+hu+xJM51/A8Ig4='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -162,8 +162,8 @@ schema = 3
     hash = 'sha256-ldJTTb7hhj1mdmzTn9IEkQVwCoj3KRlENZtUSEKHABU='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.81.1'
-    hash = 'sha256-YZ5KMHmN1HvsMxyIBIl3SmFmL3r+6bwjzzFLxUFhm1o='
+    version = 'v1.82.0'
+    hash = 'sha256-qmNBIHFIpR3bCGwtjXBCa79fBK4sTkpxgqsQMy2GsAw='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.11'
