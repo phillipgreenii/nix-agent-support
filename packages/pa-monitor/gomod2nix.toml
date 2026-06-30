@@ -186,8 +186,8 @@ schema = 3
     hash = 'sha256-ldJTTb7hhj1mdmzTn9IEkQVwCoj3KRlENZtUSEKHABU='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.81.1'
-    hash = 'sha256-YZ5KMHmN1HvsMxyIBIl3SmFmL3r+6bwjzzFLxUFhm1o='
+    version = 'v1.82.0'
+    hash = 'sha256-qmNBIHFIpR3bCGwtjXBCa79fBK4sTkpxgqsQMy2GsAw='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.11'
