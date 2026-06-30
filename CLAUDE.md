@@ -50,6 +50,11 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   they share rows and the right edge is reserved for notifications.
 - **New JSON field**: extend the wrapper's `jq` extraction in `mkWrapperScript` to export a
   new `CLAUDE_SL_*` var, then add a part that consumes it.
+- **Branch fallback**: `worktree.branch` is only present inside a Claude worktree session.
+  In a normal checkout the wrapper derives `CLAUDE_SL_BRANCH` from the repo's `.git/HEAD`
+  (walking up from `workspace.current_dir`) using the `read` builtin — deliberately **no
+  `git` subprocess**, to preserve the single-process-per-render goal. JSON `worktree.branch`
+  always wins when present; a detached HEAD shows no branch.
 - **Colors**: override named ANSI codes via `phillipgreenii.programs.claude.status-line-colors`
   (the `claude-theme` module injects Stylix truecolor). Do not hardcode new colors in parts
   without a matching key.

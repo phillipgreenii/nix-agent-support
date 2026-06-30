@@ -167,6 +167,63 @@ strip_ansi() {
   [[ "$stripped" != *"git "* ]]
 }
 
+# --- Git branch fallback (.git/HEAD, outside a worktree session) ---
+# Claude Code only populates worktree.branch inside a worktree session. In a normal
+# checkout the wrapper derives the branch from the repo's .git/HEAD (a bash `read`, no
+# git subprocess), walking up from workspace.current_dir.
+
+@test "branch fallback reads .git/HEAD when worktree.branch absent" {
+  mkdir -p "$TEST_DIR/.git"
+  printf 'ref: refs/heads/feature/login\n' > "$TEST_DIR/.git/HEAD"
+  FB_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"'"$TEST_DIR"'"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$FB_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"feature/login"* ]]
+}
+
+@test "branch fallback walks up from a subdirectory to find .git" {
+  mkdir -p "$TEST_DIR/.git" "$TEST_DIR/sub/deep"
+  printf 'ref: refs/heads/main-line\n' > "$TEST_DIR/.git/HEAD"
+  FB_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"'"$TEST_DIR/sub/deep"'"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$FB_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"main-line"* ]]
+}
+
+@test "worktree.branch takes precedence over .git/HEAD fallback" {
+  mkdir -p "$TEST_DIR/.git"
+  printf 'ref: refs/heads/from-head\n' > "$TEST_DIR/.git/HEAD"
+  FB_JSON='{"session_id":"s1","version":"1.0.0","worktree":{"branch":"from-json"},"workspace":{"current_dir":"'"$TEST_DIR"'"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$FB_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"from-json"* ]]
+  [[ "$stripped" != *"from-head"* ]]
+}
+
+@test "branch fallback skips on detached HEAD (no ref)" {
+  mkdir -p "$TEST_DIR/.git"
+  printf '0123456789abcdef0123456789abcdef01234567\n' > "$TEST_DIR/.git/HEAD"
+  FB_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"'"$TEST_DIR"'"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$FB_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"0123456789"* ]]
+}
+
+@test "branch fallback follows a .git file (gitdir indirection)" {
+  mkdir -p "$TEST_DIR/realgit" "$TEST_DIR/checkout"
+  printf 'ref: refs/heads/linked-branch\n' > "$TEST_DIR/realgit/HEAD"
+  printf 'gitdir: %s\n' "$TEST_DIR/realgit" > "$TEST_DIR/checkout/.git"
+  FB_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"'"$TEST_DIR/checkout"'"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$FB_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"linked-branch"* ]]
+}
+
 # --- Version segment ---
 
 @test "outputs claude version" {

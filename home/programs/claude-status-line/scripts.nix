@@ -204,8 +204,37 @@ let
         @sh "CLAUDE_SL_THINKING=\(.thinking.enabled // false | tostring)",
         @sh "CLAUDE_SL_OUTPUT_STYLE=\(.output_style.name // "")",
         @sh "CLAUDE_SL_VIM_MODE=\(.vim.mode // "")",
-        @sh "CLAUDE_SL_AGENT=\(.agent.name // "")"
+        @sh "CLAUDE_SL_AGENT=\(.agent.name // "")",
+        @sh "_sl_cwd=\(.workspace.current_dir // .cwd // "")"
       ')"
+
+      # Branch fallback: Claude only populates worktree.branch inside a worktree session,
+      # so a normal checkout has no branch. Derive it from the repo's .git/HEAD by walking
+      # up from cwd. Uses the `read` builtin (no git subprocess) to honor the
+      # single-process-per-render goal; only runs when the JSON carried no branch.
+      if [ -z "$CLAUDE_SL_BRANCH" ] && [ -n "$_sl_cwd" ]; then
+        d=$_sl_cwd
+        while [ -n "$d" ]; do
+          if [ -d "$d/.git" ]; then
+            gitdir="$d/.git"
+          elif [ -f "$d/.git" ]; then
+            # Linked worktree / submodule: ".git" is a file holding "gitdir: <path>".
+            read -r gl <"$d/.git" || gl=""
+            gitdir=''${gl#gitdir: }
+            case "$gitdir" in /*) ;; *) gitdir="$d/$gitdir" ;; esac
+          else
+            d=''${d%/*}
+            continue
+          fi
+          if [ -r "$gitdir/HEAD" ]; then
+            read -r hl <"$gitdir/HEAD" || hl=""
+            case "$hl" in
+              "ref: refs/heads/"*) CLAUDE_SL_BRANCH=''${hl#ref: refs/heads/} ;;
+            esac
+          fi
+          break
+        done
+      fi
 
       collected=()
       ${lib.concatMapStringsSep "\n" (part: ''
