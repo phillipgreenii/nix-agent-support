@@ -38,9 +38,15 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
 
 - **Extension point**: append part-script store paths to
   `phillipgreenii.programs.claude.status-line-parts` (a `listOf str` — any module MAY
-  contribute, including downstream flakes like `phillipg-nix-ziprecruiter`). Use
-  `lib.mkBefore` / `lib.mkAfter` to control where your part lands relative to the
-  defaults; plain assignment merges at default priority and order is then import-dependent.
+  contribute, including downstream flakes like `phillipg-nix-ziprecruiter`).
+- **Ordering convention** (see `docs/adr/0020-status-line-parts-ordering-convention.md`):
+  the list is merged across modules by ascending priority band, so contributors MUST place
+  their parts with an explicit order helper and MUST NOT use plain assignment (which lands
+  at the default band and orders by module-import order — non-deterministic across
+  contributors). Bands: `lib.mkBefore` (500) leads; the base default set is `lib.mkOrder
+1000`; `lib.mkAfter` (1500) trails (e.g. ZR's `aws` / `workspace` parts). For finer
+  placement use `lib.mkOrder N` with N between bands. Within one definition list, order is
+  the list order.
 - **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
   (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
   `_CONTEXT_USED_PCT`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,

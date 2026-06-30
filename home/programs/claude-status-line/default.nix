@@ -68,7 +68,11 @@ in
   };
 
   config = lib.mkIf config.phillipgreenii.programs.claude.enable {
-    phillipgreenii.programs.claude.status-line-parts = scripts.defaultParts;
+    # Base parts occupy the default order band (1000). Downstream modules MUST place their
+    # parts with lib.mkBefore / lib.mkAfter / lib.mkOrder (never plain assignment) so the
+    # merged order stays deterministic as contributors grow.
+    # See docs/adr/0020-status-line-parts-ordering-convention.md.
+    phillipgreenii.programs.claude.status-line-parts = lib.mkOrder 1000 scripts.defaultParts;
 
     phillipgreenii.programs.claude.settings.statusLine = lib.mkIf (cfg != [ ]) {
       type = "command";
