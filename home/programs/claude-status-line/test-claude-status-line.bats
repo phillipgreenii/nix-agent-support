@@ -103,6 +103,16 @@ strip_ansi() {
   [[ "$stripped" != *"abc-123"* ]]
 }
 
+@test "session_name with shell-special characters renders verbatim (no injection)" {
+  # Guards the single-jq extraction: values are shell-quoted (jq @sh) before eval, so
+  # spaces, $(...), backticks and & must be preserved literally and never executed.
+  SPECIAL_JSON='{"session_id":"s1","session_name":"hello $(world) & `friends`","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus 4.6"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$SPECIAL_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *'hello $(world) & `friends`'* ]]
+}
+
 @test "skips session segment when neither session_id nor session_name present" {
   NO_SESSION_JSON='{"version":"1.2.3","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus 4.6"},"context_window":{"used_percentage":25}}'
   run bash -c "echo '$NO_SESSION_JSON' | claude-status-line"

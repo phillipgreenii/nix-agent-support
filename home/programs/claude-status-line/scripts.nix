@@ -100,13 +100,20 @@ let
       export CLAUDE_SL_VERSION
       export CLAUDE_SL_MODEL
       export CLAUDE_SL_CONTEXT_USED_PCT
-      CLAUDE_SL_SESSION_NAME=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.session_name // ""')
-      CLAUDE_SL_SESSION_ID=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.session_id // ""')
-      CLAUDE_SL_WORKTREE=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.worktree.name // .workspace.git_worktree // ""')
-      CLAUDE_SL_BRANCH=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.worktree.branch // ""')
-      CLAUDE_SL_VERSION=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.version // ""')
-      CLAUDE_SL_MODEL=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.model.display_name // ""')
-      CLAUDE_SL_CONTEXT_USED_PCT=$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '.context_window.used_percentage // ""')
+      # Single jq invocation extracts every field at once (one process per render, not one
+      # per field). jq emits shell-quoted `VAR=value` assignments via @sh; eval applies them.
+      # @sh guarantees each value is safely quoted, so spaces / quotes / $() / backticks in
+      # JSON values are preserved literally and never executed. The vars are pre-declared
+      # exported above, so these plain assignments are still exported to the part scripts.
+      eval "$(printf '%s' "$input" | ${pkgs.jq}/bin/jq -r '
+        @sh "CLAUDE_SL_SESSION_NAME=\(.session_name // "")",
+        @sh "CLAUDE_SL_SESSION_ID=\(.session_id // "")",
+        @sh "CLAUDE_SL_WORKTREE=\(.worktree.name // .workspace.git_worktree // "")",
+        @sh "CLAUDE_SL_BRANCH=\(.worktree.branch // "")",
+        @sh "CLAUDE_SL_VERSION=\(.version // "")",
+        @sh "CLAUDE_SL_MODEL=\(.model.display_name // "")",
+        @sh "CLAUDE_SL_CONTEXT_USED_PCT=\(.context_window.used_percentage // "")"
+      ')"
 
       collected=()
       ${lib.concatMapStringsSep "\n" (part: ''
