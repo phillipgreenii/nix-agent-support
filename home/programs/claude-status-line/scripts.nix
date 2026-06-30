@@ -56,6 +56,27 @@ let
     printf "''${GREEN}%s''${RESET}" "$CLAUDE_SL_BRANCH"
   '';
 
+  repoPart = pkgs.writeShellScript "claude-sl-repo" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_REPO_OWNER" ] && [ -n "$CLAUDE_SL_REPO_NAME" ] || exit 1
+    printf "''${MAGENTA}%s/%s''${RESET}" "$CLAUDE_SL_REPO_OWNER" "$CLAUDE_SL_REPO_NAME"
+  '';
+
+  # PR number, colored by review state. The full URL is exported as CLAUDE_SL_PR_URL for
+  # custom parts to consume but is not rendered here (a URL would blow the width budget).
+  prPart = pkgs.writeShellScript "claude-sl-pr" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_PR_NUMBER" ] || exit 1
+    case "$CLAUDE_SL_PR_REVIEW_STATE" in
+      approved)          color="''${GREEN}" ;;
+      changes_requested) color="''${RED}" ;;
+      pending)           color="''${YELLOW}" ;;
+      draft)             color="''${DIM}" ;;
+      *)                 color="" ;;
+    esac
+    printf "''${color}PR#%s''${RESET}" "$CLAUDE_SL_PR_NUMBER"
+  '';
+
   modelPart = pkgs.writeShellScript "claude-sl-model" ''
     ${ansiColors}
     [ -n "$CLAUDE_SL_MODEL" ] || exit 1
@@ -100,6 +121,11 @@ let
       export CLAUDE_SL_VERSION
       export CLAUDE_SL_MODEL
       export CLAUDE_SL_CONTEXT_USED_PCT
+      export CLAUDE_SL_REPO_OWNER
+      export CLAUDE_SL_REPO_NAME
+      export CLAUDE_SL_PR_NUMBER
+      export CLAUDE_SL_PR_URL
+      export CLAUDE_SL_PR_REVIEW_STATE
       # Single jq invocation extracts every field at once (one process per render, not one
       # per field). jq emits shell-quoted `VAR=value` assignments via @sh; eval applies them.
       # @sh guarantees each value is safely quoted, so spaces / quotes / $() / backticks in
@@ -112,7 +138,12 @@ let
         @sh "CLAUDE_SL_BRANCH=\(.worktree.branch // "")",
         @sh "CLAUDE_SL_VERSION=\(.version // "")",
         @sh "CLAUDE_SL_MODEL=\(.model.display_name // "")",
-        @sh "CLAUDE_SL_CONTEXT_USED_PCT=\(.context_window.used_percentage // "")"
+        @sh "CLAUDE_SL_CONTEXT_USED_PCT=\(.context_window.used_percentage // "")",
+        @sh "CLAUDE_SL_REPO_OWNER=\(.workspace.repo.owner // "")",
+        @sh "CLAUDE_SL_REPO_NAME=\(.workspace.repo.name // "")",
+        @sh "CLAUDE_SL_PR_NUMBER=\(.pr.number // "")",
+        @sh "CLAUDE_SL_PR_URL=\(.pr.url // "")",
+        @sh "CLAUDE_SL_PR_REVIEW_STATE=\(.pr.review_state // "")"
       ')"
 
       collected=()
@@ -180,6 +211,8 @@ let
     "${sessionPart}"
     "${worktreePart}"
     "${gitPart}"
+    "${repoPart}"
+    "${prPart}"
     "${modelPart}"
     "${versionPart}"
   ];
@@ -190,6 +223,8 @@ in
     sessionPart
     worktreePart
     gitPart
+    repoPart
+    prPart
     modelPart
     versionPart
     mkWrapperScript

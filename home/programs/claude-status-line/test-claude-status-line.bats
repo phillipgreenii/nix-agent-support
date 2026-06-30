@@ -184,6 +184,85 @@ strip_ansi() {
   [ -n "$output" ]
 }
 
+# --- Repo segment (workspace.repo) ---
+
+@test "outputs repo owner/name from workspace.repo" {
+  REPO_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato","repo":{"host":"github.com","owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$REPO_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"anthropics/claude-code"* ]]
+}
+
+@test "repo segment uses magenta" {
+  REPO_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$REPO_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[35m'*"anthropics/claude-code"* ]]
+}
+
+@test "skips repo segment when workspace.repo absent" {
+  # TEST_JSON has no workspace.repo and no other '/'-producing field, so a correctly
+  # skipped repo segment leaves no slash in the output.
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"/"* ]]
+}
+
+@test "skips repo segment when only owner present (name empty)" {
+  PARTIAL_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PARTIAL_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"anthropics"* ]]
+}
+
+# --- PR segment (pr.*) ---
+
+@test "outputs PR number from pr.number" {
+  PR_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"pr":{"number":1234,"url":"https://github.com/o/r/pull/1234","review_state":"approved"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PR_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#1234"* ]]
+}
+
+@test "PR segment green when approved" {
+  PR_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"pr":{"number":1234,"review_state":"approved"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PR_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[32m'"PR#1234"* ]]
+}
+
+@test "PR segment red when changes_requested" {
+  PR_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"pr":{"number":1234,"review_state":"changes_requested"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PR_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[31m'"PR#1234"* ]]
+}
+
+@test "PR segment yellow when pending" {
+  PR_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"pr":{"number":1234,"review_state":"pending"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PR_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[33m'"PR#1234"* ]]
+}
+
+@test "PR segment dim when draft" {
+  PR_JSON='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"pr":{"number":1234,"review_state":"draft"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$PR_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[2m'"PR#1234"* ]]
+}
+
+@test "skips PR segment when pr absent" {
+  run bash -c "echo '$TEST_JSON' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"PR#"* ]]
+}
+
 # --- Width-aware wrapping ---
 # NOTE: claude-status-line is invoked through a pipeline (echo | cmd). A plain shell
 # assignment is NOT inherited by a piped command, so COLUMNS/CLAUDE_SL_RESERVE MUST be

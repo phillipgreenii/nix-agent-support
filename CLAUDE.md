@@ -43,7 +43,8 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   defaults; plain assignment merges at default priority and order is then import-dependent.
 - **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
   (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
-  `_CONTEXT_USED_PCT`) or its own environment; prints **one** formatted segment to stdout
+  `_CONTEXT_USED_PCT`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
+  `_PR_REVIEW_STATE`) or its own environment; prints **one** formatted segment to stdout
   (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
   they share rows and the right edge is reserved for notifications.
 - **New JSON field**: extend the wrapper's `jq` extraction in `mkWrapperScript` to export a

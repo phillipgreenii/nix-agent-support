@@ -26,7 +26,9 @@ in
         Ordered list of status line part scripts to run. Each script:
           - receives Claude context via exported env vars (CLAUDE_SL_SESSION_NAME,
             CLAUDE_SL_SESSION_ID, CLAUDE_SL_WORKTREE, CLAUDE_SL_BRANCH,
-            CLAUDE_SL_VERSION, CLAUDE_SL_MODEL, CLAUDE_SL_CONTEXT_USED_PCT)
+            CLAUDE_SL_VERSION, CLAUDE_SL_MODEL, CLAUDE_SL_CONTEXT_USED_PCT,
+            CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME, CLAUDE_SL_PR_NUMBER,
+            CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE)
           - prints a single formatted segment to stdout (ANSI colors allowed)
           - exits 0 to include the segment, non-zero to skip it silently
         Segments are joined with " | ".
