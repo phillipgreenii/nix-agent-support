@@ -49,11 +49,27 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   the list order.
 - **Part contract**: a part reads its data from the exported `CLAUDE_SL_*` env vars
   (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
-  `_CONTEXT_USED_PCT`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
-  `_PR_REVIEW_STATE`, `_EFFORT`, `_THINKING`, `_OUTPUT_STYLE`, `_VIM_MODE`, `_AGENT`)
+  `_CONTEXT_USED_PCT`, `_EXCEEDS_200K`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
+  `_PR_REVIEW_STATE`, `_EFFORT`, `_THINKING`, `_VIM_MODE`, `_AGENT`, `_5H_PCT`, `_5H_RESET`,
+  `_7D_PCT`, `_7D_RESET`)
   or its own environment; prints **one** formatted segment to stdout
   (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
   they share rows and the right edge is reserved for notifications.
+- **Default segment order** (base set, `home/programs/claude-status-line/scripts.nix`):
+  vim, session name?, session id, location (repo + worktree + branch), model (+effort +thinking),
+  agent, context (+200k alert), limits (5h + 7d), version. The `prPart` script is still exported
+  for downstream/custom use but is not in the default order.
+- **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
+  false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
+  branch) via the `nerdFont` arg threaded into `scripts.nix`. Glyphs are emitted as precomputed
+  raw UTF-8 bytes (`printf '\xNN...'`), NOT `printf '\U...'`, because `\U` needs a UTF-8 active
+  locale (the nix build sandbox and `LC_ALL=C` shells have none) — byte escapes are
+  locale-independent. Both a nerd-off and a nerd-on test package are built in `flake.nix`
+  (`test-claude-status-line`, `test-claude-status-line-nerdfont`); the shared bats file branches
+  on the `CLAUDE_SL_TEST_NERD_FONT` env marker the nerd-on package sets.
+- **Locale-safe width**: the wrapper forces a UTF-8 locale (baked: `en_US.UTF-8` on darwin,
+  `C.UTF-8` elsewhere) for the visible-width math when the active `LC_CTYPE` isn't UTF-8, so a
+  4-byte MDI glyph counts as one character (`${#}` == 1) instead of over-wrapping.
 - **New JSON field**: extend the wrapper's `jq` extraction in `mkWrapperScript` to export a
   new `CLAUDE_SL_*` var, then add a part that consumes it.
 - **Branch fallback**: `worktree.branch` is only present inside a Claude worktree session.
