@@ -1,8 +1,14 @@
 # pa-monitor: Account/Plan model with pluggable limits + cost sources
 
-**Status**: Draft
+**Status**: Accepted
 **Date**: 2026-07-01
 **Deciders**: phillipg, Claude
+
+> Accepted 2026-07-01 after the Phase 0 validation gate PASSED — `rate_limits` is
+> emitted on this account and `five_hour` is authoritative and exact. `seven_day`
+> was observed absent, which sharpens (does not block) the design: every
+> `rate_limits` field is treated as **independently optional**. See
+> [Validation Gate](#validation-gate-blocks-acceptance) for the captured evidence.
 
 ## Context
 
@@ -58,10 +64,27 @@ transcript** in the session directory, named `<session_id>.status.jsonl`.
   `{ … } 2>/dev/null || true`, using `$EPOCHSECONDS` (no `date` fork), performed
   synchronously (no background fork).
 - The record MUST contain only an allowlisted field set: `ts`, `session_id`,
-  `hostname`, and the four `rate_limits` values. It MUST NOT capture the process
-  environment generically (secret-leak risk — see
+  `hostname`, and whichever `rate_limits` window values are present — each window
+  is **independently optional** (see the robustness clause below; Phase 0 observed
+  `seven_day` absent on this account, so "the four values" is an upper bound, not a
+  guarantee). It MUST NOT capture the process environment generically (secret-leak
+  risk — Phase 0 confirmed the status-line command runs with the **full user env**,
+  151 names including `SSH_AUTH_SOCK` and `STARSHIP_SESSION_KEY`; see
   `2026-06-12-nix-agent-support-deepdive.md` finding "allowlist env at capture").
 - The file MUST be created mode `0600`.
+- **Missing-field robustness (load-bearing — proven by Phase 0).** Every level of
+  `rate_limits` is independently optional: the whole object, either `five_hour` /
+  `seven_day` window, and each window's `used_percentage` / `resets_at`. Phase 0
+  observed `seven_day` entirely absent and `five_hour` `null` before the first
+  server response on this account. The wrapper MUST treat any missing level as
+  **absent** — skip that field — and MUST NOT substitute `0` (a real "unused"
+  reading) or a `1970` timestamp. A window present in one render and gone the next
+  MUST be handled without emitting a spurious change. No consumer — wrapper,
+  sibling-file reader, daemon, proto, or TUI — may assume a field exists; each
+  independently degrades to "unknown/stale". (The existing status-line render
+  already meets this: `limitsPart` hides the whole segment when both windows are
+  absent and omits the countdown when `resets_at` is missing; the `jq` extraction
+  defaults each field to `""`.)
 - The wrapper MUST validate `used_percentage ∈ [0,100]` and treat out-of-range
   values as absent (Claude Code bug #52326 can return an epoch-sized number for
   an empty window; unclamped it renders as garbage and defeats write-on-change).
@@ -210,7 +233,10 @@ down-migrations). This work MUST:
 
 - Add a numbered migration (`003_*.sql`) with **nullable** `five_hour_pct`,
   `seven_day_pct`, `seven_day_resets_at`, `limits_captured_at` — `NULL` means
-  "unknown/stale", explicitly distinct from `0`.
+  "unknown/stale", explicitly distinct from `0`. Phase 0 observed `seven_day`
+  absent on this account, so `seven_day_pct` / `seven_day_resets_at` MUST tolerate
+  being **long-lived `NULL`** — the common case, not an edge case — and the TUI/OTel
+  MUST render/omit them as unknown rather than `0%`.
 - Add corresponding proto3 fields (new field numbers — wire-compatible additions)
   and re-thread `state_convert.go` (store→tree) + `translate.go` / `from_proto.go`.
   New fields MUST use **distinct** names (e.g. `five_hour_resets_at` /
@@ -264,7 +290,10 @@ bats file, mirroring `strip-ansi.bash` / `test-strip-ansi.bats`, so clamp and
 append-on-change are unit-testable without a filesystem.
 
 - **Unit (Go):** status-JSON parse/clamp (0 / 100 / >100 / negative / #52326 epoch →
-  absent / missing / malformed); `LimitsSource` newest-across-files by `ts` with
+  absent / missing / malformed); **per-field optionality** — `rate_limits` absent,
+  one window absent (the observed `seven_day` case), a window present but its
+  `used_percentage` / `resets_at` absent — each MUST yield `NULL`/skip, never `0`
+  or `1970`, and MUST NOT emit a spurious append-on-change; `LimitsSource` newest-across-files by `ts` with
   churned `session_id`, equal-`ts` tiebreak, empty / only-stale dirs; staleness
   boundary + the unset-timestamp→1970 regression guard; `isTranscriptFile` truth
   table; `ResolveTranscript` / `gc.listSessionFiles` ignore `*.status.jsonl`;
@@ -295,10 +324,42 @@ absent, this approach is abandoned in favor of the proxy or estimate
 alternatives below. The `statusline-probe.sh` shim captures one payload for this
 check.
 
+### Result — PASSED (2026-07-01)
+
+A throwaway `statusLine.command` shim (`claude --settings <throwaway>`, no
+nix-managed file touched) captured two live renders on this account (Claude Code
+`2.1.196`, model "Opus 4.8 (1M context)"):
+
+| Signal                       | Observed                                                                                              | Verdict                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `rate_limits` emitted at all | Yes — **not** the bug #40094 "missing entirely" case                                                  | ✅ gate passes                      |
+| `five_hour.used_percentage`  | `34` — **exact** match to the claude.ai usage UI (34%) at capture time                                | ✅ authoritative                    |
+| `five_hour.resets_at`        | present (epoch `1782958200`)                                                                          | ✅                                  |
+| `seven_day`                  | **absent** — the key is not emitted (only `five_hour` present) in both renders                        | ⚠️ see below                        |
+| pre-first-response render    | `rate_limits: null` before the first server round-trip, populated after                               | ⚠️ absent→skip needed               |
+| `transcript_path`            | present (`~/.claude/projects/…/<session>.jsonl`)                                                      | ✅                                  |
+| env-name allowlist evidence  | status line runs with the **full user env** — 151 names incl. `SSH_AUTH_SOCK`, `STARSHIP_SESSION_KEY` | ✅ allowlist-only capture mandatory |
+
+**Decision:** GREEN. The gate's core question — is `rate_limits` present and
+realistic on this account? — is answered yes, and `five_hour` (the ADR's primary
+metric) is authoritative and exact. The status-line path is **not** abandoned.
+
+**`seven_day` caveat (folded into the design, not a blocker):** it was absent in
+both renders. This is why every `rate_limits` field is treated as independently
+optional (see §1 "Missing-field robustness" and §6 long-lived-`NULL`). The
+per-model claude.ai view showing `0` used is a separate UI breakdown (Fable-only)
+and does not contradict the aggregate 5h reading.
+
+> Two renders 14s apart cannot prove `seven_day` is _permanently_ absent; the
+> design does not depend on that conclusion. Whether `seven_day` appears under
+> heavier 7-day usage MAY be re-observed opportunistically, but the missing-field
+> robustness above makes the answer immaterial to correctness.
+
 ## Sequencing (each phase compiles and the daemon keeps running)
 
-0. **Phase 0 — gate (above).** Prove `rate_limits` appears for this account; no code
-   lands until green.
+0. **Phase 0 — gate (above). ✅ PASSED 2026-07-01.** `rate_limits` appears for this
+   account; `five_hour` present and exact (34% vs UI 34%), `seven_day` absent
+   (design treats every window as independently optional). Phases 1–4 unblocked.
 1. **Persistence + wire.** Add migration `003` (nullable columns, `NULL` ≠ `0`) and
    the new proto3 fields (backward-readable; unset → stale, not 1970). No consumer
    reads them yet.
