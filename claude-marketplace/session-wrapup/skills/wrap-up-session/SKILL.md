@@ -97,6 +97,23 @@ The mechanics of each flow — exact commands, the bitbucket mirror, coordinated
 teardown, conflict handling — live in **`references/integration-and-cleanup.md`**. Read it
 before running the integrate/cleanup phases.
 
+## Where captured work goes: beads, or a markdown handoff
+
+Recording what's done, discovered, and unfinished is the memory that survives the session — but
+_where_ it's recorded is detected, not assumed. Two backends:
+
+- **Beads-backed repo** — beads is available and scoped to this repo (a `.beads/` directory, or
+  `bd list` returns this repo's issues). Work is captured as bd issues and the next-session
+  pointer is a single P0 bead. This is the default path throughout the phases below.
+- **No-beads repo** — no beads for this repo (`bd` is unconfigured/unavailable and there's no
+  `.beads/`). Work is captured in a **markdown handoff doc committed to the repo** — a TODO/handoff
+  file that plays the exact role a bead would. Everything else — commit, gates, per-repo
+  integration, branch/worktree retirement — is **identical**; only the work-capture medium changes.
+
+Detect this per repo (a `pn` workspace can mix both). Wherever the phases below say "file a
+bead," "close a bead," or "leave a P0 bead," a no-beads repo does the markdown-handoff equivalent
+described in **"Markdown handoff doc (no-beads repos)."**
+
 ## The sequence
 
 Run these in order. Earlier phases are read-only or reversible; the irreversible ones come
@@ -109,10 +126,12 @@ capture: current branch, worktree kind, dirty state, commits ahead of `main`, de
 Identify the repo's quality-gate commands (see phase 3). Produce nothing destructive here —
 this is the picture everything else acts on.
 
-### 2. Beads: close what's done, capture what isn't
+### 2. Capture the work: close what's done, record what isn't
 
-Beads is the memory that survives the session, so get it accurate before tearing anything
-down.
+Your work-tracker — beads, or a markdown handoff doc in a no-beads repo — is the memory that
+survives the session, so get it accurate before tearing anything down. In a **beads-backed repo**
+this means the `bd` commands below; a **no-beads repo** does the same three things in the markdown
+handoff doc instead (see the note at the end of this phase).
 
 - **Close completed work.** For each in-scope bead whose work is actually finished and
   committed: `bd close <id> [<id>...] --reason="..."`. Don't close a bead whose code didn't
@@ -126,6 +145,12 @@ down.
 Keep this lightweight — you're recording reality, not grooming the backlog (that's the
 `bead-grooming` skill). Don't write acceptance criteria here; just capture enough that the
 work is findable and the intent is clear.
+
+**No-beads repos** do the same three things in the repo's markdown handoff doc instead of bd
+issues. Completed work needs no issue to close — it's just committed. Discovered and unfinished
+work each become a checklist entry under the doc's "Outstanding / next" section (see "Markdown
+handoff doc (no-beads repos)"). The doc is committed with the session's changes in phase 4, so it
+lands with the work it describes.
 
 ### 3. Quality gates
 
@@ -227,6 +252,13 @@ _and_ nothing deferred or discovered that you mean to continue. Note completion 
 When you can't tell which side of the line you're on, write the pointer: a redundant P0 costs one
 line to close, a missing one costs the next session a cold restart.
 
+**No-beads repos:** the continuation pointer is the markdown handoff doc, not a P0 bead. When work
+carries over, write (or refresh) the doc's top "Resume here" section as the single next-session
+entry point, exactly as the P0 bead would be — one front door, updated in place on a re-run rather
+than duplicated. Its "Outstanding / next" checklist holds the discovered/deferred items that would
+otherwise be non-P0 beads. See "Markdown handoff doc (no-beads repos)." Skip writing it only when
+nothing carries over at all.
+
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
 
@@ -258,6 +290,55 @@ work carries over (interrupted, deferred, or discovered). The other follow-ups f
 their own (non-P0) beads; this P0 doesn't replace them — it points at the one place to start and
 links them, so the next session sees a single front door instead of a scattered backlog.
 
+## Markdown handoff doc (no-beads repos)
+
+When a repo doesn't use beads, the same recording happens in a markdown file committed to the
+repo — one doc that captures both the loose ends (phase 2) and the single next-session entry point
+(phase 7). It plays the role beads would: durable, findable, version-controlled memory that
+survives the session.
+
+**Where it lives.** Reuse the repo's existing handoff/TODO doc if it has one (e.g. `HANDOFF.md`,
+`TODO.md`, `docs/handoff.md`); otherwise create `HANDOFF.md` at the repo root. One doc per repo —
+don't scatter. Commit it in phase 4 with the session's changes so it lands with the work it
+describes.
+
+**Shape.** Keep it scannable and dated so a fresh session can resume cold. Add a new dated section
+for this session's carry-over rather than overwriting prior history (unless that history is now
+stale):
+
+```markdown
+# Session handoff
+
+## <YYYY-MM-DD> — <short description of the work>
+
+### Where this stands
+
+<1-3 sentences: what got done this session, what's left>
+
+### Resume here
+
+- Repo / worktree: <path or branch to check out>
+- State: <branch ahead of main by N, PR #NN open, gates red, etc.>
+- First step: <the concrete next action>
+
+### Outstanding / next
+
+- [ ] <discovered follow-up, deferred cleanup, or unfinished task>
+- [ ] <bug you noticed>
+
+### Watch out for
+
+<gate failures, stopped rebase/conflict, decisions still open>
+```
+
+This mirrors the P0 handoff bead: "Where this stands" + "Resume here" + "Watch out for" are the
+cold-start brief, and the "Outstanding / next" checklist holds the discovered/unfinished items
+that would otherwise be their own non-P0 beads. One doc, not many — it's the single front door.
+
+When a re-run finds an existing handoff doc for still-open work, **update its top section** rather
+than appending a duplicate — the next session needs one front door, same as the "update the P0
+rather than file a second" rule for beads.
+
 ## Safety and idempotency
 
 - **Re-running is safe.** A second wrapup with nothing new to do should find a clean tree,
@@ -268,6 +349,10 @@ links them, so the next session sees a single front door instead of a scattered 
   discovered work you mean to resume next — means there's a next session; capture it as the
   single P0 pointer (linking the rest). Skip the P0 only when nothing carries over at all. When
   unsure, write it.
+- **No-beads repos use the markdown handoff doc.** Everywhere these rules say "file/close/update a
+  bead" or "leave a P0," a no-beads repo does the markdown-handoff-doc equivalent (see "Markdown
+  handoff doc (no-beads repos)"). The intent — one durable, committed front door, updated in place
+  rather than duplicated — is identical.
 - **Never touch out-of-scope work** — unrelated branches, others' worktrees, pre-existing
   stashes, dirty files you didn't create. Skip and report.
 - **Never auto-merge a PR.** Pushing + opening/updating is the boundary.
@@ -300,21 +385,26 @@ Left untouched (out of scope):
 - 1 pre-existing stash in nix-overlay
 ```
 
+For a no-beads repo, replace the Beads / Next-session lines with the handoff doc, e.g.
+`Handoff: HANDOFF.md updated — 2 outstanding items; resume brief for feat-x.`
+
 If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                       | command                                                                     |
-| -------------------------- | --------------------------------------------------------------------------- |
-| in-progress beads          | `bd list --status in_progress`                                              |
-| PR-tracker beads           | `bd list --type=merge-request`                                              |
-| close finished work        | `bd close <id> [<id>...] --reason="..."`                                    |
-| file discovered/unfinished | `bd create --title=... --description=... --type=... -p <0-4>`               |
-| dirty state                | `git status` ; ahead of main: `git log main..`                              |
-| detect PR (per repo)       | `gh pr view` / `pg-pr pr show` / `bd list --type=merge-request`             |
-| run gates (nix-\* repos)   | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check` |
-| local ff-merge + cleanup   | see `references/integration-and-cleanup.md`                                 |
-| push branch (PR flow only) | `git push -u origin <branch>` (NOT `pn workspace push`)                     |
-| remove pn worktree set     | `pn workspace worktree remove <branch>` (only when whole set clean)         |
-| prune stale worktree admin | `pn workspace worktree prune`                                               |
-| next-session handoff       | one P0 `bd create` (see "Next-session handoff bead")                        |
+| need                            | command                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------ |
+| in-progress beads               | `bd list --status in_progress`                                                 |
+| PR-tracker beads                | `bd list --type=merge-request`                                                 |
+| close finished work             | `bd close <id> [<id>...] --reason="..."`                                       |
+| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                  |
+| dirty state                     | `git status` ; ahead of main: `git log main..`                                 |
+| detect PR (per repo)            | `gh pr view` / `pg-pr pr show` / `bd list --type=merge-request`                |
+| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`    |
+| local ff-merge + cleanup        | see `references/integration-and-cleanup.md`                                    |
+| push branch (PR flow only)      | `git push -u origin <branch>` (NOT `pn workspace push`)                        |
+| remove pn worktree set          | `pn workspace worktree remove <branch>` (only when whole set clean)            |
+| prune stale worktree admin      | `pn workspace worktree prune`                                                  |
+| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                           |
+| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)") |
+| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                             |

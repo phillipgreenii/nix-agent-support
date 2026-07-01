@@ -76,7 +76,8 @@ gh pr create --fill --draft       # only if there's genuinely no PR yet and the 
 
 Leave the branch and worktree in place — they're needed until the PR merges. A later wrapup
 (after merge) will retire them via the local cleanup path. Record the PR number in the summary
-and reference it from the next-session handoff bead.
+and reference it from the next-session handoff — the P0 bead, or the markdown handoff doc in a
+no-beads repo (see SKILL.md "Markdown handoff doc (no-beads repos)").
 
 ## Working directly on main
 
