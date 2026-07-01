@@ -372,6 +372,23 @@ strip_ansi() {
   [[ "$stripped" != *"anthropics"* ]]
 }
 
+@test "location sub-parts labeled (repo:/wt:/br:) in text mode, glyph-prefixed in nerd mode" {
+  J='{"session_id":"s1","version":"1.0.0","worktree":{"name":"my-feature","branch":"feat/foo"},"workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_REPO anthropics/claude-code"* ]]
+    [[ "$stripped" != *"repo:"* ]]
+    [[ "$stripped" != *"wt:"* ]]
+    [[ "$stripped" != *"br:"* ]]
+  else
+    [[ "$stripped" == *"repo:anthropics/claude-code"* ]]
+    [[ "$stripped" == *"wt:my-feature"* ]]
+    [[ "$stripped" == *"br:feat/foo"* ]]
+  fi
+}
+
 # --- PR sub-part of the location segment ---
 
 @test "location shows PR number appended after branch" {

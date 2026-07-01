@@ -62,7 +62,9 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
 - **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
   false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
-  branch) via the `nerdFont` arg threaded into `scripts.nix`. Glyphs are emitted as precomputed
+  branch) via the `nerdFont` arg threaded into `scripts.nix`. In text (off) mode the location
+  sub-parts carry `repo:` / `wt:` / `br:` labels (matching the `ctx:` / `5h:` / `7d:` idiom); in
+  glyph (on) mode the MDI marker replaces the label. Glyphs are emitted as precomputed
   raw UTF-8 bytes (`printf '\xNN...'`), NOT `printf '\U...'`, because `\U` needs a UTF-8 active
   locale (the nix build sandbox and `LC_ALL=C` shells have none) — byte escapes are
   locale-independent. Both a nerd-off and a nerd-on test package are built in `flake.nix`

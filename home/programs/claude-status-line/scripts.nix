@@ -61,9 +61,9 @@ let
   # space from its following value (e.g. `<repoG> owner/name`, `<ctxG> 42%`, `<5hG> <slice>`).
   # Nerd-off text labels stay tight (`ctx:`, `5h:`, `7d:`) — unaffected by the glyph spacing.
   # Decimal codepoints (see comments for the U+ hex values):
-  glyphRepo = if nerdFont then glyph 983714 + " " else ""; # U+F02A2
-  glyphWorktree = if nerdFont then glyph 983627 + " " else ""; # U+F024B
-  glyphBranch = if nerdFont then glyph 984620 + " " else ""; # U+F062C
+  glyphRepo = if nerdFont then glyph 983714 + " " else "repo:"; # U+F02A2
+  glyphWorktree = if nerdFont then glyph 983627 + " " else "wt:"; # U+F024B
+  glyphBranch = if nerdFont then glyph 984620 + " " else "br:"; # U+F062C
   glyphCtx = if nerdFont then glyph 983899 + " " else "ctx:"; # U+F035B
   glyph5h = if nerdFont then glyph 983376 + " " else "5h:"; # U+F0150
   glyph7d = if nerdFont then glyph 984697 + " " else "7d:"; # U+F0679
