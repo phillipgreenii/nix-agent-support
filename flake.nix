@@ -718,11 +718,12 @@
                 extraInputs = [ ];
               };
 
-            # Test claude-status-line wrapper and part scripts
+            # Test claude-status-line wrapper and part scripts (nerd-font OFF: text fallbacks).
             test-claude-status-line =
               let
                 slScripts = import ./home/programs/claude-status-line/scripts.nix {
                   inherit pkgs lib;
+                  nerdFont = false;
                 };
                 wrapperScript = slScripts.mkWrapperScript {
                   parts = slScripts.defaultParts;
@@ -736,6 +737,40 @@
                 tests = ./home/programs/claude-status-line;
                 extraInputs = [ ];
               };
+
+            # Same bats suite, but built with nerd-font ON so the glyph literals are asserted.
+            # Cannot reuse checksHelpers.testBashScripts (it can't inject an env var), so this
+            # mirrors that helper and exports CLAUDE_SL_TEST_NERD_FONT=1 as the mode marker the
+            # shared bats file branches on.
+            test-claude-status-line-nerdfont =
+              let
+                slScripts = import ./home/programs/claude-status-line/scripts.nix {
+                  inherit pkgs lib;
+                  nerdFont = true;
+                };
+                wrapperScript = slScripts.mkWrapperScript {
+                  parts = slScripts.defaultParts;
+                  reserve = 20;
+                };
+                package = pkgs.writeShellScriptBin "claude-status-line" ''
+                  exec ${wrapperScript} "$@"
+                '';
+              in
+              pkgs.runCommand "test-bash-scripts"
+                {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.git
+                    pkgs.which
+                    package
+                  ];
+                }
+                ''
+                  export PATH="${package}/bin:$PATH"
+                  export CLAUDE_SL_TEST_NERD_FONT=1
+                  bats ${./home/programs/claude-status-line}
+                  touch $out
+                '';
 
             test-claude-settings-replace = checksHelpers.testBashScripts {
               package = pkgs.writeShellApplication {

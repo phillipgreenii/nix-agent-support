@@ -8,9 +8,11 @@ let
   cfg = config.phillipgreenii.programs.claude.status-line-parts;
   cfgColors = config.phillipgreenii.programs.claude.status-line-colors;
   cfgReserve = config.phillipgreenii.programs.claude.status-line-notification-reserve;
+  cfgNerdFont = config.phillipgreenii.programs.claude.status-line-nerd-font;
   scripts = import ./scripts.nix {
     inherit pkgs lib;
     colors = cfgColors;
+    nerdFont = cfgNerdFont;
   };
   wrapperScript = scripts.mkWrapperScript {
     parts = cfg;
@@ -27,13 +29,25 @@ in
           - receives Claude context via exported env vars (CLAUDE_SL_SESSION_NAME,
             CLAUDE_SL_SESSION_ID, CLAUDE_SL_WORKTREE, CLAUDE_SL_BRANCH,
             CLAUDE_SL_VERSION, CLAUDE_SL_MODEL, CLAUDE_SL_CONTEXT_USED_PCT,
-            CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME, CLAUDE_SL_PR_NUMBER,
-            CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE, CLAUDE_SL_EFFORT,
-            CLAUDE_SL_THINKING, CLAUDE_SL_OUTPUT_STYLE, CLAUDE_SL_VIM_MODE,
-            CLAUDE_SL_AGENT)
+            CLAUDE_SL_EXCEEDS_200K, CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME,
+            CLAUDE_SL_PR_NUMBER, CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE,
+            CLAUDE_SL_EFFORT, CLAUDE_SL_THINKING, CLAUDE_SL_VIM_MODE, CLAUDE_SL_AGENT,
+            CLAUDE_SL_5H_PCT, CLAUDE_SL_5H_RESET, CLAUDE_SL_7D_PCT, CLAUDE_SL_7D_RESET)
           - prints a single formatted segment to stdout (ANSI colors allowed)
           - exits 0 to include the segment, non-zero to skip it silently
         Segments are joined with " | ".
+      '';
+    };
+
+    status-line-nerd-font = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        When true, status-line part scripts emit Material Design Icon (MDI) glyphs
+        (plane-15 PUA, U+F0xxx) instead of their plain-text fallbacks. The choice is
+        baked into the part scripts at Nix evaluation time (no runtime shell branch).
+        Enable only when the terminal font renders the MDI plane-15 range (classic
+        Powerline / FontAwesome / Octicon BMP-PUA glyphs are NOT used).
       '';
     };
 
