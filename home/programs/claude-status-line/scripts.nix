@@ -57,15 +57,24 @@ let
     hx b0 + hx b1 + hx b2 + hx b3;
   glyph = cp: "$(printf '${utf8Bytes cp}')";
 
+  # Marker glyphs. Nerd-on prefix markers bake a SINGLE TRAILING SPACE so the marker sits one
+  # space from its following value (e.g. `<repoG> owner/name`, `<ctxG> 42%`, `<5hG> <slice>`).
+  # Nerd-off text labels stay tight (`ctx:`, `5h:`, `7d:`) — unaffected by the glyph spacing.
   # Decimal codepoints (see comments for the U+ hex values):
-  glyphRepo = if nerdFont then glyph 983714 else ""; # U+F02A2
-  glyphWorktree = if nerdFont then glyph 983627 else ""; # U+F024B
-  glyphBranch = if nerdFont then glyph 984620 else ""; # U+F062C
+  glyphRepo = if nerdFont then glyph 983714 + " " else ""; # U+F02A2
+  glyphWorktree = if nerdFont then glyph 983627 + " " else ""; # U+F024B
+  glyphBranch = if nerdFont then glyph 984620 + " " else ""; # U+F062C
+  glyphCtx = if nerdFont then glyph 983899 + " " else "ctx:"; # U+F035B
+  glyph5h = if nerdFont then glyph 983376 + " " else "5h:"; # U+F0150
+  glyph7d = if nerdFont then glyph 984697 + " " else "7d:"; # U+F0679
+
+  # Thinking cog is a SUFFIX marker; the space in front of it is supplied by the model part
+  # (`$out $cog`), so the glyph itself carries NO extra space. Text fallback is `[thinking]`.
   glyphThinking = if nerdFont then glyph 984211 else "[thinking]"; # U+F0493
-  glyphCtx = if nerdFont then glyph 983899 else "ctx:"; # U+F035B
-  glyphAlert = if nerdFont then glyph 983080 else "(!)"; # U+F0028
-  glyph5h = if nerdFont then glyph 983376 else "5h:"; # U+F0150
-  glyph7d = if nerdFont then glyph 984697 else "7d:"; # U+F0679
+
+  # 200k alert is a SUFFIX marker appended after the ctx percentage; it bakes a single LEADING
+  # space so it reads `... 42% <alert>`. Nerd-off `(!)` stays tight (text unaffected).
+  glyphAlert = if nerdFont then " " + glyph 983080 else "(!)"; # U+F0028
 
   # The session NAME is its own segment (bold). Shown only when session_name present.
   sessionNamePart = pkgs.writeShellScript "claude-sl-session-name" ''
@@ -81,9 +90,11 @@ let
     printf "%s" "$CLAUDE_SL_SESSION_ID"
   '';
 
-  # LOCATION: repo (dim) + worktree (bold yellow) + branch (green), space-separated in ONE
-  # segment. Each sub-part appears only when its data is present; the whole segment is hidden
-  # when none are present. Worktree comes ONLY from worktree.name (B8: no git_worktree fallback).
+  # LOCATION: repo (dim) + worktree (bold yellow) + branch (green) + PR (colored by review
+  # state), space-separated in ONE segment. Each sub-part appears only when its data is
+  # present; the whole segment is hidden when none are present. Worktree comes ONLY from
+  # worktree.name (B8: no git_worktree fallback). The PR sub-part is appended LAST, after
+  # branch, with NO glyph prefix (just `PR#<n>`).
   locationPart = pkgs.writeShellScript "claude-sl-location" ''
     ${ansiColors}
     parts=()
@@ -96,27 +107,24 @@ let
     if [ -n "$CLAUDE_SL_BRANCH" ]; then
       parts+=("$(printf "''${GREEN}${glyphBranch}%s''${RESET}" "$CLAUDE_SL_BRANCH")")
     fi
+    if [ -n "$CLAUDE_SL_PR_NUMBER" ]; then
+      # Colored by review state; full URL is exported as CLAUDE_SL_PR_URL for custom parts to
+      # consume but is not rendered here (a URL would blow the width budget). No glyph prefix.
+      case "$CLAUDE_SL_PR_REVIEW_STATE" in
+        approved)          pr_color="''${GREEN}" ;;
+        changes_requested) pr_color="''${RED}" ;;
+        pending)           pr_color="''${YELLOW}" ;;
+        draft)             pr_color="''${DIM}" ;;
+        *)                 pr_color="" ;;
+      esac
+      parts+=("$(printf "''${pr_color}PR#%s''${RESET}" "$CLAUDE_SL_PR_NUMBER")")
+    fi
     [ ''${#parts[@]} -gt 0 ] || exit 1
     out=$parts
     for p in "''${parts[@]:1}"; do
       out="$out $p"
     done
     printf '%s' "$out"
-  '';
-
-  # PR number, colored by review state. The full URL is exported as CLAUDE_SL_PR_URL for
-  # custom parts to consume but is not rendered here (a URL would blow the width budget).
-  prPart = pkgs.writeShellScript "claude-sl-pr" ''
-    ${ansiColors}
-    [ -n "$CLAUDE_SL_PR_NUMBER" ] || exit 1
-    case "$CLAUDE_SL_PR_REVIEW_STATE" in
-      approved)          color="''${GREEN}" ;;
-      changes_requested) color="''${RED}" ;;
-      pending)           color="''${YELLOW}" ;;
-      draft)             color="''${DIM}" ;;
-      *)                 color="" ;;
-    esac
-    printf "''${color}PR#%s''${RESET}" "$CLAUDE_SL_PR_NUMBER"
   '';
 
   # MODEL: full display_name (cyan) + folded effort abbreviation in parens + thinking glyph.
@@ -481,7 +489,6 @@ in
     sessionNamePart
     sessionIdPart
     locationPart
-    prPart
     modelPart
     contextPart
     versionPart

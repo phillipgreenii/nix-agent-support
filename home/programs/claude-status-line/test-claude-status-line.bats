@@ -106,6 +106,21 @@ strip_ansi() {
   fi
 }
 
+@test "model thinking cog keeps exactly one space after effort (nerd on)" {
+  nerd_on || skip "nerd-font off"
+  J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"effort":{"level":"high"},"thinking":{"enabled":true},"model":{"display_name":"Opus 4.6"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  # "Opus 4.6 (hi) <cog>" — exactly one space between the effort parens and the cog (not two).
+  [[ "$stripped" == *"Opus 4.6 (hi) $GLYPH_THINKING"* ]]
+  [[ "$stripped" != *"(hi)  $GLYPH_THINKING"* ]]
+  # The cog is the LAST thing in the model segment: it is immediately followed by the segment
+  # separator " | " (agent is next), proving the model part bakes no extra trailing space.
+  [[ "$stripped" == *"$GLYPH_THINKING | "* ]]
+  [[ "$stripped" != *"$GLYPH_THINKING  | "* ]]
+}
+
 @test "model omits thinking indicator when thinking disabled" {
   J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"thinking":{"enabled":false},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
   run bash -c "echo '$J' | claude-status-line"
@@ -134,14 +149,16 @@ strip_ansi() {
   [[ "$stripped" == *"25%"* ]]
 }
 
-@test "context uses ctx marker (glyph on / text off)" {
+@test "context uses ctx marker (glyph+space on / tight text off)" {
   run bash -c "echo '$TEST_JSON' | claude-status-line"
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
   if nerd_on; then
-    [[ "$stripped" == *"$GLYPH_CTX"* ]]
+    # single space between the memory glyph and the percentage
+    [[ "$stripped" == *"$GLYPH_CTX 25%"* ]]
   else
-    [[ "$stripped" == *"ctx:"* ]]
+    # text label stays tight (unaffected by glyph spacing)
+    [[ "$stripped" == *"ctx:25%"* ]]
   fi
 }
 
@@ -172,7 +189,8 @@ strip_ansi() {
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
   if nerd_on; then
-    [[ "$stripped" == *"$GLYPH_ALERT"* ]]
+    # single space BEFORE the alert glyph: "... 30% <alert>"
+    [[ "$stripped" == *"30% $GLYPH_ALERT"* ]]
   else
     [[ "$stripped" == *"(!)"* ]]
   fi
@@ -253,17 +271,21 @@ strip_ansi() {
 # Location segment (repo + worktree + branch combined, space-separated)
 # =====================================================================================
 
-@test "location combines repo, worktree, branch in one segment" {
-  J='{"session_id":"s1","version":"1.0.0","worktree":{"name":"my-feature","branch":"feature/foo"},"workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+@test "location combines repo, worktree, branch, pr in one segment" {
+  J='{"session_id":"s1","version":"1.0.0","worktree":{"name":"my-feature","branch":"feature/foo"},"pr":{"number":1234,"review_state":"approved"},"workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
   run bash -c "echo '$J' | claude-status-line"
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
-  # all three appear, and they are NOT separated by ' | ' (same segment)
+  # all four appear, and they are NOT separated by ' | ' (same segment)
   [[ "$stripped" == *"anthropics/claude-code"* ]]
   [[ "$stripped" == *"my-feature"* ]]
   [[ "$stripped" == *"feature/foo"* ]]
+  [[ "$stripped" == *"PR#1234"* ]]
   [[ "$stripped" != *"anthropics/claude-code | "* ]]
   [[ "$stripped" != *"my-feature | feature/foo"* ]]
+  [[ "$stripped" != *"feature/foo | PR#1234"* ]]
+  # PR is appended AFTER branch within the segment
+  [[ "$stripped" == *"feature/foo"*"PR#1234"* ]]
 }
 
 @test "location repo is dim" {
@@ -273,13 +295,13 @@ strip_ansi() {
   [[ "$output" == *$'\033[2m'*"anthropics/claude-code"* ]]
 }
 
-@test "location repo uses repo glyph when nerd on" {
+@test "location repo uses repo glyph with a single space before the value when nerd on" {
   nerd_on || skip "nerd-font off"
   J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato","repo":{"owner":"anthropics","name":"claude-code"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
   run bash -c "echo '$J' | claude-status-line"
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
-  [[ "$stripped" == *"$GLYPH_REPO"* ]]
+  [[ "$stripped" == *"$GLYPH_REPO anthropics/claude-code"* ]]
 }
 
 @test "location worktree is bold yellow" {
@@ -289,7 +311,7 @@ strip_ansi() {
   [[ "$output" == *$'\033[1m'*$'\033[33m'*"my-feature"* || "$output" == *$'\033[33m'*$'\033[1m'*"my-feature"* ]]
   if nerd_on; then
     stripped=$(strip_ansi "$output")
-    [[ "$stripped" == *"$GLYPH_WORKTREE"* ]]
+    [[ "$stripped" == *"$GLYPH_WORKTREE my-feature"* ]]
   fi
 }
 
@@ -308,7 +330,7 @@ strip_ansi() {
   [[ "$output" == *$'\033[32m'*"feature/bar"* ]]
   if nerd_on; then
     stripped=$(strip_ansi "$output")
-    [[ "$stripped" == *"$GLYPH_BRANCH"* ]]
+    [[ "$stripped" == *"$GLYPH_BRANCH feature/bar"* ]]
   fi
 }
 
@@ -321,12 +343,13 @@ strip_ansi() {
   [[ "$stripped" != *"git feature/bar"* ]]
 }
 
-@test "location segment hidden entirely when repo, worktree and branch all absent" {
+@test "location segment hidden entirely when repo, worktree, branch AND pr all absent" {
   run bash -c "echo '$TEST_JSON' | claude-status-line"
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
-  # TEST_JSON has no repo, no worktree, no branch (and /tmp/potato is not a git dir)
+  # TEST_JSON has no repo, no worktree, no branch, no pr (and /tmp/potato is not a git dir)
   [[ "$stripped" != *"/"* ]]
+  [[ "$stripped" != *"PR#"* ]]
 }
 
 @test "location shows only present sub-parts (repo alone)" {
@@ -343,6 +366,74 @@ strip_ansi() {
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
   [[ "$stripped" != *"anthropics"* ]]
+}
+
+# --- PR sub-part of the location segment ---
+
+@test "location shows PR number appended after branch" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"approved"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#1234"* ]]
+}
+
+@test "location shown when only pr present (repo/worktree/branch absent)" {
+  # /tmp/potato is not a git dir, so no branch fallback; only the PR sub-part exists.
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":77,"review_state":"pending"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#77"* ]]
+}
+
+@test "location PR has no glyph prefix (just PR#n) when nerd on" {
+  nerd_on || skip "nerd-font off"
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"approved"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#1234"* ]]
+  # No repo/worktree/branch glyph is emitted for the PR sub-part.
+  [[ "$stripped" != *"$GLYPH_REPO"* ]]
+  [[ "$stripped" != *"$GLYPH_WORKTREE"* ]]
+  [[ "$stripped" != *"$GLYPH_BRANCH"* ]]
+}
+
+@test "location PR green when approved" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"approved"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[32m'"PR#1234"* ]]
+}
+
+@test "location PR red when changes_requested" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"changes_requested"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[31m'"PR#1234"* ]]
+}
+
+@test "location PR yellow when pending" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"pending"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[33m'"PR#1234"* ]]
+}
+
+@test "location PR dim when draft" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"review_state":"draft"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[2m'"PR#1234"* ]]
+}
+
+@test "location omits PR when pr absent" {
+  J='{"session_id":"s1","version":"1.0.0","worktree":{"name":"wt","branch":"br"},"workspace":{"current_dir":"/tmp/potato","repo":{"owner":"o","name":"r"}},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"PR#"* ]]
 }
 
 # --- Branch fallback (.git/HEAD, outside a worktree session) ---
@@ -545,10 +636,10 @@ strip_ansi() {
   run env COLUMNS=400 bash -c "echo '$J' | claude-status-line"
   [ "$status" -eq 0 ]
   stripped=$(strip_ansi "$output")
-  # 5% -> slice1
-  [[ "$stripped" == *"$GLYPH_SLICE1"* ]]
-  # 75% -> slice8
-  [[ "$stripped" == *"$GLYPH_SLICE8"* ]]
+  # 5% -> slice1, with a single space between the 5h marker and the slice glyph
+  [[ "$stripped" == *"$GLYPH_5H $GLYPH_SLICE1"* ]]
+  # 75% -> slice8, with a single space between the 7d marker and the slice glyph
+  [[ "$stripped" == *"$GLYPH_7D $GLYPH_SLICE8"* ]]
   # glyph render shows NO numeric percentage for these sub-80 values
   [[ "$stripped" != *"%"* ]]
 }
@@ -609,6 +700,8 @@ strip_ansi() {
   [[ "$stripped" == *"2h 5m"* ]]
   # red
   [[ "$output" == *$'\033[31m'* ]]
+  # nerd-on: single space between the 5h marker glyph and the red number
+  nerd_off || [[ "$stripped" == *"$GLYPH_5H 90%"* ]]
 }
 
 @test "limits red number without countdown when >= 80 and resets_at missing" {
@@ -752,20 +845,26 @@ strip_ansi() {
 }
 
 # =====================================================================================
-# B1 locale-safe width: a glyph-bearing segment must measure width 1 (no over-wrapping)
-# even under a non-UTF-8 active locale (env LC_ALL=C).
+# B1 locale-safe width: the wrapper MUST measure visible width under a UTF-8 locale so each
+# glyph counts as ONE character, even when the active locale is non-UTF-8 (env LC_ALL=C).
+# Our glyphs are emitted as raw 4-byte UTF-8, so a naive C-locale count sees 4 bytes each.
+# The test picks a budget that sits BETWEEN the correct (1-char/glyph) total and the buggy
+# (4-byte/glyph) total, so a regression that dropped the locale forcing would over-wrap.
 # =====================================================================================
 
-@test "glyph-bearing segment measures width 1 under LC_ALL=C (no over-wrapping)" {
+@test "glyph-bearing location segment does NOT over-wrap under LC_ALL=C" {
   nerd_on || skip "nerd-font off (no glyph to measure)"
-  # A repo location segment carries one glyph. Under a naive C-locale width count the glyph
-  # would measure 10 chars and force a wrap. With the wrapper forcing UTF-8 for the width
-  # math, budget is big enough to keep it on one line together with a short neighbor.
-  J='{"session_id":"x","workspace":{"current_dir":"/tmp/potato","repo":{"owner":"o","name":"r"}},"model":{"display_name":"M"}}'
-  # budget: COLUMNS 40 - reserve 20 = 20. Segments (stripped, UTF-8): "x"(1), glyph+" o/r"(1+4=5), "M"(1).
-  # Row1 packs "x | <glyph> o/r | M" = 1+3+5+3+1 = 13 <= 20 -> single line IF glyph counts as 1.
-  # Under a C-locale miscount the glyph is 10 => 5 becomes 14 => 1+3+14+3+1=22 > 20 => wraps.
-  run env LC_ALL=C COLUMNS=40 CLAUDE_SL_RESERVE=20 bash -c "echo '$J' | claude-status-line"
+  # Location carries THREE glyphs (repo, worktree, branch); with single-space markers the
+  # stripped widths are: repo "<g> o/r" = 5, worktree "<g> wt" = 4, branch "<g> br" = 4,
+  # space-joined => 5+1+4+1+4 = 15 chars under UTF-8. Under a C-locale miscount each glyph is
+  # 4 bytes (+3 each, +9 total) => 24. Neighbors: session "s" (1), model "M" (1).
+  #   budget = COLUMNS 45 - reserve 20 = 25.
+  #   UTF-8 pack: "s | LOC | M" = 1 + 3 + 15 + 3 + 1 = 23 <= 25 -> ONE row.
+  #   C-miscount:  "s | LOC" = 1 + 3 + 24 = 28 > 25 -> LOC wraps; "LOC | M" = 24+3+1 = 28 > 25
+  #                -> M wraps too => THREE rows.
+  # So the correct wrapper yields exactly 1 row; the buggy (unforced-locale) one yields 3.
+  J='{"session_id":"s","worktree":{"name":"wt","branch":"br"},"workspace":{"current_dir":"/tmp/potato","repo":{"owner":"o","name":"r"}},"model":{"display_name":"M"}}'
+  run env LC_ALL=C COLUMNS=45 CLAUDE_SL_RESERVE=20 bash -c "echo '$J' | claude-status-line"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
 }
