@@ -108,8 +108,7 @@ let
       parts+=("$(printf "''${GREEN}${glyphBranch}%s''${RESET}" "$CLAUDE_SL_BRANCH")")
     fi
     if [ -n "$CLAUDE_SL_PR_NUMBER" ]; then
-      # Colored by review state; full URL is exported as CLAUDE_SL_PR_URL for custom parts to
-      # consume but is not rendered here (a URL would blow the width budget). No glyph prefix.
+      # Colored by review state. No glyph prefix.
       case "$CLAUDE_SL_PR_REVIEW_STATE" in
         approved)          pr_color="''${GREEN}" ;;
         changes_requested) pr_color="''${RED}" ;;
@@ -117,7 +116,16 @@ let
         draft)             pr_color="''${DIM}" ;;
         *)                 pr_color="" ;;
       esac
-      parts+=("$(printf "''${pr_color}PR#%s''${RESET}" "$CLAUDE_SL_PR_NUMBER")")
+      pr_text=$(printf "''${pr_color}PR#%s''${RESET}" "$CLAUDE_SL_PR_NUMBER")
+      # When the PR URL is known, wrap the colored PR# in an OSC 8 hyperlink so it is CLICKABLE in
+      # supporting terminals at ZERO visible width (the URL itself is never rendered — it would
+      # blow the width budget). ST-terminated (ESC '\'), the spec-canonical form modern terminals
+      # prefer; the wrapper's strip_ansi (strip-ansi.bash) discounts it from the width math. NOTE:
+      # inside tmux/screen this needs OSC 8 passthrough, else the sequence may render literally.
+      if [ -n "$CLAUDE_SL_PR_URL" ]; then
+        pr_text=$(printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$CLAUDE_SL_PR_URL" "$pr_text")
+      fi
+      parts+=("$pr_text")
     fi
     [ ''${#parts[@]} -gt 0 ] || exit 1
     out=$parts
@@ -430,16 +438,12 @@ let
         *) export LC_ALL='${utf8Locale}' ;;
       esac
 
-      # Visible width = segment with ANSI SGR escapes stripped. Pure bash, no subprocess.
-      strip_ansi() {
-        local s=$1 out=""
-        while [ "$s" != "''${s#*$'\033['}" ]; do
-          out=$out''${s%%$'\033['*}
-          s=''${s#*$'\033['}
-          s=''${s#*m}
-        done
-        printf '%s' "$out$s"
-      }
+      # Visible width = segment with ANSI escapes (SGR + OSC 8 hyperlinks) stripped. Pure bash,
+      # no subprocess. strip_ansi() lives in strip-ansi.bash as the single source of truth and is
+      # injected verbatim here; it is unit-tested directly by test-strip-ansi.bats. Direct unit
+      # tests are the ONLY way to cover the BEL-terminated OSC path — the built wrapper only ever
+      # emits the ST hyperlink form (see prPart), so no end-to-end test can exercise BEL.
+      ${builtins.readFile ./strip-ansi.bash}
 
       # Greedily pack segments into " | "-joined rows in list order. A segment is moved to
       # a new row only when appending it to a NON-empty row would exceed budget; the first

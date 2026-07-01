@@ -457,6 +457,54 @@ strip_ansi() {
   [[ "$stripped" != *"PR#"* ]]
 }
 
+# --- PR OSC 8 clickable hyperlink (pg2-hl1f) ---
+
+@test "PR# is wrapped in an OSC 8 hyperlink to pr.url when url present" {
+  url="https://github.com/anthropics/claude-code/pull/1234"
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":1234,"url":"'"$url"'","review_state":"approved"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  # Well-formed ST-terminated OSC 8: opener carries the URL, closer has empty params.
+  osc_open=$'\033]8;;'"$url"$'\033\\'
+  osc_close=$'\033]8;;\033\\'
+  [[ "$output" == *"$osc_open"* ]]
+  [[ "$output" == *"$osc_close"* ]]
+  # Visible text and its review-state color survive INSIDE the hyperlink (approved -> green,
+  # SGR immediately abutting the number just as the non-hyperlinked tests assert).
+  [[ "$output" == *$'\033[32m'"PR#1234"* ]]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#1234"* ]]
+}
+
+@test "PR# is NOT wrapped in a hyperlink when pr.url absent" {
+  J='{"session_id":"s1","version":"1.0.0","pr":{"number":77,"review_state":"pending"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  # No pr.url -> no OSC 8 introducer at all.
+  [[ "$output" != *$'\033]8;;'* ]]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#77"* ]]
+}
+
+@test "hyperlinked PR# is discounted from the width math (does NOT over-wrap)" {
+  # URL is 32 chars: "https://github.com/o/r/pull/1234".
+  # Present segments' VISIBLE widths under a correct strip_ansi: session "s"=1, location
+  # "PR#1234"=7 (URL is zero-width), model "M"=1. (context/version/etc. all omitted.)
+  #   Correct single-line pack = 1 + 3 + 7 + 3 + 1 = 15 columns.
+  #   budget = COLUMNS 40 - RESERVE 20 = 20, and 15 <= 20  =>  ONE row.
+  # If strip_ansi regressed and counted the OSC 8 bytes, the location width would balloon to
+  #   len("\033]8;;")=5 + URL 32 + len(ST "\033\\")=2 + "PR#1234"=7 + len(closer "\033]8;;\033\\")=7 = 53,
+  # so session + location = 1 + 3 + 53 = 57 > 20 => the row wraps  =>  MORE than one row.
+  # Exactly one row therefore proves the hyperlink's URL is not counted as visible width.
+  url="https://github.com/o/r/pull/1234"
+  J='{"session_id":"s","pr":{"number":1234,"url":"'"$url"'","review_state":"approved"},"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"M"}}'
+  run env COLUMNS=40 CLAUDE_SL_RESERVE=20 bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"PR#1234"* ]]
+}
+
 # --- Branch fallback (.git/HEAD, outside a worktree session) ---
 
 @test "branch fallback reads .git/HEAD when worktree.branch absent" {
