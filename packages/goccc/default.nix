@@ -6,13 +6,13 @@
 
 buildGoModule rec {
   pname = "goccc";
-  version = "0.3.5";
+  version = "0.3.6";
 
   src = fetchFromGitHub {
     owner = "backstabslash";
     repo = "goccc";
     rev = "v${version}";
-    hash = "sha256-e0Phi6zWIPAC8r/KxZXoIMvecX2WooOQ+b6OyyaHAMo=";
+    hash = "sha256-Yb9bIStAkLuzaOo17mlvfVkbkt6/JniOPUiREysT/U4=";
   };
 
   vendorHash = null;
