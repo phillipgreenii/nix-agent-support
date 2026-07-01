@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 #
 # Register a nix-provided DIRECTORY-source marketplace into Claude Code's
 # marketplace registry (~/.claude/plugins/known_marketplaces.json) BEFORE the
@@ -23,12 +23,10 @@
 #     or the network is unavailable the activation must not break.
 #
 # Usage:
-#   register-marketplace.sh <claude_bin> <marketplace_name> <directory_path>
+#   claude-settings-register-marketplace.sh <claude_bin> <marketplace_name> <directory_path>
 #
 # github-source marketplaces are intentionally NOT handled here — they are left
 # to the existing `claude plugin marketplace update` global call + install flow.
-
-set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 <claude_bin> <marketplace_name> <directory_path>" >&2
@@ -40,11 +38,11 @@ name="$2"
 path="$3"
 
 if "$claude_bin" plugin marketplace add "$path" >/dev/null 2>&1; then
-  echo "claude-settings: marketplace $name registered ($path)"
+  act_ok "marketplace $name registered ($path)"
 elif "$claude_bin" plugin marketplace update "$name" >/dev/null 2>&1; then
-  echo "claude-settings: marketplace $name refreshed"
+  act_ok "marketplace $name refreshed"
 else
-  echo "claude-settings: WARNING marketplace $name add/update skipped ($path)" >&2
+  act_warn "WARNING marketplace $name add/update skipped ($path)" >&2
 fi
 
 exit 0

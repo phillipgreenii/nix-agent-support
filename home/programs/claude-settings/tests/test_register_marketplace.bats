@@ -18,7 +18,7 @@ bats_require_minimum_version 1.5.0
 # runs (`bats tests/`).
 SCRIPT="$(command -v claude-settings-register-marketplace || true)"
 if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../register-marketplace.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-register-marketplace.sh"
 fi
 
 setup() {

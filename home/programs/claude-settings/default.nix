@@ -2,11 +2,27 @@
   config,
   lib,
   pkgs,
+  mkBashBuildersFor,
+  inputs,
   ...
 }:
 
 let
   cfg = config.phillipgreenii.programs.claude.settings;
+
+  # Build the shared act_* activation-output helpers locally (repo-base ADR 0014;
+  # the library form cannot be a flake.lib output, so each consumer builds it from
+  # repo-base's lib/activation). Mirrors modules/zm and github-nix-auth.
+  bashBuilders = mkBashBuildersFor pkgs;
+  activation-lib = bashBuilders.mkBashLibrary {
+    name = "activation-lib";
+    src = inputs.phillipgreenii-nix-base + "/lib/activation";
+    description = "Shared act_* activation-output helpers (single source with system.activationScripts)";
+  };
+  scripts = import ./scripts.nix {
+    inherit pkgs activation-lib;
+    inherit (bashBuilders) mkBashScript;
+  };
 
   filters =
     lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
@@ -31,31 +47,13 @@ let
       )
     ];
 
-  replaceScript = pkgs.writeShellApplication {
-    name = "claude-settings-replace-managed-keys";
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.coreutils
-    ];
-    text = builtins.readFile ./replace-managed-keys.sh;
-  };
-
-  installPluginScript = pkgs.writeShellApplication {
-    name = "claude-settings-install-plugin";
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.coreutils
-    ];
-    text = builtins.readFile ./install-plugin.sh;
-  };
-
-  registerMarketplaceScript = pkgs.writeShellApplication {
-    name = "claude-settings-register-marketplace";
-    runtimeInputs = [
-      pkgs.coreutils
-    ];
-    text = builtins.readFile ./register-marketplace.sh;
-  };
+  # Framework-built scripts (mkBashScript with libraries = [ activation-lib ]),
+  # so they source the shared act_* helpers. Binary names preserved as
+  # claude-settings-* (invocations below, the eval-check, and the bats tests all
+  # depend on the stable names).
+  replaceScript = scripts.replaceManagedKeys.script;
+  installPluginScript = scripts.installPlugin.script;
+  registerMarketplaceScript = scripts.registerMarketplace.script;
 
   # DIRECTORY-source marketplaces from extraKnownMarketplaces. `claude plugin
   # marketplace update` only refreshes marketplaces already in the registry, so
@@ -198,6 +196,10 @@ in
 
   config = lib.mkIf (config.phillipgreenii.programs.claude.enable && hasAnything) {
     home.activation.claude-settings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      # Source act_* so the inline status lines below match the chained scripts'
+      # output. Same byte-identical source as the activation-lib mkBashLibrary
+      # those scripts consume (repo-base readFile single source).
+      ${inputs.phillipgreenii-nix-base.lib.activationHelpers}
       SETTINGS="$HOME/.claude/settings.json"
 
       mkdir -p "$HOME/.claude"
@@ -209,24 +211,24 @@ in
           '${builtins.toJSON cfg.enabledPlugins}' \
           '${builtins.toJSON cfg.extraKnownMarketplaces}' \
           "$HOME/.claude"
-        echo "claude-settings: enabledPlugins and extraKnownMarketplaces replaced"
+        act_ok "enabledPlugins and extraKnownMarketplaces replaced"
       ''}
 
       ${lib.optionalString hasSettings ''
         ${pkgs.jq}/bin/jq '
           ${lib.concatStringsSep " |\n    " filters}
         ' "$SETTINGS" > "$SETTINGS.tmp" && mv -f "$SETTINGS.tmp" "$SETTINGS"
-        echo "claude-settings: settings.json updated"
+        act_ok "settings.json updated"
       ''}
 
       ${lib.optionalString hasPlugins ''
         CLAUDE="${cfg.claudeCodePackage}/bin/claude"
 
-        echo "claude-settings: updating marketplaces"
+        act_info "updating marketplaces"
         $CLAUDE plugin marketplace update 2>/dev/null || true
 
         ${lib.optionalString (directoryMarketplaces != { }) ''
-          echo "claude-settings: registering directory marketplaces"
+          act_info "registering directory marketplaces"
           ${lib.concatStringsSep "\n" (
             lib.mapAttrsToList (name: entry: ''
               ${registerMarketplaceScript}/bin/claude-settings-register-marketplace \

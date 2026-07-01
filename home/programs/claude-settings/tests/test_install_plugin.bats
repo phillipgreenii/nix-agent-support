@@ -23,7 +23,7 @@ bats_require_minimum_version 1.5.0
 
 SCRIPT="$(command -v claude-settings-install-plugin || true)"
 if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../install-plugin.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-install-plugin.sh"
 fi
 
 setup() {

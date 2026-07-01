@@ -13,7 +13,7 @@ bats_require_minimum_version 1.5.0
 # dev-time runs (`bats tests/`).
 SCRIPT="$(command -v claude-settings-replace-managed-keys || true)"
 if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../replace-managed-keys.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-replace-managed-keys.sh"
 fi
 
 setup() {

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 #
 # Replace `enabledPlugins` and `extraKnownMarketplaces` in a Claude Code
 # settings.json with the Nix-declared sets. Any pre-existing entries that
@@ -6,9 +6,7 @@
 # echoed to stderr before the replace happens.
 #
 # Usage:
-#   replace-managed-keys.sh <settings_path> <new_enabled_json> <new_mkts_json> <removed_dir>
-
-set -euo pipefail
+#   claude-settings-replace-managed-keys.sh <settings_path> <new_enabled_json> <new_mkts_json> <removed_dir>
 
 if [ "$#" -ne 4 ]; then
   echo "usage: $0 <settings_path> <new_enabled_json> <new_mkts_json> <removed_dir>" >&2
@@ -42,7 +40,7 @@ removed=$(jq -n \
 if [ "$removed" != "{}" ]; then
   ts=$(date -u +%Y%m%dT%H%M%SZ)
   removed_file="$removed_dir/.claude-settings-removed-$ts-$$.json"
-  echo "claude-settings: REMOVED on activation (saved to $removed_file):" >&2
+  act_warn "REMOVED on activation (saved to $removed_file):" >&2
   echo "$removed" | jq . >&2
   echo "$removed" >"$removed_file"
 fi

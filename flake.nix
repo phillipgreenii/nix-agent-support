@@ -388,582 +388,589 @@
           # the current system's architecture.
           phillipgreenii.devshell.extraInputs = [ pkgs.go ];
 
-          checks = {
-            test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
+          checks =
+            let
+              # Build the claude-settings framework scripts the same way the
+              # home module does: activation-lib from repo-base's lib/activation,
+              # then the 3 scripts via scripts.nix. The bats tests run separately
+              # via testBashScripts below (the `.check` on each is unused here).
+              claudeSettingsActivationLib = pkgs._agentSupportBashBuilders.mkBashLibrary {
+                name = "activation-lib";
+                src = phillipgreenii-nix-base + "/lib/activation";
+                description = "Shared act_* activation-output helpers (single source with system.activationScripts)";
+              };
+              claudeSettingsScripts = import ./home/programs/claude-settings/scripts.nix {
+                inherit pkgs;
+                inherit (pkgs._agentSupportBashBuilders) mkBashScript;
+                activation-lib = claudeSettingsActivationLib;
+              };
+            in
+            {
+              test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
-            # Durable eval test for the claude-marketplaces consumer module
-            # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
-            # passthru shape repo-base's mkClaudeMarketplace produces — no build
-            # needed to read passthru. Asserts: registration (extraKnownMarketplaces
-            # directory source + enabledPlugins resolved from defaultEnabled +
-            # plugins list), the per-plugin override flip, and the per-marketplace
-            # disable removing all keys. Pure module eval — no HM/NixOS harness.
-            test-claude-marketplaces =
-              let
-                # Mock built marketplace: a trivial derivation with the expected
-                # passthru. mkClaudeMarketplace's real output carries identical keys.
-                mockMarketplace = pkgs.runCommand "mock-marketplace" {
-                  passthru = {
-                    marketplaceName = "mock-repo-marketplace-local";
-                    plugins = [
-                      {
-                        name = "on-plugin";
-                        version = "1.0.0+aaaaaaaa";
-                        key = "on-plugin@mock-repo-marketplace-local";
-                        defaultEnabled = true;
-                      }
-                      {
-                        name = "off-plugin";
-                        version = "1.0.0+bbbbbbbb";
-                        key = "off-plugin@mock-repo-marketplace-local";
-                        defaultEnabled = false;
-                      }
-                    ];
-                  };
-                } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
-
-                evalCfg =
-                  cfg:
-                  (lib.evalModules {
-                    specialArgs = { inherit pkgs lib; };
-                    modules = [
-                      ./home/programs/claude-marketplaces/default.nix
-                      (
-                        { lib, ... }:
+              # Durable eval test for the claude-marketplaces consumer module
+              # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
+              # passthru shape repo-base's mkClaudeMarketplace produces — no build
+              # needed to read passthru. Asserts: registration (extraKnownMarketplaces
+              # directory source + enabledPlugins resolved from defaultEnabled +
+              # plugins list), the per-plugin override flip, and the per-marketplace
+              # disable removing all keys. Pure module eval — no HM/NixOS harness.
+              test-claude-marketplaces =
+                let
+                  # Mock built marketplace: a trivial derivation with the expected
+                  # passthru. mkClaudeMarketplace's real output carries identical keys.
+                  mockMarketplace = pkgs.runCommand "mock-marketplace" {
+                    passthru = {
+                      marketplaceName = "mock-repo-marketplace-local";
+                      plugins = [
                         {
-                          # Minimal stubs for the config surface the module reads
-                          # and contributes to (the real options live in
-                          # claude/claude-settings, not pulled in here).
-                          options = {
-                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
-                            phillipgreenii.programs.claude.settings = {
-                              extraKnownMarketplaces = lib.mkOption {
-                                type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                          name = "on-plugin";
+                          version = "1.0.0+aaaaaaaa";
+                          key = "on-plugin@mock-repo-marketplace-local";
+                          defaultEnabled = true;
+                        }
+                        {
+                          name = "off-plugin";
+                          version = "1.0.0+bbbbbbbb";
+                          key = "off-plugin@mock-repo-marketplace-local";
+                          defaultEnabled = false;
+                        }
+                      ];
+                    };
+                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
+
+                  evalCfg =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-marketplaces/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Minimal stubs for the config surface the module reads
+                            # and contributes to (the real options live in
+                            # claude/claude-settings, not pulled in here).
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude.settings = {
+                                extraKnownMarketplaces = lib.mkOption {
+                                  type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                  default = { };
+                                };
+                                enabledPlugins = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                plugins = lib.mkOption {
+                                  type = lib.types.listOf lib.types.str;
+                                  default = [ ];
+                                };
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.file = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
-                              enabledPlugins = lib.mkOption {
-                                type = lib.types.attrsOf lib.types.bool;
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  # Baseline: registered, claude enabled, no overrides.
+                  base = evalCfg {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  baseSettings = base.phillipgreenii.programs.claude.settings;
+
+                  # Per-plugin override flips on-plugin off.
+                  overridden = evalCfg {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.overrides."on-plugin@mock-repo-marketplace-local" = false;
+                    };
+                  };
+
+                  # Per-marketplace disable removes all keys.
+                  disabled = evalCfg {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.enabled."mock-repo-marketplace-local" = false;
+                    };
+                  };
+                  disabledSettings = disabled.phillipgreenii.programs.claude.settings;
+                in
+                # Registration: directory source + on-disk path.
+                assert baseSettings.extraKnownMarketplaces ? "mock-repo-marketplace-local";
+                assert
+                  baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.source == "directory";
+                assert
+                  baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.path
+                  == "/home/test/.local/share/pgii-marketplaces/mock-repo-marketplace-local";
+                # enabledPlugins resolved from defaultEnabled.
+                assert baseSettings.enabledPlugins."on-plugin@mock-repo-marketplace-local" == true;
+                assert baseSettings.enabledPlugins."off-plugin@mock-repo-marketplace-local" == false;
+                # plugins lists all keys regardless of enable state.
+                assert lib.elem "on-plugin@mock-repo-marketplace-local" baseSettings.plugins;
+                assert lib.elem "off-plugin@mock-repo-marketplace-local" baseSettings.plugins;
+                # Symlink under the marketplace root.
+                assert base.home.file ? ".local/share/pgii-marketplaces/mock-repo-marketplace-local";
+                # Override flips on-plugin off.
+                assert
+                  overridden.phillipgreenii.programs.claude.settings.enabledPlugins."on-plugin@mock-repo-marketplace-local"
+                  == false;
+                # Per-marketplace disable removes ALL keys (settings + symlink).
+                assert disabledSettings.extraKnownMarketplaces == { };
+                assert disabledSettings.enabledPlugins == { };
+                assert disabledSettings.plugins == [ ];
+                assert disabled.home.file == { };
+                pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
+
+              # Regression guard for pg2-1ygj: the claude-settings activation must
+              # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
+              # BEFORE the per-plugin install loop (otherwise the first apply fails
+              # "Plugin not found"), and must NOT add github-source marketplaces
+              # (those are left to the existing update + install flow). Pure module
+              # eval inspecting the generated activation string — no HM harness.
+              test-claude-settings-activation-marketplace-add =
+                let
+                  # The module calls `lib.hm.dag.entryAfter` (home-manager's
+                  # extended lib). Stub it to return the raw activation text so we
+                  # can inspect the generated script without a full HM harness.
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs;
+                        lib = hmLib;
+                        # The directly-imported claude-settings module builds its
+                        # framework scripts (activation-lib + the 3 mkBashScripts),
+                        # so it needs these args the homeModules.default wrapper
+                        # normally threads via _module.args.
+                        inherit inputs;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
-                              plugins = lib.mkOption {
-                                type = lib.types.listOf lib.types.str;
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  # A directory marketplace + a github marketplace + the matching
+                  # plugin so the install loop (and thus the CLAUDE block) renders.
+                  activation =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                          plugins = [ "some-plugin@dir-mkt" ];
+                          extraKnownMarketplaces = {
+                            dir-mkt.source = {
+                              source = "directory";
+                              path = "/home/test/.local/share/pgii-marketplaces/dir-mkt";
+                            };
+                            gh-mkt.source = {
+                              source = "github";
+                              repo = "x/y";
+                            };
+                          };
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  # When there is no directory marketplace, no register-marketplace
+                  # invocation should be emitted at all.
+                  activationNoDir =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                          plugins = [ "some-plugin@gh-mkt" ];
+                          extraKnownMarketplaces = {
+                            gh-mkt.source = {
+                              source = "github";
+                              repo = "x/y";
+                            };
+                          };
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # The register-marketplace invocation block (everything after the
+                  # "registering directory marketplaces" echo, up to the install
+                  # loop). github marketplace names CAN legitimately appear elsewhere
+                  # in the activation (e.g. the extraKnownMarketplaces JSON passed to
+                  # the replace script), so target the register block specifically.
+                  registerBlock =
+                    let
+                      afterEcho = lib.last (lib.splitString ''act_info "registering directory marketplaces"'' activation);
+                    in
+                    lib.head (lib.splitString "claude-settings-install-plugin" afterEcho);
+                in
+                # The directory marketplace is registered (name + on-disk path appear
+                # as arguments to the register-marketplace script).
+                assert hasSub "claude-settings-register-marketplace" activation;
+                assert hasSub ''"dir-mkt"'' registerBlock;
+                assert hasSub "/home/test/.local/share/pgii-marketplaces/dir-mkt" registerBlock;
+                # The github marketplace is NOT passed to register-marketplace.
+                assert !(hasSub ''"gh-mkt"'' registerBlock);
+                # The existing global `marketplace update` call is preserved.
+                assert hasSub "plugin marketplace update" activation;
+                # No directory marketplaces ⇒ no register-marketplace invocation at all.
+                assert !(hasSub "claude-settings-register-marketplace" activationNoDir);
+                assert hasSub "plugin marketplace update" activationNoDir;
+                pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
+
+              # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
+              # must render on daemon.enable even when the TUI (enable/
+              # claude.enable) is off, and must NOT render when nothing is
+              # enabled. Pure module eval — no HM/NixOS harness, no package build.
+              test-pa-monitor-config-gating =
+                let
+                  evalCfg =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pa-monitor/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.anything;
                                 default = [ ];
                               };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
                             };
-                            home.homeDirectory = lib.mkOption {
-                              type = lib.types.str;
-                              default = "/home/test";
-                            };
-                            home.file = lib.mkOption {
-                              type = lib.types.attrsOf lib.types.anything;
-                              default = { };
-                            };
-                          };
-                        }
-                      )
-                      cfg
-                    ];
-                  }).config;
-
-                # Baseline: registered, claude enabled, no overrides.
-                base = evalCfg {
-                  phillipgreenii.programs.claude = {
-                    enable = true;
-                    marketplaces.nixProvided = [ mockMarketplace ];
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+                  hasConfig = c: c.xdg.configFile ? "pa-monitor/config.toml";
+                  endpoint = {
+                    otel.endpoint = "http://127.0.0.1:4317";
                   };
-                };
-                baseSettings = base.phillipgreenii.programs.claude.settings;
-
-                # Per-plugin override flips on-plugin off.
-                overridden = evalCfg {
-                  phillipgreenii.programs.claude = {
-                    enable = true;
-                    marketplaces.nixProvided = [ mockMarketplace ];
-                    marketplaces.overrides."on-plugin@mock-repo-marketplace-local" = false;
-                  };
-                };
-
-                # Per-marketplace disable removes all keys.
-                disabled = evalCfg {
-                  phillipgreenii.programs.claude = {
-                    enable = true;
-                    marketplaces.nixProvided = [ mockMarketplace ];
-                    marketplaces.enabled."mock-repo-marketplace-local" = false;
-                  };
-                };
-                disabledSettings = disabled.phillipgreenii.programs.claude.settings;
-              in
-              # Registration: directory source + on-disk path.
-              assert baseSettings.extraKnownMarketplaces ? "mock-repo-marketplace-local";
-              assert
-                baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.source == "directory";
-              assert
-                baseSettings.extraKnownMarketplaces."mock-repo-marketplace-local".source.path
-                == "/home/test/.local/share/pgii-marketplaces/mock-repo-marketplace-local";
-              # enabledPlugins resolved from defaultEnabled.
-              assert baseSettings.enabledPlugins."on-plugin@mock-repo-marketplace-local" == true;
-              assert baseSettings.enabledPlugins."off-plugin@mock-repo-marketplace-local" == false;
-              # plugins lists all keys regardless of enable state.
-              assert lib.elem "on-plugin@mock-repo-marketplace-local" baseSettings.plugins;
-              assert lib.elem "off-plugin@mock-repo-marketplace-local" baseSettings.plugins;
-              # Symlink under the marketplace root.
-              assert base.home.file ? ".local/share/pgii-marketplaces/mock-repo-marketplace-local";
-              # Override flips on-plugin off.
-              assert
-                overridden.phillipgreenii.programs.claude.settings.enabledPlugins."on-plugin@mock-repo-marketplace-local"
-                == false;
-              # Per-marketplace disable removes ALL keys (settings + symlink).
-              assert disabledSettings.extraKnownMarketplaces == { };
-              assert disabledSettings.enabledPlugins == { };
-              assert disabledSettings.plugins == [ ];
-              assert disabled.home.file == { };
-              pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
-
-            # Regression guard for pg2-1ygj: the claude-settings activation must
-            # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
-            # BEFORE the per-plugin install loop (otherwise the first apply fails
-            # "Plugin not found"), and must NOT add github-source marketplaces
-            # (those are left to the existing update + install flow). Pure module
-            # eval inspecting the generated activation string — no HM harness.
-            test-claude-settings-activation-marketplace-add =
-              let
-                # The module calls `lib.hm.dag.entryAfter` (home-manager's
-                # extended lib). Stub it to return the raw activation text so we
-                # can inspect the generated script without a full HM harness.
-                hmLib = lib // {
-                  hm = (lib.hm or { }) // {
-                    dag = (lib.hm.dag or { }) // {
-                      entryAfter = _deps: text: text;
+                  daemonOnly = evalCfg {
+                    phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      settings = endpoint;
                     };
                   };
-                };
-                evalActivation =
-                  cfg:
-                  (lib.evalModules {
-                    specialArgs = {
-                      inherit pkgs;
-                      lib = hmLib;
-                    };
-                    modules = [
-                      ./home/programs/claude-settings/default.nix
-                      (
-                        { lib, ... }:
-                        {
-                          options = {
-                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
-                            home.activation = lib.mkOption {
-                              type = lib.types.attrsOf lib.types.anything;
-                              default = { };
-                            };
-                          };
-                        }
-                      )
-                      cfg
-                    ];
-                  }).config;
-
-                # A directory marketplace + a github marketplace + the matching
-                # plugin so the install loop (and thus the CLAUDE block) renders.
-                activation =
-                  (evalActivation {
-                    phillipgreenii.programs.claude = {
+                  tuiOnly = evalCfg {
+                    phillipgreenii.programs.claude.enable = true;
+                    phillipgreenii.programs.pa-monitor = {
                       enable = true;
-                      settings = {
-                        claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
-                        plugins = [ "some-plugin@dir-mkt" ];
-                        extraKnownMarketplaces = {
-                          dir-mkt.source = {
-                            source = "directory";
-                            path = "/home/test/.local/share/pgii-marketplaces/dir-mkt";
-                          };
-                          gh-mkt.source = {
-                            source = "github";
-                            repo = "x/y";
-                          };
-                        };
-                      };
+                      settings = endpoint;
                     };
-                  }).home.activation.claude-settings;
-
-                # When there is no directory marketplace, no register-marketplace
-                # invocation should be emitted at all.
-                activationNoDir =
-                  (evalActivation {
-                    phillipgreenii.programs.claude = {
+                  };
+                  neither = evalCfg {
+                    phillipgreenii.programs.pa-monitor.settings = endpoint;
+                  };
+                  bothEnabled = evalCfg {
+                    phillipgreenii.programs.claude.enable = true;
+                    phillipgreenii.programs.pa-monitor = {
                       enable = true;
-                      settings = {
-                        claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
-                        plugins = [ "some-plugin@gh-mkt" ];
-                        extraKnownMarketplaces = {
-                          gh-mkt.source = {
-                            source = "github";
-                            repo = "x/y";
-                          };
-                        };
-                      };
+                      daemon.enable = true;
+                      settings = endpoint;
                     };
-                  }).home.activation.claude-settings;
-
-                hasSub = needle: haystack: lib.hasInfix needle haystack;
-
-                # The register-marketplace invocation block (everything after the
-                # "registering directory marketplaces" echo, up to the install
-                # loop). github marketplace names CAN legitimately appear elsewhere
-                # in the activation (e.g. the extraKnownMarketplaces JSON passed to
-                # the replace script), so target the register block specifically.
-                registerBlock =
-                  let
-                    afterEcho = lib.last (
-                      lib.splitString "echo \"claude-settings: registering directory marketplaces\"" activation
-                    );
-                  in
-                  lib.head (lib.splitString "claude-settings-install-plugin" afterEcho);
-              in
-              # The directory marketplace is registered (name + on-disk path appear
-              # as arguments to the register-marketplace script).
-              assert hasSub "claude-settings-register-marketplace" activation;
-              assert hasSub ''"dir-mkt"'' registerBlock;
-              assert hasSub "/home/test/.local/share/pgii-marketplaces/dir-mkt" registerBlock;
-              # The github marketplace is NOT passed to register-marketplace.
-              assert !(hasSub ''"gh-mkt"'' registerBlock);
-              # The existing global `marketplace update` call is preserved.
-              assert hasSub "plugin marketplace update" activation;
-              # No directory marketplaces ⇒ no register-marketplace invocation at all.
-              assert !(hasSub "claude-settings-register-marketplace" activationNoDir);
-              assert hasSub "plugin marketplace update" activationNoDir;
-              pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
-
-            # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
-            # must render on daemon.enable even when the TUI (enable/
-            # claude.enable) is off, and must NOT render when nothing is
-            # enabled. Pure module eval — no HM/NixOS harness, no package build.
-            test-pa-monitor-config-gating =
-              let
-                evalCfg =
-                  cfg:
-                  (lib.evalModules {
-                    specialArgs = { inherit pkgs lib; };
-                    modules = [
-                      ./home/programs/pa-monitor/default.nix
-                      (
-                        { lib, ... }:
-                        {
-                          options = {
-                            phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
-                            home.packages = lib.mkOption {
-                              type = lib.types.listOf lib.types.anything;
-                              default = [ ];
-                            };
-                            xdg.configFile = lib.mkOption {
-                              type = lib.types.attrsOf lib.types.anything;
-                              default = { };
-                            };
-                          };
-                        }
-                      )
-                      cfg
-                    ];
-                  }).config;
-                hasConfig = c: c.xdg.configFile ? "pa-monitor/config.toml";
-                endpoint = {
-                  otel.endpoint = "http://127.0.0.1:4317";
-                };
-                daemonOnly = evalCfg {
-                  phillipgreenii.programs.pa-monitor = {
-                    daemon.enable = true;
-                    settings = endpoint;
                   };
-                };
-                tuiOnly = evalCfg {
-                  phillipgreenii.programs.claude.enable = true;
-                  phillipgreenii.programs.pa-monitor = {
-                    enable = true;
-                    settings = endpoint;
-                  };
-                };
-                neither = evalCfg {
-                  phillipgreenii.programs.pa-monitor.settings = endpoint;
-                };
-                bothEnabled = evalCfg {
-                  phillipgreenii.programs.claude.enable = true;
-                  phillipgreenii.programs.pa-monitor = {
-                    enable = true;
-                    daemon.enable = true;
-                    settings = endpoint;
-                  };
-                };
-              in
-              assert hasConfig daemonOnly; # the fix: daemon.enable alone ⇒ config rendered
-              assert hasConfig tuiOnly; # TUI path unchanged ⇒ still rendered
-              assert !(hasConfig neither); # nothing enabled ⇒ no file
-              assert hasConfig bothEnabled; # both gates ⇒ still rendered
-              pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
+                in
+                assert hasConfig daemonOnly; # the fix: daemon.enable alone ⇒ config rendered
+                assert hasConfig tuiOnly; # TUI path unchanged ⇒ still rendered
+                assert !(hasConfig neither); # nothing enabled ⇒ no file
+                assert hasConfig bothEnabled; # both gates ⇒ still rendered
+                pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
 
-            test-ollama-wrapper =
-              let
-                wrapper = import ./home/programs/ollama/wrapper.nix {
-                  inherit pkgs lib;
-                  # Stub: bats mocks the binary via OLLAMA_BIN. Using a failing stub
-                  # strengthens the override contract — any regression where the wrapper
-                  # bypasses OLLAMA_BIN trips this immediately.
-                  ollamaPackage = pkgs.writeShellScriptBin "ollama" ''
-                    echo "stub ollama: not for runtime use" >&2
-                    exit 1
+              test-ollama-wrapper =
+                let
+                  wrapper = import ./home/programs/ollama/wrapper.nix {
+                    inherit pkgs lib;
+                    # Stub: bats mocks the binary via OLLAMA_BIN. Using a failing stub
+                    # strengthens the override contract — any regression where the wrapper
+                    # bypasses OLLAMA_BIN trips this immediately.
+                    ollamaPackage = pkgs.writeShellScriptBin "ollama" ''
+                      echo "stub ollama: not for runtime use" >&2
+                      exit 1
+                    '';
+                  };
+                in
+                checksHelpers.testBashScripts {
+                  package = wrapper;
+                  tests = ./home/programs/ollama/tests;
+                  extraInputs = [ ];
+                };
+
+              # Test claude-status-line wrapper and part scripts (nerd-font OFF: text fallbacks).
+              test-claude-status-line =
+                let
+                  slScripts = import ./home/programs/claude-status-line/scripts.nix {
+                    inherit pkgs lib;
+                    nerdFont = false;
+                  };
+                  wrapperScript = slScripts.mkWrapperScript {
+                    parts = slScripts.defaultParts;
+                    reserve = 20;
+                  };
+                in
+                checksHelpers.testBashScripts {
+                  package = pkgs.writeShellScriptBin "claude-status-line" ''
+                    exec ${wrapperScript} "$@"
                   '';
+                  tests = ./home/programs/claude-status-line;
+                  extraInputs = [ ];
                 };
-              in
-              checksHelpers.testBashScripts {
-                package = wrapper;
-                tests = ./home/programs/ollama/tests;
-                extraInputs = [ ];
+
+              # Same bats suite, but built with nerd-font ON so the glyph literals are asserted.
+              # Cannot reuse checksHelpers.testBashScripts (it can't inject an env var), so this
+              # mirrors that helper and exports CLAUDE_SL_TEST_NERD_FONT=1 as the mode marker the
+              # shared bats file branches on.
+              test-claude-status-line-nerdfont =
+                let
+                  slScripts = import ./home/programs/claude-status-line/scripts.nix {
+                    inherit pkgs lib;
+                    nerdFont = true;
+                  };
+                  wrapperScript = slScripts.mkWrapperScript {
+                    parts = slScripts.defaultParts;
+                    reserve = 20;
+                  };
+                  package = pkgs.writeShellScriptBin "claude-status-line" ''
+                    exec ${wrapperScript} "$@"
+                  '';
+                in
+                pkgs.runCommand "test-bash-scripts"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.which
+                      package
+                    ];
+                  }
+                  ''
+                    export PATH="${package}/bin:$PATH"
+                    export CLAUDE_SL_TEST_NERD_FONT=1
+                    bats ${./home/programs/claude-status-line}
+                    touch $out
+                  '';
+
+              test-claude-settings-replace = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.replaceManagedKeys.script;
+                tests = ./home/programs/claude-settings/tests/test_replace.bats;
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
               };
 
-            # Test claude-status-line wrapper and part scripts (nerd-font OFF: text fallbacks).
-            test-claude-status-line =
-              let
-                slScripts = import ./home/programs/claude-status-line/scripts.nix {
-                  inherit pkgs lib;
-                  nerdFont = false;
-                };
-                wrapperScript = slScripts.mkWrapperScript {
-                  parts = slScripts.defaultParts;
-                  reserve = 20;
-                };
-              in
-              checksHelpers.testBashScripts {
-                package = pkgs.writeShellScriptBin "claude-status-line" ''
-                  exec ${wrapperScript} "$@"
-                '';
-                tests = ./home/programs/claude-status-line;
-                extraInputs = [ ];
+              test-claude-settings-install-plugin = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.installPlugin.script;
+                tests = ./home/programs/claude-settings/tests/test_install_plugin.bats;
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
               };
 
-            # Same bats suite, but built with nerd-font ON so the glyph literals are asserted.
-            # Cannot reuse checksHelpers.testBashScripts (it can't inject an env var), so this
-            # mirrors that helper and exports CLAUDE_SL_TEST_NERD_FONT=1 as the mode marker the
-            # shared bats file branches on.
-            test-claude-status-line-nerdfont =
-              let
-                slScripts = import ./home/programs/claude-status-line/scripts.nix {
-                  inherit pkgs lib;
-                  nerdFont = true;
-                };
-                wrapperScript = slScripts.mkWrapperScript {
-                  parts = slScripts.defaultParts;
-                  reserve = 20;
-                };
-                package = pkgs.writeShellScriptBin "claude-status-line" ''
-                  exec ${wrapperScript} "$@"
-                '';
-              in
-              pkgs.runCommand "test-bash-scripts"
-                {
-                  nativeBuildInputs = [
-                    pkgs.bats
-                    pkgs.git
-                    pkgs.which
-                    package
-                  ];
-                }
-                ''
-                  export PATH="${package}/bin:$PATH"
-                  export CLAUDE_SL_TEST_NERD_FONT=1
-                  bats ${./home/programs/claude-status-line}
+              test-claude-settings-register-marketplace = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.registerMarketplace.script;
+                tests = ./home/programs/claude-settings/tests/test_register_marketplace.bats;
+                extraInputs = [
+                  pkgs.coreutils
+                ];
+              };
+
+              # Validate claude-theme token map: parse as JSON and assert required keys.
+              # Uses mock Catppuccin Mocha hex values; actual values come from
+              # config.lib.stylix.colors at module evaluation time.
+              test-claude-theme-json =
+                let
+                  mockColors = {
+                    base00 = "1e1e2e";
+                    base01 = "181825";
+                    base02 = "313244";
+                    base03 = "45475a";
+                    base04 = "585b70";
+                    base05 = "cdd6f4";
+                    base06 = "f5e0dc";
+                    base07 = "b4befe";
+                    base08 = "f38ba8";
+                    base09 = "fab387";
+                    base0A = "f9e2af";
+                    base0B = "a6e3a1";
+                    base0C = "89dceb";
+                    base0D = "89b4fa";
+                    base0E = "cba6f7";
+                    base0F = "f2cdcd";
+                  };
+                  tokenMap = import ./home/programs/claude-theme/colors.nix {
+                    colors = mockColors;
+                  };
+                  themeFile = pkgs.writeText "test-stylix-theme.json" (
+                    builtins.toJSON {
+                      name = "Stylix";
+                      base = "dark";
+                      overrides = tokenMap;
+                    }
+                  );
+                in
+                pkgs.runCommand "check-claude-theme-json" { buildInputs = [ pkgs.jq ]; } ''
+                  # Validate JSON is well-formed
+                  ${pkgs.jq}/bin/jq empty < ${themeFile}
+
+                  # Assert required semantic tokens are present
+                  ${pkgs.jq}/bin/jq -e '
+                    .overrides | (
+                      has("claude") and
+                      has("error") and
+                      has("success") and
+                      has("warning") and
+                      has("text") and
+                      has("background") and
+                      has("diffAdded") and
+                      has("diffRemoved") and
+                      has("rate_limit_fill") and
+                      has("clawd_body") and
+                      has("red_FOR_SUBAGENTS_ONLY") and
+                      has("autoAccept") and
+                      has("rainbow_red")
+                    )
+                  ' < ${themeFile}
+
+                  # Assert all values are hex color strings starting with #
+                  ${pkgs.jq}/bin/jq -e '
+                    .overrides | to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
+                  ' < ${themeFile}
+
+                  # Assert token count is reasonable (at least 30)
+                  count=$(${pkgs.jq}/bin/jq '.overrides | length' < ${themeFile})
+                  [ "$count" -ge 30 ] || {
+                    echo "Expected at least 30 tokens, got $count"
+                    exit 1
+                  }
+
                   touch $out
                 '';
 
-            test-claude-settings-replace = checksHelpers.testBashScripts {
-              package = pkgs.writeShellApplication {
-                name = "claude-settings-replace-managed-keys";
-                runtimeInputs = [
-                  pkgs.jq
-                  pkgs.coreutils
-                ];
-                text = builtins.readFile ./home/programs/claude-settings/replace-managed-keys.sh;
-              };
-              tests = ./home/programs/claude-settings/tests/test_replace.bats;
-              extraInputs = [
-                pkgs.jq
-                pkgs.coreutils
-              ];
-            };
+              # Validate tuicr theme token map: render via the same TOML generator
+              # the module uses, plus a JSON view for jq to assert required keys,
+              # hex-format values, and a sane token count.
+              test-tuicr-theme =
+                let
+                  mockColors = {
+                    base00 = "1e1e2e";
+                    base01 = "181825";
+                    base02 = "313244";
+                    base03 = "45475a";
+                    base04 = "585b70";
+                    base05 = "cdd6f4";
+                    base06 = "f5e0dc";
+                    base07 = "b4befe";
+                    base08 = "f38ba8";
+                    base09 = "fab387";
+                    base0A = "f9e2af";
+                    base0B = "a6e3a1";
+                    base0C = "89dceb";
+                    base0D = "89b4fa";
+                    base0E = "cba6f7";
+                    base0F = "f2cdcd";
+                  };
+                  tokens = import ./home/programs/tuicr/theme.nix {
+                    colors = mockColors;
+                    inherit (pkgs) lib;
+                  };
+                  tomlFile = (pkgs.formats.toml { }).generate "test-tuicr-stylix.toml" tokens;
+                  jsonFile = pkgs.writeText "test-tuicr-stylix.json" (builtins.toJSON tokens);
+                in
+                pkgs.runCommand "check-tuicr-theme" { buildInputs = [ pkgs.jq ]; } ''
+                  # The generated TOML must be serializable and non-empty.
+                  test -s ${tomlFile}
 
-            test-claude-settings-install-plugin = checksHelpers.testBashScripts {
-              package = pkgs.writeShellApplication {
-                name = "claude-settings-install-plugin";
-                runtimeInputs = [
-                  pkgs.jq
-                  pkgs.coreutils
-                ];
-                text = builtins.readFile ./home/programs/claude-settings/install-plugin.sh;
-              };
-              tests = ./home/programs/claude-settings/tests/test_install_plugin.bats;
-              extraInputs = [
-                pkgs.jq
-                pkgs.coreutils
-              ];
-            };
+                  # Validate JSON view is well-formed
+                  ${pkgs.jq}/bin/jq empty < ${jsonFile}
 
-            test-claude-settings-register-marketplace = checksHelpers.testBashScripts {
-              package = pkgs.writeShellApplication {
-                name = "claude-settings-register-marketplace";
-                runtimeInputs = [
-                  pkgs.coreutils
-                ];
-                text = builtins.readFile ./home/programs/claude-settings/register-marketplace.sh;
-              };
-              tests = ./home/programs/claude-settings/tests/test_register_marketplace.bats;
-              extraInputs = [
-                pkgs.coreutils
-              ];
-            };
+                  # Assert required tokens across each category are present
+                  ${pkgs.jq}/bin/jq -e '
+                    has("panel_bg") and
+                    has("fg_primary") and
+                    has("diff_add") and
+                    has("diff_del") and
+                    has("diff_add_bg") and
+                    has("diff_del_bg") and
+                    has("syntax_add_bg") and
+                    has("file_added") and
+                    has("comment_issue") and
+                    has("border_focused") and
+                    has("status_bar_bg") and
+                    has("mode_bg") and
+                    has("message_error_bg")
+                  ' < ${jsonFile}
 
-            # Validate claude-theme token map: parse as JSON and assert required keys.
-            # Uses mock Catppuccin Mocha hex values; actual values come from
-            # config.lib.stylix.colors at module evaluation time.
-            test-claude-theme-json =
-              let
-                mockColors = {
-                  base00 = "1e1e2e";
-                  base01 = "181825";
-                  base02 = "313244";
-                  base03 = "45475a";
-                  base04 = "585b70";
-                  base05 = "cdd6f4";
-                  base06 = "f5e0dc";
-                  base07 = "b4befe";
-                  base08 = "f38ba8";
-                  base09 = "fab387";
-                  base0A = "f9e2af";
-                  base0B = "a6e3a1";
-                  base0C = "89dceb";
-                  base0D = "89b4fa";
-                  base0E = "cba6f7";
-                  base0F = "f2cdcd";
-                };
-                tokenMap = import ./home/programs/claude-theme/colors.nix {
-                  colors = mockColors;
-                };
-                themeFile = pkgs.writeText "test-stylix-theme.json" (
-                  builtins.toJSON {
-                    name = "Stylix";
-                    base = "dark";
-                    overrides = tokenMap;
+                  # Assert all values are hex color strings starting with #
+                  ${pkgs.jq}/bin/jq -e '
+                    to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
+                  ' < ${jsonFile}
+
+                  # Assert the full token set is present (tuicr v0.17.1 = 41 tokens)
+                  count=$(${pkgs.jq}/bin/jq 'length' < ${jsonFile})
+                  [ "$count" -ge 41 ] || {
+                    echo "Expected at least 41 tokens, got $count"
+                    exit 1
                   }
-                );
-              in
-              pkgs.runCommand "check-claude-theme-json" { buildInputs = [ pkgs.jq ]; } ''
-                # Validate JSON is well-formed
-                ${pkgs.jq}/bin/jq empty < ${themeFile}
 
-                # Assert required semantic tokens are present
-                ${pkgs.jq}/bin/jq -e '
-                  .overrides | (
-                    has("claude") and
-                    has("error") and
-                    has("success") and
-                    has("warning") and
-                    has("text") and
-                    has("background") and
-                    has("diffAdded") and
-                    has("diffRemoved") and
-                    has("rate_limit_fill") and
-                    has("clawd_body") and
-                    has("red_FOR_SUBAGENTS_ONLY") and
-                    has("autoAccept") and
-                    has("rainbow_red")
-                  )
-                ' < ${themeFile}
-
-                # Assert all values are hex color strings starting with #
-                ${pkgs.jq}/bin/jq -e '
-                  .overrides | to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
-                ' < ${themeFile}
-
-                # Assert token count is reasonable (at least 30)
-                count=$(${pkgs.jq}/bin/jq '.overrides | length' < ${themeFile})
-                [ "$count" -ge 30 ] || {
-                  echo "Expected at least 30 tokens, got $count"
-                  exit 1
-                }
-
-                touch $out
-              '';
-
-            # Validate tuicr theme token map: render via the same TOML generator
-            # the module uses, plus a JSON view for jq to assert required keys,
-            # hex-format values, and a sane token count.
-            test-tuicr-theme =
-              let
-                mockColors = {
-                  base00 = "1e1e2e";
-                  base01 = "181825";
-                  base02 = "313244";
-                  base03 = "45475a";
-                  base04 = "585b70";
-                  base05 = "cdd6f4";
-                  base06 = "f5e0dc";
-                  base07 = "b4befe";
-                  base08 = "f38ba8";
-                  base09 = "fab387";
-                  base0A = "f9e2af";
-                  base0B = "a6e3a1";
-                  base0C = "89dceb";
-                  base0D = "89b4fa";
-                  base0E = "cba6f7";
-                  base0F = "f2cdcd";
-                };
-                tokens = import ./home/programs/tuicr/theme.nix {
-                  colors = mockColors;
-                  inherit (pkgs) lib;
-                };
-                tomlFile = (pkgs.formats.toml { }).generate "test-tuicr-stylix.toml" tokens;
-                jsonFile = pkgs.writeText "test-tuicr-stylix.json" (builtins.toJSON tokens);
-              in
-              pkgs.runCommand "check-tuicr-theme" { buildInputs = [ pkgs.jq ]; } ''
-                # The generated TOML must be serializable and non-empty.
-                test -s ${tomlFile}
-
-                # Validate JSON view is well-formed
-                ${pkgs.jq}/bin/jq empty < ${jsonFile}
-
-                # Assert required tokens across each category are present
-                ${pkgs.jq}/bin/jq -e '
-                  has("panel_bg") and
-                  has("fg_primary") and
-                  has("diff_add") and
-                  has("diff_del") and
-                  has("diff_add_bg") and
-                  has("diff_del_bg") and
-                  has("syntax_add_bg") and
-                  has("file_added") and
-                  has("comment_issue") and
-                  has("border_focused") and
-                  has("status_bar_bg") and
-                  has("mode_bg") and
-                  has("message_error_bg")
-                ' < ${jsonFile}
-
-                # Assert all values are hex color strings starting with #
-                ${pkgs.jq}/bin/jq -e '
-                  to_entries | all(.value | test("^#[0-9a-fA-F]{6}$"))
-                ' < ${jsonFile}
-
-                # Assert the full token set is present (tuicr v0.17.1 = 41 tokens)
-                count=$(${pkgs.jq}/bin/jq 'length' < ${jsonFile})
-                [ "$count" -ge 41 ] || {
-                  echo "Expected at least 41 tokens, got $count"
-                  exit 1
-                }
-
-                touch $out
-              '';
-          }
-          // (import ./packages/gc-dolt-maintenance {
-            inherit pkgs;
-            bashBuilders = pkgs._agentSupportBashBuilders;
-            inherit (pkgs) gascity;
-          }).checks;
+                  touch $out
+                '';
+            }
+            // (import ./packages/gc-dolt-maintenance {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              inherit (pkgs) gascity;
+            }).checks;
 
           packages = {
             # This repo's own Claude Code marketplace, bundled into the store with
@@ -1087,8 +1094,25 @@
         nixosModules.default = ./nixos;
         homeModules.default =
           { lib, pkgs, ... }:
+          let
+            # Thread the bash-builders factory + inputs to the ./home modules so
+            # consumers (e.g. claude-settings) can build activation-lib and their
+            # framework scripts WITHOUT any downstream flake having to provide
+            # these args. Mirrors how ziprecruiter's modules receive them.
+            mkBashBuildersFor =
+              p:
+              inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                pkgs = p;
+                inherit self;
+                inherit (p) lib;
+              };
+          in
           {
             imports = [ ./home ];
+            # `_module.args` must sit under `config` here: this module also sets a
+            # top-level `config.<...>` (nixProvided below), and the module system
+            # forbids a bare top-level `_module` alongside an explicit `config`.
+            config._module.args = { inherit mkBashBuildersFor inputs; };
             # Auto-register repo-base's nix-built Claude marketplace AND this repo's
             # own (consumer half of the pattern documented in repo-base
             # docs/claude-marketplaces.md).

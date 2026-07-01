@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# shellcheck shell=bash
 #
 # Validate cached manifests for a Claude Code plugin, then install it via the
 # supplied claude binary and ALWAYS follow a successful install with an
@@ -32,15 +32,13 @@
 # update is NEVER skipped on account of a cached/enabled plugin — see pg2-cxwj.
 #
 # Usage:
-#   install-plugin.sh <claude_bin> <plugin@marketplace> <cache_root>
+#   claude-settings-install-plugin.sh <claude_bin> <plugin@marketplace> <cache_root>
 #
 # Cache layout assumed:
 #   <cache_root>/<marketplace>/<plugin>/<version>/.claude-plugin/plugin.json
 #
 # installed_plugins.json is assumed to live beside the cache dir:
 #   <cache_root>/../installed_plugins.json
-
-set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 <claude_bin> <plugin@marketplace> <cache_root>" >&2
@@ -65,7 +63,7 @@ if [ -d "$plugin_cache" ]; then
     manifest="$ver_dir.claude-plugin/plugin.json"
     if [ -f "$manifest" ]; then
       if ! jq -e '.name' <"$manifest" >/dev/null 2>&1; then
-        echo "claude-settings: WARNING corrupt manifest at $manifest — removing $ver_dir" >&2
+        act_warn "WARNING corrupt manifest at $manifest — removing $ver_dir" >&2
         rm -rf "$ver_dir"
       fi
     fi
@@ -96,7 +94,7 @@ if [ -f "$installed_plugins" ]; then
       [ -n "$entry_path" ] || continue
       # Only a DEAD projectPath counts as stale.
       [ -e "$entry_path" ] && continue
-      echo "claude-settings: WARNING $spec has a stale $entry_scope-scope entry (version $entry_ver) for dead path $entry_path — it shadows the $scope-scope enable" >&2
+      act_warn "WARNING $spec has a stale $entry_scope-scope entry (version $entry_ver) for dead path $entry_path — it shadows the $scope-scope enable" >&2
       if [ -n "${CLAUDE_SETTINGS_PRUNE_STALE_SCOPE:-}" ]; then
         if jq \
           --arg spec "$spec" \
@@ -107,10 +105,10 @@ if [ -f "$installed_plugins" ]; then
           )
         ' "$installed_plugins" >"$installed_plugins.tmp" 2>/dev/null; then
           mv -f "$installed_plugins.tmp" "$installed_plugins"
-          echo "claude-settings: pruned stale $entry_scope-scope entry for $spec ($entry_path)" >&2
+          act_ok "pruned stale $entry_scope-scope entry for $spec ($entry_path)" >&2
         else
           rm -f "$installed_plugins.tmp"
-          echo "claude-settings: WARNING failed to prune stale entry for $spec (non-fatal)" >&2
+          act_warn "WARNING failed to prune stale entry for $spec (non-fatal)" >&2
         fi
       fi
     done <<<"$candidates"
@@ -164,20 +162,20 @@ _emit_failure_context() {
 }
 
 if "$claude_bin" plugin install "$spec" --scope "$scope" >"$install_out" 2>&1; then
-  echo "claude-settings: $spec installed"
+  act_ok "$spec installed"
   # `install` is a no-op for an already-installed plugin and does NOT pull a
   # newer marketplace version, so always follow with an (idempotent) update.
   # Non-fatal: a failed post-install update leaves the installed copy in place.
   if "$claude_bin" plugin update "$spec" --scope "$scope" >"$update_out" 2>&1; then
-    echo "claude-settings: $spec updated"
+    act_ok "$spec updated"
   else
-    echo "claude-settings: WARNING $spec post-install update failed (non-fatal)" >&2
+    act_warn "WARNING $spec post-install update failed (non-fatal)" >&2
     cat "$update_out" >&2
   fi
 elif "$claude_bin" plugin update "$spec" --scope "$scope" >"$update_out" 2>&1; then
-  echo "claude-settings: $spec updated"
+  act_ok "$spec updated"
 else
-  echo "claude-settings: WARNING $spec install/update failed" >&2
+  act_warn "WARNING $spec install/update failed" >&2
   echo "--- install output ---" >&2
   cat "$install_out" >&2
   echo "--- update output ---" >&2
