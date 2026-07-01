@@ -26,7 +26,11 @@ _glyph() {
   printf '%b' "$esc"
 }
 GLYPH_REPO=$(_glyph 0xF02A2)
+# GLYPH_WORKTREE / GLYPH_BRANCH are referenced only inside @test blocks, which
+# the linter analyzes as separate scopes and cannot see.
+# shellcheck disable=SC2034
 GLYPH_WORKTREE=$(_glyph 0xF024B)
+# shellcheck disable=SC2034
 GLYPH_BRANCH=$(_glyph 0xF062C)
 GLYPH_THINKING=$(_glyph 0xF0493)
 GLYPH_CTX=$(_glyph 0xF035B)
