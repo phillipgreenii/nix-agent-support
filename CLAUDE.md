@@ -56,9 +56,10 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
   they share rows and the right edge is reserved for notifications.
 - **Default segment order** (base set, `home/programs/claude-status-line/scripts.nix`):
-  vim, session name?, session id, location (repo + worktree + branch), model (+effort +thinking),
-  agent, context (+200k alert), limits (5h + 7d), version. The `prPart` script is still exported
-  for downstream/custom use but is not in the default order.
+  vim, session name?, session id, location (repo + worktree + branch + `PR#<n>`), model
+  (+effort +thinking), agent, context (+200k alert), limits (5h + 7d), version. The PR sub-part
+  is appended after branch inside the single location segment (colored by `pr.review_state`,
+  no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
 - **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
   false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
   branch) via the `nerdFont` arg threaded into `scripts.nix`. Glyphs are emitted as precomputed
