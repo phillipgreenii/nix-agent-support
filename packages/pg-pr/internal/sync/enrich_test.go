@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
@@ -27,7 +28,8 @@ func TestEnrichAndStore_PersistsToRow(t *testing.T) {
 
 	e := &Engine{deps: Deps{Store: db, Now: func() time.Time { return time.Unix(0, 0).UTC() }}}
 	enriched := &vcs.EnrichedPR{PR: pr, Files: []string{"a.go"}, Commits: []string{"fix: boom"}}
-	if err := e.enrichAndStore(ctx, "o/r", pr, enriched); err != nil {
+	rcfg := config.RepoConfig{Remote: "o/r"}
+	if err := e.enrichAndStore(ctx, "o/r", pr, enriched, rcfg); err != nil {
 		t.Fatalf("enrichAndStore: %v", err)
 	}
 

@@ -123,6 +123,19 @@ type Input struct {
 	// PR's branch is green. See broken_project.go. Nil disables the signal.
 	// Live verification of this hook is deferred (pg2-4c5i.25 follow-up).
 	ProjectHealthFunc ProjectHealthFunc
+
+	// LinkedTicketKeys is the list of external ticket keys linked to this PR
+	// (e.g. derived from the branch name, PR title, or body via ticketlink.Parse).
+	// Used by JiraLookupFunc to fetch priority/incident info. May be nil or empty
+	// when no ticket linkage has been configured or found.
+	LinkedTicketKeys []string
+
+	// JiraLookupFunc, when non-nil, is called for each key in LinkedTicketKeys
+	// to fetch Jira priority and production-incident information. See
+	// jira_priority.go. Nil disables the signal (backward compatible).
+	// Live verification deferred (pg2-4c5i.26 follow-up): the real Jira provider
+	// and config-driven injection are wired in a future bead.
+	JiraLookupFunc JiraLookupFunc
 }
 
 var urgencyLabels = map[string]bool{

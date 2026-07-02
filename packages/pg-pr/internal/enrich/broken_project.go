@@ -107,8 +107,9 @@ func scoreProjectHealth(ctx context.Context, in Input) (score int, reasons []str
 }
 
 // scoreUrgencyWithHealth is the context-aware variant of scoreUrgency that
-// incorporates the project-health signal. It delegates the base urgency signals
-// to scoreUrgency and then layers in the project-health contribution.
+// incorporates the project-health and Jira priority/incident signals. It
+// delegates the base urgency signals to scoreUrgency and then layers in the
+// project-health and Jira contributions.
 func scoreUrgencyWithHealth(ctx context.Context, in Input) (string, int, []string) {
 	level, score, reasons := scoreUrgency(in)
 
@@ -119,6 +120,15 @@ func scoreUrgencyWithHealth(ctx context.Context, in Input) (string, int, []strin
 		// Re-derive level from updated score.
 		level = urgencyLevel(score)
 	}
+
+	jiraScore, jiraReasons := scoreJiraPriority(ctx, in)
+	if jiraScore > 0 {
+		score += jiraScore
+		reasons = append(reasons, jiraReasons...)
+		// Re-derive level from updated score.
+		level = urgencyLevel(score)
+	}
+
 	return level, score, reasons
 }
 

@@ -451,6 +451,14 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					prEnriched = &ep
 				}
 			}
+			// Resolve the repo config once for this PR: used by both
+			// reconcileTruncatedCI and enrichAndStore (ticket-pattern extraction).
+			// On a miss, fall back to a minimal RepoConfig carrying the remote so
+			// enrichAndStore still runs (just without ticket patterns).
+			prRcfg, prRcfgErr := e.repoConfig(key.Repo)
+			if prRcfgErr != nil {
+				prRcfg = config.RepoConfig{Remote: key.Repo}
+			}
 			// Repair CI truncated by the bulk GraphQL first:30 context cap: on a
 			// PR with >30 checks, re-source CI from the dedicated CICD provider
 			// (consistent with the per-PR enrichOnePR path) so BOTH ci-failure
@@ -459,14 +467,12 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			// 30, no wrong promotion. prEnriched is a local copy (&ep), so this
 			// mutation does not affect the shared enrichByRepo map.
 			if prEnriched != nil {
-				if rcfg, rerr := e.repoConfig(key.Repo); rerr == nil {
-					e.reconcileTruncatedCI(prCtx, prEnriched, rcfg)
-				}
+				e.reconcileTruncatedCI(prCtx, prEnriched, prRcfg)
 			}
 			// Compute and persist enrichment (kind/languages/size/urgency) for
 			// this PR. Runs after emitPREvent so the store row already exists.
 			// Non-fatal: errors are recorded into summary.Errors and self-heal.
-			if err := e.enrichAndStore(prCtx, key.Repo, pr, prEnriched); err != nil {
+			if err := e.enrichAndStore(prCtx, key.Repo, pr, prEnriched, prRcfg); err != nil {
 				summary.Errors = append(summary.Errors, SummaryError{Repo: key.Repo, Message: err.Error()})
 			}
 			// Phase 3: drive feedback + draft auto-promote pipelines for the PR.
@@ -1209,7 +1215,7 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	// Compute and persist enrichment (kind/languages/size/urgency) for this PR.
 	// Runs after emitPREvent so the store row already exists. Non-fatal: errors
 	// are recorded into summary.Errors and self-heal on the next tick.
-	if err := e.enrichAndStore(ctx, rcfg.Remote, *pr, enriched); err != nil {
+	if err := e.enrichAndStore(ctx, rcfg.Remote, *pr, enriched, rcfg); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: err.Error()})
 	}
 	// Phase 3: feedback + draft pipelines. enriched (when non-nil) carries the
