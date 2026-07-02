@@ -130,13 +130,13 @@ func TestAppPathsFromFiles(t *testing.T) {
 		},
 		{
 			name:  "single app-path",
-			files: []string{"finance/creditcards/main.go", "finance/creditcards/service.go"},
-			want:  []string{"finance/creditcards"},
+			files: []string{"svc/alpha/main.go", "svc/alpha/service.go"},
+			want:  []string{"svc/alpha"},
 		},
 		{
 			name:  "multiple distinct app-paths, deduped and sorted",
-			files: []string{"finance/creditcards/main.go", "platform/auth/handler.go", "finance/creditcards/types.go"},
-			want:  []string{"finance/creditcards", "platform/auth"},
+			files: []string{"svc/alpha/main.go", "example/widget/handler.go", "svc/alpha/types.go"},
+			want:  []string{"example/widget", "svc/alpha"},
 		},
 		{
 			name:  "top-level single segment path included",
@@ -186,12 +186,12 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 
 	t.Run("main broken and PR branch green → HIGHEST urgency (PR-is-the-fix)", func(t *testing.T) {
 		checker := &mockHealthChecker{
-			mainBroken:    map[string]bool{"finance/payments": true},
-			prBranchGreen: map[string]bool{"finance/payments": true},
+			mainBroken:    map[string]bool{"svc/beta": true},
+			prBranchGreen: map[string]bool{"svc/beta": true},
 		}
 		in := Input{
 			PR:                api.PR{Title: "fix payment timeout", Branch: "fix/payment-timeout"},
-			Files:             []string{"finance/payments/handler.go"},
+			Files:             []string{"svc/beta/handler.go"},
 			ProjectHealthFunc: checker.ProjectHealth,
 		}
 		lvl, score, reasons := scoreUrgencyWithHealth(ctx, in)
@@ -203,30 +203,30 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 		}
 		found := false
 		for _, r := range reasons {
-			if r == "project-broken-main:finance/payments" {
+			if r == "project-broken-main:svc/beta" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Fatalf("want reason project-broken-main:finance/payments; got %v", reasons)
+			t.Fatalf("want reason project-broken-main:svc/beta; got %v", reasons)
 		}
 	})
 
 	t.Run("main broken but PR branch also broken → no PR-is-fix signal", func(t *testing.T) {
 		checker := &mockHealthChecker{
-			mainBroken:    map[string]bool{"finance/payments": true},
-			prBranchGreen: map[string]bool{"finance/payments": false},
+			mainBroken:    map[string]bool{"svc/beta": true},
+			prBranchGreen: map[string]bool{"svc/beta": false},
 		}
 		in := Input{
 			PR:                api.PR{Title: "work in progress", Branch: "feat/new-thing"},
-			Files:             []string{"finance/payments/handler.go"},
+			Files:             []string{"svc/beta/handler.go"},
 			ProjectHealthFunc: checker.ProjectHealth,
 		}
 		lvl, _, reasons := scoreUrgencyWithHealth(ctx, in)
 		// no PR-is-fix reason; urgency could still be "low"
 		for _, r := range reasons {
-			if r == "project-broken-main:finance/payments" {
+			if r == "project-broken-main:svc/beta" {
 				t.Fatalf("should not have PR-is-fix reason when PR branch is also broken; reasons=%v", reasons)
 			}
 		}
@@ -235,12 +235,12 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 
 	t.Run("main healthy → no project-health signal", func(t *testing.T) {
 		checker := &mockHealthChecker{
-			mainBroken:    map[string]bool{"finance/payments": false},
-			prBranchGreen: map[string]bool{"finance/payments": true},
+			mainBroken:    map[string]bool{"svc/beta": false},
+			prBranchGreen: map[string]bool{"svc/beta": true},
 		}
 		in := Input{
 			PR:                api.PR{Title: "refactor", Branch: "refactor/cleanup"},
-			Files:             []string{"finance/payments/handler.go"},
+			Files:             []string{"svc/beta/handler.go"},
 			ProjectHealthFunc: checker.ProjectHealth,
 		}
 		_, _, reasons := scoreUrgencyWithHealth(ctx, in)
@@ -254,7 +254,7 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 	t.Run("no checker → no health signal, no error", func(t *testing.T) {
 		in := Input{
 			PR:    api.PR{Title: "refactor", Branch: "refactor/cleanup"},
-			Files: []string{"finance/payments/handler.go"},
+			Files: []string{"svc/beta/handler.go"},
 			// ProjectHealthFunc is nil
 		}
 		// scoreUrgencyWithHealth should work fine with nil checker
@@ -270,12 +270,12 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 
 	t.Run("multiple app-paths: one broken on main, PR branch green for it → signal fires once per broken path", func(t *testing.T) {
 		checker := &mockHealthChecker{
-			mainBroken:    map[string]bool{"finance/payments": true, "platform/auth": false},
-			prBranchGreen: map[string]bool{"finance/payments": true, "platform/auth": true},
+			mainBroken:    map[string]bool{"svc/beta": true, "platform/auth": false},
+			prBranchGreen: map[string]bool{"svc/beta": true, "platform/auth": true},
 		}
 		in := Input{
 			PR:                api.PR{Title: "fix payment", Branch: "fix/payment"},
-			Files:             []string{"finance/payments/x.go", "platform/auth/y.go"},
+			Files:             []string{"svc/beta/x.go", "platform/auth/y.go"},
 			ProjectHealthFunc: checker.ProjectHealth,
 		}
 		_, _, reasons := scoreUrgencyWithHealth(ctx, in)
@@ -286,7 +286,7 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 			}
 		}
 		if countSignal != 1 {
-			t.Fatalf("want exactly 1 project-broken-main reason (only finance/payments is broken); got %d reasons=%v", countSignal, reasons)
+			t.Fatalf("want exactly 1 project-broken-main reason (only svc/beta is broken); got %d reasons=%v", countSignal, reasons)
 		}
 	})
 }
@@ -296,12 +296,12 @@ func TestScoreUrgencyWithProjectHealth(t *testing.T) {
 func TestComputeWithProjectHealth(t *testing.T) {
 	ctx := context.Background()
 	checker := &mockHealthChecker{
-		mainBroken:    map[string]bool{"finance/payments": true},
-		prBranchGreen: map[string]bool{"finance/payments": true},
+		mainBroken:    map[string]bool{"svc/beta": true},
+		prBranchGreen: map[string]bool{"svc/beta": true},
 	}
 	in := Input{
 		PR:                api.PR{Title: "plain fix", Branch: "fix/payments", Additions: 20, Deletions: 5},
-		Files:             []string{"finance/payments/service.go"},
+		Files:             []string{"svc/beta/service.go"},
 		ProjectHealthFunc: checker.ProjectHealth,
 	}
 	got := ComputeWithContext(ctx, in)
@@ -310,12 +310,12 @@ func TestComputeWithProjectHealth(t *testing.T) {
 	}
 	found := false
 	for _, r := range got.UrgencyReasons {
-		if r == "project-broken-main:finance/payments" {
+		if r == "project-broken-main:svc/beta" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("UrgencyReasons = %v; want to include project-broken-main:finance/payments", got.UrgencyReasons)
+		t.Errorf("UrgencyReasons = %v; want to include project-broken-main:svc/beta", got.UrgencyReasons)
 	}
 }

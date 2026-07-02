@@ -5,7 +5,7 @@ package enrich
 // "Referenced project broken on main" urgency signal (pg2-4c5i.25).
 //
 // Design: A PR touches one or more app-paths (derived from changed-file paths,
-// e.g. "finance/payments" from "finance/payments/handler.go"). For each
+// e.g. "svc/beta" from "svc/beta/handler.go"). For each
 // app-path a configurable ProjectHealthFunc checks (a) whether main is currently
 // broken and (b) whether this PR's branch is currently green for that path.
 //
@@ -17,10 +17,11 @@ package enrich
 // its own) and a reason "project-broken-main:<app-path>" is appended.
 //
 // Live verification deferred: ProjectHealthFunc is an injectable type alias.
-// The real implementation (querying captains-log / Grafana-Thanos for ZR, or
-// any other build-status backend for other deployments) is NOT wired here.
-// Callers supply nil to skip the signal entirely; a future bead will wire the
-// real backend and inject it via config-driven dependency injection.
+// The real implementation (querying an internal build-health / CI observability
+// backend, or any other build-status backend for other deployments) is NOT
+// wired here. Callers supply nil to skip the signal entirely; a future bead
+// will wire the real backend and inject it via config-driven dependency
+// injection.
 
 import (
 	"context"
@@ -40,14 +41,14 @@ type ProjectHealthResult struct {
 
 // ProjectHealthFunc is the injectable function signature for looking up build
 // health for a given app-path and PR branch. Implementations query an external
-// build-status source (e.g. captains-log, Grafana/Thanos). A nil value disables
-// the signal entirely. The context carries cancellation / deadline from the
-// calling enrichment pass.
+// build-status source (e.g. an internal build-health / CI observability
+// backend). A nil value disables the signal entirely. The context carries
+// cancellation / deadline from the calling enrichment pass.
 //
 // Public-repo hygiene: pg-pr defines only this generic interface. All
-// ZipRecruiter-specific details (captains-log endpoints, workflow identifiers,
-// app-path mappings) MUST live in the consuming config (phillipg-nix-ziprecruiter)
-// and be injected as a concrete implementation of this type.
+// deployment-specific details (backend endpoints, workflow identifiers,
+// app-path mappings) MUST live in the consuming config and be injected as a
+// concrete implementation of this type.
 type ProjectHealthFunc func(ctx context.Context, appPath, prBranch string) (ProjectHealthResult, error)
 
 // appPathsFromFiles derives the sorted, deduplicated set of app-paths from
