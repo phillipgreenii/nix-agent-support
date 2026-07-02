@@ -6,11 +6,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
-	"github.com/phillipgreenii/pa-monitor/internal/render"
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/treestate"
+	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
 
 // ModalKind selects which full-screen modal is currently open.
@@ -23,10 +23,10 @@ const (
 )
 
 type Options struct {
-	Tree     *aggregate.Tree
-	Poller   Poller
-	Interval time.Duration
-	CacheDir string // used to load/save tree collapse state
+	Tree                 *aggregate.Tree
+	Poller               Poller
+	Interval             time.Duration
+	CacheDir             string // used to load/save tree collapse state
 	Reporter             cmuxstatus.Reporter
 	SidebarIntervalTicks int
 	ErrorLogger          *ErrorLogger
@@ -57,11 +57,11 @@ type Options struct {
 }
 
 type Model struct {
-	tree          *aggregate.Tree
-	showAll       bool
-	forceID       bool
-	costMode      bool
-	caffeinateOn  bool
+	tree         *aggregate.Tree
+	showAll      bool
+	forceID      bool
+	costMode     bool
+	caffeinateOn bool
 	// caffeinateProcess + caffeinateGraceRemaining are the daemon-reported
 	// PROCESS indicator (D6): what the wake-assertion subprocess is doing,
 	// separate from caffeinateOn (the MODE). View-only; populated from
@@ -69,14 +69,14 @@ type Model struct {
 	// the MODE, never the PROCESS, so a stale snapshot can't undo a user action.
 	caffeinateProcess        render.CaffeinateProcess
 	caffeinateGraceRemaining time.Duration
-	width, height       int
-	selected            *aggregate.SessionView
-	activeModal         ModalKind
-	modalScrollOffset   int
-	detailsScrollOffset int
-	cursor              int
-	scrollOffset        int
-	theme         render.Theme
+	width, height            int
+	selected                 *aggregate.SessionView
+	activeModal              ModalKind
+	modalScrollOffset        int
+	detailsScrollOffset      int
+	cursor                   int
+	scrollOffset             int
+	theme                    render.Theme
 
 	poller     Poller
 	interval   time.Duration

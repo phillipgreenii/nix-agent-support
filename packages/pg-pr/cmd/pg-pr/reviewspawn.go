@@ -52,7 +52,8 @@ func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string
 		"Run the pg-pr-review-orchestrator for %s#%d (ownership=%s, bead=%s). "+
 			"After staging the review, print a single JSON line to stdout: "+
 			`{"head_sha":"<the SHA the worktree was checked out at>"}.`,
-		ref.Repo, ref.Number, ownership, ref.BeadID)
+		ref.Repo, ref.Number, ownership, ref.BeadID,
+	)
 
 	cmd := exec.CommandContext(ctx, bin, "-p", prompt)
 	if dir := s.repoPath[ref.Repo]; dir != "" {
@@ -166,27 +167,35 @@ func (m *multiRepoReviewBeads) ListReadyDraftReviews(ctx context.Context) ([]bea
 func (m *multiRepoReviewBeads) ClaimDraftReview(ctx context.Context, id string) error {
 	return m.clientForBead(id).ClaimDraftReview(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) UnclaimDraftReview(ctx context.Context, id string) error {
 	return m.clientForBead(id).UnclaimDraftReview(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) CloseDraftReview(ctx context.Context, id, reason string) error {
 	return m.clientForBead(id).CloseDraftReview(ctx, id, reason)
 }
+
 func (m *multiRepoReviewBeads) ReopenDraftReview(ctx context.Context, id string) error {
 	return m.clientForBead(id).ReopenDraftReview(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) DeadLetterDraftReview(ctx context.Context, id string) error {
 	return m.clientForBead(id).DeadLetterDraftReview(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) ReviewFailCount(ctx context.Context, id string) (int, error) {
 	return m.clientForBead(id).ReviewFailCount(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) BumpReviewFailCount(ctx context.Context, id string) (int, error) {
 	return m.clientForBead(id).BumpReviewFailCount(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) ResetReviewFailCount(ctx context.Context, id string) error {
 	return m.clientForBead(id).ResetReviewFailCount(ctx, id)
 }
+
 func (m *multiRepoReviewBeads) FindDraftReviewForPR(ctx context.Context, repo string, number int) (string, bool, bool, error) {
 	id, closed, found, err := m.clientForRepo(repo).FindDraftReviewForPR(ctx, repo, number)
 	if found && id != "" {

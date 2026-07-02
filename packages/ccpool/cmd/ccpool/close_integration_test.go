@@ -36,7 +36,8 @@ plugin_dir = "/unused"
 [wait]
 timeout = "10s"
 `), 0o600)
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),

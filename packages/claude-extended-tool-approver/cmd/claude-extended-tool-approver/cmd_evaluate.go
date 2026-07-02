@@ -88,11 +88,11 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 	}
 
 	counts := map[string]int{
-		"correct":              0,
+		"correct":                 0,
 		"miss-caught-by-settings": 0,
-		"miss-uncaught":        0,
-		"needs-review":         0,
-		"stale-cwd":            0,
+		"miss-uncaught":           0,
+		"needs-review":            0,
+		"stale-cwd":               0,
 	}
 
 	// sandboxCounts tallies rows by sandbox state ("on"/"off"/"unknown").

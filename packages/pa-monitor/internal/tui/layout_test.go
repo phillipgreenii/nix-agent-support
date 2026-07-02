@@ -68,9 +68,9 @@ func TestLayoutZonesDropPriority(t *testing.T) {
 		wantBodyMin int
 	}{
 		{height: 5, wantHeader: true, wantStatus: true, wantBodyMin: 1},
-		{height: 4, wantHeader: false, wantStatus: true, wantBodyMin: 3}, // header drops, status stays, body=3
-		{height: 3, wantHeader: false, wantStatus: true, wantBodyMin: 2}, // header drops, status stays, body=2
-		{height: 2, wantHeader: false, wantStatus: true, wantBodyMin: 1}, // header dropped, body=1
+		{height: 4, wantHeader: false, wantStatus: true, wantBodyMin: 3},  // header drops, status stays, body=3
+		{height: 3, wantHeader: false, wantStatus: true, wantBodyMin: 2},  // header drops, status stays, body=2
+		{height: 2, wantHeader: false, wantStatus: true, wantBodyMin: 1},  // header dropped, body=1
 		{height: 1, wantHeader: false, wantStatus: false, wantBodyMin: 1}, // both dropped
 	}
 	for _, c := range cases {

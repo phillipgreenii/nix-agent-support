@@ -26,7 +26,7 @@ type Snapshot struct {
 	// native CostPricer prices; nil/empty when the transcript has no usage.
 	// Error (isApiErrorMessage) records are excluded, matching TotalTokens.
 	ModelTokens map[string]usage.ModelTokens
-	LastError         *ErrorRecord // most recent isApiErrorMessage event in the transcript; nil if no such event seen
+	LastError   *ErrorRecord // most recent isApiErrorMessage event in the transcript; nil if no such event seen
 	// LastErrorRetryable is pa-monitor's derived auto-resume verdict for
 	// LastError (transient server/network → true). It is tracked separately
 	// from the shared ErrorRecord because the daemon flips it to false on

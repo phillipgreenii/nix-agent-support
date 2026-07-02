@@ -49,7 +49,8 @@ func TestFleetRace_beadHeldUntilGateResolves(t *testing.T) {
 	fakePN := run.NewFakeRunner()
 	info := fmt.Sprintf(
 		`{"wsid":"home","root":%q,"terminal":"m","repos":[{"name":"repo-a","path":%q,"applied_ref":"main","dirty":false}]}`,
-		ws, ws)
+		ws, ws,
+	)
 	fakePN.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: info}, nil)
 
 	real := run.CLIRunner{}

@@ -71,11 +71,11 @@ const nudgeSelectColumns = `SELECT id, session_id, text, result, error_text,
 
 func scanNudgeWithSources(ctx context.Context, db *sql.DB, row *sql.Row) (*store.NudgeEvent, error) {
 	var (
-		id              int64
-		ev              store.NudgeEvent
-		causedBy        sql.NullString
-		escalated       int
-		firedAt         string
+		id        int64
+		ev        store.NudgeEvent
+		causedBy  sql.NullString
+		escalated int
+		firedAt   string
 	)
 	err := row.Scan(&id, &ev.SessionID, &ev.Text, &ev.Result, &ev.ErrorText,
 		&causedBy, &escalated, &firedAt)

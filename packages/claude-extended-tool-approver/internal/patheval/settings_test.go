@@ -21,7 +21,7 @@ func TestLoadSandboxFilesystemConfig_Empty(t *testing.T) {
 func TestLoadSandboxFilesystemConfig_UserSettings(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	settings := map[string]any{
@@ -34,7 +34,7 @@ func TestLoadSandboxFilesystemConfig_UserSettings(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(settings)
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,10 +57,10 @@ func TestLoadSandboxFilesystemConfig_MergesProjectSettings(t *testing.T) {
 
 	homeClaudeDir := filepath.Join(homeDir, ".claude")
 	projectClaudeDir := filepath.Join(projectDir, ".claude")
-	if err := os.MkdirAll(homeClaudeDir, 0755); err != nil {
+	if err := os.MkdirAll(homeClaudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(projectClaudeDir, 0755); err != nil {
+	if err := os.MkdirAll(projectClaudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,14 +83,14 @@ func TestLoadSandboxFilesystemConfig_MergesProjectSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(homeClaudeDir, "settings.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeClaudeDir, "settings.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	data, err = json.Marshal(projectSettings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectClaudeDir, "settings.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectClaudeDir, "settings.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,10 +110,10 @@ func TestLoadSandboxFilesystemConfig_MergesProjectSettings(t *testing.T) {
 func TestLoadSandboxFilesystemConfig_MissingSandboxKey(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"statusLine": {}}`), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"statusLine": {}}`), 0o644)
 
 	t.Setenv("HOME", dir)
 	cfg := LoadSandboxFilesystemConfig("")

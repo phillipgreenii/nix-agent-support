@@ -49,7 +49,8 @@ timeout = "10s"
 `
 	_ = os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o600)
 
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
@@ -141,7 +142,8 @@ plugin_dir = "/unused-in-fake"
 timeout = "10s"
 `
 	_ = os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o600)
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),

@@ -23,7 +23,8 @@ func registryJSON(pid int, sessionID, name, status, waitingFor string, startedAt
 	return fmt.Sprintf(
 		`{"pid":%d,"sessionId":%q,"cwd":"/tmp/work","name":%s,"kind":"interactive",`+
 			`"entrypoint":"cli","status":%q,"waitingFor":%s,"startedAt":%d,"statusUpdatedAt":%d}`,
-		pid, sessionID, nm, status, wf, startedAtMs, statusUpdatedAtMs)
+		pid, sessionID, nm, status, wf, startedAtMs, statusUpdatedAtMs,
+	)
 }
 
 func TestReadSessionFile_parsesAllFields(t *testing.T) {

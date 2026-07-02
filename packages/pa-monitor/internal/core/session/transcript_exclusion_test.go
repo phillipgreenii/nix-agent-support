@@ -21,8 +21,8 @@ func TestIsTranscriptFile(t *testing.T) {
 		{"abc-123.json", false}, // session record, not a transcript
 		{"agent-1.jsonl", true},
 		{"", false},
-		{".jsonl", true}, // suffix-only edge: still a .jsonl, not a status file
-		{"status.jsonl", true},        // no session-id prefix but not the .status.jsonl suffix form
+		{".jsonl", true},       // suffix-only edge: still a .jsonl, not a status file
+		{"status.jsonl", true}, // no session-id prefix but not the .status.jsonl suffix form
 		{"x.status.jsonl", false},
 	}
 	for _, c := range cases {

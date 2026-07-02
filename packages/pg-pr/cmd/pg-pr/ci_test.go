@@ -31,6 +31,7 @@ func (f *fakeCICD) ListRuns(context.Context, string, int) ([]api.CIRun, error) {
 	}
 	return f.runs, nil
 }
+
 func (f *fakeCICD) GetLogs(context.Context, string) ([]byte, error) {
 	f.logCalls++
 	if f.logsErr != nil {
@@ -38,6 +39,7 @@ func (f *fakeCICD) GetLogs(context.Context, string) ([]byte, error) {
 	}
 	return f.logs, nil
 }
+
 func (f *fakeCICD) RerunFailed(context.Context, string, int) error {
 	f.rerunCalls++
 	return f.rerunErr

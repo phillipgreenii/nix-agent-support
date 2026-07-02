@@ -188,7 +188,8 @@ func (p *Provider) EnrichedPRs(ctx context.Context, repo, searchQuery string) ([
 	// The GraphQL query is fed via stdin (`-F query=@-`); search is passed
 	// as a string variable so multi-author search strings don't fight
 	// gh's shell-arg parsing.
-	raw, err := p.gh.RunStdin(ctx, []byte(enrichedPRsQuery),
+	raw, err := p.gh.RunStdin(
+		ctx, []byte(enrichedPRsQuery),
 		"api", "graphql",
 		"-F", "search="+searchQuery,
 		"-F", "query=@-",
@@ -453,7 +454,8 @@ func (p *Provider) EnrichPR(ctx context.Context, repo string, number int) (*vcs.
 	if number <= 0 {
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
-	raw, err := p.gh.RunStdin(ctx, []byte(enrichedPRByNumberQuery),
+	raw, err := p.gh.RunStdin(
+		ctx, []byte(enrichedPRByNumberQuery),
 		"api", "graphql",
 		"-F", "owner="+owner,
 		"-F", "name="+name,

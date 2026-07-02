@@ -23,8 +23,10 @@ func TestBeadsReady_argsAndPostFilter(t *testing.T) {
 	  {"id":"c2","issue_type":"task","title":"not a cycle"},
 	  {"id":"c3","issue_type":"bug","title":"process-feedback: y"}
 	]`}
-	q := BeadsReady{Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
-		TitlePrefix: "process-feedback:", ItemType: "task"}
+	q := BeadsReady{
+		Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
+		TitlePrefix: "process-feedback:", ItemType: "task",
+	}
 	items, err := q.Run(context.Background(), Env{BD: bd})
 	if err != nil {
 		t.Fatal(err)

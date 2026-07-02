@@ -58,7 +58,8 @@ func (m *Model) View() string {
 	if alerts != "" {
 		zones = append(zones, zoneSpec{name: "alert", content: alerts, dropOrder: 3})
 	}
-	zones = append(zones,
+	zones = append(
+		zones,
 		zoneSpec{
 			name: "body",
 			fill: true,

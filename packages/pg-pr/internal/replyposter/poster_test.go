@@ -21,6 +21,7 @@ func (f *fakeReplier) ReplyToThread(ctx context.Context, repo, threadID, body st
 	f.lastBody = body
 	return &api.Comment{ID: f.id}, nil
 }
+
 func (f *fakeReplier) AddComment(ctx context.Context, repo string, number int, body string) (*api.Comment, error) {
 	f.commentPosts++
 	f.lastBody = body

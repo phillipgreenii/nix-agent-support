@@ -126,7 +126,8 @@ func newSandbox(t *testing.T) *sandbox {
 		t.Fatal(err)
 	}
 
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_CONFIG_HOME="+cfgHome,
 		"XDG_DATA_HOME="+dataHome,
 		"XDG_STATE_HOME="+stateHome,

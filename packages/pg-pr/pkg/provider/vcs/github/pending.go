@@ -68,7 +68,8 @@ func (p *Provider) HasPendingReviewByViewer(ctx context.Context, repo string, nu
 		return false, fmt.Errorf("github: invalid PR number %d", number)
 	}
 
-	raw, err := p.gh.RunStdin(ctx, []byte(pendingReviewByViewerQuery),
+	raw, err := p.gh.RunStdin(
+		ctx, []byte(pendingReviewByViewerQuery),
 		"api", "graphql",
 		"-F", "owner="+owner,
 		"-F", "name="+name,

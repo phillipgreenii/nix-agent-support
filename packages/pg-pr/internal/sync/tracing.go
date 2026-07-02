@@ -22,7 +22,8 @@ import (
 // startRepoSpan opens the top-level per-repo sync span. The returned
 // ctx carries the span; callers MUST defer span.End().
 func startRepoSpan(ctx context.Context, repo string) (context.Context, trace.Span) {
-	return telemetry.Tracer().Start(ctx, "pg-pr.sync.repo",
+	return telemetry.Tracer().Start(
+		ctx, "pg-pr.sync.repo",
 		trace.WithAttributes(attribute.String("repo_name", repo)),
 	)
 }
@@ -37,7 +38,8 @@ func startPRSpan(ctx context.Context, repo string, prNumber int, author string) 
 	if author != "" {
 		attrs = append(attrs, attribute.String("author_email", author))
 	}
-	return telemetry.Tracer().Start(ctx, "pg-pr.sync.pr",
+	return telemetry.Tracer().Start(
+		ctx, "pg-pr.sync.pr",
 		trace.WithAttributes(attrs...),
 	)
 }
@@ -50,7 +52,8 @@ func startVCSSpan(ctx context.Context, method, repo string, prNumber int) (conte
 	if prNumber > 0 {
 		attrs = append(attrs, attribute.Int("pr_number", prNumber))
 	}
-	return telemetry.Tracer().Start(ctx, "pg-pr.provider.vcs."+method,
+	return telemetry.Tracer().Start(
+		ctx, "pg-pr.provider.vcs."+method,
 		trace.WithAttributes(attrs...),
 	)
 }
@@ -64,7 +67,8 @@ func startCICDSpan(ctx context.Context, method, repo string, prNumber int, runID
 	if runID != "" {
 		attrs = append(attrs, attribute.String("run_id", runID))
 	}
-	return telemetry.Tracer().Start(ctx, "pg-pr.provider.cicd."+method,
+	return telemetry.Tracer().Start(
+		ctx, "pg-pr.provider.cicd."+method,
 		trace.WithAttributes(attrs...),
 	)
 }

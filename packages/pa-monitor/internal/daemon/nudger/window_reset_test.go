@@ -18,6 +18,7 @@ func (w wmStub) WindowResetFiredFor() time.Time { return w.wr }
 func (w wmStub) SessionWatermark(sid string) SessionWatermark {
 	return w.per[sid]
 }
+
 func (w wmStub) SetDisruptEscalated(sid string, escalated bool) {
 	if w.escalated != nil {
 		w.escalated[sid] = escalated
@@ -69,7 +70,8 @@ func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 	resetsAt := now.Add(-31 * time.Second) // delay elapsed (30s)
 	p := &WindowResetProducer{}
 	store := NewPendingStore()
-	tree := treeWith(resetsAt,
+	tree := treeWith(
+		resetsAt,
 		newSV("idle-1", 1, session.Idle),
 		newSV("work-1", 2, session.Working),
 		newSV("dorm-1", 3, session.Dormant),

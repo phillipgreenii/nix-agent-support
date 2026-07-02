@@ -444,7 +444,8 @@ func makeRegistryFixture(t *testing.T, status, waitingFor string, statusUpdatedA
 	}
 	sessionJSON := fmt.Sprintf(
 		`{"pid":99050,"sessionId":"reg-sess","cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli","status":%q,"waitingFor":%q,"statusUpdatedAt":%d}`,
-		cwd, status, waitingFor, statusUpdatedAt.UnixMilli())
+		cwd, status, waitingFor, statusUpdatedAt.UnixMilli(),
+	)
 	if err := os.WriteFile(filepath.Join(sessionsDir, "99050.json"), []byte(sessionJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}

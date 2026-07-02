@@ -27,16 +27,18 @@ type Tmux interface {
 	KillSession(name string) error
 	CapturePane(name string) (string, error)
 }
-type Truster interface{ EnsureTrusted(cwd string) error }
-type Store interface {
-	GetByExternalID(ctx context.Context, externalID string) (store.Session, bool, error)
-	Insert(ctx context.Context, s store.Session) error
-	Transition(ctx context.Context, externalID string, to store.State, claudeSessionID, transcriptPath string) (store.State, error)
-	Delete(ctx context.Context, externalID string) error
-	List(ctx context.Context) ([]store.Session, error)
-	// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
-	SetMeta(ctx context.Context, externalID, key, value string) error
-}
+type (
+	Truster interface{ EnsureTrusted(cwd string) error }
+	Store   interface {
+		GetByExternalID(ctx context.Context, externalID string) (store.Session, bool, error)
+		Insert(ctx context.Context, s store.Session) error
+		Transition(ctx context.Context, externalID string, to store.State, claudeSessionID, transcriptPath string) (store.State, error)
+		Delete(ctx context.Context, externalID string) error
+		List(ctx context.Context) ([]store.Session, error)
+		// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
+		SetMeta(ctx context.Context, externalID, key, value string) error
+	}
+)
 
 // Locker serializes operations on one external_id (spec §15). A nil Locker on
 // Deps means "no locking" (used by unit tests with fakes).

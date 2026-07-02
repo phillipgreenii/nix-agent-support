@@ -78,7 +78,8 @@ func TestMigrate_V6PreservesCodeCommentMessages(t *testing.T) {
 	// idx_feedback_pr was re-created.
 	var idxName string
 	if err := db.sql.QueryRow(
-		"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_feedback_pr'").Scan(&idxName); err != nil {
+		"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_feedback_pr'",
+	).Scan(&idxName); err != nil {
 		t.Fatalf("idx_feedback_pr missing after rebuild: %v", err)
 	}
 

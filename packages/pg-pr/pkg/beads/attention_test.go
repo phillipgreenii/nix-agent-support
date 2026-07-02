@@ -3,9 +3,8 @@ package beads
 import (
 	"context"
 	"encoding/json"
-	"testing"
-
 	"strings"
+	"testing"
 )
 
 // hasArg reports whether flag appears anywhere in the bd args.

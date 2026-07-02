@@ -8,8 +8,10 @@ import (
 
 func TestPendingStoreAddIdempotent(t *testing.T) {
 	s := NewPendingStore()
-	in := NudgeIntent{Key: IntentKey{"sid", SourceManual}, Text: "continue",
-		EmittedAt: time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)}
+	in := NudgeIntent{
+		Key: IntentKey{"sid", SourceManual}, Text: "continue",
+		EmittedAt: time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC),
+	}
 	if added := s.Add(in); !added {
 		t.Error("Add new key returned false, want true")
 	}

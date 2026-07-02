@@ -29,8 +29,11 @@ func (f *fakeVCS) GetPR(_ context.Context, repo string, n int) (*api.PR, error) 
 	out.Number = n
 	return &out, nil
 }
-func (f *fakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error)             { return nil, nil }
+
+func (f *fakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { return nil, nil }
+
 func (f *fakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) { return nil, nil }
+
 func (f *fakeVCS) CreatePR(context.Context, string, bool, string, string, string, string, []string, []string) (*api.PR, error) {
 	return nil, nil
 }
@@ -42,9 +45,11 @@ func (f *fakeVCS) Close(context.Context, string, int) error              { retur
 func (f *fakeVCS) ListComments(context.Context, string, int) ([]api.Comment, error) {
 	return nil, nil
 }
+
 func (f *fakeVCS) AddComment(context.Context, string, int, string) (*api.Comment, error) {
 	return nil, nil
 }
+
 func (f *fakeVCS) ReplyToThread(context.Context, string, string, string) (*api.Comment, error) {
 	return nil, nil
 }
@@ -52,6 +57,7 @@ func (f *fakeVCS) ResolveThread(context.Context, string, string) error { return 
 func (f *fakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
+
 func (f *fakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
 	return nil, nil
 }

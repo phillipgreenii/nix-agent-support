@@ -104,8 +104,10 @@ type WatermarkStore struct {
 }
 
 // Compile-time interface checks.
-var _ nudger.WatermarkView = (*WatermarkStore)(nil)
-var _ nudger.Recorder = (*WatermarkStore)(nil)
+var (
+	_ nudger.WatermarkView = (*WatermarkStore)(nil)
+	_ nudger.Recorder      = (*WatermarkStore)(nil)
+)
 
 func NewWatermarkStore(path string, emitter *otel.Emitter) (*WatermarkStore, error) {
 	s, err := ReadRuntimeState(path)

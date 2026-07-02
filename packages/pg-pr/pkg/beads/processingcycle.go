@@ -60,7 +60,8 @@ func (c *Client) CreateProcessingCycle(ctx context.Context, prBeadID, title stri
 	}
 	// Wire parent-child: the processing-cycle bead depends on (is a child
 	// of) the merge-request bead.
-	if _, err := c.Runner.Run(ctx,
+	if _, err := c.Runner.Run(
+		ctx,
 		"dep", "add", id, prBeadID,
 		"--type=parent-child",
 		"--no-cycle-check",
@@ -103,7 +104,8 @@ func (c *Client) FindOpenProcessingCycle(ctx context.Context, prBeadID string) (
 	for _, id := range childIDs {
 		isChild[id] = struct{}{}
 	}
-	out, err := c.Runner.Run(ctx,
+	out, err := c.Runner.Run(
+		ctx,
 		"list",
 		"--type=task",
 		"--status=open",

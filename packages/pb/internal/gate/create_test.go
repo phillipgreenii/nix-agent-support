@@ -28,8 +28,10 @@ func TestCreate_singleCommitDefaultHEAD(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "HEAD"}, run.Result{Stdout: "diff..."}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadsha\n"}, nil)
 	// bd gate create (co-located at /ws)
-	f.AddResponse("bd", []string{"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
-		"--await-id", "home:repo-a:abc123", "--reason", "pn:applied gate", "--json"},
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
+		"--await-id", "home:repo-a:abc123", "--reason", "pn:applied gate", "--json",
+	},
 		run.Result{Stdout: `{"data":{"id":"g-1"}}`}, nil)
 	// bd update --set-metadata applied_baseline=base1
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--set-metadata", "applied_baseline=base1"},
@@ -37,7 +39,8 @@ func TestCreate_singleCommitDefaultHEAD(t *testing.T) {
 
 	d := CreateDeps{PN: pn.Client{R: f}, BD: bd.Client{R: f}, PatchID: patchid.Client{R: f}, R: f, Discover: stubDiscoverWS}
 	out, err := Create(context.Background(), d, CreateParams{
-		WorkspaceDir: "/ws", BeadID: "b-1", Repo: "repo-a", Reason: "pn:applied gate"})
+		WorkspaceDir: "/ws", BeadID: "b-1", Repo: "repo-a", Reason: "pn:applied gate",
+	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -73,16 +76,21 @@ func TestCreate_multiCommitOneGatePerCommit(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "sha2"}, run.Result{Stdout: "d2"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "pid2 sha2\n"}, nil)
 	// one gate per commit, both blocking b-1
-	f.AddResponse("bd", []string{"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
-		"--await-id", "home:repo-a:pid1", "--reason", "r", "--json"}, run.Result{Stdout: `{"data":{"id":"g-1"}}`}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
+		"--await-id", "home:repo-a:pid1", "--reason", "r", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"g-1"}}`}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--set-metadata", "applied_baseline=base1"}, run.Result{}, nil)
-	f.AddResponse("bd", []string{"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
-		"--await-id", "home:repo-a:pid2", "--reason", "r", "--json"}, run.Result{Stdout: `{"data":{"id":"g-2"}}`}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
+		"--await-id", "home:repo-a:pid2", "--reason", "r", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"g-2"}}`}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-2", "--set-metadata", "applied_baseline=base1"}, run.Result{}, nil)
 
 	d := CreateDeps{PN: pn.Client{R: f}, BD: bd.Client{R: f}, PatchID: patchid.Client{R: f}, R: f, Discover: stubDiscoverWS}
 	out, err := Create(context.Background(), d, CreateParams{
-		WorkspaceDir: "/ws", BeadID: "b-1", Repo: "repo-a", Commits: "base1..HEAD", Reason: "r"})
+		WorkspaceDir: "/ws", BeadID: "b-1", Repo: "repo-a", Commits: "base1..HEAD", Reason: "r",
+	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

@@ -26,7 +26,7 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 	for _, cmd := range commands {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
-			CWD:      "/home/user/project",
+			CWD:       "/home/user/project",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
@@ -41,7 +41,7 @@ func TestSafecmds_JqWithProjectPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "jq . /home/user/project/package.json"}),
 	}
 	got := r.Evaluate(input)
@@ -55,7 +55,7 @@ func TestSafecmds_JqWithNoPaths_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "jq ."}),
 	}
 	got := r.Evaluate(input)
@@ -69,7 +69,7 @@ func TestSafecmds_CatEtcPasswd_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "cat /etc/passwd"}),
 	}
 	got := r.Evaluate(input)
@@ -83,7 +83,7 @@ func TestSafecmds_Rm_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "rm -rf /"}),
 	}
 	got := r.Evaluate(input)
@@ -97,7 +97,7 @@ func TestSafecmds_Ls_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "ls"}),
 	}
 	got := r.Evaluate(input)
@@ -111,7 +111,7 @@ func TestSafecmds_HeadProjectFile_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "head -20 /home/user/project/README.md"}),
 	}
 	got := r.Evaluate(input)
@@ -133,7 +133,7 @@ func TestSafecmds_Compound_EchoAndRm_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "echo hello && rm -rf /"}),
 	}
 	got := r.Evaluate(input)
@@ -147,7 +147,7 @@ func TestSafecmds_Compound_EchoAndCatEtcPasswd_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "echo hello && cat /etc/passwd"}),
 	}
 	got := r.Evaluate(input)
@@ -161,7 +161,7 @@ func TestSafecmds_Compound_EchoAndLs_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "echo hello && ls"}),
 	}
 	got := r.Evaluate(input)
@@ -175,7 +175,7 @@ func TestSafecmds_Compound_JqAndYq_ProjectPaths_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "jq '.name' /home/user/project/file.json && yq '.v' /home/user/project/other.yaml"}),
 	}
 	got := r.Evaluate(input)
@@ -189,7 +189,7 @@ func TestSafecmds_RmProjectPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "rm /home/user/project/tmp/file.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -203,7 +203,7 @@ func TestSafecmds_RmNixStore_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "rm /nix/store/abc123/bin/foo"}),
 	}
 	got := r.Evaluate(input)
@@ -217,7 +217,7 @@ func TestSafecmds_CatNixStore_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "cat /nix/store/abc123/bin/foo"}),
 	}
 	got := r.Evaluate(input)
@@ -231,7 +231,7 @@ func TestSafecmds_CpReadToWrite_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "cp /nix/store/abc123/file.txt /home/user/project/dest.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -245,7 +245,7 @@ func TestSafecmds_CpWriteToReadOnly_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "cp /home/user/project/file.txt /nix/store/abc123/dest.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -259,7 +259,7 @@ func TestSafecmds_MvProjectPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "mv /home/user/project/old.txt /home/user/project/new.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -273,7 +273,7 @@ func TestSafecmds_TouchProjectPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "touch /home/user/project/newfile.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -287,7 +287,7 @@ func TestSafecmds_SedInPlace_WritePath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "sed -i 's/foo/bar/' /home/user/project/file.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -301,7 +301,7 @@ func TestSafecmds_SedInPlace_ReadOnlyPath_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "sed -i 's/foo/bar/' /nix/store/abc123/file.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -315,7 +315,7 @@ func TestSafecmds_SedNoInPlace_ReadOnlyPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "sed 's/foo/bar/' /nix/store/abc123/file.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -329,7 +329,7 @@ func TestSafecmds_RmTmpPath_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "rm /tmp/scratch.txt"}),
 	}
 	got := r.Evaluate(input)
@@ -367,7 +367,7 @@ func TestSafecmds_GrepNixVarProfiles_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": `grep -rn "vscodeProfiles" /nix/var/nix/profiles/system-461-link/user/ 2>/dev/null | head -10`}),
 	}
 	got := r.Evaluate(input)
@@ -381,7 +381,7 @@ func TestSafecmds_LsNixVarProfiles_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "ls /nix/var/nix/profiles/system-461-link/user/"}),
 	}
 	got := r.Evaluate(input)
@@ -395,7 +395,7 @@ func TestSafecmds_HeadNixVarProfiles_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "head -20 /nix/var/nix/profiles/system-461-link/user/some-file"}),
 	}
 	got := r.Evaluate(input)
@@ -409,7 +409,7 @@ func TestSafecmds_Pgrep_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "pgrep -f claude"}),
 	}
 	got := r.Evaluate(input)
@@ -423,7 +423,7 @@ func TestSafecmds_ReadlinkNixVar_Approve(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "readlink /nix/var/nix/profiles/system-461-link"}),
 	}
 	got := r.Evaluate(input)
@@ -437,7 +437,7 @@ func TestSafecmds_RmNixVar_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/project",
+		CWD:       "/home/user/project",
 		ToolInput: mustJSON(map[string]string{"command": "rm /nix/var/nix/profiles/some-link"}),
 	}
 	got := r.Evaluate(input)
@@ -458,7 +458,7 @@ func TestSafecmds_Help_CommandOnly_Approve(t *testing.T) {
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
-			CWD:      "/home/user/project",
+			CWD:       "/home/user/project",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
@@ -485,7 +485,7 @@ func TestSafecmds_Help_SubcommandKnown_Approve(t *testing.T) {
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
-			CWD:      "/home/user/project",
+			CWD:       "/home/user/project",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
@@ -499,18 +499,18 @@ func TestSafecmds_Help_SubcommandForm_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
-		"go help",                // known command, bare help
-		"go help build",          // known command, help + subcommand
-		"cargo help test",        // known command, help + subcommand
-		"kubectl help apply",     // known command, help + subcommand
-		"git help rebase",        // known command, help + subcommand
-		"npm help install",       // known command, help + subcommand
-		"bd help",                // known command, bare help
+		"go help",            // known command, bare help
+		"go help build",      // known command, help + subcommand
+		"cargo help test",    // known command, help + subcommand
+		"kubectl help apply", // known command, help + subcommand
+		"git help rebase",    // known command, help + subcommand
+		"npm help install",   // known command, help + subcommand
+		"bd help",            // known command, bare help
 	}
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
-			CWD:      "/home/user/project",
+			CWD:       "/home/user/project",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
@@ -548,17 +548,17 @@ func TestSafecmds_Help_NotApproved(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	notApproved := []string{
-		"unknowncmd help",           // unknown command, help not recognized
-		"unknowncmd --help -r",      // --help not last
-		"unknowncmd -r --help",      // flag before --help, not a subcommand
-		"unknowncmd sub --help -v",  // --help not last
-		"unknowncmd sub --help",     // unknown command with subcommand
-		"go help -v build",          // help with flag, not clean
+		"unknowncmd help",          // unknown command, help not recognized
+		"unknowncmd --help -r",     // --help not last
+		"unknowncmd -r --help",     // flag before --help, not a subcommand
+		"unknowncmd sub --help -v", // --help not last
+		"unknowncmd sub --help",    // unknown command with subcommand
+		"go help -v build",         // help with flag, not clean
 	}
 	for _, cmd := range notApproved {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
-			CWD:      "/home/user/project",
+			CWD:       "/home/user/project",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
@@ -596,7 +596,7 @@ func TestEvaluateCp_Comprehensive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
-				CWD:      "/home/user/project",
+				CWD:       "/home/user/project",
 				ToolInput: mustJSON(map[string]string{"command": tt.command}),
 			}
 			got := r.Evaluate(input)

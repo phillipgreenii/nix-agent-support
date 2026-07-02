@@ -321,7 +321,7 @@ var hasSubcommands = map[string]bool{
 	"git": true, "gh": true,
 	"docker": true, "docker-compose": true, "podman": true,
 	"kubectl": true,
-	"nix": true, "nix-env": true, "nix-store": true,
+	"nix":     true, "nix-env": true, "nix-store": true,
 	"darwin-rebuild": true, "nixos-rebuild": true, "home-manager": true,
 	"cargo": true, "go": true, "rustup": true,
 	"npm": true, "yarn": true, "pnpm": true, "npx": true,

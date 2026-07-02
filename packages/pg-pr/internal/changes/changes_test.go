@@ -193,18 +193,30 @@ func TestSince_MissingStateFileIsNotFatal(t *testing.T) {
 
 func TestSince_FiltersToManagedTypes(t *testing.T) {
 	rows := []map[string]any{
-		{"id": "t-1", "issue_type": "merge-request", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
-		{"id": "t-2", "issue_type": "feedback", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
-		{"id": "t-3", "issue_type": "task", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
-		{"id": "t-4", "issue_type": "bug", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
-		{"id": "t-5", "issue_type": "epic", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
-		{"id": "t-6", "issue_type": "convoy", "status": "open",
-			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z"},
+		{
+			"id": "t-1", "issue_type": "merge-request", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
+		{
+			"id": "t-2", "issue_type": "feedback", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
+		{
+			"id": "t-3", "issue_type": "task", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
+		{
+			"id": "t-4", "issue_type": "bug", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
+		{
+			"id": "t-5", "issue_type": "epic", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
+		{
+			"id": "t-6", "issue_type": "convoy", "status": "open",
+			"created_at": "2026-05-20T00:00:00Z", "updated_at": "2026-05-20T00:00:00Z",
+		},
 	}
 	data, _ := json.Marshal(rows)
 	runner := &stubRunner{stdout: string(data)}

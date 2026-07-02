@@ -45,7 +45,8 @@ func TestCheck_resolvesWhenPatchIDInHistory(t *testing.T) {
 
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour, StaleHandler: "convert-to-human",
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -65,7 +66,8 @@ func TestCheck_dryRunMutatesNothing(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 sha\n"}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, DryRun: true, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -87,7 +89,8 @@ func TestCheck_unknownRepoSkipsAndReports(t *testing.T) {
 			"await_id":"home:ghost:zzz","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -112,7 +115,8 @@ func TestCheck_staleBoundaryYoungerVsOlder(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-old", "--add-label", "human"}, run.Result{}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 24 * time.Hour, StaleHandler: "convert-to-human",
-		Now: time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -143,7 +147,8 @@ func TestCheck_multiDBResolvesInOwnDB(t *testing.T) {
 
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws", "/ws/repo-b")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -181,7 +186,8 @@ func TestCheck_baselineNotAncestorFallsBackToLastN(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -200,7 +206,8 @@ func TestCheck_strictSkipsDirty(t *testing.T) {
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, Strict: true, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -227,7 +234,8 @@ func TestCheck_over50Gates(t *testing.T) {
 		run.Result{Stdout: b.String()}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, StaleAfter: 72 * time.Hour,
-		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC)})
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}

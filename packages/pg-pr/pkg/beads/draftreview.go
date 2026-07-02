@@ -130,7 +130,8 @@ func (c *Client) EnsureDraftReviewBead(ctx context.Context, prBeadID, title stri
 	}
 	// Wire parent-child: the draft-review bead depends on (is a child of) the
 	// merge-request bead.
-	if _, err := c.Runner.Run(ctx,
+	if _, err := c.Runner.Run(
+		ctx,
 		"dep", "add", id, prBeadID,
 		"--type=parent-child",
 		"--no-cycle-check",
@@ -209,7 +210,8 @@ func (c *Client) findDraftReviewChild(ctx context.Context, prBeadID string) (str
 	for _, id := range childIDs {
 		isChild[id] = struct{}{}
 	}
-	out, err := c.Runner.Run(ctx,
+	out, err := c.Runner.Run(
+		ctx,
 		"list",
 		"--type=task",
 		"--all", // include closed — required for no-resurrection

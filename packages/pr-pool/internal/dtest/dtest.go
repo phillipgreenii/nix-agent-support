@@ -14,8 +14,10 @@ import (
 )
 
 // Ensure the fakes satisfy their interfaces at compile time.
-var _ ccpool.Runner = (*FakeCC)(nil)
-var _ beads.Runner = (*ScriptBD)(nil)
+var (
+	_ ccpool.Runner = (*FakeCC)(nil)
+	_ beads.Runner  = (*ScriptBD)(nil)
+)
 
 // TestStamp is the fixed per-attempt stamp injected in tests so external_ids are
 // deterministic.
@@ -65,6 +67,7 @@ func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _, meta
 	f.EnsuredMeta = meta
 	return f.EnsureErr
 }
+
 func (f *FakeCC) Send(_ context.Context, externalID, _ string, _ ccpool.SendMode) error {
 	f.Sent = append(f.Sent, externalID)
 	return f.SendErr
@@ -75,6 +78,7 @@ func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 	f.ClosedPurge = append(f.ClosedPurge, purge)
 	return nil
 }
+
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

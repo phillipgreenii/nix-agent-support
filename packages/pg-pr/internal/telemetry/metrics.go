@@ -57,41 +57,68 @@ var (
 	)
 
 	FingerprintPollDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{Name: "pg_pr_fingerprint_poll_duration_seconds",
-			Help: "Fingerprint poll latency by group.", Buckets: prometheus.DefBuckets},
-		[]string{"group"})
+		prometheus.HistogramOpts{
+			Name: "pg_pr_fingerprint_poll_duration_seconds",
+			Help: "Fingerprint poll latency by group.", Buckets: prometheus.DefBuckets,
+		},
+		[]string{"group"},
+	)
 
 	FingerprintPollErrorsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "pg_pr_fingerprint_poll_errors_total",
-			Help: "Fingerprint poll errors by group."}, []string{"group"})
+		prometheus.CounterOpts{
+			Name: "pg_pr_fingerprint_poll_errors_total",
+			Help: "Fingerprint poll errors by group.",
+		}, []string{"group"},
+	)
 
 	FingerprintPollTruncatedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "pg_pr_fingerprint_poll_truncated_total",
-			Help: "Fingerprint polls that hit the page cap (incomplete roster)."}, []string{"group"})
+		prometheus.CounterOpts{
+			Name: "pg_pr_fingerprint_poll_truncated_total",
+			Help: "Fingerprint polls that hit the page cap (incomplete roster).",
+		}, []string{"group"},
+	)
 
 	FingerprintPollSuccessTimestamp = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{Name: "pg_pr_fingerprint_poll_success_timestamp_seconds",
-			Help: "Unix time of last successful fingerprint poll by group."}, []string{"group"})
+		prometheus.GaugeOpts{
+			Name: "pg_pr_fingerprint_poll_success_timestamp_seconds",
+			Help: "Unix time of last successful fingerprint poll by group.",
+		}, []string{"group"},
+	)
 
 	FingerprintChangesTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "pg_pr_fingerprint_changes_total",
-			Help: "Detected changes by group and kind."}, []string{"group", "kind"})
+		prometheus.CounterOpts{
+			Name: "pg_pr_fingerprint_changes_total",
+			Help: "Detected changes by group and kind.",
+		}, []string{"group", "kind"},
+	)
 
 	RefreshQueueDepth = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{Name: "pg_pr_refresh_queue_depth",
-			Help: "Current refresh queue depth by group."}, []string{"group"})
+		prometheus.GaugeOpts{
+			Name: "pg_pr_refresh_queue_depth",
+			Help: "Current refresh queue depth by group.",
+		}, []string{"group"},
+	)
 
 	RefreshEnqueuedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "pg_pr_refresh_enqueued_total",
-			Help: "PRs enqueued for refresh by group."}, []string{"group"})
+		prometheus.CounterOpts{
+			Name: "pg_pr_refresh_enqueued_total",
+			Help: "PRs enqueued for refresh by group.",
+		}, []string{"group"},
+	)
 
 	GraphQLCost = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{Name: "pg_pr_graphql_cost",
-			Help: "Last fingerprint query point cost by group."}, []string{"group"})
+		prometheus.GaugeOpts{
+			Name: "pg_pr_graphql_cost",
+			Help: "Last fingerprint query point cost by group.",
+		}, []string{"group"},
+	)
 
 	GraphQLRateRemaining = prometheus.NewGauge(
-		prometheus.GaugeOpts{Name: "pg_pr_graphql_rate_remaining",
-			Help: "GraphQL rate-limit points remaining."})
+		prometheus.GaugeOpts{
+			Name: "pg_pr_graphql_rate_remaining",
+			Help: "GraphQL rate-limit points remaining.",
+		},
+	)
 
 	SnapshotPresent = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "pg_pr_snapshot_present",
@@ -99,8 +126,11 @@ var (
 	})
 
 	GHAuthFailuresTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{Name: "pg_pr_gh_auth_failures_total",
-			Help: "gh auth failures by stage (preflight|poll)."}, []string{"stage"})
+		prometheus.CounterOpts{
+			Name: "pg_pr_gh_auth_failures_total",
+			Help: "gh auth failures by stage (preflight|poll).",
+		}, []string{"stage"},
+	)
 )
 
 func init() {

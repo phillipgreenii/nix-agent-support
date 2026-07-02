@@ -9,9 +9,9 @@ import (
 type RowKind int
 
 const (
-	SessionKind RowKind = iota
-	BlankKind           // blank separator line after each directory group
-	PathNodeKind        // collapsible path tree node
+	SessionKind  RowKind = iota
+	BlankKind            // blank separator line after each directory group
+	PathNodeKind         // collapsible path tree node
 )
 
 // Row is one logical element in the rendered session list.

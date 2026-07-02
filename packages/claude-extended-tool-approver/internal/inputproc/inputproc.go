@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-const envKey = "CETA_INPUT_PROCESSOR"
-const timeout = 3 * time.Second
+const (
+	envKey  = "CETA_INPUT_PROCESSOR"
+	timeout = 3 * time.Second
+)
 
 // Configured returns true if an input processor command is set.
 func Configured() bool {

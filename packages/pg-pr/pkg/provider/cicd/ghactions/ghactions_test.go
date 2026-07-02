@@ -207,7 +207,8 @@ func TestRerunFailed_PicksLatestFailedRun(t *testing.T) {
 func TestRerunFailed_NoFailedRuns(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(
-		`[{"databaseId":1,"status":"completed","conclusion":"success","headBranch":"f"}]`)
+		`[{"databaseId":1,"status":"completed","conclusion":"success","headBranch":"f"}]`,
+	)
 	p := NewWithDeps(gh, &fakePR{branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar", 42); err == nil {
 		t.Fatalf("expected error when no failed runs")

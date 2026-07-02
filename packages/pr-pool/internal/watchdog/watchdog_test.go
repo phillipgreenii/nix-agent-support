@@ -37,6 +37,7 @@ type fakeCC struct {
 func (f *fakeCC) Ensure(context.Context, string, string, string, map[string]string, map[string]string) error {
 	return nil
 }
+
 func (f *fakeCC) Send(_ context.Context, _, prompt string, m ccpool.SendMode) error {
 	flag := "queue"
 	f.sent = append(f.sent, flag+":"+prompt)
@@ -62,6 +63,7 @@ func (r *recBD) Run(_ context.Context, args ...string) (string, error) {
 	r.calls = append(r.calls, out)
 	return "", nil
 }
+
 func (r *recBD) has(s string) bool {
 	for _, c := range r.calls {
 		if c == s {

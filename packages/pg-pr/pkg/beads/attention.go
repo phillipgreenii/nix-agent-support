@@ -55,7 +55,8 @@ func (c *Client) EnsureAttentionBead(ctx context.Context, prBeadID, title string
 		title = prBeadID
 	}
 	fullTitle := attentionTitlePrefix + title
-	out, err := c.Runner.Run(ctx,
+	out, err := c.Runner.Run(
+		ctx,
 		"create",
 		"--type=task",
 		"--title", fullTitle,
@@ -72,7 +73,8 @@ func (c *Client) EnsureAttentionBead(ctx context.Context, prBeadID, title string
 	}
 	// Wire parent-child: the attention bead depends on (is a child of) the
 	// merge-request bead — so cascadeClose closes it on PR close/merge.
-	if _, err := c.Runner.Run(ctx,
+	if _, err := c.Runner.Run(
+		ctx,
 		"dep", "add", id, prBeadID,
 		"--type=parent-child",
 		"--no-cycle-check",
@@ -116,7 +118,8 @@ func (c *Client) findOpenAttentionChild(ctx context.Context, prBeadID string) (s
 	for _, id := range childIDs {
 		isChild[id] = struct{}{}
 	}
-	out, err := c.Runner.Run(ctx,
+	out, err := c.Runner.Run(
+		ctx,
 		"list",
 		"--type=task",
 		"--status=open", // OPEN only — attention re-opens after a not-needed window

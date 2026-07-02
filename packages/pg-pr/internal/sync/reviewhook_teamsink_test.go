@@ -76,8 +76,10 @@ func TestReviewHookCycle_DefaultTeamSink_PostsPendingReview(t *testing.T) {
 
 	bdc := newFakeReviewBeads()
 	bdc.ready = []beads.DraftReviewRef{{ID: "dr-team", Repo: "o/r", Number: 8, Mine: false}}
-	sp := &draftSpawner{headSHA: "h9", reviewsDir: dir, body: "team review body",
-		comments: []api.Comment{{Path: "x.go", Line: 2, Body: "nit"}}}
+	sp := &draftSpawner{
+		headSHA: "h9", reviewsDir: dir, body: "team review body",
+		comments: []api.Comment{{Path: "x.go", Line: 2, Body: "nit"}},
+	}
 	rv := &reviewerVCS{fakeVCS: newFakeVCS()}
 	e := newReviewHookEngineTeamDefault(t, bdc, sp, rv, db, dir, []config.RepoConfig{{Remote: "o/r"}})
 

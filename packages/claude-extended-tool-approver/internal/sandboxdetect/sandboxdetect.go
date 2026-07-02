@@ -25,9 +25,9 @@ type settingsShape struct {
 // Detect returns true if the merged Claude Code settings have
 // sandbox.enabled = true. Precedence (later wins):
 //
-//	1. ~/.claude/settings.json
-//	2. <projectDir>/.claude/settings.json
-//	3. <projectDir>/.claude/settings.local.json
+//  1. ~/.claude/settings.json
+//  2. <projectDir>/.claude/settings.json
+//  3. <projectDir>/.claude/settings.local.json
 //
 // projectDir should be CLAUDE_PROJECT_DIR (or the hook's CWD as a fallback).
 // Missing files, parse errors, and unset fields are all treated as "no
@@ -40,7 +40,8 @@ func Detect(projectDir string) bool {
 		candidates = append(candidates, filepath.Join(home, ".claude", "settings.json"))
 	}
 	if projectDir != "" {
-		candidates = append(candidates,
+		candidates = append(
+			candidates,
 			filepath.Join(projectDir, ".claude", "settings.json"),
 			filepath.Join(projectDir, ".claude", "settings.local.json"),
 		)

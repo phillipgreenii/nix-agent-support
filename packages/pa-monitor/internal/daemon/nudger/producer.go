@@ -53,8 +53,10 @@ type SessionWatermark struct {
 // WindowResetProducer, DisruptProducer, ManualProducer are concrete
 // producers; their reconcile bodies live in their own files. Empty
 // declarations here so the interface assertions compile.
-type WindowResetProducer struct{}
-type DisruptProducer struct {
-	firstSeen map[string]time.Time // sid -> when this disrupt was first observed
-}
+type (
+	WindowResetProducer struct{}
+	DisruptProducer     struct {
+		firstSeen map[string]time.Time // sid -> when this disrupt was first observed
+	}
+)
 type ManualProducer struct{}

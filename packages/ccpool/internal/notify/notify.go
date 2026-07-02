@@ -34,7 +34,8 @@ func (e Exec) Notify(ev Event) error {
 		return nil
 	}
 	cmd := exec.Command(e.Argv[0], e.Argv[1:]...)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"CCPOOL_NAME="+ev.Name,
 		"CCPOOL_UUID="+ev.UUID,
 		"CCPOOL_STATE="+ev.State,

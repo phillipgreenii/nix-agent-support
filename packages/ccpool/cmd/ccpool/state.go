@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/state"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // runState computes and prints the RECONCILED state of one session — a live,

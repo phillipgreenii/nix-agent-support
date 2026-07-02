@@ -98,8 +98,10 @@ func (db *DB) RecordRevision(ctx context.Context, prID int64, headSHA, baseSHA s
 		}
 		id, _ := res.LastInsertId()
 		appended = true
-		result = Revision{ID: id, PRID: prID, Seq: seq, HeadSHA: headSHA,
-			BaseSHA: baseSHA, ObservedAt: now, LastSeenAt: now, CIState: "none"}
+		result = Revision{
+			ID: id, PRID: prID, Seq: seq, HeadSHA: headSHA,
+			BaseSHA: baseSHA, ObservedAt: now, LastSeenAt: now, CIState: "none",
+		}
 		return nil
 	})
 	return result, appended, err

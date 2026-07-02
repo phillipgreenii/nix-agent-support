@@ -29,9 +29,11 @@ func (f *fakeDepBeads) FindByRepoAndNumber(_ context.Context, _ string, _ int) (
 	}
 	return &beads.MergeRequest{ID: f.mrID}, nil
 }
+
 func (f *fakeDepBeads) DepTreeUp(_ context.Context, _ string) ([]beads.DepNode, error) {
 	return f.deps, nil
 }
+
 func (f *fakeDepBeads) HumanLabeledBeads(_ context.Context) (map[string]bool, error) {
 	return f.human, nil
 }
@@ -283,9 +285,11 @@ func (f *outboxFakeBeads) CloseMergeRequest(context.Context, string, string) err
 func (f *outboxFakeBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
 	return nil, nil
 }
+
 func (f *outboxFakeBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
+
 func (f *outboxFakeBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
 	return "", false, nil
 }
@@ -303,6 +307,7 @@ func (f *outboxFakeBeads) HumanLabeledBeads(_ context.Context) (map[string]bool,
 func (f *outboxFakeBeads) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
+
 func (f *outboxFakeBeads) EnsureAttentionBead(context.Context, string, string) (string, error) {
 	return "", nil
 }

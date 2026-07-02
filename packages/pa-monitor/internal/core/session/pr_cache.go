@@ -12,7 +12,7 @@ import (
 const prNotFoundTTL = 5 * time.Minute
 
 type cacheEntry struct {
-	PR        *PRInfo   `json:"pr"`        // nil = not found
+	PR        *PRInfo   `json:"pr"` // nil = not found
 	FetchedAt time.Time `json:"fetchedAt"`
 }
 

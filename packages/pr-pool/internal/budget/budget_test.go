@@ -8,9 +8,11 @@ import (
 )
 
 func mk(tok, cost Limit, tm time.Duration) Budget {
-	return Budget{Tokens: tok, Cost: cost, Time: tm,
+	return Budget{
+		Tokens: tok, Cost: cost, Time: tm,
 		Thresholds: Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
-		Prices:     usage.PriceTable{"_default": {OutputPerMTok: 75}}}
+		Prices:     usage.PriceTable{"_default": {OutputPerMTok: 75}},
+	}
 }
 
 func TestLimitUnlimited(t *testing.T) {

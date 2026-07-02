@@ -204,7 +204,7 @@ func (r *Rule) evaluateNixEnv(args []string) hookio.RuleResult {
 var nixStoreReadOnly = map[string]bool{
 	"--query": true, "-q": true,
 	"--print-env": true,
-	"--verify": true, "--verify-path": true,
+	"--verify":    true, "--verify-path": true,
 	"--dump": true, "--export": true,
 	"--read-log": true, "-l": true,
 	"--dump-db": true,

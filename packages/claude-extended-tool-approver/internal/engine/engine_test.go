@@ -16,7 +16,7 @@ type mockRule struct {
 	reason   string
 }
 
-func (m *mockRule) Name() string                { return m.name }
+func (m *mockRule) Name() string { return m.name }
 func (m *mockRule) Evaluate(*hookio.HookInput) hookio.RuleResult {
 	return hookio.RuleResult{Decision: m.decision, Reason: m.reason, Module: m.name}
 }

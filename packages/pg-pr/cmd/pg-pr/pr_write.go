@@ -533,8 +533,10 @@ var prDraftCmd = &cobra.Command{
 // humanOnlyWarning is printed to stderr before any human-only mutation
 // (automerge on/off, merge). It is constant text so callers (humans + tests)
 // can assert on it.
-const humanOnlyWarning = "WARNING: automerge is a human-only verb. Agents must not invoke this.\n"
-const humanOnlyMergeWarning = "WARNING: merge is a human-only verb. Agents must not invoke this.\n"
+const (
+	humanOnlyWarning      = "WARNING: automerge is a human-only verb. Agents must not invoke this.\n"
+	humanOnlyMergeWarning = "WARNING: merge is a human-only verb. Agents must not invoke this.\n"
+)
 
 var prAutomergeCmd = &cobra.Command{
 	Use:   "automerge",

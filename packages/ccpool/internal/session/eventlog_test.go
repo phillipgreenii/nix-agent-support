@@ -120,13 +120,19 @@ func TestReap_evictionTearsDownTmux_noFabricatedTransition(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	// One stale (idle past TTL) and one fresh session, both live and resumable so
 	// the prune pass leaves them alone (eviction is by TTL, not prune).
-	_ = st.Insert(ctx, store.Session{ExternalID: "stale", ClaudeSessionID: "u-stale", Name: "stale", State: store.Ready,
-		TmuxSession: "cc-stale", LastActivityAt: now.Unix() - 7200})
-	_ = st.Insert(ctx, store.Session{ExternalID: "fresh", ClaudeSessionID: "u-fresh", Name: "fresh", State: store.Ready,
-		TmuxSession: "cc-fresh", LastActivityAt: now.Unix() - 10})
+	_ = st.Insert(ctx, store.Session{
+		ExternalID: "stale", ClaudeSessionID: "u-stale", Name: "stale", State: store.Ready,
+		TmuxSession: "cc-stale", LastActivityAt: now.Unix() - 7200,
+	})
+	_ = st.Insert(ctx, store.Session{
+		ExternalID: "fresh", ClaudeSessionID: "u-fresh", Name: "fresh", State: store.Ready,
+		TmuxSession: "cc-fresh", LastActivityAt: now.Unix() - 10,
+	})
 	tm := &reapTmux{live: map[string]bool{"cc-stale": true, "cc-fresh": true}, closed: map[string]bool{}}
-	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true},
-		Events: el, Now: func() time.Time { return now }})
+	s := New(Deps{
+		Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true},
+		Events: el, Now: func() time.Time { return now },
+	})
 
 	if err := s.Reap(ctx, 2, time.Hour); err != nil {
 		t.Fatalf("Reap: %v", err)

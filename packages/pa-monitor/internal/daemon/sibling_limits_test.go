@@ -32,11 +32,13 @@ func TestSiblingLimitsSource_NewestAcrossFilesByTS(t *testing.T) {
 	home := t.TempDir()
 	// Two different sessions (different session_id, different project dirs) — the
 	// reader must ignore session_id and pick purely by ts.
-	writeStatusFile(t, home, "-proj-a", "sess-a.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj-a", "sess-a.status.jsonl",
 		`{"ts":1700000000,"session_id":"sess-a","five_hour_pct":10,"five_hour_resets_at":1782958200}`,
 		`{"ts":1700000100,"session_id":"sess-a","five_hour_pct":20,"five_hour_resets_at":1782958200}`,
 	)
-	writeStatusFile(t, home, "-proj-b", "sess-b.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj-b", "sess-b.status.jsonl",
 		`{"ts":1700000200,"session_id":"sess-b","five_hour_pct":34,"five_hour_resets_at":1782958999,"seven_day_pct":5,"seven_day_resets_at":1783000000}`,
 	)
 
@@ -71,7 +73,8 @@ func TestSiblingLimitsSource_NewestAcrossFilesByTS(t *testing.T) {
 func TestSiblingLimitsSource_AbsentFieldsStayUnknown(t *testing.T) {
 	home := t.TempDir()
 	// Only five_hour present (the Phase 0 seven_day-absent case).
-	writeStatusFile(t, home, "-proj", "s.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj", "s.status.jsonl",
 		`{"ts":1700000000,"session_id":"s","five_hour_pct":34,"five_hour_resets_at":1782958200}`,
 	)
 	src := &SiblingLimitsSource{ClaudeHome: home}
@@ -94,7 +97,8 @@ func TestSiblingLimitsSource_AbsentFieldsStayUnknown(t *testing.T) {
 // real reading, not "unknown".
 func TestSiblingLimitsSource_RealZeroDistinctFromUnknown(t *testing.T) {
 	home := t.TempDir()
-	writeStatusFile(t, home, "-proj", "s.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj", "s.status.jsonl",
 		`{"ts":1700000000,"session_id":"s","seven_day_pct":0}`,
 	)
 	src := &SiblingLimitsSource{ClaudeHome: home}
@@ -116,10 +120,12 @@ func TestSiblingLimitsSource_RealZeroDistinctFromUnknown(t *testing.T) {
 // result must be one whole record (not a mix).
 func TestSiblingLimitsSource_EqualTSTiebreak(t *testing.T) {
 	home := t.TempDir()
-	writeStatusFile(t, home, "-proj-a", "a.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj-a", "a.status.jsonl",
 		`{"ts":1700000000,"session_id":"a","five_hour_pct":10}`,
 	)
-	writeStatusFile(t, home, "-proj-b", "b.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj-b", "b.status.jsonl",
 		`{"ts":1700000000,"session_id":"b","five_hour_pct":20}`,
 	)
 	src := &SiblingLimitsSource{ClaudeHome: home}
@@ -154,10 +160,12 @@ func TestSiblingLimitsSource_EmptyDir(t *testing.T) {
 func TestSiblingLimitsSource_IgnoresTranscripts(t *testing.T) {
 	home := t.TempDir()
 	// A transcript that happens to contain a "ts" — must be ignored.
-	writeStatusFile(t, home, "-proj", "s.jsonl",
+	writeStatusFile(
+		t, home, "-proj", "s.jsonl",
 		`{"ts":9999999999,"type":"user"}`,
 	)
-	writeStatusFile(t, home, "-proj", "s.status.jsonl",
+	writeStatusFile(
+		t, home, "-proj", "s.status.jsonl",
 		`{"ts":1700000000,"session_id":"s","five_hour_pct":34}`,
 	)
 	src := &SiblingLimitsSource{ClaudeHome: home}

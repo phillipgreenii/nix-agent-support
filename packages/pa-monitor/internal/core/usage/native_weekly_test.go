@@ -17,8 +17,8 @@ func TestCurrentWeeklyCost(t *testing.T) {
 	monday := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
 	recs := []Record{
 		// In-week: Monday and Wednesday.
-		{Timestamp: monday.Add(time.Hour), Model: "claude-opus-4-7", Tokens: ModelTokens{Output: 1_000_000}},   // $25
-		{Timestamp: now.Add(-time.Hour), Model: "claude-sonnet-4-6", Tokens: ModelTokens{Output: 1_000_000}},   // $15
+		{Timestamp: monday.Add(time.Hour), Model: "claude-opus-4-7", Tokens: ModelTokens{Output: 1_000_000}}, // $25
+		{Timestamp: now.Add(-time.Hour), Model: "claude-sonnet-4-6", Tokens: ModelTokens{Output: 1_000_000}}, // $15
 		// Previous week — excluded.
 		{Timestamp: monday.Add(-24 * time.Hour), Model: "claude-opus-4-7", Tokens: ModelTokens{Output: 4_000_000}}, // $100 excluded
 	}

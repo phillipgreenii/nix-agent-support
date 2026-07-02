@@ -16,9 +16,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
@@ -266,7 +266,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// migration, the WatermarkStore sees an absent file (empty state) rather
 	// than the stale JSON. Best-effort — log the error but continue startup.
 	if opts.RuntimePath != "" && opts.WriteService != nil {
-		if err := MigrateRuntimeJSON(ctx, opts.RuntimePath,
+		if err := MigrateRuntimeJSON(
+			ctx, opts.RuntimePath,
 			opts.WriteService.Toggles(),
 			opts.WriteService.Nudges(),
 			opts.WriteService.Sessions(),

@@ -120,7 +120,8 @@ func (t *Tx) UpsertFeedback(f Feedback) (int64, error) {
 		f.Status = "new"
 	}
 	now := nowRFC3339()
-	_, err := t.Exec(`
+	_, err := t.Exec(
+		`
 INSERT INTO feedback
   (pr_id, kind, external_id, fingerprint, status, title, body,
    subject_sha, first_seen_head_sha, is_outdated, is_minimized, minimized_reason,
@@ -340,7 +341,8 @@ func (t *Tx) ReplaceMessages(feedbackID int64, msgs []Message) error {
 		if m.ExternalID == "" {
 			return fmt.Errorf("store: ReplaceMessages: message missing external_id (feedback=%d)", feedbackID)
 		}
-		_, err := t.Exec(`
+		_, err := t.Exec(
+			`
 INSERT INTO code_comment_message
   (feedback_id, external_id, author_login, author_kind, agent_name, is_ours, author_role, body, posted_at)
 VALUES (?,?,?,?,?,?,?,?,?)

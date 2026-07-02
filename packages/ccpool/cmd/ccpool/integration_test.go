@@ -23,7 +23,8 @@ func buildCCPool(t *testing.T) string {
 func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"XDG_DATA_HOME="+xdgData,
 		"XDG_STATE_HOME="+xdgState,
 		"XDG_CONFIG_HOME="+filepath.Join(xdgData, "..", "cfg"),

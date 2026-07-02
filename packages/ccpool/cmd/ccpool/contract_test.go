@@ -232,7 +232,8 @@ func TestContract_Canary_GoldenMarkerRendersInPane(t *testing.T) {
 	marker := "CCGOLDEN" + nonce // the literal we assert; absent from the prompt below
 	canaryPrompt := fmt.Sprintf(
 		"Concatenate the text CCGOLDEN and the number %s with no space or punctuation "+
-			"between them, and reply with exactly that single token and nothing else.", nonce)
+			"between them, and reply with exactly that single token and nothing else.", nonce,
+	)
 	sb.ccp("reply", "g", canaryPrompt, "--no-wait")
 	// Poll the pane until the joined marker renders (mirrors the AskUserQuestion
 	// poll idiom: 90s deadline, 500ms sleeps).

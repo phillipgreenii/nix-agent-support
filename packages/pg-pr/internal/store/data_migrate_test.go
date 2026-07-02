@@ -160,7 +160,8 @@ func TestRunDataMigrations_FailedRunIsNotRecorded(t *testing.T) {
 	})
 
 	// Seed a feedback row so the step has something to delete.
-	_, err := db.sql.Exec(`
+	_, err := db.sql.Exec(
+		`
 		INSERT INTO feedback
 		  (pr_id, kind, fingerprint, status, title, body, file, created_at, updated_at)
 		VALUES (?, 'code-comment-thread', 'fp-atomic', 'new', '', 'body', 'f.go',
@@ -255,7 +256,8 @@ func seedLegacyPRRCRow(t *testing.T, db *DB, prID int64, prrcCommentID, fingerpr
 	}
 	// Insert message with NULL posted_at (legacy: no createdAt).
 	// The message external_id is the comment node id — same as feedback.external_id.
-	_, err = db.sql.Exec(`
+	_, err = db.sql.Exec(
+		`
 		INSERT INTO code_comment_message
 		  (feedback_id, external_id, body, posted_at)
 		VALUES (?, ?, ?, NULL)`,
@@ -289,7 +291,8 @@ func seedPRRTRow(t *testing.T, db *DB, prID int64, prrtThreadID, prrcCommentID, 
 	}
 	// The message external_id is the original comment node id (PRRC_).
 	// This is the overlap the migration exploits to pair PRRC and PRRT rows.
-	_, err = db.sql.Exec(`
+	_, err = db.sql.Exec(
+		`
 		INSERT INTO code_comment_message
 		  (feedback_id, external_id, body, posted_at)
 		VALUES (?, ?, ?, ?)`,
@@ -386,7 +389,8 @@ func TestMigration0001_BackfillsPostedAt(t *testing.T) {
 
 	// Insert a feedback row with a known created_at so we can verify the backfill.
 	const knownCreatedAt = "2024-03-01T08:00:00Z"
-	_, err := db.sql.Exec(`
+	_, err := db.sql.Exec(
+		`
 		INSERT INTO feedback
 		  (pr_id, kind, fingerprint, status, title, body, file, created_at, updated_at)
 		VALUES (?, 'code-comment-thread', 'fp-backfill', 'new', '', 'body', 'f.go', ?, ?)`,
@@ -399,7 +403,8 @@ func TestMigration0001_BackfillsPostedAt(t *testing.T) {
 	_ = db.sql.QueryRow("SELECT id FROM feedback WHERE fingerprint='fp-backfill'").Scan(&fbID)
 
 	// Insert message with NULL posted_at.
-	_, err = db.sql.Exec(`
+	_, err = db.sql.Exec(
+		`
 		INSERT INTO code_comment_message
 		  (feedback_id, external_id, body, posted_at)
 		VALUES (?, 'ext-backfill', 'msg', NULL)`,
@@ -440,7 +445,8 @@ func TestMigration0001_DoesNotOverwriteExistingPostedAt(t *testing.T) {
 	const origCreatedAt = "2024-01-01T00:00:00Z"
 	const existingPostedAt = "2024-01-10T12:00:00Z"
 
-	_, err := db.sql.Exec(`
+	_, err := db.sql.Exec(
+		`
 		INSERT INTO feedback
 		  (pr_id, kind, fingerprint, status, title, body, file, created_at, updated_at)
 		VALUES (?, 'code-comment-thread', 'fp-existing', 'new', '', 'body', 'f.go', ?, ?)`,
@@ -452,7 +458,8 @@ func TestMigration0001_DoesNotOverwriteExistingPostedAt(t *testing.T) {
 	var fbID int64
 	_ = db.sql.QueryRow("SELECT id FROM feedback WHERE fingerprint='fp-existing'").Scan(&fbID)
 
-	_, err = db.sql.Exec(`
+	_, err = db.sql.Exec(
+		`
 		INSERT INTO code_comment_message
 		  (feedback_id, external_id, body, posted_at)
 		VALUES (?, 'ext-existing', 'msg', ?)`,

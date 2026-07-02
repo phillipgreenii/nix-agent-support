@@ -3,9 +3,9 @@ package aggregate
 import (
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 type SessionEnrichment struct {

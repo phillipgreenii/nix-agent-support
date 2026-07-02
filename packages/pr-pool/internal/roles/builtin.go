@@ -39,8 +39,10 @@ func BuiltinRoleSet(p BuiltinParams) RoleSet {
 	return RoleSet{
 		{
 			Name: "feedback", Type: "ccpool", Cap: p.MaxFeedback, Enabled: true,
-			Query: query.BeadsReady{Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
-				TitlePrefix: "process-feedback:", ItemType: "task"},
+			Query: query.BeadsReady{
+				Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
+				TitlePrefix: "process-feedback:", ItemType: "task",
+			},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__process-feedback", SkillMD: p.SkillMD,
 				Completion: CloseOnly, OnFailure: Unclaim, OnDispatchFail: DispatchUnclaim,

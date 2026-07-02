@@ -127,7 +127,8 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 // env + runtime attrs), degrading to a schemaless resource if detection
 // fails. service.name comes from OTEL_SERVICE_NAME, else serviceName.
 func buildResource(ctx context.Context, serviceName, version string) *resource.Resource {
-	res, err := resource.New(ctx,
+	res, err := resource.New(
+		ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(envOr("OTEL_SERVICE_NAME", serviceName)),
 			semconv.ServiceVersion(version),

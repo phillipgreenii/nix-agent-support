@@ -20,7 +20,9 @@ import (
 type transcriptAdapter struct{}
 
 func (transcriptAdapter) LastAssistantText(p string) (string, error) { return ct.LastAssistantText(p) }
-func (transcriptAdapter) IsAwaitingInput(p string) (bool, error)     { return ct.IsAwaitingInput(p) }
+
+func (transcriptAdapter) IsAwaitingInput(p string) (bool, error) { return ct.IsAwaitingInput(p) }
+
 func (transcriptAdapter) FirstMessageActivity(p string) (time.Time, bool) {
 	return ct.LastMessageActivity(p)
 }

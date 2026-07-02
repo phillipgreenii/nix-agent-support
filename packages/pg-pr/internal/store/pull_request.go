@@ -124,7 +124,8 @@ func (t *Tx) UpsertPR(pr PullRequest) (int64, error) {
 		return 0, errors.New("store: UpsertPR requires repo and number")
 	}
 	now := nowRFC3339()
-	_, err := t.Exec(`
+	_, err := t.Exec(
+		`
 INSERT INTO pull_request
   (repo, number, ownership, author, state, branch, base, url, head_sha, last_synced_at, created_at, updated_at)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)

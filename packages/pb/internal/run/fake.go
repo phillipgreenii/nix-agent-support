@@ -58,8 +58,10 @@ func (f *FakeRunner) Calls() []Call {
 	return out
 }
 
-var _ Runner = (*FakeRunner)(nil)
-var _ Runner = CLIRunner{}
+var (
+	_ Runner = (*FakeRunner)(nil)
+	_ Runner = CLIRunner{}
+)
 
 func argsEqual(a, b []string) bool {
 	if len(a) != len(b) {

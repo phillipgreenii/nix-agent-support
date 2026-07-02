@@ -29,9 +29,9 @@ import (
 	"fmt"
 	"time"
 
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/pane"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // State is the reconciled vocabulary (distinct from store.State, which is the
@@ -182,6 +182,7 @@ func ClassifyFrame(f1, f2, f3 string, nFrames int) PaneVerdict {
 //  7. settled + row Failed                    -> error
 //  8. settled + row Starting                  -> working/thinking (launching)
 //  9. settled + registry Idle                 -> idle (positive idle confirmation)
+//
 // 10. else                                    -> idle
 func Classify(in Inputs) Result {
 	res := Result{Name: in.Name, Live: in.Live, LastKnown: in.Row.State}

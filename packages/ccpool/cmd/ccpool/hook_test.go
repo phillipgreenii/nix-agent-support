@@ -26,10 +26,12 @@ func openTestStore(t *testing.T) (*store.Store, string) {
 	return st, dbPath
 }
 
-const startPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
-const stopPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop","stop_hook_active":false}`
-const failPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop"}`
-const notifyPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Notification"}`
+const (
+	startPayload  = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","cwd":"/tmp/x","hook_event_name":"SessionStart","source":"startup"}`
+	stopPayload   = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop","stop_hook_active":false}`
+	failPayload   = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Stop"}`
+	notifyPayload = `{"session_id":"csid-x","transcript_path":"/p/csid-x.jsonl","hook_event_name":"Notification"}`
+)
 
 // TestHook_start_resolvesByClaudeSessionID_setsReady: payload session_id matches
 // an existing row's claude_session_id → row transitions to Ready.

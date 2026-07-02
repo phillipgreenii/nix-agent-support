@@ -36,7 +36,8 @@ func writeAPIErrorTranscript(t *testing.T, kind ct.ErrorKind, text string) strin
 	line := fmt.Sprintf(
 		`{"type":"assistant","timestamp":"%s","error":%q,"isApiErrorMessage":true,`+
 			`"message":{"model":"<synthetic>","content":[{"type":"text","text":%q}]}}`+"\n",
-		ts.Format(time.RFC3339Nano), string(kind), text)
+		ts.Format(time.RFC3339Nano), string(kind), text,
+	)
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
 		t.Fatal(err)

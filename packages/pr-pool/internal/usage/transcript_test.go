@@ -15,6 +15,7 @@ func writeJSONL(t *testing.T, lines ...string) string {
 	}
 	return p
 }
+
 func joinLines(ls []string) string {
 	out := ""
 	for _, l := range ls {
@@ -24,7 +25,8 @@ func joinLines(ls []string) string {
 }
 
 func TestTranscriptReader_assistantOnlyCumulative(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"cache_creation_input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":50}}}`,
 		`{"type":"user","message":{"usage":{"input_tokens":99999,"output_tokens":99999}}}`, // STRAY usage — must be excluded
 		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":2000,"output_tokens":80}}}`,
@@ -50,7 +52,8 @@ func TestTranscriptReader_assistantOnlyCumulative(t *testing.T) {
 // transcripts: e.g. msg_01Akq… appears 5× with identical usage.)
 func TestTranscriptReader_dedupesByMessageID(t *testing.T) {
 	const line = `{"type":"assistant","message":{"id":"msg_A","model":"claude-opus-4-8","usage":{"input_tokens":1,"cache_creation_input_tokens":4856,"cache_read_input_tokens":146385,"output_tokens":557}}}`
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		line, line, line, line, line, // one 5-block turn, repeated usage
 		`{"type":"assistant","message":{"id":"msg_B","model":"claude-opus-4-8","usage":{"input_tokens":2,"output_tokens":3}}}`, // a second distinct turn
 	)
@@ -68,7 +71,8 @@ func TestTranscriptReader_dedupesByMessageID(t *testing.T) {
 // Lines without a message id (older transcripts) must still each be counted —
 // dedupe applies only to non-empty ids, preserving per-turn summing.
 func TestTranscriptReader_noIDStillSums(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":50}}}`,
 		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":200,"output_tokens":80}}}`,
 	)

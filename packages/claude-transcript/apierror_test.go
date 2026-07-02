@@ -15,7 +15,8 @@ func apiErrorEvent(ts time.Time, kind ErrorKind, text string) string {
 	return fmt.Sprintf(
 		`{"type":"assistant","timestamp":"%s","error":%q,"isApiErrorMessage":true,`+
 			`"message":{"model":"<synthetic>","content":[{"type":"text","text":%q}]}}`,
-		ts.UTC().Format(time.RFC3339Nano), string(kind), text)
+		ts.UTC().Format(time.RFC3339Nano), string(kind), text,
+	)
 }
 
 // TestRetryClass_taxonomy covers every row of the spec's classification

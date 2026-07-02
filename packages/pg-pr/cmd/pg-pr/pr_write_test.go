@@ -64,6 +64,7 @@ func (f *writeFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { re
 func (f *writeFakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
 	return nil, nil
 }
+
 func (f *writeFakeVCS) CreatePR(_ context.Context, repo string, draft bool, title, body, head, base string, reviewers, labels []string) (*api.PR, error) {
 	f.createCalls = append(f.createCalls, writeCreateCall{
 		repo: repo, title: title, body: body, head: head, base: base, draft: draft,
@@ -79,32 +80,40 @@ func (f *writeFakeVCS) CreatePR(_ context.Context, repo string, draft bool, titl
 	}
 	return &api.PR{Repo: repo, Number: 1, URL: "https://example/pr/1", Branch: head, Base: base, Draft: draft}, nil
 }
+
 func (f *writeFakeVCS) UpdatePR(_ context.Context, repo string, n int, body string) error {
 	f.updateCalls = append(f.updateCalls, writeUpdateCall{repo, n, body})
 	return f.genericErr
 }
+
 func (f *writeFakeVCS) SetDraft(_ context.Context, repo string, n int, d bool) error {
 	f.setDraft = append(f.setDraft, writeSetDraftCall{repo, n, d})
 	return f.genericErr
 }
+
 func (f *writeFakeVCS) SetAutomerge(_ context.Context, repo string, n int, e bool) error {
 	f.automerge = append(f.automerge, writeAutomergeCall{repo, n, e})
 	return f.genericErr
 }
+
 func (f *writeFakeVCS) Merge(_ context.Context, repo string, n int) error {
 	f.mergeCalls = append(f.mergeCalls, writeNumCall{repo, n})
 	return f.genericErr
 }
+
 func (f *writeFakeVCS) Close(_ context.Context, repo string, n int) error {
 	f.closeCalls = append(f.closeCalls, writeNumCall{repo, n})
 	return f.genericErr
 }
+
 func (f *writeFakeVCS) ListComments(context.Context, string, int) ([]api.Comment, error) {
 	return nil, nil
 }
+
 func (f *writeFakeVCS) AddComment(context.Context, string, int, string) (*api.Comment, error) {
 	return nil, nil
 }
+
 func (f *writeFakeVCS) ReplyToThread(context.Context, string, string, string) (*api.Comment, error) {
 	return nil, nil
 }
@@ -112,6 +121,7 @@ func (f *writeFakeVCS) ResolveThread(context.Context, string, string) error { re
 func (f *writeFakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
+
 func (f *writeFakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
 	return nil, nil
 }
@@ -137,11 +147,13 @@ func (f *fakeBeadsClient) EnsureMergeRequest(_ context.Context, _ string, fields
 	}
 	return "test-bd-1", false, nil
 }
+
 func (f *fakeBeadsClient) CloseMergeRequest(_ context.Context, id, reason string) error {
 	f.closeCalls = append(f.closeCalls, id)
 	f.closeReasonLog = append(f.closeReasonLog, reason)
 	return nil
 }
+
 func (f *fakeBeadsClient) FindByRepoAndNumber(_ context.Context, repo string, n int) (*beads.MergeRequest, error) {
 	f.findRepo = repo
 	f.findNumber = n

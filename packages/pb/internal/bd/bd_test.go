@@ -47,8 +47,10 @@ func TestListGates_parsesEnvelopeAndMetadata(t *testing.T) {
 func TestCreateGate_returnsID(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("bd",
-		[]string{"-C", "/db", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
-			"--await-id", "home:repo-a:abc123", "--reason", "pn:applied gate", "--json"},
+		[]string{
+			"-C", "/db", "gate", "create", "--type=pn:applied", "--blocks", "b-1",
+			"--await-id", "home:repo-a:abc123", "--reason", "pn:applied gate", "--json",
+		},
 		run.Result{Stdout: `{"data":{"id":"g-9"},"schema_version":1}`}, nil)
 	id, err := Client{R: f}.CreateGate(context.Background(), "/db", "b-1", "pn:applied", "home:repo-a:abc123", "pn:applied gate")
 	if err != nil {

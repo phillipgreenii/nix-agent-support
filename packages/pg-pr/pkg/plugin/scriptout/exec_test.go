@@ -90,7 +90,8 @@ func helperCmdFactory(behavior string) func(ctx context.Context, name string, ar
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		cs := append([]string{"-test.run=^TestHelperProcess$", "--", name}, args...)
 		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GO_WANT_HELPER_PROCESS=1",
 			"GO_HELPER_BEHAVIOR="+behavior,
 		)

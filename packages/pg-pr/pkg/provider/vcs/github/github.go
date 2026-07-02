@@ -382,7 +382,8 @@ func (p *Provider) UpdatePR(ctx context.Context, repo string, number int, body s
 	if number <= 0 {
 		return fmt.Errorf("github: invalid PR number %d", number)
 	}
-	_, err := p.gh.RunStdin(ctx, []byte(body),
+	_, err := p.gh.RunStdin(
+		ctx, []byte(body),
 		"pr", "edit", fmt.Sprintf("%d", number),
 		"--repo", repo,
 		"--body-file", "-",
@@ -448,7 +449,8 @@ func (p *Provider) Merge(ctx context.Context, repo string, number int) error {
 	if number <= 0 {
 		return fmt.Errorf("github: invalid PR number %d", number)
 	}
-	if _, err := p.gh.Run(ctx,
+	if _, err := p.gh.Run(
+		ctx,
 		"pr", "merge", fmt.Sprintf("%d", number),
 		"--repo", repo,
 		"--squash",
@@ -466,7 +468,8 @@ func (p *Provider) Close(ctx context.Context, repo string, number int) error {
 	if number <= 0 {
 		return fmt.Errorf("github: invalid PR number %d", number)
 	}
-	if _, err := p.gh.Run(ctx,
+	if _, err := p.gh.Run(
+		ctx,
 		"pr", "close", fmt.Sprintf("%d", number),
 		"--repo", repo,
 	); err != nil {
@@ -518,7 +521,8 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 	out := make([]api.Comment, 0)
 
 	// 1. Top-level PR comments (the "issue" comment endpoint).
-	issueRaw, err := p.gh.Run(ctx,
+	issueRaw, err := p.gh.Run(
+		ctx,
 		"api",
 		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
 		"--paginate",
@@ -543,7 +547,8 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 	}
 
 	// 2. Inline / review-thread comments (the "pulls comments" endpoint).
-	reviewRaw, err := p.gh.Run(ctx,
+	reviewRaw, err := p.gh.Run(
+		ctx,
 		"api",
 		fmt.Sprintf("repos/%s/pulls/%d/comments", repo, number),
 		"--paginate",
@@ -596,7 +601,8 @@ func (p *Provider) AddComment(ctx context.Context, repo string, number int, body
 	if strings.TrimSpace(body) == "" {
 		return nil, errors.New("github: comment body is empty")
 	}
-	raw, err := p.gh.Run(ctx,
+	raw, err := p.gh.Run(
+		ctx,
 		"api",
 		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
 		"--method", "POST",
@@ -794,7 +800,8 @@ func (p *Provider) PostReview(ctx context.Context, repo string, number int, body
 		return nil, fmt.Errorf("github: marshal review payload: %w", err)
 	}
 
-	raw, err := p.gh.RunStdin(ctx, payloadJSON,
+	raw, err := p.gh.RunStdin(
+		ctx, payloadJSON,
 		"api",
 		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
 		"--method", "POST",
@@ -839,7 +846,8 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 	if number <= 0 {
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
-	raw, err := p.gh.Run(ctx,
+	raw, err := p.gh.Run(
+		ctx,
 		"pr", "view", fmt.Sprintf("%d", number),
 		"--repo", repo,
 		"--json", "reviews",

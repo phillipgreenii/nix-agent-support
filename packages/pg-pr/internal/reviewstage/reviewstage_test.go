@@ -10,8 +10,10 @@ import (
 
 func TestSaveLoadClear_Roundtrip(t *testing.T) {
 	dir := t.TempDir()
-	in := &Draft{Repo: "foo/bar", PR: 42, Body: "hi",
-		Comments: []api.Comment{{Path: "main.go", Line: 1, Body: "x"}}}
+	in := &Draft{
+		Repo: "foo/bar", PR: 42, Body: "hi",
+		Comments: []api.Comment{{Path: "main.go", Line: 1, Body: "x"}},
+	}
 	path, err := Save(dir, in)
 	if err != nil {
 		t.Fatalf("Save: %v", err)

@@ -48,7 +48,8 @@ func TestReapAll_gcAndSkip(t *testing.T) {
 	link("cc-invalid", invalid)
 	link("cc-dangling", dangling)
 
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"HOME="+base,
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
@@ -134,7 +135,8 @@ timeout = "10s"
 			"[claude]\nbin = \"" + fake + "\"\nplugin_dir = \"/unused\"\n[wait]\ntimeout = \"10s\"\n"
 	}
 
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),

@@ -5,9 +5,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // FromTree converts an aggregate.Tree (the daemon's internal state) into

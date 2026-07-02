@@ -63,7 +63,8 @@ func TestMigrate_V2EnrichmentColumns(t *testing.T) {
 	for _, col := range []string{"kind", "languages", "size", "urgency", "urgency_score", "urgency_reasons"} {
 		var cnt int
 		if err := db.sql.QueryRow(
-			"SELECT COUNT(*) FROM pragma_table_info('pull_request') WHERE name=?", col).Scan(&cnt); err != nil {
+			"SELECT COUNT(*) FROM pragma_table_info('pull_request') WHERE name=?", col,
+		).Scan(&cnt); err != nil {
 			t.Fatalf("pragma_table_info %s: %v", col, err)
 		}
 		if cnt != 1 {

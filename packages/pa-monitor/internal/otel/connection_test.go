@@ -84,8 +84,10 @@ func (s stubMetricExporter) Aggregation(k sdkmetric.InstrumentKind) sdkmetric.Ag
 }
 
 func (s stubMetricExporter) Export(context.Context, *metricdata.ResourceMetrics) error { return nil }
-func (s stubMetricExporter) ForceFlush(context.Context) error                          { return nil }
-func (s stubMetricExporter) Shutdown(context.Context) error                            { return s.shutdownErr }
+
+func (s stubMetricExporter) ForceFlush(context.Context) error { return nil }
+
+func (s stubMetricExporter) Shutdown(context.Context) error { return s.shutdownErr }
 
 // stubLogExporter implements sdklog.Exporter; same contract as above.
 type stubLogExporter struct{ shutdownErr error }

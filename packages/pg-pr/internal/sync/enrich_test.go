@@ -20,8 +20,10 @@ func TestEnrichAndStore_PersistsToRow(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	pr := api.PR{Repo: "o/r", Number: 3, Title: "fix: boom", Body: "production incident",
-		Branch: "fix/boom", Author: "me", State: "open", Additions: 20, Deletions: 5}
+	pr := api.PR{
+		Repo: "o/r", Number: 3, Title: "fix: boom", Body: "production incident",
+		Branch: "fix/boom", Author: "me", State: "open", Additions: 20, Deletions: 5,
+	}
 	if _, err := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 3, Ownership: "mine", Author: "me", State: "open"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

@@ -133,10 +133,10 @@ func New(projectRoot string) *PathEvaluator {
 		rawProjectRoot: rawProjectRoot,
 		cwd:            projectRoot,
 		home:           home,
-		xdgDataHome:   xdgData,
-		workspaceRoot: workspaceRoot,
-		gradleHome:    gradleHome,
-		tmpRoot:       tmpRoot,
+		xdgDataHome:    xdgData,
+		workspaceRoot:  workspaceRoot,
+		gradleHome:     gradleHome,
+		tmpRoot:        tmpRoot,
 	}
 }
 

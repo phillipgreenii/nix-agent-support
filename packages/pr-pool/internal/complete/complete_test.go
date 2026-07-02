@@ -64,6 +64,7 @@ func (r *recRunner) Run(_ context.Context, args ...string) (string, error) {
 	r.calls = append(r.calls, join(args))
 	return "", nil
 }
+
 func (r *recRunner) has(sub string) bool {
 	for _, c := range r.calls {
 		if c == sub {
@@ -72,6 +73,7 @@ func (r *recRunner) has(sub string) bool {
 	}
 	return false
 }
+
 func join(a []string) string {
 	s := ""
 	for i, x := range a {

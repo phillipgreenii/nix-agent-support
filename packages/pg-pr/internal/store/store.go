@@ -55,7 +55,8 @@ func OpenForTest(t interface {
 	TempDir() string
 	Cleanup(func())
 	Fatalf(string, ...any)
-}) *DB {
+},
+) *DB {
 	db, err := Open(t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatalf("OpenForTest: %v", err)

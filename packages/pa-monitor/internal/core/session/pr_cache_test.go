@@ -105,7 +105,7 @@ func TestPRCacheDifferentBranchesTreatedIndependently(t *testing.T) {
 func TestPRCacheFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.json")
 	c1 := &PRCache{
-		Path:     path,
+		Path: path,
 		LookupFn: func(_ context.Context, _, _ string) (PRInfo, bool, error) {
 			return PRInfo{Number: 99, Title: "Round trip", URL: "u"}, true, nil
 		},

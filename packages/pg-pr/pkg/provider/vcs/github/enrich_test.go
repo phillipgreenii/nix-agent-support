@@ -317,6 +317,7 @@ type fakeStdinRunner struct {
 func (f *fakeStdinRunner) Run(_ context.Context, _ ...string) ([]byte, error) {
 	return f.out, f.err
 }
+
 func (f *fakeStdinRunner) RunStdin(_ context.Context, _ []byte, _ ...string) ([]byte, error) {
 	return f.out, f.err
 }

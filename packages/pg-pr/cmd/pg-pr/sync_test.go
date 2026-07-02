@@ -30,9 +30,11 @@ func (s *stubVCS) GetPR(_ context.Context, repo string, n int) (*api.PR, error) 
 	}
 	return nil, errors.New("not found")
 }
+
 func (s *stubVCS) ListMyPRs(_ context.Context, repo string) ([]api.PR, error) {
 	return s.prs[repo], nil
 }
+
 func (s *stubVCS) ListTeamPRs(_ context.Context, _ string, _ []string) ([]api.PR, error) {
 	return nil, nil
 }
@@ -45,22 +47,28 @@ func (s *stubBeads) EnsureMergeRequest(_ context.Context, _ string, _ beads.Merg
 	s.created++
 	return "stub-1", false, nil
 }
+
 func (s *stubBeads) UpdateMergeRequest(_ context.Context, _ string, _ beads.MergeRequestFields) error {
 	return nil
 }
+
 func (s *stubBeads) CloseMergeRequest(_ context.Context, _, _ string) error {
 	s.closed++
 	return nil
 }
+
 func (s *stubBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (s *stubBeads) GetMergeRequest(_ context.Context, _ string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (s *stubBeads) CreateProcessingCycle(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", nil
 }
+
 func (s *stubBeads) FindOpenProcessingCycle(_ context.Context, _ string) (string, bool, error) {
 	return "", false, nil
 }

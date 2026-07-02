@@ -37,7 +37,8 @@ func DialPath(ctx context.Context, socket string) (*Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, "unix:"+socket,
+	conn, err := grpc.DialContext(
+		dialCtx, "unix:"+socket,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {

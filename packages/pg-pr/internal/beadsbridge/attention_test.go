@@ -22,11 +22,13 @@ type attentionClient struct {
 func (c *attentionClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return c.mr, nil
 }
+
 func (c *attentionClient) EnsureAttentionBead(_ context.Context, prBeadID, _ string) (string, error) {
 	c.ensureCalls++
 	c.lastEnsureMR = prBeadID
 	return "att-1", nil
 }
+
 func (c *attentionClient) CloseAttentionBead(_ context.Context, prBeadID, _ string) error {
 	c.closeCalls++
 	c.lastCloseMR = prBeadID

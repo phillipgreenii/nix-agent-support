@@ -32,6 +32,7 @@ func (f *reviewFakeVCS) ListMyPRs(context.Context, string) ([]api.PR, error) { r
 func (f *reviewFakeVCS) ListTeamPRs(context.Context, string, []string) ([]api.PR, error) {
 	return nil, nil
 }
+
 func (f *reviewFakeVCS) CreatePR(context.Context, string, bool, string, string, string, string, []string, []string) (*api.PR, error) {
 	return nil, nil
 }
@@ -43,10 +44,12 @@ func (f *reviewFakeVCS) Close(context.Context, string, int) error              {
 func (f *reviewFakeVCS) ListComments(context.Context, string, int) ([]api.Comment, error) {
 	return nil, nil
 }
+
 func (f *reviewFakeVCS) AddComment(_ context.Context, _ string, _ int, body string) (*api.Comment, error) {
 	f.addBody = body
 	return &api.Comment{ID: "IC_x", Body: body}, nil
 }
+
 func (f *reviewFakeVCS) ReplyToThread(_ context.Context, repo, threadID, body string) (*api.Comment, error) {
 	f.replyRepo = repo
 	f.replyThreadID = threadID
@@ -65,6 +68,7 @@ func (f *reviewFakeVCS) PostReview(_ context.Context, _ string, _ int, body stri
 	f.postedComments = comments
 	return &api.Review{ID: "RV_x", State: "pending", Body: body}, nil
 }
+
 func (f *reviewFakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
 	return nil, nil
 }

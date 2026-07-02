@@ -11,11 +11,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
-	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 func TestServer_PingReturnsTimestamp(t *testing.T) {
@@ -159,7 +159,8 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 
 func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 	t.Helper()
-	conn, err := grpc.Dial("unix:"+sockPath,
+	conn, err := grpc.Dial(
+		"unix:"+sockPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
@@ -174,8 +175,8 @@ func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 // noopSignaler is a Signaler that does nothing. Satisfies signal.Signaler.
 type noopSignaler struct{}
 
-func (noopSignaler) Name() string         { return "noop" }
-func (noopSignaler) Detect(_ int) bool    { return true }
+func (noopSignaler) Name() string               { return "noop" }
+func (noopSignaler) Detect(_ int) bool          { return true }
 func (noopSignaler) Send(_ int, _ string) error { return nil }
 
 var _ signal.Signaler = noopSignaler{}
@@ -423,7 +424,6 @@ func TestServerSetAutoResumeNudgerNil(t *testing.T) {
 		t.Fatal("expected error when watermarks is nil, got nil")
 	}
 }
-
 
 func TestServerCaffeinatePersistsToToggleStore(t *testing.T) {
 	// Setup: in-memory DB + WriteService + new test server.

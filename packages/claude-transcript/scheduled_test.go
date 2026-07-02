@@ -14,7 +14,8 @@ func scheduleWakeupEvent(ts time.Time, delaySeconds int) string {
 		`{"type":"assistant","timestamp":%q,"message":{"role":"assistant","content":`+
 			`[{"type":"text","text":"scheduling"},`+
 			`{"type":"tool_use","id":"toolu_1","name":"ScheduleWakeup","input":{"delaySeconds":%d,"prompt":"<<autonomous-loop-dynamic>>","reason":"pace"}}]}}`,
-		ts.Format(time.RFC3339Nano), delaySeconds)
+		ts.Format(time.RFC3339Nano), delaySeconds,
+	)
 }
 
 func TestPendingScheduledResume_found(t *testing.T) {

@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
-	"github.com/phillipgreenii/pa-monitor/internal/render"
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
 
 func TestModelInitialView(t *testing.T) {
@@ -185,7 +185,6 @@ func TestRowAtReturnsCorrectRow(t *testing.T) {
 		t.Error("rowAt out of bounds should return ok=false")
 	}
 }
-
 
 // TestCursorDownStopsAtLastSelectable verifies that pressing Down past the
 // last selectable row leaves the cursor on that row (does not roll past or

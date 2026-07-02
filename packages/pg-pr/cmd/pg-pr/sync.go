@@ -149,7 +149,7 @@ configured repo.`,
 			if err != nil {
 				return fmt.Errorf("invalid --interval: %w", err)
 			}
-			var base = sync.NewTextHandler()
+			base := sync.NewTextHandler()
 			if syFlags.logJSON {
 				base = sync.NewJSONHandler()
 			}

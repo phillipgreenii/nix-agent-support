@@ -394,7 +394,8 @@ func TestListComments_ValidatesInput(t *testing.T) {
 func TestAddComment_PostsToIssueEndpoint(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["api repos/foo/bar/issues/42/comments"] = []byte(
-		`{"node_id":"IC_kw","user":{"login":"phillipg"},"body":"hi"}`)
+		`{"node_id":"IC_kw","user":{"login":"phillipg"},"body":"hi"}`,
+	)
 	p := NewWithRunner(gh)
 
 	c, err := p.AddComment(context.Background(), "foo/bar", 42, "hi")
@@ -416,7 +417,8 @@ func TestAddComment_EmptyBodyRejected(t *testing.T) {
 func TestPostReview_SendsJSONPayload(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(
-		`{"node_id":"RV_kw","state":"PENDING","body":"the body"}`)
+		`{"node_id":"RV_kw","state":"PENDING","body":"the body"}`,
+	)
 	p := NewWithRunner(gh)
 
 	rev, err := p.PostReview(context.Background(), "foo/bar", 42,
@@ -659,7 +661,8 @@ func TestClose_InvokesPrClose(t *testing.T) {
 func TestReplyToThread_PostsGraphQL(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["api graphql"] = []byte(
-		`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRC_1","body":"hi","author":{"login":"phillipg"}}}}}`)
+		`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRC_1","body":"hi","author":{"login":"phillipg"}}}}}`,
+	)
 	p := NewWithRunner(gh)
 	c, err := p.ReplyToThread(context.Background(), "foo/bar", "PRRT_xxx", "hi")
 	if err != nil {

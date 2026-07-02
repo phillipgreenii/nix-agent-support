@@ -489,6 +489,7 @@ func (f *fakeFingerprintVCS) FingerprintPRs(_ context.Context, query string) (vc
 	}
 	return vcs.FingerprintResult{}, nil
 }
+
 func (f *fakeFingerprintVCS) GetPR(_ context.Context, _ string, _ int) (*api.PR, error) {
 	pr := f.getPR
 	return &pr, nil

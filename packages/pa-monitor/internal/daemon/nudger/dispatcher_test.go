@@ -57,31 +57,37 @@ func (r *fakeRecorder) RecordSuppressed(sid string, sources []Source, cause stri
 	defer r.mu.Unlock()
 	r.suppressed = append(r.suppressed, sid)
 }
+
 func (r *fakeRecorder) RecordSent(sid string, sources []Source, errorKind string, escalated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sent = append(r.sent, sid)
 }
+
 func (r *fakeRecorder) UpdateWatermarks(sid string, now time.Time, sources []Source, cause *transcript.ErrorRecord, escalated bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.watermarkOps = append(r.watermarkOps, sid)
 }
+
 func (r *fakeRecorder) AdvanceWindowResetFiredFor(at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.windowLatchOps = append(r.windowLatchOps, at)
 }
+
 func (r *fakeRecorder) RecordQueued(sid string, source Source) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.queuedOps = append(r.queuedOps, sid+":"+string(source))
 }
+
 func (r *fakeRecorder) RecordDisruptAttempt(sid string, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attemptOps = append(r.attemptOps, sid)
 }
+
 func (r *fakeRecorder) RecordSendFailed(sid string, sources []Source, errorKind, errText string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -92,8 +98,10 @@ func TestDispatcherFiresOnceAndClears(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown},
+	})
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
@@ -339,8 +347,10 @@ func TestDispatcher_RecordsSuppressed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := NewPendingStore()
 			now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
-			store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-				Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now}})
+			store.Add(NudgeIntent{
+				Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+				Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now},
+			})
 			tree := treeWith(time.Time{}, newSV("sid-1", 1234, tc.status))
 			sig := &fakeSignaler{}
 			rec := &fakeRecorder{}
@@ -380,8 +390,10 @@ func TestDispatcher_RecordsSuppressed(t *testing.T) {
 func TestDispatcher_RecordsSendFailure(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-		Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now}})
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now},
+	})
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{err: errors.New("cmux send: exit status 1")}
 	rec := &fakeRecorder{}
@@ -491,8 +503,10 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 func TestDispatcherSuppressesWaitingForHuman(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Now()
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown},
+	})
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.WaitingForHuman))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
@@ -517,8 +531,10 @@ func TestDispatcherSuppressesWaitingForHuman(t *testing.T) {
 func TestDispatcherRecordsDisruptAttemptOnSuccess(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Now()
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown},
+	})
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
@@ -535,8 +551,10 @@ func TestDispatcherRecordsDisruptAttemptOnSuccess(t *testing.T) {
 func TestDispatcherRecordsDisruptAttemptOnFailure(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Now()
-	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
-		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown}})
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown},
+	})
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{err: errors.New("no signaler")}
 	rec := &fakeRecorder{}

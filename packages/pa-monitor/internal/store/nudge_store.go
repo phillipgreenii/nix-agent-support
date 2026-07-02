@@ -9,14 +9,14 @@ import (
 // Sources is the unsorted set of contributing sources joined from
 // nudge_history_sources.
 type NudgeEvent struct {
-	SessionID         int64
-	Text              string
-	Result            string  // 'sent' | 'failed' | 'suppressed' | 'escalated'
-	ErrorText         string
-	CausedByErrorAt   *time.Time
-	Escalated         bool
-	FiredAt           time.Time
-	Sources           []string
+	SessionID       int64
+	Text            string
+	Result          string // 'sent' | 'failed' | 'suppressed' | 'escalated'
+	ErrorText       string
+	CausedByErrorAt *time.Time
+	Escalated       bool
+	FiredAt         time.Time
+	Sources         []string
 }
 
 type NudgeStore interface {

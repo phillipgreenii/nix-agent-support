@@ -11,9 +11,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
-	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
 // TestViewLineWidthInvariant is the contract test for the View boundary clip:

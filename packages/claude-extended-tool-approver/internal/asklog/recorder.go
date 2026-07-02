@@ -49,7 +49,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 			return fmt.Errorf("begin tx: %w", err)
 		}
 
-		res, err := tx.Exec(`
+		res, err := tx.Exec(
+			`
 			INSERT INTO tool_decisions
 				(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 				 tool_input_hash, tool_input_json, tool_summary,
@@ -77,7 +78,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 		}
 
 		for i, entry := range result.Trace {
-			_, err := tx.Exec(`
+			_, err := tx.Exec(
+				`
 				INSERT INTO decision_trace_entries
 					(tool_decision_id, rule_order, rule_name, decision, reason)
 				VALUES (?, ?, ?, ?, ?)`,
@@ -94,7 +96,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 	}
 
 	// Non-trace path: single INSERT
-	_, err := s.db.Exec(`
+	_, err := s.db.Exec(
+		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 			 tool_input_hash, tool_input_json, tool_summary,
@@ -116,7 +119,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSuggestions string) error {
 	hash := inputHash(input.ToolInput)
 
-	res, err := s.db.Exec(`
+	res, err := s.db.Exec(
+		`
 		UPDATE tool_decisions
 		SET permission_suggestions = ?
 		WHERE id = (
@@ -136,7 +140,8 @@ func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSugges
 		return nil
 	}
 
-	_, err = s.db.Exec(`
+	_, err = s.db.Exec(
+		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name,
 			 tool_input_hash, tool_input_json, tool_summary,
@@ -158,7 +163,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	now := nowISO()
 
 	if input.ToolUseID != "" {
-		res, err := s.db.Exec(`
+		res, err := s.db.Exec(
+			`
 			UPDATE tool_decisions
 			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?
 			WHERE tool_use_id = ? AND outcome = 'pending'`,
@@ -173,7 +179,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	}
 
 	hash := inputHash(input.ToolInput)
-	_, err := s.db.Exec(`
+	_, err := s.db.Exec(
+		`
 		UPDATE tool_decisions
 		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?
 		WHERE session_id = ? AND tool_name = ? AND tool_input_hash = ? AND outcome = 'pending'`,
@@ -184,7 +191,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 }
 
 func ResolveDeniedAll(s *Store, sessionID string) error {
-	_, err := s.db.Exec(`
+	_, err := s.db.Exec(
+		`
 		UPDATE tool_decisions
 		SET outcome = 'denied', resolved_at = ?
 		WHERE session_id = ? AND outcome = 'pending'`,
@@ -198,7 +206,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	notes := "auto_mode_classifier: " + input.Reason
 
 	if input.ToolUseID != "" {
-		res, err := s.db.Exec(`
+		res, err := s.db.Exec(
+			`
 			UPDATE tool_decisions
 			SET outcome = 'denied', resolved_at = ?, outcome_notes = ?
 			WHERE tool_use_id = ? AND outcome = 'pending'`,
@@ -213,7 +222,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	}
 
 	hash := inputHash(input.ToolInput)
-	res, err := s.db.Exec(`
+	res, err := s.db.Exec(
+		`
 		UPDATE tool_decisions
 		SET outcome = 'denied', resolved_at = ?, outcome_notes = ?
 		WHERE session_id = ? AND tool_name = ? AND tool_input_hash = ? AND outcome = 'pending'`,
@@ -227,7 +237,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 		return nil
 	}
 
-	_, err = s.db.Exec(`
+	_, err = s.db.Exec(
+		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 			 tool_input_hash, tool_input_json, tool_summary,

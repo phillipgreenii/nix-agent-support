@@ -23,7 +23,8 @@ func TestMigrate_V7OthersApprovedColumns(t *testing.T) {
 	for _, col := range []string{"others_approved", "others_approved_at"} {
 		var cnt int
 		if err := db.sql.QueryRow(
-			"SELECT COUNT(*) FROM pragma_table_info('pr_revision') WHERE name=?", col).Scan(&cnt); err != nil {
+			"SELECT COUNT(*) FROM pragma_table_info('pr_revision') WHERE name=?", col,
+		).Scan(&cnt); err != nil {
 			t.Fatalf("pragma_table_info %s: %v", col, err)
 		}
 		if cnt != 1 {

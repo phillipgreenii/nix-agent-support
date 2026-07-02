@@ -22,7 +22,8 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 	if b.UpdatedAt.IsZero() {
 		b.UpdatedAt = now
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO blocks (
 			block_id, started_at, ended_at, plan_cap_usd, total_cost_usd, total_tokens,
 			rate_limit_resets_at, cap_hit_at, last_processed_at, updated_at,

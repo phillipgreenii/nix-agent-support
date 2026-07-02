@@ -76,7 +76,8 @@ func Since(ctx context.Context, ts time.Time, runner beads.Runner, stateFile str
 	cs := &ChangeSet{Since: ts.UTC()}
 
 	tsStr := ts.UTC().Format(time.RFC3339)
-	stdout, err := runner.Run(ctx,
+	stdout, err := runner.Run(
+		ctx,
 		"list", "--json", "--all", "--limit", "0", "--updated-after", tsStr,
 	)
 	if err != nil {

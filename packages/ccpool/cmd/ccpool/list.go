@@ -140,8 +140,8 @@ type liveRow struct {
 // Shared by the text and JSON renderers so both honor identical view hygiene.
 func visibleRows(rows []store.Session, all bool, stateFilter string,
 	liveFn func(socket, target string) bool, socket string,
-	now time.Time, doneTTL, failedTTL time.Duration) []liveRow {
-
+	now time.Time, doneTTL, failedTTL time.Duration,
+) []liveRow {
 	var out []liveRow
 	for _, r := range rows {
 		if stateFilter != "" && string(r.State) != stateFilter {
@@ -160,8 +160,8 @@ func visibleRows(rows []store.Session, all bool, stateFilter string,
 // returns the rendered table. Pure (no I/O) so it is unit-testable.
 func renderList(rows []store.Session, all bool, stateFilter string,
 	liveFn func(socket, target string) bool, socket string,
-	now time.Time, doneTTL, failedTTL time.Duration) string {
-
+	now time.Time, doneTTL, failedTTL time.Duration,
+) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n", "EXTERNAL_ID", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "CLAUDE_SESSION_ID")
 	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
@@ -225,8 +225,8 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 	gitFn func(cwd string) gitfacet.Facets,
 	metaFn func(externalID string) map[string]string,
 	socket string,
-	now time.Time, doneTTL, failedTTL time.Duration) (string, error) {
-
+	now time.Time, doneTTL, failedTTL time.Duration,
+) (string, error) {
 	out := []listJSON{}
 	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
 		r := lr.row

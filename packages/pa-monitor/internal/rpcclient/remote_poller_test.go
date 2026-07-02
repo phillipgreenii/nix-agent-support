@@ -28,7 +28,8 @@ func shortTempDir(t *testing.T) string {
 func buildDaemonBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	out, err := exec.Command("go", "build", "-o", bin,
+	out, err := exec.Command(
+		"go", "build", "-o", bin,
 		"github.com/phillipgreenii/pa-monitor/cmd/pa-monitor",
 	).CombinedOutput()
 	if err != nil {
@@ -59,7 +60,8 @@ func TestRemotePoller_RecoversFromDaemonRestart(t *testing.T) {
 
 	bin := buildDaemonBinary(t)
 	stateDir := shortTempDir(t)
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_STATE_HOME="+stateDir,
 		"XDG_RUNTIME_DIR="+stateDir,
 	)

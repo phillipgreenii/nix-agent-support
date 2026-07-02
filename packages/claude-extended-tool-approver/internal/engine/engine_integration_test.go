@@ -99,7 +99,6 @@ func TestIntegration_RegressionSuite(t *testing.T) {
 		// New safe commands
 		{"df", "df -h", "Bash", hookio.Approve},
 		{"du in project", "du -sh /Users/testuser/workspace/my-project/src", "Bash", hookio.Approve},
-
 	}
 
 	for _, tt := range tests {

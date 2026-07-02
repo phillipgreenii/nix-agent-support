@@ -43,37 +43,46 @@ func newFakeReviewBeads() *fakeReviewBeads {
 func (f *fakeReviewBeads) ListReadyDraftReviews(context.Context) ([]beads.DraftReviewRef, error) {
 	return f.ready, f.readyErr
 }
+
 func (f *fakeReviewBeads) ClaimDraftReview(_ context.Context, id string) error {
 	f.claimed = append(f.claimed, id)
 	return nil
 }
+
 func (f *fakeReviewBeads) UnclaimDraftReview(_ context.Context, id string) error {
 	f.unclaimed = append(f.unclaimed, id)
 	return nil
 }
+
 func (f *fakeReviewBeads) CloseDraftReview(_ context.Context, id, reason string) error {
 	f.closed[id] = reason
 	return nil
 }
+
 func (f *fakeReviewBeads) ReopenDraftReview(_ context.Context, id string) error {
 	f.reopened = append(f.reopened, id)
 	return nil
 }
+
 func (f *fakeReviewBeads) DeadLetterDraftReview(_ context.Context, id string) error {
 	f.deadLetter = append(f.deadLetter, id)
 	return nil
 }
+
 func (f *fakeReviewBeads) ReviewFailCount(_ context.Context, id string) (int, error) {
 	return f.failCounts[id], nil
 }
+
 func (f *fakeReviewBeads) BumpReviewFailCount(_ context.Context, id string) (int, error) {
 	f.failCounts[id]++
 	return f.failCounts[id], nil
 }
+
 func (f *fakeReviewBeads) ResetReviewFailCount(_ context.Context, id string) error {
 	delete(f.failCounts, id)
 	return nil
 }
+
 func (f *fakeReviewBeads) FindDraftReviewForPR(_ context.Context, repo string, number int) (string, bool, bool, error) {
 	r := f.findResults[key(repo, number)]
 	return r.id, r.closed, r.found, nil
@@ -136,6 +145,7 @@ func (r *recordingSinks) mineSink(_ context.Context, res reviewstage.Result) err
 	r.mine = append(r.mine, res)
 	return nil
 }
+
 func (r *recordingSinks) teamSink(_ context.Context, res reviewstage.Result) error {
 	r.team = append(r.team, res)
 	return nil

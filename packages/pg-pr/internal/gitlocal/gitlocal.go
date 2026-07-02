@@ -106,7 +106,8 @@ func Commits(ctx context.Context, r Runner, dir, base string) ([]Commit, error) 
 	if base == "" {
 		base = "origin/main"
 	}
-	out, err := r.Run(ctx, dir, "log",
+	out, err := r.Run(
+		ctx, dir, "log",
 		fmt.Sprintf("%s..HEAD", base),
 		"--format=%H%x00%s%x00%b%x00%an <%ae>",
 		"-z",

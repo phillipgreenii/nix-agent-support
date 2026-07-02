@@ -27,6 +27,7 @@ func (f *fakeCICD) ListRuns(_ context.Context, _ string, _ int) ([]api.CIRun, er
 	}
 	return f.runs, nil
 }
+
 func (f *fakeCICD) GetLogs(_ context.Context, _ string) ([]byte, error) {
 	return []byte(f.logs), nil
 }

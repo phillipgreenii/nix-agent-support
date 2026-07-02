@@ -31,13 +31,13 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 func TestDockerRule(t *testing.T) {
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
-			"bats":       {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"rm -rf /":   {Decision: hookio.Reject, Reason: "no", Module: "mock"},
-			"whoami":              {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"ls":                  {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"echo hello":          {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"true && ls":          {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
-			"bash -c echo hello":  {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"bats":               {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"rm -rf /":           {Decision: hookio.Reject, Reason: "no", Module: "mock"},
+			"whoami":             {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"ls":                 {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"echo hello":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"true && ls":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
+			"bash -c echo hello": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
 	}

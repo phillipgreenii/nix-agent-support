@@ -149,7 +149,8 @@ func (p *Provider) ListRunsByBranch(ctx context.Context, repo, branch string) ([
 	if strings.TrimSpace(branch) == "" {
 		return nil, fmt.Errorf("github-actions: branch is required")
 	}
-	raw, err := p.gh.Run(ctx,
+	raw, err := p.gh.Run(
+		ctx,
 		"run", "list",
 		"--repo", repo,
 		"--branch", branch,

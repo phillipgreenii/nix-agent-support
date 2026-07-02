@@ -57,7 +57,7 @@ func DefaultDBPath() string {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
@@ -210,7 +210,8 @@ func (s *Store) MarkExcluded(ids []int, reason string) error {
 	for _, id := range ids {
 		_, err := s.db.Exec(
 			`UPDATE tool_decisions SET excluded = 1, excluded_reason = ? WHERE id = ?`,
-			reason, id)
+			reason, id,
+		)
 		if err != nil {
 			return fmt.Errorf("mark-excluded id=%d: %w", id, err)
 		}
@@ -223,7 +224,8 @@ func (s *Store) SetCorrectDecision(ids []int, decision, explanation string) erro
 	for _, id := range ids {
 		_, err := s.db.Exec(
 			`UPDATE tool_decisions SET correct_hook_decision = ?, correct_hook_decision_explanation = ? WHERE id = ?`,
-			decision, explanation, id)
+			decision, explanation, id,
+		)
 		if err != nil {
 			return fmt.Errorf("set-correct-decision id=%d: %w", id, err)
 		}

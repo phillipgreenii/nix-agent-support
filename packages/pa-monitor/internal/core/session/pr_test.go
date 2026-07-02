@@ -26,7 +26,8 @@ func writeFakeGH(t *testing.T, stdout string, exitCode int) {
 }
 
 func TestLookupPRFound(t *testing.T) {
-	writeFakeGH(t,
+	writeFakeGH(
+		t,
 		`{"number":42,"title":"Add the thing","url":"https://github.com/owner/repo/pull/42"}`,
 		0,
 	)

@@ -69,10 +69,10 @@ type ExpansionKind int
 
 const (
 	ExpansionNone       ExpansionKind = iota // static value: "/foo/bar"
-	ExpansionVarRef                           // $VAR, ${VAR:-default}
-	ExpansionSafeCmd                          // $(mktemp), $(date +%F)
-	ExpansionArithmetic                       // $((1+2))
-	ExpansionUnknown                          // can't classify
+	ExpansionVarRef                          // $VAR, ${VAR:-default}
+	ExpansionSafeCmd                         // $(mktemp), $(date +%F)
+	ExpansionArithmetic                      // $((1+2))
+	ExpansionUnknown                         // can't classify
 )
 
 type EnvAssignment struct {

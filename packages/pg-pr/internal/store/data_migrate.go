@@ -78,7 +78,8 @@ func RunDataMigrations(ctx context.Context, db *DB, steps []DataMigrationStep) e
 // isDataMigrationApplied returns true if id is already in data_migration.
 func isDataMigrationApplied(ctx context.Context, db *DB, id string) (bool, error) {
 	var cnt int
-	err := db.sql.QueryRowContext(ctx,
+	err := db.sql.QueryRowContext(
+		ctx,
 		"SELECT COUNT(*) FROM data_migration WHERE id=?", id,
 	).Scan(&cnt)
 	if err != nil {

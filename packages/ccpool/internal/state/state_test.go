@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // --- pure Classify: the six precedence branches ---------------------------

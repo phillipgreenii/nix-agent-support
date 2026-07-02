@@ -30,7 +30,8 @@ func TestDisruptProducerSkipsWhenNotTerminal(t *testing.T) {
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	p := NewDisruptProducer()
 	store := NewPendingStore()
-	tree := treeWith(time.Time{},
+	tree := treeWith(
+		time.Time{},
 		sessionWithError("sid-1", transcript.ErrUnknown, now.Add(-1*time.Minute), false /*not terminal*/),
 	)
 	p.Reconcile(TickContext{
@@ -89,7 +90,8 @@ func TestDisruptProducerCancelsOnNonRetryable(t *testing.T) {
 	p := NewDisruptProducer()
 	store := NewPendingStore()
 	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceDisrupted}, EmittedAt: now})
-	tree := treeWith(time.Time{},
+	tree := treeWith(
+		time.Time{},
 		sessionWithError("sid-1", transcript.ErrAuthFailed, now.Add(-1*time.Minute), true),
 	)
 	p.Reconcile(TickContext{

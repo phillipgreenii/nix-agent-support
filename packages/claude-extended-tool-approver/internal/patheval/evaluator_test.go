@@ -167,7 +167,6 @@ func TestDetectProjectRoot_MONOREPO_ROOT_CWDOutside(t *testing.T) {
 	}
 }
 
-
 func TestDetectProjectRoot_MONOREPO_ROOT_TakesPrecedence(t *testing.T) {
 	t.Setenv("MONOREPO_ROOT", "/new/root")
 	if got := DetectProjectRoot("/new/root/subdir"); got != "/new/root" {
@@ -179,10 +178,10 @@ func TestDetectProjectRoot_EnvVarIgnoredFallsToGitWalk(t *testing.T) {
 	// Create a temp dir with .git to simulate a non-monorepo project
 	tmp := t.TempDir()
 	subdir := filepath.Join(tmp, "src")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	t.Setenv("MONOREPO_ROOT", "/mono/repo")
@@ -196,7 +195,7 @@ func TestDetectProjectRoot_EnvVarIgnoredFallsToGitWalk(t *testing.T) {
 func TestDetectProjectRoot_WalksUpForGit(t *testing.T) {
 	tmp := t.TempDir()
 	gitDir := filepath.Join(tmp, "a", "b", "c")
-	if err := os.MkdirAll(filepath.Join(gitDir, ".git"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(gitDir, ".git"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	t.Setenv("MONOREPO_ROOT", "")
@@ -315,7 +314,7 @@ func TestPathEvaluator_SymlinkResolution(t *testing.T) {
 	}
 
 	realFile := filepath.Join(projectDir, "real.txt")
-	os.WriteFile(realFile, []byte("ok"), 0644)
+	os.WriteFile(realFile, []byte("ok"), 0o644)
 	got = pe.Evaluate(realFile)
 	if got != PathReadWrite {
 		t.Errorf("Evaluate(real project file) = %v, want PathReadWrite", got)

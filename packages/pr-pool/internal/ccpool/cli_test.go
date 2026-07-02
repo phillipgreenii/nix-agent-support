@@ -79,7 +79,8 @@ func TestEnsure_argv_includesAutonomous(t *testing.T) {
 	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"new", "s", "--cwd", "/r",
+	want := []string{
+		"new", "s", "--cwd", "/r",
 		"--permission-mode", "dontAsk",
 		"--allowed-tools", config.Default().AllowedTools,
 		"--effort", "max",

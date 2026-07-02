@@ -43,7 +43,8 @@ var (
 // right-alignment styling and joins with single spaces. The total visible
 // width equals statsBlockCols.
 func renderStatsBlock(col1, pct, bar, amount, burn string) string {
-	return fmt.Sprintf("%s %s %s %s %s",
+	return fmt.Sprintf(
+		"%s %s %s %s %s",
 		styleCol1.Render(col1),
 		stylePct.Render(pct),
 		styleBar.Render(bar),
@@ -153,7 +154,8 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selec
 		tail += fmt.Sprintf(" %d🐚", s.SessionEnrichment.SubshellCount)
 	}
 
-	out := fmt.Sprintf("%s%s %s  %s%s\n",
+	out := fmt.Sprintf(
+		"%s%s %s  %s%s\n",
 		cursorMark,
 		prefix,
 		labelStyle(opts.Width).Render(label),

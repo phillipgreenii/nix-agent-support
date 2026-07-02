@@ -36,7 +36,8 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 		sess.CreatedAt = now
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT INTO sessions (
 			session_id, pid, command_hash, cwd, name, kind, entrypoint,
 			model, terminal_host, branch, status, first_prompt, labels,

@@ -9,10 +9,10 @@ import (
 func writeSettings(t *testing.T, dir, name, body string) {
 	t.Helper()
 	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(claudeDir, name), []byte(body), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, name), []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 }

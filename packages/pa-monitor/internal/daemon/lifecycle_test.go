@@ -205,7 +205,8 @@ func TestRun_SIGKILLRecoveredOnNextStart(t *testing.T) {
 	stateDir := shortTempDir(t)
 
 	cmd := exec.Command(bin, "daemon")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"XDG_STATE_HOME="+stateDir,
 		"XDG_RUNTIME_DIR="+stateDir,
 	)
@@ -234,7 +235,8 @@ func TestRun_SIGKILLRecoveredOnNextStart(t *testing.T) {
 func buildTestBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	out, err := exec.Command("go", "build",
+	out, err := exec.Command(
+		"go", "build",
 		"-o", bin,
 		"github.com/phillipgreenii/pa-monitor/cmd/pa-monitor",
 	).CombinedOutput()
@@ -251,7 +253,8 @@ func TestRun_ConcurrentStartExactlyOneWins(t *testing.T) {
 
 	bin := buildTestBinary(t)
 	stateDir := shortTempDir(t)
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"XDG_STATE_HOME="+stateDir,
 		"XDG_RUNTIME_DIR="+stateDir,
 	)

@@ -188,6 +188,7 @@ func mustInsert(t *testing.T, st *Store, externalID, csid string) {
 		t.Fatalf("Insert %s: %v", externalID, err)
 	}
 }
+
 func externalIDs(ss []Session) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {
@@ -195,6 +196,7 @@ func externalIDs(ss []Session) []string {
 	}
 	return out
 }
+
 func bumpClock(t *testing.T, st *Store, secs int) {
 	t.Helper()
 	f, ok := st.clock.(*clock.Fake)

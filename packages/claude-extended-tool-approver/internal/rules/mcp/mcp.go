@@ -7,11 +7,11 @@ import (
 )
 
 var allowedMCPTools = map[string]bool{
-	"mcp__Atlassian-MCP-Server__atlassianUserInfo":              true,
+	"mcp__Atlassian-MCP-Server__atlassianUserInfo":               true,
 	"mcp__Atlassian-MCP-Server__getAccessibleAtlassianResources": true,
-	"mcp__Atlassian-MCP-Server__getJiraIssue":                   true,
-	"mcp__Atlassian-MCP-Server__search":                         true,
-	"mcp__Notion__notion-fetch":                                 true,
+	"mcp__Atlassian-MCP-Server__getJiraIssue":                    true,
+	"mcp__Atlassian-MCP-Server__search":                          true,
+	"mcp__Notion__notion-fetch":                                  true,
 }
 
 type Rule struct{}

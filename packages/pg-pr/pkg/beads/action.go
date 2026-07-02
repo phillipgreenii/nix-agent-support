@@ -61,7 +61,8 @@ func (c *Client) CreateAction(ctx context.Context, in CreateActionInput) (string
 	if strings.TrimSpace(body) == "" {
 		body = in.Title
 	}
-	out, err := c.Runner.Run(ctx,
+	out, err := c.Runner.Run(
+		ctx,
 		"create",
 		"--type="+bdType,
 		"--title", in.Title,
@@ -79,7 +80,8 @@ func (c *Client) CreateAction(ctx context.Context, in CreateActionInput) (string
 	}
 
 	// Parent-child link from the merge-request to the action.
-	if _, err := c.Runner.Run(ctx,
+	if _, err := c.Runner.Run(
+		ctx,
 		"dep", "add", id, in.MergeRequestID,
 		"--type=parent-child",
 		"--no-cycle-check",
@@ -93,7 +95,8 @@ func (c *Client) CreateAction(ctx context.Context, in CreateActionInput) (string
 		if fbID == "" {
 			continue
 		}
-		if _, err := c.Runner.Run(ctx,
+		if _, err := c.Runner.Run(
+			ctx,
 			"dep", "add", id, fbID,
 			"--type=discovered-from",
 			"--no-cycle-check",

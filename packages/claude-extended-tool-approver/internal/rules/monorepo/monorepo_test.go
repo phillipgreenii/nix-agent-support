@@ -18,7 +18,7 @@ func TestMonorepo_Unknown_Abstain(t *testing.T) {
 	r := New(pe)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
-		CWD:      "/home/user/monorepo",
+		CWD:       "/home/user/monorepo",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
 	}
 	got := r.Evaluate(input)

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // Build groups sessions by Cwd and totals tokens/cost. The block argument may be nil.

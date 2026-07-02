@@ -20,7 +20,8 @@ func TestMigrate_V5AgentReviewedColumn(t *testing.T) {
 	var cnt int
 	if err := db.sql.QueryRow(
 		"SELECT COUNT(*) FROM pragma_table_info('pr_revision') WHERE name=?",
-		"reviewed_by_agent_at").Scan(&cnt); err != nil {
+		"reviewed_by_agent_at",
+	).Scan(&cnt); err != nil {
 		t.Fatalf("pragma_table_info: %v", err)
 	}
 	if cnt != 1 {
