@@ -6,6 +6,7 @@ package feedbackclassify
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
@@ -82,6 +83,9 @@ type FPParts struct {
 //     file + normalized body) — one row survives force-pushes; staleness is
 //     tracked separately via is_outdated.
 //   - pr-comments: revision-stable (external id if present, else normalized body).
+//   - self-review: revision-SCOPED (subject_sha + file + line + normalized body)
+//     — a re-review at a new head SHA is a new finding; a re-run at the same head
+//     dedups. File/Line empty ⇒ a PR-level (fileless) finding.
 //   - review-request / jira-link: keyed by external id.
 //
 // Body whitespace is collapsed so trivial reflow doesn't churn the key.
@@ -97,6 +101,14 @@ func Fingerprint(kind string, p FPParts) string {
 		} else {
 			key = "code-comment-thread\x00" + p.File + "\x00" + norm
 		}
+	case "self-review":
+		// HEAD-scoped: a re-review at a new head SHA is a NEW finding, but a
+		// re-run of the reviewer at the same head + same finding dedups
+		// (idempotency via UNIQUE(pr_id, fingerprint)). Keyed on
+		// (subject_sha, file, line, normalized body); File/Line are empty for a
+		// PR-level (fileless) finding, distinguishing it from inline findings.
+		key = "self-review\x00" + p.SubjectSHA + "\x00" + p.File + "\x00" +
+			strconv.Itoa(p.Line) + "\x00" + norm
 	case "pr-comments":
 		key = "pr-comments\x00" + p.ExternalID + "\x00" + norm
 	case "review-request":

@@ -20,8 +20,14 @@ Lifecycle handler for processing-cycle / work beads on a merge-request.
 - **work bead** — a proposed change (`task`/`bug`) you create in response to feedback. A **child of the PR bead**, `discovered-from` the feedback item that motivated it.
 
 Feedback items live in **pg-pr's own store** (not as beads). Each item has: `id`, `kind`
-(`code-comment-thread` | `pr-comments` | `ci-failure` | `review-request` | `jira-link`),
-`status`, `author_kind` (`human` | `agent`), `agent_name`, `body`, and thread context.
+(`code-comment-thread` | `pr-comments` | `ci-failure` | `review-request` | `jira-link` |
+`self-review`), `status`, `author_kind` (`human` | `agent`), `agent_name`, `body`, and thread
+context.
+
+`self-review` items are the agent's own review findings on one of MY PRs (ingested by the
+my-PR review sink, not posted to GitHub). Like unresolved `ci-failure` items, **unresolved
+`self-review` findings BLOCK auto-merge until dispositioned** — disposition each one (`will-fix`
+/ `wont-fix` / `no-action`) exactly as you would any other item to clear the merge gate.
 
 There can legitimately be more than one open cycle for a PR (pg-pr starts a new cycle when the
 existing one is already in-progress). That is fine — you work one cycle at a time and

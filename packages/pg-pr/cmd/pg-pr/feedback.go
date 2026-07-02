@@ -59,7 +59,7 @@ func newFeedbackListCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&fbF.json, "json", false, "Emit machine-readable JSON")
 	cmd.Flags().BoolVar(&fbF.active, "active", false, "Show only active (non-outdated, non-resolved) items")
-	cmd.Flags().StringVar(&fbF.kind, "kind", "", "Filter by kind (e.g. ci-failure, pr-comments, code-comment-thread)")
+	cmd.Flags().StringVar(&fbF.kind, "kind", "", "Filter by kind (e.g. ci-failure, pr-comments, code-comment-thread, self-review)")
 	return cmd
 }
 

@@ -237,6 +237,37 @@ func (db *DB) ListFeedback(ctx context.Context, prID int64, filter ListFilter) (
 	return out, rows.Err()
 }
 
+// blockingFeedbackKinds are the feedback kinds that gate auto-merge while
+// unresolved. ci-failure has always gated the merge loop; self-review
+// (pg2-4c5i.34, Q1 — always block) joins it so agent self-review findings block
+// until dispositioned. Both clear via `pg-pr feedback disposition` (status →
+// dispositioned) or supersession/resolution.
+var blockingFeedbackKinds = []string{"ci-failure", "self-review"}
+
+// HasBlockingFeedback reports whether the PR has any unresolved blocking
+// feedback — a row of a blocking kind whose status is NOT dispositioned /
+// resolved / superseded. This is the merge-loop gate predicate: while it is
+// true, the PR MUST NOT auto-merge. self-review rows gate exactly like
+// ci-failure rows (they are ingested at status='new' by the my-PR sink).
+func (db *DB) HasBlockingFeedback(ctx context.Context, prID int64) (bool, error) {
+	// Build the IN-list placeholders for the blocking kinds.
+	placeholders := make([]string, len(blockingFeedbackKinds))
+	args := make([]any, 0, len(blockingFeedbackKinds)+1)
+	args = append(args, prID)
+	for i, k := range blockingFeedbackKinds {
+		placeholders[i] = "?"
+		args = append(args, k)
+	}
+	q := "SELECT EXISTS(SELECT 1 FROM feedback WHERE pr_id=? AND kind IN (" +
+		strings.Join(placeholders, ",") +
+		") AND status NOT IN ('dispositioned','resolved','superseded'))"
+	var exists int
+	if err := db.sql.QueryRowContext(ctx, q, args...).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: has blocking feedback pr=%d: %w", prID, err)
+	}
+	return exists == 1, nil
+}
+
 // SetDisposition records the agent's decision and (optionally) a queued reply.
 // Moves status to "dispositioned".
 func (db *DB) SetDisposition(ctx context.Context, id int64, action, note, reply string) error {

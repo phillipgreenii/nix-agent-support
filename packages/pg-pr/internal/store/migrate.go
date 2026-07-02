@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -157,6 +157,75 @@ CREATE TABLE data_migration (
 	`
 ALTER TABLE pr_revision ADD COLUMN reviewed_by_agent_at TEXT;
 `,
+	// v5 -> v6: add the 'self-review' feedback kind (pg2-4c5i.34 my-PR sink).
+	// feedback.kind carries a hard column CHECK; SQLite cannot alter a column
+	// CHECK in place, so the table is rebuilt (the SQLite-recommended
+	// "12-step ALTER" pattern). The new CHECK adds 'self-review' and keeps the
+	// code-comment-thread file-NOT-NULL guard (self-review carries no such
+	// constraint, so PR-level fileless self-review findings are legal). The
+	// UNIQUE(pr_id, fingerprint) is preserved (idempotent re-ingest key) and
+	// idx_feedback_pr is re-created after the rename.
+	//
+	// NOTE: the rebuild DROPs feedback, which has an ON DELETE CASCADE child
+	// (code_comment_message). foreign_keys MUST be OFF during this migration or
+	// the DROP cascades and orphans the messages — applyMigration disables FKs
+	// around the migration tx for exactly this reason.
+	`
+CREATE TABLE feedback_new (
+    id                 INTEGER PRIMARY KEY,
+    pr_id              INTEGER NOT NULL REFERENCES pull_request(id) ON DELETE CASCADE,
+    kind               TEXT NOT NULL CHECK (kind IN
+                         ('code-comment-thread','pr-comments','ci-failure','review-request','jira-link','self-review')),
+    external_id        TEXT,
+    fingerprint        TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'new' CHECK (status IN
+                         ('new','presented','dispositioned','replied','resolved','superseded')),
+    title              TEXT,
+    body               TEXT,
+
+    subject_sha        TEXT,
+    first_seen_head_sha TEXT,
+    is_outdated        INTEGER NOT NULL DEFAULT 0,
+    is_minimized       INTEGER NOT NULL DEFAULT 0,
+    minimized_reason   TEXT,
+
+    author_login       TEXT,
+    author_kind        TEXT CHECK (author_kind IS NULL OR author_kind IN ('human','agent')),
+    agent_name         TEXT,
+    is_ours            INTEGER NOT NULL DEFAULT 0,
+    author_role        TEXT,
+
+    disposition_action TEXT CHECK (disposition_action IS NULL OR disposition_action IN
+                         ('will-fix','wont-fix','no-action')),
+    disposition_note   TEXT,
+    reply_body         TEXT,
+    response_id        TEXT,
+    severity           TEXT,
+    managed_upstream   INTEGER NOT NULL DEFAULT 0,
+
+    file               TEXT,
+    line               INTEGER,
+    thread_resolved    INTEGER,
+    comment_node_id    TEXT,
+    run_id             TEXT,
+    check_name         TEXT,
+    conclusion         TEXT,
+    related            INTEGER,
+    retry_count        INTEGER,
+    link               TEXT,
+
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    resolved_at        TEXT,
+
+    UNIQUE (pr_id, fingerprint),
+    CHECK (kind <> 'code-comment-thread' OR file IS NOT NULL)
+);
+INSERT INTO feedback_new SELECT * FROM feedback;
+DROP TABLE feedback;
+ALTER TABLE feedback_new RENAME TO feedback;
+CREATE INDEX idx_feedback_pr ON feedback(pr_id);
+`,
 }
 
 // migrate brings the DB up to schemaVersion. It runs each pending migration in
@@ -181,6 +250,18 @@ func migrate(db *DB) error {
 }
 
 func applyMigration(db *DB, toVersion int, ddl string) error {
+	// Disable foreign-key enforcement for the duration of the migration.
+	// SQLite's "12-step ALTER" table-rebuild pattern (used by v6 to change the
+	// feedback.kind CHECK) DROPs a table that has ON DELETE CASCADE children
+	// (code_comment_message → feedback); with FKs on, the DROP would cascade and
+	// orphan those rows. The pragma cannot be toggled inside a transaction, so
+	// it is set here (outside the tx) and restored after commit. Additive
+	// migrations are unaffected. The runtime DSN keeps foreign_keys ON.
+	if _, err := db.sql.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		return fmt.Errorf("disable foreign_keys for migration to v%d: %w", toVersion, err)
+	}
+	defer func() { _, _ = db.sql.Exec("PRAGMA foreign_keys = ON") }()
+
 	tx, err := db.sql.Begin()
 	if err != nil {
 		return fmt.Errorf("begin migration to v%d: %w", toVersion, err)

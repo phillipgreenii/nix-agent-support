@@ -16,8 +16,11 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewsink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -280,18 +283,49 @@ func (e *Engine) handleProductionFailure(ctx context.Context, log *slog.Logger, 
 }
 
 // routeReview dispatches the produced Result to the ownership-selected sink
-// (Content-Based Router). Nil sinks fall back to a logging no-op stub.
+// (Content-Based Router). An explicitly injected sink wins; otherwise the mine
+// path falls back to the real default self-review-ingest sink (.34) and the team
+// path to the .35 stub (filled by that slice).
 func (e *Engine) routeReview(ctx context.Context, ownership string, result reviewstage.Result) error {
 	if ownership == "mine" {
 		if e.deps.Review.MineSink != nil {
 			return e.deps.Review.MineSink(ctx, result)
 		}
-		return stubMineSink(ctx, result)
+		return e.defaultMineSink(ctx, result)
 	}
 	if e.deps.Review.TeamSink != nil {
 		return e.deps.Review.TeamSink(ctx, result)
 	}
 	return stubTeamSink(ctx, result)
+}
+
+// defaultMineSink is the .34 my-PR sink: it loads the staged Draft, ingests each
+// finding as a self-review feedback row (via reviewsink.IngestSelfReview), and
+// enqueues feedback.created so the existing process-feedback bead + merge loop
+// consume them. It performs NO GitHub write. It treats a missing Draft/Result as
+// "review not yet produced" and no-ops (idempotent). A nil store disables it (a
+// store-less engine cannot ingest feedback).
+func (e *Engine) defaultMineSink(ctx context.Context, result reviewstage.Result) error {
+	db := e.deps.Store
+	if db == nil {
+		slog.Default().Warn("review hook: mine sink skipped (no store)", "repo", result.Repo, "pr", result.PR, "bead", result.BeadID)
+		return nil
+	}
+	draft, err := reviewstage.Load(e.reviewsDir(), result.Repo, result.PR)
+	if err != nil {
+		// Missing Draft ⇒ review not yet produced; treat as no-op (idempotent).
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("review hook: mine sink load draft %s#%d: %w", result.Repo, result.PR, err)
+	}
+	n, err := reviewsink.IngestSelfReview(ctx, db, result.Repo, result.PR, draft, &result)
+	if err != nil {
+		return err
+	}
+	slog.Default().Info("review hook: mine sink ingested self-review findings",
+		"repo", result.Repo, "pr", result.PR, "bead", result.BeadID, "head_sha", result.HeadSHA, "ingested", n)
+	return nil
 }
 
 // stampAgentReviewed records the reviewed head SHA on the matching revision so
@@ -311,13 +345,6 @@ func (e *Engine) stampAgentReviewed(ctx context.Context, log *slog.Logger, repo 
 	if err := db.MarkRevisionAgentReviewed(ctx, pr.ID, headSHA, e.deps.Now().Format("2006-01-02T15:04:05Z07:00")); err != nil {
 		log.Warn("review hook: mark agent-reviewed failed", "repo", repo, "number", number, "err", err.Error())
 	}
-}
-
-// stubMineSink is the .34 placeholder: it logs ownership and no-ops. pg2-4c5i.34
-// replaces it behind ReviewSink. It MUST NOT call any GitHub-write path.
-func stubMineSink(_ context.Context, result reviewstage.Result) error {
-	slog.Default().Info("review hook: mine sink stub (no-op)", "repo", result.Repo, "pr", result.PR, "bead", result.BeadID, "head_sha", result.HeadSHA)
-	return nil
 }
 
 // stubTeamSink is the .35 placeholder: it logs ownership and no-ops. pg2-4c5i.35
