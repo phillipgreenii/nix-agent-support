@@ -4,7 +4,7 @@
 package block
 
 import (
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 type Tracker struct {
@@ -24,7 +24,7 @@ func (t *Tracker) ID() string { return t.currentID }
 
 // Update folds a fresh ccusage block snapshot into the tracker. Fires
 // OnLimitHit at most once per block.
-func (t *Tracker) Update(b *ccusage.Block) {
+func (t *Tracker) Update(b *usage.Block) {
 	if b == nil {
 		return
 	}

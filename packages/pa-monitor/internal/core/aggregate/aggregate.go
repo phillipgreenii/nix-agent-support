@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
 
@@ -12,7 +12,7 @@ import (
 // blockCapUSD is the per-5h-block soft cap (0 = unknown) used for display-layer
 // projections; the caller supplies it from the Account so Build no longer looks
 // up the cap from the concrete ccusage provider.
-func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *ccusage.Block, blockCapUSD float64) *Tree {
+func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *usage.Block, blockCapUSD float64) *Tree {
 	byDir := map[string]*Directory{}
 	var windowResetsAt time.Time
 	for _, s := range sessions {

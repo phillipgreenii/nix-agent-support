@@ -5,7 +5,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -134,7 +134,7 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 	return out
 }
 
-func blockToProto(b *ccusage.Block, capUSD float64) *Block {
+func blockToProto(b *usage.Block, capUSD float64) *Block {
 	if b == nil {
 		return nil
 	}
@@ -162,7 +162,7 @@ func blockToProto(b *ccusage.Block, capUSD float64) *Block {
 	return pb
 }
 
-func weekToProto(w *ccusage.WeeklyEntry, capUSD float64) *Week {
+func weekToProto(w *usage.WeeklyEntry, capUSD float64) *Week {
 	if w == nil {
 		return nil
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -68,7 +68,7 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	})
 
 	// Synthesised state: 2 working sessions, 1 idle, one active block.
-	activeBlock := &ccusage.Block{
+	activeBlock := &usage.Block{
 		StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC),
 		IsActive:  true,
 		CostUSD:   100.0, // above cap
@@ -421,8 +421,8 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// --- real *poller.Poller wired with DB and WriteService, driven through
-	// the real ccusage.Provider cost adapter (CostPricer port). ---
-	cache := ccusage.NewCachedRunner(time.Hour, time.Second,
+	// the real usage.Provider cost adapter (CostPricer port). ---
+	cache := usage.NewCachedRunner(time.Hour, time.Second,
 		func(context.Context) ([]byte, error) { return activeBlockBody, nil })
 	cache.Start(ctx)
 	p := &poller.Poller{
@@ -430,7 +430,7 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 		ClaudeHome:   dir,
 		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
 		Now:          time.Now,
-		Pricer:       ccusage.NewProvider(cache, &ccusage.Runner{}),
+		Pricer:       usage.NewProvider(cache, &usage.Runner{}),
 		WriteService: ws,
 		DB:           db,
 	}

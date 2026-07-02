@@ -1,4 +1,4 @@
-package ccusage
+package usage
 
 // PlanCapUSD returns the per-5h-block soft cap for a plan tier. Figures are
 // approximate ccusage-published budget mappings. Update when Anthropic changes.

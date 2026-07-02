@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // TestApplyLimits_PopulatesTree proves a LimitsSource reading is copied onto the
@@ -65,7 +65,7 @@ func TestBlockToStoreBlock_CarriesTreeLimits(t *testing.T) {
 		SevenDayResetsAt: sevRst,
 		LimitsCapturedAt: capAt,
 	}
-	b := &ccusage.Block{ID: "blk", CostUSD: 1.0}
+	b := &usage.Block{ID: "blk", CostUSD: 1.0}
 	sb := blockToStoreBlockWithLimits(b, 90.0, time.Now().UTC(), tree)
 
 	if sb.FiveHourPct == nil || *sb.FiveHourPct != 34 {
@@ -89,7 +89,7 @@ func TestBlockToStoreBlock_CarriesTreeLimits(t *testing.T) {
 // nil pointer (unknown/stale), never a 0 or a 1970 timestamp.
 func TestBlockToStoreBlock_UnknownLimitsStayNil(t *testing.T) {
 	tree := &aggregate.Tree{} // all rate_limits unknown
-	b := &ccusage.Block{ID: "blk"}
+	b := &usage.Block{ID: "blk"}
 	sb := blockToStoreBlockWithLimits(b, 90.0, time.Now().UTC(), tree)
 	if sb.FiveHourPct != nil {
 		t.Errorf("FiveHourPct = %v, want nil", *sb.FiveHourPct)

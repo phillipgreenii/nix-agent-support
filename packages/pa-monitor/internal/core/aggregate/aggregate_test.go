@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -21,7 +21,7 @@ func TestBuildGroupsByCwdAndTotalsTokens(t *testing.T) {
 		"b": {ContextTokens: 500, SessionTokens: 5_000},
 		"c": {ContextTokens: 2000, SessionTokens: 20_000},
 	}
-	block := &ccusage.Block{CostUSD: 10.0, BurnRate: ccusage.BurnRate{TokensPerMinute: 100_000}, Projection: ccusage.Projection{RemainingMinutes: 100}}
+	block := &usage.Block{CostUSD: 10.0, BurnRate: usage.BurnRate{TokensPerMinute: 100_000}, Projection: usage.Projection{RemainingMinutes: 100}}
 	tree := Build(sessions, enriched, nil, block, 90.0)
 	if len(tree.Dirs) != 2 {
 		t.Fatalf("want 2 dirs, got %d", len(tree.Dirs))
@@ -40,7 +40,7 @@ func TestBuildGroupsByCwdAndTotalsTokens(t *testing.T) {
 
 func TestBuildSetsPlanCapFromArg(t *testing.T) {
 	// Build sources the plan cap from its blockCapUSD argument (supplied by the
-	// caller from the Account), not from an inline ccusage.PlanCapUSD lookup.
+	// caller from the Account), not from an inline usage.PlanCapUSD lookup.
 	tree := Build(nil, nil, nil, nil, 90.0)
 	if tree.PlanCapUSD != 90.0 {
 		t.Errorf("tree.PlanCapUSD = %v, want 90 (from blockCapUSD arg)", tree.PlanCapUSD)
@@ -50,7 +50,7 @@ func TestBuildSetsPlanCapFromArg(t *testing.T) {
 func TestTopupOnlyDisplayedWhenCapReached(t *testing.T) {
 	tree := &Tree{
 		PlanCapUSD:  90,
-		ActiveBlock: &ccusage.Block{CostUSD: 50},
+		ActiveBlock: &usage.Block{CostUSD: 50},
 	}
 	if tree.TopupShouldDisplay() {
 		t.Error("topup should not display when block under cap")

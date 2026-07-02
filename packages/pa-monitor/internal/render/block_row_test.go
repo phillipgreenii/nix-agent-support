@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 func TestBlockRowPreActiveStates(t *testing.T) {
@@ -39,11 +39,11 @@ func TestBlockRowActiveBlockTiers(t *testing.T) {
 	tree := &aggregate.Tree{
 		CCUsageProbed: true,
 		PlanCapUSD:    100,
-		ActiveBlock: &ccusage.Block{
+		ActiveBlock: &usage.Block{
 			CostUSD:    35,
 			EndTime:    time.Date(2026, 5, 8, 1, 0, 0, 0, time.UTC),
-			BurnRate:   ccusage.BurnRate{TokensPerMinute: 1_200_000, CostPerHour: 30},
-			Projection: ccusage.Projection{RemainingMinutes: 90},
+			BurnRate:   usage.BurnRate{TokensPerMinute: 1_200_000, CostPerHour: 30},
+			Projection: usage.Projection{RemainingMinutes: 90},
 		},
 	}
 	now := time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)
@@ -97,11 +97,11 @@ func TestBlockRowFitsAtTierFloor(t *testing.T) {
 	tree := &aggregate.Tree{
 		CCUsageProbed: true,
 		PlanCapUSD:    100,
-		ActiveBlock: &ccusage.Block{
+		ActiveBlock: &usage.Block{
 			CostUSD:    35,
 			EndTime:    time.Date(2026, 5, 8, 1, 0, 0, 0, time.UTC),
-			BurnRate:   ccusage.BurnRate{TokensPerMinute: 1_200_000, CostPerHour: 30},
-			Projection: ccusage.Projection{RemainingMinutes: 90},
+			BurnRate:   usage.BurnRate{TokensPerMinute: 1_200_000, CostPerHour: 30},
+			Projection: usage.Projection{RemainingMinutes: 90},
 		},
 	}
 	now := time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC)
@@ -123,7 +123,7 @@ func TestBlockRow_AuthoritativeRateLimitPercentage(t *testing.T) {
 	base := &aggregate.Tree{
 		CCUsageProbed: true,
 		PlanCapUSD:    100,
-		ActiveBlock: &ccusage.Block{
+		ActiveBlock: &usage.Block{
 			CostUSD: 10,
 			EndTime: now.Add(3 * time.Hour),
 		},
@@ -156,7 +156,7 @@ func TestBlockRow_FallsBackToCostPercentageWhenNoRateLimit(t *testing.T) {
 	tree := &aggregate.Tree{
 		CCUsageProbed: true,
 		PlanCapUSD:    100,
-		ActiveBlock:   &ccusage.Block{CostUSD: 35, EndTime: now.Add(3 * time.Hour)},
+		ActiveBlock:   &usage.Block{CostUSD: 35, EndTime: now.Add(3 * time.Hour)},
 		// FiveHourPct nil -> fall back.
 	}
 	out := BlockRow(tree, BlockRowOpts{Width: 200, Now: now, StaleAfter: 10 * time.Minute})

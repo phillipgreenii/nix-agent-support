@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 func TestTracker_IDDerivedFromBlockStart(t *testing.T) {
-	b := &ccusage.Block{
+	b := &usage.Block{
 		StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC),
 		CostUSD:   3.5,
 	}
@@ -24,15 +24,15 @@ func TestTracker_LimitHitTransitionFiresOnce(t *testing.T) {
 	hits := 0
 	tr.OnLimitHit = func() { hits++ }
 
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 5.0})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 5.0})
 	if hits != 0 {
 		t.Errorf("under-cap should not hit, got %d", hits)
 	}
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 12.0})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 12.0})
 	if hits != 1 {
 		t.Errorf("over-cap should hit once, got %d", hits)
 	}
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 15.0})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 15.0})
 	if hits != 1 {
 		t.Errorf("further updates in same block should not re-hit, got %d", hits)
 	}
@@ -40,10 +40,10 @@ func TestTracker_LimitHitTransitionFiresOnce(t *testing.T) {
 
 func TestTracker_NewBlockResetsLimitHitFlag(t *testing.T) {
 	tr := NewTracker(10.0)
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 12.0})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 12.0})
 	hits := 0
 	tr.OnLimitHit = func() { hits++ }
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 19, 0, 0, 0, time.UTC), CostUSD: 11.0})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 19, 0, 0, 0, time.UTC), CostUSD: 11.0})
 	if hits != 1 {
 		t.Errorf("new block should fire fresh hit, got %d", hits)
 	}
@@ -61,7 +61,7 @@ func TestTracker_ZeroCapNeverHits(t *testing.T) {
 	tr := NewTracker(0)
 	hits := 0
 	tr.OnLimitHit = func() { hits++ }
-	tr.Update(&ccusage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 999})
+	tr.Update(&usage.Block{StartTime: time.Date(2026, 5, 20, 14, 0, 0, 0, time.UTC), CostUSD: 999})
 	if hits != 0 {
 		t.Errorf("zero cap should never fire, got %d", hits)
 	}

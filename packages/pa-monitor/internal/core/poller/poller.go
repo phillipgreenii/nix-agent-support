@@ -12,7 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
@@ -42,7 +42,7 @@ type Poller struct {
 	PlanTier    string
 	// BlockCapUSD is the per-5h-block soft cap (0 = unknown) sourced from the
 	// Account at wiring time and threaded into aggregate.Build for the
-	// display-layer projection. Replaces the former inline ccusage.PlanCapUSD
+	// display-layer projection. Replaces the former inline usage.PlanCapUSD
 	// lookup so the poller depends only on the port/Account, not the provider.
 	BlockCapUSD      float64
 	WorkingThreshold time.Duration
@@ -331,7 +331,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 
-	var block *ccusage.Block
+	var block *usage.Block
 	var ccUsageProbed bool
 	var ccUsageErr error
 	if p.Pricer != nil {

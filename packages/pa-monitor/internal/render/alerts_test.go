@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -41,7 +41,7 @@ func TestAlertsTopupShows(t *testing.T) {
 	tree := &aggregate.Tree{
 		CCUsageProbed: true,
 		PlanCapUSD:    50,
-		ActiveBlock:   &ccusage.Block{CostUSD: 75},
+		ActiveBlock:   &usage.Block{CostUSD: 75},
 	}
 	out := Alerts(tree, AlertsOpts{
 		Now:           time.Now(),
@@ -62,7 +62,7 @@ func TestAlertsPipeJoinedWhenMultiple(t *testing.T) {
 	tree := &aggregate.Tree{
 		CCUsageProbed:  true,
 		PlanCapUSD:     50,
-		ActiveBlock:    &ccusage.Block{CostUSD: 75},
+		ActiveBlock:    &usage.Block{CostUSD: 75},
 		WindowResetsAt: now.Add(60 * time.Second),
 	}
 	out := Alerts(tree, AlertsOpts{

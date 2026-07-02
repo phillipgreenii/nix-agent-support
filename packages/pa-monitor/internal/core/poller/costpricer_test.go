@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // fakeCostPricer is a port fake proving the poller depends only on the
@@ -14,13 +14,13 @@ import (
 // "port fakes prove consumers depend only on interfaces"). It returns a
 // preset block and probe state with no ccusage subprocess or byte parsing.
 type fakeCostPricer struct {
-	block  *ccusage.Block
+	block  *usage.Block
 	err    error
 	probed bool
 	stErr  error
 }
 
-func (f *fakeCostPricer) ActiveBlock(context.Context) (*ccusage.Block, error) {
+func (f *fakeCostPricer) ActiveBlock(context.Context) (*usage.Block, error) {
 	return f.block, f.err
 }
 func (f *fakeCostPricer) Probed() (bool, error) { return f.probed, f.stErr }
@@ -29,7 +29,7 @@ func (f *fakeCostPricer) Probed() (bool, error) { return f.probed, f.stErr }
 // to it by the CostPricer port into the tree (via aggregate.Build cost share)
 // and threads the port's probe state onto the tree.
 func TestSnapshotConsumesCostPricerBlock(t *testing.T) {
-	block := &ccusage.Block{
+	block := &usage.Block{
 		ID:        "2026-06-01T10Z",
 		StartTime: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC),
 		IsActive:  true,

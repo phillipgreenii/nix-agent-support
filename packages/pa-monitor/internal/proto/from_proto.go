@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -143,20 +143,20 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	return out
 }
 
-func blockFromProto(b *Block) *ccusage.Block {
+func blockFromProto(b *Block) *usage.Block {
 	if b == nil {
 		return nil
 	}
-	out := &ccusage.Block{
+	out := &usage.Block{
 		StartTime: timeFromTS(b.GetStartTime()),
 		EndTime:   timeFromTS(b.GetEndTime()),
 		IsActive:  b.GetIsActive(),
 		CostUSD:   b.GetCostUsd(),
-		BurnRate: ccusage.BurnRate{
+		BurnRate: usage.BurnRate{
 			TokensPerMinute: b.GetTokensPerMinute(),
 			CostPerHour:     b.GetCostPerHour(),
 		},
-		Projection: ccusage.Projection{
+		Projection: usage.Projection{
 			TotalCost:        b.GetProjectionTotalCost(),
 			RemainingMinutes: int(b.GetProjectionRemainingMinutes()),
 		},
@@ -168,11 +168,11 @@ func blockFromProto(b *Block) *ccusage.Block {
 	return out
 }
 
-func weekFromProto(w *Week) *ccusage.WeeklyEntry {
+func weekFromProto(w *Week) *usage.WeeklyEntry {
 	if w == nil {
 		return nil
 	}
-	out := &ccusage.WeeklyEntry{
+	out := &usage.WeeklyEntry{
 		Period:    w.GetPeriod(),
 		TotalCost: w.GetCostUsd(),
 	}

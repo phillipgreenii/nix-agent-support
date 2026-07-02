@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Block is the persisted snapshot of one 5h cost window from ccusage.
+// Block is the persisted snapshot of one 5h cost window from usage.
 type Block struct {
 	ID                int64 // surrogate; assigned on insert
 	BlockID           string

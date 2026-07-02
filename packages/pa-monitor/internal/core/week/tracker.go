@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 type Tracker struct {
@@ -27,7 +27,7 @@ func NewTracker(capUSD float64) *Tracker {
 
 func (t *Tracker) ID() string { return t.currentID }
 
-func (t *Tracker) Update(e *ccusage.WeeklyEntry) {
+func (t *Tracker) Update(e *usage.WeeklyEntry) {
 	if e == nil {
 		return
 	}

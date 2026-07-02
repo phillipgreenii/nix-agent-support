@@ -3,7 +3,7 @@ package aggregate
 import (
 	"time"
 
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -63,8 +63,8 @@ type SessionView struct {
 
 type Tree struct {
 	Dirs           []*Directory
-	ActiveBlock    *ccusage.Block
-	ActiveWeek     *ccusage.WeeklyEntry // populated by daemon when ccusage weekly data is available
+	ActiveBlock    *usage.Block
+	ActiveWeek     *usage.WeeklyEntry // populated by daemon when ccusage weekly data is available
 	PlanCapUSD     float64
 	WeekCapUSD     float64 // used by week tracker integration
 	GeneratedAt    time.Time

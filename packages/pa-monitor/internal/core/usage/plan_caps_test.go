@@ -1,4 +1,4 @@
-package ccusage
+package usage
 
 import "testing"
 

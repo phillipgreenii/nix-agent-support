@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -124,7 +124,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 
 	// Account carries the plan identity and pricing inputs (the per-block /
 	// per-week caps). Built once here and threaded to the poller, trackers, and
-	// the store-conversion path so no consumer looks caps up from ccusage.
+	// the store-conversion path so no consumer looks caps up from usage.
 	acct := account.LoadAccount(cfg)
 
 	emitter, err := otel.New(ctx, otel.Options{
@@ -303,10 +303,10 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 // controls the lifetime of the background ccusage refresh goroutine —
 // pass the daemon's signal-bound ctx in production so the goroutine
 // exits on SIGTERM; tests pass a short-lived ctx to avoid leaks.
-func buildPoller(ctx context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*ccusage.WeeklyEntry, error)) {
+func buildPoller(ctx context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*usage.WeeklyEntry, error)) {
 	home, _ := os.UserHomeDir()
 
-	ccusageCache := ccusage.NewCachedRunner(60*time.Second, 60*time.Second,
+	ccusageCache := usage.NewCachedRunner(60*time.Second, 60*time.Second,
 		func(ctx context.Context) ([]byte, error) {
 			return exec.CommandContext(ctx, "ccusage", "blocks", "--active", "--json", "--offline").Output()
 		})
@@ -315,8 +315,8 @@ func buildPoller(ctx context.Context, cfg config.Config, acct account.Account) (
 	// The ccusage cost adapter is the first CostPricer implementation (ADR 0021
 	// §3). Building it here — the composition root — is where the concrete
 	// provider is named; the poller and daemon see only the port.
-	weeklyRunner := &ccusage.Runner{}
-	pricer := ccusage.NewProvider(ccusageCache, weeklyRunner)
+	weeklyRunner := &usage.Runner{}
+	pricer := usage.NewProvider(ccusageCache, weeklyRunner)
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 	signalers := signallayer.DefaultSignalers()

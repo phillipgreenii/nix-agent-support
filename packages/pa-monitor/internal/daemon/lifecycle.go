@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
@@ -156,7 +156,7 @@ type RunOptions struct {
 	// of caffeinate toggle changes from Caffeinate RPC.
 	RuntimePath string
 	// WeeklyFn fetches the current week entry. Nil → never polled.
-	WeeklyFn func(ctx context.Context) (*ccusage.WeeklyEntry, error)
+	WeeklyFn func(ctx context.Context) (*usage.WeeklyEntry, error)
 	// Account carries the plan identity and pricing inputs (the per-block /
 	// per-week caps) used by the store-conversion path. Its zero value yields
 	// zero caps ("unknown"), matching the pre-Account default for an unset tier.
@@ -901,11 +901,11 @@ func Run(ctx context.Context, p Paths) error {
 	return RunWith(ctx, RunOptions{Paths: p})
 }
 
-// blockToStoreBlock converts a ccusage.Block into a store.Block ready for
+// blockToStoreBlock converts a usage.Block into a store.Block ready for
 // persistence. capUSD is the per-5h-block soft cap, supplied by the caller from
 // the Account so the conversion no longer looks up the cap from the concrete
 // ccusage provider.
-func blockToStoreBlock(b *ccusage.Block, capUSD float64, now time.Time) store.Block {
+func blockToStoreBlock(b *usage.Block, capUSD float64, now time.Time) store.Block {
 	sb := store.Block{
 		BlockID:         b.ID,
 		StartedAt:       b.StartTime,
@@ -924,7 +924,7 @@ func blockToStoreBlock(b *ccusage.Block, capUSD float64, now time.Time) store.Bl
 // values (nil pointer / zero time on the tree) persist as nil — never 0 / 1970. The
 // store's COALESCE-on-conflict then preserves the last known value when a later tick
 // carries an unknown reading.
-func blockToStoreBlockWithLimits(b *ccusage.Block, capUSD float64, now time.Time, tree *aggregate.Tree) store.Block {
+func blockToStoreBlockWithLimits(b *usage.Block, capUSD float64, now time.Time, tree *aggregate.Tree) store.Block {
 	sb := blockToStoreBlock(b, capUSD, now)
 	if tree == nil {
 		return sb
@@ -972,10 +972,10 @@ func applyLimits(tree *aggregate.Tree, l *Limits) {
 	}
 }
 
-// weekToStoreWeek converts a ccusage.WeeklyEntry into a store.Week. The
+// weekToStoreWeek converts a usage.WeeklyEntry into a store.Week. The
 // week window is anchored on the Monday (Period) and extends 7 days. capUSD is
 // the per-week soft cap, supplied by the caller from the Account.
-func weekToStoreWeek(w *ccusage.WeeklyEntry, capUSD float64, now time.Time) store.Week {
+func weekToStoreWeek(w *usage.WeeklyEntry, capUSD float64, now time.Time) store.Week {
 	// Parse the Monday anchor from "YYYY-MM-DD".
 	var startedAt time.Time
 	if t, err := time.Parse("2006-01-02", w.Period); err == nil {

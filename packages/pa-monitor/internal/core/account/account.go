@@ -5,7 +5,7 @@
 //
 // In Phase 2 the "prices" the Account carries are the per-plan USD caps that
 // the block/week trackers and the store-conversion path consume. Sourcing them
-// from the Account (instead of calling ccusage.PlanCapUSD / ccusage.WeekCapUSD
+// from the Account (instead of calling usage.PlanCapUSD / usage.WeekCapUSD
 // inline) removes the consumers' direct coupling to the ccusage provider while
 // keeping the numbers identical (see account_test.go's pinned guard). Native
 // per-token pricing is a Phase 4 concern; no price table lives here yet.
@@ -13,7 +13,7 @@ package account
 
 import (
 	"github.com/phillipgreenii/pa-monitor/internal/config"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // Account is the plain plan/pricing/budget model. Built by LoadAccount from the
@@ -26,20 +26,20 @@ type Account struct {
 
 	// blockCapUSD / weekCapUSD are the per-5h-block and per-week soft caps in
 	// USD. Zero means "unknown" — do not compute exhaust time (matches the
-	// legacy ccusage.*CapUSD unknown-tier semantics exactly).
+	// legacy usage.*CapUSD unknown-tier semantics exactly).
 	blockCapUSD float64
 	weekCapUSD  float64
 }
 
 // LoadAccount builds an Account from config. The caps are sourced from the
 // legacy ccusage cap tables so the values are byte-identical to the pre-port
-// behavior (the pinned test asserts this); ccusage.PlanCapUSD / WeekCapUSD are
+// behavior (the pinned test asserts this); usage.PlanCapUSD / WeekCapUSD are
 // retained as the reference until they are retired in Phase 4.
 func LoadAccount(cfg config.Config) Account {
 	return Account{
 		PlanTier:    cfg.PlanTier,
-		blockCapUSD: ccusage.PlanCapUSD(cfg.PlanTier),
-		weekCapUSD:  ccusage.WeekCapUSD(cfg.PlanTier),
+		blockCapUSD: usage.PlanCapUSD(cfg.PlanTier),
+		weekCapUSD:  usage.WeekCapUSD(cfg.PlanTier),
 	}
 }
 

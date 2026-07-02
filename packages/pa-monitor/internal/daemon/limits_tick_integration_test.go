@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
@@ -77,7 +77,7 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cache := ccusage.NewCachedRunner(time.Hour, time.Second,
+	cache := usage.NewCachedRunner(time.Hour, time.Second,
 		func(context.Context) ([]byte, error) { return activeBlockBody, nil })
 	cache.Start(ctx)
 	p := &poller.Poller{
@@ -85,7 +85,7 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 		ClaudeHome:   dir,
 		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
 		Now:          time.Now,
-		Pricer:       ccusage.NewProvider(cache, &ccusage.Runner{}),
+		Pricer:       usage.NewProvider(cache, &usage.Runner{}),
 		WriteService: ws,
 		DB:           db,
 	}

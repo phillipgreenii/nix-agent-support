@@ -4,7 +4,7 @@ import (
 	"sort"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -179,16 +179,16 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 	}
 }
 
-// storeBlockToCCUsageBlock converts a *store.Block into a *ccusage.Block.
+// storeBlockToCCUsageBlock converts a *store.Block into a *usage.Block.
 // The BurnRate and Projection fields are not stored in the DB; they are
 // set to zero — callers that need them (ProjectedExhaust, proto render)
 // must recompute them if needed. For the "all sessions" view that Task 20
 // enables, zero burn-rate means the projection simply doesn't render.
-func storeBlockToCCUsageBlock(b *store.Block) *ccusage.Block {
+func storeBlockToCCUsageBlock(b *store.Block) *usage.Block {
 	if b == nil {
 		return nil
 	}
-	return &ccusage.Block{
+	return &usage.Block{
 		ID:        b.BlockID,
 		StartTime: b.StartedAt,
 		EndTime:   b.EndedAt,
@@ -200,12 +200,12 @@ func storeBlockToCCUsageBlock(b *store.Block) *ccusage.Block {
 	}
 }
 
-// storeWeekToCCUsageWeek converts a *store.Week into a *ccusage.WeeklyEntry.
-func storeWeekToCCUsageWeek(w *store.Week) *ccusage.WeeklyEntry {
+// storeWeekToCCUsageWeek converts a *store.Week into a *usage.WeeklyEntry.
+func storeWeekToCCUsageWeek(w *store.Week) *usage.WeeklyEntry {
 	if w == nil {
 		return nil
 	}
-	return &ccusage.WeeklyEntry{
+	return &usage.WeeklyEntry{
 		Period:    w.WeekID, // "YYYY-MM-DD" Monday anchor stored as WeekID
 		TotalCost: w.TotalCostUSD,
 		CapHitAt:  w.CapHitAt,
