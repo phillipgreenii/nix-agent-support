@@ -41,6 +41,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ticketlink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
@@ -622,8 +623,8 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 			bdc = e.bdClientFor(rcfg)
 		}
 		in := e.buildPRInput(ctx, pr, enriched, bdc, cachesByRepo[key.Repo], rcfg, "")
-		// JIRA — left empty for v1; downstream task wires this from
-		// feedback beads.
+		// JIRA — ticket keys parsed from branch/title/body via ticketlink;
+		// downstream task (pg2-4c5i.26) resolves full Jira issue details.
 		inputs = append(inputs, in)
 	}
 
@@ -802,6 +803,18 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 		pr.Repo = rcfg.Remote
 	}
 	in := snapshot.PRInput{PR: pr}
+
+	// --- ticket linkage ---
+	// Extract linked external ticket key(s) from the PR's branch, title, and
+	// body using the repo's config-driven patterns. Each key becomes a
+	// stub JIRAItem (ID only); the downstream Jira-fetch task (pg2-4c5i.26)
+	// is responsible for resolving Title/State/URL.
+	if keys := ticketlink.Parse(pr.Branch, pr.Title, pr.Body, rcfg.TicketPatterns); len(keys) > 0 {
+		in.JIRA = make([]api.Issue, len(keys))
+		for i, k := range keys {
+			in.JIRA[i] = api.Issue{ID: k}
+		}
+	}
 
 	// --- reviews/comments/CI runs ---
 	if enriched != nil {

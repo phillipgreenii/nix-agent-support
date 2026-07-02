@@ -57,6 +57,13 @@ type RepoConfig struct {
 	TeamMembers    []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
 	WatchLabels    []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
 	PRBodyTemplate string   `yaml:"pr_body_template,omitempty" json:"pr_body_template,omitempty"`
+	// TicketPatterns is a list of Go regular-expression strings used to
+	// extract linked external ticket keys from a PR's branch name, title,
+	// and body. Each pattern is applied in order; keys are de-duplicated
+	// across all three fields. An empty slice disables ticket-key
+	// extraction for this repo. No patterns are hardcoded in pg-pr itself;
+	// the consuming config (e.g. phillipg-nix-ziprecruiter) supplies them.
+	TicketPatterns []string `yaml:"ticket_patterns,omitempty" json:"ticket_patterns,omitempty"`
 }
 
 // Load reads and parses the config file using the resolution order described
