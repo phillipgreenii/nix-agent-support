@@ -68,13 +68,32 @@ You receive a PR identifier as your task, which can be:
    inspection. **Never call `pg-pr review post` or `pg-pr review
 submit` directly — that's a human decision.**
 
-5. **Cleanup**:
+5. **Emit the reviewed head SHA** — immediately after `pg-pr review draft`
+   succeeds, print one JSON line to stdout:
+
+   ```
+   {"head_sha":"<SHA>"}
+   ```
+
+   where `<SHA>` is the git commit hash the worktree was checked out at
+   (the HEAD of the PR branch). Obtain it by running:
+
+   ```bash
+   git -C <worktree_path> rev-parse HEAD
+   ```
+
+   This line MUST appear on its own line, contain no extra whitespace or
+   trailing characters, and use the exact key `head_sha`. The calling
+   daemon parses this line to stamp the reviewed revision; omitting it
+   silently disables re-review-on-head-advance.
+
+6. **Cleanup**:
 
    ```bash
    pg-pr worktree remove <PR>
    ```
 
-6. Report the summary (see below).
+7. Report the summary (see below).
 
 ## Summary Report Format
 
