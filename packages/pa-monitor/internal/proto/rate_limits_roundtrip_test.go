@@ -29,6 +29,9 @@ func TestDaemonStateRateLimits_UnsetRoundTripsToStale(t *testing.T) {
 	}
 
 	// Unset proto timestamps must be nil on the wire, not a 1970 sentinel.
+	if out.GetFiveHourResetsAt() != nil {
+		t.Errorf("FiveHourResetsAt = %v, want nil (never 1970)", out.GetFiveHourResetsAt())
+	}
 	if out.GetSevenDayResetsAt() != nil {
 		t.Errorf("SevenDayResetsAt = %v, want nil (never 1970)", out.GetSevenDayResetsAt())
 	}
@@ -43,6 +46,10 @@ func TestDaemonStateRateLimits_UnsetRoundTripsToStale(t *testing.T) {
 	}
 	if tree.SevenDayPct != nil {
 		t.Errorf("tree.SevenDayPct = %v, want nil (unknown, not 0)", *tree.SevenDayPct)
+	}
+	if !tree.FiveHourResetsAt.IsZero() {
+		t.Errorf("tree.FiveHourResetsAt = %v (Unix=%d), want zero Time (never 1970)",
+			tree.FiveHourResetsAt, tree.FiveHourResetsAt.Unix())
 	}
 	if !tree.SevenDayResetsAt.IsZero() {
 		t.Errorf("tree.SevenDayResetsAt = %v (Unix=%d), want zero Time (never 1970)",
@@ -60,12 +67,14 @@ func TestDaemonStateRateLimits_UnsetRoundTripsToStale(t *testing.T) {
 func TestTreeRateLimits_FullRoundTrip(t *testing.T) {
 	fivePct := 34.0
 	sevPct := 0.0 // real "0% used", NOT unknown
+	fiveRst := time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC)
 	sevRst := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	capAt := time.Date(2026, 7, 1, 9, 30, 0, 0, time.UTC)
 
 	in := &aggregate.Tree{
 		FiveHourPct:      &fivePct,
 		SevenDayPct:      &sevPct,
+		FiveHourResetsAt: fiveRst,
 		SevenDayResetsAt: sevRst,
 		LimitsCapturedAt: capAt,
 	}
@@ -86,6 +95,9 @@ func TestTreeRateLimits_FullRoundTrip(t *testing.T) {
 	}
 	if got.SevenDayPct == nil || *got.SevenDayPct != sevPct {
 		t.Errorf("SevenDayPct = %v, want %v (real 0%%, not nil)", got.SevenDayPct, sevPct)
+	}
+	if !got.FiveHourResetsAt.Equal(fiveRst) {
+		t.Errorf("FiveHourResetsAt = %v, want %v", got.FiveHourResetsAt, fiveRst)
 	}
 	if !got.SevenDayResetsAt.Equal(sevRst) {
 		t.Errorf("SevenDayResetsAt = %v, want %v", got.SevenDayResetsAt, sevRst)

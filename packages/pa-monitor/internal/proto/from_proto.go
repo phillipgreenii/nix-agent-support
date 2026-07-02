@@ -48,6 +48,7 @@ func ToTree(s *DaemonState) *aggregate.Tree {
 		v := *s.SevenDayPct
 		t.SevenDayPct = &v
 	}
+	t.FiveHourResetsAt = timeFromTS(s.GetFiveHourResetsAt())
 	t.SevenDayResetsAt = timeFromTS(s.GetSevenDayResetsAt())
 	t.LimitsCapturedAt = timeFromTS(s.GetLimitsCapturedAt())
 	for _, pd := range s.GetDirs() {

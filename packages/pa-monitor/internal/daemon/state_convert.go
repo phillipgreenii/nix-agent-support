@@ -42,6 +42,9 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 		// yet; this is the store->tree plumbing for Phase 1.
 		tree.FiveHourPct = st.Block.FiveHourPct
 		tree.SevenDayPct = st.Block.SevenDayPct
+		if st.Block.FiveHourResetsAt != nil {
+			tree.FiveHourResetsAt = *st.Block.FiveHourResetsAt
+		}
 		if st.Block.SevenDayResetsAt != nil {
 			tree.SevenDayResetsAt = *st.Block.SevenDayResetsAt
 		}

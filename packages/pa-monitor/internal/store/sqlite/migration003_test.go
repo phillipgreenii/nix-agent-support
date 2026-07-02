@@ -101,13 +101,16 @@ func TestMigrate003_AppliesCleanlyOn002DB(t *testing.T) {
 		t.Fatalf("Migrate to head: %v", err)
 	}
 
-	var maxV int
+	// Migrate applies ALL pending migrations, so head is whatever the latest
+	// numbered migration is (>= 3). Assert 003 itself was recorded rather than
+	// pinning head, which would break every time a later migration lands.
+	var applied003 int
 	if err := db.QueryRowContext(ctx,
-		"SELECT MAX(version) FROM schema_migrations").Scan(&maxV); err != nil {
-		t.Fatalf("max version: %v", err)
+		"SELECT COUNT(*) FROM schema_migrations WHERE version = 3").Scan(&applied003); err != nil {
+		t.Fatalf("check 003 applied: %v", err)
 	}
-	if maxV != 3 {
-		t.Errorf("schema_migrations max version = %d, want 3", maxV)
+	if applied003 != 1 {
+		t.Errorf("migration 003 applied = %d, want 1", applied003)
 	}
 
 	for _, col := range []string{"five_hour_pct", "seven_day_pct", "seven_day_resets_at", "limits_captured_at"} {

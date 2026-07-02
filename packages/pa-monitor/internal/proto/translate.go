@@ -37,6 +37,9 @@ func FromTree(tree *aggregate.Tree) *DaemonState {
 	if tree.SevenDayPct != nil {
 		d.SevenDayPct = proto.Float64(*tree.SevenDayPct)
 	}
+	if !tree.FiveHourResetsAt.IsZero() {
+		d.FiveHourResetsAt = timestamppb.New(tree.FiveHourResetsAt)
+	}
 	if !tree.SevenDayResetsAt.IsZero() {
 		d.SevenDayResetsAt = timestamppb.New(tree.SevenDayResetsAt)
 	}

@@ -84,6 +84,7 @@ type Tree struct {
 	// proto plumbing only.
 	FiveHourPct      *float64  // 5h used_percentage; nil = unknown
 	SevenDayPct      *float64  // 7d used_percentage; nil = unknown
+	FiveHourResetsAt time.Time // 5h window reset; zero = unknown
 	SevenDayResetsAt time.Time // 7d window reset; zero = unknown
 	LimitsCapturedAt time.Time // capture ts of the limits reading; zero = unknown
 }

@@ -30,6 +30,7 @@ type Block struct {
 	// nil. No consumer reads these yet — Phase 1 is persistence + proto plumbing.
 	FiveHourPct      *float64   // 5h window used_percentage, [0,100]; nil = unknown
 	SevenDayPct      *float64   // 7d window used_percentage, [0,100]; nil = unknown
+	FiveHourResetsAt *time.Time // 5h window reset instant; nil = unknown
 	SevenDayResetsAt *time.Time // 7d window reset instant; nil = unknown
 	LimitsCapturedAt *time.Time // capture ts of the limits reading; nil = unknown
 }

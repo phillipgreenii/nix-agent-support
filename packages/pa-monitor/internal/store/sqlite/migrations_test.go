@@ -40,8 +40,8 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 		"SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("schema_migrations max version = %d, want 3", version)
+	if version != 4 {
+		t.Errorf("schema_migrations max version = %d, want 4", version)
 	}
 
 	// Migration 002 adds last_error_from_subagent to sessions.
@@ -54,8 +54,9 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 		t.Errorf("sessions.last_error_from_subagent present = %d, want 1", hasCol)
 	}
 
-	// Migration 003 adds the status-line rate_limits columns to blocks.
-	for _, col := range []string{"five_hour_pct", "seven_day_pct", "seven_day_resets_at", "limits_captured_at"} {
+	// Migration 003 adds the status-line rate_limits columns to blocks; 004 adds
+	// the 5h window reset (five_hour_resets_at).
+	for _, col := range []string{"five_hour_pct", "seven_day_pct", "seven_day_resets_at", "limits_captured_at", "five_hour_resets_at"} {
 		var n int
 		if err := db.QueryRowContext(context.Background(),
 			"SELECT COUNT(*) FROM pragma_table_info('blocks') WHERE name=?", col).Scan(&n); err != nil {
@@ -85,7 +86,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 3 {
-		t.Errorf("schema_migrations rows = %d, want 3 (idempotent)", count)
+	if count != 4 {
+		t.Errorf("schema_migrations rows = %d, want 4 (idempotent)", count)
 	}
 }

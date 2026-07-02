@@ -128,6 +128,7 @@ message DaemonState {
   optional double seven_day_pct = 21;                    // 7d used_percentage [0,100]; unset = unknown
   google.protobuf.Timestamp seven_day_resets_at = 22;    // 7d window reset; unset = unknown (never 1970)
   google.protobuf.Timestamp limits_captured_at = 23;     // capture ts of the limits reading; unset = unknown
+  google.protobuf.Timestamp five_hour_resets_at = 24;    // 5h window reset; unset = unknown (never 1970)
 }
 
 message Directory {
