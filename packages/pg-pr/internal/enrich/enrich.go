@@ -136,6 +136,14 @@ type Input struct {
 	// Live verification deferred (pg2-4c5i.26 follow-up): the real Jira provider
 	// and config-driven injection are wired in a future bead.
 	JiraLookupFunc JiraLookupFunc
+
+	// SlackIncidentFunc, when non-nil, is called with PR context to determine
+	// whether there is an active production incident in Slack related to this PR
+	// (LLM-assessed). See slack_incident.go. Nil disables the signal (backward
+	// compatible). Live verification deferred (pg2-4c5i.27 follow-up): the real
+	// Slack client, LLM call, and config-driven injection are wired in a future
+	// bead.
+	SlackIncidentFunc SlackIncidentFunc
 }
 
 var urgencyLabels = map[string]bool{

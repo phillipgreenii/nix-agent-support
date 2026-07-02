@@ -129,6 +129,14 @@ func scoreUrgencyWithHealth(ctx context.Context, in Input) (string, int, []strin
 		level = urgencyLevel(score)
 	}
 
+	slackScore, slackReasons := scoreSlackIncident(ctx, in)
+	if slackScore > 0 {
+		score += slackScore
+		reasons = append(reasons, slackReasons...)
+		// Re-derive level from updated score.
+		level = urgencyLevel(score)
+	}
+
 	return level, score, reasons
 }
 
