@@ -303,6 +303,10 @@ func (f *outboxFakeBeads) HumanLabeledBeads(_ context.Context) (map[string]bool,
 func (f *outboxFakeBeads) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
+func (f *outboxFakeBeads) EnsureAttentionBead(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 // compile-time check: the same fake serves the bridge interface too.
 var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)

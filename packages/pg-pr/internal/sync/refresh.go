@@ -83,6 +83,22 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 		return nil, err
 	}
 	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
+
+	// Teammate-attention projection (pg2-4c5i.13): for TEAM PRs, re-derive the
+	// attention verdict from the just-persisted facts and emit pr.attention every
+	// tick (self-healing under fire-once delivery, R1). Then flush so the bridge
+	// ensures/closes the attention bead. Mine PRs carry no attention signal.
+	if e.deps.Store != nil && !e.isSelfAuthored(pr.Author) {
+		if stored, gerr := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); gerr == nil && stored != nil {
+			if aerr := e.emitAttention(ctx, bdc, rcfg.Remote, pr.Number, stored.ID); aerr != nil {
+				// Non-fatal: a failed attention emit self-heals next tick.
+				summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: aerr.Error()})
+			} else {
+				flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
+			}
+		}
+	}
+
 	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, "")
 	return &in, nil
 }

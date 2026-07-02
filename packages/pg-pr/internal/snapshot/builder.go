@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -16,6 +17,14 @@ type PRInput struct {
 	CIRuns    []api.CIRun
 	JIRA      []api.Issue
 	BeadsDeps []beads.DepNode // recursive deps of the merge-request bead
+	// Revisions is the PR's persisted revision timeline in ascending seq order
+	// (store.ListRevisions). It feeds the shared needsAttention predicate so the
+	// dashboard attention signal is store-derived, matching the bead projector
+	// (design §2.7, D4).
+	Revisions []store.Revision
+	// DraftReviewClosed is true iff pg2-4c5i.36 closed this PR's draft-review
+	// bead (the "draft review ready" signal). Also feeds needsAttention.
+	DraftReviewClosed bool
 }
 
 // BuilderInput is the full snapshot input.
@@ -70,18 +79,24 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
 
 func buildTeamRow(p PRInput, reg *agentregistry.Registry) TeamRow {
 	hum, agt := classifyApprovals(p, reg)
+	// Attention is STORE-derived through the shared predicate — the SAME function
+	// and SAME inputs the bead projector uses, so the dashboard signal and the
+	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
+	need, reason := NeedsAttention(p.Revisions, p.DraftReviewClosed)
 	return TeamRow{
-		Repo:          p.PR.Repo,
-		Number:        p.PR.Number,
-		Title:         p.PR.Title,
-		Owner:         p.PR.Author,
-		URL:           p.PR.URL,
-		CIStatus:      rollupCI(p.CIRuns),
-		HumanApproved: hum,
-		AgentApproved: agt,
-		LinesChanged:  p.PR.Additions + p.PR.Deletions,
-		FilesChanged:  p.PR.ChangedFiles,
-		JIRA:          mapJIRA(p.JIRA),
+		Repo:            p.PR.Repo,
+		Number:          p.PR.Number,
+		Title:           p.PR.Title,
+		Owner:           p.PR.Author,
+		URL:             p.PR.URL,
+		CIStatus:        rollupCI(p.CIRuns),
+		HumanApproved:   hum,
+		AgentApproved:   agt,
+		LinesChanged:    p.PR.Additions + p.PR.Deletions,
+		FilesChanged:    p.PR.ChangedFiles,
+		JIRA:            mapJIRA(p.JIRA),
+		NeedsAttention:  need,
+		AttentionReason: reason,
 	}
 }
 

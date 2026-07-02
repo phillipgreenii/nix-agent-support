@@ -26,19 +26,27 @@ type Revision struct {
 	// (pg2-4c5i.36) recorded an agent review against this revision's head SHA.
 	// "" when NULL (no agent review produced against this head yet).
 	ReviewedByAgentAt string
+	// OthersApproved is true when a NON-SELF (teammate) APPROVED review was
+	// observed at this revision's head SHA (pg2-4c5i.13). Deliberately excludes
+	// the viewer's own approval (that lives in my_review_state) so the attention
+	// predicate can tell "a teammate approved" from "I approved" (X3).
+	OthersApproved bool
+	// OthersApprovedAt is the timestamp of the recorded teammate approval; ""
+	// when NULL (no teammate approval observed at this head yet).
+	OthersApprovedAt string
 }
 
 const revisionColumns = `id, pr_id, seq, head_sha, COALESCE(base_sha,''),
 	observed_at, last_seen_at, ci_state, ci_passed, ci_failed, ci_pending,
 	COALESCE(ci_captured_at,''), COALESCE(reviewed_at,''), COALESCE(my_review_state,''),
-	COALESCE(reviewed_by_agent_at,'')`
+	COALESCE(reviewed_by_agent_at,''), others_approved, COALESCE(others_approved_at,'')`
 
 func scanRevision(s rowScanner) (Revision, error) {
 	var r Revision
 	err := s.Scan(&r.ID, &r.PRID, &r.Seq, &r.HeadSHA, &r.BaseSHA,
 		&r.ObservedAt, &r.LastSeenAt, &r.CIState, &r.CIPassed, &r.CIFailed,
 		&r.CIPending, &r.CICapturedAt, &r.ReviewedAt, &r.MyReviewState,
-		&r.ReviewedByAgentAt)
+		&r.ReviewedByAgentAt, &r.OthersApproved, &r.OthersApprovedAt)
 	return r, err
 }
 
@@ -187,6 +195,25 @@ func (db *DB) MarkRevisionAgentReviewed(ctx context.Context, prID int64, headSHA
 		at, prID, headSHA)
 	if err != nil {
 		return fmt.Errorf("store: mark revision agent-reviewed %d %s: %w", prID, headSHA, err)
+	}
+	return nil
+}
+
+// MarkRevisionOthersApproved records that a NON-SELF (teammate) APPROVED review
+// was observed at headSHA, on the latest revision whose head_sha matches (a head
+// SHA can recur after a force-push; we care about the most recent occurrence).
+// No-op if no revision matches. Mirrors MarkRevisionReviewed/AgentReviewed but
+// records the *teammate*-approval marker — deliberately distinct from
+// my_review_state (the viewer's own review) so the attention predicate can tell
+// "a teammate approved" from "I approved" (pg2-4c5i.13, X3).
+func (db *DB) MarkRevisionOthersApproved(ctx context.Context, prID int64, headSHA, at string) error {
+	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
+		SET others_approved=1, others_approved_at=?
+		WHERE id = (SELECT id FROM pr_revision
+		            WHERE pr_id=? AND head_sha=? ORDER BY seq DESC LIMIT 1)`,
+		at, prID, headSHA)
+	if err != nil {
+		return fmt.Errorf("store: mark revision others-approved %d %s: %w", prID, headSHA, err)
 	}
 	return nil
 }

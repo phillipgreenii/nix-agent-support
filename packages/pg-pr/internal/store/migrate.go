@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -225,6 +225,17 @@ INSERT INTO feedback_new SELECT * FROM feedback;
 DROP TABLE feedback;
 ALTER TABLE feedback_new RENAME TO feedback;
 CREATE INDEX idx_feedback_pr ON feedback(pr_id);
+`,
+	// v6 -> v7: per-revision others-approved marker (pg2-4c5i.13). Records when a
+	// NON-SELF (teammate) APPROVED review is observed at a revision's head SHA, so
+	// the attention predicate ("someone else approved") is store-derived rather
+	// than computed live in snapshot.classifyApprovals (which conflated the
+	// viewer's own approval with a teammate's — X3). Additive ALTER ADD COLUMN with
+	// defaults; existing rows backfill to 0 / NULL. Distinct from
+	// reviewed_at/my_review_state (that is *my* submitted GitHub review).
+	`
+ALTER TABLE pr_revision ADD COLUMN others_approved    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pr_revision ADD COLUMN others_approved_at TEXT;
 `,
 }
 

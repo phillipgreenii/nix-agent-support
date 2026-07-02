@@ -5,9 +5,19 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
+
+// draftReviewFinder is the optional bd capability the attention projector needs
+// to read the "draft review ready" signal (the draft-review bead CLOSED by
+// pg2-4c5i.36). The real *beads.Client satisfies it; test fakes may inject it.
+// Segregated (Interface Segregation) from the slim sync.BeadClient so the
+// projector degrades gracefully when the capability is absent (signal=false).
+type draftReviewFinder interface {
+	FindDraftReviewForPR(ctx context.Context, repo string, number int) (id string, closed bool, found bool, err error)
+}
 
 // prToStoreRow maps an observed PR + ownership into the authoritative
 // store.PullRequest row. Written for EVERY observed PR (regardless of
@@ -58,6 +68,50 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 			return err
 		}
 		return tx.EnqueueEvent(eventType, payload)
+	})
+}
+
+// emitAttention re-derives the teammate-attention verdict for a PR from
+// PERSISTED store facts (its revision timeline + the draft-review-bead-closed
+// signal) through the SHARED snapshot.NeedsAttention predicate, and emits a
+// pr.attention event carrying that verdict. Called once per tick from refreshPR
+// for team PRs.
+//
+// Because it re-derives + re-emits from facts EVERY tick (never a one-shot
+// transition), a dropped fire-once pr.attention event self-heals on the next
+// tick (design §2.7, R1/D3). The bridge's projectAttentionBead ensures (need) or
+// closes (!need) the attention bead idempotently.
+//
+// It uses the SAME predicate + SAME store inputs the dashboard builder feeds
+// buildTeamRow, so the dashboard NeedsAttention signal and the open-attention-
+// bead set can never diverge (D4/R4). No-op when the store is nil.
+func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string, number int, prID int64) error {
+	if e.deps.Store == nil {
+		return nil
+	}
+	revs, err := e.deps.Store.ListRevisions(ctx, prID)
+	if err != nil {
+		return err
+	}
+	// "Draft review ready" = the draft-review bead was CLOSED by .36. Read it via
+	// the optional finder capability; absent capability degrades to "not ready".
+	draftReviewClosed := false
+	if finder, ok := bdc.(draftReviewFinder); ok {
+		_, closed, found, ferr := finder.FindDraftReviewForPR(ctx, repo, number)
+		if ferr != nil {
+			return ferr
+		}
+		draftReviewClosed = found && closed
+	}
+	need, reason := snapshot.NeedsAttention(revs, draftReviewClosed)
+	payload, err := json.Marshal(store.AttentionPayload{
+		Repo: repo, Number: number, Need: need, Reason: reason,
+	})
+	if err != nil {
+		return err
+	}
+	return e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
+		return tx.EnqueueEvent(store.EventPRAttention, payload)
 	})
 }
 

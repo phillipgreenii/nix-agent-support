@@ -25,6 +25,8 @@ type BeadClient interface {
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
 	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
+	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
+	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
 }
 
 // Handler is the beads event handler.
@@ -74,6 +76,12 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 			return fmt.Errorf("beadsbridge: decode feedback payload: %w", err)
 		}
 		return h.ensureProcessFeedbackBead(ctx, p)
+	case store.EventPRAttention:
+		var p store.AttentionPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return fmt.Errorf("beadsbridge: decode attention payload: %w", err)
+		}
+		return h.projectAttentionBead(ctx, p)
 	case store.EventPRClosed, store.EventPRMerged:
 		var p store.PRPayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -107,6 +115,30 @@ func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPaylo
 	}
 	_, err = h.client.CreateProcessingCycle(ctx, mr.ID, fmt.Sprintf("%s#%d", p.Repo, p.Number), p.Mine)
 	return err
+}
+
+// projectAttentionBead ensures or closes the teammate-attention bead for a PR
+// from the shared needsAttention verdict carried in the event. Re-run every tick
+// (the projector re-emits from persisted facts), so both ensure and close are
+// idempotent and a dropped fire-once event self-heals on the next tick (R1).
+// Mirrors ensureProcessFeedbackBead: the FindByRepoAndNumber error PROPAGATES,
+// and a closed parent suppresses opening a new child.
+func (h *Handler) projectAttentionBead(ctx context.Context, p store.AttentionPayload) error {
+	mr, err := h.client.FindByRepoAndNumber(ctx, p.Repo, p.Number)
+	if err != nil {
+		return err
+	}
+	if mr == nil {
+		return fmt.Errorf("beadsbridge: no merge-request bead for %s#%d", p.Repo, p.Number)
+	}
+	if mr.Status == "closed" {
+		return nil // do not attach/reopen an attention child under a closed PR bead
+	}
+	if p.Need {
+		_, err := h.client.EnsureAttentionBead(ctx, mr.ID, fmt.Sprintf("%s#%d", p.Repo, p.Number))
+		return err
+	}
+	return h.client.CloseAttentionBead(ctx, mr.ID, "attention-cleared")
 }
 
 // cascadeClose closes the PR bead and its descendants.

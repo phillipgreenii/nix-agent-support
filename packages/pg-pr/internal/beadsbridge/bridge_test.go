@@ -67,6 +67,10 @@ func (noopBeadClient) CloseFeedback(context.Context, string, string) error      
 func (noopBeadClient) EnsureDraftReviewBead(context.Context, string, string, bool) (string, error) {
 	return "", nil
 }
+func (noopBeadClient) EnsureAttentionBead(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
 // errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed

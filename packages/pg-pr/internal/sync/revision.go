@@ -96,3 +96,28 @@ func mySubmittedReviews(reviews []api.Review, self string) []submittedReview {
 	}
 	return out
 }
+
+// othersApprovedReviews returns the NON-SELF (teammate) APPROVED reviews — the
+// inverse-self counterpart of mySubmittedReviews, filtered to APPROVED only.
+// It underpins the store-derived "someone else approved" marker used by the
+// attention predicate (pg2-4c5i.13). The viewer's OWN approval is deliberately
+// EXCLUDED so it can never be mistaken for a teammate's approval (X3). Only
+// APPROVED counts — a teammate's COMMENTED/CHANGES_REQUESTED review does not put
+// the PR "off the hook". State is always "approved" for the entries returned.
+func othersApprovedReviews(reviews []api.Review, self string) []submittedReview {
+	var out []submittedReview
+	for _, r := range reviews {
+		if self != "" && r.Author == self {
+			continue // the viewer's own approval is NOT a teammate approval (X3)
+		}
+		if r.State != "APPROVED" {
+			continue
+		}
+		out = append(out, submittedReview{
+			CommitSHA:   r.CommitOID,
+			State:       "approved",
+			SubmittedAt: r.SubmittedAt,
+		})
+	}
+	return out
+}

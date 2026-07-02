@@ -74,6 +74,15 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			return fmt.Errorf("ingest: mark reviewed %s#%d: %w", repo, pr.Number, err)
 		}
 	}
+	// Record teammate (non-self) approvals per revision so the attention predicate
+	// (pg2-4c5i.13) is store-derived. This runs on the daemon's enriched path per
+	// tick, keeping the marker current. The viewer's own approval is excluded by
+	// othersApprovedReviews (X3), so it can never masquerade as a teammate's.
+	for _, rv := range othersApprovedReviews(enriched.Reviews, self) {
+		if err := e.deps.Store.MarkRevisionOthersApproved(ctx, prID, rv.CommitSHA, rv.SubmittedAt); err != nil {
+			return fmt.Errorf("ingest: mark others-approved %s#%d: %w", repo, pr.Number, err)
+		}
+	}
 
 	// Encode the shared event payload (identical for every item in this PR).
 	payloadBytes, err := json.Marshal(struct {

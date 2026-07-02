@@ -40,6 +40,13 @@ type TeamRow struct {
 	LinesChanged  int        `json:"lines_changed"`
 	FilesChanged  int        `json:"files_changed"`
 	JIRA          []JIRAItem `json:"jira"`
+	// NeedsAttention flags a teammate PR that currently needs my review, derived
+	// from the shared needsAttention predicate over persisted store facts. Stays
+	// consistent with the open-attention-bead set (same predicate, same inputs).
+	NeedsAttention bool `json:"needs_attention"`
+	// AttentionReason is the (stable) reason string when NeedsAttention is true;
+	// empty otherwise. See snapshot.AttentionReason* constants.
+	AttentionReason string `json:"attention_reason,omitempty"`
 }
 
 // JIRAItem is one resolved JIRA issue referenced by a PR.
