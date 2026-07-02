@@ -45,6 +45,19 @@ let
       (
         if cfg.noFlicker then ".env.CLAUDE_CODE_NO_FLICKER = \"1\"" else "del(.env.CLAUDE_CODE_NO_FLICKER)"
       )
+    ]
+    # promptCacheTtl selects the Claude Code prompt-cache TTL via two mutually
+    # exclusive env vars (docs: code.claude.com/docs/en/prompt-caching). Applied
+    # after cfg.env so the dedicated option wins over any stray env entry, and
+    # each non-null state deletes the opposite key so toggling never leaves a
+    # stale value behind.
+    ++ lib.optionals (cfg.promptCacheTtl == "1h") [
+      ".env.ENABLE_PROMPT_CACHING_1H = \"1\""
+      "del(.env.FORCE_PROMPT_CACHING_5M)"
+    ]
+    ++ lib.optionals (cfg.promptCacheTtl == "5m") [
+      ".env.FORCE_PROMPT_CACHING_5M = \"1\""
+      "del(.env.ENABLE_PROMPT_CACHING_1H)"
     ];
 
   # Framework-built scripts (mkBashScript with libraries = [ activation-lib ]),
@@ -162,14 +175,46 @@ in
       default = { };
       example = lib.literalExpression ''
         {
-          ENABLE_PROMPT_CACHING_1H = "1";
+          BASH_DEFAULT_TIMEOUT_MS = "600000";
         }
       '';
       description = ''
         Extra environment variables to merge into `.env` in `~/.claude/settings.json`.
         Each entry is applied as a jq assignment, so keys overwrite any existing
         value at that path. `CLAUDE_CODE_NO_FLICKER` is still controlled by the
-        `noFlicker` option and applied after this attrset.
+        `noFlicker` option and applied after this attrset. For the prompt-cache
+        TTL vars (`ENABLE_PROMPT_CACHING_1H` / `FORCE_PROMPT_CACHING_5M`) use the
+        dedicated `promptCacheTtl` option instead of setting them here — it is
+        applied after this attrset and would override a conflicting value set here.
+      '';
+    };
+
+    promptCacheTtl = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.enum [
+          "1h"
+          "5m"
+        ]
+      );
+      default = null;
+      example = "1h";
+      description = ''
+        Claude Code prompt-cache TTL preference, written into `.env` of
+        `~/.claude/settings.json`. Three states:
+
+        - `null` (default): write neither cache env var, so Claude Code's
+          auth-based default applies (1h on a Claude subscription, 5m on an
+          API key / Bedrock / Vertex).
+        - `"1h"`: set `ENABLE_PROMPT_CACHING_1H=1` (force the 1-hour TTL).
+        - `"5m"`: set `FORCE_PROMPT_CACHING_5M=1` (the documented short-TTL
+          override; force the 5-minute TTL).
+
+        The two env vars are mutually exclusive, so selecting one deletes the
+        other. Setting this back to `null` after a non-null value leaves the
+        last-written key in place (same caveat as the other `nullOr` options
+        here) — set `"1h"` or `"5m"` explicitly to change a written value.
+        Prefer this over setting the cache vars through the generic `env`
+        option. See https://code.claude.com/docs/en/prompt-caching.
       '';
     };
 

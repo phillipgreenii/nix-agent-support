@@ -674,6 +674,104 @@
                 assert hasSub "plugin marketplace update" activationNoDir;
                 pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
 
+              # Regression guard for pg2-64uu: promptCacheTtl writes the correct
+              # mutually-exclusive prompt-cache env var into settings.json's `.env`
+              # (docs: code.claude.com/docs/en/prompt-caching). "1h" sets
+              # ENABLE_PROMPT_CACHING_1H and deletes FORCE_PROMPT_CACHING_5M; "5m"
+              # is the inverse; null writes neither. Pure module eval inspecting the
+              # generated activation string — no HM harness.
+              test-claude-settings-prompt-cache-ttl =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  activationFor =
+                    ttl:
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings.promptCacheTtl = ttl;
+                      };
+                    }).home.activation.claude-settings;
+
+                  oneHour = activationFor "1h";
+                  fiveMin = activationFor "5m";
+                  unset = activationFor null;
+
+                  # A conflicting generic `env` entry alongside promptCacheTtl, to
+                  # prove the dedicated filter is emitted AFTER the env attrset and
+                  # therefore wins (jq's left-to-right `|` chain, last write wins).
+                  ordered =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          env.ENABLE_PROMPT_CACHING_1H = "bogus";
+                          promptCacheTtl = "1h";
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # Everything after the generic-env assignment; the dedicated
+                  # assignment must appear here (i.e. later in the jq program).
+                  afterGenericEnv = lib.last (lib.splitString ''.env["ENABLE_PROMPT_CACHING_1H"] = "bogus"'' ordered);
+                in
+                # "1h" forces the 1-hour TTL and removes the 5-minute override.
+                assert hasSub ''.env.ENABLE_PROMPT_CACHING_1H = "1"'' oneHour;
+                assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" oneHour;
+                assert !(hasSub ''FORCE_PROMPT_CACHING_5M = "1"'' oneHour);
+                # "5m" is the inverse: force 5-minute, remove the 1-hour flag.
+                assert hasSub ''.env.FORCE_PROMPT_CACHING_5M = "1"'' fiveMin;
+                assert hasSub "del(.env.ENABLE_PROMPT_CACHING_1H)" fiveMin;
+                assert !(hasSub ''ENABLE_PROMPT_CACHING_1H = "1"'' fiveMin);
+                # null (default) writes neither prompt-cache key.
+                assert !(hasSub "ENABLE_PROMPT_CACHING_1H" unset);
+                assert !(hasSub "FORCE_PROMPT_CACHING_5M" unset);
+                # Ordering guarantee: the dedicated option overrides a conflicting
+                # generic `env` entry because its filter runs later in the chain.
+                assert hasSub ''.env["ENABLE_PROMPT_CACHING_1H"] = "bogus"'' ordered;
+                assert hasSub ''.env.ENABLE_PROMPT_CACHING_1H = "1"'' afterGenericEnv;
+                assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" afterGenericEnv;
+                pkgs.runCommand "claude-settings-prompt-cache-ttl-ok" { } "touch $out";
+
               # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
               # must render on daemon.enable even when the TUI (enable/
               # claude.enable) is off, and must NOT render when nothing is
