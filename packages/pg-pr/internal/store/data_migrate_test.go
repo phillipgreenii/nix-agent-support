@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -48,7 +49,7 @@ func TestRunDataMigrations_RunsAndRecordsStep(t *testing.T) {
 	steps := []DataMigrationStep{
 		{
 			ID: "0001_test_step",
-			Run: func(ctx context.Context, db *DB) error {
+			Run: func(ctx context.Context, tx *Tx) error {
 				calls++
 				return nil
 			},
@@ -86,7 +87,7 @@ func TestRunDataMigrations_IdempotentRerun(t *testing.T) {
 	steps := []DataMigrationStep{
 		{
 			ID: "0001_idempotent",
-			Run: func(ctx context.Context, db *DB) error {
+			Run: func(ctx context.Context, tx *Tx) error {
 				calls++
 				return nil
 			},
@@ -123,14 +124,14 @@ func TestRunDataMigrations_AppliesOnlyPendingSteps(t *testing.T) {
 	steps := []DataMigrationStep{
 		{
 			ID: "0001_already_done",
-			Run: func(ctx context.Context, db *DB) error {
+			Run: func(ctx context.Context, tx *Tx) error {
 				t.Error("0001_already_done should not run again")
 				return nil
 			},
 		},
 		{
 			ID: "0002_pending",
-			Run: func(ctx context.Context, db *DB) error {
+			Run: func(ctx context.Context, tx *Tx) error {
 				bCalls++
 				return nil
 			},
@@ -142,6 +143,89 @@ func TestRunDataMigrations_AppliesOnlyPendingSteps(t *testing.T) {
 	}
 	if bCalls != 1 {
 		t.Fatalf("0002_pending called %d time(s), want 1", bCalls)
+	}
+}
+
+// TestRunDataMigrations_FailedRunIsNotRecorded verifies the transactional
+// guarantee: if a step's Run returns an error AFTER doing partial SQL work, the
+// entire transaction is rolled back — the partial work is undone AND the step
+// is NOT recorded as applied. A subsequent call to RunDataMigrations must
+// attempt the step again from scratch.
+func TestRunDataMigrations_FailedRunIsNotRecorded(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	prID, _ := db.UpsertPR(ctx, PullRequest{
+		Repo: "o/r", Number: 99, Ownership: "mine", State: "open",
+	})
+
+	// Seed a feedback row so the step has something to delete.
+	_, err := db.sql.Exec(`
+		INSERT INTO feedback
+		  (pr_id, kind, fingerprint, status, title, body, file, created_at, updated_at)
+		VALUES (?, 'code-comment-thread', 'fp-atomic', 'new', '', 'body', 'f.go',
+		        '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`,
+		prID,
+	)
+	if err != nil {
+		t.Fatalf("seed feedback: %v", err)
+	}
+
+	// A step that deletes the seeded row then deliberately fails.
+	runCalls := 0
+	errBoom := fmt.Errorf("boom: intentional failure after partial work")
+	steps := []DataMigrationStep{
+		{
+			ID: "0099_atomic_test",
+			Run: func(ctx context.Context, tx *Tx) error {
+				runCalls++
+				// Do real SQL work inside the transaction.
+				if _, err := tx.Exec(
+					"DELETE FROM feedback WHERE pr_id=?", prID,
+				); err != nil {
+					return err
+				}
+				// Confirm the delete took effect inside the tx.
+				var cnt int
+				_ = tx.QueryRow(
+					"SELECT COUNT(*) FROM feedback WHERE pr_id=?", prID,
+				).Scan(&cnt)
+				if cnt != 0 {
+					t.Errorf("in-tx delete did not take effect: %d rows remain", cnt)
+				}
+				// Now deliberately fail — the whole tx must roll back.
+				return errBoom
+			},
+		},
+	}
+
+	// First call: step runs but fails → must error, tx rolls back.
+	if err := RunDataMigrations(ctx, db, steps); err == nil {
+		t.Fatal("RunDataMigrations: expected an error, got nil")
+	}
+
+	// The partial DELETE must have been rolled back — row still exists.
+	var cnt int
+	_ = db.sql.QueryRow("SELECT COUNT(*) FROM feedback WHERE pr_id=?", prID).Scan(&cnt)
+	if cnt != 1 {
+		t.Fatalf("after failed step: expected 1 row (rollback), got %d", cnt)
+	}
+
+	// The step must NOT be recorded as applied.
+	var recorded int
+	_ = db.sql.QueryRow(
+		"SELECT COUNT(*) FROM data_migration WHERE id='0099_atomic_test'",
+	).Scan(&recorded)
+	if recorded != 0 {
+		t.Fatalf("failed step was incorrectly recorded in data_migration")
+	}
+
+	// A re-run must attempt the step again (runCalls increments to 2).
+	if err := RunDataMigrations(ctx, db, steps); err == nil {
+		t.Fatal("second RunDataMigrations: expected an error again, got nil")
+	}
+	if runCalls != 2 {
+		t.Fatalf("step was called %d time(s) across two failing runs, want 2", runCalls)
 	}
 }
 
@@ -245,7 +329,9 @@ func TestMigration0001_DedupLegacyFeedback(t *testing.T) {
 	}
 
 	// Run migration.
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 
@@ -275,7 +361,9 @@ func TestMigration0001_LeavesOrphanPRRC(t *testing.T) {
 	// Only a PRRC row, no PRRT counterpart.
 	seedLegacyPRRCRow(t, db, prID, "PRRC_orphan", "fp-prrc-orphan")
 
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 
@@ -321,7 +409,9 @@ func TestMigration0001_BackfillsPostedAt(t *testing.T) {
 		t.Fatalf("seed message: %v", err)
 	}
 
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 
@@ -372,7 +462,9 @@ func TestMigration0001_DoesNotOverwriteExistingPostedAt(t *testing.T) {
 		t.Fatalf("seed message: %v", err)
 	}
 
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 
@@ -398,10 +490,14 @@ func TestMigration0001_Idempotent(t *testing.T) {
 	seedLegacyPRRCRow(t, db, prID, "PRRC_dup", "fp-prrc-dup")
 	seedPRRTRow(t, db, prID, "PRRT_dup", "PRRC_dup", "fp-prrt-dup")
 
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("second run (idempotent): %v", err)
 	}
 
@@ -441,7 +537,9 @@ func TestMigration0001_MultipleThreadsSamePR(t *testing.T) {
 		t.Fatalf("pre-migration: expected 4 rows, got %d", pre)
 	}
 
-	if err := DataMigration0001DedupLegacyFeedback(ctx, db); err != nil {
+	if err := db.InTx(ctx, func(tx *Tx) error {
+		return DataMigration0001DedupLegacyFeedback(ctx, tx)
+	}); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 

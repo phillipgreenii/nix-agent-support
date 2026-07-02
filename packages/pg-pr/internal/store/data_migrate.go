@@ -5,14 +5,19 @@ import (
 	"fmt"
 )
 
-// DataMigrationStep is one idempotent data-migration step. ID must be unique
-// across all registered migrations; by convention use a zero-padded sequence
-// prefix, e.g. "0001_dedup_legacy_feedback". Run is called at most once per
-// store; once applied, the step is recorded in data_migration and skipped on
-// all future RunDataMigrations calls.
+// DataMigrationStep is one data-migration step. ID must be unique across all
+// registered migrations; by convention use a zero-padded sequence prefix, e.g.
+// "0001_dedup_legacy_feedback". Run is called inside a transaction: the applied
+// record and all SQL mutations land in the same commit, so a crash between them
+// is impossible. Once the transaction commits, the step is recorded in
+// data_migration and skipped on all future RunDataMigrations calls.
+//
+// Run MUST be safe to call more than once (idempotent) as a belt-and-suspenders
+// guarantee, but the framework's transactional record means a partial run never
+// leaves a step falsely marked as applied.
 type DataMigrationStep struct {
 	ID  string
-	Run func(ctx context.Context, db *DB) error
+	Run func(ctx context.Context, tx *Tx) error
 }
 
 // RegisteredDataMigrations is the ordered list of all data migrations known to
@@ -42,8 +47,10 @@ func PendingDataMigrations(ctx context.Context, db *DB, steps []DataMigrationSte
 
 // RunDataMigrations applies any pending data migrations from steps in order.
 // Each step is skipped if its ID is already recorded in the data_migration
-// table, making the whole call idempotent. A nil or empty steps slice is
-// valid (no-op).
+// table. For each pending step, the step's SQL work and the applied-record
+// INSERT are executed inside a single transaction: either both commit or
+// neither does, so a crash between them cannot leave the database in a
+// partially-applied state. A nil or empty steps slice is valid (no-op).
 func RunDataMigrations(ctx context.Context, db *DB, steps []DataMigrationStep) error {
 	for _, step := range steps {
 		applied, err := isDataMigrationApplied(ctx, db, step.ID)
@@ -53,11 +60,16 @@ func RunDataMigrations(ctx context.Context, db *DB, steps []DataMigrationStep) e
 		if applied {
 			continue
 		}
-		if err := step.Run(ctx, db); err != nil {
-			return fmt.Errorf("data migrate: run %s: %w", step.ID, err)
-		}
-		if err := recordDataMigration(ctx, db, step.ID); err != nil {
-			return fmt.Errorf("data migrate: record %s: %w", step.ID, err)
+		if err := db.InTx(ctx, func(tx *Tx) error {
+			if err := step.Run(ctx, tx); err != nil {
+				return fmt.Errorf("run %s: %w", step.ID, err)
+			}
+			if err := recordDataMigration(ctx, tx, step.ID); err != nil {
+				return fmt.Errorf("record %s: %w", step.ID, err)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("data migrate: %w", err)
 		}
 	}
 	return nil
@@ -75,9 +87,10 @@ func isDataMigrationApplied(ctx context.Context, db *DB, id string) (bool, error
 	return cnt > 0, nil
 }
 
-// recordDataMigration inserts a row into data_migration for id.
-func recordDataMigration(ctx context.Context, db *DB, id string) error {
-	_, err := db.sql.ExecContext(ctx,
+// recordDataMigration inserts a row into data_migration for id inside tx.
+// The caller is responsible for committing or rolling back tx.
+func recordDataMigration(ctx context.Context, tx *Tx, id string) error {
+	_, err := tx.Exec(
 		"INSERT INTO data_migration (id, applied_at) VALUES (?,?)",
 		id, nowRFC3339(),
 	)
@@ -98,7 +111,7 @@ func recordDataMigration(ctx context.Context, db *DB, id string) error {
 //
 // The function is idempotent: running it against a store that has already been
 // cleaned up is a no-op.
-func DataMigration0001DedupLegacyFeedback(ctx context.Context, db *DB) error {
+func DataMigration0001DedupLegacyFeedback(ctx context.Context, tx *Tx) error {
 	// Step 1: delete PRRC-keyed rows that have a PRRT counterpart.
 	//
 	// Matching strategy: the legacy REST path wrote a feedback row whose
@@ -127,7 +140,7 @@ WHERE external_id LIKE 'PRRC_%'
         AND prrt.kind         = 'code-comment-thread'
         AND prrt.pr_id        = feedback.pr_id
   )`
-	if _, err := db.sql.ExecContext(ctx, deleteStmt); err != nil {
+	if _, err := tx.Exec(deleteStmt); err != nil {
 		return fmt.Errorf("0001 dedup: delete PRRC rows: %w", err)
 	}
 
@@ -147,7 +160,7 @@ SET posted_at = (
 )
 WHERE posted_at IS NULL OR posted_at = ''`
 
-	if _, err := db.sql.ExecContext(ctx, backfillStmt); err != nil {
+	if _, err := tx.Exec(backfillStmt); err != nil {
 		return fmt.Errorf("0001 dedup: backfill posted_at: %w", err)
 	}
 
