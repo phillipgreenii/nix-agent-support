@@ -55,7 +55,8 @@ type Poller struct {
 	Now                func() time.Time
 	// Pricer is the CostPricer port supplying the active 5h block cost and its
 	// probe state. Nil disables cost folding (the block is simply absent). The
-	// ccusage adapter is its production implementation; tests inject a fake.
+	// native adapter (usage.NativePricer) is its production implementation;
+	// tests inject a fake.
 	Pricer     CostPricer
 	PRLookupFn func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
 	Signalers  []signal.Signaler
@@ -78,7 +79,7 @@ type Poller struct {
 	DB *sql.DB
 
 	// ActiveBlockID is the surrogate id of the current block in the DB.
-	// Set by the daemon main loop after ccusage poller upserts the block.
+	// Set by the daemon main loop after the cost poller upserts the block.
 	// 0 means no active block yet — contributions are skipped this tick.
 	ActiveBlockID int64
 	ActiveWeekID  int64

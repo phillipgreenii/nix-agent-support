@@ -125,8 +125,6 @@
           pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
             inherit (goBuilders) mkGoApp;
           };
-          goccc = final.callPackage ./packages/goccc { };
-          toktrack = final.callPackage ./packages/toktrack { };
           claude-activity =
             let
               result = import ./packages/claude-activity {
@@ -1002,8 +1000,6 @@
               pa-monitor
               pa-monitor-decorator-gc
               pg-pr
-              goccc
-              toktrack
               gc-bd-import-breaker
               gc-dolt-maintenance
               gascity

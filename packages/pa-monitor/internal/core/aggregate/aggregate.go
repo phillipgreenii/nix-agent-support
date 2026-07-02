@@ -11,7 +11,7 @@ import (
 // Build groups sessions by Cwd and totals tokens/cost. The block argument may be nil.
 // blockCapUSD is the per-5h-block soft cap (0 = unknown) used for display-layer
 // projections; the caller supplies it from the Account so Build no longer looks
-// up the cap from the concrete ccusage provider.
+// up the cap from the concrete cost provider.
 func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *usage.Block, blockCapUSD float64) *Tree {
 	byDir := map[string]*Directory{}
 	var windowResetsAt time.Time

@@ -63,29 +63,22 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 		t.Fatalf("write session fixture: %v", err)
 	}
 
-	activeBlockBody, _ := json.Marshal(map[string]any{
-		"blocks": []map[string]any{
-			{
-				"id":        "2026-06-01T10Z",
-				"startTime": "2026-06-01T10:00:00Z",
-				"endTime":   "2026-06-01T15:00:00Z",
-				"isActive":  true,
-				"costUSD":   5.0,
-			},
-		},
-	})
+	activeBlock := &usage.Block{
+		ID:        "2026-06-01T10Z",
+		StartTime: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC),
+		EndTime:   time.Date(2026, 6, 1, 15, 0, 0, 0, time.UTC),
+		IsActive:  true,
+		CostUSD:   5.0,
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cache := usage.NewCachedRunner(time.Hour, time.Second,
-		func(context.Context) ([]byte, error) { return activeBlockBody, nil })
-	cache.Start(ctx)
 	p := &poller.Poller{
 		SessionsDir:  sessDir,
 		ClaudeHome:   dir,
 		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
 		Now:          time.Now,
-		Pricer:       usage.NewProvider(cache, &usage.Runner{}),
+		Pricer:       &fakeCostPricer{block: activeBlock},
 		WriteService: ws,
 		DB:           db,
 	}

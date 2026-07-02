@@ -2,16 +2,23 @@ package usage
 
 import "time"
 
+// BurnRate is the current spend velocity of a block. Populated by the daemon's
+// own periodic sampling (ADR 0021 §1); the native pricer leaves it zero, and
+// the display layer omits the projection when burn is zero.
 type BurnRate struct {
 	TokensPerMinute float64 `json:"tokensPerMinute"`
 	CostPerHour     float64 `json:"costPerHour"`
 }
 
+// Projection is a block's forecast to the plan cap. Same provenance as BurnRate.
 type Projection struct {
 	TotalCost        float64 `json:"totalCost"`
 	RemainingMinutes int     `json:"remainingMinutes"`
 }
 
+// Block is the neutral 5h-block cost DTO consumed across aggregate / proto /
+// store / trackers (renamed from ccusage.Block in Phase 4). The native
+// CostPricer produces it from transcript usage × config prices.
 type Block struct {
 	ID         string     `json:"id"`
 	StartTime  time.Time  `json:"startTime"`
@@ -23,22 +30,11 @@ type Block struct {
 	CapHitAt   *time.Time `json:"capHitAt,omitempty"`
 }
 
-type BlocksResponse struct {
-	Blocks []Block `json:"blocks"`
-}
-
-// WeeklyEntry mirrors one row from `ccusage weekly --json --offline`.
-// Period is the Monday of the week in YYYY-MM-DD form, local time.
+// WeeklyEntry is the neutral current-week cost DTO. Period is the Monday of the
+// week in YYYY-MM-DD form.
 type WeeklyEntry struct {
 	Period    string     `json:"period"`
 	TotalCost float64    `json:"totalCost"`
 	Agent     string     `json:"agent"`
 	CapHitAt  *time.Time `json:"capHitAt,omitempty"`
-}
-
-type WeeklyResponse struct {
-	Weekly []WeeklyEntry `json:"weekly"`
-	Totals struct {
-		TotalCost float64 `json:"totalCost"`
-	} `json:"totals"`
 }

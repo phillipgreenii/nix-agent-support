@@ -64,12 +64,12 @@ type SessionView struct {
 type Tree struct {
 	Dirs           []*Directory
 	ActiveBlock    *usage.Block
-	ActiveWeek     *usage.WeeklyEntry // populated by daemon when ccusage weekly data is available
+	ActiveWeek     *usage.WeeklyEntry // populated by daemon from the native weekly cost
 	PlanCapUSD     float64
 	WeekCapUSD     float64 // used by week tracker integration
 	GeneratedAt    time.Time
-	CCUsageProbed  bool      // true once the first ccusage probe has run
-	CCUsageErr     error     // non-nil if ccusage exec failed
+	CCUsageProbed  bool      // true once the CostPricer has probed once (wire field name retained)
+	CCUsageErr     error     // non-nil if the last cost probe (native transcript scan) failed
 	WindowResetsAt time.Time // global: max RateLimitResetsAt across all sessions (zero = none)
 
 	// Authoritative status-line rate_limits windows (ADR 0021 §6). These are

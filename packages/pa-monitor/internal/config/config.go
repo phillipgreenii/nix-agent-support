@@ -40,6 +40,25 @@ type Config struct {
 	CmuxSidebarIntervalTicks int
 	Decorators               []DecoratorConfig
 	OTel                     OTelConfig
+	// Pricing is the per-model price table the native CostPricer uses (ADR 0021
+	// §3). Sourced from [account.pricing]; built-in defaults populate it so
+	// native cost emits with no config (cost is notional on this plan).
+	Pricing PricingConfig
+}
+
+// ModelPricing is one model's per-million-token USD prices.
+type ModelPricing struct {
+	InputPerMTok         float64
+	OutputPerMTok        float64
+	CacheCreationPerMTok float64
+	CacheReadPerMTok     float64
+}
+
+// PricingConfig is the [account.pricing] block: per-model prices plus a Default
+// applied to models absent from the map.
+type PricingConfig struct {
+	Models  map[string]ModelPricing
+	Default ModelPricing
 }
 
 // OTelConfig is the [otel] block. Endpoint is the OTLP gRPC endpoint
@@ -81,6 +100,23 @@ type tomlConfig struct {
 	CmuxSidebarIntervalTicks *int            `toml:"cmux_sidebar_interval_ticks"`
 	Decorators               []tomlDecorator `toml:"decorator"`
 	OTel                     *tomlOTel       `toml:"otel"`
+	Account                  *tomlAccount    `toml:"account"`
+}
+
+type tomlAccount struct {
+	Pricing *tomlPricing `toml:"pricing"`
+}
+
+type tomlPricing struct {
+	Default *tomlModelPricing            `toml:"default"`
+	Models  map[string]*tomlModelPricing `toml:"models"`
+}
+
+type tomlModelPricing struct {
+	InputPerMTok         *float64 `toml:"input_per_mtok"`
+	OutputPerMTok        *float64 `toml:"output_per_mtok"`
+	CacheCreationPerMTok *float64 `toml:"cache_creation_per_mtok"`
+	CacheReadPerMTok     *float64 `toml:"cache_read_per_mtok"`
 }
 
 type tomlDecorator struct {
@@ -114,6 +150,27 @@ func defaults() Config {
 		EscalationAfter:          60 * time.Second,
 		CmuxSidebarEnable:        true,
 		CmuxSidebarIntervalTicks: 5,
+		Pricing:                  defaultPricing(),
+	}
+}
+
+// defaultPricing is the built-in per-model price table (Anthropic published
+// per-MTok rates as of 2026-06: Opus 4.x in5/out25/cc6.25/cr0.50, Sonnet 4.x
+// in3/out15/cc3.75/cr0.30, Haiku 4.5 in1/out5/cc1.25/cr0.10). It lets native
+// cost emit with no [account.pricing] config; [account.pricing] overrides it.
+// Default (unknown-model fallback) matches Opus, the priciest common tier, so
+// unknown models are never understated.
+func defaultPricing() PricingConfig {
+	return PricingConfig{
+		Default: ModelPricing{InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
+		Models: map[string]ModelPricing{
+			"claude-opus-4-7":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
+			"claude-opus-4-6":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
+			"claude-opus-4-5":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
+			"claude-sonnet-4-6":         {InputPerMTok: 3, OutputPerMTok: 15, CacheCreationPerMTok: 3.75, CacheReadPerMTok: 0.30},
+			"claude-sonnet-4-5":         {InputPerMTok: 3, OutputPerMTok: 15, CacheCreationPerMTok: 3.75, CacheReadPerMTok: 0.30},
+			"claude-haiku-4-5-20251001": {InputPerMTok: 1, OutputPerMTok: 5, CacheCreationPerMTok: 1.25, CacheReadPerMTok: 0.10},
+		},
 	}
 }
 
@@ -199,6 +256,52 @@ func apply(cfg *Config, raw tomlConfig) {
 			dc.TimeoutMS = *d.TimeoutMS
 		}
 		cfg.Decorators = append(cfg.Decorators, dc)
+	}
+	if raw.Account != nil && raw.Account.Pricing != nil {
+		applyPricing(&cfg.Pricing, raw.Account.Pricing)
+	}
+}
+
+// applyPricing merges a parsed [account.pricing] block over the built-in
+// defaults: any per-field override replaces that field; a configured model adds
+// to / overrides the map entry, seeded from the current Default so a partial
+// model block still yields a complete ModelPricing.
+func applyPricing(cfg *PricingConfig, raw *tomlPricing) {
+	if raw.Default != nil {
+		mergeModelPricing(&cfg.Default, raw.Default)
+	}
+	for name, mp := range raw.Models {
+		if mp == nil {
+			continue
+		}
+		cur, ok := cfg.Models[name]
+		if !ok {
+			// Seed a brand-new model from Default so a partial override still
+			// yields complete prices. A model already present (including one
+			// legitimately priced at all-zero) keeps its values and is merged
+			// onto, not re-seeded.
+			cur = cfg.Default
+		}
+		mergeModelPricing(&cur, mp)
+		if cfg.Models == nil {
+			cfg.Models = map[string]ModelPricing{}
+		}
+		cfg.Models[name] = cur
+	}
+}
+
+func mergeModelPricing(dst *ModelPricing, src *tomlModelPricing) {
+	if src.InputPerMTok != nil {
+		dst.InputPerMTok = *src.InputPerMTok
+	}
+	if src.OutputPerMTok != nil {
+		dst.OutputPerMTok = *src.OutputPerMTok
+	}
+	if src.CacheCreationPerMTok != nil {
+		dst.CacheCreationPerMTok = *src.CacheCreationPerMTok
+	}
+	if src.CacheReadPerMTok != nil {
+		dst.CacheReadPerMTok = *src.CacheReadPerMTok
 	}
 }
 

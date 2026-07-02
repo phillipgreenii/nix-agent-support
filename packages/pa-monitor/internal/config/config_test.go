@@ -30,6 +30,86 @@ func TestDefaultsWhenFileMissing(t *testing.T) {
 	}
 }
 
+func TestAccountPricingParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+plan_tier = "max_5x"
+
+[account.pricing.default]
+input_per_mtok = 5.0
+output_per_mtok = 25.0
+cache_creation_per_mtok = 6.25
+cache_read_per_mtok = 0.5
+
+[account.pricing.models."claude-sonnet-4-6"]
+input_per_mtok = 3.0
+output_per_mtok = 15.0
+cache_creation_per_mtok = 3.75
+cache_read_per_mtok = 0.3
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Pricing.Default.OutputPerMTok != 25.0 {
+		t.Errorf("Default.OutputPerMTok = %v, want 25", cfg.Pricing.Default.OutputPerMTok)
+	}
+	m, ok := cfg.Pricing.Models["claude-sonnet-4-6"]
+	if !ok {
+		t.Fatal("sonnet model prices missing")
+	}
+	if m.InputPerMTok != 3.0 || m.CacheReadPerMTok != 0.3 {
+		t.Errorf("sonnet prices = %+v, want in3 cr0.3", m)
+	}
+}
+
+func TestAccountPricingDefaultsWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nonexistent.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Built-in defaults MUST populate a usable price table so native cost works
+	// with no [account.pricing] config (cost is notional but must still emit).
+	if cfg.Pricing.Default.OutputPerMTok <= 0 {
+		t.Errorf("Pricing.Default.OutputPerMTok = %v, want a positive built-in default", cfg.Pricing.Default.OutputPerMTok)
+	}
+	if len(cfg.Pricing.Models) == 0 {
+		t.Error("Pricing.Models empty; want built-in model prices as defaults")
+	}
+}
+
+// TestAccountPricingZeroPricedModel guards that a model configured with all-zero
+// prices (a legitimately free / zero-rated model) surfaces as all-zero, not the
+// Default (Opus) rates. applyPricing seeds a new model from Default only on
+// genuine map-absence (two-value read), so the explicit zeros win.
+func TestAccountPricingZeroPricedModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[account.pricing.models."free-model"]
+input_per_mtok = 0.0
+output_per_mtok = 0.0
+cache_creation_per_mtok = 0.0
+cache_read_per_mtok = 0.0
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Pricing.Models["free-model"]
+	if m != (ModelPricing{}) {
+		t.Errorf("free-model prices = %+v, want all-zero (not re-seeded from Default)", m)
+	}
+}
+
 func TestOverridesFromFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

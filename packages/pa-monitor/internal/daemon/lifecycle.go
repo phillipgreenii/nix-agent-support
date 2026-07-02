@@ -125,7 +125,7 @@ type PollerInterface interface {
 
 // BlockWeekIDSetter is an optional extension of PollerInterface. When the
 // PollerInterface value also implements this interface, RunWith assigns the
-// surrogate block/week ids after each ccusage upsert so that the next
+// surrogate block/week ids after each cost upsert so that the next
 // Snapshot call can attach contributions to the correct parent rows.
 type BlockWeekIDSetter interface {
 	SetActiveBlockID(id int64)
@@ -208,7 +208,7 @@ type RunOptions struct {
 	// cmux server PID. Typically (*signal.CmuxSignaler).FindCmuxServerAncestor.
 	CmuxAncestor func(pid int) (int, bool)
 	// WriteService, when non-nil, receives block and week upserts after each
-	// ccusage tick. The returned surrogate ids are assigned to the poller's
+	// cost tick. The returned surrogate ids are assigned to the poller's
 	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.
 	WriteService *service.WriteService
 	// ReadService, when non-nil, is wired into sharedState so snapshot()
@@ -904,7 +904,7 @@ func Run(ctx context.Context, p Paths) error {
 // blockToStoreBlock converts a usage.Block into a store.Block ready for
 // persistence. capUSD is the per-5h-block soft cap, supplied by the caller from
 // the Account so the conversion no longer looks up the cap from the concrete
-// ccusage provider.
+// cost provider.
 func blockToStoreBlock(b *usage.Block, capUSD float64, now time.Time) store.Block {
 	sb := store.Block{
 		BlockID:         b.ID,

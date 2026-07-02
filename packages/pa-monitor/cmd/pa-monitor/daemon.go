@@ -255,7 +255,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.WeekTracker = weekTr
 		opts.WeeklyFn = weeklyFn
 		opts.SessionsDir = p.SessionsDir
-		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — weekly fetch is slow
+		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — the weekly scan reads all transcripts
 		// Wire the authoritative status-line rate_limits source (ADR 0021 §1/§3):
 		// the sibling-file reader over ~/.claude/projects/**/*.status.jsonl. This
 		// replaces the nil port Phase 2 wired; the daemon now samples it each tick.
@@ -298,32 +298,29 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 	return out
 }
 
-// buildPoller wires the same poller the TUI uses, but for the daemon
-// process. ccusage runs are cached so the hot path stays cheap. The ctx
-// controls the lifetime of the background ccusage refresh goroutine —
-// pass the daemon's signal-bound ctx in production so the goroutine
-// exits on SIGTERM; tests pass a short-lived ctx to avoid leaks.
-func buildPoller(ctx context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*usage.WeeklyEntry, error)) {
+// buildPoller wires the same poller the TUI uses, but for the daemon process.
+// The CostPricer is the native adapter (ADR 0021 §3/Phase 4): it computes the
+// active 5h block and weekly cost from local transcripts × the Account's
+// per-model price table, with no ccusage subprocess. It scans on demand, so no
+// background goroutine or ctx lifetime is involved. Building it here — the
+// composition root — is where the concrete adapter is named; the poller and
+// daemon see only the CostPricer port.
+func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*usage.WeeklyEntry, error)) {
 	home, _ := os.UserHomeDir()
+	claudeHome := filepath.Join(home, ".claude")
 
-	ccusageCache := usage.NewCachedRunner(60*time.Second, 60*time.Second,
-		func(ctx context.Context) ([]byte, error) {
-			return exec.CommandContext(ctx, "ccusage", "blocks", "--active", "--json", "--offline").Output()
-		})
-	ccusageCache.Start(ctx)
-
-	// The ccusage cost adapter is the first CostPricer implementation (ADR 0021
-	// §3). Building it here — the composition root — is where the concrete
-	// provider is named; the poller and daemon see only the port.
-	weeklyRunner := &usage.Runner{}
-	pricer := usage.NewProvider(ccusageCache, weeklyRunner)
+	pricer := &usage.NativePricer{
+		ClaudeHome: claudeHome,
+		Prices:     acct.PriceTable(),
+		Now:        time.Now,
+	}
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 	signalers := signallayer.DefaultSignalers()
 
 	p := &poller.Poller{
 		SessionsDir:        session.DefaultSessionsDir(),
-		ClaudeHome:         filepath.Join(home, ".claude"),
+		ClaudeHome:         claudeHome,
 		PidAlive:           session.DefaultPidAlive,
 		PlanTier:           cfg.PlanTier,
 		BlockCapUSD:        acct.BlockCap(),

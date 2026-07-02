@@ -71,10 +71,10 @@ func tickCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
-// pollTimeout must be long enough for `ccusage blocks --active --json`, which
-// parses every ~/.claude/projects/**/*.jsonl transcript and routinely takes
-// ~5s on a busy workstation. Too small a timeout silently kills ccusage and
-// makes the 5h-block header display "unavailable".
+// pollTimeout must be long enough for the native cost scan, which parses every
+// ~/.claude/projects/**/*.jsonl transcript and can take a few seconds on a busy
+// workstation. Too small a timeout aborts the scan and makes the 5h-block
+// header display "unavailable".
 const pollTimeout = 10 * time.Second
 
 func (m *Model) pollNow() tea.Cmd {

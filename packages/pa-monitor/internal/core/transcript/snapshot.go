@@ -8,6 +8,8 @@ import (
 	"time"
 
 	ct "github.com/phillipgreenii/claude-transcript"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // Snapshot holds all per-session enrichment data extracted in a single pass.
@@ -19,6 +21,11 @@ type Snapshot struct {
 	SubagentCount     int
 	AwaitingInput     bool
 	RateLimitResetsAt time.Time
+	// ModelTokens accumulates each token category per model across all
+	// non-error assistant usage records (ADR 0021 §6). It is the ingestion the
+	// native CostPricer prices; nil/empty when the transcript has no usage.
+	// Error (isApiErrorMessage) records are excluded, matching TotalTokens.
+	ModelTokens map[string]usage.ModelTokens
 	LastError         *ErrorRecord // most recent isApiErrorMessage event in the transcript; nil if no such event seen
 	// LastErrorRetryable is pa-monitor's derived auto-resume verdict for
 	// LastError (transient server/network → true). It is tracked separately
@@ -72,6 +79,7 @@ func Scan(path string) (Snapshot, error) {
 	var lastCtxTotal int
 	var lastCtxModel string
 	var totalOut int
+	modelTokens := map[string]usage.ModelTokens{}
 	openTasks := make(map[string]bool)
 	pendingAUQ := make(map[string]bool)
 	var lastAPIErrTime time.Time
@@ -177,6 +185,17 @@ func Scan(path string) (Snapshot, error) {
 					lastCtxModel = ev.Message.Model
 				}
 				totalOut += u.OutputTokens
+				// Cumulative per-model token ingestion for the native
+				// CostPricer (ADR 0021 §6). Same single-pass hot path as
+				// totalOut; adds only integer sums keyed by model.
+				if m := ev.Message.Model; m != "" {
+					mt := modelTokens[m]
+					mt.Input += u.InputTokens
+					mt.Output += u.OutputTokens
+					mt.CacheCreation += u.CacheCreationInputTokens
+					mt.CacheRead += u.CacheReadInputTokens
+					modelTokens[m] = mt
+				}
 				pendingAUQ = make(map[string]bool)
 				for _, b := range ev.Message.Content {
 					if b.Type == "tool_use" && b.ID != "" {
@@ -207,6 +226,9 @@ func Scan(path string) (Snapshot, error) {
 	snap.Model = lastCtxModel
 	snap.ContextTokens = lastCtxTotal
 	snap.TotalTokens = totalOut
+	if len(modelTokens) > 0 {
+		snap.ModelTokens = modelTokens
+	}
 	snap.SubagentCount = len(openTasks)
 	snap.AwaitingInput = len(pendingAUQ) > 0
 	if hasAPIErr && !resumedAfterAPIErr {

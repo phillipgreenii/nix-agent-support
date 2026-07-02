@@ -28,7 +28,7 @@ const blockRowBarWidth = 18
 // Pre-active states (any tier):
 //
 //	"5h loading…"
-//	"5h unavailable — `ccusage` not on PATH"
+//	"5h unavailable — cost scan failed"
 //	"5h no active block"
 //	"5h $X.XX  resets HH:MM  (plan cap unknown)"   when PlanCapUSD <= 0
 //
@@ -49,7 +49,7 @@ func BlockRow(tree *aggregate.Tree, opts BlockRowOpts) string {
 	case !tree.CCUsageProbed:
 		return "5h loading…"
 	case tree.CCUsageErr != nil:
-		return "5h unavailable — `ccusage` not on PATH"
+		return "5h unavailable — cost scan failed"
 	case tree.ActiveBlock == nil:
 		return "5h no active block"
 	}
