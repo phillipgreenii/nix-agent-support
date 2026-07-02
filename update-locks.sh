@@ -48,14 +48,6 @@ ul_run_step "update-deps-pa-monitor" \
   "update-locks: update pa-monitor Go deps + gomod2nix.toml" \
   bash -c 'cd packages/pa-monitor && go get -u ./... && ./update-deps.sh'
 
-ul_run_step "update-goccc" \
-  "update-locks: bump goccc rev + src hash" \
-  nix run nixpkgs#nix-update -- -F goccc
-
-ul_run_step "update-toktrack" \
-  "update-locks: bump toktrack rev + src hash + cargoHash" \
-  nix run nixpkgs#nix-update -- -F toktrack
-
 # gascity (gc) — upstream-released Go binary pinned in packages/gascity.
 # nix-update bumps version + src hash + vendorHash to the latest GitHub release.
 # NOTE: gascity ships breaking changes across minor versions (Pack V2 enforcement,
