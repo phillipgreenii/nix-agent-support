@@ -346,6 +346,9 @@ func (e *Engine) maintenanceCycle(ctx context.Context, log *slog.Logger) {
 		log.Warn("reply reconcile failed", "err", err.Error())
 	}
 	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
+	// Draft-review consumption (pg2-4c5i.36). A no-op unless the review hook
+	// deps are wired; errors are logged inside, never abort the tick.
+	e.reviewHookCycle(ctx, log)
 }
 
 // runMaintenance runs maintenanceCycle on its own ticker until ctx is cancelled.

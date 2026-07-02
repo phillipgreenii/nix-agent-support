@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -147,6 +147,15 @@ CREATE TABLE data_migration (
     id         TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
 );
+`,
+	// v4 -> v5: per-revision agent-review marker (pg2-4c5i.36). Stamped by the
+	// daemon's draft-review consumer when it closes a review, recording the head
+	// SHA the agent review was produced against. The re-review gate re-triggers
+	// production when LatestRevision.HeadSHA post-dates the stamped revision.
+	// Distinct from reviewed_at/my_review_state (that is *my submitted GitHub
+	// review*, different semantics).
+	`
+ALTER TABLE pr_revision ADD COLUMN reviewed_by_agent_at TEXT;
 `,
 }
 

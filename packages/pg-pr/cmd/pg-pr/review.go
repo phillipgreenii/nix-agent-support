@@ -12,8 +12,24 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
+
+// reviewReadyLister is the minimal bd seam `review ready` needs. Tests inject
+// a fake; production uses a beads.Client.
+type reviewReadyLister interface {
+	ListReadyDraftReviews(ctx context.Context) ([]beads.DraftReviewRef, error)
+}
+
+// reviewReadyBeadsClient constructs the beads client used by `review ready`.
+// Tests replace this variable to inject a fake reviewReadyLister.
+var reviewReadyBeadsClient = func(repo string) reviewReadyLister {
+	if repo != "" {
+		return beads.NewClientForRepo(repo)
+	}
+	return beads.NewClient()
+}
 
 // reviewFlags holds the parsed CLI flags for the `pg-pr review` subcommands.
 type reviewFlags struct {
@@ -206,6 +222,63 @@ post immediately. No state is persisted.`,
 	},
 }
 
+// readyDraftReviewJSON is the machine-readable shape of one ready
+// draft-review bead emitted by `pg-pr review ready --json`.
+type readyDraftReviewJSON struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Mine   bool   `json:"mine"`
+}
+
+var reviewReadyCmd = &cobra.Command{
+	Use:   "ready",
+	Short: "List ready draft-review beads (bd ready, filtered)",
+	Long: `List the draft-review work items that are ready to be produced.
+
+Wraps 'bd ready', filters to draft-review beads, and resolves each to its
+target PR (<owner/repo>#<number>) plus the mine/team ownership flag. This is
+the same detection the daemon's review-consumption hook uses.`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx := cmd.Context()
+		repoPath := resolveRepoPath(ctx, rvF.repo)
+		client := reviewReadyBeadsClient(repoPath)
+		refs, err := client.ListReadyDraftReviews(ctx)
+		if err != nil {
+			return fmt.Errorf("review ready: %w", err)
+		}
+		// Always emit a non-nil slice so empty renders as [] not null.
+		out := make([]readyDraftReviewJSON, 0, len(refs))
+		for _, r := range refs {
+			out = append(out, readyDraftReviewJSON{
+				ID:     r.ID,
+				Title:  fmt.Sprintf("draft-review: %s#%d", r.Repo, r.Number),
+				Repo:   r.Repo,
+				Number: r.Number,
+				Mine:   r.Mine,
+			})
+		}
+		if output.Resolve(rvF.json) {
+			return writeJSON(cmd.OutOrStdout(), out)
+		}
+		if len(out) == 0 {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "no ready draft-review beads")
+			return err
+		}
+		for _, r := range out {
+			owner := "team"
+			if r.Mine {
+				owner = "mine"
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s#%d\t%s\n", r.ID, r.Repo, r.Number, owner); err != nil {
+				return err
+			}
+		}
+		return nil
+	},
+}
+
 // ----------------------------------------------------------------------
 // Comment subcommands
 // ----------------------------------------------------------------------
@@ -292,7 +365,7 @@ func loadCommentBody(cmd *cobra.Command, bodyFlag, fromFile string) (string, err
 var _ = api.Comment{}
 
 func init() {
-	for _, c := range []*cobra.Command{reviewDraftCmd, reviewPostCmd, reviewSubmitCmd, commentAddCmd, commentResolveCmd} {
+	for _, c := range []*cobra.Command{reviewDraftCmd, reviewPostCmd, reviewSubmitCmd, reviewReadyCmd, commentAddCmd, commentResolveCmd} {
 		c.Flags().StringVar(&rvF.repo, "repo", "",
 			"Repository in owner/name form (defaults to auto-detected remote)")
 		c.Flags().BoolVar(&rvF.json, "json", false,
@@ -305,7 +378,7 @@ func init() {
 	commentAddCmd.Flags().StringVar(&rvF.body, "body", "", "Comment body (alternative to stdin)")
 	commentAddCmd.Flags().StringVar(&rvF.fromFile, "body-file", "", "Read the comment body from this file")
 
-	reviewCmd.AddCommand(reviewDraftCmd, reviewPostCmd, reviewSubmitCmd)
+	reviewCmd.AddCommand(reviewDraftCmd, reviewPostCmd, reviewSubmitCmd, reviewReadyCmd)
 	commentCmd.AddCommand(commentAddCmd, commentResolveCmd)
 	rootCmd.AddCommand(reviewCmd, commentCmd)
 }

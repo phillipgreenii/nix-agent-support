@@ -17,11 +17,23 @@ import (
 )
 
 // Draft is the on-disk shape of a staged review.
+//
+// The trailing Ownership/HeadSHA/BeadID/Verdict fields are additive, omitempty
+// provenance hints an agent MAY populate when staging a review (design §2.2).
+// They are advisory only: the authoritative routing/provenance record is the
+// Result sidecar (result.go), which the daemon writes from its own claim
+// context. Kept omitempty so a human-authored Draft need not carry them and an
+// existing draft file round-trips unchanged.
 type Draft struct {
 	Repo     string        `json:"repo"`
 	PR       int           `json:"pr"`
 	Body     string        `json:"body,omitempty"`
 	Comments []api.Comment `json:"comments,omitempty"`
+
+	Ownership string `json:"ownership,omitempty"` // "mine" | "team"
+	HeadSHA   string `json:"head_sha,omitempty"`  // SHA the worktree was checked out at
+	BeadID    string `json:"bead_id,omitempty"`   // the draft-review bead this satisfies
+	Verdict   string `json:"verdict,omitempty"`   // approve|request-changes|comment (advisory)
 }
 
 // DefaultDir returns the base directory under which staged reviews live.

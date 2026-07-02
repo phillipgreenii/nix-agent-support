@@ -55,6 +55,7 @@ type bdIssue struct {
 	Title        string         `json:"title"`
 	Status       string         `json:"status"`
 	Type         string         `json:"issue_type"`
+	Labels       []string       `json:"labels,omitempty"`
 	Metadata     map[string]any `json:"metadata"`
 	Dependencies []bdDependency `json:"dependencies,omitempty"`
 }

@@ -22,17 +22,23 @@ type Revision struct {
 	CICapturedAt  string // "" when NULL
 	ReviewedAt    string // "" when NULL
 	MyReviewState string // "" when NULL
+	// ReviewedByAgentAt is the timestamp the daemon's draft-review consumer
+	// (pg2-4c5i.36) recorded an agent review against this revision's head SHA.
+	// "" when NULL (no agent review produced against this head yet).
+	ReviewedByAgentAt string
 }
 
 const revisionColumns = `id, pr_id, seq, head_sha, COALESCE(base_sha,''),
 	observed_at, last_seen_at, ci_state, ci_passed, ci_failed, ci_pending,
-	COALESCE(ci_captured_at,''), COALESCE(reviewed_at,''), COALESCE(my_review_state,'')`
+	COALESCE(ci_captured_at,''), COALESCE(reviewed_at,''), COALESCE(my_review_state,''),
+	COALESCE(reviewed_by_agent_at,'')`
 
 func scanRevision(s rowScanner) (Revision, error) {
 	var r Revision
 	err := s.Scan(&r.ID, &r.PRID, &r.Seq, &r.HeadSHA, &r.BaseSHA,
 		&r.ObservedAt, &r.LastSeenAt, &r.CIState, &r.CIPassed, &r.CIFailed,
-		&r.CIPending, &r.CICapturedAt, &r.ReviewedAt, &r.MyReviewState)
+		&r.CIPending, &r.CICapturedAt, &r.ReviewedAt, &r.MyReviewState,
+		&r.ReviewedByAgentAt)
 	return r, err
 }
 
@@ -163,6 +169,24 @@ func (db *DB) MarkRevisionReviewed(ctx context.Context, prID int64, headSHA, sta
 		reviewedAt, state, prID, headSHA)
 	if err != nil {
 		return fmt.Errorf("store: mark revision reviewed %d %s: %w", prID, headSHA, err)
+	}
+	return nil
+}
+
+// MarkRevisionAgentReviewed records that the daemon's draft-review consumer
+// produced an agent review against headSHA, on the latest revision whose
+// head_sha matches (a head SHA can recur after a force-push; we care about the
+// most recent occurrence). No-op if no revision matches. Mirrors
+// MarkRevisionReviewed but records the *agent* review marker (semantics differ
+// from my-submitted-GitHub-review's reviewed_at/my_review_state).
+func (db *DB) MarkRevisionAgentReviewed(ctx context.Context, prID int64, headSHA, at string) error {
+	_, err := db.sql.ExecContext(ctx, `UPDATE pr_revision
+		SET reviewed_by_agent_at=?
+		WHERE id = (SELECT id FROM pr_revision
+		            WHERE pr_id=? AND head_sha=? ORDER BY seq DESC LIMIT 1)`,
+		at, prID, headSHA)
+	if err != nil {
+		return fmt.Errorf("store: mark revision agent-reviewed %d %s: %w", prID, headSHA, err)
 	}
 	return nil
 }

@@ -14,11 +14,75 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
 // draftReviewTitlePrefix is matched verbatim by findDraftReviewChild.
 const draftReviewTitlePrefix = "draft-review: "
+
+// DraftReviewRef is a ready draft-review bead resolved to its target PR.
+// Repo/Number are parsed from the title (`draft-review: <owner/repo>#<n>`);
+// Mine is derived from the `mine` ownership label (absent ⇒ teammate PR).
+type DraftReviewRef struct {
+	ID     string
+	Repo   string
+	Number int
+	Mine   bool
+}
+
+// ListReadyDraftReviews returns the ready (unblocked, unclaimed-or-claimed but
+// still open) draft-review beads, resolved to their target PRs. It shells out
+// to `bd ready --json`, filters to `task` beads whose title carries the
+// draft-review prefix, and parses `<owner/repo>#<number>` from the title plus
+// the `mine` label. Beads whose title does not parse are skipped (not fatal).
+//
+// This is the daemon-side detection primitive for pg2-4c5i.36 and the backing
+// query for `pg-pr review ready --json`.
+func (c *Client) ListReadyDraftReviews(ctx context.Context) ([]DraftReviewRef, error) {
+	out, err := c.Runner.Run(ctx, "ready", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("list ready draft-reviews: %w", err)
+	}
+	issues, err := parseBDList(out)
+	if err != nil {
+		return nil, err
+	}
+	var refs []DraftReviewRef
+	for _, iss := range issues {
+		if !strings.HasPrefix(iss.Title, draftReviewTitlePrefix) {
+			continue
+		}
+		repo, number, ok := parseRepoPR(strings.TrimPrefix(iss.Title, draftReviewTitlePrefix))
+		if !ok {
+			continue // malformed title — skip, do not abort the whole scan
+		}
+		refs = append(refs, DraftReviewRef{
+			ID:     iss.ID,
+			Repo:   repo,
+			Number: number,
+			Mine:   hasLabel(iss.Labels, "mine"),
+		})
+	}
+	return refs, nil
+}
+
+// parseRepoPR splits "<owner>/<repo>#<number>" into (repo, number). Returns
+// ok=false when the shape does not match (missing '#', non-numeric number, or
+// empty repo).
+func parseRepoPR(s string) (repo string, number int, ok bool) {
+	s = strings.TrimSpace(s)
+	hash := strings.LastIndex(s, "#")
+	if hash <= 0 || hash == len(s)-1 {
+		return "", 0, false
+	}
+	repo = s[:hash]
+	n, err := strconv.Atoi(s[hash+1:])
+	if err != nil || n <= 0 || !strings.Contains(repo, "/") {
+		return "", 0, false
+	}
+	return repo, n, true
+}
 
 // EnsureDraftReviewBead ensures exactly one draft-review bead (open OR closed)
 // exists as a child of prBeadID, and returns its ID. title is appended after
@@ -74,6 +138,57 @@ func (c *Client) EnsureDraftReviewBead(ctx context.Context, prBeadID, title stri
 		return id, fmt.Errorf("link draft-review %s to pr %s: %w", id, prBeadID, err)
 	}
 	return id, nil
+}
+
+// FindDraftReviewForPR resolves the draft-review bead (open OR closed) for a
+// given upstream PR, mapping (repo, number) → merge-request bead → draft-review
+// child. It returns the child id, whether it is currently closed, whether one
+// was found at all, and any error. Used by the re-review-on-head-advance gate
+// (pg2-4c5i.36 §2.3.3) to reopen a closed draft-review bead when the PR head
+// advances past the last agent-reviewed SHA.
+func (c *Client) FindDraftReviewForPR(ctx context.Context, repo string, number int) (id string, closed bool, found bool, err error) {
+	mrs, err := c.ListMergeRequests(ctx, true)
+	if err != nil {
+		return "", false, false, fmt.Errorf("find draft-review for %s#%d: list MRs: %w", repo, number, err)
+	}
+	var mrID string
+	for _, mr := range mrs {
+		if mr.Fields.Repo == repo && mr.Fields.PRNumber == number {
+			mrID = mr.ID
+			break
+		}
+	}
+	if mrID == "" {
+		return "", false, false, nil
+	}
+	childIDs, err := c.ListChildrenOfPR(ctx, mrID)
+	if err != nil {
+		return "", false, false, fmt.Errorf("find draft-review for %s#%d: list children: %w", repo, number, err)
+	}
+	if len(childIDs) == 0 {
+		return "", false, false, nil
+	}
+	isChild := make(map[string]struct{}, len(childIDs))
+	for _, cid := range childIDs {
+		isChild[cid] = struct{}{}
+	}
+	out, err := c.Runner.Run(ctx, "list", "--type=task", "--all", "--json", "--limit=0")
+	if err != nil {
+		return "", false, false, fmt.Errorf("find draft-review for %s#%d: list tasks: %w", repo, number, err)
+	}
+	issues, err := parseBDList(out)
+	if err != nil {
+		return "", false, false, err
+	}
+	for _, iss := range issues {
+		if !strings.HasPrefix(iss.Title, draftReviewTitlePrefix) {
+			continue
+		}
+		if _, ok := isChild[iss.ID]; ok {
+			return iss.ID, iss.Status == "closed", true, nil
+		}
+	}
+	return "", false, false, nil
 }
 
 // findDraftReviewChild returns the ID of an existing draft-review child of

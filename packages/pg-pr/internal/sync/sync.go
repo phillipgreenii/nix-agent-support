@@ -159,6 +159,12 @@ type Deps struct {
 	// handlers. Optional: when nil (or when Store is nil), flushOutbox is a
 	// no-op. Typically set to (*event.Dispatcher).Dispatch.
 	Dispatch store.DispatchFunc
+
+	// Review configures the daemon-side draft-review consumption hook
+	// (pg2-4c5i.36). When Review.Beads or Review.Spawner is nil the hook is
+	// disabled (a no-op), so callers that don't wire review production keep
+	// running unchanged.
+	Review ReviewHookDeps
 }
 
 // Engine carries the configured dependencies for a series of sync calls.
@@ -1031,6 +1037,13 @@ func (e *Engine) SetAgentRegistry(reg *agentregistry.Registry) {
 func (e *Engine) SetStoreAndDispatch(db *store.DB, dispatch store.DispatchFunc) {
 	e.deps.Store = db
 	e.deps.Dispatch = dispatch
+}
+
+// SetReviewHook wires the draft-review consumption hook (pg2-4c5i.36) onto the
+// engine. Called by CLI daemon-mode setup. When deps.Beads or deps.Spawner is
+// nil the hook stays a no-op. Safe to call only before the daemon loop starts.
+func (e *Engine) SetReviewHook(deps ReviewHookDeps) {
+	e.deps.Review = deps
 }
 
 // StoreFile returns the path that the CLI should open as the SQLite store.

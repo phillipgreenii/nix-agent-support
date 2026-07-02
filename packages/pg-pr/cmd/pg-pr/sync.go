@@ -160,6 +160,14 @@ configured repo.`,
 			}
 			snapStore := snapshot.NewStore()
 			engine.SetAgentRegistry(reg)
+			// Wire the draft-review consumption hook (pg2-4c5i.36): delegate
+			// LLM production to a spawned `claude -p`, route by ownership to
+			// the mine/team sink stubs (.34/.35 fill them). A per-repo bd
+			// multiplexer scans every configured workspace's `bd ready`.
+			engine.SetReviewHook(sync.ReviewHookDeps{
+				Beads:   newMultiRepoReviewBeads(cfg),
+				Spawner: newClaudeSpawner(cfg),
+			})
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
 				Logger:      logger,
