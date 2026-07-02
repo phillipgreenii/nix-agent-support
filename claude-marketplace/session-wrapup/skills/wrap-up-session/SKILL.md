@@ -8,7 +8,8 @@ description: >-
   runs the repo's test/lint/build gates, integrates each touched repo (local ff-merge to main,
   or push branch + open/update PR for PR-based repos), removes spent branches and worktrees,
   syncs beads to the remote, and — if any work carries over, including work deferred to next
-  session — writes a single P0 next-session bead so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
+  session — writes a single P0 next-session bead (or, in repos without beads, records the same
+  in a committed markdown handoff doc) so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
   leaves everything else untouched. Do NOT use for mid-session commits, for grooming the
   backlog (that's bead-grooming), or for merging someone else's PR.
 ---
