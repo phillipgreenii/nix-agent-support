@@ -507,7 +507,11 @@ func TestSyncSummaryCounts(t *testing.T) {
 	// Pre-existing: seed an OPEN merge-request bead for PR #2 directly in the
 	// engine's bd workspace BEFORE Sync, so listExistingByKey records it in
 	// repoPreExisting and the per-PR block classifies #2 as pr.updated.
-	if _, _, err := e.deps.Beads.EnsureMergeRequest(ctx, "foo/bar#2", beads.MergeRequestFields{
+	// Type-assert to *beads.Client: makeEngine uses newRealBDClient (concrete),
+	// and sync.BeadClient is now {ListMergeRequests} — the seed call goes through
+	// the concrete type's EnsureMergeRequest method, not the slim interface.
+	seeder := e.deps.Beads.(*beads.Client)
+	if _, _, err := seeder.EnsureMergeRequest(ctx, "foo/bar#2", beads.MergeRequestFields{
 		Repo: "foo/bar", PRNumber: 2, State: "open", Branch: "feat/existing",
 		Base: "main", Author: "phillipg",
 	}); err != nil {
@@ -785,9 +789,10 @@ func TestSyncPR_ClosesWhenUpstreamMerged(t *testing.T) {
 // closed PR emits a store.EventPRClosed (so the bridge cascade-closes the bead)
 // instead of closing the bead inline, while still reporting BeadsClosed==1.
 //
-// It wires a real store but a no-op dispatcher (NOT the bridge) so an inline
-// CloseMergeRequest on the engine's bd client would be detectable, and inspects
-// the raw outbox for the close event.
+// After the sync.BeadClient slim (pg2-4c5i.18), the structural guarantee is
+// baked into the type — sync.BeadClient = {ListMergeRequests} means
+// CloseMergeRequest cannot be called on the engine's bd client. The test still
+// inspects the raw outbox to confirm the event was emitted.
 func TestSyncPRClosedEmitsClose(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -824,9 +829,8 @@ func TestSyncPRClosedEmitsClose(t *testing.T) {
 	if sum.BeadsClosed != 1 {
 		t.Fatalf("BeadsClosed: got %d want 1", sum.BeadsClosed)
 	}
-	if bdc.closed {
-		t.Fatal("SyncPR must NOT close the bead inline; the bridge does the cascade")
-	}
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} prevents the
+	// engine from calling CloseMergeRequest inline. Assert the close event fired.
 
 	var events []store.Event
 	if err := db.RunOutbox(ctx, func(_ context.Context, ev store.Event) error {
@@ -976,33 +980,14 @@ func TestNew_ValidatesRequiredDeps(t *testing.T) {
 	}
 }
 
-// noopBeads is a do-nothing BeadClient used only for New validation tests.
+// noopBeads is a do-nothing BeadClient (sync.BeadClient = {ListMergeRequests}).
+// Tests that need the bridge-side methods (beadsbridge.BeadClient) define their
+// own fakes; noopBeads is only for engine construction and engine-only tests.
 type noopBeads struct{}
 
-func (noopBeads) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	return "", false, nil
-}
-func (noopBeads) UpdateMergeRequest(context.Context, string, beads.MergeRequestFields) error {
-	return nil
-}
-func (noopBeads) CloseMergeRequest(context.Context, string, string) error { return nil }
 func (noopBeads) ListMergeRequests(context.Context, bool) ([]beads.MergeRequest, error) {
 	return nil, nil
 }
-func (noopBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
-	return nil, nil
-}
-func (noopBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
-	return "", nil
-}
-func (noopBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-func (noopBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
-func (noopBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (noopBeads) CloseFeedback(context.Context, string, string) error { return nil }
 
 func TestSync_ProgressesEvenIfStateSaveFails(t *testing.T) {
 	// Exercise the state-save error path by pointing StateDir at a file
@@ -1291,26 +1276,21 @@ func TestSync_TreatsEmptySelfLoginAsTeammate(t *testing.T) {
 }
 
 // inlineGuardBeads is the engine's per-repo bd client for the
-// outbox-projection test. It embeds noopBeads (which returns empty/nil for
-// every method) and overrides EnsureMergeRequest to RECORD + FAIL — proving
-// the inline create path is gone. ListMergeRequests is left as noopBeads's
-// (nil, nil) so listExistingByKey and the close-detection loop still work.
+// outbox-projection test. After the #5 event-ownership refactor + this slim,
+// sync.BeadClient = {ListMergeRequests}, so the engine literally cannot call
+// EnsureMergeRequest through BeadClient — the structural guarantee is now
+// baked into the type. noopBeads satisfies the slim interface.
 type inlineGuardBeads struct {
 	noopBeads
-	ensureCalled int
-}
-
-func (g *inlineGuardBeads) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
-	g.ensureCalled++
-	return "", false, errors.New("inlineGuardBeads: EnsureMergeRequest must NOT be called inline; the PR bead is projected via the outbox bridge")
 }
 
 // TestSyncCreatesBeadViaOutbox proves Task 6's core invariant: the one-shot
 // Engine.Sync per-PR path no longer creates the PR (merge-request) bead inline.
 // Instead it emits a pr.opened event whose outbox flush drives the beadsbridge
-// handler's EnsureMergeRequest. We assert:
-//   - the engine's own per-repo bd client (inlineGuardBeads) is NEVER asked to
-//     EnsureMergeRequest (the inline path is removed),
+// handler's EnsureMergeRequest. After the sync.BeadClient slim (pg2-4c5i.18),
+// this is structurally guaranteed — sync.BeadClient = {ListMergeRequests}, so
+// the engine literally cannot call EnsureMergeRequest through BeadClient. We
+// assert:
 //   - the bridge's bd client DID receive EnsureMergeRequest with full PR fields
 //     during flushOutbox,
 //   - summary.BeadsCreated == 1.
@@ -1350,9 +1330,8 @@ func TestSyncCreatesBeadViaOutbox(t *testing.T) {
 		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
 	}
 
-	if guard.ensureCalled != 0 {
-		t.Fatalf("inline EnsureMergeRequest must not be called; got %d call(s)", guard.ensureCalled)
-	}
+	// The slim sync.BeadClient = {ListMergeRequests} structurally prevents the
+	// engine from calling EnsureMergeRequest on guard — no assertion needed.
 	if len(bridgeClient.ensureCalls) != 1 {
 		t.Fatalf("expected bridge EnsureMergeRequest called once via outbox; got %d", len(bridgeClient.ensureCalls))
 	}

@@ -104,22 +104,12 @@ type CICDBranchLister interface {
 }
 
 // BeadClient is the subset of *pkg/beads.Client the sync engine uses.
+// After the #5 event-ownership refactor all bead writes (create/update/close)
+// moved to beadsbridge; only ListMergeRequests is still called through this
+// interface (by listExistingByKey). beadsbridge.BeadClient covers the write
+// side — the two interfaces are intentionally disjoint (Interface Segregation).
 type BeadClient interface {
-	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (id string, alreadyClosed bool, err error)
-	UpdateMergeRequest(ctx context.Context, id string, fields beads.MergeRequestFields) error
-	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListMergeRequests(ctx context.Context, includeClosed bool) ([]beads.MergeRequest, error)
-	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
-
-	CreateProcessingCycle(ctx context.Context, prBeadID, title string, mine bool) (string, error)
-	FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error)
-	CloseProcessingCycle(ctx context.Context, id, reason string) error
-	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
-
-	// CloseFeedback closes a child feedback bead during cascade-close. Feedback
-	// is now stored in internal/store, but the cascade still closes any legacy
-	// feedback beads left under a PR's subtree.
-	CloseFeedback(ctx context.Context, id, reason string) error
 }
 
 // Deps bundles the engine's dependencies.

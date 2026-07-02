@@ -74,24 +74,18 @@ func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 // refreshPR tests
 // ----------------------------------------------------------------------
 
-// refreshFakeBeads embeds noopBeads (full BeadClient) and records the
-// signals the three refreshPR outcomes are distinguished by:
-//   - lastState: the State passed to the most recent EnsureMergeRequest.
-//   - closed: whether CloseMergeRequest was called.
+// refreshFakeBeads is a minimal sync.BeadClient that satisfies the slim
+// {ListMergeRequests} interface. It is used by the refreshPR tests.
+//
+// After the pg2-4c5i.18 slim, EnsureMergeRequest/CloseMergeRequest are gone
+// from sync.BeadClient — the engine cannot call them inline. Regression guards
+// that previously checked bdc.closed / bdc.lastState are now event-based:
+// tests assert that the correct outbox event was emitted (collectOutboxEvents).
 //
 // existing, when non-nil, is returned by ListMergeRequests so the engine's
 // pre-existing-bead index (listExistingByKey) finds a bead for this PR.
 type refreshFakeBeads struct {
-	noopBeads
-	existing     *beads.MergeRequest
-	lastState    string
-	closed       bool
-	ensureClosed bool // when true, EnsureMergeRequest reports the bead already closed
-}
-
-func (f *refreshFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields beads.MergeRequestFields) (string, bool, error) {
-	f.lastState = fields.State
-	return "mr-1", f.ensureClosed, nil
+	existing *beads.MergeRequest
 }
 
 func (f *refreshFakeBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads.MergeRequest, error) {
@@ -99,11 +93,6 @@ func (f *refreshFakeBeads) ListMergeRequests(_ context.Context, _ bool) ([]beads
 		return nil, nil
 	}
 	return []beads.MergeRequest{*f.existing}, nil
-}
-
-func (f *refreshFakeBeads) CloseMergeRequest(_ context.Context, _, _ string) error {
-	f.closed = true
-	return nil
 }
 
 // newRefreshEngine builds an Engine over a single repo "o/r" with the given
@@ -155,10 +144,9 @@ func TestRefreshPR_ClosedMerged_ClosesAndRemoves(t *testing.T) {
 	if in != nil {
 		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
 	}
-	if bdc.closed {
-		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
-	}
-	// Genuine merged detection: a pr.merged event must have been emitted.
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
+	// refreshPR cannot call CloseMergeRequest on the engine's bd client.
+	// Event-based regression guard: a pr.merged event must have been emitted.
 	var sawMerged bool
 	for _, ev := range collectOutboxEvents(t, db) {
 		if ev.Type == store.EventPRMerged {
@@ -190,14 +178,10 @@ func TestRefreshPR_TeamDraft_MarksDraftKeepsBeadHidden(t *testing.T) {
 	if in != nil {
 		t.Fatalf("hidden team draft must be removed (nil input); got %+v", in)
 	}
-	if bdc.lastState != "" {
-		t.Fatalf("refreshPR must NOT EnsureMergeRequest inline; the bridge does it (got lastState %q)", bdc.lastState)
-	}
-	if bdc.closed {
-		t.Fatal("team draft bead must not be closed")
-	}
-	// Genuine draft detection: a pr.updated event with State=="draft" must have
-	// been emitted (the bead state the bridge will project).
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so refreshPR
+	// cannot call EnsureMergeRequest or CloseMergeRequest on the engine's bd
+	// client. Event-based regression guard: a pr.updated event with State=="draft"
+	// must have been emitted (the bead state the bridge will project).
 	var sawDraft bool
 	for _, ev := range collectOutboxEvents(t, db) {
 		if ev.Type != store.EventPRUpdated {
@@ -234,9 +218,8 @@ func TestRefreshPR_ActiveMine_UpsertsSnapshot(t *testing.T) {
 	if in.PR.Number != 3 {
 		t.Fatalf("input PR.Number: got %d want 3", in.PR.Number)
 	}
-	if bdc.closed {
-		t.Fatal("active PR bead must not be closed")
-	}
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
+	// refreshPR cannot close the bead inline on the engine's bd client.
 }
 
 func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
@@ -267,10 +250,12 @@ func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
 // EnsureMergeRequest call so the test can prove the bead is created by the
 // OUTBOX (the bridge) and NOT inline by applyFetchedPR.
 //
-// It satisfies both sync.BeadClient (via embedded noopBeads) and
-// beadsbridge.BeadClient (via FindByRepoAndNumber + the cycle/close methods on
-// noopBeads), and adds depTreeReader (FindByRepoAndNumber/DepTreeUp/
-// HumanLabeledBeads) so buildPRInput's dep path engages and the bead lookup runs.
+// It satisfies both sync.BeadClient (via embedded noopBeads, which provides
+// ListMergeRequests) and beadsbridge.BeadClient (all bridge write methods
+// are defined directly below — after the sync.BeadClient slim, noopBeads no
+// longer provides the bridge-side methods). It also adds depTreeReader
+// (FindByRepoAndNumber/DepTreeUp/HumanLabeledBeads) so buildPRInput's dep
+// path engages and the bead lookup runs.
 type outboxFakeBeads struct {
 	noopBeads
 	ensureFields []beads.MergeRequestFields // every EnsureMergeRequest call's fields
@@ -293,6 +278,19 @@ func (f *outboxFakeBeads) FindByRepoAndNumber(_ context.Context, _ string, _ int
 	}
 	return &beads.MergeRequest{ID: "mr-1"}, nil
 }
+
+func (f *outboxFakeBeads) CloseMergeRequest(context.Context, string, string) error { return nil }
+func (f *outboxFakeBeads) ListChildrenOfPR(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (f *outboxFakeBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+	return "", nil
+}
+func (f *outboxFakeBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+func (f *outboxFakeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
+func (f *outboxFakeBeads) CloseFeedback(context.Context, string, string) error        { return nil }
 
 func (f *outboxFakeBeads) DepTreeUp(_ context.Context, _ string) ([]beads.DepNode, error) {
 	return nil, nil
@@ -484,10 +482,9 @@ func TestRefreshPRClosedEmitsClose(t *testing.T) {
 	if in != nil {
 		t.Fatalf("closed PR must be removed (nil input); got %+v", in)
 	}
-	if bdc.closed {
-		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
-	}
-
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
+	// refreshPR cannot call CloseMergeRequest on the engine's bd client.
+	// Event-based regression guard: a pr.closed event must have been emitted.
 	events := collectOutboxEvents(t, db)
 	var found bool
 	for _, ev := range events {
@@ -534,10 +531,9 @@ func TestRefreshPRMergedEmitsMerge(t *testing.T) {
 	if in != nil {
 		t.Fatalf("merged PR must be removed (nil input); got %+v", in)
 	}
-	if bdc.closed {
-		t.Fatal("refreshPR must NOT close the bead inline; the bridge does the cascade")
-	}
-
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
+	// refreshPR cannot call CloseMergeRequest on the engine's bd client.
+	// Event-based regression guard: a pr.merged event must have been emitted.
 	events := collectOutboxEvents(t, db)
 	var found bool
 	for _, ev := range events {
@@ -580,10 +576,10 @@ func TestRefreshPRHiddenDraftEmitsUpdate(t *testing.T) {
 	if in != nil {
 		t.Fatalf("hidden team draft must be removed (nil input); got %+v", in)
 	}
-	if bdc.lastState != "" {
-		t.Fatalf("refreshPR must NOT EnsureMergeRequest inline; the bridge does it (got lastState %q)", bdc.lastState)
-	}
-
+	// Structural guarantee: sync.BeadClient = {ListMergeRequests} so
+	// refreshPR cannot call EnsureMergeRequest on the engine's bd client.
+	// Event-based regression guard: a pr.updated event with State=="draft" must
+	// have been emitted (the bead state the bridge will project).
 	events := collectOutboxEvents(t, db)
 	var found bool
 	for _, ev := range events {
