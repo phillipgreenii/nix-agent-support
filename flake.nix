@@ -220,22 +220,23 @@
             };
         };
 
-      # Fixed pkgs used ONLY to build the pre-commit hook entries below. The
-      # `phillipgreenii.pre-commit.extraHooks` option is top-level (system-agnostic),
-      # so it cannot close over perSystem `pkgs`; pin the hook tooling to
-      # aarch64-darwin, the primary dev host where these hooks run at commit time.
-      hookSystem = "aarch64-darwin";
-      hookPkgs = import nixpkgs { system = hookSystem; };
-
       # Custom pre-commit hooks merged into the base set (which already provides
       # treefmt, statix, deadnix, shellcheck --severity=warning, trailing-whitespace,
       # end-of-file-fixer, check-merge-conflicts, check-case-conflicts). Those are
       # DROPPED here as redundant.
-      extraHooks = {
+      #
+      # Defined as a FUNCTION of the per-system `pkgs`: the pre-commit module
+      # (phillipg-nix-repo-base flake-modules/pre-commit.nix) applies it inside its
+      # `perSystem`, so every hook `entry` store path (go, golangci-lint) follows the
+      # building/committing system. Previously these were pinned to aarch64-darwin,
+      # which meant the hooks could not build on a linux dev host (install-pre-commit-hooks
+      # silently skipped) and — worse — an aarch64-darwin remote builder would let install
+      # SUCCEED writing darwin store paths, poisoning every subsequent linux commit (tc-yyx8l).
+      extraHooks = pkgs: {
         gofmt = {
           enable = true;
           name = "gofmt (pg-pr/pr-pool/pb)";
-          entry = "${hookPkgs.go}/bin/gofmt -l -w";
+          entry = "${pkgs.go}/bin/gofmt -l -w";
           files = "^packages/(pg-pr|pr-pool|pb)/.*\\.go$";
           types_or = [ "go" ];
         };
@@ -246,10 +247,10 @@
           # which fails for monorepo modules (no enclosing go.mod). Override
           # entry to chdir into the pg-pr module first.
           entry = toString (
-            hookPkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
+            pkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
               set -e
               # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${hookPkgs.go}/bin:$PATH"
+              export PATH="${pkgs.go}/bin:$PATH"
               # The auto checks.pre-commit runs this hook inside a pure nix build
               # sandbox (NIX_BUILD_TOP set, HOME=/homeless-shelter, no network).
               # golangci-lint needs to download pg-pr's external module deps,
@@ -261,7 +262,7 @@
                 exit 0
               fi
               cd packages/pg-pr
-              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
             ''
           );
           files = "^packages/pg-pr/.*\\.go$";
@@ -271,10 +272,10 @@
           enable = true;
           name = "golangci-lint (pr-pool)";
           entry = toString (
-            hookPkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
+            pkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
               set -e
               # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${hookPkgs.go}/bin:$PATH"
+              export PATH="${pkgs.go}/bin:$PATH"
               # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
               # pr-pool has external deps + a local replace to ../claude-transcript
               # that golangci-lint cannot resolve offline. Lint normally on a dev
@@ -284,7 +285,7 @@
                 exit 0
               fi
               cd packages/pr-pool
-              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
             ''
           );
           files = "^packages/pr-pool/.*\\.go$";
@@ -294,10 +295,10 @@
           enable = true;
           name = "golangci-lint (pb)";
           entry = toString (
-            hookPkgs.writeShellScript "precommit-golangci-lint-pb" ''
+            pkgs.writeShellScript "precommit-golangci-lint-pb" ''
               set -e
               # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${hookPkgs.go}/bin:$PATH"
+              export PATH="${pkgs.go}/bin:$PATH"
               # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
               # pb has external deps (cobra) that golangci-lint cannot download
               # offline. Lint normally on a dev machine. Mirrors the pg-pr/pr-pool
@@ -307,7 +308,7 @@
                 exit 0
               fi
               cd packages/pb
-              ${hookPkgs.golangci-lint}/bin/golangci-lint run ./...
+              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
             ''
           );
           files = "^packages/pb/.*\\.go$";
