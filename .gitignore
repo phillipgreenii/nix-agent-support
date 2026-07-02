@@ -13,10 +13,8 @@ result
 *.db
 .beads-credential-key
 
-# Gas City
-.beads/*
-!.beads/config.yaml
-!.beads/metadata.json
+# beads: local-only (data lives in dolt; nothing under .beads/ is tracked)
+.beads/
 
 # Claude Code per-session worktrees (runtime state, created by EnterWorktree)
 .claude/worktrees/
