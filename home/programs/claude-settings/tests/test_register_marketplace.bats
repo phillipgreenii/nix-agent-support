@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Verify register-marketplace.sh:
+# Verify claude-settings-register-marketplace.sh:
 #   - registers a directory marketplace via `claude plugin marketplace add <path>`
 #   - on `add` failure (e.g. already registered), falls back to
 #     `marketplace update <name>`
@@ -13,13 +13,12 @@
 
 bats_require_minimum_version 1.5.0
 
+load test_helper
+
 # Resolve the script: prefer the packaged binary on PATH (Nix build sandbox via
-# testBashScripts), fall back to the sibling source script for direct dev-time
-# runs (`bats tests/`).
-SCRIPT="$(command -v claude-settings-register-marketplace || true)"
-if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-register-marketplace.sh"
-fi
+# testBashScripts), fall back to a lib-sourcing wrapper around the sibling
+# source script for direct dev-time runs (`bats tests/`).
+SCRIPT="$(resolve_claude_settings_script claude-settings-register-marketplace)"
 
 setup() {
   TMP="$(mktemp -d)"

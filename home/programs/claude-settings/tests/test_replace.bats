@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Verify replace-managed-keys.sh:
+# Verify claude-settings-replace-managed-keys.sh:
 #   - replaces enabledPlugins and extraKnownMarketplaces with the Nix-declared set
 #   - writes a timestamped JSON file when any pre-existing entries are removed
 #   - logs removed entries to stderr
@@ -8,13 +8,12 @@
 
 bats_require_minimum_version 1.5.0
 
+load test_helper
+
 # Resolve the script: prefer the packaged binary on PATH (Nix build sandbox
-# via testBashScripts), fall back to the sibling source script for direct
-# dev-time runs (`bats tests/`).
-SCRIPT="$(command -v claude-settings-replace-managed-keys || true)"
-if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-replace-managed-keys.sh"
-fi
+# via testBashScripts), fall back to a lib-sourcing wrapper around the sibling
+# source script for direct dev-time runs (`bats tests/`).
+SCRIPT="$(resolve_claude_settings_script claude-settings-replace-managed-keys)"
 
 setup() {
   TMP="$(mktemp -d)"

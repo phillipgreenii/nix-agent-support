@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Verify install-plugin.sh:
+# Verify claude-settings-install-plugin.sh:
 #   - validates cache manifests; removes corrupt cached versions with warning
 #   - installs the plugin via the supplied claude binary, then ALWAYS follows a
 #     successful install with an (idempotent) update so content-digest version
@@ -21,10 +21,12 @@
 
 bats_require_minimum_version 1.5.0
 
-SCRIPT="$(command -v claude-settings-install-plugin || true)"
-if [ -z "$SCRIPT" ]; then
-  SCRIPT="${BATS_TEST_DIRNAME}/../claude-settings-install-plugin.sh"
-fi
+load test_helper
+
+# Resolve the script: prefer the packaged binary on PATH (Nix build sandbox via
+# testBashScripts), fall back to a lib-sourcing wrapper around the sibling
+# source script for direct dev-time runs (`bats tests/`).
+SCRIPT="$(resolve_claude_settings_script claude-settings-install-plugin)"
 
 setup() {
   TMP="$(mktemp -d)"

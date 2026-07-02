@@ -402,6 +402,22 @@
                 inherit (pkgs._agentSupportBashBuilders) mkBashScript;
                 activation-lib = claudeSettingsActivationLib;
               };
+              # Each claude-settings bats file does `load test_helper` to resolve
+              # the script under test (packaged binary on PATH here in the sandbox,
+              # else a lib-sourcing wrapper for a local `bats tests/`). A single
+              # `.bats` path would copy only that file to the store, so the sibling
+              # test_helper.bash would be absent and `load` would fail. Pair each
+              # bats file with the helper in a minimal store dir; `bats <dir>` then
+              # runs just that one file with the helper alongside.
+              claudeSettingsTestSrc =
+                bats:
+                lib.fileset.toSource {
+                  root = ./home/programs/claude-settings/tests;
+                  fileset = lib.fileset.unions [
+                    (./home/programs/claude-settings/tests + "/${bats}")
+                    ./home/programs/claude-settings/tests/test_helper.bash
+                  ];
+                };
             in
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
@@ -799,7 +815,7 @@
 
               test-claude-settings-replace = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.replaceManagedKeys.script;
-                tests = ./home/programs/claude-settings/tests/test_replace.bats;
+                tests = claudeSettingsTestSrc "test_replace.bats";
                 extraInputs = [
                   pkgs.jq
                   pkgs.coreutils
@@ -808,7 +824,7 @@
 
               test-claude-settings-install-plugin = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.installPlugin.script;
-                tests = ./home/programs/claude-settings/tests/test_install_plugin.bats;
+                tests = claudeSettingsTestSrc "test_install_plugin.bats";
                 extraInputs = [
                   pkgs.jq
                   pkgs.coreutils
@@ -817,7 +833,7 @@
 
               test-claude-settings-register-marketplace = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.registerMarketplace.script;
-                tests = ./home/programs/claude-settings/tests/test_register_marketplace.bats;
+                tests = claudeSettingsTestSrc "test_register_marketplace.bats";
                 extraInputs = [
                   pkgs.coreutils
                 ];
