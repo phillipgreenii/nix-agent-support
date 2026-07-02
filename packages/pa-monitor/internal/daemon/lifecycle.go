@@ -12,6 +12,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
+	"github.com/phillipgreenii/pa-monitor/internal/core/account"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
@@ -156,6 +157,14 @@ type RunOptions struct {
 	RuntimePath string
 	// WeeklyFn fetches the current week entry. Nil → never polled.
 	WeeklyFn func(ctx context.Context) (*ccusage.WeeklyEntry, error)
+	// Account carries the plan identity and pricing inputs (the per-block /
+	// per-week caps) used by the store-conversion path. Its zero value yields
+	// zero caps ("unknown"), matching the pre-Account default for an unset tier.
+	Account account.Account
+	// Limits is the LimitsSource port (ADR 0021 §1). Phase 2 wires it nil and
+	// nothing reads it; a nil port cannot change output. Phase 3 supplies the
+	// sibling-file reader adapter and the sampling that consumes it.
+	Limits LimitsSource
 	// PlanTier is forwarded as the `plan_tier` attribute on emitted
 	// limit-hit events/counters.
 	PlanTier string
@@ -375,7 +384,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.WriteService != nil {
 				if tree.ActiveBlock != nil {
 					nowUTC := time.Now().UTC()
-					b := blockToStoreBlock(tree.ActiveBlock, opts.PlanTier, nowUTC)
+					b := blockToStoreBlock(tree.ActiveBlock, opts.Account.BlockCap(), nowUTC)
 					if blockID, err := opts.WriteService.UpsertBlock(ctx, b); err == nil {
 						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
 							setter.SetActiveBlockID(blockID)
@@ -384,7 +393,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				}
 				if tree.ActiveWeek != nil {
 					nowUTC := time.Now().UTC()
-					w := weekToStoreWeek(tree.ActiveWeek, opts.PlanTier, nowUTC)
+					w := weekToStoreWeek(tree.ActiveWeek, opts.Account.WeekCap(), nowUTC)
 					if weekID, err := opts.WriteService.UpsertWeek(ctx, w); err == nil {
 						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
 							setter.SetActiveWeekID(weekID)
@@ -874,13 +883,15 @@ func Run(ctx context.Context, p Paths) error {
 }
 
 // blockToStoreBlock converts a ccusage.Block into a store.Block ready for
-// persistence. PlanCapUSD is derived from the plan tier.
-func blockToStoreBlock(b *ccusage.Block, planTier string, now time.Time) store.Block {
+// persistence. capUSD is the per-5h-block soft cap, supplied by the caller from
+// the Account so the conversion no longer looks up the cap from the concrete
+// ccusage provider.
+func blockToStoreBlock(b *ccusage.Block, capUSD float64, now time.Time) store.Block {
 	sb := store.Block{
 		BlockID:         b.ID,
 		StartedAt:       b.StartTime,
 		EndedAt:         b.EndTime,
-		PlanCapUSD:      ccusage.PlanCapUSD(planTier),
+		PlanCapUSD:      capUSD,
 		TotalCostUSD:    b.CostUSD,
 		LastProcessedAt: now,
 		UpdatedAt:       now,
@@ -889,8 +900,9 @@ func blockToStoreBlock(b *ccusage.Block, planTier string, now time.Time) store.B
 }
 
 // weekToStoreWeek converts a ccusage.WeeklyEntry into a store.Week. The
-// week window is anchored on the Monday (Period) and extends 7 days.
-func weekToStoreWeek(w *ccusage.WeeklyEntry, planTier string, now time.Time) store.Week {
+// week window is anchored on the Monday (Period) and extends 7 days. capUSD is
+// the per-week soft cap, supplied by the caller from the Account.
+func weekToStoreWeek(w *ccusage.WeeklyEntry, capUSD float64, now time.Time) store.Week {
 	// Parse the Monday anchor from "YYYY-MM-DD".
 	var startedAt time.Time
 	if t, err := time.Parse("2006-01-02", w.Period); err == nil {
@@ -901,7 +913,7 @@ func weekToStoreWeek(w *ccusage.WeeklyEntry, planTier string, now time.Time) sto
 		WeekID:          w.Period,
 		StartedAt:       startedAt,
 		EndedAt:         endedAt,
-		WeekCapUSD:      ccusage.WeekCapUSD(planTier),
+		WeekCapUSD:      capUSD,
 		TotalCostUSD:    w.TotalCost,
 		LastProcessedAt: now,
 		UpdatedAt:       now,

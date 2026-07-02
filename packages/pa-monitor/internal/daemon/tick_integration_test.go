@@ -418,15 +418,19 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 		},
 	})
 
-	// --- real *poller.Poller wired with DB and WriteService ---
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// --- real *poller.Poller wired with DB and WriteService, driven through
+	// the real ccusage.Provider cost adapter (CostPricer port). ---
+	cache := ccusage.NewCachedRunner(time.Hour, time.Second,
+		func(context.Context) ([]byte, error) { return activeBlockBody, nil })
+	cache.Start(ctx)
 	p := &poller.Poller{
-		SessionsDir: sessDir,
-		ClaudeHome:  dir,
-		PidAlive:    func(pid int) bool { return pid == os.Getpid() },
-		Now:         time.Now,
-		CCUsageFn: func(ctx context.Context) ([]byte, error) {
-			return activeBlockBody, nil
-		},
+		SessionsDir:  sessDir,
+		ClaudeHome:   dir,
+		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
+		Now:          time.Now,
+		Pricer:       ccusage.NewProvider(cache, &ccusage.Runner{}),
 		WriteService: ws,
 		DB:           db,
 	}
@@ -434,7 +438,6 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 	tickCount := 0
 	tickSynced := make(chan struct{}, 10)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
 		done <- RunWith(ctx, RunOptions{

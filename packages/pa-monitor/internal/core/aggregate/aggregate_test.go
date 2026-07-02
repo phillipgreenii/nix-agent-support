@@ -22,7 +22,7 @@ func TestBuildGroupsByCwdAndTotalsTokens(t *testing.T) {
 		"c": {ContextTokens: 2000, SessionTokens: 20_000},
 	}
 	block := &ccusage.Block{CostUSD: 10.0, BurnRate: ccusage.BurnRate{TokensPerMinute: 100_000}, Projection: ccusage.Projection{RemainingMinutes: 100}}
-	tree := Build(sessions, enriched, nil, block, "max_5x")
+	tree := Build(sessions, enriched, nil, block, 90.0)
 	if len(tree.Dirs) != 2 {
 		t.Fatalf("want 2 dirs, got %d", len(tree.Dirs))
 	}
@@ -35,6 +35,15 @@ func TestBuildGroupsByCwdAndTotalsTokens(t *testing.T) {
 	}
 	if byPath["/p1"].WorkingN != 1 || byPath["/p1"].IdleN != 1 {
 		t.Errorf("/p1 counts wrong: %+v", byPath["/p1"])
+	}
+}
+
+func TestBuildSetsPlanCapFromArg(t *testing.T) {
+	// Build sources the plan cap from its blockCapUSD argument (supplied by the
+	// caller from the Account), not from an inline ccusage.PlanCapUSD lookup.
+	tree := Build(nil, nil, nil, nil, 90.0)
+	if tree.PlanCapUSD != 90.0 {
+		t.Errorf("tree.PlanCapUSD = %v, want 90 (from blockCapUSD arg)", tree.PlanCapUSD)
 	}
 }
 
@@ -64,7 +73,7 @@ func TestBuildSessionsSortedByStartedAtDesc(t *testing.T) {
 		"mid": {SessionTokens: 20},
 		"new": {SessionTokens: 30},
 	}
-	tree := Build(sessions, enriched, nil, nil, "max_5x")
+	tree := Build(sessions, enriched, nil, nil, 90.0)
 	if len(tree.Dirs) != 1 {
 		t.Fatalf("want 1 dir, got %d", len(tree.Dirs))
 	}
@@ -93,14 +102,14 @@ func TestBuildWindowResetsAtTakesLatest(t *testing.T) {
 		"b": {RateLimitResetsAt: t2},
 		"c": {},
 	}
-	tree := Build(sessions, enriched, nil, nil, "max_5x")
+	tree := Build(sessions, enriched, nil, nil, 90.0)
 	if !tree.WindowResetsAt.Equal(t2) {
 		t.Errorf("WindowResetsAt = %v, want %v", tree.WindowResetsAt, t2)
 	}
 }
 
 func TestBuildWindowResetsAtZeroWhenNoSessions(t *testing.T) {
-	tree := Build(nil, nil, nil, nil, "max_5x")
+	tree := Build(nil, nil, nil, nil, 90.0)
 	if !tree.WindowResetsAt.IsZero() {
 		t.Errorf("WindowResetsAt = %v, want zero", tree.WindowResetsAt)
 	}
@@ -115,7 +124,7 @@ func TestBuildSetsPRInfo(t *testing.T) {
 	prByDir := map[string]*session.PRInfo{
 		"/p1": {Number: 42, Title: "My PR", URL: "https://gh/42"},
 	}
-	tree := Build(sessions, enriched, prByDir, nil, "max_5x")
+	tree := Build(sessions, enriched, prByDir, nil, 90.0)
 	byPath := map[string]*Directory{}
 	for _, d := range tree.Dirs {
 		byPath[d.Path] = d
@@ -143,7 +152,7 @@ func TestAggregateCarriesLastError(t *testing.T) {
 	enriched := map[string]SessionEnrichment{
 		"sid-1": {LastError: rec, LastErrorRetryable: true},
 	}
-	tree := Build(sessions, enriched, nil, nil, "")
+	tree := Build(sessions, enriched, nil, nil, 0)
 	if len(tree.Dirs) == 0 || len(tree.Dirs[0].Sessions) == 0 {
 		t.Fatal("expected one session in tree")
 	}
@@ -167,7 +176,7 @@ func TestBuildPopulatesDirectoryBurnRateSum(t *testing.T) {
 		"b": {BurnRateShort: 50},
 		"c": {BurnRateShort: 200},
 	}
-	tree := Build(sessions, enriched, nil, nil, "")
+	tree := Build(sessions, enriched, nil, nil, 0)
 
 	byPath := map[string]*Directory{}
 	for _, d := range tree.Dirs {

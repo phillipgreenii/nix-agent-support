@@ -53,7 +53,7 @@ func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
-		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
@@ -81,7 +81,7 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
-		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSnapshotProducesTree(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestSnapshotPopulatesTranscriptCache(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestSnapshotTranscriptCacheRetainsAcrossPolls(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.CCUsageFn = func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil }
+	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
-		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+		Pricer:      &fakeCostPricer{},
 		PRLookupFn: func(_ context.Context, cwd, branch string) (*session.PRInfo, error) {
 			calls = append(calls, call{cwd, branch})
 			return nil, nil
@@ -341,7 +341,7 @@ func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
-		CCUsageFn:   func(ctx context.Context) ([]byte, error) { return []byte(`{"blocks":[]}`), nil },
+		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {

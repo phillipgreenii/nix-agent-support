@@ -9,8 +9,10 @@ import (
 )
 
 // Build groups sessions by Cwd and totals tokens/cost. The block argument may be nil.
-// PlanTier controls the plan-cap lookup used for display-layer projections.
-func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *ccusage.Block, planTier string) *Tree {
+// blockCapUSD is the per-5h-block soft cap (0 = unknown) used for display-layer
+// projections; the caller supplies it from the Account so Build no longer looks
+// up the cap from the concrete ccusage provider.
+func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, prByDir map[string]*session.PRInfo, block *ccusage.Block, blockCapUSD float64) *Tree {
 	byDir := map[string]*Directory{}
 	var windowResetsAt time.Time
 	for _, s := range sessions {
@@ -68,7 +70,7 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 	}
 	tree := &Tree{
 		ActiveBlock:    block,
-		PlanCapUSD:     ccusage.PlanCapUSD(planTier),
+		PlanCapUSD:     blockCapUSD,
 		GeneratedAt:    time.Now(),
 		WindowResetsAt: windowResetsAt,
 	}

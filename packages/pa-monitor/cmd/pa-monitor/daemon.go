@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
+	"github.com/phillipgreenii/pa-monitor/internal/core/account"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/ccusage"
@@ -121,6 +122,11 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	// for daemon + bridge + tui). Only-if-unset, so an explicit env still wins.
 	config.ApplyOTelEnv(cfg.OTel)
 
+	// Account carries the plan identity and pricing inputs (the per-block /
+	// per-week caps). Built once here and threaded to the poller, trackers, and
+	// the store-conversion path so no consumer looks caps up from ccusage.
+	acct := account.LoadAccount(cfg)
+
 	emitter, err := otel.New(ctx, otel.Options{
 		ServiceName:    "pa-monitor",
 		ServiceVersion: ver,
@@ -167,6 +173,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		Emitter:             emitter,
 		Tick:                tick,
 		PlanTier:            cfg.PlanTier,
+		Account:             acct,
 		Caffeinate:          caffMgr,
 		InitialCaffeinateOn: false, // updated from DB below when available
 		RuntimePath:         runtimePath,
@@ -185,7 +192,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	}
 
 	if !disablePoller {
-		p, blockTr, weekTr, weeklyFn := buildPoller(ctx, cfg)
+		p, blockTr, weekTr, weeklyFn := buildPoller(ctx, cfg, acct)
 		p.BridgeRegistry = bridgeRegistry
 
 		// Open the SQLite database and wire WriteService into the poller so
@@ -292,7 +299,7 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 // controls the lifetime of the background ccusage refresh goroutine —
 // pass the daemon's signal-bound ctx in production so the goroutine
 // exits on SIGTERM; tests pass a short-lived ctx to avoid leaks.
-func buildPoller(ctx context.Context, cfg config.Config) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*ccusage.WeeklyEntry, error)) {
+func buildPoller(ctx context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*ccusage.WeeklyEntry, error)) {
 	home, _ := os.UserHomeDir()
 
 	ccusageCache := ccusage.NewCachedRunner(60*time.Second, 60*time.Second,
@@ -300,6 +307,12 @@ func buildPoller(ctx context.Context, cfg config.Config) (*poller.Poller, *block
 			return exec.CommandContext(ctx, "ccusage", "blocks", "--active", "--json", "--offline").Output()
 		})
 	ccusageCache.Start(ctx)
+
+	// The ccusage cost adapter is the first CostPricer implementation (ADR 0021
+	// §3). Building it here — the composition root — is where the concrete
+	// provider is named; the poller and daemon see only the port.
+	weeklyRunner := &ccusage.Runner{}
+	pricer := ccusage.NewProvider(ccusageCache, weeklyRunner)
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 	signalers := signallayer.DefaultSignalers()
@@ -309,27 +322,22 @@ func buildPoller(ctx context.Context, cfg config.Config) (*poller.Poller, *block
 		ClaudeHome:         filepath.Join(home, ".claude"),
 		PidAlive:           session.DefaultPidAlive,
 		PlanTier:           cfg.PlanTier,
+		BlockCapUSD:        acct.BlockCap(),
 		WorkingThreshold:   cfg.WorkingThreshold,
 		IdleThreshold:      cfg.IdleThreshold,
 		WaitingFreshWindow: cfg.WaitingFreshWindow,
 		BurnWindowShort:    cfg.BurnWindowShort,
 		BurnWindowLong:     cfg.BurnWindowLong,
 		Now:                time.Now,
-		CCUsageFn:          ccusageCache.Get,
-		CCUsageStateFn:     func() (bool, error) { return ccusageCache.Probed(), ccusageCache.LastErr() },
+		Pricer:             pricer,
 		PRLookupFn:         prCache.Get,
 		Signalers:          signalers,
 	}
 
-	blockCap := ccusage.PlanCapUSD(cfg.PlanTier)
-	weekCap := ccusage.WeekCapUSD(cfg.PlanTier)
-	blockTr := block.NewTracker(blockCap)
-	weekTr := week.NewTracker(weekCap)
+	blockTr := block.NewTracker(acct.BlockCap())
+	weekTr := week.NewTracker(acct.WeekCap())
 
-	weeklyRunner := &ccusage.Runner{}
-	weeklyFn := func(ctx context.Context) (*ccusage.WeeklyEntry, error) {
-		return weeklyRunner.CurrentWeekly(ctx)
-	}
+	weeklyFn := pricer.CurrentWeekly
 
 	return p, blockTr, weekTr, weeklyFn
 }

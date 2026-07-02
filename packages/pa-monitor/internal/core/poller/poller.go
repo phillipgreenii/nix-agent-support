@@ -36,10 +36,15 @@ type cachedTranscript struct {
 }
 
 type Poller struct {
-	SessionsDir      string
-	ClaudeHome       string
-	PidAlive         func(int) bool
-	PlanTier         string
+	SessionsDir string
+	ClaudeHome  string
+	PidAlive    func(int) bool
+	PlanTier    string
+	// BlockCapUSD is the per-5h-block soft cap (0 = unknown) sourced from the
+	// Account at wiring time and threaded into aggregate.Build for the
+	// display-layer projection. Replaces the former inline ccusage.PlanCapUSD
+	// lookup so the poller depends only on the port/Account, not the provider.
+	BlockCapUSD      float64
 	WorkingThreshold time.Duration
 	IdleThreshold    time.Duration
 	// WaitingFreshWindow bounds the registry-"waiting" freshness cross-check
@@ -48,10 +53,12 @@ type Poller struct {
 	BurnWindowShort    time.Duration
 	BurnWindowLong     time.Duration
 	Now                func() time.Time
-	CCUsageFn          func(ctx context.Context) ([]byte, error)
-	CCUsageStateFn     func() (probed bool, err error)
-	PRLookupFn         func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
-	Signalers          []signal.Signaler
+	// Pricer is the CostPricer port supplying the active 5h block cost and its
+	// probe state. Nil disables cost folding (the block is simply absent). The
+	// ccusage adapter is its production implementation; tests inject a fake.
+	Pricer     CostPricer
+	PRLookupFn func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
+	Signalers  []signal.Signaler
 	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
 	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
 	// whether a cmux-bridge has registered for the session's cmux server PID.
@@ -325,19 +332,14 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	}
 
 	var block *ccusage.Block
-	if p.CCUsageFn != nil {
-		if body, err := p.CCUsageFn(ctx); err == nil && body != nil {
-			block, _ = ccusage.ParseActiveBlock(body)
-		}
-	}
-
 	var ccUsageProbed bool
 	var ccUsageErr error
-	if p.CCUsageStateFn != nil {
-		ccUsageProbed, ccUsageErr = p.CCUsageStateFn()
+	if p.Pricer != nil {
+		block, _ = p.Pricer.ActiveBlock(ctx)
+		ccUsageProbed, ccUsageErr = p.Pricer.Probed()
 	}
 
-	tree := aggregate.Build(sessions, enriched, prByDir, block, p.PlanTier)
+	tree := aggregate.Build(sessions, enriched, prByDir, block, p.BlockCapUSD)
 	tree.CCUsageProbed = ccUsageProbed
 	tree.CCUsageErr = ccUsageErr
 
