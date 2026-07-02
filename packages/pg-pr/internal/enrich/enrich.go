@@ -1,9 +1,15 @@
 // Package enrich computes deterministic, LLM-free enrichment fields for a PR:
 // kind, languages, size, and urgency. All functions are pure (no I/O, no clock,
 // no network) so they are fully table-testable.
+//
+// The "project broken on main" urgency signal (pg2-4c5i.25) is injectable via
+// Input.ProjectHealthFunc. When nil the signal is disabled and Compute behaves
+// identically to before. Use ComputeWithContext to pass a context for the
+// health-checker call; Compute is a context-free wrapper (uses context.Background).
 package enrich
 
 import (
+	"context"
 	"regexp"
 	"strings"
 
@@ -111,6 +117,12 @@ type Input struct {
 	Commits []string    // commit messages
 	Labels  []string    // PR label names
 	CIRuns  []api.CIRun // the PR's own CI runs
+
+	// ProjectHealthFunc, when non-nil, is called for each app-path derived from
+	// Files to determine whether the project is broken on main and whether this
+	// PR's branch is green. See broken_project.go. Nil disables the signal.
+	// Live verification of this hook is deferred (pg2-4c5i.25 follow-up).
+	ProjectHealthFunc ProjectHealthFunc
 }
 
 var urgencyLabels = map[string]bool{
@@ -163,14 +175,7 @@ func scoreUrgency(in Input) (string, int, []string) {
 		}
 	}
 
-	level := "low"
-	switch {
-	case score >= 3:
-		level = "high"
-	case score >= 1:
-		level = "medium"
-	}
-	return level, score, reasons
+	return urgencyLevel(score), score, reasons
 }
 
 // anyCIFailing reports whether any completed run has a non-success conclusion
@@ -201,12 +206,22 @@ type Result struct {
 }
 
 // Compute derives all four enrichment fields from Input. Pure and deterministic.
+// When Input.ProjectHealthFunc is nil the "project broken on main" signal is
+// skipped. Use ComputeWithContext to pass a context for the health-checker call;
+// Compute is a convenience wrapper that uses context.Background.
 func Compute(in Input) Result {
+	return ComputeWithContext(context.Background(), in)
+}
+
+// ComputeWithContext is the context-aware variant of Compute. The context is
+// forwarded to Input.ProjectHealthFunc (if set) so health-checker calls can be
+// cancelled or have a deadline. All other signals remain pure and context-free.
+func ComputeWithContext(ctx context.Context, in Input) Result {
 	r := Result{
 		Kind:      classifyKind(in.PR.Title, in.PR.Branch, in.Commits),
 		Languages: detectLanguages(in.Files),
 		Size:      bucketSize(in.PR.Additions + in.PR.Deletions),
 	}
-	r.Urgency, r.UrgencyScore, r.UrgencyReasons = scoreUrgency(in)
+	r.Urgency, r.UrgencyScore, r.UrgencyReasons = scoreUrgencyWithHealth(ctx, in)
 	return r
 }

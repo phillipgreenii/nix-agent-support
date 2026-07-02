@@ -29,7 +29,11 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 			in.Labels = enriched.PR.Labels
 		}
 	}
-	r := enrich.Compute(in)
+	// Use ComputeWithContext so any injected ProjectHealthFunc (wired in a
+	// future live-verification bead) can be cancelled via the calling context.
+	// When ProjectHealthFunc is nil (current default), this is identical to
+	// Compute(in).
+	r := enrich.ComputeWithContext(ctx, in)
 	if err := e.deps.Store.SetEnrichment(ctx, repo, pr.Number, store.Enrichment{
 		Kind: r.Kind, Languages: r.Languages, Size: r.Size,
 		Urgency: r.Urgency, UrgencyScore: r.UrgencyScore, UrgencyReasons: r.UrgencyReasons,
