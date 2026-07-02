@@ -376,7 +376,8 @@ let
         @sh "CLAUDE_SL_5H_RESET=\(.rate_limits.five_hour.resets_at // "")",
         @sh "CLAUDE_SL_7D_PCT=\(.rate_limits.seven_day.used_percentage // "")",
         @sh "CLAUDE_SL_7D_RESET=\(.rate_limits.seven_day.resets_at // "")",
-        @sh "_sl_cwd=\(.workspace.current_dir // .cwd // "")"
+        @sh "_sl_cwd=\(.workspace.current_dir // .cwd // "")",
+        @sh "_sl_transcript=\(.transcript_path // "")"
       ')"
 
       # Branch fallback: Claude only populates worktree.branch inside a worktree session,
@@ -406,6 +407,29 @@ let
           break
         done
       fi
+
+      # rate_limits capture (ADR 0021 §1). Append-on-change an allowlisted record to
+      # <session_id>.status.jsonl NEXT TO the transcript. The capture logic lives in
+      # capture-status.bash (unit-tested directly by test-capture-status.bats) and is
+      # injected verbatim, mirroring strip-ansi.bash. The whole capture is wrapped
+      # `{ ... } 2>/dev/null || true` so it is BEST-EFFORT and can NEVER alter the
+      # render output or the wrapper's exit status. It runs only when both a
+      # transcript_path and a session_id are known (needed to derive the sibling path).
+      ${builtins.readFile ./capture-status.bash}
+      {
+        if [ -n "$_sl_transcript" ] && [ -n "$CLAUDE_SL_SESSION_ID" ]; then
+          _sl_txdir=''${_sl_transcript%/*}
+          capture_status_line \
+            "$_sl_txdir/$CLAUDE_SL_SESSION_ID.status.jsonl" \
+            "$EPOCHSECONDS" \
+            "$CLAUDE_SL_SESSION_ID" \
+            "''${HOSTNAME:-}" \
+            "$CLAUDE_SL_5H_PCT" \
+            "$CLAUDE_SL_5H_RESET" \
+            "$CLAUDE_SL_7D_PCT" \
+            "$CLAUDE_SL_7D_RESET"
+        fi
+      } 2>/dev/null || true
 
       collected=()
       ${lib.concatMapStringsSep "\n" (part: ''

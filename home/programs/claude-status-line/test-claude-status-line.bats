@@ -937,3 +937,109 @@ strip_ansi() {
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
 }
+
+# =====================================================================================
+# rate_limits capture (ADR 0021 §1). The wrapper appends-on-change an allowlisted
+# record to <session_id>.status.jsonl NEXT TO the transcript, best-effort, without
+# EVER altering the render output or the exit status. These end-to-end tests drive the
+# built wrapper; the pure clamp/append-on-change logic is unit-tested in
+# test-capture-status.bats. Mode-agnostic (capture is nerd-font-independent).
+# =====================================================================================
+
+# Build a status-line JSON carrying a transcript_path in $TEST_DIR plus rate_limits.
+# Args: $1 transcript_path  $2 5h_pct  $3 5h_reset  $4 7d_pct  $5 7d_reset
+_capture_json() {
+  printf '{"session_id":"sess-1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"transcript_path":"%s","model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}}}' \
+    "$1" "$2" "$3" "$4" "$5"
+}
+
+@test "capture writes <session_id>.status.jsonl next to the transcript at 0600" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_capture_json "$tx" 34 1782958200 12 1783000000)
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  local sf="$TEST_DIR/sess-1.status.jsonl"
+  [ -f "$sf" ]
+  local mode
+  mode=$(stat -c '%a' "$sf" 2>/dev/null || stat -f '%Lp' "$sf")
+  [ "$mode" = "600" ]
+  [[ "$(cat "$sf")" == *'"five_hour_pct":34'* ]]
+}
+
+@test "capture never alters the render output or exit status" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  # Render WITH a transcript_path (capture active) vs WITHOUT (no capture): the visible
+  # render must be byte-identical, proving capture is a pure side effect.
+  local with without
+  with=$(bash -c "printf '%s' '$(_capture_json "$tx" 34 1782958200 12 1783000000)' | claude-status-line")
+  local Jno='{"session_id":"sess-1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":34,"resets_at":1782958200},"seven_day":{"used_percentage":12,"resets_at":1783000000}}}'
+  without=$(bash -c "printf '%s' '$Jno' | claude-status-line")
+  [ "$with" = "$without" ]
+}
+
+@test "capture is append-on-change across renders (unchanged -> no new line)" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_capture_json "$tx" 34 1782958200 12 1783000000)
+  bash -c "printf '%s' '$J' | claude-status-line"
+  bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$(wc -l <"$TEST_DIR/sess-1.status.jsonl")" -eq 1 ]
+}
+
+@test "capture appends a second line when a percentage changes" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  bash -c "printf '%s' '$(_capture_json "$tx" 34 1782958200 12 1783000000)' | claude-status-line"
+  bash -c "printf '%s' '$(_capture_json "$tx" 35 1782958200 12 1783000000)' | claude-status-line"
+  [ "$(wc -l <"$TEST_DIR/sess-1.status.jsonl")" -eq 2 ]
+}
+
+@test "capture writes only allowlisted fields (no env secrets)" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_capture_json "$tx" 34 1782958200 12 1783000000)
+  run env MY_SECRET=hunter2 SSH_AUTH_SOCK=/tmp/secret.sock bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(cat "$TEST_DIR/sess-1.status.jsonl")
+  [[ "$body" != *"hunter2"* ]]
+  [[ "$body" != *"secret.sock"* ]]
+  [[ "$body" != *"SSH_AUTH_SOCK"* ]]
+}
+
+@test "capture clamps the #52326 epoch percentage to absent" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  # five_hour.used_percentage is an epoch-sized number (bug #52326): must be omitted.
+  local J
+  J=$(_capture_json "$tx" 1782958200 1782958200 "null" "null")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(cat "$TEST_DIR/sess-1.status.jsonl")
+  [[ "$body" != *'"five_hour_pct"'* ]]
+  [[ "$body" == *'"five_hour_resets_at":1782958200'* ]]
+}
+
+@test "capture is a no-op (no file) when transcript_path is absent" {
+  local J='{"session_id":"sess-1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":34,"resets_at":1782958200}}}'
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  # No transcript_path -> no directory to write beside -> no status file anywhere in TEST_DIR.
+  run bash -c "find '$TEST_DIR' -name '*.status.jsonl'"
+  [ "$output" = "" ]
+}
+
+@test "capture does not affect exit status when the transcript dir is unwritable" {
+  local tx="$TEST_DIR/nope/sess-1.jsonl"
+  local J
+  J=$(_capture_json "$tx" 34 1782958200 "null" "null")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/nope/sess-1.status.jsonl" ]
+}
