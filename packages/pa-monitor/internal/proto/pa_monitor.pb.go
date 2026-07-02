@@ -270,8 +270,24 @@ type DaemonState struct {
 	CaffeinateProcess         CaffeinateProcess `protobuf:"varint,17,opt,name=caffeinate_process,json=caffeinateProcess,proto3,enum=pa_monitor.v1.CaffeinateProcess" json:"caffeinate_process,omitempty"` // caffeination PROCESS state
 	CaffeinateGraceRemainingS uint32            `protobuf:"varint,18,opt,name=caffeinate_grace_remaining_s,json=caffeinateGraceRemainingS,proto3" json:"caffeinate_grace_remaining_s,omitempty"`          // seconds left in grace; 0 unless process == GRACE
 	CaffeinateCause           string            `protobuf:"bytes,19,opt,name=caffeinate_cause,json=caffeinateCause,proto3" json:"caffeinate_cause,omitempty"`                                             // "manual", "agents_active", or ""
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// Authoritative status-line rate_limits windows (ADR 0021 §6). These are
+	// account-global (NO session_id) and carry Claude Code's server-side 5h/7d
+	// used_percentage. They are DISTINCT from window_resets_at (field 8) /
+	// SessionView.rate_limit_resets_at (the daemon's pause / limit-hit concept):
+	// these are the status-line windows.
+	//
+	// proto3 `optional` gives explicit field presence so an unset percentage is
+	// distinguishable from a real 0% reading (unknown/stale != 0). The reset /
+	// captured timestamps are google.protobuf.Timestamp messages, which are nil
+	// when unset and MUST NOT decode as 1970 (see timeFromTS). Phase 0 observed
+	// seven_day absent on this account, so these are commonly unset. No consumer
+	// reads them yet — this is persistence + wire plumbing only.
+	FiveHourPct      *float64               `protobuf:"fixed64,20,opt,name=five_hour_pct,json=fiveHourPct,proto3,oneof" json:"five_hour_pct,omitempty"`          // 5h used_percentage [0,100]; unset = unknown
+	SevenDayPct      *float64               `protobuf:"fixed64,21,opt,name=seven_day_pct,json=sevenDayPct,proto3,oneof" json:"seven_day_pct,omitempty"`          // 7d used_percentage [0,100]; unset = unknown
+	SevenDayResetsAt *timestamppb.Timestamp `protobuf:"bytes,22,opt,name=seven_day_resets_at,json=sevenDayResetsAt,proto3" json:"seven_day_resets_at,omitempty"` // 7d window reset; unset = unknown (never 1970)
+	LimitsCapturedAt *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=limits_captured_at,json=limitsCapturedAt,proto3" json:"limits_captured_at,omitempty"`   // capture ts of the limits reading; unset = unknown
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *DaemonState) Reset() {
@@ -435,6 +451,34 @@ func (x *DaemonState) GetCaffeinateCause() string {
 		return x.CaffeinateCause
 	}
 	return ""
+}
+
+func (x *DaemonState) GetFiveHourPct() float64 {
+	if x != nil && x.FiveHourPct != nil {
+		return *x.FiveHourPct
+	}
+	return 0
+}
+
+func (x *DaemonState) GetSevenDayPct() float64 {
+	if x != nil && x.SevenDayPct != nil {
+		return *x.SevenDayPct
+	}
+	return 0
+}
+
+func (x *DaemonState) GetSevenDayResetsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SevenDayResetsAt
+	}
+	return nil
+}
+
+func (x *DaemonState) GetLimitsCapturedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LimitsCapturedAt
+	}
+	return nil
 }
 
 type Directory struct {
@@ -2126,7 +2170,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x10push_interval_ms\x18\x01 \x01(\rR\x0epushIntervalMs\"\r\n" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12*\n" +
-	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\x98\a\n" +
+	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xa3\t\n" +
 	"\vDaemonState\x12,\n" +
 	"\x03now\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x03now\x122\n" +
 	"\x15daemon_uptime_seconds\x18\x02 \x01(\x04R\x13daemonUptimeSeconds\x12%\n" +
@@ -2150,7 +2194,13 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x0fcaffeinate_mode\x18\x10 \x01(\bR\x0ecaffeinateMode\x12O\n" +
 	"\x12caffeinate_process\x18\x11 \x01(\x0e2 .pa_monitor.v1.CaffeinateProcessR\x11caffeinateProcess\x12?\n" +
 	"\x1ccaffeinate_grace_remaining_s\x18\x12 \x01(\rR\x19caffeinateGraceRemainingS\x12)\n" +
-	"\x10caffeinate_cause\x18\x13 \x01(\tR\x0fcaffeinateCause\"\xdd\x02\n" +
+	"\x10caffeinate_cause\x18\x13 \x01(\tR\x0fcaffeinateCause\x12'\n" +
+	"\rfive_hour_pct\x18\x14 \x01(\x01H\x00R\vfiveHourPct\x88\x01\x01\x12'\n" +
+	"\rseven_day_pct\x18\x15 \x01(\x01H\x01R\vsevenDayPct\x88\x01\x01\x12I\n" +
+	"\x13seven_day_resets_at\x18\x16 \x01(\v2\x1a.google.protobuf.TimestampR\x10sevenDayResetsAt\x12H\n" +
+	"\x12limits_captured_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10limitsCapturedAtB\x10\n" +
+	"\x0e_five_hour_pctB\x10\n" +
+	"\x0e_seven_day_pct\"\xdd\x02\n" +
 	"\tDirectory\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12.\n" +
@@ -2366,51 +2416,53 @@ var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
 	10, // 4: pa_monitor.v1.DaemonState.active_week:type_name -> pa_monitor.v1.Week
 	30, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: pa_monitor.v1.DaemonState.caffeinate_process:type_name -> pa_monitor.v1.CaffeinateProcess
-	7,  // 7: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
-	8,  // 8: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
-	30, // 9: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	30, // 10: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
-	30, // 11: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
-	30, // 12: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
-	30, // 13: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
-	30, // 14: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	30, // 15: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
-	30, // 16: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
-	30, // 17: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
-	0,  // 18: pa_monitor.v1.CaffeinateResponse.process:type_name -> pa_monitor.v1.CaffeinateProcess
-	30, // 19: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
-	13, // 20: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
-	8,  // 21: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
-	22, // 22: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
-	23, // 23: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
-	6,  // 24: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
-	1,  // 25: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
-	2,  // 26: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
-	3,  // 27: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
-	11, // 28: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
-	24, // 29: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
-	26, // 30: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
-	28, // 31: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	14, // 32: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
-	16, // 33: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
-	18, // 34: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
-	20, // 35: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
-	5,  // 36: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	5,  // 37: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
-	4,  // 38: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	12, // 39: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	25, // 40: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	27, // 41: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	29, // 42: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	15, // 43: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
-	17, // 44: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
-	19, // 45: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
-	21, // 46: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
-	36, // [36:47] is the sub-list for method output_type
-	25, // [25:36] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	30, // 7: pa_monitor.v1.DaemonState.seven_day_resets_at:type_name -> google.protobuf.Timestamp
+	30, // 8: pa_monitor.v1.DaemonState.limits_captured_at:type_name -> google.protobuf.Timestamp
+	7,  // 9: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
+	8,  // 10: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
+	30, // 11: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	30, // 12: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
+	30, // 13: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
+	30, // 14: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
+	30, // 15: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
+	30, // 16: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
+	30, // 17: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
+	30, // 18: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
+	30, // 19: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	0,  // 20: pa_monitor.v1.CaffeinateResponse.process:type_name -> pa_monitor.v1.CaffeinateProcess
+	30, // 21: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	13, // 22: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
+	8,  // 23: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
+	22, // 24: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
+	23, // 25: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
+	6,  // 26: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
+	1,  // 27: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
+	2,  // 28: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
+	3,  // 29: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
+	11, // 30: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
+	24, // 31: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
+	26, // 32: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
+	28, // 33: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
+	14, // 34: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	16, // 35: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	18, // 36: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	20, // 37: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
+	5,  // 38: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	5,  // 39: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
+	4,  // 40: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	12, // 41: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	25, // 42: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	27, // 43: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	29, // 44: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	15, // 45: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	17, // 46: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	19, // 47: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	21, // 48: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
+	38, // [38:49] is the sub-list for method output_type
+	27, // [27:38] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_pa_monitor_proto_init() }
@@ -2418,6 +2470,7 @@ func file_internal_proto_pa_monitor_proto_init() {
 	if File_internal_proto_pa_monitor_proto != nil {
 		return
 	}
+	file_internal_proto_pa_monitor_proto_msgTypes[4].OneofWrappers = []any{}
 	file_internal_proto_pa_monitor_proto_msgTypes[12].OneofWrappers = []any{
 		(*Selector_SessionId)(nil),
 		(*Selector_Path)(nil),

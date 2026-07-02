@@ -34,6 +34,20 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 	if st.Block != nil {
 		tree.ActiveBlock = storeBlockToCCUsageBlock(st.Block)
 		tree.PlanCapUSD = st.Block.PlanCapUSD
+
+		// Carry the authoritative status-line rate_limits windows (ADR 0021 §6)
+		// from the persisted block onto the tree. These are account-global and
+		// distinct from the daemon-pause WindowResetsAt below. A nil pointer /
+		// zero time stays unknown — never 0, never 1970. No consumer reads them
+		// yet; this is the store->tree plumbing for Phase 1.
+		tree.FiveHourPct = st.Block.FiveHourPct
+		tree.SevenDayPct = st.Block.SevenDayPct
+		if st.Block.SevenDayResetsAt != nil {
+			tree.SevenDayResetsAt = *st.Block.SevenDayResetsAt
+		}
+		if st.Block.LimitsCapturedAt != nil {
+			tree.LimitsCapturedAt = *st.Block.LimitsCapturedAt
+		}
 	}
 
 	// Convert week.

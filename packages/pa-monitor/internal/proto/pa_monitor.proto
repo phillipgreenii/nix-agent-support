@@ -111,6 +111,23 @@ message DaemonState {
   CaffeinateProcess caffeinate_process = 17; // caffeination PROCESS state
   uint32 caffeinate_grace_remaining_s = 18;  // seconds left in grace; 0 unless process == GRACE
   string caffeinate_cause = 19;              // "manual", "agents_active", or ""
+
+  // Authoritative status-line rate_limits windows (ADR 0021 §6). These are
+  // account-global (NO session_id) and carry Claude Code's server-side 5h/7d
+  // used_percentage. They are DISTINCT from window_resets_at (field 8) /
+  // SessionView.rate_limit_resets_at (the daemon's pause / limit-hit concept):
+  // these are the status-line windows.
+  //
+  // proto3 `optional` gives explicit field presence so an unset percentage is
+  // distinguishable from a real 0% reading (unknown/stale != 0). The reset /
+  // captured timestamps are google.protobuf.Timestamp messages, which are nil
+  // when unset and MUST NOT decode as 1970 (see timeFromTS). Phase 0 observed
+  // seven_day absent on this account, so these are commonly unset. No consumer
+  // reads them yet — this is persistence + wire plumbing only.
+  optional double five_hour_pct = 20;                    // 5h used_percentage [0,100]; unset = unknown
+  optional double seven_day_pct = 21;                    // 7d used_percentage [0,100]; unset = unknown
+  google.protobuf.Timestamp seven_day_resets_at = 22;    // 7d window reset; unset = unknown (never 1970)
+  google.protobuf.Timestamp limits_captured_at = 23;     // capture ts of the limits reading; unset = unknown
 }
 
 message Directory {

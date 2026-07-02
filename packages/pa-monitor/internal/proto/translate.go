@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
@@ -26,6 +27,21 @@ func FromTree(tree *aggregate.Tree) *DaemonState {
 	}
 	if !tree.WindowResetsAt.IsZero() {
 		d.WindowResetsAt = timestamppb.New(tree.WindowResetsAt)
+	}
+	// Status-line rate_limits windows (ADR 0021 §6). A nil percentage stays
+	// absent on the wire (proto3 optional presence), preserving "unknown != 0".
+	// A zero reset/captured time stays nil, so it can never decode as 1970.
+	if tree.FiveHourPct != nil {
+		d.FiveHourPct = proto.Float64(*tree.FiveHourPct)
+	}
+	if tree.SevenDayPct != nil {
+		d.SevenDayPct = proto.Float64(*tree.SevenDayPct)
+	}
+	if !tree.SevenDayResetsAt.IsZero() {
+		d.SevenDayResetsAt = timestamppb.New(tree.SevenDayResetsAt)
+	}
+	if !tree.LimitsCapturedAt.IsZero() {
+		d.LimitsCapturedAt = timestamppb.New(tree.LimitsCapturedAt)
 	}
 	for _, dir := range tree.Dirs {
 		d.Dirs = append(d.Dirs, dirToProto(dir))

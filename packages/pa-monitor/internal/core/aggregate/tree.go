@@ -71,6 +71,21 @@ type Tree struct {
 	CCUsageProbed  bool      // true once the first ccusage probe has run
 	CCUsageErr     error     // non-nil if ccusage exec failed
 	WindowResetsAt time.Time // global: max RateLimitResetsAt across all sessions (zero = none)
+
+	// Authoritative status-line rate_limits windows (ADR 0021 §6). These are
+	// account-global and DISTINCT from WindowResetsAt / RateLimitResetsAt (the
+	// daemon's pause / limit-hit concept): they carry Claude Code's server-side
+	// 5h/7d used_percentage.
+	//
+	// A nil *float64 means "unknown/stale", distinct from a real 0% reading. A
+	// zero SevenDayResetsAt / LimitsCapturedAt time.Time likewise means unknown
+	// (never 1970). Phase 0 observed seven_day absent on this account, so these
+	// are commonly unset. No consumer reads them yet — Phase 1 is persistence +
+	// proto plumbing only.
+	FiveHourPct      *float64  // 5h used_percentage; nil = unknown
+	SevenDayPct      *float64  // 7d used_percentage; nil = unknown
+	SevenDayResetsAt time.Time // 7d window reset; zero = unknown
+	LimitsCapturedAt time.Time // capture ts of the limits reading; zero = unknown
 }
 
 // Sessions returns a flat list of every SessionView across all Directories.

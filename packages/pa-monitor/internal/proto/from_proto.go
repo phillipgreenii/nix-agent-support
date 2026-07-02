@@ -36,6 +36,20 @@ func ToTree(s *DaemonState) *aggregate.Tree {
 	if ts := s.GetWindowResetsAt(); ts != nil {
 		t.WindowResetsAt = timeFromTS(ts)
 	}
+	// Status-line rate_limits windows (ADR 0021 §6). Read the raw optional
+	// pointer fields (NOT the GetX() accessors, which dereference an absent
+	// value to 0) so "unknown != 0" survives the round-trip. Timestamps go
+	// through timeFromTS, which returns the zero Time (never 1970) when unset.
+	if s.FiveHourPct != nil {
+		v := *s.FiveHourPct
+		t.FiveHourPct = &v
+	}
+	if s.SevenDayPct != nil {
+		v := *s.SevenDayPct
+		t.SevenDayPct = &v
+	}
+	t.SevenDayResetsAt = timeFromTS(s.GetSevenDayResetsAt())
+	t.LimitsCapturedAt = timeFromTS(s.GetLimitsCapturedAt())
 	for _, pd := range s.GetDirs() {
 		t.Dirs = append(t.Dirs, dirFromProto(pd))
 	}

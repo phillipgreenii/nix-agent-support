@@ -25,8 +25,9 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO blocks (
 			block_id, started_at, ended_at, plan_cap_usd, total_cost_usd, total_tokens,
-			rate_limit_resets_at, cap_hit_at, last_processed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			rate_limit_resets_at, cap_hit_at, last_processed_at, updated_at,
+			five_hour_pct, seven_day_pct, seven_day_resets_at, limits_captured_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(block_id) DO UPDATE SET
 			started_at = excluded.started_at,
 			ended_at = excluded.ended_at,
@@ -37,12 +38,21 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 			cap_hit_at = COALESCE(blocks.cap_hit_at, excluded.cap_hit_at),
 			last_processed_at = excluded.last_processed_at,
 			updated_at = excluded.updated_at,
+			-- Status-line rate_limits windows: a fresh reading (non-NULL) wins;
+			-- a NULL/unknown reading preserves the last known value rather than
+			-- overwriting it with "unknown". NULL means unknown/stale, not 0.
+			five_hour_pct = COALESCE(excluded.five_hour_pct, blocks.five_hour_pct),
+			seven_day_pct = COALESCE(excluded.seven_day_pct, blocks.seven_day_pct),
+			seven_day_resets_at = COALESCE(excluded.seven_day_resets_at, blocks.seven_day_resets_at),
+			limits_captured_at = COALESCE(excluded.limits_captured_at, blocks.limits_captured_at),
 			deleted_at = NULL
 	`,
 		b.BlockID, formatTime(b.StartedAt), formatTime(b.EndedAt),
 		b.PlanCapUSD, b.TotalCostUSD, b.TotalTokens,
 		timePtr(b.RateLimitResetsAt), timePtr(b.CapHitAt),
 		formatTime(b.LastProcessedAt), formatTime(b.UpdatedAt),
+		floatPtr(b.FiveHourPct), floatPtr(b.SevenDayPct),
+		timePtr(b.SevenDayResetsAt), timePtr(b.LimitsCapturedAt),
 	)
 	if err != nil {
 		return 0, err
@@ -108,7 +118,8 @@ func (s *BlockStore) HardDelete(ctx context.Context, cutoff time.Time) (int64, e
 
 const blockSelectColumns = `SELECT
 	id, block_id, started_at, ended_at, plan_cap_usd, total_cost_usd, total_tokens,
-	rate_limit_resets_at, cap_hit_at, last_processed_at, updated_at, deleted_at`
+	rate_limit_resets_at, cap_hit_at, last_processed_at, updated_at, deleted_at,
+	five_hour_pct, seven_day_pct, seven_day_resets_at, limits_captured_at`
 
 func scanBlock(r rowScanner) (*store.Block, error) {
 	var (
@@ -118,10 +129,15 @@ func scanBlock(r rowScanner) (*store.Block, error) {
 		deletedAt        sql.NullString
 		startedAt, ended string
 		processed, upd   string
+		fiveHourPct      sql.NullFloat64
+		sevenDayPct      sql.NullFloat64
+		sevenDayResetsAt sql.NullString
+		limitsCapturedAt sql.NullString
 	)
 	err := r.Scan(
 		&b.ID, &b.BlockID, &startedAt, &ended, &b.PlanCapUSD, &b.TotalCostUSD, &b.TotalTokens,
 		&rateResetsAt, &capHitAt, &processed, &upd, &deletedAt,
+		&fiveHourPct, &sevenDayPct, &sevenDayResetsAt, &limitsCapturedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -145,6 +161,24 @@ func scanBlock(r rowScanner) (*store.Block, error) {
 		t := parseTime(deletedAt.String)
 		b.DeletedAt = &t
 	}
+	// Status-line rate_limits: a NULL column MUST stay nil (unknown/stale),
+	// never decode to 0 or a 1970 timestamp.
+	if fiveHourPct.Valid {
+		v := fiveHourPct.Float64
+		b.FiveHourPct = &v
+	}
+	if sevenDayPct.Valid {
+		v := sevenDayPct.Float64
+		b.SevenDayPct = &v
+	}
+	if sevenDayResetsAt.Valid {
+		t := parseTime(sevenDayResetsAt.String)
+		b.SevenDayResetsAt = &t
+	}
+	if limitsCapturedAt.Valid {
+		t := parseTime(limitsCapturedAt.String)
+		b.LimitsCapturedAt = &t
+	}
 	return &b, nil
 }
 
@@ -153,4 +187,11 @@ func timePtr(t *time.Time) any {
 		return nil
 	}
 	return formatTime(*t)
+}
+
+func floatPtr(f *float64) any {
+	if f == nil {
+		return nil
+	}
+	return *f
 }
