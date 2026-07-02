@@ -156,3 +156,41 @@ func TestListSessionFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestListSessionFiles_IgnoresStatusSiblings proves a status-line rate_limits
+// sibling never derives a phantom session id (ADR 0021 §2). A <id>.status.jsonl
+// (and the <id>.status.last hash sidecar) must be skipped; a genuine <id>.json
+// / <id>.jsonl still yields its id.
+func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"real-1.json",
+		"real-2.jsonl",
+		"sess-1.status.jsonl", // rate_limits sibling — must NOT become "sess-1.status"
+		"sess-1.status.last",  // hash sidecar — must NOT become "sess-1.status"
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := listSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("listSessionFiles: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	want := map[string]bool{"real-1": true, "real-2": true}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("missing expected id %q in %v", k, ids)
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("unexpected (phantom) id %q in %v", k, ids)
+		}
+	}
+}

@@ -6,8 +6,42 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
+
+// Status-line rate_limits sibling suffixes (ADR 0021 §1/§2). The wrapper writes a
+// <id>.status.jsonl record file (and MAY keep a <id>.status.last hash sidecar) next
+// to the transcript; neither is a transcript and neither is a session record.
+const (
+	statusRecordSuffix  = ".status.jsonl"
+	statusSidecarSuffix = ".status.last"
+)
+
+// IsTranscriptFile reports whether name is a Claude Code transcript file, as
+// opposed to a status-line rate_limits sibling file (ADR 0021 §2). It is the
+// single shared predicate applied everywhere pa-monitor enumerates transcript
+// .jsonl files (ResolveTranscript here and the sibling-file LimitsSource reader),
+// so a <id>.status.jsonl is NEVER selected as a transcript.
+//
+// A transcript ends in .jsonl but NOT .status.jsonl. The .status.last hash sidecar
+// is likewise excluded — it is never a .jsonl, but rejecting it here documents the
+// full exclusion set.
+func IsTranscriptFile(name string) bool {
+	if !strings.HasSuffix(name, ".jsonl") {
+		return false
+	}
+	return !IsStatusSiblingFile(name)
+}
+
+// IsStatusSiblingFile reports whether name is a status-line rate_limits sibling
+// file (the <id>.status.jsonl record or the <id>.status.last hash sidecar). Used
+// by gc.listSessionFiles to skip these so they never derive a phantom session ID
+// (ADR 0021 §2), while genuine <id>.json session records still pass.
+func IsStatusSiblingFile(name string) bool {
+	return strings.HasSuffix(name, statusRecordSuffix) ||
+		strings.HasSuffix(name, statusSidecarSuffix)
+}
 
 // ResolveTranscript finds the most relevant transcript file for s under
 // claudeHome/projects/<slug>/*.jsonl and returns its path and mtime.
@@ -44,7 +78,10 @@ func ResolveTranscript(claudeHome string, s *Session) (path string, mtime time.T
 	}
 	var cands []cand
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+		// Skip directories and any non-transcript .jsonl (a <id>.status.jsonl
+		// rate_limits sibling would otherwise win the newest-by-mtime fallback
+		// and corrupt token counts / model / activity state — ADR 0021 §2).
+		if e.IsDir() || !IsTranscriptFile(e.Name()) {
 			continue
 		}
 		info, err := e.Info()

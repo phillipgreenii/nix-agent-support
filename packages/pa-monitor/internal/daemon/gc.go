@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 )
 
@@ -124,6 +125,12 @@ func listSessionFiles(dir string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
+		// Skip status-line rate_limits siblings (<id>.status.jsonl and the
+		// <id>.status.last hash sidecar) so they never derive a phantom session
+		// ID — ADR 0021 §2. Genuine <id>.json session records still pass.
+		if session.IsStatusSiblingFile(name) {
+			continue
+		}
 		ext := filepath.Ext(name)
 		if ext != ".json" && ext != ".jsonl" {
 			continue
