@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewsink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
@@ -30,6 +31,12 @@ import (
 // replyposter.Replier at runtime (see Engine.reconcileReplies); this guards the
 // assertion at build time so a provider regression fails the build, not a tick.
 var _ replyposter.Replier = (*github.Provider)(nil)
+
+// Compile-time check: the github VCS provider must satisfy the team-PR sink's
+// narrow review-write surface (pg2-4c5i.35). The default team sink type-asserts
+// the configured provider to reviewsink.VCSReviewer at runtime; this guards the
+// assertion at build time so a provider regression fails the build, not a tick.
+var _ reviewsink.VCSReviewer = (*github.Provider)(nil)
 
 // syncFlags holds the parsed CLI flags for `pg-pr sync`.
 type syncFlags struct {

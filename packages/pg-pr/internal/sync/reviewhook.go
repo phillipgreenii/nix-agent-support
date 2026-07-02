@@ -296,7 +296,7 @@ func (e *Engine) routeReview(ctx context.Context, ownership string, result revie
 	if e.deps.Review.TeamSink != nil {
 		return e.deps.Review.TeamSink(ctx, result)
 	}
-	return stubTeamSink(ctx, result)
+	return e.defaultTeamSink(ctx, result)
 }
 
 // defaultMineSink is the .34 my-PR sink: it loads the staged Draft, ingests each
@@ -347,9 +347,36 @@ func (e *Engine) stampAgentReviewed(ctx context.Context, log *slog.Logger, repo 
 	}
 }
 
-// stubTeamSink is the .35 placeholder: it logs ownership and no-ops. pg2-4c5i.35
-// replaces it behind ReviewSink. It MUST NOT post to GitHub in this slice.
-func stubTeamSink(_ context.Context, result reviewstage.Result) error {
-	slog.Default().Info("review hook: team sink stub (no-op)", "repo", result.Repo, "pr", result.PR, "bead", result.BeadID, "head_sha", result.HeadSHA)
-	return nil
+// defaultTeamSink is the .35 team-PR sink: it applies the produced review to
+// the GitHub PR as a PENDING review the human submits (never auto-submitted),
+// skipping when the viewer already has a pending review (Q2). It reuses
+// reviewsink.ApplyPendingReview (marker + dedup + Clear).
+//
+// M5 (repo-scope guard): it posts ONLY to repos in the configured repo set, so
+// an unattended daemon never writes to an arbitrary teammate repo. A repo not in
+// the config is treated as "not producible here" and no-oped (return nil) — the
+// bead still closes, so it does not retry forever.
+//
+// The configured VCS provider must satisfy reviewsink.VCSReviewer (the concrete
+// github.Provider does). A provider that does not (e.g. a bare test stub) makes
+// the sink a logged no-op so a mis-wired engine never crashes a tick.
+func (e *Engine) defaultTeamSink(ctx context.Context, result reviewstage.Result) error {
+	// M5: refuse repos outside the configured set.
+	rcfg, err := e.repoConfig(result.Repo)
+	if err != nil {
+		slog.Default().Warn("review hook: team sink refused unconfigured repo (M5)",
+			"repo", result.Repo, "pr", result.PR, "bead", result.BeadID)
+		return nil
+	}
+	provider, err := e.providerFor(rcfg)
+	if err != nil {
+		return fmt.Errorf("review hook: team sink provider for %s: %w", result.Repo, err)
+	}
+	rv, ok := provider.(reviewsink.VCSReviewer)
+	if !ok {
+		slog.Default().Warn("review hook: team sink skipped (provider lacks review-write capability)",
+			"repo", result.Repo, "pr", result.PR, "bead", result.BeadID)
+		return nil
+	}
+	return reviewsink.ApplyPendingReview(ctx, rv, e.reviewsDir(), result, slog.Default())
 }
