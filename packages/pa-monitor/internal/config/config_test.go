@@ -70,6 +70,30 @@ func TestConfigDefaultsAutoResume(t *testing.T) {
 	}
 }
 
+// TestStaleAfterDefault: the status-line rate_limits staleness window (ADR 0021
+// §1). A value older than StaleAfter renders as stale(age).
+func TestStaleAfterDefault(t *testing.T) {
+	cfg := defaults()
+	if cfg.StaleAfter != 10*time.Minute {
+		t.Errorf("StaleAfter default = %v, want 10m", cfg.StaleAfter)
+	}
+}
+
+func TestStaleAfterOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("stale_after_s = 120\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StaleAfter != 120*time.Second {
+		t.Errorf("StaleAfter = %v, want 120s", cfg.StaleAfter)
+	}
+}
+
 func TestConfigDefaultsCmuxSidebar(t *testing.T) {
 	cfg := defaults()
 	if !cfg.CmuxSidebarEnable {

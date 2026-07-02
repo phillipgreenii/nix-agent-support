@@ -13,6 +13,11 @@ import (
 type BlockRowOpts struct {
 	Now   time.Time
 	Width int
+	// StaleAfter is how old the authoritative status-line rate_limits capture may
+	// be before the 5h percentage renders as stale(age) (ADR 0021 §1). Zero
+	// disables staleness (always fresh). Only consulted when the tree carries an
+	// authoritative FiveHourPct.
+	StaleAfter time.Duration
 }
 
 // blockRowBarWidth is the bar width at WIDE/NARROW tiers. TINY drops the bar.
@@ -58,14 +63,29 @@ func BlockRow(tree *aggregate.Tree, opts BlockRowOpts) string {
 	pct := 100 * block.CostUSD / tree.PlanCapUSD
 	tier := wrap.Tier(opts.Width)
 
+	// Authoritative status-line five_hour used_percentage (ADR 0021 §5) wins over
+	// the cost-derived percentage when present. It may render "NN%" (fresh) or
+	// "stale (age)" (older than StaleAfter); the progress bar still reflects the
+	// authoritative percentage when it is a live number. When absent, fall back to
+	// the cost-derived percentage (pre-Phase-3 behavior).
+	authLabel := RateLimitUsageLabel(tree.FiveHourPct, tree.LimitsCapturedAt, now, opts.StaleAfter)
+	barPct := pct
+	if authLabel != "" && tree.FiveHourPct != nil {
+		barPct = *tree.FiveHourPct
+	}
+
 	var sb strings.Builder
 	sb.WriteString("5h ")
 
 	if tier != wrap.TierTiny {
-		sb.WriteString(progressBar(pct, blockRowBarWidth))
+		sb.WriteString(progressBar(barPct, blockRowBarWidth))
 		sb.WriteString(" ")
 	}
-	fmt.Fprintf(&sb, "%.0f%%", pct)
+	if authLabel != "" {
+		sb.WriteString(authLabel)
+	} else {
+		fmt.Fprintf(&sb, "%.0f%%", pct)
+	}
 
 	if tier != wrap.TierTiny {
 		fmt.Fprintf(&sb, "  $%.2f", block.CostUSD)

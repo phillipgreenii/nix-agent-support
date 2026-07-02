@@ -371,6 +371,15 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if err != nil {
 				continue
 			}
+			// Sample the authoritative status-line rate_limits (ADR 0021 §1). The
+			// reading is account-global (newest record across all sibling files,
+			// ignoring session_id). A nil source or a nil/err reading leaves the
+			// tree's rate_limits at whatever the poller set — never clobbered with 0.
+			if opts.Limits != nil {
+				if lr, lerr := opts.Limits.Current(ctx); lerr == nil {
+					applyLimits(tree, lr)
+				}
+			}
 			fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
 			if fetchWeek {
 				if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
@@ -384,7 +393,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.WriteService != nil {
 				if tree.ActiveBlock != nil {
 					nowUTC := time.Now().UTC()
-					b := blockToStoreBlock(tree.ActiveBlock, opts.Account.BlockCap(), nowUTC)
+					// Persist the block WITH the current rate_limits reading so the
+					// store->tree (GetState) path reflects it (ADR 0021 §6).
+					b := blockToStoreBlockWithLimits(tree.ActiveBlock, opts.Account.BlockCap(), nowUTC, tree)
 					if blockID, err := opts.WriteService.UpsertBlock(ctx, b); err == nil {
 						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
 							setter.SetActiveBlockID(blockID)
@@ -494,6 +505,14 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					"week.id":   weekID,
 				})
 			}
+			// Authoritative status-line rate_limits usage gauges (ADR 0021 §5).
+			// ACCOUNT-GLOBAL: only plan_tier — no session_id, no block/week id. The
+			// *.cost.usd gauges above keep emitting native cost, unchanged; these are
+			// the honest percentage/reset signals. Unknown windows (nil pct / zero
+			// reset) are not observed at all (handled inside the emitter).
+			acctAttrs := map[string]string{"plan_tier": opts.PlanTier}
+			opts.Emitter.RecordBlockUsage(tree.FiveHourPct, tree.FiveHourResetsAt, acctAttrs)
+			opts.Emitter.RecordWeekUsage(tree.SevenDayPct, tree.SevenDayResetsAt, acctAttrs)
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
@@ -897,6 +916,60 @@ func blockToStoreBlock(b *ccusage.Block, capUSD float64, now time.Time) store.Bl
 		UpdatedAt:       now,
 	}
 	return sb
+}
+
+// blockToStoreBlockWithLimits is blockToStoreBlock plus the tree's authoritative
+// status-line rate_limits windows (ADR 0021 §5/§6), so the persisted block carries
+// them and the store->tree GetState path reflects the current reading. Unknown
+// values (nil pointer / zero time on the tree) persist as nil — never 0 / 1970. The
+// store's COALESCE-on-conflict then preserves the last known value when a later tick
+// carries an unknown reading.
+func blockToStoreBlockWithLimits(b *ccusage.Block, capUSD float64, now time.Time, tree *aggregate.Tree) store.Block {
+	sb := blockToStoreBlock(b, capUSD, now)
+	if tree == nil {
+		return sb
+	}
+	sb.FiveHourPct = tree.FiveHourPct
+	sb.SevenDayPct = tree.SevenDayPct
+	if !tree.FiveHourResetsAt.IsZero() {
+		t := tree.FiveHourResetsAt
+		sb.FiveHourResetsAt = &t
+	}
+	if !tree.SevenDayResetsAt.IsZero() {
+		t := tree.SevenDayResetsAt
+		sb.SevenDayResetsAt = &t
+	}
+	if !tree.LimitsCapturedAt.IsZero() {
+		t := tree.LimitsCapturedAt
+		sb.LimitsCapturedAt = &t
+	}
+	return sb
+}
+
+// applyLimits copies a LimitsSource reading onto the tree's account-global
+// rate_limits fields (ADR 0021 §1/§5). A nil reading (no data captured yet) leaves
+// the tree untouched, preserving whatever the store-materialised path already set.
+// Every field is independently optional: an unknown value stays nil / zero — the
+// reader never substitutes 0 / 1970.
+func applyLimits(tree *aggregate.Tree, l *Limits) {
+	if tree == nil || l == nil {
+		return
+	}
+	if l.FiveHourPct != nil {
+		tree.FiveHourPct = l.FiveHourPct
+	}
+	if l.SevenDayPct != nil {
+		tree.SevenDayPct = l.SevenDayPct
+	}
+	if !l.FiveHourResetsAt.IsZero() {
+		tree.FiveHourResetsAt = l.FiveHourResetsAt
+	}
+	if !l.SevenDayResetsAt.IsZero() {
+		tree.SevenDayResetsAt = l.SevenDayResetsAt
+	}
+	if !l.CapturedAt.IsZero() {
+		tree.LimitsCapturedAt = l.CapturedAt
+	}
 }
 
 // weekToStoreWeek converts a ccusage.WeeklyEntry into a store.Week. The

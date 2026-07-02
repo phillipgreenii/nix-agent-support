@@ -40,7 +40,7 @@ func (m *Model) View() string {
 		Theme:             m.theme,
 		Width:             m.width,
 	})
-	blockRow := render.BlockRow(m.tree, render.BlockRowOpts{Width: m.width, Now: now})
+	blockRow := render.BlockRow(m.tree, render.BlockRowOpts{Width: m.width, Now: now, StaleAfter: m.staleAfter})
 	alerts := render.Alerts(m.tree, render.AlertsOpts{
 		Now:             now,
 		Width:           m.width,

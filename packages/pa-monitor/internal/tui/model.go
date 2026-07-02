@@ -50,6 +50,10 @@ type Options struct {
 	// Version is the TUI binary's build identifier. Displayed in the [?] modal
 	// alongside the daemon's reported version. Empty string falls back to "dev".
 	Version string
+	// StaleAfter is the status-line rate_limits staleness window (ADR 0021 §1).
+	// A captured value older than this renders as stale(age) in the 5h block row.
+	// Zero disables staleness labeling.
+	StaleAfter time.Duration
 }
 
 type Model struct {
@@ -122,6 +126,10 @@ type Model struct {
 	onCaffeinateToggle func(want bool) tea.Cmd
 	onToggleAutoResume func(want bool) tea.Cmd
 	onManualNudge      func(selector string, cancel bool)
+
+	// staleAfter is the status-line rate_limits staleness window (ADR 0021 §1),
+	// consulted by the 5h block row to label a stale capture.
+	staleAfter time.Duration
 }
 
 func NewModel(o Options) *Model {
@@ -138,6 +146,7 @@ func NewModel(o Options) *Model {
 		onToggleAutoResume:   o.OnToggleAutoResume,
 		onManualNudge:        o.OnManualNudge,
 		clientVersion:        o.Version,
+		staleAfter:           o.StaleAfter,
 	}
 	if m.clientVersion == "" {
 		m.clientVersion = "dev"

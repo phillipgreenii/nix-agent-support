@@ -90,6 +90,7 @@ func runTUIRemote() {
 		SidebarIntervalTicks: cfg.CmuxSidebarIntervalTicks,
 		ErrorLogger:          errLog,
 		Version:              version,
+		StaleAfter:           cfg.StaleAfter,
 		OnCaffeinateToggle: func(want bool) tea.Cmd {
 			action := "off"
 			if want {

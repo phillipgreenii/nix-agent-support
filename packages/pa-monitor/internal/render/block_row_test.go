@@ -112,3 +112,55 @@ func TestBlockRowFitsAtTierFloor(t *testing.T) {
 		}
 	}
 }
+
+// TestBlockRow_AuthoritativeRateLimitPercentage proves BlockRow renders the
+// authoritative status-line five_hour used_percentage (ADR 0021 §5) when present,
+// not the cost-derived percentage, and labels a stale capture (ADR 0021 §1).
+func TestBlockRow_AuthoritativeRateLimitPercentage(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	fivePct := 34.0
+	// Cost-derived pct would be 10/100 = 10%; authoritative must win with 34%.
+	base := &aggregate.Tree{
+		CCUsageProbed: true,
+		PlanCapUSD:    100,
+		ActiveBlock: &ccusage.Block{
+			CostUSD: 10,
+			EndTime: now.Add(3 * time.Hour),
+		},
+		FiveHourPct:      &fivePct,
+		LimitsCapturedAt: now.Add(-1 * time.Minute), // fresh
+	}
+
+	fresh := BlockRow(base, BlockRowOpts{Width: 200, Now: now, StaleAfter: 10 * time.Minute})
+	if !strings.Contains(fresh, "34%") {
+		t.Errorf("fresh: expected authoritative 34%%, got: %q", fresh)
+	}
+	if strings.Contains(fresh, "10%") {
+		t.Errorf("fresh: cost-derived 10%% leaked, got: %q", fresh)
+	}
+
+	// Stale capture: the same value must render as stale(age), not a live percentage.
+	staleTree := *base
+	staleTree.LimitsCapturedAt = now.Add(-30 * time.Minute)
+	stale := BlockRow(&staleTree, BlockRowOpts{Width: 200, Now: now, StaleAfter: 10 * time.Minute})
+	if !strings.Contains(stale, "stale") {
+		t.Errorf("stale: expected stale label, got: %q", stale)
+	}
+}
+
+// TestBlockRow_FallsBackToCostPercentageWhenNoRateLimit keeps the pre-Phase-3
+// behavior when the authoritative value is absent (nil): the cost-derived
+// percentage still shows.
+func TestBlockRow_FallsBackToCostPercentageWhenNoRateLimit(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	tree := &aggregate.Tree{
+		CCUsageProbed: true,
+		PlanCapUSD:    100,
+		ActiveBlock:   &ccusage.Block{CostUSD: 35, EndTime: now.Add(3 * time.Hour)},
+		// FiveHourPct nil -> fall back.
+	}
+	out := BlockRow(tree, BlockRowOpts{Width: 200, Now: now, StaleAfter: 10 * time.Minute})
+	if !strings.Contains(out, "35%") {
+		t.Errorf("expected cost-derived 35%% fallback, got: %q", out)
+	}
+}

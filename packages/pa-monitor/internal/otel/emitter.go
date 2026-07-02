@@ -123,6 +123,22 @@ type Emitter struct {
 	// the meter callback emits one Observe call per row across the three
 	// session.* gauges (info=1, tokens, cost.usd) on each scrape.
 	sessionInfoObs []sessionInfoObs
+
+	// Authoritative status-line rate_limits usage gauges (ADR 0021 §5). These are
+	// ACCOUNT-GLOBAL: the daemon pushes the newest LimitsSource reading each tick
+	// via RecordBlockUsage / RecordWeekUsage, and the callback observes them with NO
+	// session_id label. Each is gated by its own *Known flag AND by presence — an
+	// unknown percentage (nil) / unset reset (zero time) is NOT observed at all, so
+	// "unknown" never surfaces as a real 0% or a 1970 epoch. The *cost.usd gauges
+	// are unaffected and keep emitting native cost.
+	blockUsagePct      float64
+	blockUsagePctKnown bool
+	blockUsageResetsAt int64 // epoch seconds; 0 = unset
+	blockUsageAttrs    []attribute.KeyValue
+	weekUsagePct       float64
+	weekUsagePctKnown  bool
+	weekUsageResetsAt  int64 // epoch seconds; 0 = unset
+	weekUsageAttrs     []attribute.KeyValue
 }
 
 // New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set,
@@ -219,6 +235,28 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 
+	// Authoritative status-line rate_limits usage gauges (ADR 0021 §5). Account-
+	// global (no session_id). The percentage gauges carry the server-side
+	// used_percentage; the resets_at gauges carry the window reset as an epoch. The
+	// existing *.cost.usd gauges are DELIBERATELY unchanged — a percentage is not a
+	// cost, so these are NEW series, not a reuse of the dollar gauges.
+	blockUsagePctGauge, err := meter.Float64ObservableGauge("pa_monitor.block.usage.percentage")
+	if err != nil {
+		return err
+	}
+	blockUsageResetsGauge, err := meter.Int64ObservableGauge("pa_monitor.block.usage.resets_at")
+	if err != nil {
+		return err
+	}
+	weekUsagePctGauge, err := meter.Float64ObservableGauge("pa_monitor.week.usage.percentage")
+	if err != nil {
+		return err
+	}
+	weekUsageResetsGauge, err := meter.Int64ObservableGauge("pa_monitor.week.usage.resets_at")
+	if err != nil {
+		return err
+	}
+
 	// Synchronous counters for transition events.
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
 		return err
@@ -264,6 +302,10 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
 		sessionInfo := e.sessionInfoObs
+		blockUsagePct, blockUsagePctKnown := e.blockUsagePct, e.blockUsagePctKnown
+		blockUsageResetsAt, blockUsageAttrs := e.blockUsageResetsAt, e.blockUsageAttrs
+		weekUsagePct, weekUsagePctKnown := e.weekUsagePct, e.weekUsagePctKnown
+		weekUsageResetsAt, weekUsageAttrs := e.weekUsageResetsAt, e.weekUsageAttrs
 		e.mu.Unlock()
 		for _, s := range obs {
 			o.ObserveInt64(sessionsGauge, s.count, metric.WithAttributes(s.attrs...))
@@ -295,10 +337,26 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(sessionTokensGauge, si.tokens, metric.WithAttributes(idAttr))
 			o.ObserveFloat64(sessionCostGauge, si.costUSD, metric.WithAttributes(idAttr))
 		}
+		// Account-global rate_limits usage gauges (ADR 0021 §5). Observe ONLY the
+		// known windows — a nil percentage / zero reset is skipped, so unknown never
+		// surfaces as 0 / 1970. No session_id is ever attached.
+		if blockUsagePctKnown {
+			o.ObserveFloat64(blockUsagePctGauge, blockUsagePct, metric.WithAttributes(blockUsageAttrs...))
+		}
+		if blockUsageResetsAt > 0 {
+			o.ObserveInt64(blockUsageResetsGauge, blockUsageResetsAt, metric.WithAttributes(blockUsageAttrs...))
+		}
+		if weekUsagePctKnown {
+			o.ObserveFloat64(weekUsagePctGauge, weekUsagePct, metric.WithAttributes(weekUsageAttrs...))
+		}
+		if weekUsageResetsAt > 0 {
+			o.ObserveInt64(weekUsageResetsGauge, weekUsageResetsAt, metric.WithAttributes(weekUsageAttrs...))
+		}
 		return nil
 	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, sessionsErroredGauge,
 		blockCostGauge, weekCostGauge,
-		sessionInfoGauge, sessionTokensGauge, sessionCostGauge)
+		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
+		blockUsagePctGauge, blockUsageResetsGauge, weekUsagePctGauge, weekUsageResetsGauge)
 	return err
 }
 
@@ -437,6 +495,57 @@ func (e *Emitter) RecordWeekCost(usd float64, attrs map[string]string) {
 	e.weekCostUSD = usd
 	e.weekCostAttrs = kv
 	e.weekCostKnown = true
+	e.mu.Unlock()
+}
+
+// RecordBlockUsage sets the authoritative 5h-block usage.percentage /
+// usage.resets_at gauge values (ADR 0021 §5). ACCOUNT-GLOBAL: attrs MUST NOT carry
+// a session_id (the caller — the daemon tick — passes only account-scope labels).
+// pct is nil when the 5h used_percentage is unknown/stale, in which case the
+// percentage gauge is not observed (unknown never surfaces as 0). resetsAt is the
+// zero time when the reset is unknown, in which case the resets_at gauge is not
+// observed (never a 1970 epoch). nil-safe.
+func (e *Emitter) RecordBlockUsage(pct *float64, resetsAt time.Time, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.blockUsageAttrs = kv
+	if pct != nil {
+		e.blockUsagePct = *pct
+		e.blockUsagePctKnown = true
+	} else {
+		e.blockUsagePctKnown = false
+	}
+	if !resetsAt.IsZero() {
+		e.blockUsageResetsAt = resetsAt.Unix()
+	} else {
+		e.blockUsageResetsAt = 0
+	}
+	e.mu.Unlock()
+}
+
+// RecordWeekUsage is the 7d-window counterpart to RecordBlockUsage (ADR 0021 §5).
+// Same account-global / unknown-not-zero contract. nil-safe.
+func (e *Emitter) RecordWeekUsage(pct *float64, resetsAt time.Time, attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	kv := attrsToKV(attrs)
+	e.mu.Lock()
+	e.weekUsageAttrs = kv
+	if pct != nil {
+		e.weekUsagePct = *pct
+		e.weekUsagePctKnown = true
+	} else {
+		e.weekUsagePctKnown = false
+	}
+	if !resetsAt.IsZero() {
+		e.weekUsageResetsAt = resetsAt.Unix()
+	} else {
+		e.weekUsageResetsAt = 0
+	}
 	e.mu.Unlock()
 }
 

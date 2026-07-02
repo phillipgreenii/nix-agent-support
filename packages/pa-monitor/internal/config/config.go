@@ -25,7 +25,13 @@ type Config struct {
 	// the registry's statusUpdatedAt before a "waiting" flag is treated as
 	// stale (and ignored, falling through to Idle). See the registry-driven
 	// activity verdict (claude-transcript.ClassifyActivity) §4.3.
-	WaitingFreshWindow       time.Duration
+	WaitingFreshWindow time.Duration
+	// StaleAfter is how old the authoritative status-line rate_limits capture
+	// (rate_limits.*.captured_at) may be before the TUI renders the 5h/7d value
+	// as stale(age) rather than a live percentage (ADR 0021 §1). Limits refresh
+	// only during interactive status-line renders, so a headless-only period
+	// naturally ages the value past this window.
+	StaleAfter               time.Duration
 	AutoResumeDelay          time.Duration
 	AutoResumeMessage        string
 	DisruptGrace             time.Duration
@@ -66,6 +72,7 @@ type tomlConfig struct {
 	WorkingThresholdS        *int            `toml:"working_threshold_s"`
 	IdleThresholdS           *int            `toml:"idle_threshold_s"`
 	WaitingFreshWindowS      *int            `toml:"waiting_fresh_window_s"`
+	StaleAfterS              *int            `toml:"stale_after_s"`
 	AutoResumeDelayS         *int            `toml:"auto_resume_delay_s"`
 	AutoResumeMessage        *string         `toml:"auto_resume_message"`
 	DisruptGraceS            *int            `toml:"disrupt_grace_s"`
@@ -100,6 +107,7 @@ func defaults() Config {
 		// Default ~2*WorkingThreshold: a fresh "waiting" flag should not have a
 		// transcript that has advanced well past statusUpdatedAt.
 		WaitingFreshWindow:       60 * time.Second,
+		StaleAfter:               10 * time.Minute,
 		AutoResumeDelay:          45 * time.Second,
 		AutoResumeMessage:        "continue",
 		DisruptGrace:             30 * time.Second,
@@ -155,6 +163,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.WaitingFreshWindowS != nil {
 		cfg.WaitingFreshWindow = time.Duration(*raw.WaitingFreshWindowS) * time.Second
+	}
+	if raw.StaleAfterS != nil {
+		cfg.StaleAfter = time.Duration(*raw.StaleAfterS) * time.Second
 	}
 	if raw.AutoResumeDelayS != nil {
 		cfg.AutoResumeDelay = time.Duration(*raw.AutoResumeDelayS) * time.Second

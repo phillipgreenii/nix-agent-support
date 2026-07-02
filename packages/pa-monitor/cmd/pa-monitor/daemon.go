@@ -256,6 +256,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.WeeklyFn = weeklyFn
 		opts.SessionsDir = p.SessionsDir
 		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — weekly fetch is slow
+		// Wire the authoritative status-line rate_limits source (ADR 0021 §1/§3):
+		// the sibling-file reader over ~/.claude/projects/**/*.status.jsonl. This
+		// replaces the nil port Phase 2 wired; the daemon now samples it each tick.
+		opts.Limits = &daemon.SiblingLimitsSource{ClaudeHome: p.ClaudeHome}
 
 		// Without NudgerSignalers being non-empty, lifecycle.go skips
 		// constructing the WatermarkStore — which makes SetAutoResume,
