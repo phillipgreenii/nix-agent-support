@@ -4,7 +4,7 @@ import "fmt"
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -138,6 +138,15 @@ CREATE TABLE pr_revision (
     UNIQUE (pr_id, seq)
 );
 CREATE INDEX idx_pr_revision_pr ON pr_revision(pr_id);
+`,
+	// v3 -> v4: data migration tracking table. Records which one-shot data
+	// migrations have been applied (keyed by string ID), so RunDataMigrations
+	// can skip already-applied steps on re-run.
+	`
+CREATE TABLE data_migration (
+    id         TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
 `,
 }
 
