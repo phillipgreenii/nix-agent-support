@@ -72,6 +72,11 @@ func NewJiraLookupFunc(p issues.Provider, cfg AdapterConfig) enrich.JiraLookupFu
 		if err != nil {
 			return enrich.JiraTicketInfo{}, err
 		}
+		if issue == nil {
+			// Provider returned (nil, nil): no issue found, no error — treat as
+			// a routine (not high-priority, not incident) ticket.
+			return enrich.JiraTicketInfo{}, nil
+		}
 
 		var info enrich.JiraTicketInfo
 

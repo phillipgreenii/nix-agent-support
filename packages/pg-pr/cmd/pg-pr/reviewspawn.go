@@ -39,11 +39,17 @@ func newClaudeSpawner(cfg *config.Config) *claudeSpawner {
 	return &claudeSpawner{bin: cfg.ClaudeBin, repoPath: rp}
 }
 
-func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string, error) {
-	bin := s.bin
+// resolveBin returns bin unchanged when non-empty, or "claude" when empty so
+// callers that have no explicit path fall back to the PATH-resolved binary.
+func resolveBin(bin string) string {
 	if bin == "" {
-		bin = "claude"
+		return "claude"
 	}
+	return bin
+}
+
+func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string, error) {
+	bin := resolveBin(s.bin)
 	ownership := "team"
 	if ref.Mine {
 		ownership = "mine"

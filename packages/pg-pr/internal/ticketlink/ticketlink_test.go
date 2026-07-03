@@ -3,9 +3,41 @@
 package ticketlink
 
 import (
+	"bytes"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// TestCompilePatterns_invalidPatternEmitsWarn verifies that compilePatterns
+// emits a slog.Warn for each invalid regex pattern and still returns the
+// valid patterns.
+func TestCompilePatterns_invalidPatternEmitsWarn(t *testing.T) {
+	var buf bytes.Buffer
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
+	testLogger := slog.New(handler)
+	orig := slog.Default()
+	slog.SetDefault(testLogger)
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	patterns := []string{`[invalid`, `[A-Z]+-\d+`}
+	compiled := compilePatterns(patterns)
+
+	// The invalid pattern must be skipped (only valid one compiled).
+	if len(compiled) != 1 {
+		t.Errorf("compilePatterns: got %d compiled patterns, want 1 (valid only)", len(compiled))
+	}
+
+	// A Warn must have been logged for the invalid pattern.
+	logged := buf.String()
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("compilePatterns: expected WARN log for invalid pattern; got %q", logged)
+	}
+	if !strings.Contains(logged, "[invalid") {
+		t.Errorf("compilePatterns: expected log to mention the bad pattern; got %q", logged)
+	}
+}
 
 // TestParse is a comprehensive table-driven test for Parse. It covers:
 //   - branch-only match

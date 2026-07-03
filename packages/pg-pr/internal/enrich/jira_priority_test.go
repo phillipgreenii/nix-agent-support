@@ -167,9 +167,9 @@ func TestScoreJiraPriority_lookup_error_does_not_fire(t *testing.T) {
 	}
 }
 
-func TestScoreJiraPriority_both_high_priority_and_incident_fire_highest(t *testing.T) {
-	// A ticket that is BOTH high-priority AND an active incident should yield
-	// the higher of the two scores (incident ≥ priority bump).
+func TestScoreJiraPriority_both_high_priority_and_incident_fire_combined(t *testing.T) {
+	// A ticket that is BOTH high-priority AND an active incident must yield
+	// score==6 (incident +4 + priority +2) and include BOTH reason strings.
 	mock := &mockJiraLookup{results: map[string]JiraTicketInfo{
 		"INC-1": {HighPriority: true, ActiveIncident: true},
 	}}
@@ -179,19 +179,25 @@ func TestScoreJiraPriority_both_high_priority_and_incident_fire_highest(t *testi
 		JiraLookupFunc:   mock.Lookup,
 	}
 	score, reasons := scoreJiraPriority(context.Background(), in)
-	if score <= 0 {
-		t.Errorf("want score>0 for incident+priority ticket; got %d", score)
+	if score != 6 {
+		t.Errorf("want score==6 for incident(+4)+priority(+2) ticket; got %d", score)
 	}
-	// At least one jira reason must be present.
-	hasJira := false
+	// Both reason strings must be present.
+	hasIncident := false
+	hasPriority := false
 	for _, r := range reasons {
-		if strings.HasPrefix(r, "jira-incident:") || strings.HasPrefix(r, "jira-priority:") {
-			hasJira = true
-			break
+		if r == "jira-incident:INC-1" {
+			hasIncident = true
+		}
+		if r == "jira-priority:INC-1" {
+			hasPriority = true
 		}
 	}
-	if !hasJira {
-		t.Errorf("want at least one jira reason; got %v", reasons)
+	if !hasIncident {
+		t.Errorf("want reason jira-incident:INC-1 present; got %v", reasons)
+	}
+	if !hasPriority {
+		t.Errorf("want reason jira-priority:INC-1 present; got %v", reasons)
 	}
 }
 

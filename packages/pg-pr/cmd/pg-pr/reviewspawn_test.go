@@ -38,6 +38,25 @@ func TestNewClaudeSpawner_ConfiguredBin(t *testing.T) {
 	}
 }
 
+// TestResolveBin_emptyBinFallsBackToClaude verifies that resolveBin("") returns
+// "claude", so callers that receive an empty bin still exec the right binary.
+func TestResolveBin_emptyBinFallsBackToClaude(t *testing.T) {
+	got := resolveBin("")
+	if got != "claude" {
+		t.Fatalf("resolveBin(%q) = %q; want %q", "", got, "claude")
+	}
+}
+
+// TestResolveBin_absolutePathPassedThrough verifies that a configured absolute
+// path is returned unchanged so deployments pinned to an absolute binary work.
+func TestResolveBin_absolutePathPassedThrough(t *testing.T) {
+	const want = "/run/current-system/sw/bin/claude"
+	got := resolveBin(want)
+	if got != want {
+		t.Fatalf("resolveBin(%q) = %q; want %q", want, got, want)
+	}
+}
+
 func TestParseHeadSHAFromOutput_JSONLine(t *testing.T) {
 	out := "some log\nrunning orchestrator\n{\"head_sha\":\"abc123def\"}\ndone\n"
 	sha := parseHeadSHAFromOutput(out)

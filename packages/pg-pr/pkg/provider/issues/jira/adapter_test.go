@@ -16,8 +16,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	jiraprovider "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/issues/jira"
 )
+
+// nilIssueProvider is an issues.Provider that returns (nil, nil) from GetIssue,
+// simulating a provider that has no data for a given key but also no error.
+type nilIssueProvider struct{}
+
+func (nilIssueProvider) GetIssue(_ context.Context, _ string) (*api.Issue, error) {
+	return nil, nil
+}
 
 // cliIssueJSON encodes a fake jira CLI JSON response as the subprocess would
 // emit it (the shape cliIssue in jira.go parses).
@@ -190,5 +199,24 @@ func TestNewJiraLookupFunc_priorityMatchIsCaseInsensitive(t *testing.T) {
 	}
 	if !info.HighPriority {
 		t.Errorf("HighPriority = false; want true for case-insensitive match (ticket HIGH vs config high)")
+	}
+}
+
+func TestNewJiraLookupFunc_nilIssueReturnedByProvider_returnsZeroInfo(t *testing.T) {
+	// When a provider returns (nil, nil) — no issue found, no error — the adapter
+	// MUST return a zero JiraTicketInfo (no signal) rather than panicking on a nil
+	// pointer dereference.
+	cfg := jiraprovider.AdapterConfig{
+		HighPriorityValues: []string{"Highest"},
+		IncidentLabels:     []string{"incident"},
+	}
+	fn := jiraprovider.NewJiraLookupFunc(nilIssueProvider{}, cfg)
+
+	info, err := fn(context.Background(), "GHOST-1")
+	if err != nil {
+		t.Fatalf("unexpected error on nil issue: %v", err)
+	}
+	if info.HighPriority || info.ActiveIncident {
+		t.Errorf("want zero JiraTicketInfo for nil issue; got %+v", info)
 	}
 }

@@ -12,6 +12,7 @@
 package ticketlink
 
 import (
+	"log/slog"
 	"regexp"
 )
 
@@ -22,7 +23,8 @@ import (
 // most once. A PR with no linked ticket returns nil (not an error).
 //
 // patterns is a slice of Go regular-expression strings. Invalid patterns are
-// skipped silently so a mis-configured entry does not break the sync loop.
+// skipped (with a slog.Warn) so a mis-configured entry does not break the
+// sync loop while still being discoverable in logs.
 func Parse(branch, title, body string, patterns []string) []string {
 	compiled := compilePatterns(patterns)
 	if len(compiled) == 0 {
@@ -56,8 +58,10 @@ func compilePatterns(patterns []string) []*regexp.Regexp {
 	for _, p := range patterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
-			// Skip invalid patterns silently; a mis-configured pattern should
-			// not break the sync loop.
+			// Skip invalid patterns; a mis-configured pattern should not break
+			// the sync loop, but log a warning so it is discoverable.
+			slog.Default().Warn("ticketlink: invalid ticket pattern skipped",
+				"pattern", p, "err", err.Error())
 			continue
 		}
 		out = append(out, re)

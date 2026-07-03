@@ -65,8 +65,7 @@ type JiraLookupFunc func(ctx context.Context, ticketKey string) (JiraTicketInfo,
 //
 // Scoring per ticket:
 //   - active incident: +4 and reason "jira-incident:<KEY>"
-//   - high priority (and not incident, to avoid double-counting the larger
-//     bump): +2 and reason "jira-priority:<KEY>"
+//   - high priority: +2 and reason "jira-priority:<KEY>"
 //   - both: +4 (incident) + +2 (priority) = +6 and both reason strings
 //
 // A nil JiraLookupFunc is a no-op. Lookup errors are treated as "unknown" —

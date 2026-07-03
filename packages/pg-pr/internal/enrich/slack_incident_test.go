@@ -72,18 +72,18 @@ func TestScoreSlackIncident_active_incident_fires(t *testing.T) {
 		SlackIncidentFunc: mock.Lookup,
 	}
 	score, reasons := scoreSlackIncident(context.Background(), in)
-	if score <= 0 {
-		t.Errorf("want score>0 for active Slack incident; got %d", score)
+	if score != 4 {
+		t.Errorf("want score==4 for active Slack incident; got %d", score)
 	}
 	found := false
 	for _, r := range reasons {
-		if strings.HasPrefix(r, "slack-incident:") {
+		if r == "slack-incident:INC-2024-0042" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("want reason with slack-incident: prefix; got %v", reasons)
+		t.Errorf("want reason slack-incident:INC-2024-0042; got %v", reasons)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestScoreSlackIncident_lookup_error_does_not_fire(t *testing.T) {
 }
 
 func TestScoreSlackIncident_active_incident_bump_is_high_severity(t *testing.T) {
-	// An active Slack production incident MUST bump urgency by at least +4,
+	// An active Slack production incident MUST bump urgency by exactly +4,
 	// consistent with the pg2-4c5i.25 / .26 scale so it reaches "high" on its own.
 	mock := &mockSlackIncident{info: SlackIncidentInfo{
 		ActiveIncident: true,
@@ -154,9 +154,19 @@ func TestScoreSlackIncident_active_incident_bump_is_high_severity(t *testing.T) 
 		PR:                api.PR{Title: "boring refactor", Branch: "refactor/boring"},
 		SlackIncidentFunc: mock.Lookup,
 	}
-	score, _ := scoreSlackIncident(context.Background(), in)
-	if score < 4 {
-		t.Errorf("want score>=4 for active Slack incident (high-severity bump); got %d", score)
+	score, reasons := scoreSlackIncident(context.Background(), in)
+	if score != 4 {
+		t.Errorf("want score==4 for active Slack incident (high-severity bump); got %d", score)
+	}
+	found := false
+	for _, r := range reasons {
+		if r == "slack-incident:inc-123" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("want reason slack-incident:inc-123; got %v", reasons)
 	}
 }
 
