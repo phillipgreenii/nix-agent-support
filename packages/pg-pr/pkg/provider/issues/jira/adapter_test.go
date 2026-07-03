@@ -107,7 +107,7 @@ func TestNewJiraLookupFunc_incidentIssueType_setsActiveIncident(t *testing.T) {
 	runner := &fakeRunner{stdout: cliIssueJSON("INC-2", "High", "Incident", nil)}
 	p := jiraprovider.NewWithRunner("jira", runner)
 	cfg := jiraprovider.AdapterConfig{
-		HighPriorityValues:  []string{"Highest", "High"},
+		HighPriorityValues: []string{"Highest", "High"},
 		IncidentIssueTypes: []string{"Incident"},
 	}
 	fn := jiraprovider.NewJiraLookupFunc(p, cfg)
