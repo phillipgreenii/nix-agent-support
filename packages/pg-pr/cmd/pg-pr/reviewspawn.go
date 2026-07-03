@@ -36,7 +36,7 @@ func newClaudeSpawner(cfg *config.Config) *claudeSpawner {
 			rp[r.Remote] = r.Path
 		}
 	}
-	return &claudeSpawner{repoPath: rp}
+	return &claudeSpawner{bin: cfg.ClaudeBin, repoPath: rp}
 }
 
 func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string, error) {

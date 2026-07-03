@@ -10,6 +10,41 @@ import (
 	"testing"
 )
 
+func TestLoadFile_ClaudeBin(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: phillipg
+worktree_root: /tmp/wr
+repos:
+  - remote: owner/name
+claude_bin: /run/current-system/sw/bin/claude
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.ClaudeBin != "/run/current-system/sw/bin/claude" {
+		t.Fatalf("claude_bin: got %q want /run/current-system/sw/bin/claude", cfg.ClaudeBin)
+	}
+}
+
+func TestLoadFile_ClaudeBinDefaultsToEmpty(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, `
+self_login: phillipg
+worktree_root: /tmp/wr
+repos:
+  - remote: owner/name
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.ClaudeBin != "" {
+		t.Fatalf("claude_bin: got %q want empty (unset)", cfg.ClaudeBin)
+	}
+}
+
 func TestLoadFile_AgentsBlock(t *testing.T) {
 	dir := t.TempDir()
 	p := writeYAML(t, dir, `

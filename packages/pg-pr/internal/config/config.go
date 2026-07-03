@@ -44,6 +44,17 @@ type Config struct {
 	DaemonInterval          string                `yaml:"daemon_interval,omitempty" json:"daemon_interval,omitempty"`
 	CIOnlyAttemptsThreshold int                   `yaml:"ci_only_attempts_threshold,omitempty" json:"ci_only_attempts_threshold,omitempty"`
 	Agents                  []agentregistry.Entry `yaml:"agents,omitempty" json:"agents,omitempty"`
+	// ClaudeBin is the absolute path to the claude binary used by the
+	// draft-review spawn consumer (the pg-pr-sync daemon). When unset (the
+	// default), the daemon falls back to "claude" and relies on PATH — which
+	// works in interactive sessions but fails in launchd daemons whose PATH
+	// does not include the nix-store paths. Set this to the absolute path
+	// reported by `which claude` or the nix-store derivation path so the
+	// deployed daemon can find the binary without PATH manipulation.
+	//
+	// Example (launchd / NixOS deployment):
+	//   claude_bin: /run/current-system/sw/bin/claude
+	ClaudeBin string `yaml:"claude_bin,omitempty" json:"claude_bin,omitempty"`
 }
 
 // RepoConfig is a single repo's configuration.
