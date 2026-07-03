@@ -44,6 +44,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ticketlink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/issues"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
@@ -165,6 +166,14 @@ type Deps struct {
 	// disabled (a no-op), so callers that don't wire review production keep
 	// running unchanged.
 	Review ReviewHookDeps
+
+	// JiraProvider, when non-nil AND cfg.Jira is non-nil, is used to build the
+	// JiraLookupFunc injected into enrich.Input (pg2-jpfw.4). Both fields must
+	// be non-nil to activate the signal; when either is nil the signal stays
+	// disabled (backward-compatible). Tests inject a fake provider here.
+	// Production code leaves this nil; the wiring in enrichAndStore constructs
+	// the default provider from PGPR_JIRA_BINARY.
+	JiraProvider issues.Provider
 }
 
 // Engine carries the configured dependencies for a series of sync calls.

@@ -25,6 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	jiraprovider "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/issues/jira"
 )
 
 // ErrNoConfig is returned by Load when no config file is found.
@@ -55,6 +56,39 @@ type Config struct {
 	// Example (launchd / NixOS deployment):
 	//   claude_bin: /run/current-system/sw/bin/claude
 	ClaudeBin string `yaml:"claude_bin,omitempty" json:"claude_bin,omitempty"`
+
+	// Jira, when non-nil, enables the Jira priority/incident urgency signal
+	// (pg2-jpfw.4). When nil (the default), the signal is disabled and
+	// behaviour is identical to before this bead.
+	//
+	// Public-repo hygiene: no org-specific Jira URLs, project keys, auth
+	// tokens, or instance names appear in this struct. All deployment-specific
+	// details MUST be supplied via the config file.
+	Jira *JiraConfig `yaml:"jira,omitempty" json:"jira,omitempty"`
+}
+
+// JiraConfig configures the Jira priority/incident urgency signal (pg2-jpfw.4).
+//
+// The signal is enabled only when config.Jira is non-nil. The binary name for
+// the subprocess-backed Jira provider is controlled by the PGPR_JIRA_BINARY
+// environment variable (default "jira") — see pkg/provider/issues/jira.
+//
+// Example YAML section (all values are fictional/generic):
+//
+//	jira:
+//	  high_priority_values: [Highest, High]
+//	  incident_labels: [incident]
+//	  incident_issue_types: [Incident]
+//
+// Public-repo hygiene: populate high_priority_values, incident_labels, and
+// incident_issue_types from your own Jira instance's terminology. No defaults
+// are baked in here.
+type JiraConfig struct {
+	// AdapterCfg drives the mapping from api.Issue fields to JiraTicketInfo.
+	// Embedded inline in YAML so the top-level jira: keys map directly to
+	// AdapterConfig fields (high_priority_values, incident_labels,
+	// incident_issue_types).
+	jiraprovider.AdapterConfig `yaml:",inline" json:",inline"`
 }
 
 // RepoConfig is a single repo's configuration.

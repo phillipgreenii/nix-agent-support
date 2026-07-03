@@ -75,12 +75,15 @@ type cliIssue struct {
 // GetIssue execs `<binary> issue <key>`, decodes the JSON envelope, and maps
 // cliIssue → api.Issue.
 //
-// Field mapping (current; UJ-3 will extend api.Issue with Priority/incident):
+// Field mapping:
 //
-//	cliIssue.Key     → api.Issue.ID
-//	cliIssue.Summary → api.Issue.Title
-//	cliIssue.Status  → api.Issue.State
-//	cliIssue.URL     → api.Issue.URL
+//	cliIssue.Key       → api.Issue.ID
+//	cliIssue.Summary   → api.Issue.Title
+//	cliIssue.Status    → api.Issue.State
+//	cliIssue.URL       → api.Issue.URL
+//	cliIssue.Priority  → api.Issue.Priority  (pg2-jpfw.4)
+//	cliIssue.Labels    → api.Issue.Labels    (pg2-jpfw.4)
+//	cliIssue.IssueType → api.Issue.IssueType (pg2-jpfw.4)
 func (p *Provider) GetIssue(ctx context.Context, id string) (*api.Issue, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -98,9 +101,12 @@ func (p *Provider) GetIssue(ctx context.Context, id string) (*api.Issue, error) 
 		return nil, fmt.Errorf("jira provider: response for %s is missing key field", id)
 	}
 	return &api.Issue{
-		ID:    raw.Key,
-		Title: raw.Summary,
-		State: raw.Status,
-		URL:   raw.URL,
+		ID:        raw.Key,
+		Title:     raw.Summary,
+		State:     raw.Status,
+		URL:       raw.URL,
+		Priority:  raw.Priority,
+		Labels:    raw.Labels,
+		IssueType: raw.IssueType,
 	}, nil
 }

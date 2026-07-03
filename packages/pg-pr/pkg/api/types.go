@@ -69,4 +69,19 @@ type Issue struct {
 	Title string `json:"title"`
 	State string `json:"state"`
 	URL   string `json:"url"`
+
+	// Priority is the issue's priority string as returned by the tracker (e.g.
+	// "High", "Medium", "Low"). Empty when the provider does not supply it.
+	// Added in pg2-jpfw.4 (additive; existing callers are unaffected).
+	Priority string `json:"priority,omitempty"`
+
+	// Labels is the list of label strings attached to the issue. Empty when the
+	// provider does not supply them or when the issue has no labels.
+	// Added in pg2-jpfw.4 (additive; existing callers are unaffected).
+	Labels []string `json:"labels,omitempty"`
+
+	// IssueType is the issue-type string as returned by the tracker (e.g.
+	// "Bug", "Story", "Incident"). Empty when the provider does not supply it.
+	// Added in pg2-jpfw.4 (additive; existing callers are unaffected).
+	IssueType string `json:"issue_type,omitempty"`
 }

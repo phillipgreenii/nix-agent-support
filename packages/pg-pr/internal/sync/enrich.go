@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ticketlink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	jiraprovider "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/issues/jira"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
@@ -24,6 +25,11 @@ import (
 // for the Jira priority/incident signal (pg2-4c5i.26). An empty TicketPatterns
 // slice disables ticket-key extraction for this repo, which is the default
 // until a consuming config supplies patterns.
+//
+// When cfg.Jira is non-nil the JiraLookupFunc is built from the in-repo Jira
+// provider (pkg/provider/issues/jira) and injected into enrich.Input. When
+// cfg.Jira is nil the signal stays disabled (nil JiraLookupFunc), preserving
+// backward compatibility.
 func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enriched *vcs.EnrichedPR, rcfg config.RepoConfig) error {
 	if e.deps.Store == nil {
 		return nil
@@ -38,17 +44,28 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 		}
 	}
 	// Populate linked ticket keys from the PR's branch/title/body using the
-	// repo's config-driven ticket patterns. The Jira lookup function
-	// (JiraLookupFunc) is intentionally left nil here — wiring the real Jira
-	// client is deferred to a future bead (pg2-4c5i.26 follow-up). When nil,
-	// the signal is a no-op and urgency is computed identically to before.
+	// repo's config-driven ticket patterns.
 	in.LinkedTicketKeys = ticketlink.Parse(pr.Branch, pr.Title, pr.Body, rcfg.TicketPatterns)
-	// in.JiraLookupFunc remains nil until the real provider is wired (deferred).
+
+	// Wire JiraLookupFunc when Jira is configured (pg2-jpfw.4). When cfg.Jira
+	// is nil (or cfg itself is nil — allowed for test engines built without Cfg)
+	// the signal remains disabled (nil JiraLookupFunc) — no behaviour change for
+	// callers that don't configure a Jira section.
+	cfg := e.cfg()
+	if cfg != nil && cfg.Jira != nil {
+		// Use the injected provider (Deps.JiraProvider) when set (tests), or
+		// construct the default subprocess-backed provider from PGPR_JIRA_BINARY.
+		var p = e.deps.JiraProvider
+		if p == nil {
+			p = jiraprovider.New()
+		}
+		in.JiraLookupFunc = jiraprovider.NewJiraLookupFunc(p, cfg.Jira.AdapterConfig)
+	}
+	// When cfg.Jira is nil, in.JiraLookupFunc remains nil (signal disabled).
 
 	// Use ComputeWithContext so any injected ProjectHealthFunc or JiraLookupFunc
-	// (wired in a future live-verification bead) can be cancelled via the
-	// calling context. When both are nil (current default), this is identical
-	// to Compute(in).
+	// (wired above) can be cancelled via the calling context. When both are nil
+	// (current default), this is identical to Compute(in).
 	r := enrich.ComputeWithContext(ctx, in)
 	if err := e.deps.Store.SetEnrichment(ctx, repo, pr.Number, store.Enrichment{
 		Kind: r.Kind, Languages: r.Languages, Size: r.Size,
