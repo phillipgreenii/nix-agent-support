@@ -55,7 +55,7 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 	if cfg != nil && cfg.Jira != nil {
 		// Use the injected provider (Deps.JiraProvider) when set (tests), or
 		// construct the default subprocess-backed provider from PGPR_JIRA_BINARY.
-		var p = e.deps.JiraProvider
+		p := e.deps.JiraProvider
 		if p == nil {
 			p = jiraprovider.New()
 		}
