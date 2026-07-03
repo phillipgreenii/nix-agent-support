@@ -247,9 +247,18 @@ var blockingFeedbackKinds = []string{"ci-failure", "self-review"}
 
 // HasBlockingFeedback reports whether the PR has any unresolved blocking
 // feedback — a row of a blocking kind whose status is NOT dispositioned /
-// resolved / superseded. This is the merge-loop gate predicate: while it is
-// true, the PR MUST NOT auto-merge. self-review rows gate exactly like
+// resolved / superseded. This is the canonical merge-gate predicate: while it
+// is true the PR MUST NOT auto-merge. self-review rows gate exactly like
 // ci-failure rows (they are ingested at status='new' by the my-PR sink).
+//
+// Merge-gate wiring note: there is currently no Go merge-decision point where
+// this predicate can be enforced automatically. The merge loop is driven by the
+// bd/skill layer (pr-merge / pr-automerge are human-invoked skills); no Go code
+// executes at the moment a merge decision is made. Enforcement therefore lives
+// at the process-feedback skill layer, which MUST call HasBlockingFeedback
+// before approving a merge and surface any blocking items to the operator.
+// When/if a Go merge-decision point is introduced (e.g. a daemon automerge
+// worker), wire this predicate in at that callsite.
 func (db *DB) HasBlockingFeedback(ctx context.Context, prID int64) (bool, error) {
 	// Build the IN-list placeholders for the blocking kinds.
 	placeholders := make([]string, len(blockingFeedbackKinds))

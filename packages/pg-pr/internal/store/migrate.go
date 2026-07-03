@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
@@ -286,6 +289,34 @@ func applyMigration(db *DB, toVersion int, ddl string) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration to v%d: %w", toVersion, err)
+	}
+
+	// After commit (and while foreign_keys is still OFF), run
+	// PRAGMA foreign_key_check to verify the migration did not introduce any
+	// dangling FK references. A bad migration fails loudly here rather than
+	// silently corrupting referential integrity. The check runs on db.sql
+	// (outside the now-committed tx) so it sees the fully-committed state.
+	fkRows, err := db.sql.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("foreign_key_check after migration to v%d: %w", toVersion, err)
+	}
+	defer func() { _ = fkRows.Close() }()
+	var violations []string
+	for fkRows.Next() {
+		// Columns: table, rowid, parent, fkid
+		var table, parent string
+		var rowid, fkid int64
+		if scanErr := fkRows.Scan(&table, &rowid, &parent, &fkid); scanErr != nil {
+			return fmt.Errorf("scan foreign_key_check row after migration to v%d: %w", toVersion, scanErr)
+		}
+		violations = append(violations, fmt.Sprintf("%s rowid=%d → %s fk#%d", table, rowid, parent, fkid))
+	}
+	if err := fkRows.Err(); err != nil {
+		return fmt.Errorf("foreign_key_check iteration after migration to v%d: %w", toVersion, err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("migration to v%d introduced foreign key violations: %s",
+			toVersion, strings.Join(violations, "; "))
 	}
 	return nil
 }
