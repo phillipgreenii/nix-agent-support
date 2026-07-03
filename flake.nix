@@ -685,11 +685,13 @@
                 assert hasSub "plugin marketplace update" activationNoDir;
                 pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
 
-              # Regression guard for pg2-64uu: promptCacheTtl writes the correct
-              # mutually-exclusive prompt-cache env var into settings.json's `.env`
-              # (docs: code.claude.com/docs/en/prompt-caching). "1h" sets
-              # ENABLE_PROMPT_CACHING_1H and deletes FORCE_PROMPT_CACHING_5M; "5m"
-              # is the inverse; null writes neither. Pure module eval inspecting the
+              # Regression guard for pg2-64uu and pg2-e46e: promptCacheTtl writes
+              # the correct mutually-exclusive prompt-cache env var into
+              # settings.json's `.env` (docs: code.claude.com/docs/en/prompt-caching).
+              # "1h" sets ENABLE_PROMPT_CACHING_1H and deletes FORCE_PROMPT_CACHING_5M;
+              # "5m" is the inverse; null scrubs BOTH keys (del) so a prior "1h"/"5m"
+              # write does not linger, EXCEPT a key pinned via the generic `env`
+              # attrset, which null preserves. Pure module eval inspecting the
               # generated activation string — no HM harness.
               test-claude-settings-prompt-cache-ttl =
                 let
@@ -759,6 +761,45 @@
                       };
                     }).home.activation.claude-settings;
 
+                  # promptCacheTtl = null while a cache key is pinned via the
+                  # generic `env` attrset: the null cleanup must PRESERVE the pinned
+                  # key (skip its del) yet still scrub the other key. One case per
+                  # key so each `cfg.env ? KEY` guard is exercised independently.
+                  nullPins1h =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          env.ENABLE_PROMPT_CACHING_1H = "keep";
+                          promptCacheTtl = null;
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  nullPins5m =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          env.FORCE_PROMPT_CACHING_5M = "keep";
+                          promptCacheTtl = null;
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
+                  # A non-null state deletes the OPPOSITE key even when it is pinned
+                  # via `env` — the dedicated option wins over env whenever it is set.
+                  oppositePinned =
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        settings = {
+                          env.FORCE_PROMPT_CACHING_5M = "keep";
+                          promptCacheTtl = "1h";
+                        };
+                      };
+                    }).home.activation.claude-settings;
+
                   hasSub = needle: haystack: lib.hasInfix needle haystack;
 
                   # Everything after the generic-env assignment; the dedicated
@@ -773,9 +814,28 @@
                 assert hasSub ''.env.FORCE_PROMPT_CACHING_5M = "1"'' fiveMin;
                 assert hasSub "del(.env.ENABLE_PROMPT_CACHING_1H)" fiveMin;
                 assert !(hasSub ''ENABLE_PROMPT_CACHING_1H = "1"'' fiveMin);
-                # null (default) writes neither prompt-cache key.
-                assert !(hasSub "ENABLE_PROMPT_CACHING_1H" unset);
-                assert !(hasSub "FORCE_PROMPT_CACHING_5M" unset);
+                # null (default) scrubs both keys via del, but writes neither value.
+                # (The bare key name now appears inside the del, so the negative
+                # must match the full assignment substring, not the bare key.)
+                assert hasSub "del(.env.ENABLE_PROMPT_CACHING_1H)" unset;
+                assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" unset;
+                assert !(hasSub ''.env.ENABLE_PROMPT_CACHING_1H = "1"'' unset);
+                assert !(hasSub ''.env.FORCE_PROMPT_CACHING_5M = "1"'' unset);
+                # null preserves a cache key pinned via `env` (skips that del) while
+                # still scrubbing the other key. The pin uses the bracket form
+                # `.env["KEY"]` and the del the dot form `del(.env.KEY)`, so the two
+                # substrings never cross-match.
+                assert hasSub ''.env["ENABLE_PROMPT_CACHING_1H"] = "keep"'' nullPins1h;
+                assert !(hasSub "del(.env.ENABLE_PROMPT_CACHING_1H)" nullPins1h);
+                assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" nullPins1h;
+                assert hasSub ''.env["FORCE_PROMPT_CACHING_5M"] = "keep"'' nullPins5m;
+                assert !(hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" nullPins5m);
+                assert hasSub "del(.env.ENABLE_PROMPT_CACHING_1H)" nullPins5m;
+                # A non-null state still deletes the opposite key even when it is
+                # pinned via `env` (dedicated option wins when set).
+                assert hasSub ''.env["FORCE_PROMPT_CACHING_5M"] = "keep"'' oppositePinned;
+                assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" oppositePinned;
+                assert hasSub ''.env.ENABLE_PROMPT_CACHING_1H = "1"'' oppositePinned;
                 # Ordering guarantee: the dedicated option overrides a conflicting
                 # generic `env` entry because its filter runs later in the chain.
                 assert hasSub ''.env["ENABLE_PROMPT_CACHING_1H"] = "bogus"'' ordered;

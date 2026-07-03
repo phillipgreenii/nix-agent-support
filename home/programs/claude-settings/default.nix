@@ -50,7 +50,12 @@ let
     # exclusive env vars (docs: code.claude.com/docs/en/prompt-caching). Applied
     # after cfg.env so the dedicated option wins over any stray env entry, and
     # each non-null state deletes the opposite key so toggling never leaves a
-    # stale value behind.
+    # stale value behind. When null (the default, incl. the option being unset)
+    # both keys are deleted so a value a previous "1h"/"5m" generation wrote is
+    # scrubbed — EXCEPT a key pinned via the generic `env` attrset, which is
+    # preserved. That `cfg.env ? KEY` guard is the only eval-time signal that a
+    # runtime key is user-owned rather than our leftover, so it is what makes the
+    # generic `env` attrset a deliberate escape hatch (pg2-e46e).
     ++ lib.optionals (cfg.promptCacheTtl == "1h") [
       ".env.ENABLE_PROMPT_CACHING_1H = \"1\""
       "del(.env.FORCE_PROMPT_CACHING_5M)"
@@ -58,7 +63,13 @@ let
     ++ lib.optionals (cfg.promptCacheTtl == "5m") [
       ".env.FORCE_PROMPT_CACHING_5M = \"1\""
       "del(.env.ENABLE_PROMPT_CACHING_1H)"
-    ];
+    ]
+    ++ lib.optional (
+      cfg.promptCacheTtl == null && !(cfg.env ? ENABLE_PROMPT_CACHING_1H)
+    ) "del(.env.ENABLE_PROMPT_CACHING_1H)"
+    ++ lib.optional (
+      cfg.promptCacheTtl == null && !(cfg.env ? FORCE_PROMPT_CACHING_5M)
+    ) "del(.env.FORCE_PROMPT_CACHING_5M)";
 
   # Framework-built scripts (mkBashScript with libraries = [ activation-lib ]),
   # so they source the shared act_* helpers. Binary names preserved as
@@ -183,9 +194,12 @@ in
         Each entry is applied as a jq assignment, so keys overwrite any existing
         value at that path. `CLAUDE_CODE_NO_FLICKER` is still controlled by the
         `noFlicker` option and applied after this attrset. For the prompt-cache
-        TTL vars (`ENABLE_PROMPT_CACHING_1H` / `FORCE_PROMPT_CACHING_5M`) use the
-        dedicated `promptCacheTtl` option instead of setting them here — it is
-        applied after this attrset and would override a conflicting value set here.
+        TTL vars (`ENABLE_PROMPT_CACHING_1H` / `FORCE_PROMPT_CACHING_5M`) prefer
+        the dedicated `promptCacheTtl` option. Both are applied after this
+        attrset: a non-null `promptCacheTtl` overrides a conflicting cache var set
+        here, while a null `promptCacheTtl` preserves one set here (its cleanup
+        deliberately skips a cache key present in this attrset). So pinning a cache
+        var here is the supported way to keep it independent of `promptCacheTtl`.
       '';
     };
 
@@ -202,19 +216,23 @@ in
         Claude Code prompt-cache TTL preference, written into `.env` of
         `~/.claude/settings.json`. Three states:
 
-        - `null` (default): write neither cache env var, so Claude Code's
-          auth-based default applies (1h on a Claude subscription, 5m on an
-          API key / Bedrock / Vertex).
+        - `null` (default, including leaving the option unset): write neither
+          cache env var, so Claude Code's auth-based default applies (1h on a
+          Claude subscription, 5m on an API key / Bedrock / Vertex).
         - `"1h"`: set `ENABLE_PROMPT_CACHING_1H=1` (force the 1-hour TTL).
         - `"5m"`: set `FORCE_PROMPT_CACHING_5M=1` (the documented short-TTL
           override; force the 5-minute TTL).
 
         The two env vars are mutually exclusive, so selecting one deletes the
-        other. Setting this back to `null` after a non-null value leaves the
-        last-written key in place (same caveat as the other `nullOr` options
-        here) — set `"1h"` or `"5m"` explicitly to change a written value.
-        Prefer this over setting the cache vars through the generic `env`
-        option. See https://code.claude.com/docs/en/prompt-caching.
+        other. Unlike the other `nullOr` options here, `null` is not a no-op: it
+        deletes BOTH keys on every activation, scrubbing a value a previous
+        `"1h"`/`"5m"` generation wrote. The one exception is a cache key pinned
+        through the generic `env` option — the `null` cleanup skips a key present
+        in `env`, so declare it there if you want to keep one of these vars by
+        hand. A value hand-edited into `settings.json` but NOT declared via `env`
+        is removed on the next activation. Prefer this dedicated option over
+        setting the cache vars through `env`.
+        See https://code.claude.com/docs/en/prompt-caching.
       '';
     };
 
