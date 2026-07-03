@@ -111,8 +111,9 @@ type PRFingerprint struct {
 type FingerprintResult struct {
 	PRs       []PRFingerprint
 	Truncated bool
-	RateCost  int // rateLimit.cost from the GraphQL envelope
-	RateLeft  int // rateLimit.remaining
+	RateCost  int    // rateLimit.cost from the GraphQL envelope
+	RateLeft  int    // rateLimit.remaining
+	ResetAt   string // rateLimit.resetAt (RFC3339; window-reset timestamp)
 }
 
 // FingerprintProvider is an optional capability for VCS providers that can

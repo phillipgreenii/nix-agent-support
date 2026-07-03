@@ -13,7 +13,7 @@ import (
 // only change-detection fields + updatedAt. $after drives pagination (null on
 // the first page).
 const fingerprintQuery = `query($search: String!, $after: String) {
-  rateLimit { cost remaining }
+  rateLimit { cost remaining resetAt }
   search(query: $search, type: ISSUE, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
@@ -40,8 +40,9 @@ const maxFingerprintPages = 20
 type ghFingerprintResponse struct {
 	Data struct {
 		RateLimit struct {
-			Cost      int `json:"cost"`
-			Remaining int `json:"remaining"`
+			Cost      int    `json:"cost"`
+			Remaining int    `json:"remaining"`
+			ResetAt   string `json:"resetAt"`
 		} `json:"rateLimit"`
 		Search struct {
 			PageInfo ghPageInfo `json:"pageInfo"`
@@ -94,6 +95,7 @@ func parseFingerprints(raw []byte) (vcs.FingerprintResult, string, bool, error) 
 	res := vcs.FingerprintResult{
 		RateCost: resp.Data.RateLimit.Cost,
 		RateLeft: resp.Data.RateLimit.Remaining,
+		ResetAt:  resp.Data.RateLimit.ResetAt,
 		PRs:      make([]vcs.PRFingerprint, 0, len(resp.Data.Search.Nodes)),
 	}
 	for _, n := range resp.Data.Search.Nodes {
@@ -147,6 +149,7 @@ func (p *Provider) FingerprintPRs(ctx context.Context, searchQuery string) (vcs.
 		acc.PRs = append(acc.PRs, pageRes.PRs...)
 		acc.RateCost = pageRes.RateCost
 		acc.RateLeft = pageRes.RateLeft
+		acc.ResetAt = pageRes.ResetAt
 		if !more {
 			break
 		}

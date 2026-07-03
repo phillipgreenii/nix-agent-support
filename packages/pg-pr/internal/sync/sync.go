@@ -193,6 +193,15 @@ type Engine struct {
 	// restart-to-refresh once it crosses maxAuthFailStreak.
 	authFailStreak int
 
+	// lastRateLeft / rateResetAt retain the latest GraphQL rate-limit reading
+	// (rateLimit.remaining + rateLimit.resetAt) from a successful fingerprint
+	// poll, so the detector can proactively skip its next poll while remaining
+	// is below the graphQLRateBuffer reserve until the window resets. Only the
+	// daemon loop goroutine touches them (via recordPoll/fingerprintTick), so no
+	// lock is needed. rateResetAt is zero until the first poll parses a resetAt.
+	lastRateLeft int
+	rateResetAt  time.Time
+
 	// humanLabels is the per-repo set of bead IDs carrying the `human` label
 	// (repo -> set). Refreshed off the critical path by the daemon's
 	// maintenance goroutine (refreshHumanLabels) and read by workers in

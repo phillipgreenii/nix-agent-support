@@ -385,6 +385,9 @@ func (e *Engine) seedDaemonMetricSeries() {
 	for _, rcfg := range e.cfg().Repos {
 		telemetry.SyncErrorsTotal.WithLabelValues(rcfg.Remote).Add(0)
 	}
+	// Self-pause gauge starts un-paused so the Ops "polling paused" panel shows
+	// a flat-zero ("running") line before the first pause ever occurs.
+	telemetry.GraphQLRatePaused.Set(0)
 }
 
 // startMetricsServer launches the Prometheus scrape endpoint in a

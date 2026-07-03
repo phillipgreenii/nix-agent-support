@@ -151,6 +151,29 @@ func (e *Engine) recordPoll(group string, res vcs.FingerprintResult, err error, 
 	telemetry.FingerprintPollSuccessTimestamp.WithLabelValues(group).Set(float64(e.deps.Now().Unix()))
 	telemetry.GraphQLCost.WithLabelValues(group).Set(float64(res.RateCost))
 	telemetry.GraphQLRateRemaining.Set(float64(res.RateLeft))
+	// Retain the latest rate reading for the detector's proactive <buffer skip.
+	// resetAt is RFC3339 from GitHub; a parse failure leaves rateResetAt zero,
+	// which disables the pause (fail-open — never wedge on a malformed reset).
+	e.lastRateLeft = res.RateLeft
+	if res.ResetAt != "" {
+		if t, perr := time.Parse(time.RFC3339, res.ResetAt); perr == nil {
+			e.rateResetAt = t
+		}
+	}
+}
+
+// graphQLRateBuffer is the bottom slice of GitHub's GraphQL rate-limit window
+// (5000 pts/hr) pg-pr reserves for direct `gh` use. When remaining drops below
+// it, the daemon proactively skips its fingerprint poll until the window resets
+// rather than draining the last points out from under an interactive `gh` call.
+const graphQLRateBuffer = 1000
+
+// graphQLRatePaused reports whether the detector should skip this tick's
+// fingerprint poll: the last observed remaining is below the reserve AND the
+// rate window has not yet reset. Resumes automatically once now >= rateResetAt
+// (the next poll then refreshes remaining to ~5000).
+func (e *Engine) graphQLRatePaused(now time.Time) bool {
+	return e.lastRateLeft > 0 && e.lastRateLeft < graphQLRateBuffer && now.Before(e.rateResetAt)
 }
 
 // fingerprintTick runs the mine + team fingerprint queries, diffs them against
@@ -163,6 +186,21 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 	if !ok {
 		return // no fingerprint-capable provider (e.g. test stub) — nothing to do
 	}
+
+	// Proactive rate-limit reserve: if the last poll left fewer than
+	// graphQLRateBuffer points and the window has not reset, SKIP this tick's
+	// GraphQL poll entirely (same "log and skip the poll" shape as a failed
+	// poll) so the bottom ~1000 points stay available for direct `gh` use.
+	// This is a SELF-imposed buffer — distinct from actual 0-remaining
+	// exhaustion — surfaced on its own pause gauge. Resumes automatically once
+	// now >= rateResetAt (the next poll refreshes remaining to ~5000).
+	if e.graphQLRatePaused(e.deps.Now()) {
+		telemetry.GraphQLRatePaused.Set(1)
+		log.Info("skipping GraphQL fingerprint poll: self-imposed <1000 safety buffer",
+			"remaining", e.lastRateLeft, "buffer", graphQLRateBuffer, "reset_at", e.rateResetAt.Format(time.RFC3339))
+		return
+	}
+	telemetry.GraphQLRatePaused.Set(0)
 
 	// Track auth health for the daemon's restart-to-refresh escalation.
 	// authErr latches on the FIRST poll (mine or any team) that fails with an

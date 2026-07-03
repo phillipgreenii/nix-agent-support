@@ -120,6 +120,18 @@ var (
 		},
 	)
 
+	// GraphQLRatePaused is 1 while the daemon is proactively skipping its
+	// GraphQL fingerprint poll to reserve the bottom ~1000 points for direct
+	// `gh` use (self-imposed safety buffer), 0 otherwise. Distinct from
+	// GraphQLRateRemaining hitting 0 (actual GitHub exhaustion): this signals a
+	// SELF-imposed pause that clears automatically once the rate window resets.
+	GraphQLRatePaused = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "pg_pr_graphql_rate_paused",
+			Help: "1 while the daemon self-pauses GraphQL polling to reserve the bottom ~1000 rate-limit points for direct gh use; 0 otherwise.",
+		},
+	)
+
 	SnapshotPresent = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "pg_pr_snapshot_present",
 		Help: "1 once the dashboard snapshot has been populated for the first time this process; otherwise 0.",
@@ -148,6 +160,7 @@ func init() {
 		RefreshEnqueuedTotal,
 		GraphQLCost,
 		GraphQLRateRemaining,
+		GraphQLRatePaused,
 		SnapshotPresent,
 		GHAuthFailuresTotal,
 	)
