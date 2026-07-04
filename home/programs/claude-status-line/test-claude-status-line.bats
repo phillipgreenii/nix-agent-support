@@ -697,6 +697,21 @@ strip_ansi() {
   [[ "$stripped" == *"7d:40%"* ]]
 }
 
+# Regression: used_percentage can arrive as a float with a binary-fp artifact
+# (e.g. 14.000000000000002). The nerd-off numeric render must show the integer
+# part only ("14%"), never the raw float.
+@test "limits nerd-off rounds float percentage to integer" {
+  nerd_off || skip "nerd-font on"
+  J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25},"rate_limits":{"five_hour":{"used_percentage":14.000000000000002},"seven_day":{"used_percentage":40.5}}}'
+  run env COLUMNS=400 bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"5h:14%"* ]]
+  [[ "$stripped" == *"7d:40%"* ]]
+  [[ "$stripped" != *"14.0"* ]]
+  [[ "$stripped" != *"40.5"* ]]
+}
+
 @test "limits nerd-on shows circle-slice fill glyph (no number) below 80" {
   nerd_on || skip "nerd-font off"
   # 5% -> idx=1 -> slice-1; 75% -> idx=8 -> slice-8. Omit context_window so the ONLY possible

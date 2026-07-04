@@ -249,7 +249,7 @@ let
             fi
           fi
         fi
-        printf "''${RED}%s%s%%%s''${RESET}" "$marker" "$used" "$cd"
+        printf "''${RED}%s%s%%%s''${RESET}" "$marker" "$used_int" "$cd"
         return 0
       fi
 
@@ -291,7 +291,7 @@ let
           ''
         else
           ''
-            printf "''${color}%s%s%%''${RESET}" "$marker" "$used"
+            printf "''${color}%s%s%%''${RESET}" "$marker" "$used_int"
           ''
       }
     }
