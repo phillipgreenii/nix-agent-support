@@ -57,6 +57,32 @@ func TestResolveBin_absolutePathPassedThrough(t *testing.T) {
 	}
 }
 
+// TestClaudeArgs_HeadlessWorkerFlags verifies the daemon spawns claude with the
+// headless-worker flags: the prompt runs via -p, and --permission-mode
+// bypassPermissions is present so the orchestrator agent can use its tools
+// (Bash/Edit/`pg-pr review draft`) without an interactive permission prompt. A
+// plain `claude -p` (no permission mode) leaves the headless orchestrator unable
+// to act and stages no Draft ("no Draft staged"). pg2-jpfw.2.
+func TestClaudeArgs_HeadlessWorkerFlags(t *testing.T) {
+	const prompt = "Run the pg-pr-review-orchestrator for owner/repo#1"
+	args := claudeArgs(prompt)
+
+	if len(args) < 2 || args[0] != "-p" || args[1] != prompt {
+		t.Fatalf("args must start with -p <prompt>; got %v", args)
+	}
+
+	found := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--permission-mode" && args[i+1] == "bypassPermissions" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("args must include --permission-mode bypassPermissions; got %v", args)
+	}
+}
+
 func TestParseHeadSHAFromOutput_JSONLine(t *testing.T) {
 	out := "some log\nrunning orchestrator\n{\"head_sha\":\"abc123def\"}\ndone\n"
 	sha := parseHeadSHAFromOutput(out)

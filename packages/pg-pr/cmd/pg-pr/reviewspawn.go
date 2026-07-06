@@ -48,6 +48,22 @@ func resolveBin(bin string) string {
 	return bin
 }
 
+// claudeArgs builds the argv (after the binary) for the headless review spawn.
+//
+// The daemon runs claude non-interactively, so it MUST bypass permission
+// prompts: with the default permission mode a headless `claude -p` cannot grant
+// the pg-pr-review-orchestrator agent the tools it needs (Bash for the worktree,
+// `pg-pr review draft`, Edit), so the run produces nothing and the hook reports
+// "no Draft staged". bypassPermissions is the human-less-worker mode (the same
+// mode ccpool uses for its workers). pg2-jpfw.2.
+//
+// NOTE: this is the interim fix on the synchronous `claude -p` path; a follow-up
+// (pg2-jpfw.9) replaces this Spawner with ccpool for autonomous handling +
+// tmux-attach monitorability.
+func claudeArgs(prompt string) []string {
+	return []string{"-p", prompt, "--permission-mode", "bypassPermissions"}
+}
+
 func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string, error) {
 	bin := resolveBin(s.bin)
 	ownership := "team"
@@ -61,7 +77,7 @@ func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string
 		ref.Repo, ref.Number, ownership, ref.BeadID,
 	)
 
-	cmd := exec.CommandContext(ctx, bin, "-p", prompt)
+	cmd := exec.CommandContext(ctx, bin, claudeArgs(prompt)...)
 	if dir := s.repoPath[ref.Repo]; dir != "" {
 		cmd.Dir = dir
 	}
