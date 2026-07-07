@@ -227,11 +227,13 @@ func TestBridgeDeliverer_SendError_CancelsAndReturnsErr(t *testing.T) {
 		t.Fatalf("Deliver error = %v, want %v", err, sendErr)
 	}
 
-	// The pending id must have been cancelled (removed), not leaked: a
-	// stray resolve for it afterwards must be a safe no-op. We can't see
-	// the id directly, but failServer for this server should find nothing
-	// left over.
-	tr.failServer(serverPID)
+	// The pending id must have been cancelled (removed), not leaked.
+	tr.mu.Lock()
+	pending := len(tr.pending)
+	tr.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("tracker.pending has %d entries after send error, want 0 (leaked pending id)", pending)
+	}
 }
 
 func TestBridgeDeliverer_NeverResolved_TimesOut(t *testing.T) {
@@ -239,12 +241,13 @@ func TestBridgeDeliverer_NeverResolved_TimesOut(t *testing.T) {
 	const serverPID = 4242
 	const bridgePID = 99
 
+	tr := newTracker()
 	d := &bridgeDeliverer{
 		reg: reg,
 		ancestor: func(pid int) (int, bool) {
 			return serverPID, true
 		},
-		tr:      newTracker(),
+		tr:      tr,
 		timeout: 20 * time.Millisecond,
 	}
 
@@ -261,6 +264,14 @@ func TestBridgeDeliverer_NeverResolved_TimesOut(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < d.timeout {
 		t.Errorf("returned before timeout elapsed: %v < %v", elapsed, d.timeout)
 	}
+
+	// The pending id must have been cancelled (removed) on timeout, not leaked.
+	tr.mu.Lock()
+	pending := len(tr.pending)
+	tr.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("tracker.pending has %d entries after timeout, want 0 (leaked pending id)", pending)
+	}
 }
 
 func TestBridgeDeliverer_ContextCancelled(t *testing.T) {
@@ -268,12 +279,13 @@ func TestBridgeDeliverer_ContextCancelled(t *testing.T) {
 	const serverPID = 4242
 	const bridgePID = 99
 
+	tr := newTracker()
 	d := &bridgeDeliverer{
 		reg: reg,
 		ancestor: func(pid int) (int, bool) {
 			return serverPID, true
 		},
-		tr:      newTracker(),
+		tr:      tr,
 		timeout: time.Second,
 	}
 
@@ -287,6 +299,15 @@ func TestBridgeDeliverer_ContextCancelled(t *testing.T) {
 	err := d.Deliver(ctx, 555, "hi")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Deliver error = %v, want context.Canceled", err)
+	}
+
+	// The pending id must have been cancelled (removed) on ctx cancellation,
+	// not leaked.
+	tr.mu.Lock()
+	pending := len(tr.pending)
+	tr.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("tracker.pending has %d entries after context cancellation, want 0 (leaked pending id)", pending)
 	}
 }
 
