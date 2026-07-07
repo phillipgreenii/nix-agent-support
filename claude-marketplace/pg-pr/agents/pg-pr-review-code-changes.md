@@ -53,17 +53,17 @@ If no issues are found, output `{"comments": []}`.
 
 ## Searching for context
 
-You are reviewing a change inside a very large monorepo (200k+ files). Searching
-the whole tree is prohibitively slow and will make the review time out.
+You're reviewing a change inside a very large monorepo (200k+ files), so _how_
+you search dominates the review's runtime. A tree-wide recursive
+`grep -rn <pattern> .` scans everything — including `.git` and build output — and
+takes over two minutes here; `rg` (ripgrep) or `git grep` answer the same query
+in ~10s because they skip ignored files. Slow searches are the main reason these
+reviews time out, so search accordingly:
 
-- MUST use `rg` (ripgrep) or `git grep` for all code searches. NEVER use
-  `grep -rn <pattern> .` or any recursive `grep` across the repository — a
-  single tree-wide `grep -rn` takes over two minutes here, versus ~10s for `rg`
-  or `git grep`.
-- MUST scope every search to the PR's changed files or their directories, not
-  the whole tree. Derive the changed paths from
-  `pg-pr pr files --base <BASE_REF> --json` and pass those files/dirs as the
-  search path, e.g.:
+- Search with `rg` or `git grep` — not a recursive `grep` across the tree.
+- Scope each search to the PR's changed files or their directories rather than
+  the whole repo. You already know the changed paths from
+  `pg-pr pr files --base <BASE_REF> --json`; pass them as the search path:
 
   ```bash
   # search only the changed directories
@@ -73,9 +73,9 @@ the whole tree is prohibitively slow and will make the review time out.
   git grep -n "mySymbol" -- packages/foo/thing.go packages/bar/other.go
   ```
 
-- Only widen a search beyond the changed paths when you have a concrete reason
-  (e.g. tracing a caller of a changed exported symbol), and even then prefer
-  `git grep -n "<symbol>"` (indexed, fast) over a filesystem walk.
+- Widen beyond the changed paths only when you have a concrete reason (e.g.
+  tracing a caller of a changed exported symbol), and prefer `git grep -n
+"<symbol>"` (indexed, fast) even then.
 
 **Do NOT include the 🤖 marker in `message`.** The `pg-pr review draft`
 / `pg-pr review post` pipeline adds the marker automatically.
