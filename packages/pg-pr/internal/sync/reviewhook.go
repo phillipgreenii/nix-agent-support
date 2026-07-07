@@ -23,6 +23,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewsink"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
@@ -93,6 +94,10 @@ type ReviewHookDeps struct {
 	// ReviewsDir overrides the reviewstage directory. Empty →
 	// reviewstage.DefaultDir(). Tests inject a temp dir.
 	ReviewsDir string
+	// PreFetch, when non-nil, gates spawning behind a daemon-side pre-fetch of
+	// the PR head (the fetch IS the credential check). Nil disables the gate:
+	// the reviewer's own `pg-pr worktree add` fetches, as before.
+	PreFetch *PreFetchGate
 }
 
 // reviewHookEnabled reports whether the hook has enough deps to run.
@@ -191,11 +196,53 @@ func (e *Engine) headAdvancedPastAgentReview(ctx context.Context, db *store.DB, 
 	return false
 }
 
+// ensurePRFetched runs the pre-spawn credential gate for ref. It returns
+// FetchOK when the PR head is local (or the gate is disabled / the repo has no
+// local checkout). Any other outcome is logged (and, for a missing `step`
+// binary or a credential/network failure, counted) and the caller leaves the
+// bead OPEN + unclaimed for a later retry — a fetch/credential failure NEVER
+// bumps the dead-letter fail count.
+func (e *Engine) ensurePRFetched(ctx context.Context, log *slog.Logger, ref beads.DraftReviewRef) FetchOutcome {
+	gate := e.deps.Review.PreFetch
+	if gate == nil {
+		return FetchOK // gate disabled → preserve prior behavior
+	}
+	rcfg, err := e.repoConfig(ref.Repo)
+	if err != nil || rcfg.Path == "" {
+		// No local checkout to fetch into; let the reviewer's worktree add fetch.
+		return FetchOK
+	}
+	outcome := gate.Ensure(ctx, rcfg.Path, ref.Number)
+	switch outcome {
+	case FetchOK:
+	case FetchDeferred:
+		log.Info("review hook: pre-fetch deferred (single-flight/cooldown); leaving bead open",
+			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
+	case FetchStepMissing:
+		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("step_missing").Inc()
+		log.Error("review hook: pre-fetch failed — `step` not resolvable on daemon PATH (deploy bug); leaving bead open",
+			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
+	default: // FetchFailed
+		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("credential").Inc()
+		log.Warn("review hook: pre-fetch failed (credential/network); leaving bead open for retry",
+			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
+	}
+	return outcome
+}
+
 // processDraftReview handles one ready draft-review bead end to end. All errors
 // are logged and swallowed here (per-item continue in the caller).
 func (e *Engine) processDraftReview(ctx context.Context, log *slog.Logger, ref beads.DraftReviewRef) {
 	bdc := e.deps.Review.Beads
 	dir := e.reviewsDir()
+
+	// Pre-fetch credential gate (before claiming, so a deferred/failed fetch
+	// leaves the bead cleanly ready for the next cycle with no claim churn and
+	// WITHOUT bumping the dead-letter fail count — a 12h cert expiry must not
+	// dead-letter the backlog).
+	if e.ensurePRFetched(ctx, log, ref) != FetchOK {
+		return
+	}
 
 	if err := bdc.ClaimDraftReview(ctx, ref.ID); err != nil {
 		log.Warn("review hook: claim failed", "id", ref.ID, "err", err.Error())

@@ -389,6 +389,94 @@ func TestMaintenanceCycle_InvokesReviewHook(t *testing.T) {
 	}
 }
 
+func TestReviewHookCycle_PreFetchFailure_LeavesBeadOpen_NoBump(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	dir := t.TempDir()
+	prID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 5, Ownership: "mine", State: "open", HeadSHA: "h1"})
+	_, _, _ = db.RecordRevision(ctx, prID, "h1", "b")
+
+	bdc := newFakeReviewBeads()
+	bdc.ready = []beads.DraftReviewRef{{ID: "dr-1", Repo: "o/r", Number: 5, Mine: true}}
+	sp := &fakeSpawner{headSHA: "h1", writeDraft: true, reviewsDir: dir}
+	sinks := &recordingSinks{}
+
+	gate := &PreFetchGate{
+		Resolver: fakeResolver{sock: "/agent.sock"},
+		Cert:     fakeCert{valid: false},
+		Fetcher:  &fakeFetcher{err: errors.New("Permission denied (publickey).")},
+	}
+	e, err := New(Deps{
+		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}}},
+		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
+		Beads: &fakeDepBeads{},
+		Store: db,
+		Review: ReviewHookDeps{
+			Beads: bdc, Spawner: sp, MineSink: sinks.mineSink, TeamSink: sinks.teamSink,
+			ReviewsDir: dir, PreFetch: gate,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	e.reviewHookCycle(ctx, NewTextLogger())
+
+	if len(sp.calls) != 0 {
+		t.Fatalf("spawner must NOT run on pre-fetch failure, got %d", len(sp.calls))
+	}
+	if len(bdc.claimed) != 0 {
+		t.Fatalf("bead must NOT be claimed on pre-fetch failure, got %v", bdc.claimed)
+	}
+	if _, ok := bdc.closed["dr-1"]; ok {
+		t.Fatal("bead must NOT be closed on pre-fetch failure")
+	}
+	if bdc.failCounts["dr-1"] != 0 {
+		t.Fatalf("fail count MUST stay 0 on a credential failure, got %d", bdc.failCounts["dr-1"])
+	}
+}
+
+func TestReviewHookCycle_PreFetchSuccess_Spawns(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	dir := t.TempDir()
+	prID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 5, Ownership: "mine", State: "open", HeadSHA: "h1"})
+	_, _, _ = db.RecordRevision(ctx, prID, "h1", "b")
+
+	bdc := newFakeReviewBeads()
+	bdc.ready = []beads.DraftReviewRef{{ID: "dr-1", Repo: "o/r", Number: 5, Mine: true}}
+	sp := &fakeSpawner{headSHA: "h1", writeDraft: true, reviewsDir: dir}
+	sinks := &recordingSinks{}
+
+	gate := &PreFetchGate{
+		Resolver: fakeResolver{sock: "/agent.sock"},
+		Cert:     fakeCert{valid: true},
+		Fetcher:  &fakeFetcher{},
+	}
+	e, err := New(Deps{
+		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}}},
+		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
+		Beads: &fakeDepBeads{},
+		Store: db,
+		Review: ReviewHookDeps{
+			Beads: bdc, Spawner: sp, MineSink: sinks.mineSink, TeamSink: sinks.teamSink,
+			ReviewsDir: dir, PreFetch: gate,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	e.reviewHookCycle(ctx, NewTextLogger())
+
+	if len(sp.calls) != 1 {
+		t.Fatalf("spawner should run once after a successful pre-fetch, got %d", len(sp.calls))
+	}
+	if bdc.closed["dr-1"] != "reviewed" {
+		t.Fatalf("bead should be produced+closed, got %v", bdc.closed)
+	}
+}
+
 func TestReviewHookCycle_ReReviewOnHeadAdvance(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
