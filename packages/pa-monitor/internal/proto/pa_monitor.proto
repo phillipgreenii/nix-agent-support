@@ -53,6 +53,12 @@ service PaMonitor {
   // (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
   // the same cmux workspace.
   rpc RegisterBridge(RegisterBridgeRequest) returns (RegisterBridgeResponse);
+
+  // BridgeChannel is a bidirectional stream between a cmux-bridge and the
+  // daemon: the bridge sends Register/Heartbeat/DeliverResult messages, and
+  // the daemon pushes DaemonState snapshots and Deliver (nudge delivery)
+  // requests.
+  rpc BridgeChannel(stream BridgeMsg) returns (stream DaemonMsg);
 }
 
 message GetStateRequest {}
@@ -283,6 +289,53 @@ message RegisterBridgeRequest {
 }
 
 message RegisterBridgeResponse {}
+
+// --- BridgeChannel --- //
+
+// BridgeMsg is sent from cmux-bridge to the daemon over BridgeChannel.
+message BridgeMsg {
+  oneof kind {
+    Register register = 1;
+    Heartbeat heartbeat = 2;
+    DeliverResult result = 3;
+  }
+}
+
+// DaemonMsg is sent from the daemon to cmux-bridge over BridgeChannel.
+message DaemonMsg {
+  oneof kind {
+    DaemonState snapshot = 1;
+    Deliver deliver = 2;
+  }
+}
+
+// Register is the first message a bridge sends on BridgeChannel,
+// announcing its identity.
+message Register {
+  int32 bridge_pid = 1;
+  int32 server_pid = 2;
+  string workspace_id = 3;
+}
+
+// Heartbeat is sent periodically by the bridge to indicate liveness.
+message Heartbeat {
+  int32 bridge_pid = 1;
+}
+
+// Deliver instructs the bridge to deliver a nudge's text to the given
+// target process.
+message Deliver {
+  string id = 1;
+  int32 target_pid = 2;
+  string text = 3;
+}
+
+// DeliverResult reports back the outcome of a Deliver request.
+message DeliverResult {
+  string id = 1;
+  bool ok = 2;
+  string error = 3;
+}
 
 // --- ApiError / PendingNudge --- //
 

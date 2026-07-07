@@ -1752,6 +1752,418 @@ func (*RegisterBridgeResponse) Descriptor() ([]byte, []int) {
 	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{20}
 }
 
+// BridgeMsg is sent from cmux-bridge to the daemon over BridgeChannel.
+type BridgeMsg struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*BridgeMsg_Register
+	//	*BridgeMsg_Heartbeat
+	//	*BridgeMsg_Result
+	Kind          isBridgeMsg_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BridgeMsg) Reset() {
+	*x = BridgeMsg{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BridgeMsg) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BridgeMsg) ProtoMessage() {}
+
+func (x *BridgeMsg) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BridgeMsg.ProtoReflect.Descriptor instead.
+func (*BridgeMsg) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *BridgeMsg) GetKind() isBridgeMsg_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *BridgeMsg) GetRegister() *Register {
+	if x != nil {
+		if x, ok := x.Kind.(*BridgeMsg_Register); ok {
+			return x.Register
+		}
+	}
+	return nil
+}
+
+func (x *BridgeMsg) GetHeartbeat() *Heartbeat {
+	if x != nil {
+		if x, ok := x.Kind.(*BridgeMsg_Heartbeat); ok {
+			return x.Heartbeat
+		}
+	}
+	return nil
+}
+
+func (x *BridgeMsg) GetResult() *DeliverResult {
+	if x != nil {
+		if x, ok := x.Kind.(*BridgeMsg_Result); ok {
+			return x.Result
+		}
+	}
+	return nil
+}
+
+type isBridgeMsg_Kind interface {
+	isBridgeMsg_Kind()
+}
+
+type BridgeMsg_Register struct {
+	Register *Register `protobuf:"bytes,1,opt,name=register,proto3,oneof"`
+}
+
+type BridgeMsg_Heartbeat struct {
+	Heartbeat *Heartbeat `protobuf:"bytes,2,opt,name=heartbeat,proto3,oneof"`
+}
+
+type BridgeMsg_Result struct {
+	Result *DeliverResult `protobuf:"bytes,3,opt,name=result,proto3,oneof"`
+}
+
+func (*BridgeMsg_Register) isBridgeMsg_Kind() {}
+
+func (*BridgeMsg_Heartbeat) isBridgeMsg_Kind() {}
+
+func (*BridgeMsg_Result) isBridgeMsg_Kind() {}
+
+// DaemonMsg is sent from the daemon to cmux-bridge over BridgeChannel.
+type DaemonMsg struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*DaemonMsg_Snapshot
+	//	*DaemonMsg_Deliver
+	Kind          isDaemonMsg_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonMsg) Reset() {
+	*x = DaemonMsg{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonMsg) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonMsg) ProtoMessage() {}
+
+func (x *DaemonMsg) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonMsg.ProtoReflect.Descriptor instead.
+func (*DaemonMsg) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *DaemonMsg) GetKind() isDaemonMsg_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *DaemonMsg) GetSnapshot() *DaemonState {
+	if x != nil {
+		if x, ok := x.Kind.(*DaemonMsg_Snapshot); ok {
+			return x.Snapshot
+		}
+	}
+	return nil
+}
+
+func (x *DaemonMsg) GetDeliver() *Deliver {
+	if x != nil {
+		if x, ok := x.Kind.(*DaemonMsg_Deliver); ok {
+			return x.Deliver
+		}
+	}
+	return nil
+}
+
+type isDaemonMsg_Kind interface {
+	isDaemonMsg_Kind()
+}
+
+type DaemonMsg_Snapshot struct {
+	Snapshot *DaemonState `protobuf:"bytes,1,opt,name=snapshot,proto3,oneof"`
+}
+
+type DaemonMsg_Deliver struct {
+	Deliver *Deliver `protobuf:"bytes,2,opt,name=deliver,proto3,oneof"`
+}
+
+func (*DaemonMsg_Snapshot) isDaemonMsg_Kind() {}
+
+func (*DaemonMsg_Deliver) isDaemonMsg_Kind() {}
+
+// Register is the first message a bridge sends on BridgeChannel,
+// announcing its identity.
+type Register struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BridgePid     int32                  `protobuf:"varint,1,opt,name=bridge_pid,json=bridgePid,proto3" json:"bridge_pid,omitempty"`
+	ServerPid     int32                  `protobuf:"varint,2,opt,name=server_pid,json=serverPid,proto3" json:"server_pid,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Register) Reset() {
+	*x = Register{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Register) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Register) ProtoMessage() {}
+
+func (x *Register) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Register.ProtoReflect.Descriptor instead.
+func (*Register) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *Register) GetBridgePid() int32 {
+	if x != nil {
+		return x.BridgePid
+	}
+	return 0
+}
+
+func (x *Register) GetServerPid() int32 {
+	if x != nil {
+		return x.ServerPid
+	}
+	return 0
+}
+
+func (x *Register) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+// Heartbeat is sent periodically by the bridge to indicate liveness.
+type Heartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BridgePid     int32                  `protobuf:"varint,1,opt,name=bridge_pid,json=bridgePid,proto3" json:"bridge_pid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Heartbeat) Reset() {
+	*x = Heartbeat{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Heartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Heartbeat) ProtoMessage() {}
+
+func (x *Heartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
+func (*Heartbeat) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *Heartbeat) GetBridgePid() int32 {
+	if x != nil {
+		return x.BridgePid
+	}
+	return 0
+}
+
+// Deliver instructs the bridge to deliver a nudge's text to the given
+// target process.
+type Deliver struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TargetPid     int32                  `protobuf:"varint,2,opt,name=target_pid,json=targetPid,proto3" json:"target_pid,omitempty"`
+	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Deliver) Reset() {
+	*x = Deliver{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Deliver) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Deliver) ProtoMessage() {}
+
+func (x *Deliver) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Deliver.ProtoReflect.Descriptor instead.
+func (*Deliver) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *Deliver) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Deliver) GetTargetPid() int32 {
+	if x != nil {
+		return x.TargetPid
+	}
+	return 0
+}
+
+func (x *Deliver) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// DeliverResult reports back the outcome of a Deliver request.
+type DeliverResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeliverResult) Reset() {
+	*x = DeliverResult{}
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeliverResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeliverResult) ProtoMessage() {}
+
+func (x *DeliverResult) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeliverResult.ProtoReflect.Descriptor instead.
+func (*DeliverResult) Descriptor() ([]byte, []int) {
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *DeliverResult) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DeliverResult) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *DeliverResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type ApiError struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
@@ -1766,7 +2178,7 @@ type ApiError struct {
 
 func (x *ApiError) Reset() {
 	*x = ApiError{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1778,7 +2190,7 @@ func (x *ApiError) String() string {
 func (*ApiError) ProtoMessage() {}
 
 func (x *ApiError) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[21]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1791,7 +2203,7 @@ func (x *ApiError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiError.ProtoReflect.Descriptor instead.
 func (*ApiError) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{21}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ApiError) GetKind() string {
@@ -1845,7 +2257,7 @@ type PendingNudge struct {
 
 func (x *PendingNudge) Reset() {
 	*x = PendingNudge{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1857,7 +2269,7 @@ func (x *PendingNudge) String() string {
 func (*PendingNudge) ProtoMessage() {}
 
 func (x *PendingNudge) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[22]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1870,7 +2282,7 @@ func (x *PendingNudge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingNudge.ProtoReflect.Descriptor instead.
 func (*PendingNudge) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{22}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PendingNudge) GetSources() []string {
@@ -1888,7 +2300,7 @@ type IsAnyBusyRequest struct {
 
 func (x *IsAnyBusyRequest) Reset() {
 	*x = IsAnyBusyRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1900,7 +2312,7 @@ func (x *IsAnyBusyRequest) String() string {
 func (*IsAnyBusyRequest) ProtoMessage() {}
 
 func (x *IsAnyBusyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[23]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1913,7 +2325,7 @@ func (x *IsAnyBusyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IsAnyBusyRequest.ProtoReflect.Descriptor instead.
 func (*IsAnyBusyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{23}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{29}
 }
 
 type IsAnyBusyResponse struct {
@@ -1926,7 +2338,7 @@ type IsAnyBusyResponse struct {
 
 func (x *IsAnyBusyResponse) Reset() {
 	*x = IsAnyBusyResponse{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1938,7 +2350,7 @@ func (x *IsAnyBusyResponse) String() string {
 func (*IsAnyBusyResponse) ProtoMessage() {}
 
 func (x *IsAnyBusyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[24]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1951,7 +2363,7 @@ func (x *IsAnyBusyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IsAnyBusyResponse.ProtoReflect.Descriptor instead.
 func (*IsAnyBusyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{24}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *IsAnyBusyResponse) GetAnyBusy() bool {
@@ -1977,7 +2389,7 @@ type GetSessionInfoRequest struct {
 
 func (x *GetSessionInfoRequest) Reset() {
 	*x = GetSessionInfoRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1989,7 +2401,7 @@ func (x *GetSessionInfoRequest) String() string {
 func (*GetSessionInfoRequest) ProtoMessage() {}
 
 func (x *GetSessionInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[25]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2002,7 +2414,7 @@ func (x *GetSessionInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionInfoRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{25}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetSessionInfoRequest) GetSelector() *Selector {
@@ -2024,7 +2436,7 @@ type SessionDetail struct {
 
 func (x *SessionDetail) Reset() {
 	*x = SessionDetail{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2036,7 +2448,7 @@ func (x *SessionDetail) String() string {
 func (*SessionDetail) ProtoMessage() {}
 
 func (x *SessionDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[26]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2049,7 +2461,7 @@ func (x *SessionDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDetail.ProtoReflect.Descriptor instead.
 func (*SessionDetail) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{26}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SessionDetail) GetView() *SessionView {
@@ -2089,7 +2501,7 @@ type GetPathInfoRequest struct {
 
 func (x *GetPathInfoRequest) Reset() {
 	*x = GetPathInfoRequest{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2101,7 +2513,7 @@ func (x *GetPathInfoRequest) String() string {
 func (*GetPathInfoRequest) ProtoMessage() {}
 
 func (x *GetPathInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[27]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2114,7 +2526,7 @@ func (x *GetPathInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPathInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetPathInfoRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{27}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetPathInfoRequest) GetPath() string {
@@ -2133,7 +2545,7 @@ type PathRollup struct {
 
 func (x *PathRollup) Reset() {
 	*x = PathRollup{}
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2145,7 +2557,7 @@ func (x *PathRollup) String() string {
 func (*PathRollup) ProtoMessage() {}
 
 func (x *PathRollup) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_pa_monitor_proto_msgTypes[28]
+	mi := &file_internal_proto_pa_monitor_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2158,7 +2570,7 @@ func (x *PathRollup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathRollup.ProtoReflect.Descriptor instead.
 func (*PathRollup) Descriptor() ([]byte, []int) {
-	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{28}
+	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *PathRollup) GetDirectory() *Directory {
@@ -2319,7 +2731,34 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1d\n" +
 	"\n" +
 	"bridge_pid\x18\x02 \x01(\x05R\tbridgePid\"\x18\n" +
-	"\x16RegisterBridgeResponse\"\xc7\x01\n" +
+	"\x16RegisterBridgeResponse\"\xbc\x01\n" +
+	"\tBridgeMsg\x125\n" +
+	"\bregister\x18\x01 \x01(\v2\x17.pa_monitor.v1.RegisterH\x00R\bregister\x128\n" +
+	"\theartbeat\x18\x02 \x01(\v2\x18.pa_monitor.v1.HeartbeatH\x00R\theartbeat\x126\n" +
+	"\x06result\x18\x03 \x01(\v2\x1c.pa_monitor.v1.DeliverResultH\x00R\x06resultB\x06\n" +
+	"\x04kind\"\x81\x01\n" +
+	"\tDaemonMsg\x128\n" +
+	"\bsnapshot\x18\x01 \x01(\v2\x1a.pa_monitor.v1.DaemonStateH\x00R\bsnapshot\x122\n" +
+	"\adeliver\x18\x02 \x01(\v2\x16.pa_monitor.v1.DeliverH\x00R\adeliverB\x06\n" +
+	"\x04kind\"k\n" +
+	"\bRegister\x12\x1d\n" +
+	"\n" +
+	"bridge_pid\x18\x01 \x01(\x05R\tbridgePid\x12\x1d\n" +
+	"\n" +
+	"server_pid\x18\x02 \x01(\x05R\tserverPid\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\"*\n" +
+	"\tHeartbeat\x12\x1d\n" +
+	"\n" +
+	"bridge_pid\x18\x01 \x01(\x05R\tbridgePid\"L\n" +
+	"\aDeliver\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"target_pid\x18\x02 \x01(\x05R\ttargetPid\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"E\n" +
+	"\rDeliverResult\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xc7\x01\n" +
 	"\bApiError\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12*\n" +
@@ -2353,7 +2792,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x16CAFFEINATE_PROCESS_OFF\x10\x00\x12\x19\n" +
 	"\x15CAFFEINATE_PROCESS_ON\x10\x01\x12\x1c\n" +
 	"\x18CAFFEINATE_PROCESS_GRACE\x10\x02\x12\x1c\n" +
-	"\x18CAFFEINATE_PROCESS_ERROR\x10\x032\x8c\a\n" +
+	"\x18CAFFEINATE_PROCESS_ERROR\x10\x032\xd5\a\n" +
 	"\tPaMonitor\x12F\n" +
 	"\bGetState\x12\x1e.pa_monitor.v1.GetStateRequest\x1a\x1a.pa_monitor.v1.DaemonState\x12L\n" +
 	"\n" +
@@ -2368,7 +2807,8 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"NudgeQueue\x12 .pa_monitor.v1.NudgeQueueRequest\x1a!.pa_monitor.v1.NudgeQueueResponse\x12T\n" +
 	"\vNudgeCancel\x12!.pa_monitor.v1.NudgeCancelRequest\x1a\".pa_monitor.v1.NudgeCancelResponse\x12Z\n" +
 	"\rSetAutoResume\x12#.pa_monitor.v1.SetAutoResumeRequest\x1a$.pa_monitor.v1.SetAutoResumeResponse\x12]\n" +
-	"\x0eRegisterBridge\x12$.pa_monitor.v1.RegisterBridgeRequest\x1a%.pa_monitor.v1.RegisterBridgeResponseB;Z9github.com/phillipgreenii/pa-monitor/internal/proto;protob\x06proto3"
+	"\x0eRegisterBridge\x12$.pa_monitor.v1.RegisterBridgeRequest\x1a%.pa_monitor.v1.RegisterBridgeResponse\x12G\n" +
+	"\rBridgeChannel\x12\x18.pa_monitor.v1.BridgeMsg\x1a\x18.pa_monitor.v1.DaemonMsg(\x010\x01B;Z9github.com/phillipgreenii/pa-monitor/internal/proto;protob\x06proto3"
 
 var (
 	file_internal_proto_pa_monitor_proto_rawDescOnce sync.Once
@@ -2383,7 +2823,7 @@ func file_internal_proto_pa_monitor_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_proto_pa_monitor_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(CaffeinateProcess)(0),         // 0: pa_monitor.v1.CaffeinateProcess
 	(*GetStateRequest)(nil),        // 1: pa_monitor.v1.GetStateRequest
@@ -2407,72 +2847,85 @@ var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*SetAutoResumeResponse)(nil),  // 19: pa_monitor.v1.SetAutoResumeResponse
 	(*RegisterBridgeRequest)(nil),  // 20: pa_monitor.v1.RegisterBridgeRequest
 	(*RegisterBridgeResponse)(nil), // 21: pa_monitor.v1.RegisterBridgeResponse
-	(*ApiError)(nil),               // 22: pa_monitor.v1.ApiError
-	(*PendingNudge)(nil),           // 23: pa_monitor.v1.PendingNudge
-	(*IsAnyBusyRequest)(nil),       // 24: pa_monitor.v1.IsAnyBusyRequest
-	(*IsAnyBusyResponse)(nil),      // 25: pa_monitor.v1.IsAnyBusyResponse
-	(*GetSessionInfoRequest)(nil),  // 26: pa_monitor.v1.GetSessionInfoRequest
-	(*SessionDetail)(nil),          // 27: pa_monitor.v1.SessionDetail
-	(*GetPathInfoRequest)(nil),     // 28: pa_monitor.v1.GetPathInfoRequest
-	(*PathRollup)(nil),             // 29: pa_monitor.v1.PathRollup
-	(*timestamppb.Timestamp)(nil),  // 30: google.protobuf.Timestamp
+	(*BridgeMsg)(nil),              // 22: pa_monitor.v1.BridgeMsg
+	(*DaemonMsg)(nil),              // 23: pa_monitor.v1.DaemonMsg
+	(*Register)(nil),               // 24: pa_monitor.v1.Register
+	(*Heartbeat)(nil),              // 25: pa_monitor.v1.Heartbeat
+	(*Deliver)(nil),                // 26: pa_monitor.v1.Deliver
+	(*DeliverResult)(nil),          // 27: pa_monitor.v1.DeliverResult
+	(*ApiError)(nil),               // 28: pa_monitor.v1.ApiError
+	(*PendingNudge)(nil),           // 29: pa_monitor.v1.PendingNudge
+	(*IsAnyBusyRequest)(nil),       // 30: pa_monitor.v1.IsAnyBusyRequest
+	(*IsAnyBusyResponse)(nil),      // 31: pa_monitor.v1.IsAnyBusyResponse
+	(*GetSessionInfoRequest)(nil),  // 32: pa_monitor.v1.GetSessionInfoRequest
+	(*SessionDetail)(nil),          // 33: pa_monitor.v1.SessionDetail
+	(*GetPathInfoRequest)(nil),     // 34: pa_monitor.v1.GetPathInfoRequest
+	(*PathRollup)(nil),             // 35: pa_monitor.v1.PathRollup
+	(*timestamppb.Timestamp)(nil),  // 36: google.protobuf.Timestamp
 }
 var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
-	30, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
-	30, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
+	36, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
+	36, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
 	6,  // 2: pa_monitor.v1.DaemonState.dirs:type_name -> pa_monitor.v1.Directory
 	9,  // 3: pa_monitor.v1.DaemonState.active_block:type_name -> pa_monitor.v1.Block
 	10, // 4: pa_monitor.v1.DaemonState.active_week:type_name -> pa_monitor.v1.Week
-	30, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
+	36, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: pa_monitor.v1.DaemonState.caffeinate_process:type_name -> pa_monitor.v1.CaffeinateProcess
-	30, // 7: pa_monitor.v1.DaemonState.seven_day_resets_at:type_name -> google.protobuf.Timestamp
-	30, // 8: pa_monitor.v1.DaemonState.limits_captured_at:type_name -> google.protobuf.Timestamp
-	30, // 9: pa_monitor.v1.DaemonState.five_hour_resets_at:type_name -> google.protobuf.Timestamp
+	36, // 7: pa_monitor.v1.DaemonState.seven_day_resets_at:type_name -> google.protobuf.Timestamp
+	36, // 8: pa_monitor.v1.DaemonState.limits_captured_at:type_name -> google.protobuf.Timestamp
+	36, // 9: pa_monitor.v1.DaemonState.five_hour_resets_at:type_name -> google.protobuf.Timestamp
 	7,  // 10: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
 	8,  // 11: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
-	30, // 12: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	30, // 13: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
-	30, // 14: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
-	30, // 15: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
-	30, // 16: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
-	30, // 17: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	30, // 18: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
-	30, // 19: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
-	30, // 20: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	36, // 12: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	36, // 13: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
+	36, // 14: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
+	36, // 15: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
+	36, // 16: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
+	36, // 17: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
+	36, // 18: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
+	36, // 19: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
+	36, // 20: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
 	0,  // 21: pa_monitor.v1.CaffeinateResponse.process:type_name -> pa_monitor.v1.CaffeinateProcess
-	30, // 22: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
-	13, // 23: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
-	8,  // 24: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
-	22, // 25: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
-	23, // 26: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
-	6,  // 27: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
-	1,  // 28: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
-	2,  // 29: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
-	3,  // 30: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
-	11, // 31: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
-	24, // 32: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
-	26, // 33: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
-	28, // 34: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	14, // 35: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
-	16, // 36: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
-	18, // 37: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
-	20, // 38: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
-	5,  // 39: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	5,  // 40: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
-	4,  // 41: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	12, // 42: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	25, // 43: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	27, // 44: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	29, // 45: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	15, // 46: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
-	17, // 47: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
-	19, // 48: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
-	21, // 49: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
-	39, // [39:50] is the sub-list for method output_type
-	28, // [28:39] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	24, // 22: pa_monitor.v1.BridgeMsg.register:type_name -> pa_monitor.v1.Register
+	25, // 23: pa_monitor.v1.BridgeMsg.heartbeat:type_name -> pa_monitor.v1.Heartbeat
+	27, // 24: pa_monitor.v1.BridgeMsg.result:type_name -> pa_monitor.v1.DeliverResult
+	5,  // 25: pa_monitor.v1.DaemonMsg.snapshot:type_name -> pa_monitor.v1.DaemonState
+	26, // 26: pa_monitor.v1.DaemonMsg.deliver:type_name -> pa_monitor.v1.Deliver
+	36, // 27: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	13, // 28: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
+	8,  // 29: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
+	28, // 30: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
+	29, // 31: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
+	6,  // 32: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
+	1,  // 33: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
+	2,  // 34: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
+	3,  // 35: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
+	11, // 36: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
+	30, // 37: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
+	32, // 38: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
+	34, // 39: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
+	14, // 40: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	16, // 41: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	18, // 42: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	20, // 43: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
+	22, // 44: pa_monitor.v1.PaMonitor.BridgeChannel:input_type -> pa_monitor.v1.BridgeMsg
+	5,  // 45: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	5,  // 46: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
+	4,  // 47: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	12, // 48: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	31, // 49: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	33, // 50: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	35, // 51: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	15, // 52: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	17, // 53: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	19, // 54: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	21, // 55: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
+	23, // 56: pa_monitor.v1.PaMonitor.BridgeChannel:output_type -> pa_monitor.v1.DaemonMsg
+	45, // [45:57] is the sub-list for method output_type
+	33, // [33:45] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_pa_monitor_proto_init() }
@@ -2486,13 +2939,22 @@ func file_internal_proto_pa_monitor_proto_init() {
 		(*Selector_Path)(nil),
 		(*Selector_CmuxWorkspaceId)(nil),
 	}
+	file_internal_proto_pa_monitor_proto_msgTypes[21].OneofWrappers = []any{
+		(*BridgeMsg_Register)(nil),
+		(*BridgeMsg_Heartbeat)(nil),
+		(*BridgeMsg_Result)(nil),
+	}
+	file_internal_proto_pa_monitor_proto_msgTypes[22].OneofWrappers = []any{
+		(*DaemonMsg_Snapshot)(nil),
+		(*DaemonMsg_Deliver)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_pa_monitor_proto_rawDesc), len(file_internal_proto_pa_monitor_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   29,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

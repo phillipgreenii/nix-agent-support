@@ -30,6 +30,7 @@ const (
 	PaMonitor_NudgeCancel_FullMethodName    = "/pa_monitor.v1.PaMonitor/NudgeCancel"
 	PaMonitor_SetAutoResume_FullMethodName  = "/pa_monitor.v1.PaMonitor/SetAutoResume"
 	PaMonitor_RegisterBridge_FullMethodName = "/pa_monitor.v1.PaMonitor/RegisterBridge"
+	PaMonitor_BridgeChannel_FullMethodName  = "/pa_monitor.v1.PaMonitor/BridgeChannel"
 )
 
 // PaMonitorClient is the client API for PaMonitor service.
@@ -73,6 +74,11 @@ type PaMonitorClient interface {
 	// (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
 	// the same cmux workspace.
 	RegisterBridge(ctx context.Context, in *RegisterBridgeRequest, opts ...grpc.CallOption) (*RegisterBridgeResponse, error)
+	// BridgeChannel is a bidirectional stream between a cmux-bridge and the
+	// daemon: the bridge sends Register/Heartbeat/DeliverResult messages, and
+	// the daemon pushes DaemonState snapshots and Deliver (nudge delivery)
+	// requests.
+	BridgeChannel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[BridgeMsg, DaemonMsg], error)
 }
 
 type paMonitorClient struct {
@@ -202,6 +208,19 @@ func (c *paMonitorClient) RegisterBridge(ctx context.Context, in *RegisterBridge
 	return out, nil
 }
 
+func (c *paMonitorClient) BridgeChannel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[BridgeMsg, DaemonMsg], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &PaMonitor_ServiceDesc.Streams[1], PaMonitor_BridgeChannel_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[BridgeMsg, DaemonMsg]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type PaMonitor_BridgeChannelClient = grpc.BidiStreamingClient[BridgeMsg, DaemonMsg]
+
 // PaMonitorServer is the server API for PaMonitor service.
 // All implementations must embed UnimplementedPaMonitorServer
 // for forward compatibility.
@@ -243,6 +262,11 @@ type PaMonitorServer interface {
 	// (cmux vs. cmux-no-bridge vs. cmux-bridge-disconnected) for sessions in
 	// the same cmux workspace.
 	RegisterBridge(context.Context, *RegisterBridgeRequest) (*RegisterBridgeResponse, error)
+	// BridgeChannel is a bidirectional stream between a cmux-bridge and the
+	// daemon: the bridge sends Register/Heartbeat/DeliverResult messages, and
+	// the daemon pushes DaemonState snapshots and Deliver (nudge delivery)
+	// requests.
+	BridgeChannel(grpc.BidiStreamingServer[BridgeMsg, DaemonMsg]) error
 	mustEmbedUnimplementedPaMonitorServer()
 }
 
@@ -285,6 +309,9 @@ func (UnimplementedPaMonitorServer) SetAutoResume(context.Context, *SetAutoResum
 }
 func (UnimplementedPaMonitorServer) RegisterBridge(context.Context, *RegisterBridgeRequest) (*RegisterBridgeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterBridge not implemented")
+}
+func (UnimplementedPaMonitorServer) BridgeChannel(grpc.BidiStreamingServer[BridgeMsg, DaemonMsg]) error {
+	return status.Error(codes.Unimplemented, "method BridgeChannel not implemented")
 }
 func (UnimplementedPaMonitorServer) mustEmbedUnimplementedPaMonitorServer() {}
 func (UnimplementedPaMonitorServer) testEmbeddedByValue()                   {}
@@ -498,6 +525,13 @@ func _PaMonitor_RegisterBridge_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PaMonitor_BridgeChannel_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PaMonitorServer).BridgeChannel(&grpc.GenericServerStream[BridgeMsg, DaemonMsg]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type PaMonitor_BridgeChannelServer = grpc.BidiStreamingServer[BridgeMsg, DaemonMsg]
+
 // PaMonitor_ServiceDesc is the grpc.ServiceDesc for PaMonitor service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -551,6 +585,12 @@ var PaMonitor_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "WatchState",
 			Handler:       _PaMonitor_WatchState_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "BridgeChannel",
+			Handler:       _PaMonitor_BridgeChannel_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "internal/proto/pa_monitor.proto",
