@@ -143,6 +143,17 @@ var (
 			Help: "gh auth failures by stage (preflight|poll).",
 		}, []string{"stage"},
 	)
+
+	// ReviewPreFetchFailuresTotal counts daemon pre-spawn PR-head fetch
+	// failures by reason. "credential" is transient (cert expiry / network) and
+	// self-heals on retry; "step_missing" is a deploy bug (the `step` binary is
+	// not on the daemon PATH) and needs operator attention.
+	ReviewPreFetchFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pg_pr_review_prefetch_failures_total",
+			Help: "daemon pre-spawn PR-head fetch failures by reason (credential|step_missing).",
+		}, []string{"reason"},
+	)
 )
 
 func init() {
@@ -163,6 +174,7 @@ func init() {
 		GraphQLRatePaused,
 		SnapshotPresent,
 		GHAuthFailuresTotal,
+		ReviewPreFetchFailuresTotal,
 	)
 }
 

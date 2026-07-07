@@ -104,3 +104,20 @@ func TestFingerprintMetricsRegistered(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewPreFetchFailuresTotal_Registered verifies the pre-fetch failure
+// counter exists and is registered on the default registry so /metrics exports
+// it.
+func TestReviewPreFetchFailuresTotal_Registered(t *testing.T) {
+	ReviewPreFetchFailuresTotal.WithLabelValues("credential").Inc()
+	mfs, err := DefaultRegistry().Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == "pg_pr_review_prefetch_failures_total" {
+			return
+		}
+	}
+	t.Fatal("pg_pr_review_prefetch_failures_total not registered")
+}
