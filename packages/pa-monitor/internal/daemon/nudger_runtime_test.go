@@ -14,6 +14,19 @@ func TestClassifySendFailure(t *testing.T) {
 		{"cmux send-key failed: exit status 1", "send_key"},
 		{"cmux --json top enumerate failed", "enumerate"},
 		{"context deadline exceeded", "timeout"},
+		// A cmux subprocess that exceeds its context deadline is SIGKILLed by
+		// exec.CommandContext, which surfaces as "signal: killed" — the dominant
+		// real-world timeout signature (see cache/signal-errors.log). It is the
+		// same root cause as "context deadline exceeded" and must classify as a
+		// timeout, not fall through to "other" (pg2-il6j). A plain `cmux send`
+		// timeout carries no path keyword, so it is the case that regressed.
+		{"cmux send: signal: killed", "timeout"},
+		// A send-key timeout keeps its more-specific path label; the send-key
+		// keyword is matched before the timeout signature, and that ordering is
+		// intentional (the path is more actionable than the generic timeout).
+		{"cmux send-key: signal: killed", "send_key"},
+		// An enumerate timeout likewise keeps its path label.
+		{"cmux enumerate: cmux --json top --processes: signal: killed", "enumerate"},
 		{"dial unix: connection refused", "connection"},
 		{"", "unknown"},
 		{"something totally unexpected", "other"},

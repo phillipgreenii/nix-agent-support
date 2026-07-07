@@ -257,7 +257,13 @@ func classifySendFailure(errText string) string {
 	case strings.Contains(s, "enumerate"):
 		return "enumerate"
 	case strings.Contains(s, "timeout"),
-		strings.Contains(s, "deadline exceeded"):
+		strings.Contains(s, "deadline exceeded"),
+		// exec.CommandContext SIGKILLs a cmux subprocess whose context
+		// deadline expires; the ExitError then renders as "signal: killed".
+		// This is the same root cause as "deadline exceeded" (and the more
+		// common of the two in practice — see cache/signal-errors.log), so
+		// it must land in "timeout" rather than falling through to "other".
+		strings.Contains(s, "signal: killed"):
 		return "timeout"
 	case strings.Contains(s, "connection"),
 		strings.Contains(s, "connect"),
