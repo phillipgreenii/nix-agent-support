@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
@@ -12,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // bridgeState captures the small slice of DaemonState whose flips the
@@ -212,8 +214,23 @@ func runCmuxBridge(args []string) {
 
 	logBridgeVersions(ctx, log)
 
+	// One CmuxSignaler for the bridge's lifetime: its ps/surface caches are
+	// reused across the server-PID probe and every local delivery. The bridge
+	// is a cmux descendant, so its FindCmuxServerAncestor and Send calls both
+	// resolve against the same in-tree cmux server.
+	cmuxSig := &signal.CmuxSignaler{}
+
+	// Resolve the cmux server PID once, retrying until non-zero: the Register
+	// message keys the daemon-side bridge registry on (serverPID, bridgePID),
+	// so a serverPID of 0 would be silently dropped by the daemon. Block here
+	// (best-effort, ctx-cancellable) rather than freeze a bad value.
+	serverPID := resolveServerPID(ctx, cmuxSig, log)
+	if serverPID == 0 {
+		return // ctx cancelled before a cmux server ancestor was found
+	}
+
 	for {
-		if err := streamOnce(ctx, ws, reporter, log, announcer); err != nil {
+		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -223,6 +240,27 @@ func runCmuxBridge(args []string) {
 			continue
 		}
 		return
+	}
+}
+
+// resolveServerPID probes for the cmux server in the bridge's own ancestry,
+// retrying with a short backoff until it finds one or ctx is cancelled.
+// Returns 0 only when ctx is cancelled first. The bridge always runs as a
+// descendant of a cmux server, so in steady state this returns on the first
+// probe; the retry loop covers a race where the bridge starts before its
+// ancestry is fully observable via ps.
+func resolveServerPID(ctx context.Context, cmuxSig *signal.CmuxSignaler, log *bridgeLogger) int {
+	const probeBackoff = 2 * time.Second
+	for {
+		if pid, ok := cmuxSig.FindCmuxServerAncestor(os.Getpid()); ok && pid > 0 {
+			return pid
+		}
+		log.Detail("bridge.server_pid_probe", map[string]string{"result": "no cmux server ancestor yet"})
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(probeBackoff):
+		}
 	}
 }
 
@@ -246,104 +284,247 @@ func logBridgeVersions(ctx context.Context, log *bridgeLogger) {
 	log.Term(fmt.Sprintf("pa-monitor bridge v%s (daemon v%s)", version, state.GetDaemonVersion()))
 }
 
-// bridgeHeartbeatInterval is how often the bridge re-calls RegisterBridge
-// on the daemon to refresh its lastSeen timestamp. Must be shorter than the
-// daemon's bridge.Registry staleAfter window (30s) by enough margin to
-// survive a missed call. ~10s gives 3 attempts before the daemon flags us
-// as disconnected.
+// bridgeHeartbeatInterval is how often the bridge sends a Heartbeat over the
+// BridgeChannel stream to refresh its lastSeen timestamp on the daemon. Must
+// be shorter than the daemon's bridge.Registry staleAfter window (30s) by
+// enough margin to survive a missed message. ~10s gives 3 attempts before the
+// daemon flags us as disconnected.
 const bridgeHeartbeatInterval = 10 * time.Second
 
-// registerBridge calls the daemon's RegisterBridge RPC on the given client.
-// Failures are non-fatal — the bridge keeps streaming state; the only
-// effect of a failed registration is that sessions in this cmux workspace
-// will surface as "cmux (no bridge)" until a later attempt succeeds.
-func registerBridge(ctx context.Context, client *rpcclient.Client, ws string, log *bridgeLogger) {
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+// streamOnce establishes one BridgeChannel session and drives it to
+// completion, returning an error the outer reconnect loop uses to retry. It is
+// intentionally thin: it owns dial + stream open + context lifetime and
+// delegates the message loop to runBridgeChannel (which is unit-tested with a
+// fake stream). The derived ctx is cancelled on return so a blocked stream.Recv
+// in runBridgeChannel unwinds cleanly.
+func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if _, err := client.C.RegisterBridge(cctx, &pb.RegisterBridgeRequest{
-		WorkspaceId: ws,
-		BridgePid:   int32(os.Getpid()),
-	}); err != nil {
-		log.Detail("bridge.register_failed", map[string]string{"error": err.Error()})
-	}
-}
 
-func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer) error {
 	client, err := rpcclient.Dial(ctx)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	// Announce ourselves to the daemon so it can refine "cmux" terminal-host
-	// labels for sessions in our workspace. Then start a goroutine that
-	// re-registers every bridgeHeartbeatInterval as a liveness heartbeat.
-	registerBridge(ctx, client, ws, log)
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	defer cancelHeartbeat()
-	go func() {
-		t := time.NewTicker(bridgeHeartbeatInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-heartbeatCtx.Done():
-				return
-			case <-t.C:
-				registerBridge(heartbeatCtx, client, ws, log)
-			}
-		}
-	}()
-
-	stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 2000})
+	stream, err := client.C.BridgeChannel(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Watchdog: client requires 2s pushes from the server; 4s budget.
-	const pushBudget = 4 * time.Second
+	return runBridgeChannel(ctx, stream, ws, serverPID, cmuxSig, reporter, log, announcer)
+}
+
+// runBridgeChannel runs the BridgeChannel message loop over an established
+// bidi stream until the stream fails or ctx is cancelled, returning the error
+// that ended it (so the caller reconnects).
+//
+// Concurrency model (mirrors the daemon side in
+// internal/daemon/bridge_channel.go):
+//
+//   - A single SENDER goroutine is the sole caller of stream.Send. It sends the
+//     initial Register, then funnels periodic Heartbeats and per-delivery
+//     DeliverResults — the latter arriving over the outbound channel — so
+//     stream.Send is never called concurrently, as gRPC requires.
+//   - A single RECEIVER goroutine is the sole caller of stream.Recv, forwarding
+//     each (msg, err) to the main loop. Recv is unblocked on teardown by ctx
+//     cancellation (streamOnce cancels the stream's context).
+//   - The MAIN loop consumes received messages: a snapshot drives reporter.Push
+//     (exactly as the old WatchState path did); a Deliver is dispatched to its
+//     own HANDLER goroutine so a slow cmux send never head-of-line-blocks
+//     snapshot handling or other deliveries.
+//   - HANDLER goroutines resolve + send locally via cmuxSig, then enqueue their
+//     DeliverResult onto the outbound channel.
+//
+// Teardown: the main loop breaks, then cancels ctx (stopping sender + receiver
+// + any handler blocked enqueuing a result) and joins every goroutine before
+// returning. The outbound channel is never closed, so no goroutine can send on
+// a closed channel.
+func runBridgeChannel(
+	ctx context.Context,
+	stream pb.PaMonitor_BridgeChannelClient,
+	ws string,
+	serverPID int,
+	cmuxSig *signal.CmuxSignaler,
+	reporter cmuxstatus.Reporter,
+	log *bridgeLogger,
+	announcer *connAnnouncer,
+) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// outbound funnels every non-Register stream.Send through the sole sender
+	// goroutine. Buffered so a delivery handler rarely blocks enqueuing a
+	// result. Never closed — teardown is signalled by cancelling ctx.
+	outbound := make(chan *pb.BridgeMsg, 16)
+
+	// sendErrCh reports the first stream.Send failure (buffered, non-blocking
+	// write) so the main loop can surface it as the return error.
+	sendErrCh := make(chan error, 1)
+	reportSendErr := func(err error) {
+		select {
+		case sendErrCh <- err:
+		default:
+		}
+	}
+
+	// Sender goroutine: sole stream.Send caller.
+	var senderWG sync.WaitGroup
+	senderWG.Add(1)
+	go func() {
+		defer senderWG.Done()
+		reg := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
+			BridgePid:   int32(os.Getpid()),
+			ServerPid:   int32(serverPID),
+			WorkspaceId: ws,
+		}}}
+		if err := stream.Send(reg); err != nil {
+			reportSendErr(err)
+			cancel()
+			return
+		}
+		t := time.NewTicker(bridgeHeartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				hb := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Heartbeat{Heartbeat: &pb.Heartbeat{
+					BridgePid: int32(os.Getpid()),
+				}}}
+				if err := stream.Send(hb); err != nil {
+					reportSendErr(err)
+					cancel()
+					return
+				}
+			case msg := <-outbound:
+				if err := stream.Send(msg); err != nil {
+					reportSendErr(err)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	// Receiver goroutine: sole stream.Recv caller.
 	type recvResult struct {
-		msg *pb.DaemonState
+		msg *pb.DaemonMsg
 		err error
 	}
 	recvCh := make(chan recvResult, 1)
-	next := func() {
-		go func() {
+	recvDone := make(chan struct{})
+	go func() {
+		defer close(recvDone)
+		for {
 			m, e := stream.Recv()
-			recvCh <- recvResult{m, e}
-		}()
-	}
-	next()
+			select {
+			case recvCh <- recvResult{m, e}:
+			case <-ctx.Done():
+				return
+			}
+			if e != nil {
+				return
+			}
+		}
+	}()
+
+	// Delivery handlers run concurrently; joined at teardown.
+	var handlerWG sync.WaitGroup
 
 	// Per-stream diff state: tracks observable toggles (caffeinate,
-	// auto_resume) across ticks so the bridge can emit human-readable
-	// change events on the pane instead of being a silent mirror. Reset
-	// per streamOnce call: a reconnect re-emits the "initial state" line,
-	// which is desirable since pane operators care about state across
-	// reconnects.
+	// auto_resume) across snapshots so the bridge can emit human-readable
+	// change events on the pane instead of being a silent mirror. Reset per
+	// call: a reconnect re-emits the "initial state" line, which is desirable
+	// since pane operators care about state across reconnects.
 	var prev bridgeState
 	var prevSessions bridgeSessions
 
+	// Watchdog: the daemon pushes a snapshot every ~2s; a 4s budget on any
+	// received message flags a stalled stream.
+	const pushBudget = 4 * time.Second
+
+	var loopErr error
+loop:
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			loopErr = ctx.Err()
+			break loop
 		case <-time.After(pushBudget):
 			log.Detail("bridge.push_missed", map[string]string{"budget": pushBudget.String()})
-			return fmt.Errorf("push missed: no message in %s", pushBudget)
+			loopErr = fmt.Errorf("push missed: no message in %s", pushBudget)
+			break loop
 		case r := <-recvCh:
 			if r.err != nil {
-				return r.err
+				loopErr = r.err
+				break loop
 			}
-			next()
 			if r.msg == nil {
 				continue
 			}
 			announcer.connected()
-			prev = diffAndLog(prev, stateFromDaemon(r.msg), log.Term)
-			prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(r.msg, ws), log.Term)
-			snap := snapshotForWorkspace(r.msg, ws)
-			reporter.Push(snap)
+			if snap := r.msg.GetSnapshot(); snap != nil {
+				prev = diffAndLog(prev, stateFromDaemon(snap), log.Term)
+				prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(snap, ws), log.Term)
+				reporter.Push(snapshotForWorkspace(snap, ws))
+				continue
+			}
+			if d := r.msg.GetDeliver(); d != nil {
+				handlerWG.Add(1)
+				go func(d *pb.Deliver) {
+					defer handlerWG.Done()
+					deliverLocally(ctx, cmuxSig, d, outbound, log)
+				}(d)
+			}
 		}
+	}
+
+	// Teardown: signal all goroutines, then join before returning so no
+	// goroutine outlives this call. Handlers blocked enqueuing a result unblock
+	// via ctx.Done; the sender exits on ctx.Done; the receiver's Recv is
+	// unblocked by the cancelled stream context.
+	cancel()
+	handlerWG.Wait()
+	senderWG.Wait()
+	<-recvDone
+
+	// A stream.Send failure is the more actionable cause; prefer it over a
+	// bare context.Canceled from teardown.
+	select {
+	case e := <-sendErrCh:
+		if loopErr == nil || loopErr == context.Canceled {
+			loopErr = e
+		}
+	default:
+	}
+	return loopErr
+}
+
+// deliverLocally resolves the cmux surface hosting d.TargetPid and injects
+// d.Text, then enqueues a DeliverResult reflecting the outcome. It runs on a
+// per-delivery handler goroutine; the outbound enqueue is abandoned if ctx is
+// cancelled (teardown) so it never blocks on a drained sender.
+func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Deliver, outbound chan<- *pb.BridgeMsg, log *bridgeLogger) {
+	err := cmuxSig.Send(int(d.GetTargetPid()), d.GetText())
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+		log.Detail("bridge.deliver_failed", map[string]string{
+			"id":         d.GetId(),
+			"target_pid": fmt.Sprintf("%d", d.GetTargetPid()),
+			"error":      errStr,
+		})
+	}
+	res := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Result{Result: &pb.DeliverResult{
+		Id:    d.GetId(),
+		Ok:    err == nil,
+		Error: errStr,
+	}}}
+	select {
+	case outbound <- res:
+	case <-ctx.Done():
 	}
 }
 
