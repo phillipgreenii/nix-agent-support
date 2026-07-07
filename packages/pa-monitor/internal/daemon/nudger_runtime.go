@@ -187,6 +187,23 @@ func (w *WatermarkStore) RecordSuppressed(sid string, sources []nudger.Source, c
 	})
 }
 
+// RecordDroppedNoBridge implements nudger.Recorder. It reports a permanent
+// give-up on a no-bridge intent group (aged past the dispatcher's
+// noBridgeDropWindow with no live cmux-bridge to retry against) via the
+// nudge.dropped_no_bridge log event. A later task adds the matching OTel
+// counter (pa_monitor.nudge.dropped_no_bridge_total); this placeholder keeps
+// the drop observable in the log in the interim, mirroring RecordSuppressed's
+// nil-emitter guard.
+func (w *WatermarkStore) RecordDroppedNoBridge(sid string, sources []nudger.Source) {
+	if w.emitter == nil {
+		return
+	}
+	w.emitter.LogEvent("nudge.dropped_no_bridge", map[string]string{
+		"session_id": sid,
+		"sources":    joinSources(sources),
+	})
+}
+
 func (w *WatermarkStore) RecordSent(sid string, sources []nudger.Source, errorKind string, escalated bool) {
 	if w.emitter == nil {
 		return

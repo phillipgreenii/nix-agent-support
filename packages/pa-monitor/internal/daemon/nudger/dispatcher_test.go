@@ -35,14 +35,15 @@ func (f *fakeSignaler) Send(pid int, text string) error {
 }
 
 type fakeRecorder struct {
-	mu             sync.Mutex
-	suppressed     []string
-	sent           []string
-	watermarkOps   []string
-	windowLatchOps []time.Time
-	queuedOps      []string     // "sid:source" pairs recorded by RecordQueued
-	attemptOps     []string     // sids recorded by RecordDisruptAttempt
-	sendFailed     []failedSend // recorded by RecordSendFailed
+	mu              sync.Mutex
+	suppressed      []string
+	sent            []string
+	watermarkOps    []string
+	windowLatchOps  []time.Time
+	queuedOps       []string          // "sid:source" pairs recorded by RecordQueued
+	attemptOps      []string          // sids recorded by RecordDisruptAttempt
+	sendFailed      []failedSend      // recorded by RecordSendFailed
+	droppedNoBridge []droppedNoBridge // recorded by RecordDroppedNoBridge
 }
 
 // failedSend captures one RecordSendFailed call for assertions.
@@ -50,6 +51,12 @@ type failedSend struct {
 	sid       string
 	errorKind string
 	errText   string
+}
+
+// droppedNoBridge captures one RecordDroppedNoBridge call for assertions.
+type droppedNoBridge struct {
+	sid     string
+	sources []Source
 }
 
 func (r *fakeRecorder) RecordSuppressed(sid string, sources []Source, cause string) {
@@ -94,6 +101,12 @@ func (r *fakeRecorder) RecordSendFailed(sid string, sources []Source, errorKind,
 	r.sendFailed = append(r.sendFailed, failedSend{sid: sid, errorKind: errorKind, errText: errText})
 }
 
+func (r *fakeRecorder) RecordDroppedNoBridge(sid string, sources []Source) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.droppedNoBridge = append(r.droppedNoBridge, droppedNoBridge{sid: sid, sources: sources})
+}
+
 func TestDispatcherFiresOnceAndClears(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
@@ -105,7 +118,7 @@ func TestDispatcherFiresOnceAndClears(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 1 {
 		t.Fatalf("len(sent) = %d, want 1 (one signal per session)", len(sig.sent))
@@ -128,7 +141,7 @@ func TestDispatcherSuppressesWorking(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Working))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 0 {
 		t.Errorf("len(sent) = %d, want 0 (suppressed)", len(sig.sent))
@@ -148,7 +161,7 @@ func TestDispatcherSendFailureLeavesIntent(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{err: errors.New("no signaler for pid")}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if !store.HasAny("sid-1") {
 		t.Error("store cleared after send failure; should retry next tick")
@@ -172,7 +185,7 @@ func TestDispatcherSendFailureRecordsFailure(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{err: errors.New("cmux send: exit status 1")}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 
 	rec.mu.Lock()
@@ -202,7 +215,7 @@ func TestDispatcherSessionMissingSilently(t *testing.T) {
 	tree := treeWith(time.Time{}) // no sessions
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if store.HasAny("missing-sid") {
 		t.Error("intent not dropped for missing session")
@@ -220,7 +233,7 @@ func TestDispatcherTextPrecedenceManualWins(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid", 1, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 1 || sig.sent[0].Text != "manual-override" {
 		t.Errorf("sent = %+v, want manual text override", sig.sent)
@@ -267,7 +280,7 @@ func TestDispatcherRemoveKeysPreservesConcurrentIntent(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if store.HasAny("sid-1") {
 		t.Error("window_reset intent not removed after successful dispatch")
@@ -301,7 +314,7 @@ func TestDispatcher_RecordsOnSend(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	nudgeRec := &fakeNudgeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nudgeRec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 
 	if len(sig.sent) != 1 {
@@ -358,7 +371,7 @@ func TestDispatcher_RecordsSuppressed(t *testing.T) {
 			sig := &fakeSignaler{}
 			rec := &fakeRecorder{}
 			nudgeRec := &fakeNudgeRecorder{}
-			d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+			d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nudgeRec}
 			d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 
 			if len(sig.sent) != 0 {
@@ -401,7 +414,7 @@ func TestDispatcher_RecordsSendFailure(t *testing.T) {
 	sig := &fakeSignaler{err: errors.New("cmux send: exit status 1")}
 	rec := &fakeRecorder{}
 	nudgeRec := &fakeNudgeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nudgeRec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 
 	nudgeRec.mu.Lock()
@@ -442,7 +455,7 @@ func TestDispatcher_RecordHistoryWriteFailureIsSurfaced(t *testing.T) {
 
 	var logged []string
 	d := &Dispatcher{
-		Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec,
+		Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nudgeRec,
 		HistoryErrLog: func(msg string) { logged = append(logged, msg) },
 	}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
@@ -475,7 +488,7 @@ func TestDispatcher_RecordHistorySuccessDoesNotLog(t *testing.T) {
 
 	var logged []string
 	d := &Dispatcher{
-		Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec,
+		Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nudgeRec,
 		HistoryErrLog: func(msg string) { logged = append(logged, msg) },
 	}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
@@ -519,7 +532,7 @@ func TestDispatcher_NudgeRecorderNilSafe(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec, NudgeRecorder: nil}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec, NudgeRecorder: nil}
 	// Must not panic.
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 1 {
@@ -541,7 +554,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		tree := treeWith(resetsAt, newSV("sid-wr", 1111, session.Idle))
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
-		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
@@ -560,7 +573,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		tree := treeWith(resetsAt, newSV("sid-d", 2222, session.Idle))
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
-		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
@@ -576,7 +589,7 @@ func TestDispatcherWindowLatchAdvancesOnWindowResetDispatch(t *testing.T) {
 		tree := treeWith(resetsAt, newSV("sid-m", 3333, session.Idle))
 		sig := &fakeSignaler{}
 		rec := &fakeRecorder{}
-		d := &Dispatcher{Signaler: sig, Recorder: rec}
+		d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 		d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 		rec.mu.Lock()
 		ops := rec.windowLatchOps
@@ -600,7 +613,7 @@ func TestDispatcherSuppressesWaitingForHuman(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.WaitingForHuman))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(sig.sent) != 0 {
 		t.Errorf("len(sent) = %d, want 0 (suppressed over human prompt)", len(sig.sent))
@@ -628,7 +641,7 @@ func TestDispatcherRecordsDisruptAttemptOnSuccess(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(rec.attemptOps) != 1 || rec.attemptOps[0] != "sid-1" {
 		t.Errorf("recorder.attemptOps = %v, want [sid-1]", rec.attemptOps)
@@ -648,7 +661,7 @@ func TestDispatcherRecordsDisruptAttemptOnFailure(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{err: errors.New("no signaler")}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(rec.attemptOps) != 1 || rec.attemptOps[0] != "sid-1" {
 		t.Errorf("recorder.attemptOps = %v, want [sid-1] (attempt counts even on failure)", rec.attemptOps)
@@ -667,9 +680,130 @@ func TestDispatcherNoDisruptAttemptForNonDisrupt(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	d := &Dispatcher{Signaler: sig, Recorder: rec}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
 	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
 	if len(rec.attemptOps) != 0 {
 		t.Errorf("recorder.attemptOps = %v, want empty (window_reset is not a disrupt)", rec.attemptOps)
+	}
+}
+
+// TestDispatcherDeliverer_NilErrRecordsSent verifies that a nil error from
+// Deliverer.Deliver takes the existing sent path (RecordSent + intent
+// cleared), exercising the Deliverer field directly (not via the
+// signalerDeliverer/fakeSignaler adapter used by the pre-existing tests
+// above).
+func TestDispatcherDeliverer_NilErrRecordsSent(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "x", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	del := &fakeDeliverer{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(rec.sent) != 1 || rec.sent[0] != "sid-1" {
+		t.Errorf("recorder.sent = %v, want [sid-1]", rec.sent)
+	}
+	if store.HasAny("sid-1") {
+		t.Error("store not cleared after successful delivery")
+	}
+	if del.pid != 1234 || del.text != "x" {
+		t.Errorf("deliverer got pid=%d text=%q, want pid=1234 text=x", del.pid, del.text)
+	}
+}
+
+// TestDispatcherDeliverer_NoBridgeFreshIntentRetained verifies that
+// ErrNoBridge with an EmittedAt inside noBridgeDropWindow leaves the intent
+// queued for a retry next tick: no RecordSent, no RecordDroppedNoBridge, no
+// RemoveKeys.
+func TestDispatcherDeliverer_NoBridgeFreshIntentRetained(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "x", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	del := &fakeDeliverer{err: ErrNoBridge}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if !store.HasAny("sid-1") {
+		t.Error("intent removed despite fresh no-bridge error; should retry next tick")
+	}
+	if len(rec.sent) != 0 {
+		t.Errorf("RecordSent called %d times, want 0", len(rec.sent))
+	}
+	if len(rec.droppedNoBridge) != 0 {
+		t.Errorf("RecordDroppedNoBridge called %d times, want 0 (within noBridgeDropWindow)", len(rec.droppedNoBridge))
+	}
+}
+
+// TestDispatcherDeliverer_NoBridgeStaleIntentDropped verifies that
+// ErrNoBridge with an EmittedAt older than noBridgeDropWindow drops the
+// intent: keys removed, RecordDroppedNoBridge called, and a "dropped"
+// nudge_history row persisted with ErrorText="no_bridge".
+func TestDispatcherDeliverer_NoBridgeStaleIntentDropped(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	old := now.Add(-noBridgeDropWindow - time.Second)
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "x", EmittedAt: old})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	del := &fakeDeliverer{err: ErrNoBridge}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec, NudgeRecorder: nudgeRec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if store.HasAny("sid-1") {
+		t.Error("stale no-bridge intent not dropped")
+	}
+	if len(rec.droppedNoBridge) != 1 || rec.droppedNoBridge[0].sid != "sid-1" {
+		t.Fatalf("recorder.droppedNoBridge = %+v, want one entry for sid-1", rec.droppedNoBridge)
+	}
+
+	nudgeRec.mu.Lock()
+	events := nudgeRec.events
+	nudgeRec.mu.Unlock()
+	if len(events) != 1 {
+		t.Fatalf("NudgeRecorder.Record called %d times, want 1 (dropped persisted)", len(events))
+	}
+	if events[0].Result != "dropped" {
+		t.Errorf("event.Result = %q, want dropped", events[0].Result)
+	}
+	if events[0].ErrorText != "no_bridge" {
+		t.Errorf("event.ErrorText = %q, want no_bridge", events[0].ErrorText)
+	}
+}
+
+// TestDispatcherDeliverer_GenericErrorRecordsFailure verifies that a non-nil,
+// non-ErrNoBridge error from Deliverer.Deliver still takes the existing
+// failed path: RecordSendFailed + a "failed" nudge_history row + the intent
+// left queued to retry.
+func TestDispatcherDeliverer_GenericErrorRecordsFailure(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "x", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	del := &fakeDeliverer{err: errors.New("boom")}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec, NudgeRecorder: nudgeRec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if !store.HasAny("sid-1") {
+		t.Error("intent removed after generic delivery failure; should retry next tick")
+	}
+	if len(rec.sendFailed) != 1 {
+		t.Fatalf("RecordSendFailed called %d times, want 1", len(rec.sendFailed))
+	}
+	if len(rec.droppedNoBridge) != 0 {
+		t.Errorf("RecordDroppedNoBridge called %d times, want 0 (not a no-bridge error)", len(rec.droppedNoBridge))
+	}
+
+	nudgeRec.mu.Lock()
+	events := nudgeRec.events
+	nudgeRec.mu.Unlock()
+	if len(events) != 1 || events[0].Result != "failed" {
+		t.Fatalf("events = %+v, want one failed event", events)
 	}
 }

@@ -2,6 +2,7 @@ package nudger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -10,6 +11,13 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
+
+// noBridgeDropWindow bounds how long a nudge intent is retried against
+// ErrNoBridge before the dispatcher gives up and drops it. Chosen so a
+// transiently-disconnected cmux-bridge (e.g. a brief reconnect) doesn't lose
+// a nudge, while a target that never comes back online doesn't retry
+// forever.
+const noBridgeDropWindow = 60 * time.Second
 
 // Signaler delivers a nudge text to a process by PID. Wraps the existing
 // signal layer (tmux/cmux/ghostty/vscode).
@@ -46,6 +54,12 @@ type Recorder interface {
 	// newly-added intent. Called by Nudger.Reconcile after diffing the
 	// pre/post pending-store key sets.
 	RecordQueued(sid string, source Source)
+	// RecordDroppedNoBridge reports that a group of intents for sid was
+	// dropped because Deliverer.Deliver kept returning ErrNoBridge for longer
+	// than noBridgeDropWindow — there was never a live cmux-bridge to retry
+	// against. Distinct from RecordSendFailed: this is a permanent give-up,
+	// not a per-attempt failure.
+	RecordDroppedNoBridge(sid string, sources []Source)
 }
 
 // NudgeRecorder is the persistence hook for the dispatcher. The daemon
@@ -72,7 +86,7 @@ type RecordEvent struct {
 // active-session suppression check, and clears intents after success or
 // suppression. Send failures leave intents for the next tick.
 type Dispatcher struct {
-	Signaler      Signaler
+	Deliverer     Deliverer
 	Recorder      Recorder
 	NudgeRecorder NudgeRecorder
 	// HistoryErrLog, if non-nil, receives a one-line message whenever
@@ -167,7 +181,29 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			continue
 		}
 
-		if err := d.Signaler.Send(view.PID, text); err != nil {
+		if err := d.Deliverer.Deliver(goCtx, view.PID, text); err != nil {
+			if errors.Is(err, ErrNoBridge) {
+				// No live cmux-bridge for this target. Record the disrupt
+				// attempt watermark as usual (an attempt was made even though
+				// it couldn't be delivered), then decide drop-vs-retry by the
+				// age of the OLDEST intent in the group: give the bridge
+				// noBridgeDropWindow to reconnect before giving up.
+				if hasDisrupt {
+					d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
+				}
+				oldest := oldestEmittedAt(group)
+				if ctx.Now.Sub(oldest) > noBridgeDropWindow {
+					d.Recorder.RecordDroppedNoBridge(sid, sources)
+					d.recordHistory(goCtx, RecordEvent{
+						SessionID: sid, Text: text, Result: "dropped", ErrorText: "no_bridge",
+						CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+					})
+					store.RemoveKeys(observedKeys)
+				}
+				// Else: still within the window — leave the intents queued
+				// (no RemoveKeys) to retry next tick.
+				continue
+			}
 			// Delivery failed. Surface it for observability (OTel counter + log)
 			// — otherwise the error is swallowed and the miss is invisible —
 			// persist a 'failed' nudge_history row, record the attempt, and leave
@@ -238,6 +274,19 @@ func indexSessions(tree *aggregate.Tree) map[string]*aggregate.SessionView {
 		}
 	}
 	return out
+}
+
+// oldestEmittedAt returns the earliest EmittedAt among group. group is
+// assumed non-empty — Dispatch only builds bySession entries from at least
+// one observed intent.
+func oldestEmittedAt(group []NudgeIntent) time.Time {
+	oldest := group[0].EmittedAt
+	for _, in := range group[1:] {
+		if in.EmittedAt.Before(oldest) {
+			oldest = in.EmittedAt
+		}
+	}
+	return oldest
 }
 
 // resolveText picks the text to send: manual overrides win, else the

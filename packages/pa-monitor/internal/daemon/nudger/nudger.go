@@ -19,14 +19,33 @@ type Nudger struct {
 // a one-line message whenever a nudge_history write fails, so a failed capture
 // is surfaced to a durable local sink instead of being silently discarded (see
 // Dispatcher.HistoryErrLog). Pass nil to disable (early-startup / tests).
+//
+// New keeps taking a synchronous Signaler (not a Deliverer) so existing
+// callers (lifecycle.go) compile unchanged; internally signaler is wrapped in
+// signalerDeliverer so the dispatcher's send site can be a single Deliverer
+// call. A later task rewires New to accept a Deliverer directly and removes
+// this shim.
 func New(signaler Signaler, recorder Recorder, nudgeRecorder NudgeRecorder, historyErrLog func(msg string)) *Nudger {
 	return &Nudger{
 		store:       NewPendingStore(),
-		dispatcher:  &Dispatcher{Signaler: signaler, Recorder: recorder, NudgeRecorder: nudgeRecorder, HistoryErrLog: historyErrLog},
+		dispatcher:  &Dispatcher{Deliverer: signalerDeliverer{signaler}, Recorder: recorder, NudgeRecorder: nudgeRecorder, HistoryErrLog: historyErrLog},
 		windowProd:  &WindowResetProducer{},
 		disruptProd: NewDisruptProducer(),
 		manualProd:  &ManualProducer{},
 	}
+}
+
+// signalerDeliverer adapts a synchronous Signaler to the Deliverer interface.
+// It lets Dispatcher always call through Deliverer.Deliver while New's
+// existing callers keep passing a plain Signaler.
+type signalerDeliverer struct{ sig Signaler }
+
+// Deliver satisfies Deliverer by delegating to the wrapped Signaler.Send. It
+// never returns ErrNoBridge — the synchronous signal layer has no bridge
+// concept — so the no-bridge drop-after-window path in Dispatch is inert
+// until a real async Deliverer is wired in.
+func (s signalerDeliverer) Deliver(_ context.Context, pid int, text string) error {
+	return s.sig.Send(pid, text)
 }
 
 // snapshotKeySet captures the current set of intent keys in the store.
