@@ -83,6 +83,24 @@ func TestClaudeArgs_HeadlessWorkerFlags(t *testing.T) {
 	}
 }
 
+// TestClaudeArgs_ModelSonnet verifies the daemon pins the spawned orchestration
+// to Sonnet. Without --model, a headless `claude -p` runs on the default model
+// (Opus 4.8), ~3x slower, even though every review agent def declares
+// `model: sonnet`. The orchestrator only delegates, so Sonnet is sufficient.
+func TestClaudeArgs_ModelSonnet(t *testing.T) {
+	args := claudeArgs("Run the pg-pr-review-orchestrator for owner/repo#1")
+	found := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--model" && args[i+1] == "sonnet" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("args must include --model sonnet; got %v", args)
+	}
+}
+
 func TestParseHeadSHAFromOutput_JSONLine(t *testing.T) {
 	out := "some log\nrunning orchestrator\n{\"head_sha\":\"abc123def\"}\ndone\n"
 	sha := parseHeadSHAFromOutput(out)

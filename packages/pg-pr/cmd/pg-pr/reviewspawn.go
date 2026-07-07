@@ -61,7 +61,11 @@ func resolveBin(bin string) string {
 // (pg2-jpfw.9) replaces this Spawner with ccpool for autonomous handling +
 // tmux-attach monitorability.
 func claudeArgs(prompt string) []string {
-	return []string{"-p", prompt, "--permission-mode", "bypassPermissions"}
+	// --model sonnet forces the whole orchestration onto Sonnet (matching every
+	// review agent def's `model: sonnet`). Without it, a headless `claude -p`
+	// runs on the default model (Opus), which is ~3x slower and unnecessary for
+	// this delegating orchestrator.
+	return []string{"-p", prompt, "--permission-mode", "bypassPermissions", "--model", "sonnet"}
 }
 
 func (s *claudeSpawner) Produce(ctx context.Context, ref sync.ReviewRef) (string, error) {
