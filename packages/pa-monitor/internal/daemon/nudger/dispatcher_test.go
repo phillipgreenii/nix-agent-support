@@ -507,7 +507,7 @@ func TestNew_ThreadsHistoryErrLogToDispatcher(t *testing.T) {
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	nudgeRec := &fakeNudgeRecorder{err: errors.New("db write boom")}
-	n := New(sig, rec, nudgeRec, func(msg string) { logged = append(logged, msg) })
+	n := New(signalerDeliverer{sig}, rec, nudgeRec, func(msg string) { logged = append(logged, msg) })
 
 	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
 	n.QueueManual([]string{"sid-1"}, "continue", now)

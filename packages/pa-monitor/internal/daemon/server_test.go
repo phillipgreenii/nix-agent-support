@@ -241,7 +241,10 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	if err != nil {
 		t.Fatalf("NewWatermarkStore: %v", err)
 	}
-	n := nudger.New(noopSignaler{}, wm, nil, nil)
+	// noopSignaler is wrapped in inDaemonDeliverer (not nudger's unexported
+	// signalerDeliverer, which is inaccessible from this package) since New
+	// now takes a Deliverer directly.
+	n := nudger.New(&inDaemonDeliverer{sig: noopSignaler{}}, wm, nil, nil)
 
 	state := newSharedState()
 	state.mu.Lock()

@@ -252,12 +252,44 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		state.setReadService(opts.ReadService)
 	}
 
+	// bridgeReg is the single bridge.Registry instance shared by the gRPC
+	// server (BridgeChannel attaches live bridge streams to it), the
+	// delivery path's bridgeDeliverer (looks up a live stream to push a
+	// Deliver), and the reaper (prunes members whose process has died).
+	// Defaulting to a fresh registry when BridgeRegistry is unset keeps
+	// bridgeDeliverer's reg field always non-nil; the bridge route is simply
+	// unreachable in that configuration since cmuxAncestorFn below then also
+	// has nothing to resolve against.
+	bridgeReg := opts.BridgeRegistry
+	if bridgeReg == nil {
+		bridgeReg = bridge.NewRegistry(30 * time.Second)
+	}
+	// cmuxAncestorFn resolves a target PID's cmux server ancestor for
+	// delivery routing. serve()'s bridges param tolerates nil, so
+	// opts.CmuxAncestor may legitimately be nil too; guard with an
+	// always-false stand-in so compositeDeliverer routes every target
+	// in-daemon instead of nil-derefing on opts.CmuxAncestor(pid).
+	cmuxAncestorFn := opts.CmuxAncestor
+	if cmuxAncestorFn == nil {
+		cmuxAncestorFn = func(int) (int, bool) { return 0, false }
+	}
+	// tr correlates in-flight bridge deliveries to their DeliverResult acks
+	// (see delivery.go). It must exist before serve() (which wires
+	// tr.resolve/tr.failServer into the BridgeChannel handler's inbound
+	// hooks) and before bridgeDel (which blocks on it per delivery).
+	tr := newTracker()
+	bridgeDel := &bridgeDeliverer{reg: bridgeReg, ancestor: cmuxAncestorFn, tr: tr, timeout: 5 * time.Second}
+
 	version := opts.Version
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, opts.BridgeRegistry, opts.CmuxAncestor)
+	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, tr.resolve, tr.failServer)
 	defer stop()
+
+	// Reap bridge members whose process has died, against the same registry
+	// instance the gRPC server and delivery path use.
+	go RunReaper(ctx, bridgeReg, 30*time.Second, pidAlive)
 
 	defer opts.Emitter.Shutdown(context.Background())
 
@@ -300,7 +332,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// runtime.json, which the SQLite migration deletes — so the toggle
 		// silently reset to false on every daemon restart.
 		watermarks.SetAutoResumeEnabled(opts.InitialAutoResumeEnabled)
-		sig := &SignalerAdapter{Signalers: opts.NudgerSignalers}
+		// inDaemonDel wraps the existing synchronous in-daemon signal layer
+		// (tmux/ghostty/vscode) unchanged. The daemon no longer constructs a
+		// separate cmux Signaler for delivery — cmux-hosted targets are
+		// routed to bridgeDel (built above, sharing bridgeReg/cmuxAncestorFn/
+		// tr with serve() and the reaper) instead.
+		inDaemonDel := &inDaemonDeliverer{sig: &SignalerAdapter{Signalers: opts.NudgerSignalers}}
+		deliverer := &compositeDeliverer{ancestor: cmuxAncestorFn, bridge: bridgeDel, inDaemon: inDaemonDel}
 		var nr nudger.NudgeRecorder
 		if opts.WriteService != nil && opts.DB != nil {
 			nr = &nudgeRecorder{ws: opts.WriteService, db: opts.DB}
@@ -312,7 +350,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// must not be discarded (it previously was, leaving failed deliveries with
 		// no trace in any sink).
 		historyErrLog := func(msg string) { fmt.Fprintf(os.Stderr, "nudger: %s\n", msg) }
-		n := nudger.New(sig, watermarks, nr, historyErrLog)
+		n := nudger.New(deliverer, watermarks, nr, historyErrLog)
 		n.LoadStore(watermarks.LoadIntents())
 		state.mu.Lock()
 		state.nudger = n

@@ -2,10 +2,25 @@ package daemon
 
 import (
 	"context"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 )
+
+// pidAlive reports whether pid is a live process, using kill(pid, 0)
+// semantics: no signal is actually delivered, but the syscall's error tells
+// us whether the process exists. EPERM means the process exists but is owned
+// by another user (or has changed privileges) — still alive, so it must not
+// be reaped. ESRCH (or any other error) means no such process — dead. This is
+// RunReaper's default isAlive check for pruning dead bridge members.
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
 
 // reapOnce runs a single reap pass over reg, dropping bridge members whose
 // process is no longer alive according to isAlive. It is a thin wrapper

@@ -68,14 +68,11 @@ type server struct {
 	// writeService persists toggle changes (Caffeinate, SetAutoResume) to
 	// the ToggleStore. Set by serve().
 	writeService *service.WriteService
-	// bridges tracks cmux-bridge registrations so RegisterBridge handlers
-	// can update last-seen and the poller can refine "cmux" terminal-host
-	// labels with bridge status.
+	// bridges tracks cmux-bridge registrations (self-reported via
+	// BridgeChannel's Register message) so the poller can refine "cmux"
+	// terminal-host labels with bridge status, and so the delivery path can
+	// look up a live stream to push a Deliver over.
 	bridges *bridge.Registry
-	// cmuxAncestor is consulted in RegisterBridge to walk the caller-supplied
-	// bridge PID's ancestry to its cmux server PID, which is the registry
-	// key.
-	cmuxAncestor cmuxAncestryFn
 	// onDeliverResult, when non-nil, is invoked by the BridgeChannel handler
 	// when a cmux-bridge reports the outcome of a Deliver (DeliverResult). A
 	// later task wires this to the delivery tracker; it defaults nil so the
@@ -91,12 +88,6 @@ type server struct {
 	// tests set a small value to exercise the ticker quickly.
 	bridgeSnapshotInterval time.Duration
 }
-
-// cmuxAncestryFn is the minimal slice of CmuxSignaler used by the
-// RegisterBridge handler: walk an arbitrary PID's ancestry to find its
-// cmux server PID. Function-shaped so tests can inject a fake without
-// constructing a CmuxSignaler.
-type cmuxAncestryFn func(pid int) (int, bool)
 
 func newServer(s *sharedState) *server {
 	return &server{started: time.Now(), state: s}
@@ -341,30 +332,13 @@ func (s *server) NudgeCancel(ctx context.Context, req *pb.NudgeCancelRequest) (*
 	return &pb.NudgeCancelResponse{CancelledSessionIds: sids}, nil
 }
 
-// RegisterBridge records or refreshes a cmux-bridge entry. The bridge
-// provides its workspace_id (for display/logging) and its own PID; the
-// daemon walks bridge_pid's ancestry to find the cmux server PID, which is
-// the actual registry key consulted by the poller's TerminalHost refinement.
-//
-// If the bridge PID has no cmux server ancestor (e.g. the bridge is running
-// outside cmux somehow, or the cmuxAncestor walker is unconfigured), the
-// call is a no-op success — the caller doesn't need to know how the daemon
-// resolves cmux membership.
+// RegisterBridge is a no-op shim. Bridges self-report their cmux server PID
+// via the Register message on the BridgeChannel stream (see
+// bridge_channel.go), so the daemon no longer needs to resolve cmux ancestry
+// or record a display-only registry entry here. The RPC is kept (rather than
+// removed via a proto-codegen pass) purely for wire back-compat with any
+// caller still invoking it; it always succeeds trivially.
 func (s *server) RegisterBridge(ctx context.Context, req *pb.RegisterBridgeRequest) (*pb.RegisterBridgeResponse, error) {
-	if s.bridges == nil || s.cmuxAncestor == nil {
-		return &pb.RegisterBridgeResponse{}, nil
-	}
-	bridgePID := int(req.GetBridgePid())
-	if bridgePID < 1 {
-		return nil, status.Error(codes.InvalidArgument, "bridge_pid must be > 0")
-	}
-	serverPID, ok := s.cmuxAncestor(bridgePID)
-	if !ok {
-		// No cmux server ancestor — caller isn't actually inside cmux. Silent
-		// success; the bridge's TerminalHost won't be refined but no harm done.
-		return &pb.RegisterBridgeResponse{}, nil
-	}
-	s.bridges.Register(serverPID)
 	return &pb.RegisterBridgeResponse{}, nil
 }
 
@@ -452,10 +426,13 @@ func (s *server) buildState() *pb.DaemonState {
 // serve runs the gRPC server on the given listener. Caller owns the
 // returned stop func.
 //
-// bridges + cmuxAncestor are both optional; when nil the RegisterBridge
-// handler becomes a no-op success and poller-side cmux refinement falls
-// back to a bare "cmux" label.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, cmuxAncestor cmuxAncestryFn) (*grpc.Server, func()) {
+// bridges is optional; when nil, BridgeChannel rejects with
+// FailedPrecondition and poller-side cmux refinement falls back to a bare
+// "cmux" label. onDeliverResult/onStreamClosed are the BridgeChannel
+// handler's inbound hooks into the delivery tracker (see delivery.go); both
+// are nil-safe (BridgeChannel checks before calling), so callers that don't
+// wire the delivery path may pass nil for either.
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, onDeliverResult func(id string, ok bool, errStr string), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version
@@ -463,7 +440,8 @@ func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMe
 	srv.autoResumeMessage = autoResumeMessage
 	srv.writeService = writeService
 	srv.bridges = bridges
-	srv.cmuxAncestor = cmuxAncestor
+	srv.onDeliverResult = onDeliverResult
+	srv.onStreamClosed = onStreamClosed
 	pb.RegisterPaMonitorServer(gs, srv)
 
 	go func() {
