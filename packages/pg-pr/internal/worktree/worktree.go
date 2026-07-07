@@ -146,6 +146,12 @@ func Add(ctx context.Context, pr int, opts Options) (*AddResult, error) {
 	// Skip the fetch when the caller asked (NoFetch) or when the PR head ref
 	// is already local (the pg-pr daemon pre-fetches it). This keeps the
 	// SSH-cert `step` machinery out of the reviewer / subagent environment.
+	//
+	// Note: the ref-present check below trusts *presence*, not *currency* — it
+	// cannot distinguish a just-fetched head from a stale one (see
+	// GitClient.RefExists). Safe in production because the daemon's pre-fetch
+	// gate force-updates the ref before Add ever runs here; in a gate-disabled
+	// fallback, a stale local origin/pr/<pr> would be reviewed as-is.
 	skipFetch := opts.NoFetch
 	if !skipFetch {
 		if present, _ := opts.Git.RefExists(ctx, repoDir, startPoint); present {

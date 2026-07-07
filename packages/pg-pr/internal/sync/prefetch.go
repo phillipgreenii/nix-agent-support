@@ -81,6 +81,10 @@ const (
 	defaultBatchTimeout       = 20 * time.Second
 	defaultInteractiveTimeout = 180 * time.Second
 	defaultBrowserCooldown    = 15 * time.Minute
+	// defaultProbeTimeout bounds each local credential probe (agent-socket
+	// resolution, cert-validity check) so a wedged ssh-add/ssh-keygen can't
+	// block the serial review loop.
+	defaultProbeTimeout = 10 * time.Second
 )
 
 // PreFetchGate is the daemon's pre-spawn credential gate. It is stateful
@@ -142,10 +146,15 @@ func (g *PreFetchGate) Ensure(ctx context.Context, repoDir string, pr int) Fetch
 	// to the interactive/browser path with the ambient SSH_AUTH_SOCK: the fetch
 	// either re-auths or fails cleanly (bead stays open, self-heals when the
 	// agent returns).
-	sock, rerr := g.Resolver.Resolve(ctx)
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaultProbeTimeout)
+	sock, rerr := g.Resolver.Resolve(resolveCtx)
+	resolveCancel()
 	valid := false
 	if rerr == nil {
-		if v, cerr := g.Cert.CertValid(ctx, sock); cerr == nil {
+		certCtx, certCancel := context.WithTimeout(ctx, defaultProbeTimeout)
+		v, cerr := g.Cert.CertValid(certCtx, sock)
+		certCancel()
+		if cerr == nil {
 			valid = v
 		}
 	} else {
@@ -403,8 +412,15 @@ func (f *CLIPRFetcher) FetchPRHead(ctx context.Context, repoDir string, pr int, 
 	if batchMode {
 		sshCmd = fmt.Sprintf("ssh -o BatchMode=yes -o ConnectTimeout=%d", ct)
 	}
-	refspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "fetch", "origin", refspec)
+	// Force-update (+) and disable prune: repoDir may already have
+	// refs/remotes/origin/pr/<pr> from a prior pre-fetch (this runs on every
+	// re-review), and without both of these git's default prune pass deletes
+	// that tracking ref (it doesn't match the default
+	// refs/heads/*:refs/remotes/origin/* fetch refspec's source side) and then
+	// fails to recreate it. Keep this refspec mirrored with
+	// worktree.CLIGitClient.FetchPR.
+	refspec := fmt.Sprintf("+pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "fetch", "--no-prune", "origin", refspec)
 	// Thread the resolved agent socket (empty → ambient env) plus the ssh wrapper.
 	cmd.Env = envWithAuthSock(authSock, "GIT_SSH_COMMAND="+sshCmd)
 	var stderr bytes.Buffer

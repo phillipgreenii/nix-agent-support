@@ -205,11 +205,16 @@ func (e *Engine) headAdvancedPastAgentReview(ctx context.Context, db *store.DB, 
 func (e *Engine) ensurePRFetched(ctx context.Context, log *slog.Logger, ref beads.DraftReviewRef) FetchOutcome {
 	gate := e.deps.Review.PreFetch
 	if gate == nil {
-		return FetchOK // gate disabled → preserve prior behavior
+		// Gate disabled → fall back to the reviewer's own `worktree add` fetch.
+		// NOT a guarantee of identical prior behavior: worktree.Add's auto-skip
+		// (see RefExists) now treats a pre-existing origin/pr/<pr> as sufficient
+		// and skips its fetch, so a stale local ref here would be reviewed as-is.
+		return FetchOK
 	}
 	rcfg, err := e.repoConfig(ref.Repo)
 	if err != nil || rcfg.Path == "" {
-		// No local checkout to fetch into; let the reviewer's worktree add fetch.
+		// No local checkout to fetch into; let the reviewer's worktree add fetch
+		// (same caveat as above: its auto-skip trusts ref presence, not currency).
 		return FetchOK
 	}
 	outcome := gate.Ensure(ctx, rcfg.Path, ref.Number)
@@ -222,10 +227,17 @@ func (e *Engine) ensurePRFetched(ctx context.Context, log *slog.Logger, ref bead
 		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("step_missing").Inc()
 		log.Error("review hook: pre-fetch failed — `step` not resolvable on daemon PATH (deploy bug); leaving bead open",
 			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
-	default: // FetchFailed
+	case FetchFailed:
 		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("credential").Inc()
 		log.Warn("review hook: pre-fetch failed (credential/network); leaving bead open for retry",
 			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
+	default:
+		// An outcome value we don't recognize (e.g. a future 5th FetchOutcome
+		// added without updating this switch). Log it distinctly rather than
+		// silently mislabeling it "credential" — still leave the bead open and
+		// still do NOT bump the dead-letter fail count.
+		log.Warn("review hook: pre-fetch returned an unexpected/unknown outcome; leaving bead open",
+			"id", ref.ID, "repo", ref.Repo, "number", ref.Number, "outcome", outcome)
 	}
 	return outcome
 }

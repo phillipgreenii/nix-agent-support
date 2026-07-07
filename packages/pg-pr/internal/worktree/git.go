@@ -27,6 +27,12 @@ type GitClient interface {
 	// already been fetched (by the daemon's pre-fetch gate or an earlier run).
 	// Returns (false, nil) when the ref is absent or on any error — a false
 	// negative is safe (the caller just fetches anyway).
+	//
+	// Note: this only checks ref *presence*, not *currency* — it cannot tell a
+	// freshly-fetched head from a stale one. That's safe in production because
+	// the daemon's pre-fetch gate force-updates the ref before Add's caller ever
+	// runs. In a gate-disabled fallback, a stale local origin/pr/<pr> would be
+	// reviewed as-is (see Add's auto-skip below).
 	RefExists(ctx context.Context, dir, ref string) (bool, error)
 
 	// CreateWorktree runs `git worktree add <target> -b <branch> <startPoint>`
@@ -69,8 +75,15 @@ func (g *CLIGitClient) RepoFromRemote(ctx context.Context, dir string) (string, 
 }
 
 func (g *CLIGitClient) FetchPR(ctx context.Context, dir string, pr int) error {
-	refspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
-	_, err := runGit(ctx, dir, "fetch", "origin", refspec)
+	// Force-update (+) and disable prune: dir may already have
+	// refs/remotes/origin/pr/<pr> from a prior fetch (this call re-fetches on
+	// every re-review), and without both of these git's default prune pass
+	// deletes that tracking ref (it doesn't match the default
+	// refs/heads/*:refs/remotes/origin/* fetch refspec's source side) and then
+	// fails to recreate it — see CLIPRFetcher.FetchPRHead in
+	// internal/sync/prefetch.go, whose refspec this mirrors exactly.
+	refspec := fmt.Sprintf("+pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
+	_, err := runGit(ctx, dir, "fetch", "--no-prune", "origin", refspec)
 	return err
 }
 
