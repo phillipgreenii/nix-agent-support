@@ -134,6 +134,8 @@ func (r *Registry) Deregister(serverPID, bridgePID int) {
 
 // Prune removes every bridge member whose bridge PID is no longer alive
 // according to isAlive. Servers left with no members are removed entirely.
+// The bridgePID-0 sentinel used by Register's display-only members is
+// exempt from this liveness check and is never pruned by Prune.
 func (r *Registry) Prune(isAlive func(pid int) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -177,7 +179,12 @@ func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
 	if best == nil {
 		return nil, false
 	}
-	return best, true
+	// Return a copy rather than the map-owned pointer: the original struct
+	// is mutated in place under the write lock by attachLocked and
+	// Heartbeat, and returning the live pointer would let a caller race
+	// those writes after this read lock is released.
+	best2 := *best
+	return &best2, true
 }
 
 // SetNowForTest overrides the clock used by the registry. Whitebox test

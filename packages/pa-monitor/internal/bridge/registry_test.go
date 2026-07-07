@@ -99,9 +99,21 @@ func TestRegistry_AttachStreamRetainsMultipleBridgesPerServer(t *testing.T) {
 		t.Errorf("LiveBridge(4000).BridgePID = %d, want 100 or 200", live.BridgePID)
 	}
 
-	// Both bridges retained: exercising both send hooks works.
-	if err := send(100)(nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Both bridges retained: deregistering one leaves the other still
+	// discoverable through the registry itself (not just the local
+	// closures), proving both were actually tracked as set members.
+	r.Deregister(4000, 100)
+	live, ok = r.LiveBridge(4000)
+	if !ok {
+		t.Fatalf("LiveBridge(4000) after deregistering 100: got !ok, want ok (200 survives)")
+	}
+	if live.BridgePID != 200 {
+		t.Errorf("LiveBridge(4000) after deregistering 100: BridgePID = %d, want 200", live.BridgePID)
+	}
+
+	r.Deregister(4000, 200)
+	if _, ok := r.LiveBridge(4000); ok {
+		t.Errorf("LiveBridge(4000) after deregistering both: got ok, want !ok")
 	}
 }
 
