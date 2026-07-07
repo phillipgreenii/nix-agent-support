@@ -15,11 +15,14 @@ type Nudger struct {
 	manualProd  *ManualProducer
 }
 
-// New constructs a Nudger ready for Tick.
-func New(signaler Signaler, recorder Recorder, nudgeRecorder NudgeRecorder) *Nudger {
+// New constructs a Nudger ready for Tick. historyErrLog, when non-nil, receives
+// a one-line message whenever a nudge_history write fails, so a failed capture
+// is surfaced to a durable local sink instead of being silently discarded (see
+// Dispatcher.HistoryErrLog). Pass nil to disable (early-startup / tests).
+func New(signaler Signaler, recorder Recorder, nudgeRecorder NudgeRecorder, historyErrLog func(msg string)) *Nudger {
 	return &Nudger{
 		store:       NewPendingStore(),
-		dispatcher:  &Dispatcher{Signaler: signaler, Recorder: recorder, NudgeRecorder: nudgeRecorder},
+		dispatcher:  &Dispatcher{Signaler: signaler, Recorder: recorder, NudgeRecorder: nudgeRecorder, HistoryErrLog: historyErrLog},
 		windowProd:  &WindowResetProducer{},
 		disruptProd: NewDisruptProducer(),
 		manualProd:  &ManualProducer{},

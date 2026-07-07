@@ -305,7 +305,14 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		if opts.WriteService != nil && opts.DB != nil {
 			nr = &nudgeRecorder{ws: opts.WriteService, db: opts.DB}
 		}
-		n := nudger.New(sig, watermarks, nr)
+		// Surface nudge_history write failures to stderr (captured by launchd →
+		// launchd-stderr.log). This sink is deliberately export-INDEPENDENT: the
+		// OTel counter/log path can be silently failing to export, and the DB row
+		// is the fallback capture — so when the row write itself fails the error
+		// must not be discarded (it previously was, leaving failed deliveries with
+		// no trace in any sink).
+		historyErrLog := func(msg string) { fmt.Fprintf(os.Stderr, "nudger: %s\n", msg) }
+		n := nudger.New(sig, watermarks, nr, historyErrLog)
 		n.LoadStore(watermarks.LoadIntents())
 		state.mu.Lock()
 		state.nudger = n

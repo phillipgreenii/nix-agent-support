@@ -19,7 +19,7 @@ func TestNudgerTickDisruptedFlowEndToEnd(t *testing.T) {
 
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	n := New(sig, rec, nil)
+	n := New(sig, rec, nil, nil)
 
 	// Tick 1: first sighting at now-31s; grace not yet elapsed against firstSeen=now.
 	n.Tick(context.Background(), TickContext{
@@ -50,7 +50,7 @@ func TestNudgerTickManualBypassesProducers(t *testing.T) {
 	tree := treeWith(time.Time{}, newSV("sid-1", 9999, session.Idle))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
-	n := New(sig, rec, nil)
+	n := New(sig, rec, nil, nil)
 	n.QueueManual([]string{"sid-1"}, "manual!", now)
 	n.Tick(context.Background(), TickContext{
 		Now: now, AutoResumeEnabled: false, // disabled disables auto producers
@@ -63,7 +63,7 @@ func TestNudgerTickManualBypassesProducers(t *testing.T) {
 
 func TestNudgerCancelManual(t *testing.T) {
 	now := time.Now()
-	n := New(&fakeSignaler{}, &fakeRecorder{}, nil)
+	n := New(&fakeSignaler{}, &fakeRecorder{}, nil, nil)
 	n.QueueManual([]string{"sid-1"}, "x", now)
 	if !n.PendingFor("sid-1") {
 		t.Error("expected pending after QueueManual")
@@ -88,7 +88,7 @@ func TestNudgerReconcileEmitsQueuedCounter(t *testing.T) {
 	tree.Dirs[0].Sessions[0].Status = session.Idle
 
 	rec := &fakeRecorder{}
-	n := New(&fakeSignaler{}, rec, nil)
+	n := New(&fakeSignaler{}, rec, nil, nil)
 
 	// Tick 1: primes firstSeen — no intent added yet.
 	n.Reconcile(TickContext{

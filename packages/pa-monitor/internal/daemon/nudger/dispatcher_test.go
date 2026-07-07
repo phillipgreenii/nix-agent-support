@@ -274,17 +274,20 @@ func TestDispatcherRemoveKeysPreservesConcurrentIntent(t *testing.T) {
 	}
 }
 
-// fakeNudgeRecorder records each RecordEvent for inspection in tests.
+// fakeNudgeRecorder records each RecordEvent for inspection in tests. When err
+// is non-nil, Record returns it (still recording the event) so tests can drive
+// the persistence-failure path.
 type fakeNudgeRecorder struct {
 	mu     sync.Mutex
 	events []RecordEvent
+	err    error
 }
 
 func (f *fakeNudgeRecorder) Record(_ context.Context, ev RecordEvent) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, ev)
-	return nil
+	return f.err
 }
 
 // TestDispatcher_RecordsOnSend verifies that a successful dispatch causes the
@@ -416,6 +419,93 @@ func TestDispatcher_RecordsSendFailure(t *testing.T) {
 	}
 	if ev.CausedByErrorAt == nil || !ev.CausedByErrorAt.Equal(now) {
 		t.Errorf("event.CausedByErrorAt = %v, want %v", ev.CausedByErrorAt, now)
+	}
+}
+
+// TestDispatcher_RecordHistoryWriteFailureIsSurfaced verifies that when
+// NudgeRecorder.Record returns an error (the nudge_history row write fails —
+// the export-independent capture sink), the dispatcher surfaces it via
+// HistoryErrLog instead of silently discarding it. This is the exact failure
+// that dropped every failed-delivery row despite the send failures occurring:
+// the error was swallowed, leaving the failure with no durable trace.
+func TestDispatcher_RecordHistoryWriteFailureIsSurfaced(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	store.Add(NudgeIntent{
+		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
+		Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now},
+	})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{err: errors.New("cmux send: signal: killed")}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{err: errors.New("context deadline exceeded")}
+
+	var logged []string
+	d := &Dispatcher{
+		Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec,
+		HistoryErrLog: func(msg string) { logged = append(logged, msg) },
+	}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(logged) != 1 {
+		t.Fatalf("HistoryErrLog called %d times, want 1 (the swallowed Record error must be surfaced)", len(logged))
+	}
+	msg := logged[0]
+	if !strings.Contains(msg, "sid-1") {
+		t.Errorf("logged msg = %q, want it to name the session id", msg)
+	}
+	if !strings.Contains(msg, "failed") {
+		t.Errorf("logged msg = %q, want it to name the failed result", msg)
+	}
+	if !strings.Contains(msg, "context deadline exceeded") {
+		t.Errorf("logged msg = %q, want it to carry the underlying Record error", msg)
+	}
+}
+
+// TestDispatcher_RecordHistorySuccessDoesNotLog verifies HistoryErrLog is NOT
+// invoked when the nudge_history write succeeds (no false-positive noise).
+func TestDispatcher_RecordHistorySuccessDoesNotLog(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{} // err == nil: write succeeds
+
+	var logged []string
+	d := &Dispatcher{
+		Signaler: sig, Recorder: rec, NudgeRecorder: nudgeRec,
+		HistoryErrLog: func(msg string) { logged = append(logged, msg) },
+	}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(logged) != 0 {
+		t.Errorf("HistoryErrLog called %d times on success, want 0: %v", len(logged), logged)
+	}
+}
+
+// TestNew_ThreadsHistoryErrLogToDispatcher verifies that nudger.New wires the
+// historyErrLog hook all the way through to the Dispatcher — otherwise the
+// daemon would construct a Nudger whose capture-write failures are silently
+// dropped, reproducing the original bug at the wiring layer.
+func TestNew_ThreadsHistoryErrLogToDispatcher(t *testing.T) {
+	var logged []string
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	nudgeRec := &fakeNudgeRecorder{err: errors.New("db write boom")}
+	n := New(sig, rec, nudgeRec, func(msg string) { logged = append(logged, msg) })
+
+	now := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	n.QueueManual([]string{"sid-1"}, "continue", now)
+	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.Idle))
+	n.Tick(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}})
+
+	if len(logged) != 1 {
+		t.Fatalf("New must thread HistoryErrLog to the dispatcher; hook fired %d times, want 1", len(logged))
+	}
+	if !strings.Contains(logged[0], "db write boom") {
+		t.Errorf("logged msg = %q, want it to carry the Record error", logged[0])
 	}
 }
 

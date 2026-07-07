@@ -2,6 +2,7 @@ package nudger
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -74,6 +75,13 @@ type Dispatcher struct {
 	Signaler      Signaler
 	Recorder      Recorder
 	NudgeRecorder NudgeRecorder
+	// HistoryErrLog, if non-nil, receives a one-line message whenever
+	// NudgeRecorder.Record returns an error. The nudge_history write is the
+	// export-INDEPENDENT capture sink (the OTel counter/log path is separate
+	// and may be silently failing to export); when it too fails the row is
+	// lost, so this hook surfaces the failure to a durable local sink instead
+	// of discarding the error. nil in tests / early-startup paths.
+	HistoryErrLog func(msg string)
 }
 
 // Dispatch iterates pending intents once, grouped by session.
@@ -205,7 +213,9 @@ func (d *Dispatcher) recordHistory(goCtx context.Context, ev RecordEvent) {
 	if d.NudgeRecorder == nil {
 		return
 	}
-	_ = d.NudgeRecorder.Record(goCtx, ev)
+	if err := d.NudgeRecorder.Record(goCtx, ev); err != nil && d.HistoryErrLog != nil {
+		d.HistoryErrLog(fmt.Sprintf("nudge_history write failed: session=%s result=%s: %v", ev.SessionID, ev.Result, err))
+	}
 }
 
 // sourceStrings stringifies a []Source for the RecordEvent.Sources field.

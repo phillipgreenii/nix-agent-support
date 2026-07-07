@@ -241,7 +241,7 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	if err != nil {
 		t.Fatalf("NewWatermarkStore: %v", err)
 	}
-	n := nudger.New(noopSignaler{}, wm, nil)
+	n := nudger.New(noopSignaler{}, wm, nil, nil)
 
 	state := newSharedState()
 	state.mu.Lock()
