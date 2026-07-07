@@ -1,8 +1,10 @@
 package signal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -74,7 +76,23 @@ func (c *CmuxSignaler) run(ctx context.Context, name string, args ...string) ([]
 	if c.RunCmd != nil {
 		return c.RunCmd(ctx, name, args...)
 	}
-	return exec.CommandContext(ctx, name, args...).Output()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	return out, enrichCmdErr(err)
+}
+
+// enrichCmdErr augments an *exec.ExitError with the subprocess's captured
+// stderr. exec.ExitError.Error() renders only "exit status N" and drops
+// Stderr, so a failing `cmux --json top --processes` surfaced as a bare
+// "exit status 1" with no clue why (see pg2-il6j: enumerate is the dominant
+// nudge Send failure and its cause was undiagnosable from the error string).
+// .Output() populates ExitError.Stderr, so we fold it into the message.
+// Non-ExitError errors (context timeout, binary-not-found) pass through.
+func enrichCmdErr(err error) error {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		return fmt.Errorf("%w: %s", err, bytes.TrimSpace(ee.Stderr))
+	}
+	return err
 }
 
 func (c *CmuxSignaler) lookupEnv(key string) (string, bool) {

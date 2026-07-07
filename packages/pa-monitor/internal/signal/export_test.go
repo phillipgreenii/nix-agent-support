@@ -2,6 +2,9 @@ package signal
 
 import "context"
 
+// EnrichCmdErrForTest exposes enrichCmdErr for whitebox testing.
+func EnrichCmdErrForTest(err error) error { return enrichCmdErr(err) }
+
 // EnumeratePanesForTest exposes enumeratePanes for whitebox testing.
 func EnumeratePanesForTest(t *TmuxSignaler, ctx context.Context) (map[int]PaneLocForTest, error) {
 	locs, err := t.enumeratePanes(ctx)
