@@ -20,9 +20,19 @@ explicitly prohibited from:
 2. Generating review comments based on your own analysis
 3. Reading the subagent files and following their instructions
 4. Falling back to "manual review" if subagents cannot be invoked
+5. Improvising git authentication, or running raw `git fetch` / `git clone` /
+   `git remote` / SSH / credential-setup commands yourself
+6. Creating a worktree by hand (e.g. `git worktree add`) or reviewing a commit
+   that `pg-pr worktree add` did not successfully check out
 
 If you cannot invoke the review subagents, run cleanup if setup
 succeeded, then STOP with an error.
+
+If `pg-pr worktree add` fails (non-zero exit), STOP with an error and report
+it. Do NOT fall back to manual git commands, do NOT re-authenticate, and do NOT
+review a PR whose head was not successfully fetched. The daemon pre-fetches the
+PR head and retries credential failures on its own schedule; a failed worktree
+setup means "try again later", not "work around it".
 
 ## Input
 
