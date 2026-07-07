@@ -295,8 +295,14 @@ const bridgeHeartbeatInterval = 10 * time.Second
 // completion, returning an error the outer reconnect loop uses to retry. It is
 // intentionally thin: it owns dial + stream open + context lifetime and
 // delegates the message loop to runBridgeChannel (which is unit-tested with a
-// fake stream). The derived ctx is cancelled on return so a blocked stream.Recv
-// in runBridgeChannel unwinds cleanly.
+// fake stream).
+//
+// The stream is created from ctx, so a blocked stream.Recv only unwinds when
+// THAT context is cancelled. streamOnce therefore threads its own cancel into
+// runBridgeChannel and lets the message loop invoke it on teardown; that cancel
+// unblocks Recv on every exit path (watchdog, Send-error, Recv-error, or an
+// outer ctx cancel). The defer here is the backstop for the dial/open error
+// returns above, which never reach runBridgeChannel.
 func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -312,7 +318,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 		return err
 	}
 
-	return runBridgeChannel(ctx, stream, ws, serverPID, cmuxSig, reporter, log, announcer)
+	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer)
 }
 
 // runBridgeChannel runs the BridgeChannel message loop over an established
@@ -327,8 +333,10 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 //     DeliverResults — the latter arriving over the outbound channel — so
 //     stream.Send is never called concurrently, as gRPC requires.
 //   - A single RECEIVER goroutine is the sole caller of stream.Recv, forwarding
-//     each (msg, err) to the main loop. Recv is unblocked on teardown by ctx
-//     cancellation (streamOnce cancels the stream's context).
+//     each (msg, err) to the main loop. Recv is bound to the context the stream
+//     was created from, so it only unblocks when THAT context is cancelled;
+//     teardown does so by invoking the cancel func the caller (streamOnce)
+//     threaded in for exactly this purpose.
 //   - The MAIN loop consumes received messages: a snapshot drives reporter.Push
 //     (exactly as the old WatchState path did); a Deliver is dispatched to its
 //     own HANDLER goroutine so a slow cmux send never head-of-line-blocks
@@ -336,12 +344,16 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 //   - HANDLER goroutines resolve + send locally via cmuxSig, then enqueue their
 //     DeliverResult onto the outbound channel.
 //
-// Teardown: the main loop breaks, then cancels ctx (stopping sender + receiver
-// + any handler blocked enqueuing a result) and joins every goroutine before
-// returning. The outbound channel is never closed, so no goroutine can send on
-// a closed channel.
+// Teardown: the main loop breaks, then calls cancel — the CancelFunc for the
+// context the stream was created from — which stops the sender, unblocks the
+// receiver's Recv, and releases any handler blocked enqueuing a result. Every
+// goroutine is joined before returning. The outbound channel is never closed,
+// so no goroutine can send on a closed channel. cancel MUST be the stream's
+// cancel (not a fresh child): a child cancel would leave Recv, bound to the
+// parent, blocked forever and deadlock the join on recvDone.
 func runBridgeChannel(
 	ctx context.Context,
+	cancel context.CancelFunc,
 	stream pb.PaMonitor_BridgeChannelClient,
 	ws string,
 	serverPID int,
@@ -350,9 +362,6 @@ func runBridgeChannel(
 	log *bridgeLogger,
 	announcer *connAnnouncer,
 ) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	// outbound funnels every non-Register stream.Send through the sole sender
 	// goroutine. Buffered so a delivery handler rarely blocks enqueuing a
 	// result. Never closed — teardown is signalled by cancelling ctx.
@@ -442,8 +451,13 @@ func runBridgeChannel(
 	var prevSessions bridgeSessions
 
 	// Watchdog: the daemon pushes a snapshot every ~2s; a 4s budget on any
-	// received message flags a stalled stream.
+	// received message flags a stalled stream. A single reusable timer (reset
+	// on each received message) avoids allocating a fresh time.After channel
+	// every loop iteration. Timer.Reset is safe here without draining timer.C
+	// because Go 1.23+ timers deliver no stale value after Reset.
 	const pushBudget = 4 * time.Second
+	timer := time.NewTimer(pushBudget)
+	defer timer.Stop()
 
 	var loopErr error
 loop:
@@ -452,7 +466,7 @@ loop:
 		case <-ctx.Done():
 			loopErr = ctx.Err()
 			break loop
-		case <-time.After(pushBudget):
+		case <-timer.C:
 			log.Detail("bridge.push_missed", map[string]string{"budget": pushBudget.String()})
 			loopErr = fmt.Errorf("push missed: no message in %s", pushBudget)
 			break loop
@@ -461,6 +475,8 @@ loop:
 				loopErr = r.err
 				break loop
 			}
+			// Refresh the budget: we just heard from the stream.
+			timer.Reset(pushBudget)
 			if r.msg == nil {
 				continue
 			}

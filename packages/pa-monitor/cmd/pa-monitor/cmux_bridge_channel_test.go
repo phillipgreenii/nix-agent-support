@@ -210,7 +210,7 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
 	}()
 
 	waitFor(t, 2*time.Second, func() bool { return stream.firstRegister() != nil })
@@ -244,7 +244,7 @@ func TestBridgeChannelDeliverSuccess(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c1", TargetPid: 4321, Text: "continue"}}}
@@ -291,7 +291,7 @@ func TestBridgeChannelDeliverFailure(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c2", TargetPid: 9999, Text: "continue"}}}
@@ -334,7 +334,7 @@ func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer())
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{
@@ -347,5 +347,50 @@ func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 	cancel()
 	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 		t.Errorf("runBridgeChannel returned %v", err)
+	}
+}
+
+// TestBridgeChannelWatchdogTeardownReturns is the regression test for the
+// teardown deadlock: on the watchdog-timeout path (healthy connection, no
+// snapshot within the push budget) runBridgeChannel MUST tear down and return.
+//
+// The parent ctx stays alive for the whole test — it is NEVER cancelled here —
+// so the ONLY thing that can cancel the stream's context is the cancel func
+// runBridgeChannel invokes on teardown. The fake stream's Recv blocks until
+// that context is cancelled, faithful to real gRPC where Recv is bound to the
+// stream's creation context. Before the cancel-propagation fix, teardown
+// cancelled a fresh child context instead, leaving Recv (bound to the parent)
+// blocked forever; runBridgeChannel then hung on <-recvDone and this test timed
+// out. With the fix, teardown cancels the stream's own context, Recv returns,
+// and runBridgeChannel returns the watchdog error within the budget.
+func TestBridgeChannelWatchdogTeardownReturns(t *testing.T) {
+	// Live parent that outlives the call: we deliberately do NOT cancel it, so
+	// only the teardown cancel can unblock the stream's Recv.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fc := &fakeCmux{}
+	sig := &signal.CmuxSignaler{RunCmd: fc.run}
+	// Never fed: with no inbound message, the ~4s push-budget watchdog trips
+	// and drives teardown. Recv blocks on ctx.Done until teardown cancels ctx.
+	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg)}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+	}()
+
+	// The watchdog budget is ~4s; give generous margin under -race. A hang here
+	// (rather than a returned error) is the pre-fix deadlock.
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatalf("runBridgeChannel returned nil error; want a watchdog teardown error")
+		}
+		if errors.Is(err, context.Canceled) {
+			t.Fatalf("runBridgeChannel returned %v; want the watchdog push-missed error, not a bare cancel", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("runBridgeChannel did not return after watchdog fired: teardown deadlock")
 	}
 }
