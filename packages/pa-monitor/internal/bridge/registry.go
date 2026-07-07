@@ -7,6 +7,8 @@ package bridge
 import (
 	"sync"
 	"time"
+
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
 // Status reports the daemon's view of a cmux-bridge for a given cmux
@@ -25,38 +27,157 @@ const (
 	Stale
 )
 
-// Registry tracks cmux-bridge registrations keyed by cmux server PID.
-// Thread-safe.
-type Registry struct {
-	mu         sync.RWMutex
-	byServer   map[int]*entry
-	staleAfter time.Duration
-	now        func() time.Time
+// BridgeEntry is a single live-bridge set member for a cmux server. Multiple
+// bridge processes may register against the same cmux server PID (e.g.
+// across bridge restarts or concurrent connections); each gets its own
+// entry keyed by its own PID.
+//
+// send is nil for display-only members created by the back-compat
+// Register method — those exist only to keep StatusForServer's liveness
+// contract working for callers that predate stream delivery.
+type BridgeEntry struct {
+	BridgePID int
+	send      func(*pb.DaemonMsg) error
+	lastSeen  time.Time
 }
 
-// entry is the per-server liveness record. Only lastSeen is read back;
-// the cmux server PID is the map key, so it does not need to be stored.
-type entry struct {
-	lastSeen time.Time
+// Registry tracks cmux-bridge registrations keyed by cmux server PID. Each
+// server PID maps to a set of bridge entries (keyed by bridge PID) so that
+// multiple live bridges for the same cmux server can be tracked
+// independently. Thread-safe.
+type Registry struct {
+	mu         sync.RWMutex
+	byServer   map[int]map[int]*BridgeEntry
+	staleAfter time.Duration
+	now        func() time.Time
 }
 
 // NewRegistry constructs a registry. staleAfter is the cutoff beyond which
 // a registered bridge is reported as Stale.
 func NewRegistry(staleAfter time.Duration) *Registry {
 	return &Registry{
-		byServer:   map[int]*entry{},
+		byServer:   map[int]map[int]*BridgeEntry{},
 		staleAfter: staleAfter,
 		now:        time.Now,
 	}
 }
 
-// Register records or refreshes a bridge entry. serverPID is the cmux server
-// PID derived from the bridge's ancestry; the registry treats it as opaque
-// and trusts the caller's derivation.
+// Register records or refreshes a display-only bridge entry. serverPID is
+// the cmux server PID derived from the bridge's ancestry; the registry
+// treats it as opaque and trusts the caller's derivation.
+//
+// This is the back-compat path used by callers that only report liveness
+// without carrying a stream send hook (bridgePID 0, no send). It keeps
+// StatusForServer's Alive/Stale/Unknown contract working for them.
 func (r *Registry) Register(serverPID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byServer[serverPID] = &entry{lastSeen: r.now()}
+	r.attachLocked(serverPID, 0, nil, r.now())
+}
+
+// AttachStream adds or updates a live-bridge set member carrying a stream
+// send hook, refreshing its lastSeen to now.
+func (r *Registry) AttachStream(serverPID, bridgePID int, send func(*pb.DaemonMsg) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attachLocked(serverPID, bridgePID, send, r.now())
+}
+
+// attachLocked inserts or refreshes a member. Callers must hold r.mu.
+func (r *Registry) attachLocked(serverPID, bridgePID int, send func(*pb.DaemonMsg) error, at time.Time) {
+	members := r.byServer[serverPID]
+	if members == nil {
+		members = map[int]*BridgeEntry{}
+		r.byServer[serverPID] = members
+	}
+	e, ok := members[bridgePID]
+	if !ok {
+		e = &BridgeEntry{BridgePID: bridgePID}
+		members[bridgePID] = e
+	}
+	if send != nil {
+		e.send = send
+	}
+	e.lastSeen = at
+}
+
+// Heartbeat refreshes a member's lastSeen without touching its send hook.
+// A no-op if the member does not exist.
+func (r *Registry) Heartbeat(serverPID, bridgePID int, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	members := r.byServer[serverPID]
+	if members == nil {
+		return
+	}
+	e, ok := members[bridgePID]
+	if !ok {
+		return
+	}
+	e.lastSeen = at
+}
+
+// Deregister removes a single bridge member for a server. A no-op if the
+// server or member does not exist.
+func (r *Registry) Deregister(serverPID, bridgePID int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	members := r.byServer[serverPID]
+	if members == nil {
+		return
+	}
+	delete(members, bridgePID)
+	if len(members) == 0 {
+		delete(r.byServer, serverPID)
+	}
+}
+
+// Prune removes every bridge member whose bridge PID is no longer alive
+// according to isAlive. Servers left with no members are removed entirely.
+func (r *Registry) Prune(isAlive func(pid int) bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for serverPID, members := range r.byServer {
+		for bridgePID := range members {
+			// bridgePID 0 denotes a display-only Register member with no
+			// real process behind it; it is never subject to liveness
+			// pruning by PID.
+			if bridgePID == 0 {
+				continue
+			}
+			if !isAlive(bridgePID) {
+				delete(members, bridgePID)
+			}
+		}
+		if len(members) == 0 {
+			delete(r.byServer, serverPID)
+		}
+	}
+}
+
+// LiveBridge returns a set member for serverPID that carries a non-nil send
+// hook, preferring the freshest such member. Returns false if no such
+// member exists (including when the only members are display-only).
+func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	members := r.byServer[serverPID]
+	if members == nil {
+		return nil, false
+	}
+	var best *BridgeEntry
+	for _, e := range members {
+		if e.send == nil {
+			continue
+		}
+		if best == nil || e.lastSeen.After(best.lastSeen) {
+			best = e
+		}
+	}
+	if best == nil {
+		return nil, false
+	}
+	return best, true
 }
 
 // SetNowForTest overrides the clock used by the registry. Whitebox test
@@ -67,15 +188,22 @@ func (r *Registry) SetNowForTest(now func() time.Time) {
 	r.mu.Unlock()
 }
 
-// StatusForServer reports the bridge's liveness for the given cmux server PID.
+// StatusForServer reports the bridge's liveness for the given cmux server
+// PID, computed over the freshest set member's lastSeen.
 func (r *Registry) StatusForServer(serverPID int) Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	e, ok := r.byServer[serverPID]
-	if !ok {
+	members := r.byServer[serverPID]
+	if len(members) == 0 {
 		return Unknown
 	}
-	if r.now().Sub(e.lastSeen) >= r.staleAfter {
+	var freshest time.Time
+	for _, e := range members {
+		if e.lastSeen.After(freshest) {
+			freshest = e.lastSeen
+		}
+	}
+	if r.now().Sub(freshest) >= r.staleAfter {
 		return Stale
 	}
 	return Alive
