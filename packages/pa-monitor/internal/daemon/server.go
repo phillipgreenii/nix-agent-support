@@ -76,6 +76,20 @@ type server struct {
 	// bridge PID's ancestry to its cmux server PID, which is the registry
 	// key.
 	cmuxAncestor cmuxAncestryFn
+	// onDeliverResult, when non-nil, is invoked by the BridgeChannel handler
+	// when a cmux-bridge reports the outcome of a Deliver (DeliverResult). A
+	// later task wires this to the delivery tracker; it defaults nil so the
+	// handler is a no-op for results until then.
+	onDeliverResult func(id string, ok bool, errStr string)
+	// onStreamClosed, when non-nil, is invoked by the BridgeChannel handler
+	// after a registered stream is deregistered on teardown, keyed by the
+	// stream's cmux server PID. A later task wires this to fail any in-flight
+	// deliveries for that stream; it defaults nil.
+	onStreamClosed func(serverPID int)
+	// bridgeSnapshotInterval overrides the per-stream roster push cadence used
+	// by BridgeChannel. Zero selects the default (defaultBridgeSnapshotInterval);
+	// tests set a small value to exercise the ticker quickly.
+	bridgeSnapshotInterval time.Duration
 }
 
 // cmuxAncestryFn is the minimal slice of CmuxSignaler used by the

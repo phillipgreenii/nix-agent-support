@@ -187,6 +187,20 @@ func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
 	return &best2, true
 }
 
+// Send pushes a DaemonMsg to this bridge via its attached stream send hook.
+// It returns nil for a display-only member (nil send hook, e.g. one created
+// by Register). The backpressure policy — dropping snapshots and returning an
+// error when the outbound queue is full for deliveries — is owned by the
+// BridgeChannel handler that attached the hook. Callers (e.g. the delivery
+// dispatcher) use this to push a Deliver to a live bridge obtained via
+// LiveBridge.
+func (e *BridgeEntry) Send(m *pb.DaemonMsg) error {
+	if e == nil || e.send == nil {
+		return nil
+	}
+	return e.send(m)
+}
+
 // SetNowForTest overrides the clock used by the registry. Whitebox test
 // hook so external callers can simulate time without resorting to sleeps.
 func (r *Registry) SetNowForTest(now func() time.Time) {
