@@ -11,6 +11,8 @@ import (
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeBridgeStream implements pb.PaMonitor_BridgeChannelServer
@@ -306,6 +308,39 @@ func TestBridgeChannelCtxCancelNotifiesStreamClosed(t *testing.T) {
 	case <-errCh:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("BridgeChannel did not return after ctx cancel")
+	}
+}
+
+// TestBridgeChannelNilBridgesReturnsFailedPrecondition verifies that a
+// server constructed with a nil bridge registry (the state serve() leaves it
+// in when no bridges/cmuxAncestor were supplied — see server.go's serve()
+// comment) rejects BridgeChannel with a FailedPrecondition status instead of
+// panicking in AttachStream. RegisterBridge already guards this case
+// (server.go); BridgeChannel must too.
+func TestBridgeChannelNilBridgesReturnsFailedPrecondition(t *testing.T) {
+	srv := newServer(newSharedState())
+	// srv.bridges is intentionally left nil (as it is by default).
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fake := newFakeBridgeStream(ctx)
+	// Drive one Register through the fake stream: with a working guard the
+	// handler must return before ever reading it, so it just sits unread in
+	// the buffered channel.
+	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
+		BridgePid: 1, ServerPid: 2, WorkspaceId: "ws-nil-bridges",
+	}}}
+
+	err := srv.BridgeChannel(fake)
+	if err == nil {
+		t.Fatalf("BridgeChannel(nil bridges) returned nil error, want FailedPrecondition")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("BridgeChannel(nil bridges) returned non-status error: %v", err)
+	}
+	if st.Code() != codes.FailedPrecondition {
+		t.Fatalf("BridgeChannel(nil bridges) code = %v, want %v", st.Code(), codes.FailedPrecondition)
 	}
 }
 

@@ -5,6 +5,9 @@ import (
 	"time"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -51,6 +54,10 @@ var errBridgeStreamClosed = errors.New("bridge stream closed")
 // (guaranteed to exit because Recv is ctx-interruptible), then — if the stream
 // had registered — deregisters the bridge and invokes onStreamClosed.
 func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
+	if s.bridges == nil {
+		return status.Error(codes.FailedPrecondition, "bridge registry not configured")
+	}
+
 	ctx := stream.Context()
 
 	interval := s.bridgeSnapshotInterval
@@ -135,7 +142,11 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 					// No registration yet — nothing to refresh.
 					continue
 				}
-				s.bridges.Heartbeat(regServerPID, int(k.Heartbeat.GetBridgePid()), time.Now())
+				// Refresh the bridge this stream actually registered
+				// (regBridgePID), not whatever bridge PID the heartbeat
+				// message claims, so stream identity stays consistent with
+				// teardown's Deregister(regServerPID, regBridgePID).
+				s.bridges.Heartbeat(regServerPID, regBridgePID, time.Now())
 			case *pb.BridgeMsg_Result:
 				if s.onDeliverResult != nil {
 					res := k.Result
