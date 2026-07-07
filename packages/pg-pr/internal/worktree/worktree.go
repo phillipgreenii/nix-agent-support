@@ -48,6 +48,13 @@ type Options struct {
 	// `git branch -D` even with uncommitted changes / unmerged branches.
 	Force bool
 
+	// NoFetch, when true, skips the `git fetch` of the PR head — used when the
+	// caller (e.g. the pg-pr daemon) has already fetched the head, so the
+	// worktree is built from the already-local origin/pr/<pr> ref and no SSH
+	// credential / `step` is needed here. Add also skips the fetch
+	// automatically when that ref is already present.
+	NoFetch bool
+
 	// Git, GH are injected for testing. If nil, real CLI-backed
 	// implementations are used.
 	Git GitClient
@@ -133,12 +140,24 @@ func Add(ctx context.Context, pr int, opts Options) (*AddResult, error) {
 		return nil, fmt.Errorf("create worktree root: %w", err)
 	}
 
-	if err := opts.Git.FetchPR(ctx, repoDir, pr); err != nil {
-		return nil, fmt.Errorf("git fetch pull/%d/head: %w", pr, err)
-	}
-
 	branch := fmt.Sprintf("review/pr-%d", pr)
 	startPoint := fmt.Sprintf("origin/pr/%d", pr)
+
+	// Skip the fetch when the caller asked (NoFetch) or when the PR head ref
+	// is already local (the pg-pr daemon pre-fetches it). This keeps the
+	// SSH-cert `step` machinery out of the reviewer / subagent environment.
+	skipFetch := opts.NoFetch
+	if !skipFetch {
+		if present, _ := opts.Git.RefExists(ctx, repoDir, startPoint); present {
+			skipFetch = true
+		}
+	}
+	if !skipFetch {
+		if err := opts.Git.FetchPR(ctx, repoDir, pr); err != nil {
+			return nil, fmt.Errorf("git fetch pull/%d/head: %w", pr, err)
+		}
+	}
+
 	if err := opts.Git.CreateWorktree(ctx, repoDir, target, branch, startPoint); err != nil {
 		return nil, fmt.Errorf("git worktree add: %w", err)
 	}

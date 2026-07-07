@@ -350,3 +350,76 @@ func TestOptionsRequireWorktreeRoot(t *testing.T) {
 		t.Fatalf("expected error when WorktreeRoot is empty")
 	}
 }
+
+// fetchErrGitClient embeds the real client but makes FetchPR fail, so a test
+// can prove Add skipped the fetch (via NoFetch or an already-present ref) by
+// asserting Add still succeeds and fetchCalls stays 0.
+type fetchErrGitClient struct {
+	GitClient
+	fetchCalls int
+}
+
+func (c *fetchErrGitClient) FetchPR(_ context.Context, _ string, _ int) error {
+	c.fetchCalls++
+	return fmt.Errorf("fetch must not be called")
+}
+
+func TestAdd_NoFetchSkipsFetch(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "repo")
+	wtRoot := filepath.Join(tmp, "reviews")
+	initRepo(t, repoDir)
+	configureRemote(t, repoDir, "git@github.com:owner/repo.git")
+	createOriginPRRef(t, repoDir, 42)
+
+	git := &fetchErrGitClient{GitClient: NewCLIGitClient()}
+	opts := Options{WorktreeRoot: wtRoot, RepoDir: repoDir, Git: git, GH: &fakeGH{}, NoFetch: true}
+
+	if _, err := Add(ctx, 42, opts); err != nil {
+		t.Fatalf("add with NoFetch should skip fetch and succeed: %v", err)
+	}
+	if git.fetchCalls != 0 {
+		t.Fatalf("FetchPR must not be called with NoFetch, got %d", git.fetchCalls)
+	}
+}
+
+func TestAdd_SkipsFetchWhenRefPresent(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "repo")
+	wtRoot := filepath.Join(tmp, "reviews")
+	initRepo(t, repoDir)
+	configureRemote(t, repoDir, "git@github.com:owner/repo.git")
+	createOriginPRRef(t, repoDir, 7) // ref already local
+
+	git := &fetchErrGitClient{GitClient: NewCLIGitClient()}
+	opts := Options{WorktreeRoot: wtRoot, RepoDir: repoDir, Git: git, GH: &fakeGH{}} // NoFetch=false
+
+	if _, err := Add(ctx, 7, opts); err != nil {
+		t.Fatalf("add should skip fetch when ref present: %v", err)
+	}
+	if git.fetchCalls != 0 {
+		t.Fatalf("FetchPR must not be called when ref present, got %d", git.fetchCalls)
+	}
+}
+
+func TestAdd_FetchesWhenRefAbsent(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "repo")
+	wtRoot := filepath.Join(tmp, "reviews")
+	initRepo(t, repoDir)
+	configureRemote(t, repoDir, "git@github.com:owner/repo.git")
+	// Deliberately do NOT forge origin/pr/13 → ref absent → fetch attempted.
+
+	git := &fetchErrGitClient{GitClient: NewCLIGitClient()}
+	opts := Options{WorktreeRoot: wtRoot, RepoDir: repoDir, Git: git, GH: &fakeGH{}}
+
+	if _, err := Add(ctx, 13, opts); err == nil {
+		t.Fatalf("add should attempt fetch (and fail) when ref absent")
+	}
+	if git.fetchCalls != 1 {
+		t.Fatalf("FetchPR should be called once when ref absent, got %d", git.fetchCalls)
+	}
+}

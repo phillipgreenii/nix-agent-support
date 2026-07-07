@@ -22,6 +22,13 @@ type GitClient interface {
 	// FetchPR fetches refs/pull/<pr>/head into refs/remotes/origin/pr/<pr>.
 	FetchPR(ctx context.Context, dir string, pr int) error
 
+	// RefExists reports whether ref resolves to a commit in dir (e.g.
+	// "origin/pr/12"). Used to skip a redundant fetch when the PR head has
+	// already been fetched (by the daemon's pre-fetch gate or an earlier run).
+	// Returns (false, nil) when the ref is absent or on any error — a false
+	// negative is safe (the caller just fetches anyway).
+	RefExists(ctx context.Context, dir, ref string) (bool, error)
+
 	// CreateWorktree runs `git worktree add <target> -b <branch> <startPoint>`
 	// from inside dir.
 	CreateWorktree(ctx context.Context, dir, target, branch, startPoint string) error
@@ -65,6 +72,16 @@ func (g *CLIGitClient) FetchPR(ctx context.Context, dir string, pr int) error {
 	refspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", pr, pr)
 	_, err := runGit(ctx, dir, "fetch", "origin", refspec)
 	return err
+}
+
+func (g *CLIGitClient) RefExists(ctx context.Context, dir, ref string) (bool, error) {
+	// `rev-parse --verify --quiet <ref>^{commit}` exits 0 when the ref resolves
+	// to a commit and non-zero (empty output) otherwise. runGit returns an
+	// error on any non-zero exit; treat every error as "not present".
+	if _, err := runGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (g *CLIGitClient) CreateWorktree(ctx context.Context, dir, target, branch, startPoint string) error {
