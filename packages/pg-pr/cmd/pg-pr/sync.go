@@ -174,6 +174,16 @@ configured repo.`,
 			engine.SetReviewHook(sync.ReviewHookDeps{
 				Beads:   newMultiRepoReviewBeads(cfg),
 				Spawner: newClaudeSpawner(cfg),
+				// Pre-fetch the PR head (and verify SSH-cert creds) before
+				// spawning, so `step`/SSH never enters the Claude environment
+				// and a cert expiry never dead-letters the backlog. The resolver
+				// finds the cert-bearing ssh-agent socket at runtime (the ambient
+				// SSH_AUTH_SOCK is the empty macOS-default agent).
+				PreFetch: &sync.PreFetchGate{
+					Resolver: sync.NewCLIAgentSocketResolver(),
+					Cert:     sync.NewCLICertChecker(),
+					Fetcher:  sync.NewCLIPRFetcher(),
+				},
 			})
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
