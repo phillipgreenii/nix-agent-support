@@ -1,6 +1,6 @@
 # Nudge delivery routed through the cmux-bridge
 
-**Status**: Draft (decisions confirmed; pending implementation plan)
+**Status**: Accepted
 **Date**: 2026-07-07
 **Deciders**: Phillip
 

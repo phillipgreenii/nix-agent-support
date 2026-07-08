@@ -24,3 +24,4 @@
 | [0019](0019-status-line-width-aware-wrapping.md)                    | Status line width-aware wrapping                              | Accepted                                                                        | 2026-06-29 |
 | [0020](0020-status-line-parts-ordering-convention.md)               | Status line parts ordering convention                         | Accepted                                                                        | 2026-06-30 |
 | [0021](0021-pa-monitor-plan-model-and-rate-limit-source.md)         | pa-monitor Account/Plan model + pluggable limits/cost sources | Accepted                                                                        | 2026-07-01 |
+| [0022](0022-nudge-delivery-via-cmux-bridge.md)                      | Nudge delivery routed through the cmux-bridge                 | Accepted                                                                        | 2026-07-07 |

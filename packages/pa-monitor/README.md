@@ -62,6 +62,21 @@ pa-monitor config show
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
 
+## Nudge delivery
+
+The daemon never invokes `cmux`: cmux's control socket is only usable from a process
+inside the cmux process tree, and the daemon runs as a LaunchAgent (not a cmux
+descendant). Instead, each cmux workspace runs a `cmux-bridge` (a cmux descendant) that
+opens a bidirectional `BridgeChannel` gRPC stream to the daemon. To nudge a session the
+daemon resolves the owning cmux **server PID** (via `ps` ancestry — socket-free) and
+pushes a `Deliver{pid}` command down that bridge's stream; the bridge resolves the surface
+locally and runs `cmux send`/`send-key`, replying with an ack. The daemon keeps a
+per-server bridge registry maintained by a periodic reaper (dead bridges pruned). If no
+live bridge exists for a target, the nudge waits briefly in the pending queue and is then
+dropped (`pa_monitor.nudge.dropped_no_bridge_total`). Non-cmux terminals
+(tmux/ghostty/vscode) are still delivered directly by the daemon. See
+`docs/adr/0022-nudge-delivery-via-cmux-bridge.md`.
+
 ## OpenTelemetry
 
 OTel is configured via the `[otel]` block in `~/.config/pa-monitor/config.toml` (see
