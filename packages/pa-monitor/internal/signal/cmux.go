@@ -255,14 +255,14 @@ func (c *CmuxSignaler) Send(pid int, text string) error {
 	}
 	loc, ok := c.findSurfaceForPID(locs, pid)
 	if !ok {
-		return fmt.Errorf("signal: no cmux surface found for pid %d", pid)
+		return &NoCmuxSurfaceError{PID: pid}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := c.run(ctx, "cmux", "send", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, text); err != nil {
+	if _, err := c.runCmux(ctx, CmuxSend, "send", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, text); err != nil {
 		return fmt.Errorf("cmux send: %w", err)
 	}
-	if _, err := c.run(ctx, "cmux", "send-key", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, "enter"); err != nil {
+	if _, err := c.runCmux(ctx, CmuxSendKey, "send-key", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, "enter"); err != nil {
 		return fmt.Errorf("cmux send-key: %w", err)
 	}
 	return nil
@@ -294,7 +294,7 @@ func (c *CmuxSignaler) findSurfaceForPID(locs map[int]surfaceLoc, pid int) (surf
 // tty_process_pids, so a target pid resolves directly to the surface that
 // hosts it. Non-terminal surfaces and surfaces without a tty are skipped.
 func (c *CmuxSignaler) enumerateSurfaces(ctx context.Context) (map[int]surfaceLoc, error) {
-	out, err := c.run(ctx, "cmux", "--json", "top", "--processes")
+	out, err := c.runCmux(ctx, CmuxEnumerate, "--json", "top", "--processes")
 	if err != nil {
 		return nil, fmt.Errorf("cmux --json top --processes: %w", err)
 	}

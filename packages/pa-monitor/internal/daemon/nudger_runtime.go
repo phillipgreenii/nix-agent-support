@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // RuntimeState is the on-disk shape of $XDG_STATE_HOME/pa-monitor/runtime.json.
@@ -267,55 +269,32 @@ func sendFailureCounterAttrs(errorKind, errText string) map[string]string {
 	}
 }
 
-// classifySendFailure maps a Signaler.Send error string onto a small,
-// fixed set of reason codes so the send_failures_total counter stays
-// bounded. The full error text is preserved on the nudge.send_failed log
-// event for debugging.
+// classifySendFailure maps a Signaler.Send error string onto a small, fixed set
+// of reason codes so the send_failures_total counter stays bounded. The full
+// error text is preserved on the nudge.send_failed log event for debugging.
+//
+// The classification taxonomy now lives in ONE place — signal.ClassifyCmuxFailure,
+// the cmux-command Gateway's typed classifier — instead of being duplicated as
+// substring matching here. The daemon still passes TEXT (not a typed error)
+// because cmux delivery is executed by the cmux-bridge and its failure crosses a
+// gRPC boundary as a plain string (ADR 0022: the daemon MUST NOT execute cmux);
+// ClassifyCmuxFailure recognises a reconstructed text error and applies its
+// documented substring fallback, preserving the exact pg2-qxo5/pg2-zixk labels.
 func classifySendFailure(errText string) string {
-	s := strings.ToLower(errText)
-	switch {
-	case s == "":
-		return "unknown"
-	case strings.Contains(s, "no cmux surface"),
-		strings.Contains(s, "no surface"),
-		strings.Contains(s, "surface not found"):
-		return "no_surface"
-	case strings.Contains(s, "send-key"),
-		strings.Contains(s, "send key"):
-		return "send_key"
-	case strings.Contains(s, "enumerate"):
-		return "enumerate"
-	case sendFailureTimedOut(errText):
-		return "timeout"
-	case strings.Contains(s, "connection"),
-		strings.Contains(s, "connect"),
-		strings.Contains(s, "broken pipe"),
-		strings.Contains(s, "refused"):
-		return "connection"
-	default:
-		return "other"
-	}
+	reason, _ := signal.ClassifyCmuxFailure(errors.New(errText))
+	return string(reason)
 }
 
-// sendFailureTimedOut reports whether a Signaler.Send error text carries a
-// timeout signature. It is deliberately ORTHOGONAL to classifySendFailure's
-// reason: the send-key/enumerate path keywords are matched before the timeout
-// signature (that precedence is intentional — the path is more actionable than
-// the generic "timeout" reason, and is locked by the pg2-qxo5 regression
-// tests), so a timeout that lands on those paths keeps its path reason and the
-// reason label alone MASKS the timeout nature. Surfacing timed_out separately
-// un-masks it (pg2-zixk) without reversing that reason-precedence decision or
-// discarding the more-actionable path label.
-//
-// exec.CommandContext SIGKILLs a cmux subprocess whose context deadline
-// expires; the ExitError then renders as "signal: killed" — the same root
-// cause as "deadline exceeded", and the more common of the two in practice
-// (see cache/signal-errors.log).
+// sendFailureTimedOut reports whether a Signaler.Send error carries a timeout
+// signature, delegating to the same single source of truth as classifySendFailure
+// (signal.ClassifyCmuxFailure). It is deliberately ORTHOGONAL to the reason: the
+// send-key/enumerate path takes precedence over the generic "timeout" reason (the
+// path is more actionable — pg2-qxo5), so a timeout that lands on those paths
+// keeps its path reason while this flag still reports true, un-masking the
+// timeout nature (pg2-zixk) without reversing the reason-precedence decision.
 func sendFailureTimedOut(errText string) bool {
-	s := strings.ToLower(errText)
-	return strings.Contains(s, "timeout") ||
-		strings.Contains(s, "deadline exceeded") ||
-		strings.Contains(s, "signal: killed")
+	_, timedOut := signal.ClassifyCmuxFailure(errors.New(errText))
+	return timedOut
 }
 
 func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, sources []nudger.Source, cause *transcript.ErrorRecord, escalated bool) {
