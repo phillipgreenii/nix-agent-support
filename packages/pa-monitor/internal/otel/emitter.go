@@ -73,17 +73,18 @@ type Emitter struct {
 	logger          otellog.Logger
 
 	// Counters — sync (not observable). Nil when SDK uninitialised.
-	blockLimitHits     metric.Int64Counter
-	weekLimitHits      metric.Int64Counter
-	caffeinateRounds   metric.Int64Counter
-	caffeinateGrace    metric.Int64Counter
-	contextLimitHits   metric.Int64Counter
-	nudgesSent         metric.Int64Counter
-	nudgeSendFailures  metric.Int64Counter
-	nudgeSuppressed    metric.Int64Counter
-	nudgeQueued        metric.Int64Counter
-	apiErrorObserved   metric.Int64Counter
-	signalerBinMissing metric.Int64Counter
+	blockLimitHits       metric.Int64Counter
+	weekLimitHits        metric.Int64Counter
+	caffeinateRounds     metric.Int64Counter
+	caffeinateGrace      metric.Int64Counter
+	contextLimitHits     metric.Int64Counter
+	nudgesSent           metric.Int64Counter
+	nudgeSendFailures    metric.Int64Counter
+	nudgeSuppressed      metric.Int64Counter
+	nudgeQueued          metric.Int64Counter
+	nudgeDroppedNoBridge metric.Int64Counter
+	apiErrorObserved     metric.Int64Counter
+	signalerBinMissing   metric.Int64Counter
 
 	mu                  sync.Mutex
 	sessionsObs         []stateObs
@@ -283,6 +284,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 	if e.nudgeQueued, err = meter.Int64Counter("pa_monitor.nudge.queued_total"); err != nil {
+		return err
+	}
+	if e.nudgeDroppedNoBridge, err = meter.Int64Counter("pa_monitor.nudge.dropped_no_bridge_total"); err != nil {
 		return err
 	}
 	if e.apiErrorObserved, err = meter.Int64Counter("pa_monitor.session.api_error.observed_total"); err != nil {
@@ -647,6 +651,21 @@ func (e *Emitter) RecordNudgeSuppressed(attrs map[string]string) {
 		e.nudgeSuppressed.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("nudge.suppressed", attrs)
+}
+
+// RecordNudgeDroppedNoBridge increments pa_monitor.nudge.dropped_no_bridge_total
+// and emits the nudge.dropped_no_bridge log event. Fired when a group of
+// no-bridge intents ages past the dispatcher's noBridgeDropWindow with no live
+// cmux-bridge to retry against — a permanent give-up, distinct from the sent/
+// suppressed/send-failed outcomes. nil-safe.
+func (e *Emitter) RecordNudgeDroppedNoBridge(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.nudgeDroppedNoBridge != nil {
+		e.nudgeDroppedNoBridge.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("nudge.dropped_no_bridge", attrs)
 }
 
 // RecordNudgeQueued increments pa_monitor.nudge.queued_total and emits

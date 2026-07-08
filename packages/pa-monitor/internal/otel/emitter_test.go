@@ -32,6 +32,7 @@ func TestEmitter_NilSafeMethods(t *testing.T) {
 	e.RecordNudgeSendFailed(map[string]string{"reason": "other"}, map[string]string{"session_id": "sid", "error": "boom"})
 	e.RecordNudgeSuppressed(nil)
 	e.RecordNudgeQueued(nil)
+	e.RecordNudgeDroppedNoBridge(nil)
 	e.RecordApiErrorObserved(nil)
 	e.RecordSessionsErrored(nil)
 	e.RecordSessionInfo(nil)
