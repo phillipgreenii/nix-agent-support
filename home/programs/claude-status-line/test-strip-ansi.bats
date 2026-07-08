@@ -37,6 +37,22 @@ ST=$'\033\\' # OSC String Terminator: ESC backslash
   [ "$output" = "wt br" ]
 }
 
+@test "strips a non-SGR CSI (final byte != 'm') without eating visible text" {
+  # ESC[32X is a well-formed CSI whose final byte is 'X' (ECH), not 'm'. Keying only on 'm'
+  # would have eaten through the 'm' in the following visible text; the CSI-final-byte guard stops at 'X'.
+  run strip_ansi "A${ESC}[32X mango B"
+  [ "$status" -eq 0 ]
+  [ "$output" = "A mango B" ]
+}
+
+@test "malformed CSI (no final byte) drops the unterminated remainder" {
+  # Mirrors the malformed-OSC case: a CSI whose parameter bytes run to end-of-string with no
+  # final byte drops the remainder rather than leaking the parameter bytes as visible text.
+  run strip_ansi "keep${ESC}[999"
+  [ "$status" -eq 0 ]
+  [ "$output" = "keep" ]
+}
+
 # --- OSC 8 hyperlinks (the new behavior this bead adds) ---
 
 @test "strips an ST-terminated OSC 8 hyperlink to just its visible text" {
