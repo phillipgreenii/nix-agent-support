@@ -57,6 +57,70 @@ func TestSendFailureCounterAttrs_Bounded(t *testing.T) {
 	}
 }
 
+// TestSendFailureTimedOut guards pg2-zixk: the timeout nature of a send failure
+// is surfaced ORTHOGONALLY to the reason label. classifySendFailure keeps the
+// more-actionable path reason for a timeout that lands on the enumerate/send-key
+// path (a precedence locked by pg2-qxo5), so the reason alone masks the timeout.
+// sendFailureTimedOut un-masks it: it is true for any timeout signature
+// regardless of which path keyword the reason matched, and false for a genuine
+// non-timeout failure on the same path (guard against over-correction — the
+// observed real case in pg2-il6j was a genuine "exit status 1", which must NOT
+// be flagged as a timeout).
+func TestSendFailureTimedOut(t *testing.T) {
+	cases := []struct {
+		err  string
+		want bool
+	}{
+		// Timeout during enumerate/send-key: reason keeps the path label, but
+		// the timeout must still be visible via timed_out.
+		{"cmux enumerate: cmux --json top --processes: signal: killed", true},
+		{"cmux send-key: signal: killed", true},
+		// Plain timeout signatures with no path keyword.
+		{"context deadline exceeded", true},
+		{"cmux send: signal: killed", true},
+		{"operation timeout", true},
+		// Genuine non-timeout failures on the enumerate/send-key path stay false.
+		{"cmux --json top enumerate failed", false},
+		{"cmux enumerate failed: exit status 1", false},
+		{"cmux send-key failed: exit status 1", false},
+		{"no cmux surface found for pid 123", false},
+		{"dial unix: connection refused", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := sendFailureTimedOut(tc.err); got != tc.want {
+			t.Errorf("sendFailureTimedOut(%q) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+// TestSendFailureCounterAttrs_TimedOut guards pg2-zixk at the counter-label
+// boundary: a timeout on the enumerate/send-key path keeps its path reason AND
+// carries timed_out="true", so the timeout is no longer masked; a genuine
+// non-timeout failure on the same path stays timed_out="false".
+func TestSendFailureCounterAttrs_TimedOut(t *testing.T) {
+	cases := []struct {
+		err        string
+		wantReason string
+		wantTimed  string
+	}{
+		{"cmux enumerate: cmux --json top --processes: signal: killed", "enumerate", "true"},
+		{"cmux enumerate failed: exit status 1", "enumerate", "false"},
+		{"cmux send-key: signal: killed", "send_key", "true"},
+		{"cmux send-key failed: exit status 1", "send_key", "false"},
+		{"cmux send: signal: killed", "timeout", "true"},
+	}
+	for _, tc := range cases {
+		attrs := sendFailureCounterAttrs(string(transcript.ErrServerError), tc.err)
+		if attrs["reason"] != tc.wantReason {
+			t.Errorf("counterAttrs(%q) reason = %q, want %q", tc.err, attrs["reason"], tc.wantReason)
+		}
+		if attrs["timed_out"] != tc.wantTimed {
+			t.Errorf("counterAttrs(%q) timed_out = %q, want %q", tc.err, attrs["timed_out"], tc.wantTimed)
+		}
+	}
+}
+
 func TestJoinSources_StableSort(t *testing.T) {
 	cases := []struct {
 		in   []nudger.Source

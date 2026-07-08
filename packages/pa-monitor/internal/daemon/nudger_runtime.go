@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -245,6 +246,7 @@ func (w *WatermarkStore) RecordSendFailed(sid string, sources []nudger.Source, e
 			"sources":    joinSources(sources),
 			"error_kind": errorKind,
 			"reason":     classifySendFailure(errText),
+			"timed_out":  strconv.FormatBool(sendFailureTimedOut(errText)),
 			"error":      errText,
 		},
 	)
@@ -253,11 +255,15 @@ func (w *WatermarkStore) RecordSendFailed(sid string, sources []nudger.Source, e
 // sendFailureCounterAttrs returns the BOUNDED label set for the
 // send_failures_total counter. It deliberately omits session_id and the raw
 // error string (both unbounded) and instead carries a coarse, fixed-cardinality
-// reason derived from the error text.
+// reason derived from the error text. timed_out is a fixed-cardinality (2-value)
+// boolean that surfaces the timeout nature of a failure independently of the
+// reason label, so a timeout on the enumerate/send-key path is not masked by
+// its more-actionable path reason (pg2-zixk).
 func sendFailureCounterAttrs(errorKind, errText string) map[string]string {
 	return map[string]string{
 		"error_kind": errorKind,
 		"reason":     classifySendFailure(errText),
+		"timed_out":  strconv.FormatBool(sendFailureTimedOut(errText)),
 	}
 }
 
@@ -279,14 +285,7 @@ func classifySendFailure(errText string) string {
 		return "send_key"
 	case strings.Contains(s, "enumerate"):
 		return "enumerate"
-	case strings.Contains(s, "timeout"),
-		strings.Contains(s, "deadline exceeded"),
-		// exec.CommandContext SIGKILLs a cmux subprocess whose context
-		// deadline expires; the ExitError then renders as "signal: killed".
-		// This is the same root cause as "deadline exceeded" (and the more
-		// common of the two in practice — see cache/signal-errors.log), so
-		// it must land in "timeout" rather than falling through to "other".
-		strings.Contains(s, "signal: killed"):
+	case sendFailureTimedOut(errText):
 		return "timeout"
 	case strings.Contains(s, "connection"),
 		strings.Contains(s, "connect"),
@@ -296,6 +295,27 @@ func classifySendFailure(errText string) string {
 	default:
 		return "other"
 	}
+}
+
+// sendFailureTimedOut reports whether a Signaler.Send error text carries a
+// timeout signature. It is deliberately ORTHOGONAL to classifySendFailure's
+// reason: the send-key/enumerate path keywords are matched before the timeout
+// signature (that precedence is intentional — the path is more actionable than
+// the generic "timeout" reason, and is locked by the pg2-qxo5 regression
+// tests), so a timeout that lands on those paths keeps its path reason and the
+// reason label alone MASKS the timeout nature. Surfacing timed_out separately
+// un-masks it (pg2-zixk) without reversing that reason-precedence decision or
+// discarding the more-actionable path label.
+//
+// exec.CommandContext SIGKILLs a cmux subprocess whose context deadline
+// expires; the ExitError then renders as "signal: killed" — the same root
+// cause as "deadline exceeded", and the more common of the two in practice
+// (see cache/signal-errors.log).
+func sendFailureTimedOut(errText string) bool {
+	s := strings.ToLower(errText)
+	return strings.Contains(s, "timeout") ||
+		strings.Contains(s, "deadline exceeded") ||
+		strings.Contains(s, "signal: killed")
 }
 
 func (w *WatermarkStore) UpdateWatermarks(sid string, now time.Time, sources []nudger.Source, cause *transcript.ErrorRecord, escalated bool) {
