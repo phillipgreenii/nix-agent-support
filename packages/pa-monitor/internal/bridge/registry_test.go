@@ -194,6 +194,31 @@ func TestRegistry_PruneDropsDeadBridgePIDs(t *testing.T) {
 	}
 }
 
+func TestRegistry_LiveBridgeSkipsStaleMember(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	r := NewRegistry(30 * time.Second)
+	r.now = func() time.Time { return now }
+
+	noop := func(*pb.DaemonMsg) error { return nil }
+	r.AttachStream(4000, 100, noop)
+
+	// Just under staleAfter: the member is fresh and must be returned.
+	r.now = func() time.Time { return now.Add(29 * time.Second) }
+	if _, ok := r.LiveBridge(4000); !ok {
+		t.Errorf("LiveBridge(4000) at 29s (fresh, non-nil send): got !ok, want ok")
+	}
+
+	// At/after staleAfter: the send hook is still non-nil (process alive but
+	// wedged — cmux socket still open, not reaped) yet lastSeen has gone
+	// stale, so LiveBridge must NOT return it. This is what drives the daemon
+	// to ErrNoBridge → clean no-bridge drop instead of retrying Delivers that
+	// time out every tick forever.
+	r.now = func() time.Time { return now.Add(31 * time.Second) }
+	if _, ok := r.LiveBridge(4000); ok {
+		t.Errorf("LiveBridge(4000) at 31s (stale, non-nil send): got ok, want !ok")
+	}
+}
+
 func TestRegistry_LiveBridgeIgnoresDisplayOnlyRegisterMember(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)

@@ -158,8 +158,14 @@ func (r *Registry) Prune(isAlive func(pid int) bool) {
 }
 
 // LiveBridge returns a set member for serverPID that carries a non-nil send
-// hook, preferring the freshest such member. Returns false if no such
-// member exists (including when the only members are display-only).
+// hook AND whose lastSeen is still fresh within staleAfter, preferring the
+// freshest such member. Returns false if no such member exists (including
+// when the only members are display-only, or when every send-carrying member
+// has gone stale). Filtering by staleAfter — the same cutoff StatusForServer
+// uses — is what lets a wedged-but-alive bridge (process up, cmux socket open
+// so it is not reaped, but lastSeen no longer refreshing) degrade to
+// ErrNoBridge and a clean no-bridge drop, instead of the daemon pushing
+// Deliver commands that time out and retry every tick forever.
 func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -167,9 +173,13 @@ func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
 	if members == nil {
 		return nil, false
 	}
+	now := r.now()
 	var best *BridgeEntry
 	for _, e := range members {
 		if e.send == nil {
+			continue
+		}
+		if now.Sub(e.lastSeen) >= r.staleAfter {
 			continue
 		}
 		if best == nil || e.lastSeen.After(best.lastSeen) {
