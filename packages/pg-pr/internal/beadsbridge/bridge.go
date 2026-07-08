@@ -30,10 +30,33 @@ type BeadClient interface {
 }
 
 // Handler is the beads event handler.
-type Handler struct{ client BeadClient }
+type Handler struct {
+	client BeadClient
+	// suppressDraftReviews, when true, makes the pr.opened/pr.updated projection
+	// skip EnsureDraftReviewBead (the NH3 kill switch, bead pg2-ynhr.11). All
+	// other production (merge-request, attention, process-feedback) is
+	// unaffected.
+	suppressDraftReviews bool
+}
 
-// New constructs the handler.
-func New(client BeadClient) *Handler { return &Handler{client: client} }
+// Option customizes a Handler.
+type Option func(*Handler)
+
+// WithoutDraftReviews disables draft-review bead PRODUCTION on pr.opened/updated
+// (the daemon's review kill switch, bead pg2-ynhr.11). Merge-request, attention,
+// and process-feedback beads are still produced.
+func WithoutDraftReviews() Option {
+	return func(h *Handler) { h.suppressDraftReviews = true }
+}
+
+// New constructs the handler, applying any options.
+func New(client BeadClient, opts ...Option) *Handler {
+	h := &Handler{client: client}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
 
 // FeedbackPayload is the JSON payload for feedback.created events.
 type FeedbackPayload struct {
@@ -65,7 +88,9 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		// Emit the review work item. My PRs are reviewed even while a GitHub
 		// draft; teammate PRs wait until the draft flag is removed (which fires
 		// on the pr.updated that flips it). EnsureDraftReviewBead is idempotent.
-		if p.Ownership == "mine" || !p.Draft {
+		// When the review kill switch is on (suppressDraftReviews), production is
+		// skipped entirely — the merge-request bead above is still ensured.
+		if !h.suppressDraftReviews && (p.Ownership == "mine" || !p.Draft) {
 			_, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), p.Ownership == "mine")
 			return err
 		}

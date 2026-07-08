@@ -402,12 +402,14 @@ type draftReviewClient struct {
 	noopBeadClient
 	alreadyClosed bool
 	drCalls       int
+	mrCalls       int
 	lastPRBeadID  string
 	lastTitle     string
 	lastMine      bool
 }
 
 func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	c.mrCalls++
 	return "mr-1", c.alreadyClosed, nil
 }
 

@@ -65,6 +65,30 @@ type Config struct {
 	// tokens, or instance names appear in this struct. All deployment-specific
 	// details MUST be supplied via the config file.
 	Jira *JiraConfig `yaml:"jira,omitempty" json:"jira,omitempty"`
+
+	// Review gates the daemon's draft-review machinery (bead pg2-ynhr.11 kill
+	// switch). When review.enabled is false, the daemon neither wires the review
+	// CONSUMER (SetReviewHook is skipped, so reviewHookEnabled() is false) nor
+	// PRODUCES draft-review beads on pr.updated (beadsbridge skips
+	// EnsureDraftReviewBead). Merge-request / attention / process-feedback
+	// production is unaffected. Absent → enabled (today's behavior).
+	Review ReviewConfig `yaml:"review,omitempty" json:"review,omitempty"`
+}
+
+// ReviewConfig gates the draft-review machinery. Enabled is a tri-state pointer
+// so an absent config defaults to on: nil → true.
+type ReviewConfig struct {
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+// ReviewEnabled reports whether the daemon's draft-review machinery is on. It
+// defaults to true (nil receiver, absent section, or absent enabled key) so the
+// kill switch is strictly opt-in.
+func (c *Config) ReviewEnabled() bool {
+	if c == nil || c.Review.Enabled == nil {
+		return true
+	}
+	return *c.Review.Enabled
 }
 
 // JiraConfig configures the Jira priority/incident urgency signal (pg2-jpfw.4).
