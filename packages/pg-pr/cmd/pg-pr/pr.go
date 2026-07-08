@@ -25,6 +25,7 @@ type prFlags struct {
 	jsonOutput bool
 	repo       string
 	base       string
+	reviewers  bool // pr list: augment each PR with the live reviewer roster + labels
 }
 
 var prF prFlags
