@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
 
@@ -241,6 +242,24 @@ func allSessionIDsUnderNode(n *aggregate.PathNode) []string {
 	return out
 }
 
+// sessionStatusWorking reports whether the session identified by sid is
+// Working in the current snapshot. Used to warn that a freshly-queued manual
+// nudge will be suppressed (session_active) at the next dispatch tick.
+func (m *Model) sessionStatusWorking(sid string) bool {
+	if m.tree == nil {
+		return false
+	}
+	for _, d := range m.tree.Dirs {
+		for _, sv := range d.Sessions {
+			if sv.Session == nil || sv.SessionID != sid {
+				continue
+			}
+			return sv.Status == session.Working
+		}
+	}
+	return false
+}
+
 // sessionHasPendingManual returns true when the session identified by sid has
 // a "manual" source in its PendingNudge.
 func (m *Model) sessionHasPendingManual(sid string) bool {
@@ -268,7 +287,13 @@ func (m *Model) sessionHasPendingManual(sid string) bool {
 
 func handleManualResume(m *Model) tea.Cmd {
 	sids, selector := m.cursorScopeSelector()
-	if len(sids) == 0 || m.onManualNudge == nil {
+	if len(sids) == 0 {
+		// Surface rather than silently no-op (pg2-0cmq): the cursor is on a
+		// blank/empty row with no session to nudge.
+		m.setNudgeFlash("nudge: no session under cursor", flashWarn)
+		return nudgeFlashClearCmd()
+	}
+	if m.onManualNudge == nil {
 		return nil
 	}
 	// Toggle semantics: if ALL selected sessions already have a manual nudge
@@ -280,6 +305,9 @@ func handleManualResume(m *Model) tea.Cmd {
 			break
 		}
 	}
-	m.onManualNudge(selector, allPending)
-	return nil
+	// The callback runs the RPC and emits a NudgeResultMsg/NudgeErrMsg the
+	// Update loop turns into a footer flash. The selector carries the CURRENT
+	// session id straight off the live snapshot row, so it is inherently
+	// tolerant of daemon-side session-id churn.
+	return m.onManualNudge(selector, allPending)
 }

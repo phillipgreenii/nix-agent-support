@@ -22,6 +22,17 @@ const (
 	ModalLegend
 )
 
+// flashLevel selects the render style of the transient nudge flash line.
+// flashInfo is a neutral confirmation (queued / cancelled); flashWarn draws
+// attention to an outcome the user likely did not intend (no-match,
+// working-suppressed, RPC failure).
+type flashLevel int
+
+const (
+	flashInfo flashLevel = iota
+	flashWarn
+)
+
 type Options struct {
 	Tree                 *aggregate.Tree
 	Poller               Poller
@@ -42,11 +53,14 @@ type Options struct {
 	// OnToggleAutoResume mirrors OnCaffeinateToggle for the R keybinding.
 	// Returned Cmd MUST emit AutoResumeResultMsg / AutoResumeErrMsg.
 	OnToggleAutoResume func(want bool) tea.Cmd
-	// OnManualNudge, when non-nil, is called whenever the user presses M.
+	// OnManualNudge, when non-nil, is called whenever the user presses N.
 	// selector is a gRPC-style nudge selector (e.g. "session:<id>" or
 	// "path:/some/dir"). cancel is true when the nudge should be cancelled
-	// (all selected sessions already have a manual intent pending).
-	OnManualNudge func(selector string, cancel bool)
+	// (all selected sessions already have a manual intent pending). The
+	// returned Cmd MUST emit a NudgeResultMsg on success or NudgeErrMsg on
+	// failure so the Update loop can surface the outcome (queued / already /
+	// no-match / suppressed) instead of a silent no-op.
+	OnManualNudge func(selector string, cancel bool) tea.Cmd
 	// Version is the TUI binary's build identifier. Displayed in the [?] modal
 	// alongside the daemon's reported version. Empty string falls back to "dev".
 	Version string
@@ -125,7 +139,16 @@ type Model struct {
 
 	onCaffeinateToggle func(want bool) tea.Cmd
 	onToggleAutoResume func(want bool) tea.Cmd
-	onManualNudge      func(selector string, cancel bool)
+	onManualNudge      func(selector string, cancel bool) tea.Cmd
+
+	// nudgeFlash is a transient, footer-rendered status line surfacing the
+	// outcome of the most recent manual nudge (N key): queued / already /
+	// no-match / working-suppressed / failed. Empty when no flash is active.
+	// nudgeFlashUntil bounds its lifetime; a nudgeFlashClearMsg (scheduled on
+	// set) wipes it once elapsed. nudgeFlashLevel picks the render style.
+	nudgeFlash      string
+	nudgeFlashLevel flashLevel
+	nudgeFlashUntil time.Time
 
 	// staleAfter is the status-line rate_limits staleness window (ADR 0021 §1),
 	// consulted by the 5h block row to label a stale capture.

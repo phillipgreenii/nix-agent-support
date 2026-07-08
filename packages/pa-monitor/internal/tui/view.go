@@ -52,7 +52,7 @@ func (m *Model) View() string {
 		ClientVersion:   m.clientVersion,
 		DaemonVersion:   m.daemonVersion,
 	})
-	footer := render.Footer(m.width, m.selectionStatus(), now)
+	footer := render.Footer(m.width, m.footerStatus(now), now)
 
 	zones := []zoneSpec{
 		{name: "controls", content: controls, dropOrder: 1},
@@ -100,6 +100,26 @@ func (m *Model) renderBody(height int) string {
 		return render.RenderWindowTree(m.pathNodes, m.flatRows, 0, 10000, opts)
 	}
 	return render.RenderWindowTree(m.pathNodes, m.flatRows, m.scrollOffset, height, opts)
+}
+
+// footerStatus returns the footer's left-column content. An active nudge
+// flash (surfacing the outcome of the last N press) takes precedence over the
+// selection prompt so the user always sees whether the nudge queued, matched
+// nothing, or was suppressed. The flash is clipped to the footer's left width
+// and styled by its level (warn = Error style).
+func (m *Model) footerStatus(now time.Time) string {
+	if m.nudgeFlash != "" && now.Before(m.nudgeFlashUntil) {
+		text := m.nudgeFlash
+		if w := render.FooterLeftWidth(m.width); w >= 1 {
+			text = wrap.Line(text, w)
+		}
+		style := m.theme.ActiveToggle
+		if m.nudgeFlashLevel == flashWarn {
+			style = m.theme.Error
+		}
+		return style.Render(text)
+	}
+	return m.selectionStatus()
 }
 
 // selectionStatus returns the dim-styled, single-line status string for the

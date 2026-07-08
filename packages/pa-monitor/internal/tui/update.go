@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -8,6 +10,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 )
+
+// nudgeFlashTTL bounds how long the manual-nudge outcome stays on the footer.
+const nudgeFlashTTL = 5 * time.Second
 
 // TreeUpdatedMsg carries the latest aggregate.Tree from the daemon watcher
 // plus view-state fields populated from DaemonState proto fields.
@@ -40,6 +45,35 @@ type AutoResumeResultMsg struct {
 
 type AutoResumeErrMsg struct {
 	Err error
+}
+
+// NudgeResultMsg carries the outcome of a manual nudge (N key) back to the
+// Update loop so it can be surfaced in the footer. Cancel distinguishes the
+// NudgeCancel path (toggle-off) from NudgeQueue; the slices mirror the RPC
+// response fields. Previously the N handler fired-and-forgot the RPC, so a
+// no-match / working-suppressed / already-queued outcome was a silent no-op
+// (pg2-0cmq).
+type NudgeResultMsg struct {
+	Cancel    bool
+	Queued    []string
+	Already   []string
+	Cancelled []string
+}
+
+// NudgeErrMsg is dispatched when the NudgeQueue/NudgeCancel RPC fails. Logged
+// via the shared ErrorLogger and surfaced as a warning flash.
+type NudgeErrMsg struct {
+	Err error
+}
+
+// nudgeFlashClearMsg is delivered by the tick scheduled when a flash is set;
+// it clears the flash once nudgeFlashUntil has elapsed. A newer flash (set
+// after this tick was scheduled) pushes nudgeFlashUntil forward, so a stale
+// tick is a no-op.
+type nudgeFlashClearMsg struct{}
+
+func nudgeFlashClearCmd() tea.Cmd {
+	return tea.Tick(nudgeFlashTTL, func(time.Time) tea.Msg { return nudgeFlashClearMsg{} })
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -129,8 +163,67 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.autoResumeEnabled = msg.Enabled
 	case AutoResumeErrMsg:
 		m.signalLog("SetAutoResume RPC failed: " + msg.Err.Error())
+	case NudgeResultMsg:
+		text, level := m.formatNudgeResult(msg)
+		m.setNudgeFlash(text, level)
+		return m, nudgeFlashClearCmd()
+	case NudgeErrMsg:
+		m.signalLog("nudge RPC failed: " + msg.Err.Error())
+		m.setNudgeFlash("nudge failed: "+msg.Err.Error(), flashWarn)
+		return m, nudgeFlashClearCmd()
+	case nudgeFlashClearMsg:
+		// Only clear if the active flash has actually expired; a newer flash
+		// (set after this tick was scheduled) must survive its own TTL.
+		if !time.Now().Before(m.nudgeFlashUntil) {
+			m.nudgeFlash = ""
+		}
 	}
 	return m, nil
+}
+
+// setNudgeFlash records a transient footer message with the given level and
+// (re)arms its expiry window.
+func (m *Model) setNudgeFlash(text string, level flashLevel) {
+	m.nudgeFlash = text
+	m.nudgeFlashLevel = level
+	m.nudgeFlashUntil = time.Now().Add(nudgeFlashTTL)
+}
+
+// formatNudgeResult renders a NudgeResultMsg into a footer line plus its
+// render level. A queued nudge against a session the live snapshot reports as
+// Working is warned about explicitly: the daemon suppresses (session_active)
+// and drops such intents at dispatch time, so implying delivery would repeat
+// the pg2-0cmq silent no-op.
+func (m *Model) formatNudgeResult(r NudgeResultMsg) (string, flashLevel) {
+	if r.Cancel {
+		if len(r.Cancelled) == 0 {
+			return "nudge: nothing queued to cancel", flashInfo
+		}
+		return fmt.Sprintf("nudge cancelled for %d session(s)", len(r.Cancelled)), flashInfo
+	}
+	if len(r.Queued) == 0 && len(r.Already) == 0 {
+		return "nudge: no sessions matched", flashWarn
+	}
+	var parts []string
+	if len(r.Queued) > 0 {
+		parts = append(parts, fmt.Sprintf("queued for %d session(s)", len(r.Queued)))
+	}
+	if len(r.Already) > 0 {
+		parts = append(parts, fmt.Sprintf("%d already queued", len(r.Already)))
+	}
+	text := "nudge " + strings.Join(parts, ", ")
+	// Count queued targets the snapshot shows as Working — those will be
+	// suppressed at the next dispatch tick.
+	working := 0
+	for _, sid := range r.Queued {
+		if m.sessionStatusWorking(sid) {
+			working++
+		}
+	}
+	if working > 0 {
+		return fmt.Sprintf("%s — %d working, suppressed until idle", text, working), flashWarn
+	}
+	return text, flashInfo
 }
 
 // syncScroll adjusts scrollOffset so the cursor row is within the visible window.

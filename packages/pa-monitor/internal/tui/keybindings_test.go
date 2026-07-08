@@ -123,10 +123,11 @@ func TestKeybindN_QueuesManualOnLeafSession(t *testing.T) {
 	tree := makeSessionTree("/proj/a", "sid-1", nil)
 	m := NewModel(Options{
 		Tree: tree,
-		OnManualNudge: func(selector string, cancel bool) {
+		OnManualNudge: func(selector string, cancel bool) tea.Cmd {
 			gotSelector = selector
 			gotCancel = cancel
 			called = true
+			return nil
 		},
 	})
 	// flatRows: PathNodeKind(0), SessionKind(1), BlankKind(2)
@@ -154,9 +155,10 @@ func TestKeybindN_CancelsWhenAllPending(t *testing.T) {
 	tree := makeSessionTree("/proj/b", "sid-2", nudge)
 	m := NewModel(Options{
 		Tree: tree,
-		OnManualNudge: func(selector string, cancel bool) {
+		OnManualNudge: func(selector string, cancel bool) tea.Cmd {
 			gotCancel = cancel
 			called = true
+			return nil
 		},
 	})
 	m.cursor = 1
@@ -178,9 +180,10 @@ func TestKeybindN_PathNodeUsesPathSelector(t *testing.T) {
 	tree := makeSessionTree("/proj/c", "sid-3", nil)
 	m := NewModel(Options{
 		Tree: tree,
-		OnManualNudge: func(selector string, cancel bool) {
+		OnManualNudge: func(selector string, cancel bool) tea.Cmd {
 			gotSelector = selector
 			called = true
+			return nil
 		},
 	})
 	// flatRows: PathNodeKind(0), SessionKind(1), BlankKind(2)

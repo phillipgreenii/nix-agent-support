@@ -127,22 +127,32 @@ func runTUIRemote() {
 				return tui.AutoResumeResultMsg{Enabled: resp.GetEnabled()}
 			}
 		},
-		OnManualNudge: func(selector string, cancel bool) {
-			ctx, cancelCtx := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancelCtx()
-			c, err := rpcclient.Dial(ctx)
-			if err != nil {
-				errLog.LogString(fmt.Sprintf("remote nudge dial: %v", err))
-				return
-			}
-			defer c.Close()
-			if cancel {
-				if _, err := c.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selector}); err != nil {
-					errLog.LogString(fmt.Sprintf("remote NudgeCancel(%s): %v", selector, err))
+		OnManualNudge: func(selector string, cancel bool) tea.Cmd {
+			return func() tea.Msg {
+				ctx, cancelCtx := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancelCtx()
+				c, err := rpcclient.Dial(ctx)
+				if err != nil {
+					errLog.LogString(fmt.Sprintf("remote nudge dial: %v", err))
+					return tui.NudgeErrMsg{Err: fmt.Errorf("dial: %w", err)}
 				}
-			} else {
-				if _, err := c.C.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: selector}); err != nil {
+				defer c.Close()
+				if cancel {
+					resp, err := c.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selector})
+					if err != nil {
+						errLog.LogString(fmt.Sprintf("remote NudgeCancel(%s): %v", selector, err))
+						return tui.NudgeErrMsg{Err: err}
+					}
+					return tui.NudgeResultMsg{Cancel: true, Cancelled: resp.GetCancelledSessionIds()}
+				}
+				resp, err := c.C.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: selector})
+				if err != nil {
 					errLog.LogString(fmt.Sprintf("remote NudgeQueue(%s): %v", selector, err))
+					return tui.NudgeErrMsg{Err: err}
+				}
+				return tui.NudgeResultMsg{
+					Queued:  resp.GetQueuedSessionIds(),
+					Already: resp.GetAlreadyQueuedSessionIds(),
 				}
 			}
 		},
