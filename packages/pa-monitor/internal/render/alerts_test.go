@@ -147,24 +147,6 @@ func TestAlertsAuthFailureSortsFirst(t *testing.T) {
 	}
 }
 
-func TestShortVersion(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"26.07.08.12345+abcd1234", "abcd1234"},
-		{"dev", "dev"},
-		{"", ""},
-		{"noplus", "noplus"},
-		{"a+b+c", "c"}, // last '+' wins
-	}
-	for _, tc := range cases {
-		if got := shortVersion(tc.in); got != tc.want {
-			t.Errorf("shortVersion(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestAlertsVersionMismatchWide(t *testing.T) {
 	tree := &aggregate.Tree{}
 	out := Alerts(tree, AlertsOpts{
@@ -173,11 +155,15 @@ func TestAlertsVersionMismatchWide(t *testing.T) {
 		ClientVersion: "26.07.08.12345+abcd1234",
 		DaemonVersion: "26.07.01.99999+deadbeef",
 	})
-	if !strings.Contains(out, "abcd1234") {
-		t.Errorf("expected short client digest 'abcd1234', got: %q", out)
+	// WIDE shows both versions in FULL — no splitting/shortening of the id.
+	if !strings.Contains(out, "26.07.01.99999+deadbeef") {
+		t.Errorf("expected full daemon version, got: %q", out)
 	}
-	if !strings.Contains(out, "deadbeef") {
-		t.Errorf("expected short daemon digest 'deadbeef', got: %q", out)
+	if !strings.Contains(out, "26.07.08.12345+abcd1234") {
+		t.Errorf("expected full client version, got: %q", out)
+	}
+	if !strings.Contains(out, "≠") {
+		t.Errorf("expected mismatch glyph '≠', got: %q", out)
 	}
 	if !strings.Contains(out, "restart daemon") {
 		t.Errorf("expected 'restart daemon' remediation, got: %q", out)
@@ -215,11 +201,19 @@ func TestAlertsVersionMismatchNarrow(t *testing.T) {
 	out := Alerts(&aggregate.Tree{}, AlertsOpts{
 		Now:           time.Now(),
 		Width:         90, // NARROW
-		ClientVersion: "26.07.08+aa",
-		DaemonVersion: "26.07.01+bb",
+		ClientVersion: "26.07.08+abcd1234",
+		DaemonVersion: "26.07.01+deadbeef",
 	})
-	if !strings.Contains(out, "⚠ daemon version differs — restart") {
-		t.Errorf("narrow tier: expected '⚠ daemon version differs — restart', got: %q", out)
+	// NARROW saves space by showing ONLY the daemon version (full) — the client
+	// version is dropped, NOT shortened.
+	if !strings.Contains(out, "⚠ daemon 26.07.01+deadbeef") {
+		t.Errorf("narrow tier: expected full daemon version, got: %q", out)
+	}
+	if strings.Contains(out, "abcd1234") {
+		t.Errorf("narrow tier: client version must be dropped, got: %q", out)
+	}
+	if !strings.Contains(out, "restart") {
+		t.Errorf("narrow tier: expected 'restart' action, got: %q", out)
 	}
 }
 
@@ -227,11 +221,15 @@ func TestAlertsVersionMismatchTiny(t *testing.T) {
 	out := Alerts(&aggregate.Tree{}, AlertsOpts{
 		Now:           time.Now(),
 		Width:         40, // TINY
-		ClientVersion: "26.07.08+aa",
-		DaemonVersion: "26.07.01+bb",
+		ClientVersion: "26.07.08+abcd1234",
+		DaemonVersion: "26.07.01+deadbeef",
 	})
-	if !strings.Contains(out, "⚠ daemon ver") {
-		t.Errorf("tiny tier: expected '⚠ daemon ver', got: %q", out)
+	// TINY shows ONLY the daemon version (full); client dropped.
+	if !strings.Contains(out, "⚠ daemon 26.07.01+deadbeef") {
+		t.Errorf("tiny tier: expected full daemon version, got: %q", out)
+	}
+	if strings.Contains(out, "abcd1234") {
+		t.Errorf("tiny tier: client version must be dropped, got: %q", out)
 	}
 }
 

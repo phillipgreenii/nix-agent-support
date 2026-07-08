@@ -24,16 +24,6 @@ type AlertsOpts struct {
 	DaemonVersion   string
 }
 
-// shortVersion returns the +<digest> suffix of a build id (the discriminating
-// part) for compact display, e.g. "26.07.08.12345+abcd1234" -> "abcd1234".
-// Strings without a '+' (including "dev" and "") are returned unchanged.
-func shortVersion(v string) string {
-	if i := strings.LastIndex(v, "+"); i >= 0 {
-		return v[i+1:]
-	}
-	return v
-}
-
 // Alerts returns "" when no alert is active, otherwise a single-line,
 // pipe-joined summary in priority order:
 //
@@ -65,14 +55,17 @@ func Alerts(tree *aggregate.Tree, opts AlertsOpts) string {
 
 	if versioncmp.Mismatch(opts.ClientVersion, opts.DaemonVersion) {
 		var seg string
+		// WIDE shows both versions in full. NARROW/TINY save space by showing
+		// only the daemon version (the stale one that needs restarting) — never
+		// by splitting/shortening the id, which has no reliable delimiter.
 		switch tier {
 		case wrap.TierWide:
 			seg = fmt.Sprintf("⚠ daemon %s ≠ this %s — restart daemon",
-				shortVersion(opts.DaemonVersion), shortVersion(opts.ClientVersion))
+				opts.DaemonVersion, opts.ClientVersion)
 		case wrap.TierNarrow:
-			seg = "⚠ daemon version differs — restart"
+			seg = fmt.Sprintf("⚠ daemon %s — restart", opts.DaemonVersion)
 		default:
-			seg = "⚠ daemon ver"
+			seg = fmt.Sprintf("⚠ daemon %s", opts.DaemonVersion)
 		}
 		segs = append(segs, opts.Theme.Error.Render(seg))
 	}
