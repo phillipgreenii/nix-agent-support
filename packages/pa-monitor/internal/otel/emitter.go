@@ -72,6 +72,11 @@ type Emitter struct {
 	logProvider     *sdklog.LoggerProvider
 	logger          otellog.Logger
 
+	// health tracks OTLP export success/failure behind the metric and log
+	// exporter decorators, surfacing a throttled UNHEALTHY / RECOVERED summary
+	// to stderr in place of the SDK's unmanaged per-attempt spam (pg2-waji).
+	health *exportHealth
+
 	// Counters — sync (not observable). Nil when SDK uninitialised.
 	blockLimitHits       metric.Int64Counter
 	weekLimitHits        metric.Int64Counter
@@ -154,12 +159,21 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		return nil, err
 	}
 
+	// Shared export-health tracker (pg2-waji). Both exporters are wrapped so
+	// every export result flows through it; the decorators swallow the raw
+	// export error (the data is already lost when the collector is down) and
+	// the tracker emits a throttled UNHEALTHY / RECOVERED summary to stderr in
+	// place of the SDK's per-attempt "failed to upload" spam.
+	health := newExportHealth(time.Now, defaultHealthThrottle)
+
 	metricExp, err := otlpmetricgrpc.New(ctx)
 	if err != nil {
 		return nil, err
 	}
 	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
+			&healthMetricExporter{Exporter: metricExp, health: health, out: os.Stderr},
+		)),
 		sdkmetric.WithResource(res),
 	)
 
@@ -169,7 +183,9 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		return nil, err
 	}
 	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(
+			&healthLogExporter{Exporter: logExp, health: health, out: os.Stderr},
+		)),
 		sdklog.WithResource(res),
 	)
 
@@ -177,6 +193,7 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		metricsProvider: mp,
 		logProvider:     lp,
 		logger:          lp.Logger("pa-monitor"),
+		health:          health,
 	}
 	if err := e.registerMetrics(mp); err != nil {
 		_ = mp.Shutdown(ctx)
@@ -362,6 +379,17 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
 		blockUsagePctGauge, blockUsageResetsGauge, weekUsagePctGauge, weekUsageResetsGauge)
 	return err
+}
+
+// ExportHealthy reports whether the most recent OTLP export attempt succeeded.
+// A nil emitter (OTel disabled) and an emitter that has not yet attempted an
+// export both report healthy. This is the local read-side of the export-health
+// state a status/info surface can consult without an RPC round-trip. nil-safe.
+func (e *Emitter) ExportHealthy() bool {
+	if e == nil || e.health == nil {
+		return true
+	}
+	return e.health.healthy()
 }
 
 // Shutdown flushes exporters. nil-safe.

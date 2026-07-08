@@ -16,6 +16,36 @@ func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 	}
 }
 
+// TestNew_WiresExportHealth constructs a real Emitter (endpoint set, no live
+// collector) and asserts New wires the export-health decorators and the emitter
+// starts healthy. Exporter construction does not dial, so this is offline-safe,
+// mirroring the connection-emitter construction test.
+func TestNew_WiresExportHealth(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+	e, err := New(context.Background(), Options{ServiceName: "pa-monitor", ServiceVersion: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if e == nil {
+		t.Fatal("want non-nil emitter when endpoint set")
+	}
+	defer e.Shutdown(context.Background())
+	if e.health == nil {
+		t.Fatal("New should wire an exportHealth tracker")
+	}
+	if !e.ExportHealthy() {
+		t.Error("emitter should start healthy before any export attempt")
+	}
+}
+
+// TestExportHealthy_NilSafe: a nil emitter (OTel disabled) reports healthy.
+func TestExportHealthy_NilSafe(t *testing.T) {
+	var e *Emitter
+	if !e.ExportHealthy() {
+		t.Error("nil emitter should report healthy")
+	}
+}
+
 func TestEmitter_NilSafeMethods(t *testing.T) {
 	var e *Emitter
 	// Methods MUST not panic on nil receiver.
