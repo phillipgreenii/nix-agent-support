@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
@@ -58,6 +59,41 @@ func TestDedup_RemovesByPathLineBodyPrefix(t *testing.T) {
 	}
 	if len(unique) != 2 {
 		t.Fatalf("expected 2 unique, got %d: %+v", len(unique), unique)
+	}
+}
+
+// The visible attribution banner is a long, constant prefix on every stamped
+// body. Dedup must key on the underlying content, not the banner — otherwise
+// two distinct findings on the same line share the banner within the key window
+// and the second gets wrongly dropped.
+func TestDedup_StampedBodiesDoNotCollideOnBanner(t *testing.T) {
+	existing := []api.Comment{
+		{Path: "main.go", Line: 10, Body: marker.Stamp("rename foo")},
+	}
+	incoming := []api.Comment{
+		{Path: "main.go", Line: 10, Body: marker.Stamp("rename foo")},          // true duplicate
+		{Path: "main.go", Line: 10, Body: marker.Stamp("extract this method")}, // distinct finding, same line
+	}
+	unique, skipped := Dedup(incoming, existing)
+	if skipped != 1 {
+		t.Fatalf("expected 1 skipped (only the true duplicate), got %d", skipped)
+	}
+	if len(unique) != 1 || marker.Strip(unique[0].Body) != "extract this method" {
+		t.Fatalf("expected the distinct finding to survive dedup, got %+v", unique)
+	}
+}
+
+// A comment posted before the banner existed carries only the invisible marker;
+// a re-post now carries the banner too. Same content ⇒ still a duplicate.
+func TestDedup_MatchesAcrossOldAndNewMarkerFormat(t *testing.T) {
+	existing := []api.Comment{
+		{Path: "main.go", Line: 5, Body: marker.HTMLMarker + "\nrename foo"},
+	}
+	incoming := []api.Comment{
+		{Path: "main.go", Line: 5, Body: marker.Stamp("rename foo")},
+	}
+	if _, skipped := Dedup(incoming, existing); skipped != 1 {
+		t.Fatalf("expected cross-format dedup (1 skipped), got %d", skipped)
 	}
 }
 

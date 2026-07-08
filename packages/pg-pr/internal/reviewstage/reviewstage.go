@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
@@ -102,7 +103,8 @@ func Clear(dir, repo string, pr int) error {
 }
 
 // Dedup removes comments from `incoming` that already exist in `existing`.
-// Match key: (Path, Line, first 100 chars of Body).
+// Match key: (Path, Line, first 100 chars of the marker-stripped Body) — see
+// dedupKey.
 func Dedup(incoming, existing []api.Comment) (unique []api.Comment, skipped int) {
 	seen := make(map[string]struct{}, len(existing))
 	for _, e := range existing {
@@ -119,7 +121,12 @@ func Dedup(incoming, existing []api.Comment) (unique []api.Comment, skipped int)
 }
 
 func dedupKey(c api.Comment) string {
-	body := c.Body
+	// Strip pg-pr attribution markup first so the key hinges on the actual
+	// comment content. Without this the constant visible attribution banner
+	// (added by marker.Stamp) dominates the fixed 100-char window, making
+	// distinct findings collide and breaking dedup across old→new marker
+	// formats.
+	body := marker.Strip(c.Body)
 	if len(body) > 100 {
 		body = body[:100]
 	}
