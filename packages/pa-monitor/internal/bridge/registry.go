@@ -32,9 +32,9 @@ const (
 // across bridge restarts or concurrent connections); each gets its own
 // entry keyed by its own PID.
 //
-// send is nil for display-only members created by the back-compat
-// Register method — those exist only to keep StatusForServer's liveness
-// contract working for callers that predate stream delivery.
+// send may be nil for a member attached without a stream send hook; LiveBridge
+// skips such members because they cannot receive Deliver pushes, while
+// StatusForServer still counts them toward liveness.
 type BridgeEntry struct {
 	BridgePID int
 	send      func(*pb.DaemonMsg) error
@@ -60,19 +60,6 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 		staleAfter: staleAfter,
 		now:        time.Now,
 	}
-}
-
-// Register records or refreshes a display-only bridge entry. serverPID is
-// the cmux server PID derived from the bridge's ancestry; the registry
-// treats it as opaque and trusts the caller's derivation.
-//
-// This is the back-compat path used by callers that only report liveness
-// without carrying a stream send hook (bridgePID 0, no send). It keeps
-// StatusForServer's Alive/Stale/Unknown contract working for them.
-func (r *Registry) Register(serverPID int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.attachLocked(serverPID, 0, nil, r.now())
 }
 
 // AttachStream adds or updates a live-bridge set member carrying a stream
@@ -134,19 +121,11 @@ func (r *Registry) Deregister(serverPID, bridgePID int) {
 
 // Prune removes every bridge member whose bridge PID is no longer alive
 // according to isAlive. Servers left with no members are removed entirely.
-// The bridgePID-0 sentinel used by Register's display-only members is
-// exempt from this liveness check and is never pruned by Prune.
 func (r *Registry) Prune(isAlive func(pid int) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for serverPID, members := range r.byServer {
 		for bridgePID := range members {
-			// bridgePID 0 denotes a display-only Register member with no
-			// real process behind it; it is never subject to liveness
-			// pruning by PID.
-			if bridgePID == 0 {
-				continue
-			}
 			if !isAlive(bridgePID) {
 				delete(members, bridgePID)
 			}
@@ -160,7 +139,7 @@ func (r *Registry) Prune(isAlive func(pid int) bool) {
 // LiveBridge returns a set member for serverPID that carries a non-nil send
 // hook AND whose lastSeen is still fresh within staleAfter, preferring the
 // freshest such member. Returns false if no such member exists (including
-// when the only members are display-only, or when every send-carrying member
+// when the only members carry no send hook, or when every send-carrying member
 // has gone stale). Filtering by staleAfter — the same cutoff StatusForServer
 // uses — is what lets a wedged-but-alive bridge (process up, cmux socket open
 // so it is not reaped, but lastSeen no longer refreshing) degrade to
@@ -198,12 +177,11 @@ func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
 }
 
 // Send pushes a DaemonMsg to this bridge via its attached stream send hook.
-// It returns nil for a display-only member (nil send hook, e.g. one created
-// by Register). The backpressure policy — dropping snapshots and returning an
-// error when the outbound queue is full for deliveries — is owned by the
-// BridgeChannel handler that attached the hook. Callers (e.g. the delivery
-// dispatcher) use this to push a Deliver to a live bridge obtained via
-// LiveBridge.
+// It returns nil for a member with no send hook (nil send). The backpressure
+// policy — dropping snapshots and returning an error when the outbound queue
+// is full for deliveries — is owned by the BridgeChannel handler that attached
+// the hook. Callers (e.g. the delivery dispatcher) use this to push a Deliver
+// to a live bridge obtained via LiveBridge.
 func (e *BridgeEntry) Send(m *pb.DaemonMsg) error {
 	if e == nil || e.send == nil {
 		return nil

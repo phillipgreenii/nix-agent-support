@@ -14,19 +14,11 @@ func TestRegistry_UnknownByDefault(t *testing.T) {
 	}
 }
 
-func TestRegistry_RegisterMarksAlive(t *testing.T) {
-	r := NewRegistry(30 * time.Second)
-	r.Register(4000)
-	if got := r.StatusForServer(4000); got != Alive {
-		t.Errorf("fresh registration: got %v, want Alive", got)
-	}
-}
-
 func TestRegistry_StaleAfterCutoff(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.Register(4000)
+	r.AttachStream(4000, 100, nil)
 
 	r.now = func() time.Time { return now.Add(31 * time.Second) }
 	if got := r.StatusForServer(4000); got != Stale {
@@ -39,20 +31,20 @@ func TestRegistry_StaleAfterCutoff(t *testing.T) {
 	}
 }
 
-func TestRegistry_ReRegisterRefreshesLastSeen(t *testing.T) {
+func TestRegistry_ReAttachRefreshesLastSeen(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.Register(4000)
+	r.AttachStream(4000, 100, nil)
 
 	r.now = func() time.Time { return now.Add(45 * time.Second) }
 	if got := r.StatusForServer(4000); got != Stale {
 		t.Fatalf("precondition: should be stale at 45s; got %v", got)
 	}
 
-	r.Register(4000)
+	r.AttachStream(4000, 100, nil)
 	if got := r.StatusForServer(4000); got != Alive {
-		t.Errorf("after re-register: got %v, want Alive", got)
+		t.Errorf("after re-attach: got %v, want Alive", got)
 	}
 }
 
@@ -60,10 +52,10 @@ func TestRegistry_DistinctServersTrackedIndependently(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.Register(4000)
+	r.AttachStream(4000, 100, nil)
 
 	r.now = func() time.Time { return now.Add(40 * time.Second) }
-	r.Register(5000)
+	r.AttachStream(5000, 200, nil)
 
 	if got := r.StatusForServer(4000); got != Stale {
 		t.Errorf("ws-A at t=40s: got %v, want Stale", got)
@@ -219,13 +211,16 @@ func TestRegistry_LiveBridgeSkipsStaleMember(t *testing.T) {
 	}
 }
 
-func TestRegistry_LiveBridgeIgnoresDisplayOnlyRegisterMember(t *testing.T) {
+func TestRegistry_LiveBridgeIgnoresSendlessMember(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	r.Register(4000)
+	// A member attached without a send hook counts toward StatusForServer
+	// liveness but must never be returned by LiveBridge, since it cannot
+	// receive Deliver pushes.
+	r.AttachStream(4000, 100, nil)
 	if _, ok := r.LiveBridge(4000); ok {
-		t.Errorf("LiveBridge(4000) with only a display-only Register member: got ok, want !ok")
+		t.Errorf("LiveBridge(4000) with only a sendless member: got ok, want !ok")
 	}
 }
