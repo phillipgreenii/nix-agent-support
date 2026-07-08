@@ -47,7 +47,9 @@ type VCSReviewer interface {
 	// ListComments returns the PR's existing comments (for inline-comment dedup).
 	ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error)
 	// PostReview posts a PENDING review (no `event`); the human submits it.
-	PostReview(ctx context.Context, repo string, number int, body string, comments []api.Comment) (*api.Review, error)
+	// commitID anchors inline comments to the reviewed commit (avoids the 422
+	// when the PR head has advanced — pg2-pipw).
+	PostReview(ctx context.Context, repo string, number int, commitID, body string, comments []api.Comment) (*api.Review, error)
 	// GetPR fetches the live PR so the sink can detect a stale head (R6 warn).
 	GetPR(ctx context.Context, repo string, number int) (*api.PR, error)
 }
@@ -121,7 +123,7 @@ func ApplyPendingReview(ctx context.Context, rv VCSReviewer, dir string, result 
 		body = marker.Stamp(body)
 	}
 
-	rev, err := rv.PostReview(ctx, repo, prNumber, body, unique)
+	rev, err := rv.PostReview(ctx, repo, prNumber, result.HeadSHA, body, unique)
 	if err != nil {
 		return fmt.Errorf("teamsink: post pending review %s#%d: %w", repo, prNumber, err)
 	}

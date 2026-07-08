@@ -118,7 +118,7 @@ func (f *writeFakeVCS) ReplyToThread(context.Context, string, string, string) (*
 	return nil, nil
 }
 func (f *writeFakeVCS) ResolveThread(context.Context, string, string) error { return nil }
-func (f *writeFakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
+func (f *writeFakeVCS) PostReview(context.Context, string, int, string, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
 

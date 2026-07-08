@@ -31,6 +31,7 @@ type fakeReviewer struct {
 type postCall struct {
 	repo     string
 	pr       int
+	commitID string
 	body     string
 	comments []api.Comment
 }
@@ -43,8 +44,8 @@ func (f *fakeReviewer) ListComments(_ context.Context, _ string, _ int) ([]api.C
 	return f.existing, nil
 }
 
-func (f *fakeReviewer) PostReview(_ context.Context, repo string, pr int, body string, comments []api.Comment) (*api.Review, error) {
-	f.posts = append(f.posts, postCall{repo: repo, pr: pr, body: body, comments: comments})
+func (f *fakeReviewer) PostReview(_ context.Context, repo string, pr int, commitID, body string, comments []api.Comment) (*api.Review, error) {
+	f.posts = append(f.posts, postCall{repo: repo, pr: pr, commitID: commitID, body: body, comments: comments})
 	if f.postErr != nil {
 		return nil, f.postErr
 	}
@@ -88,6 +89,11 @@ func TestApplyPendingReview_PostsPendingReview(t *testing.T) {
 	p := rv.posts[0]
 	if p.repo != "o/r" || p.pr != 7 {
 		t.Fatalf("posted to wrong PR: %s#%d", p.repo, p.pr)
+	}
+	// The reviewed head SHA must be forwarded as commit_id so inline comments
+	// anchor to the exact reviewed commit (pg2-pipw 422 fix).
+	if p.commitID != "h1" {
+		t.Errorf("team sink must forward result.HeadSHA as commit_id, got %q", p.commitID)
 	}
 	// Marker MUST be present on body and each comment.
 	if !marker.IsOurs(p.body) {

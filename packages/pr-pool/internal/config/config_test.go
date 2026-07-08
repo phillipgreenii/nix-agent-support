@@ -177,7 +177,7 @@ func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Built-in roles use the Default() caps (1/1); the dropped env vars do nothing.
-	if len(c.Roles) != 2 || c.Roles[1].Cap != 1 {
+	if len(c.Roles) != 3 || c.Roles[1].Cap != 1 {
 		t.Errorf("PR_POOL_MAX_WORKER must be a no-op; worker cap = %d, want 1", c.Roles[1].Cap)
 	}
 }
@@ -243,8 +243,8 @@ func TestLoad_noFile_builtinRoleSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 2 || c.Roles[0].Name != "feedback" || c.Roles[1].Name != "worker" {
-		t.Fatalf("no-file must yield built-in feedback+worker: %+v", c.Roles)
+	if len(c.Roles) != 3 || c.Roles[0].Name != "feedback" || c.Roles[1].Name != "worker" || c.Roles[2].Name != "review" {
+		t.Fatalf("no-file must yield built-in feedback+worker+review: %+v", c.Roles)
 	}
 }
 

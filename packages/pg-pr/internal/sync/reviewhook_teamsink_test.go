@@ -34,7 +34,7 @@ func (r *reviewerVCS) ListComments(_ context.Context, _ string, _ int) ([]api.Co
 	return nil, nil
 }
 
-func (r *reviewerVCS) PostReview(_ context.Context, repo string, pr int, body string, comments []api.Comment) (*api.Review, error) {
+func (r *reviewerVCS) PostReview(_ context.Context, repo string, pr int, _ string, body string, comments []api.Comment) (*api.Review, error) {
 	r.posts = append(r.posts, reviewerPost{repo: repo, pr: pr, body: body, comments: comments})
 	return &api.Review{ID: "RV_1", State: "pending", Body: body}, nil
 }

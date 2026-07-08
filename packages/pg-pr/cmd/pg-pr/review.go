@@ -144,7 +144,11 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 		body = marker.Stamp(body)
 	}
 
-	rev, err := provider.PostReview(ctx, draft.Repo, draft.PR, body, unique)
+	// Anchor inline comments to the reviewed commit (draft.HeadSHA) so a PR head
+	// that advanced between review and post does not 422 "line must be part of
+	// the diff" (pg2-pipw). Empty HeadSHA (a human-authored draft with no sidecar)
+	// falls back to GitHub's latest-commit anchoring, unchanged.
+	rev, err := provider.PostReview(ctx, draft.Repo, draft.PR, draft.HeadSHA, body, unique)
 	if err != nil {
 		return fmt.Errorf("post review: %w", err)
 	}

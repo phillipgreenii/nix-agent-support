@@ -13,7 +13,7 @@ const exampleHeader = `# pr-pool configuration — repo-local at <RepoRoot>/.pr-
 #
 # When this file is present, the [[role]] array below REPLACES the built-in roles
 # entirely. With NO config file, pr-pool runs exactly these built-in feedback +
-# worker defaults. Copy this file and edit it to customize, or run
+# worker + review defaults. Copy this file and edit it to customize, or run
 # 'pr-pool config --print-defaults' to regenerate it.
 #
 # Each [[role]] is one role. NOTE the DOUBLE brackets — a single [role] table is a

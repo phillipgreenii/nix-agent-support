@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ type fakeGH struct {
 	responses map[string][]byte
 	errs      map[string]error
 	calls     [][]string
+	stdins    [][]byte // captured RunStdin payloads (for asserting POST bodies)
 }
 
 func newFakeGH() *fakeGH {
@@ -36,8 +38,9 @@ func (f *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 	return []byte("[]"), nil
 }
 
-func (f *fakeGH) RunStdin(_ context.Context, _ []byte, args ...string) ([]byte, error) {
+func (f *fakeGH) RunStdin(_ context.Context, stdin []byte, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, append([]string(nil), args...))
+	f.stdins = append(f.stdins, append([]byte(nil), stdin...))
 	key := strings.Join(args[:min(2, len(args))], " ")
 	if err, ok := f.errs[key]; ok {
 		return nil, err
@@ -414,25 +417,101 @@ func TestAddComment_EmptyBodyRejected(t *testing.T) {
 	}
 }
 
-func TestPostReview_SendsJSONPayload(t *testing.T) {
+// decodeLastReviewPayload unmarshals the most recent captured RunStdin payload.
+func decodeLastReviewPayload(t *testing.T, gh *fakeGH) map[string]any {
+	t.Helper()
+	if len(gh.stdins) == 0 {
+		t.Fatalf("no RunStdin payload captured")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(gh.stdins[len(gh.stdins)-1], &payload); err != nil {
+		t.Fatalf("payload not valid JSON: %v (%s)", err, gh.stdins[len(gh.stdins)-1])
+	}
+	return payload
+}
+
+// TestPostReview_PayloadShape is the pg2-pipw 422 fix, verified against the
+// replayed POST payload: commit_id anchors inline comments to the reviewed
+// commit; a line comment is sent with line+side; an un-anchorable (PR-level or
+// whole-file) comment is FOLDED into the body (NOT sent as an invalid entry with
+// subject_type, which GitHub rejected with 422).
+func TestPostReview_PayloadShape(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(
 		`{"node_id":"RV_kw","state":"PENDING","body":"the body"}`,
 	)
 	p := NewWithRunner(gh)
 
-	rev, err := p.PostReview(context.Background(), "foo/bar", 42,
+	rev, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef",
 		"top-level body",
 		[]api.Comment{
 			{Path: "main.go", Line: 12, Body: "rename x"},
 			{Path: "", Body: "PR-level note"},
-			{Path: "readme.md", Body: "missing section"}, // file-level
+			{Path: "readme.md", Body: "missing section"}, // whole-file (no line)
 		})
 	if err != nil {
 		t.Fatalf("PostReview: %v", err)
 	}
 	if rev.ID != "RV_kw" || rev.State != "pending" {
 		t.Fatalf("unexpected review: %+v", rev)
+	}
+
+	payload := decodeLastReviewPayload(t, gh)
+	raw := string(gh.stdins[len(gh.stdins)-1])
+
+	if payload["commit_id"] != "deadbeef" {
+		t.Errorf("commit_id must anchor to the reviewed commit; got %v", payload["commit_id"])
+	}
+	if strings.Contains(raw, "subject_type") {
+		t.Errorf("payload must NOT contain subject_type (422 cause): %s", raw)
+	}
+	// The un-anchorable comments must be folded into the body.
+	body, _ := payload["body"].(string)
+	if !strings.Contains(body, "PR-level note") || !strings.Contains(body, "missing section") {
+		t.Errorf("PR-level + whole-file comments must fold into body; body=%q", body)
+	}
+	// Exactly one inline comment (main.go:12) survives as a comments[] entry.
+	comments, _ := payload["comments"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("expected exactly 1 inline comment, got %d: %s", len(comments), raw)
+	}
+	c0 := comments[0].(map[string]any)
+	if c0["path"] != "main.go" || c0["line"].(float64) != 12 || c0["side"] != "RIGHT" {
+		t.Errorf("inline comment shape wrong: %+v", c0)
+	}
+}
+
+// TestPostReview_EmptyReviewSkipsPost: a review with neither body nor
+// anchorable comments must NOT POST (an empty pending review is a 422); it
+// returns a no-op review so the caller clears the staged draft.
+func TestPostReview_EmptyReviewSkipsPost(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	rev, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef", "", nil)
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if rev == nil || rev.State != "pending" {
+		t.Errorf("expected a no-op pending review, got %+v", rev)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "api" && strings.Contains(c[1], "/reviews") {
+			t.Errorf("must NOT POST an empty review (422); saw call %v", c)
+		}
+	}
+}
+
+// TestPostReview_NoCommitIDOmitsField: the CLI post path passes commitID="",
+// which must omit commit_id (GitHub anchors to the latest commit).
+func TestPostReview_NoCommitIDOmitsField(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_1","state":"PENDING"}`)
+	p := NewWithRunner(gh)
+	if _, err := p.PostReview(context.Background(), "foo/bar", 42, "", "body", nil); err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if _, present := decodeLastReviewPayload(t, gh)["commit_id"]; present {
+		t.Errorf("commit_id must be omitted when commitID is empty")
 	}
 }
 

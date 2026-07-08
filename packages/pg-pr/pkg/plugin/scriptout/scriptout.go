@@ -108,6 +108,7 @@ type AuthChecker interface {
 type PostReviewArgs struct {
 	Repo     string        `json:"repo"`
 	Number   int           `json:"number"`
+	CommitID string        `json:"commit_id,omitempty"`
 	Body     string        `json:"body"`
 	Comments []api.Comment `json:"comments"`
 }
@@ -323,7 +324,7 @@ func dispatchVCS(ctx context.Context, p vcs.Provider, req *Request) (any, error)
 		if err := decodeArgs(req, &a); err != nil {
 			return nil, err
 		}
-		return p.PostReview(ctx, a.Repo, a.Number, a.Body, a.Comments)
+		return p.PostReview(ctx, a.Repo, a.Number, a.CommitID, a.Body, a.Comments)
 	case OpListReviews:
 		var a struct {
 			Repo   string `json:"repo"`

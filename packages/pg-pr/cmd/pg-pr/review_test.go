@@ -17,6 +17,7 @@ import (
 // reviewFakeVCS records the inputs to write methods.
 type reviewFakeVCS struct {
 	postedBody       string
+	postedCommitID   string
 	postedComments   []api.Comment
 	addBody          string
 	resolveErr       error
@@ -63,7 +64,8 @@ func (f *reviewFakeVCS) ReplyToThread(_ context.Context, repo, threadID, body st
 	return &api.Comment{ID: "IC_reply", Body: body, ThreadID: threadID}, nil
 }
 func (f *reviewFakeVCS) ResolveThread(context.Context, string, string) error { return f.resolveErr }
-func (f *reviewFakeVCS) PostReview(_ context.Context, _ string, _ int, body string, comments []api.Comment) (*api.Review, error) {
+func (f *reviewFakeVCS) PostReview(_ context.Context, _ string, _ int, commitID, body string, comments []api.Comment) (*api.Review, error) {
+	f.postedCommitID = commitID
 	f.postedBody = body
 	f.postedComments = comments
 	return &api.Review{ID: "RV_x", State: "pending", Body: body}, nil
@@ -173,6 +175,32 @@ func TestReviewSubmit_NoStaging(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
 	if len(files) != 0 {
 		t.Fatalf("submit should not persist staging, got %d files", len(files))
+	}
+}
+
+// TestReviewSubmit_ForwardsHeadSHAAsCommitID: a submit JSON carrying head_sha
+// must anchor the review to that commit (commit_id), so a PR head that advanced
+// between review and post does not 422 (pg2-pipw). This is the path the pr-pool
+// review role uses.
+func TestReviewSubmit_ForwardsHeadSHAAsCommitID(t *testing.T) {
+	resetReviewFlags()
+	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	in := `{"head_sha":"abc123","comments":[{"path":"a.go","line":1,"body":"x"}]}`
+	rootCmd.SetIn(strings.NewReader(in))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+	}
+	if fake.postedCommitID != "abc123" {
+		t.Errorf("submit must forward head_sha as commit_id, got %q", fake.postedCommitID)
 	}
 }
 

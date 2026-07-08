@@ -195,8 +195,8 @@ func (e *execVCSProvider) ResolveThread(ctx context.Context, repo string, thread
 	return err
 }
 
-func (e *execVCSProvider) PostReview(ctx context.Context, repo string, number int, body string, comments []api.Comment) (*api.Review, error) {
-	args := PostReviewArgs{Repo: repo, Number: number, Body: body, Comments: comments}
+func (e *execVCSProvider) PostReview(ctx context.Context, repo string, number int, commitID, body string, comments []api.Comment) (*api.Review, error) {
+	args := PostReviewArgs{Repo: repo, Number: number, CommitID: commitID, Body: body, Comments: comments}
 	raw, err := invokeWithArgs(ctx, e.binary, OpPostReview, args)
 	if err != nil {
 		return nil, err

@@ -533,6 +533,40 @@ func TestDispatch_launchesInFreshPerBeadWorktree(t *testing.T) {
 	}
 }
 
+// TestDispatch_reviewRole_completeOnClose exercises the pg2-ynhr.3 review role
+// end-to-end through the ccpool executor: a review-pr bead (task + "review-pr: "
+// prefix + PR-coord metadata) is dispatched, the ported prompt renders, and the
+// dispatch completes cleanly when the agent closes the bead (complete-on-close),
+// with no unclaim/human on success.
+func TestDispatch_reviewRole_completeOnClose(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-rv": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pr-pool-review-zr-rv", Live: true, State: ccpool.StateWorking}}}}
+	d := discover.DispatchContext{
+		Role: roleByName(cfg, "review"),
+		Item: item.Item{
+			ID: "zr-rv", Type: "task", Title: "review-pr: o/r#7",
+			Metadata: map[string]any{
+				"repo": "o/r", "pr_number": float64(7), "branch": "feat/x", "head_sha": "abc123",
+			},
+		},
+	}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pr-pool-review-zr-rv"
+	deps.Git = &dtest.NoopGit{}
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err != nil {
+		t.Fatalf("review dispatch should succeed on bead close, got %v; updates=%v", err, bd.Updates)
+	}
+	// complete-on-close: the bead closed, so no failure handling (unclaim / add-human).
+	for _, u := range bd.Updates {
+		if strings.Contains(u, "--status=open") || strings.Contains(u, "--add-label human") {
+			t.Errorf("successful review must not unclaim/add-human; got %q", u)
+		}
+	}
+}
+
 func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}

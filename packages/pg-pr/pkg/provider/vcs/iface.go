@@ -36,7 +36,7 @@ type Provider interface {
 	AddComment(ctx context.Context, repo string, number int, body string) (*api.Comment, error)
 	ReplyToThread(ctx context.Context, repo string, threadID, body string) (*api.Comment, error)
 	ResolveThread(ctx context.Context, repo string, threadID string) error
-	PostReview(ctx context.Context, repo string, number int, body string, comments []api.Comment) (*api.Review, error)
+	PostReview(ctx context.Context, repo string, number int, commitID, body string, comments []api.Comment) (*api.Review, error)
 	// ListReviews returns the review summaries for a PR. State is one of
 	// APPROVED, CHANGES_REQUESTED, COMMENTED. Body is the review-summary text
 	// (used for agent approval-mining); Comments is left empty here — inline

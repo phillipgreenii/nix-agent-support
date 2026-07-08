@@ -54,7 +54,7 @@ func (f *fakeVCS) ReplyToThread(context.Context, string, string, string) (*api.C
 	return nil, nil
 }
 func (f *fakeVCS) ResolveThread(context.Context, string, string) error { return nil }
-func (f *fakeVCS) PostReview(context.Context, string, int, string, []api.Comment) (*api.Review, error) {
+func (f *fakeVCS) PostReview(context.Context, string, int, string, string, []api.Comment) (*api.Review, error) {
 	return nil, nil
 }
 

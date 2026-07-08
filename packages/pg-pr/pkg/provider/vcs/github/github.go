@@ -742,12 +742,11 @@ func (p *Provider) ResolveThread(ctx context.Context, repo, threadID string) err
 
 // reviewComment is the on-wire shape sent inside POST /reviews's `comments[]`.
 type reviewComment struct {
-	Path        string `json:"path"`
-	Body        string `json:"body"`
-	Line        int    `json:"line,omitempty"`
-	StartLine   int    `json:"start_line,omitempty"`
-	Side        string `json:"side,omitempty"`
-	SubjectType string `json:"subject_type,omitempty"`
+	Path      string `json:"path"`
+	Body      string `json:"body"`
+	Line      int    `json:"line,omitempty"`
+	StartLine int    `json:"start_line,omitempty"`
+	Side      string `json:"side,omitempty"`
 }
 
 // PostReview creates a pending PR review with optional comments.
@@ -756,10 +755,18 @@ type reviewComment struct {
 // (`POST repos/.../pulls/<n>/reviews`). `event` is left unspecified so the
 // review is created in PENDING state — agents/humans submit explicitly.
 //
-// Phase 2: comments without a Path become PR-level (subject_type=file when
-// Path is set + Line empty; PR-level when Path empty). The caller already
+// commitID, when non-empty, is sent as `commit_id` so inline `line` comments
+// anchor to the exact reviewed commit rather than the PR's latest commit — a
+// mismatch (a reviewed head the PR has since advanced past) is a 422 "line must
+// be part of the diff" (bead pg2-pipw). The daemon team-sink passes the reviewed
+// head SHA; the CLI post path passes "" (anchor to latest).
+//
+// A comment that cannot be anchored to a diff line — no Path, or a Path with no
+// Line — is FOLDED into the review body. GitHub's reviews-create comments[]
+// schema requires path+line; the previously-sent `subject_type:"file"` is not a
+// field of that endpoint and was rejected with 422 (pg2-pipw). The caller already
 // dedups against existing review-comments before calling.
-func (p *Provider) PostReview(ctx context.Context, repo string, number int, body string, comments []api.Comment) (*api.Review, error) {
+func (p *Provider) PostReview(ctx context.Context, repo string, number int, commitID, body string, comments []api.Comment) (*api.Review, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, err
 	}
@@ -769,25 +776,32 @@ func (p *Provider) PostReview(ctx context.Context, repo string, number int, body
 
 	rcs := make([]reviewComment, 0, len(comments))
 	for _, c := range comments {
-		if c.Path == "" {
-			// PR-level: fold into review body below.
+		if c.Path == "" || c.Line <= 0 {
+			// Un-anchorable (PR-level, or whole-file): fold into the review body.
+			note := c.Body
+			if c.Path != "" {
+				note = c.Path + ": " + c.Body
+			}
 			if body != "" {
 				body += "\n\n"
 			}
-			body += c.Body
+			body += note
 			continue
 		}
-		rc := reviewComment{Path: c.Path, Body: c.Body}
-		if c.Line > 0 {
-			rc.Line = c.Line
-			rc.Side = "RIGHT"
-		} else {
-			rc.SubjectType = "file"
-		}
-		rcs = append(rcs, rc)
+		rcs = append(rcs, reviewComment{Path: c.Path, Body: c.Body, Line: c.Line, Side: "RIGHT"})
+	}
+
+	// Empty guard: a PENDING review with neither a body nor comments is rejected
+	// by GitHub with 422 (pg2-pipw). Nothing to post → no-op (the caller then
+	// clears the staged draft; there is nothing to retry).
+	if body == "" && len(rcs) == 0 {
+		return &api.Review{State: "pending"}, nil
 	}
 
 	payload := map[string]any{}
+	if commitID != "" {
+		payload["commit_id"] = commitID
+	}
 	if body != "" {
 		payload["body"] = body
 	}
