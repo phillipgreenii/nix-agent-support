@@ -65,6 +65,9 @@ func TestBuildRunOptions_WiringNotNil(t *testing.T) {
 	if opts.WriteService == nil {
 		t.Error("opts.WriteService is nil — production code path skipped DB / WriteService setup; contribution rows would not be persisted")
 	}
+	if opts.DB == nil {
+		t.Error("opts.DB is nil — lifecycle.go requires opts.WriteService AND opts.DB to build the nudgeRecorder; without DB the dispatcher's NudgeRecorder stays nil and nudge_history rows (sent/failed/suppressed) are never persisted")
+	}
 	if opts.ReadService == nil {
 		t.Error("opts.ReadService is nil — sharedState.snapshot() would return nil and all gRPC clients (CLI / TUI) would see an empty DaemonState")
 	}

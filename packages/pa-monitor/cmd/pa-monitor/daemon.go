@@ -236,6 +236,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 			p.WriteService = ws
 			p.DB = db
 			opts.WriteService = ws
+			opts.DB = db
 			opts.ReadService = rs
 
 			// Read the persisted toggles from the DB (primary source of truth
