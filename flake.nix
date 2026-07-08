@@ -842,6 +842,119 @@
                 assert hasSub "del(.env.FORCE_PROMPT_CACHING_5M)" afterGenericEnv;
                 pkgs.runCommand "claude-settings-prompt-cache-ttl-ok" { } "touch $out";
 
+              # Regression guard for pg2-a6y3: the sibling nullOr options that write
+              # TOP-LEVEL settings keys are deliberate NO-OPs on null — a prior value is
+              # left in place, NOT scrubbed (the opposite of promptCacheTtl). This pins
+              # that decision so a future "consistency" refactor cannot silently add a
+              # del-on-null. Positive controls prove a set value still emits its
+              # assignment, so the negative assertions are not vacuous. `sandbox`'s null
+              # behavior is intentionally NOT pinned here (a scrub-on-null was left open;
+              # see the option description), so only its write path gets a positive control.
+              test-claude-settings-nullor-noop =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  activationWith =
+                    settings:
+                    (evalActivation {
+                      phillipgreenii.programs.claude = {
+                        enable = true;
+                        inherit settings;
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # Every sibling option left at its null default. Only noFlicker and the
+                  # promptCacheTtl null-cleanup emit filters in this state.
+                  allNull = activationWith { };
+
+                  # Positive controls: a set value must emit its assignment.
+                  themeSet = activationWith { theme = "dark"; };
+                  statusLineSet = activationWith {
+                    statusLine = {
+                      type = "command";
+                      command = "x";
+                    };
+                  };
+                  thinkingSet = activationWith { showThinkingSummaries = true; };
+                  coauthSet = activationWith { includeCoAuthoredBy = true; };
+                  clearCtxSet = activationWith { showClearContextOnPlanAccept = true; };
+                  sandboxSet = activationWith {
+                    sandbox = {
+                      enabled = true;
+                    };
+                  };
+                  # sandboxEnabled is guarded by `sandbox == null`, so leave sandbox unset.
+                  sandboxEnabledSet = activationWith { sandboxEnabled = true; };
+                in
+                # null ⇒ neither an assignment nor a del for these top-level keys. The del
+                # forms are the real regression guard (a silent scrub would add them). The
+                # assignment/del substrings are jq syntax, so they cannot collide with the
+                # activation-script boilerplate.
+                assert !(hasSub ".statusLine = " allNull);
+                assert !(hasSub "del(.statusLine)" allNull);
+                assert !(hasSub ".showClearContextOnPlanAccept = " allNull);
+                assert !(hasSub "del(.showClearContextOnPlanAccept)" allNull);
+                assert !(hasSub ".showThinkingSummaries = " allNull);
+                assert !(hasSub "del(.showThinkingSummaries)" allNull);
+                assert !(hasSub ".includeCoAuthoredBy = " allNull);
+                assert !(hasSub "del(.includeCoAuthoredBy)" allNull);
+                assert !(hasSub ".theme = " allNull);
+                assert !(hasSub "del(.theme)" allNull);
+                # Positive controls: a set value emits its assignment.
+                assert hasSub ''.theme = "dark"'' themeSet;
+                assert hasSub ".statusLine = " statusLineSet;
+                assert hasSub ".showThinkingSummaries = true" thinkingSet;
+                assert hasSub ".includeCoAuthoredBy = true" coauthSet;
+                assert hasSub ".showClearContextOnPlanAccept = true" clearCtxSet;
+                # The sandbox object writes `.sandbox = <json>`; the sandboxEnabled alias
+                # writes the dotted `.sandbox.enabled` and NOT the object form. Matching
+                # `.sandbox = ` (space-equals) vs `.sandbox.enabled` keeps the two from
+                # cross-matching — the same defensive discipline the prompt-cache-ttl test
+                # uses for `.env["KEY"]` (bracket) vs `del(.env.KEY)` (dot).
+                assert hasSub ".sandbox = " sandboxSet;
+                assert hasSub ".sandbox.enabled = true" sandboxEnabledSet;
+                assert !(hasSub ".sandbox = " sandboxEnabledSet);
+                pkgs.runCommand "claude-settings-nullor-noop-ok" { } "touch $out";
+
               # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
               # must render on daemon.enable even when the TUI (enable/
               # claude.enable) is off, and must NOT render when nothing is

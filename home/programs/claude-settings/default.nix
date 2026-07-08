@@ -25,6 +25,17 @@ let
   };
 
   filters =
+    # These top-level-key options are tri-state nullOr, but unlike promptCacheTtl
+    # (below) `null` is a deliberate NO-OP: no filter is emitted, so a value a
+    # previous non-null generation wrote is LEFT IN PLACE, not deleted (pg2-a6y3).
+    # A promptCacheTtl-style scrub-on-null is intentionally NOT applied here because
+    # (1) `theme`/`statusLine` are written by Claude Code itself at runtime
+    # (`/theme`, `/statusline`), so del-on-null would fight an interactive choice;
+    # and (2) these are top-level keys with no per-key escape hatch (promptCacheTtl
+    # keys off `cfg.env ? KEY`), so an unconditional del would clobber a hand-set
+    # value with no opt-out — and this list runs on EVERY activation (it is never
+    # empty: noFlicker and the promptCacheTtl null-cleanup always append). A
+    # `sandbox` scrub was considered and deferred for the same no-opt-out reason.
     lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
     ++ lib.optional (
       cfg.showClearContextOnPlanAccept != null
@@ -106,7 +117,13 @@ in
     statusLine = lib.mkOption {
       type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
       default = null;
-      description = "statusLine config object to set in ~/.claude/settings.json";
+      description = ''
+        statusLine config object to set in ~/.claude/settings.json. `null`
+        (default) is a deliberate no-op: a previously written `.statusLine` is
+        left in place, not deleted (unlike `promptCacheTtl`). Claude Code's
+        `/statusline` command writes `.statusLine` itself, so a scrub-on-null
+        would fight an interactive change.
+      '';
     };
 
     extraKnownMarketplaces = lib.mkOption {
@@ -124,19 +141,34 @@ in
     showClearContextOnPlanAccept = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
-      description = "Whether to show the clear-context option when accepting a plan";
+      description = ''
+        Whether to show the clear-context option when accepting a plan. `null`
+        (default) is a deliberate no-op — a previously written
+        `.showClearContextOnPlanAccept` is left in place, not deleted (top-level
+        key, no escape hatch, unlike `promptCacheTtl`).
+      '';
     };
 
     showThinkingSummaries = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
-      description = "Whether to show thinking summaries in interactive sessions (off by default since Claude Code 2.x)";
+      description = ''
+        Whether to show thinking summaries in interactive sessions (off by
+        default since Claude Code 2.x). `null` (default) is a deliberate no-op —
+        a previously written `.showThinkingSummaries` is left in place, not
+        deleted (top-level key, no escape hatch, unlike `promptCacheTtl`).
+      '';
     };
 
     includeCoAuthoredBy = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
-      description = "Whether Claude Code adds Co-Authored-By trailers to git commits";
+      description = ''
+        Whether Claude Code adds Co-Authored-By trailers to git commits. `null`
+        (default) is a deliberate no-op — a previously written
+        `.includeCoAuthoredBy` is left in place, not deleted (top-level key, no
+        escape hatch, unlike `promptCacheTtl`).
+      '';
     };
 
     sandbox = lib.mkOption {
@@ -161,6 +193,13 @@ in
 
         Requires Seatbelt on macOS (built-in) or bubblewrap + socat on
         Linux. macOS-only in our setup today.
+
+        `null` (default) is a deliberate no-op: a previously written `.sandbox`
+        is left in place, not deleted (unlike `promptCacheTtl`). A scrub-on-null
+        was considered — Claude Code never writes `.sandbox` itself — but
+        deferred: this filter list runs on every activation with no per-key
+        escape hatch, so an unconditional `del(.sandbox)` would clobber a
+        hand-crafted policy with no opt-out (pg2-a6y3).
       '';
     };
 
@@ -171,7 +210,10 @@ in
         Convenience toggle for `sandbox.enabled`. When set and the
         `sandbox` option is null, writes only `.sandbox.enabled` into
         settings.json. Ignored if `sandbox` is set (use `sandbox.enabled`
-        there instead).
+        there instead). `null` is a deliberate no-op: it never writes or
+        deletes a top-level `.sandboxEnabled` key (only `.sandbox.enabled`),
+        and a previously written `.sandbox.enabled` is left in place, not
+        deleted (pg2-a6y3).
       '';
     };
 
@@ -247,6 +289,13 @@ in
         .json) of a file in ~/.claude/themes/. For example, a theme file at
         ~/.claude/themes/stylix.json is selected with "custom:stylix".
         See: https://code.claude.com/docs/en/terminal-config
+
+        `null` (default, including leaving the option unset) is a deliberate
+        no-op: a previously written `.theme` is left in place, not deleted
+        (unlike `promptCacheTtl`). Claude Code writes `.theme` itself when you
+        pick a theme with `/theme`, and there is no per-key escape hatch for
+        top-level settings, so a scrub-on-null would fight an interactive theme
+        choice.
       '';
     };
 
