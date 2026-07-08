@@ -24,7 +24,7 @@ Subcommands:
   config --print-defaults print the built-in default config.toml (copy-paste starting point)
   config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
   sessions                list this pool's sessions (bead/role) from session metadata (read-only)
-  reconcile               report open process-feedback cycles that are self-owned but unstamped (missing the 'mine' label), which discovery silently skips (read-only)
+  reconcile               report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads 'pg-pr pr list'; mutates beads; exit-0-on-partial)
   version                 print the version and exit
   help                    print this help and exit
 
@@ -66,7 +66,7 @@ const (
 	routeRunQuery                   // run a role's discovery query read-only (.role)
 	routeConfig                     // print/show config (.configMode)
 	routeSessions                   // list this pool's sessions from metadata (read-only)
-	routeReconcile                  // report stranded self-owned feedback cycles (read-only)
+	routeReconcile                  // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
 )
 
 type routeResult struct {
