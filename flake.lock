@@ -660,11 +660,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783401065,
-        "narHash": "sha256-R/HZ3xk1NdlZ0WAxhgR7h62NPeJbprkWi36nyApzdRQ=",
+        "lastModified": 1783492378,
+        "narHash": "sha256-BYvtz8FpAso2Od1ecI2z8kDrQQ/qpN52QaHRkqhSd7k=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "c06627f47ed4247b284edc4a37242b91f92d0a0a",
+        "rev": "43b4f14c818de52d292f6fd70fdb9721745d27ad",
         "type": "github"
       },
       "original": {
@@ -685,11 +685,11 @@
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
-        "lastModified": 1783401065,
-        "narHash": "sha256-R/HZ3xk1NdlZ0WAxhgR7h62NPeJbprkWi36nyApzdRQ=",
+        "lastModified": 1783492378,
+        "narHash": "sha256-BYvtz8FpAso2Od1ecI2z8kDrQQ/qpN52QaHRkqhSd7k=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "c06627f47ed4247b284edc4a37242b91f92d0a0a",
+        "rev": "43b4f14c818de52d292f6fd70fdb9721745d27ad",
         "type": "github"
       },
       "original": {
@@ -707,11 +707,11 @@
         "phillipgreenii-nix-base": "phillipgreenii-nix-base_2"
       },
       "locked": {
-        "lastModified": 1783401119,
-        "narHash": "sha256-pLHv6N2IapC9gmt51TTxFe9JOACshlOwQYZa7Xw+pZM=",
+        "lastModified": 1783492479,
+        "narHash": "sha256-4GlaaWICIyQLryxToiALi4cNc7VIVstQ0HjGv2sok5M=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "ed1c747b0228695701dd754ef1769a31d235a141",
+        "rev": "46de9e4331d44a187fb3239171d240f4b6f014f5",
         "type": "github"
       },
       "original": {
