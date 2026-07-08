@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
+	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
 
 func (m *Model) View() string {
@@ -48,6 +49,8 @@ func (m *Model) View() string {
 		AutoResume:      m.autoResumeEnabled,
 		WindowResetsAt:  m.tree.WindowResetsAt,
 		AutoResumeDelay: m.autoResumeDelay,
+		ClientVersion:   m.clientVersion,
+		DaemonVersion:   m.daemonVersion,
 	})
 	footer := render.Footer(m.width, m.selectionStatus(), now)
 
@@ -126,11 +129,18 @@ func (m *Model) selectionStatus() string {
 func (m *Model) renderModal() string {
 	switch m.activeModal {
 	case ModalHelp:
+		// Compute the mismatch on the RAW fields, before the "(disconnected)"
+		// substitution below — an empty daemon version must not warn.
+		mm := versioncmp.Mismatch(m.clientVersion, m.daemonVersion)
 		dv := m.daemonVersion
 		if dv == "" {
 			dv = "(disconnected)"
 		}
-		lines := []string{fmt.Sprintf("pa-monitor %s (TUI) ⇄ %s (daemon)", m.clientVersion, dv)}
+		header := fmt.Sprintf("pa-monitor %s (TUI) ⇄ %s (daemon)", m.clientVersion, dv)
+		if mm {
+			header += m.theme.Error.Render(" — MISMATCH (restart daemon)")
+		}
+		lines := []string{header}
 		if m.cacheDir != "" {
 			lines = append(lines, "Signal errors logged to: "+filepath.Join(m.cacheDir, "signal-errors.log"))
 		}

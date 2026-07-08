@@ -14,6 +14,7 @@ import (
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
+	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
 
 // bridgeState captures the small slice of DaemonState whose flips the
@@ -27,6 +28,7 @@ type bridgeState struct {
 	initialized       bool
 	caffeinateActive  bool
 	autoResumeEnabled bool
+	daemonVersion     string
 }
 
 // stateFromDaemon extracts a bridgeState from a DaemonState message and
@@ -36,6 +38,7 @@ func stateFromDaemon(s *pb.DaemonState) bridgeState {
 		initialized:       true,
 		caffeinateActive:  s.GetCaffeinateActive(),
 		autoResumeEnabled: s.GetAutoResumeEnabled(),
+		daemonVersion:     s.GetDaemonVersion(),
 	}
 }
 
@@ -51,12 +54,24 @@ func stateFromDaemon(s *pb.DaemonState) bridgeState {
 // for the bridge to diff against. If a future proto change adds a
 // nudge-event signal to DaemonState, extend bridgeState + diffAndLog here.
 //
-// Returns curr so callers can `prev = diffAndLog(prev, curr, log)`.
-func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
+// selfVersion is the bridge's own build id (the package-main `version` global).
+// On the initial tick, if it differs from the daemon's reported version (both
+// non-empty), diffAndLog emits a warning after the summary — surfacing the
+// stale-daemon case (rebuild+activate without restarting the launchd daemon).
+// There is intentionally no diff-across-ticks version check: a daemon's version
+// is fixed for its process lifetime, so such a branch would be unreachable. The
+// initial-state branch fires on the first snapshot of every (re)connection
+// because prev resets per runBridgeChannel call.
+//
+// Returns curr so callers can `prev = diffAndLog(prev, curr, selfVersion, log)`.
+func diffAndLog(prev, curr bridgeState, selfVersion string, log func(string)) bridgeState {
 	if !prev.initialized {
 		log(fmt.Sprintf("initial state: %s, %s",
 			caffeinatePhrase(curr.caffeinateActive),
 			autoNudgePhrase(curr.autoResumeEnabled)))
+		if versioncmp.Mismatch(selfVersion, curr.daemonVersion) {
+			log("⚠ daemon version differs from this bridge — restart daemon")
+		}
 		return curr
 	}
 	if prev.caffeinateActive != curr.caffeinateActive {
@@ -482,7 +497,7 @@ loop:
 			}
 			announcer.connected()
 			if snap := r.msg.GetSnapshot(); snap != nil {
-				prev = diffAndLog(prev, stateFromDaemon(snap), log.Term)
+				prev = diffAndLog(prev, stateFromDaemon(snap), version, log.Term)
 				prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(snap, ws), log.Term)
 				reporter.Push(snapshotForWorkspace(snap, ws))
 				continue

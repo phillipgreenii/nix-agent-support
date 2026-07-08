@@ -100,8 +100,10 @@ The cmux-bridge and TUI additionally emit:
 ### cmux-bridge pane output
 
 The cmux-bridge pane shows only timestamped (`2006-01-02 15:04:05`), prefix-less, operator-facing
-lines: startup banner, caffeinate/auto-nudge state changes, session roster events (`+/-<pid>`), and
-`Lost connection to daemon` / `Connection to daemon restored` (shown once per episode). Low-level
+lines: startup banner, a `⚠ daemon version differs … — restart daemon` warning (emitted on each
+(re)connect when the running daemon's build differs from the bridge's own), caffeinate/auto-nudge
+state changes, session roster events (`+/-<pid>`), and `Lost connection to daemon` /
+`Connection to daemon restored` (shown once per episode). Low-level
 RPC/transport/retry detail goes to `~/.cache/pa-monitor/cmux-bridge.log` and to OTel logs — never
 the pane.
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
+	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
 
 // AlertsOpts carries the inputs needed to compose the alert row.
@@ -19,6 +20,18 @@ type AlertsOpts struct {
 	AutoResumeDelay time.Duration
 	TopupPoolUSD    float64
 	TopupConsumed   float64
+	ClientVersion   string
+	DaemonVersion   string
+}
+
+// shortVersion returns the +<digest> suffix of a build id (the discriminating
+// part) for compact display, e.g. "26.07.08.12345+abcd1234" -> "abcd1234".
+// Strings without a '+' (including "dev" and "") are returned unchanged.
+func shortVersion(v string) string {
+	if i := strings.LastIndex(v, "+"); i >= 0 {
+		return v[i+1:]
+	}
+	return v
 }
 
 // Alerts returns "" when no alert is active, otherwise a single-line,
@@ -46,6 +59,20 @@ func Alerts(tree *aggregate.Tree, opts AlertsOpts) string {
 			seg = "⊘ auth — run /login"
 		default:
 			seg = "⊘ /login"
+		}
+		segs = append(segs, opts.Theme.Error.Render(seg))
+	}
+
+	if versioncmp.Mismatch(opts.ClientVersion, opts.DaemonVersion) {
+		var seg string
+		switch tier {
+		case wrap.TierWide:
+			seg = fmt.Sprintf("⚠ daemon %s ≠ this %s — restart daemon",
+				shortVersion(opts.DaemonVersion), shortVersion(opts.ClientVersion))
+		case wrap.TierNarrow:
+			seg = "⚠ daemon version differs — restart"
+		default:
+			seg = "⚠ daemon ver"
 		}
 		segs = append(segs, opts.Theme.Error.Render(seg))
 	}

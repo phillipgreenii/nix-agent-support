@@ -146,3 +146,107 @@ func TestAlertsAuthFailureSortsFirst(t *testing.T) {
 		t.Errorf("auth banner must sort before resume; got: %q", out)
 	}
 }
+
+func TestShortVersion(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"26.07.08.12345+abcd1234", "abcd1234"},
+		{"dev", "dev"},
+		{"", ""},
+		{"noplus", "noplus"},
+		{"a+b+c", "c"}, // last '+' wins
+	}
+	for _, tc := range cases {
+		if got := shortVersion(tc.in); got != tc.want {
+			t.Errorf("shortVersion(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestAlertsVersionMismatchWide(t *testing.T) {
+	tree := &aggregate.Tree{}
+	out := Alerts(tree, AlertsOpts{
+		Now:           time.Now(),
+		Width:         200,
+		ClientVersion: "26.07.08.12345+abcd1234",
+		DaemonVersion: "26.07.01.99999+deadbeef",
+	})
+	if !strings.Contains(out, "abcd1234") {
+		t.Errorf("expected short client digest 'abcd1234', got: %q", out)
+	}
+	if !strings.Contains(out, "deadbeef") {
+		t.Errorf("expected short daemon digest 'deadbeef', got: %q", out)
+	}
+	if !strings.Contains(out, "restart daemon") {
+		t.Errorf("expected 'restart daemon' remediation, got: %q", out)
+	}
+	if !strings.Contains(out, "⚠") {
+		t.Errorf("expected warning glyph, got: %q", out)
+	}
+}
+
+func TestAlertsVersionMismatchAbsentWhenEqual(t *testing.T) {
+	out := Alerts(&aggregate.Tree{}, AlertsOpts{
+		Now:           time.Now(),
+		Width:         200,
+		ClientVersion: "26.07.08+aa",
+		DaemonVersion: "26.07.08+aa",
+	})
+	if strings.Contains(out, "daemon") {
+		t.Errorf("expected no mismatch segment when versions equal, got: %q", out)
+	}
+}
+
+func TestAlertsVersionMismatchAbsentWhenDaemonEmpty(t *testing.T) {
+	out := Alerts(&aggregate.Tree{}, AlertsOpts{
+		Now:           time.Now(),
+		Width:         200,
+		ClientVersion: "26.07.08+aa",
+		DaemonVersion: "",
+	})
+	if strings.Contains(out, "daemon") {
+		t.Errorf("expected no mismatch segment when daemon version empty, got: %q", out)
+	}
+}
+
+func TestAlertsVersionMismatchNarrow(t *testing.T) {
+	out := Alerts(&aggregate.Tree{}, AlertsOpts{
+		Now:           time.Now(),
+		Width:         90, // NARROW
+		ClientVersion: "26.07.08+aa",
+		DaemonVersion: "26.07.01+bb",
+	})
+	if !strings.Contains(out, "⚠ daemon version differs — restart") {
+		t.Errorf("narrow tier: expected '⚠ daemon version differs — restart', got: %q", out)
+	}
+}
+
+func TestAlertsVersionMismatchTiny(t *testing.T) {
+	out := Alerts(&aggregate.Tree{}, AlertsOpts{
+		Now:           time.Now(),
+		Width:         40, // TINY
+		ClientVersion: "26.07.08+aa",
+		DaemonVersion: "26.07.01+bb",
+	})
+	if !strings.Contains(out, "⚠ daemon ver") {
+		t.Errorf("tiny tier: expected '⚠ daemon ver', got: %q", out)
+	}
+}
+
+func TestAlertsAuthFailureSortsBeforeVersionMismatch(t *testing.T) {
+	tree := treeWithAuthFailures(1)
+	out := Alerts(tree, AlertsOpts{
+		Now:           time.Now(),
+		Width:         200,
+		ClientVersion: "26.07.08+abcd1234",
+		DaemonVersion: "26.07.01+deadbeef",
+	})
+	authIdx := strings.Index(out, "/login")
+	mismatchIdx := strings.Index(out, "daemon")
+	if authIdx == -1 || mismatchIdx == -1 || authIdx > mismatchIdx {
+		t.Errorf("auth segment must sort before version mismatch; authIdx=%d mismatchIdx=%d out=%q",
+			authIdx, mismatchIdx, out)
+	}
+}

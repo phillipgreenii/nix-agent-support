@@ -442,6 +442,47 @@ func TestViewHelpModalOmitsLogPathWhenCacheDirEmpty(t *testing.T) {
 	}
 }
 
+// TestViewShowsVersionMismatchAlert asserts the main View surfaces the
+// daemon/client version-mismatch alert segment when both versions are set and
+// differ.
+func TestViewShowsVersionMismatchAlert(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Version: "26.07.08+abcd1234"})
+	m.daemonVersion = "26.07.01+deadbeef"
+	m.SetSizeForTest(200, 30) // WIDE
+	out := m.View()
+	if !strings.Contains(out, "⚠ daemon") {
+		t.Errorf("View should surface version-mismatch alert; output:\n%s", out)
+	}
+}
+
+// TestModalHelpShowsMismatchSuffix asserts the [?] modal header appends the
+// MISMATCH suffix when the raw client/daemon versions differ.
+func TestModalHelpShowsMismatchSuffix(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Version: "26.07.08+abcd1234"})
+	m.daemonVersion = "26.07.01+deadbeef"
+	m.SetActiveModalForTest(ModalHelp)
+	m.SetSizeForTest(120, 40)
+	out := m.View()
+	if !strings.Contains(out, "MISMATCH") {
+		t.Errorf("help modal should show MISMATCH when versions differ; output:\n%s", out)
+	}
+}
+
+// TestModalHelpNoMismatchWhenDisconnected asserts the [?] modal does NOT show
+// MISMATCH when the daemon version is empty (disconnected), even though the
+// client version is non-empty — the mismatch is computed on the RAW fields
+// before the "(disconnected)" substitution.
+func TestModalHelpNoMismatchWhenDisconnected(t *testing.T) {
+	m := NewModel(Options{Tree: &aggregate.Tree{}, Version: "26.07.08+abcd1234"})
+	m.daemonVersion = "" // disconnected
+	m.SetActiveModalForTest(ModalHelp)
+	m.SetSizeForTest(120, 40)
+	out := m.View()
+	if strings.Contains(out, "MISMATCH") {
+		t.Errorf("help modal must NOT show MISMATCH when daemon disconnected; output:\n%s", out)
+	}
+}
+
 func fixtureLongPR() *Model {
 	d := &aggregate.Directory{
 		Path:   "/p",

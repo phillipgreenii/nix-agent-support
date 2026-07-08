@@ -112,7 +112,7 @@ func TestDiffAndLogNoChange(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	var lines []string
-	got := diffAndLog(prev, curr, captureLog(&lines))
+	got := diffAndLog(prev, curr, "self", captureLog(&lines))
 	if len(lines) != 0 {
 		t.Fatalf("expected no log lines, got %v", lines)
 	}
@@ -127,7 +127,7 @@ func TestDiffAndLogCaffeinateFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	var lines []string
-	diffAndLog(prev, curr, captureLog(&lines))
+	diffAndLog(prev, curr, "self", captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
@@ -142,7 +142,7 @@ func TestDiffAndLogAutoResumeFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: true}
 	curr := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	var lines []string
-	diffAndLog(prev, curr, captureLog(&lines))
+	diffAndLog(prev, curr, "self", captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
@@ -158,7 +158,7 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	var prev bridgeState // zero value, initialized == false
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true}
 	var lines []string
-	got := diffAndLog(prev, curr, captureLog(&lines))
+	got := diffAndLog(prev, curr, "self", captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 initial-state line, got %d: %v", len(lines), lines)
 	}
@@ -176,13 +176,64 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	}
 }
 
+// TestDiffAndLogInitialStateVersionMismatch asserts that when the bridge's own
+// version and the daemon's reported version are both non-empty and differ, the
+// initial-state tick emits a second "⚠ daemon version differs" line after the
+// "initial state" summary.
+func TestDiffAndLogInitialStateVersionMismatch(t *testing.T) {
+	var prev bridgeState // zero value, initialized == false
+	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true, daemonVersion: "26.07.01+daemon"}
+	var lines []string
+	diffAndLog(prev, curr, "26.07.08+bridge", captureLog(&lines))
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly 2 lines (initial + mismatch warning), got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "initial state") {
+		t.Fatalf("expected first line to be the initial-state summary, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "⚠ daemon version differs from this bridge — restart daemon") {
+		t.Fatalf("expected second line to be the mismatch warning, got %q", lines[1])
+	}
+}
+
+// TestDiffAndLogInitialStateVersionMatch asserts that equal bridge/daemon
+// versions emit only the single initial-state line (no warning).
+func TestDiffAndLogInitialStateVersionMatch(t *testing.T) {
+	var prev bridgeState // zero value, initialized == false
+	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true, daemonVersion: "26.07.08+same"}
+	var lines []string
+	diffAndLog(prev, curr, "26.07.08+same", captureLog(&lines))
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly 1 line for matching versions, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "initial state") {
+		t.Fatalf("expected the single line to be the initial-state summary, got %q", lines[0])
+	}
+}
+
+// TestDiffAndLogInitialStateEmptyDaemonVersion asserts that an empty daemon
+// version never warns (Mismatch with "" is false), even when the bridge's own
+// version is non-empty.
+func TestDiffAndLogInitialStateEmptyDaemonVersion(t *testing.T) {
+	var prev bridgeState                                                                    // zero value, initialized == false
+	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true} // daemonVersion == ""
+	var lines []string
+	diffAndLog(prev, curr, "26.07.08+bridge", captureLog(&lines))
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly 1 line when daemon version is empty, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "initial state") {
+		t.Fatalf("expected the single line to be the initial-state summary, got %q", lines[0])
+	}
+}
+
 // TestDiffAndLogBothFlip asserts simultaneous flips both surface as separate
 // lines (not collapsed).
 func TestDiffAndLogBothFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true}
 	var lines []string
-	diffAndLog(prev, curr, captureLog(&lines))
+	diffAndLog(prev, curr, "self", captureLog(&lines))
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 log lines for two simultaneous flips, got %d: %v", len(lines), lines)
 	}
