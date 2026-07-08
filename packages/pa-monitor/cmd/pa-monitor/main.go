@@ -3,44 +3,99 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 )
 
 var version = "dev"
+
+// subcommandNames is the ordered, canonical list of top-level subcommands.
+// It is the single source of truth for both dispatch (see knownSubcommands)
+// and the top-level usage text (see usageText). "tui" is included because it
+// can be requested explicitly, and it is also the default when no subcommand
+// is given.
+var subcommandNames = []string{
+	"daemon",
+	"status",
+	"agents-busy-check",
+	"wait-until-agents-finished",
+	"config",
+	"caffeinate",
+	"nudge",
+	"info",
+	"cmux-bridge",
+	"auto-resume",
+	"tui",
+}
+
+// knownSubcommands is the set form of subcommandNames for O(1) lookup.
+var knownSubcommands = func() map[string]bool {
+	m := make(map[string]bool, len(subcommandNames))
+	for _, n := range subcommandNames {
+		m[n] = true
+	}
+	return m
+}()
+
+// usageText returns the top-level help/usage listing every subcommand.
+func usageText() string {
+	var b strings.Builder
+	b.WriteString("pa-monitor - monitor Personal Agents\n\n")
+	b.WriteString("Usage:\n")
+	b.WriteString("  pa-monitor [<subcommand>] [flags]\n\n")
+	b.WriteString("With no subcommand, pa-monitor launches the TUI.\n\n")
+	b.WriteString("Subcommands:\n")
+	for _, n := range subcommandNames {
+		b.WriteString("  " + n + "\n")
+	}
+	b.WriteString("\nExamples:\n")
+	b.WriteString("  pa-monitor nudge <session:<id>|path:<p>|cmux:<ws>> [--text=...] [--cancel]\n")
+	return b.String()
+}
 
 // pickSubcommand inspects os.Args-style input and returns the subcommand
 // name plus the remaining args (minus the subcommand token).
 //
 // Rules:
+//   - No args: the command is "tui" (the default when invoked bare).
+//   - "-h"/"--help": the command is "help" (top-level usage).
 //   - If args[1] is a known subcommand name, that wins; the rest are its args.
-//   - Otherwise the command is "tui" and args[1:] are its args.
-//   - The flag-first case (e.g. --wait-until-idle) routes to tui because
-//     no current TUI flags collide with a subcommand name.
+//   - A leading flag other than -h/--help (e.g. --wait-until-idle) routes to
+//     tui, since no current TUI flag collides with a subcommand name.
+//   - Any other first arg is unrecognized: it is returned as the command
+//     itself so main can emit an "unknown subcommand" error (it MUST NOT fall
+//     through to the TUI).
 func pickSubcommand(args []string) (cmd string, rest []string) {
-	known := map[string]bool{
-		"daemon":                     true,
-		"status":                     true,
-		"agents-busy-check":          true,
-		"wait-until-agents-finished": true,
-		"config":                     true,
-		"caffeinate":                 true,
-		"nudge":                      true,
-		"info":                       true,
-		"cmux-bridge":                true,
-		"auto-resume":                true,
-	}
 	if len(args) < 2 {
 		return "tui", nil
 	}
-	if known[args[1]] {
+	if args[1] == "-h" || args[1] == "--help" {
+		return "help", args[2:]
+	}
+	if knownSubcommands[args[1]] {
 		return args[1], args[2:]
 	}
-	return "tui", args[1:]
+	if strings.HasPrefix(args[1], "-") {
+		return "tui", args[1:]
+	}
+	return args[1], args[2:]
 }
 
 func main() {
-	cmd, rest := pickSubcommand(os.Args)
+	os.Exit(run(os.Args, os.Stdout, os.Stderr))
+}
+
+// run dispatches os.Args-style input and returns a process exit code. The
+// pure meta-commands (help/unknown) are handled here against the provided
+// writers so they are testable without shelling out; known subcommands are
+// delegated to their runners (which manage their own exit behavior).
+func run(args []string, stdout, stderr io.Writer) int {
+	cmd, rest := pickSubcommand(args)
 	switch cmd {
+	case "help":
+		fmt.Fprint(stdout, usageText())
+		return 0
 	case "daemon":
 		runDaemon(rest)
 	case "status":
@@ -64,9 +119,11 @@ func main() {
 	case "tui":
 		runTUI(rest)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "unknown subcommand: %s\n", cmd)
+		fmt.Fprintf(stderr, "Run 'pa-monitor --help' for usage.\n")
+		return 2
 	}
+	return 0
 }
 
 // runConfigSubcommand dispatches `config show` (only "show" supported v1).
