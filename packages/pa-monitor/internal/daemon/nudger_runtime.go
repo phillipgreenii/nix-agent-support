@@ -31,6 +31,7 @@ type NudgerState struct {
 	PendingIntents      []PersistedIntent                  `json:"pending_intents,omitempty"`
 	Sessions            map[string]NudgerSessionWatermarks `json:"sessions,omitempty"`
 	WindowResetFiredFor time.Time                          `json:"window_reset_fired_for,omitempty"`
+	LimitPauseFiredFor  time.Time                          `json:"limit_pause_fired_for,omitempty"`
 }
 
 // PersistedIntent is a nudge intent that was queued but not yet delivered.
@@ -142,6 +143,12 @@ func (w *WatermarkStore) WindowResetFiredFor() time.Time {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.state.Nudger.WindowResetFiredFor
+}
+
+func (w *WatermarkStore) LimitPauseFiredFor() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.state.Nudger.LimitPauseFiredFor
 }
 
 func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
@@ -354,6 +361,21 @@ func (w *WatermarkStore) SetWindowResetFiredFor(at time.Time) {
 // actually fires a SourceWindowReset nudge.
 func (w *WatermarkStore) AdvanceWindowResetFiredFor(at time.Time) {
 	w.SetWindowResetFiredFor(at)
+}
+
+func (w *WatermarkStore) SetLimitPauseFiredFor(at time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.state.Nudger.LimitPauseFiredFor = at
+	_ = WriteRuntimeState(w.path, w.state)
+}
+
+// AdvanceLimitPauseFiredFor implements nudger.Recorder. It delegates to
+// SetLimitPauseFiredFor so the latch advances when the dispatcher ATTEMPTS a
+// SourceLimitPause nudge (on any outcome — see Dispatch's advance-on-attempt
+// comment).
+func (w *WatermarkStore) AdvanceLimitPauseFiredFor(at time.Time) {
+	w.SetLimitPauseFiredFor(at)
 }
 
 // RecordDisruptAttempt implements nudger.Recorder. It stamps the

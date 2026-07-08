@@ -80,8 +80,9 @@ type Tree struct {
 	// A nil *float64 means "unknown/stale", distinct from a real 0% reading. A
 	// zero SevenDayResetsAt / LimitsCapturedAt time.Time likewise means unknown
 	// (never 1970). Phase 0 observed seven_day absent on this account, so these
-	// are commonly unset. No consumer reads them yet — Phase 1 is persistence +
-	// proto plumbing only.
+	// are commonly unset. FiveHourResetsAt is consumed by the nudger's
+	// LimitPauseProducer (bead pg2-2z7k) as the once-per-window latch for
+	// retrying spend-limit pauses; the rest are persistence + proto plumbing.
 	FiveHourPct      *float64  // 5h used_percentage; nil = unknown
 	SevenDayPct      *float64  // 7d used_percentage; nil = unknown
 	FiveHourResetsAt time.Time // 5h window reset; zero = unknown

@@ -13,6 +13,7 @@ const (
 	SourceWindowReset Source = "window_reset"
 	SourceDisrupted   Source = "disrupted"
 	SourceManual      Source = "manual"
+	SourceLimitPause  Source = "limit_pause"
 )
 
 // IntentKey uniquely identifies one pending intent in the store.

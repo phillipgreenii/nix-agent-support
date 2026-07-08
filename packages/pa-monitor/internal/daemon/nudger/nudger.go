@@ -8,11 +8,12 @@ import (
 // Nudger is the top-level façade. Owns the pending store and the three
 // producers; runs Tick on every daemon tick.
 type Nudger struct {
-	store       *PendingStore
-	dispatcher  *Dispatcher
-	windowProd  *WindowResetProducer
-	disruptProd *DisruptProducer
-	manualProd  *ManualProducer
+	store          *PendingStore
+	dispatcher     *Dispatcher
+	windowProd     *WindowResetProducer
+	limitPauseProd *LimitPauseProducer
+	disruptProd    *DisruptProducer
+	manualProd     *ManualProducer
 }
 
 // New constructs a Nudger ready for Tick. historyErrLog, when non-nil, receives
@@ -27,11 +28,12 @@ type Nudger struct {
 // plain Signaler where a Deliverer is required (e.g. in tests).
 func New(deliverer Deliverer, recorder Recorder, nudgeRecorder NudgeRecorder, historyErrLog func(msg string)) *Nudger {
 	return &Nudger{
-		store:       NewPendingStore(),
-		dispatcher:  &Dispatcher{Deliverer: deliverer, Recorder: recorder, NudgeRecorder: nudgeRecorder, HistoryErrLog: historyErrLog},
-		windowProd:  &WindowResetProducer{},
-		disruptProd: NewDisruptProducer(),
-		manualProd:  &ManualProducer{},
+		store:          NewPendingStore(),
+		dispatcher:     &Dispatcher{Deliverer: deliverer, Recorder: recorder, NudgeRecorder: nudgeRecorder, HistoryErrLog: historyErrLog},
+		windowProd:     &WindowResetProducer{},
+		limitPauseProd: &LimitPauseProducer{},
+		disruptProd:    NewDisruptProducer(),
+		manualProd:     &ManualProducer{},
 	}
 }
 
@@ -67,6 +69,7 @@ func (n *Nudger) Reconcile(ctx TickContext) {
 	pre := snapshotKeySet(n.store)
 	n.windowProd.Reconcile(ctx, n.store)
 	n.disruptProd.Reconcile(ctx, n.store)
+	n.limitPauseProd.Reconcile(ctx, n.store)
 	// Manual is RPC-driven; Reconcile is a no-op but called for symmetry.
 	n.manualProd.Reconcile(ctx, n.store)
 	// Emit queued_total counter for each newly-added intent.

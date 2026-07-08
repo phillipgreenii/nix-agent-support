@@ -10,11 +10,13 @@ import (
 
 type wmStub struct {
 	wr        time.Time
+	lp        time.Time // LimitPauseFiredFor latch
 	per       map[string]SessionWatermark
 	escalated map[string]bool // tracks SetDisruptEscalated calls (for assertions)
 }
 
 func (w wmStub) WindowResetFiredFor() time.Time { return w.wr }
+func (w wmStub) LimitPauseFiredFor() time.Time  { return w.lp }
 func (w wmStub) SessionWatermark(sid string) SessionWatermark {
 	return w.per[sid]
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -40,6 +41,7 @@ type fakeRecorder struct {
 	sent            []string
 	watermarkOps    []string
 	windowLatchOps  []time.Time
+	limitLatchOps   []time.Time       // recorded by AdvanceLimitPauseFiredFor
 	queuedOps       []string          // "sid:source" pairs recorded by RecordQueued
 	attemptOps      []string          // sids recorded by RecordDisruptAttempt
 	sendFailed      []failedSend      // recorded by RecordSendFailed
@@ -81,6 +83,12 @@ func (r *fakeRecorder) AdvanceWindowResetFiredFor(at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.windowLatchOps = append(r.windowLatchOps, at)
+}
+
+func (r *fakeRecorder) AdvanceLimitPauseFiredFor(at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.limitLatchOps = append(r.limitLatchOps, at)
 }
 
 func (r *fakeRecorder) RecordQueued(sid string, source Source) {
@@ -805,5 +813,161 @@ func TestDispatcherDeliverer_GenericErrorRecordsFailure(t *testing.T) {
 	nudgeRec.mu.Unlock()
 	if len(events) != 1 || events[0].Result != "failed" {
 		t.Fatalf("events = %+v, want one failed event", events)
+	}
+}
+
+// TestDispatcherLimitPauseLatchAdvancesOnDeliverFailure is the churn-regression
+// test (bead pg2-2z7k). A lone qualifying limit_pause session whose Deliver
+// returns a generic (non-ErrNoBridge) error MUST still advance the limit-pause
+// latch to FiveHourResetsAt — the attempt counts even on failure. Otherwise a
+// persistently-failing delivery would re-nudge every tick forever (unlike
+// window-reset, FiveHourResetsAt never stale-zeroes to release the latch). The
+// follow-up producer reconcile confirms no unbounded re-queue: once the latch
+// equals reset, the producer cancels the stale intent.
+func TestDispatcherLimitPauseLatchAdvancesOnDeliverFailure(t *testing.T) {
+	reset := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	now := reset.Add(-time.Hour)
+	store := NewPendingStore()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-lp", SourceLimitPause}, Text: "continue", EmittedAt: now})
+	tree := treeWithFiveHour(reset, newSV("sid-lp", 1234, session.Idle))
+	del := &fakeDeliverer{err: errors.New("boom")} // non-ErrNoBridge failure
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	rec.mu.Lock()
+	ops := rec.limitLatchOps
+	rec.mu.Unlock()
+	if len(ops) != 1 || !ops[0].Equal(reset) {
+		t.Fatalf("limitLatchOps = %v, want [%v] (advance on ATTEMPT even on failure)", ops, reset)
+	}
+	// A failed delivery leaves the intent queued for this tick.
+	if !store.HasAny("sid-lp") {
+		t.Error("failed delivery should leave the intent queued")
+	}
+
+	// Next reconcile: latch now equals reset, so the producer must cancelAll —
+	// the queued intent is removed, proving no unbounded re-queue.
+	p := &LimitPauseProducer{}
+	p.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true, AutoResumeMessage: "continue",
+		Tree:       treeWithFiveHour(reset, qualifyingLimitPauseSV("sid-lp", 1234)),
+		Watermarks: wmStub{lp: reset},
+	}, store)
+	if store.HasAny("sid-lp") {
+		t.Error("producer should cancel the stale limit_pause intent once latch == reset (churn regression)")
+	}
+}
+
+// TestDispatcherLimitPauseLatchAdvancesOnSuccess verifies a successful
+// limit_pause delivery also advances the latch and clears the intent.
+func TestDispatcherLimitPauseLatchAdvancesOnSuccess(t *testing.T) {
+	reset := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	now := reset.Add(-time.Hour)
+	store := NewPendingStore()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-lp", SourceLimitPause}, Text: "continue", EmittedAt: now})
+	tree := treeWithFiveHour(reset, newSV("sid-lp", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(sig.sent) != 1 {
+		t.Fatalf("len(sent) = %d, want 1", len(sig.sent))
+	}
+	rec.mu.Lock()
+	ops := rec.limitLatchOps
+	rec.mu.Unlock()
+	if len(ops) != 1 || !ops[0].Equal(reset) {
+		t.Fatalf("limitLatchOps = %v, want [%v]", ops, reset)
+	}
+	if store.HasAny("sid-lp") {
+		t.Error("store not cleared after successful limit_pause delivery")
+	}
+}
+
+// TestDispatcherLimitPauseLatchAdvancesOnNoBridge documents the deliberate
+// choice (bead pg2-2z7k) that ErrNoBridge also counts as an attempt: even with
+// the intent still inside the 60s no-bridge retry window, the limit-pause latch
+// advances, so the session consumes its 5h window on the first attempt rather
+// than leaning on the reconnect grace. A transient bridge blip therefore costs
+// at most one window's probe (immaterial for a monthly cap) and avoids re-arm
+// churn. Contrast disrupt/window-reset, which lean on the retry window.
+func TestDispatcherLimitPauseLatchAdvancesOnNoBridge(t *testing.T) {
+	reset := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	now := reset.Add(-time.Hour)
+	store := NewPendingStore()
+	// EmittedAt = now: well inside noBridgeDropWindow, so the intent is retained
+	// (not dropped) by the no-bridge path — yet the latch must still advance.
+	store.Add(NudgeIntent{Key: IntentKey{"sid-lp", SourceLimitPause}, Text: "continue", EmittedAt: now})
+	tree := treeWithFiveHour(reset, newSV("sid-lp", 1234, session.Idle))
+	del := &fakeDeliverer{err: ErrNoBridge}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: del, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	rec.mu.Lock()
+	ops := rec.limitLatchOps
+	rec.mu.Unlock()
+	if len(ops) != 1 || !ops[0].Equal(reset) {
+		t.Fatalf("limitLatchOps = %v, want [%v] (ErrNoBridge still advances the latch)", ops, reset)
+	}
+}
+
+// TestDispatcherLimitPauseLatchNotAdvancedWithoutLimitPause is the negative
+// case: a tick that dispatches only non-limit_pause intents must not advance the
+// limit-pause latch, even when FiveHourResetsAt is set.
+func TestDispatcherLimitPauseLatchNotAdvancedWithoutLimitPause(t *testing.T) {
+	reset := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	now := reset.Add(-time.Hour)
+	store := NewPendingStore()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceManual}, Text: "continue", EmittedAt: now})
+	tree := treeWithFiveHour(reset, newSV("sid-1", 1234, session.Idle))
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	rec.mu.Lock()
+	ops := rec.limitLatchOps
+	rec.mu.Unlock()
+	if len(ops) != 0 {
+		t.Fatalf("limitLatchOps = %v, want [] (no SourceLimitPause intent this tick)", ops)
+	}
+}
+
+// TestDispatcherMixedWindowResetAndLimitPauseCoalesce verifies that when a
+// single session carries BOTH a SourceWindowReset and a SourceLimitPause intent
+// they coalesce into one Send, and both latches advance independently to their
+// own reset times.
+func TestDispatcherMixedWindowResetAndLimitPauseCoalesce(t *testing.T) {
+	windowReset := time.Date(2026, 7, 8, 16, 0, 0, 0, time.UTC)
+	fiveHour := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	now := windowReset.Add(-time.Minute)
+	store := NewPendingStore()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceLimitPause}, Text: "continue", EmittedAt: now})
+	tree := &aggregate.Tree{WindowResetsAt: windowReset, FiveHourResetsAt: fiveHour}
+	tree.Dirs = []*aggregate.Directory{{Sessions: []*aggregate.SessionView{newSV("sid-1", 1234, session.Idle)}}}
+	sig := &fakeSignaler{}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	if len(sig.sent) != 1 {
+		t.Fatalf("len(sent) = %d, want 1 (coalesced single Send)", len(sig.sent))
+	}
+	rec.mu.Lock()
+	wrOps := rec.windowLatchOps
+	lpOps := rec.limitLatchOps
+	rec.mu.Unlock()
+	if len(wrOps) != 1 || !wrOps[0].Equal(windowReset) {
+		t.Errorf("windowLatchOps = %v, want [%v]", wrOps, windowReset)
+	}
+	if len(lpOps) != 1 || !lpOps[0].Equal(fiveHour) {
+		t.Errorf("limitLatchOps = %v, want [%v]", lpOps, fiveHour)
+	}
+	if store.HasAny("sid-1") {
+		t.Error("store not cleared after coalesced dispatch")
 	}
 }

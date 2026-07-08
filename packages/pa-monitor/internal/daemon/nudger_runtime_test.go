@@ -145,6 +145,29 @@ func TestWatermarkStorePersistsToDisk(t *testing.T) {
 	}
 }
 
+// TestWatermarkStoreLimitPauseFiredForRoundTrip verifies the limit-pause
+// once-per-window latch (bead pg2-2z7k) survives a daemon restart: without
+// persistence a restart mid-window would re-nudge (the loaded zero latch is
+// After-beaten by any real reset), reintroducing the restart-burst the latch
+// exists to prevent. Exercises the Recorder path (AdvanceLimitPauseFiredFor).
+func TestWatermarkStoreLimitPauseFiredForRoundTrip(t *testing.T) {
+	path := t.TempDir() + "/runtime.json"
+	w, _ := NewWatermarkStore(path, nil)
+	reset := time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC)
+	w.AdvanceLimitPauseFiredFor(reset)
+	if !w.LimitPauseFiredFor().Equal(reset) {
+		t.Fatalf("LimitPauseFiredFor = %v, want %v", w.LimitPauseFiredFor(), reset)
+	}
+	// Reload from disk; the latch must survive so a restart does not re-nudge.
+	w2, err := NewWatermarkStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w2.LimitPauseFiredFor().Equal(reset) {
+		t.Errorf("after reload: LimitPauseFiredFor = %v, want %v", w2.LimitPauseFiredFor(), reset)
+	}
+}
+
 // TestWatermarkStoreLastNudgeSourcesRoundTrip verifies that the sources passed
 // to UpdateWatermarks survive a disk round-trip in sorted order so the details
 // panel renders a stable "via: [...]" line across daemon restarts.

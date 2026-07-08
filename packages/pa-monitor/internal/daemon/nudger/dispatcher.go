@@ -40,6 +40,13 @@ type Recorder interface {
 	// WindowResetsAt=at fired this tick. Called by the dispatcher exactly
 	// once per tick when any session with SourceWindowReset is dispatched.
 	AdvanceWindowResetFiredFor(at time.Time)
+	// AdvanceLimitPauseFiredFor records that the limit-pause nudge for
+	// FiveHourResetsAt=at was ATTEMPTED this tick. Called by the dispatcher at
+	// most once per tick when any session with SourceLimitPause had a delivery
+	// attempt — on ANY outcome (success or failure), unlike
+	// AdvanceWindowResetFiredFor which advances only on success. See the
+	// advance-on-attempt comment in Dispatch for why.
+	AdvanceLimitPauseFiredFor(at time.Time)
 	// RecordDisruptAttempt persists the LastDisruptAttemptAt watermark for a
 	// disrupt nudge ATTEMPT — called on BOTH the success and failure path so
 	// the D5 error keep-awake releases after the first attempt (even a failed
@@ -121,6 +128,7 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 
 	sessionsByID := indexSessions(ctx.Tree)
 	windowResetDispatched := false
+	limitPauseAttempted := false
 	for _, sid := range sids {
 		group := bySession[sid]
 		observedKeys := keysBySession[sid]
@@ -142,10 +150,14 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 		// RecordDisruptAttempt) so the D5 error keep-awake releases after the
 		// first attempt, even a failed one.
 		hasDisrupt := false
+		hasLimitPause := false
 		var cause *transcript.ErrorRecord
 		var kind string
 		var causeAt *time.Time
 		for _, in := range group {
+			if in.Key.Source == SourceLimitPause {
+				hasLimitPause = true
+			}
 			if in.Key.Source != SourceDisrupted {
 				continue
 			}
@@ -181,7 +193,15 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 			continue
 		}
 
-		if err := d.Deliverer.Deliver(goCtx, view.PID, text); err != nil {
+		err := d.Deliverer.Deliver(goCtx, view.PID, text)
+		if hasLimitPause {
+			// Advance-on-ATTEMPT: mark the single per-window limit-pause attempt
+			// immediately after Deliver returns, for ANY outcome (ErrNoBridge,
+			// other error, or success). See the post-loop advance for WHY this
+			// diverges from window-reset's success-only advance.
+			limitPauseAttempted = true
+		}
+		if err != nil {
 			if errors.Is(err, ErrNoBridge) {
 				// No live cmux-bridge for this target. Record the disrupt
 				// attempt watermark as usual (an attempt was made even though
@@ -238,6 +258,21 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 	// Advance the window-reset latch only when a SourceWindowReset actually fired.
 	if windowResetDispatched && !ctx.Tree.WindowResetsAt.IsZero() {
 		d.Recorder.AdvanceWindowResetFiredFor(ctx.Tree.WindowResetsAt)
+	}
+	// Advance the limit-pause latch on ATTEMPT (not success), unlike
+	// window-reset. WHY: FiveHourResetsAt never stale-zeroes the way
+	// WindowResetsAt does — that stale-zero is window-reset's escape hatch that
+	// lets it re-fire. Advancing the limit-pause latch only on success would
+	// make a persistently-failing delivery (dead PID / no resolvable signaler,
+	// whose intent this dispatcher RETAINS to retry) re-nudge every tick forever.
+	// One attempt per window is the requirement, so the latch advances as soon as
+	// a delivery has been attempted, regardless of outcome. This deliberately
+	// includes ErrNoBridge: rather than lean on the 60s no-bridge retry window, a
+	// limit-pause target consumes its window on the first attempt — a transient
+	// bridge blip costs at most one 5h window's probe (immaterial for a monthly
+	// cap that will not clear at a 5h reset anyway) and avoids re-arm churn.
+	if limitPauseAttempted && !ctx.Tree.FiveHourResetsAt.IsZero() {
+		d.Recorder.AdvanceLimitPauseFiredFor(ctx.Tree.FiveHourResetsAt)
 	}
 }
 

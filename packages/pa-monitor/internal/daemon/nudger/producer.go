@@ -33,6 +33,10 @@ type TickContext struct {
 // watermark writes remain owned by the dispatcher.
 type WatermarkView interface {
 	WindowResetFiredFor() time.Time
+	// LimitPauseFiredFor returns the account-global FiveHourResetsAt value the
+	// limit-pause nudge last fired for. Used by LimitPauseProducer as its
+	// once-per-window latch (mirrors WindowResetFiredFor).
+	LimitPauseFiredFor() time.Time
 	SessionWatermark(sid string) SessionWatermark
 	// SetDisruptEscalated persists the escalation flag for sid. Called by
 	// DisruptProducer when it detects the session has been stuck past
@@ -55,6 +59,7 @@ type SessionWatermark struct {
 // declarations here so the interface assertions compile.
 type (
 	WindowResetProducer struct{}
+	LimitPauseProducer  struct{}
 	DisruptProducer     struct {
 		firstSeen map[string]time.Time // sid -> when this disrupt was first observed
 	}
