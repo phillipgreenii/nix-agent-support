@@ -198,6 +198,52 @@ func TestResolveSignalerReturnsNilWhenNoneMatch(t *testing.T) {
 	}
 }
 
+// countCmux reports how many *CmuxSignaler entries a slice holds.
+func countCmux(sigs []signal.Signaler) int {
+	n := 0
+	for _, s := range sigs {
+		if _, ok := s.(*signal.CmuxSignaler); ok {
+			n++
+		}
+	}
+	return n
+}
+
+// TestWithoutCmuxExcludesCmuxSignaler is the structural ADR-0022 guarantee for
+// the delivery path: WithoutCmux drops every *CmuxSignaler, keeps the rest in
+// order, and does not mutate its input (the D5 keep-awake path shares that
+// slice and MUST still see cmux). So the in-daemon delivery SignalerAdapter,
+// built over WithoutCmux(...), can never resolve a cmux signaler — the daemon
+// cannot exec cmux because the type isn't in the slice at all.
+func TestWithoutCmuxExcludesCmuxSignaler(t *testing.T) {
+	tmux := &signal.TmuxSignaler{}
+	cmux := &signal.CmuxSignaler{}
+	in := []signal.Signaler{tmux, cmux}
+
+	out := signal.WithoutCmux(in)
+
+	if countCmux(out) != 0 {
+		t.Error("WithoutCmux left a *CmuxSignaler in the delivery slice (ADR 0022: daemon MUST NOT execute cmux)")
+	}
+	if len(out) != 1 || out[0] != tmux {
+		t.Errorf("WithoutCmux = %v, want [tmux] (non-cmux signalers preserved in order)", out)
+	}
+	// Input is not mutated: the shared D5 keep-awake slice must retain cmux.
+	if countCmux(in) != 1 {
+		t.Error("WithoutCmux mutated its input; the shared D5 keep-awake slice lost its CmuxSignaler")
+	}
+}
+
+// TestDefaultSignalersRetainsCmuxForKeepAwake anchors that the source slice the
+// daemon feeds BOTH paths still carries cmux, so filtering it out of delivery
+// does not also remove it from the D5 keep-awake predicate (which resolves
+// cmux-hosted disrupts to hold the Mac awake).
+func TestDefaultSignalersRetainsCmuxForKeepAwake(t *testing.T) {
+	if countCmux(signal.DefaultSignalers()) == 0 {
+		t.Error("DefaultSignalers() must contain a CmuxSignaler for the D5 keep-awake path")
+	}
+}
+
 func TestTmuxRequiredBinaries(t *testing.T) {
 	got := (&signal.TmuxSignaler{}).RequiredBinaries()
 	if len(got) != 1 || got[0] != "tmux" {

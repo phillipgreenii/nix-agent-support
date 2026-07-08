@@ -65,3 +65,27 @@ var defaultSignalers = []Signaler{
 // DefaultSignalers returns the standard ordered list of Signalers.
 // TmuxSignaler is tried first.
 func DefaultSignalers() []Signaler { return defaultSignalers }
+
+// WithoutCmux returns a new slice containing every signaler except any
+// *CmuxSignaler, preserving order and leaving the input slice unmodified.
+//
+// The in-daemon delivery path (SignalerAdapter over the daemon's configured
+// signalers) uses this so a CmuxSignaler can never be resolved there: per ADR
+// 0022 the daemon MUST NOT execute cmux — cmux-hosted targets are routed to the
+// bridge instead. Excluding the type from the delivery slice — rather than
+// relying on CmuxSignaler.Detect happening to return false for in-daemon
+// targets in the shipped config — makes "the daemon never execs cmux" a
+// structural guarantee of the delivery path rather than emergent coupling.
+//
+// Callers that legitimately need cmux (e.g. the D5 keep-awake predicate, which
+// only calls Detect and never Send) MUST keep the unfiltered slice.
+func WithoutCmux(signalers []Signaler) []Signaler {
+	out := make([]Signaler, 0, len(signalers))
+	for _, s := range signalers {
+		if _, isCmux := s.(*CmuxSignaler); isCmux {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}

@@ -333,11 +333,21 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// silently reset to false on every daemon restart.
 		watermarks.SetAutoResumeEnabled(opts.InitialAutoResumeEnabled)
 		// inDaemonDel wraps the existing synchronous in-daemon signal layer
-		// (tmux/ghostty/vscode) unchanged. The daemon no longer constructs a
-		// separate cmux Signaler for delivery — cmux-hosted targets are
-		// routed to bridgeDel (built above, sharing bridgeReg/cmuxAncestorFn/
-		// tr with serve() and the reaper) instead.
-		inDaemonDel := &inDaemonDeliverer{sig: &SignalerAdapter{Signalers: opts.NudgerSignalers}}
+		// (tmux/ghostty/vscode) unchanged. cmux-hosted targets are routed to
+		// bridgeDel (built above, sharing bridgeReg/cmuxAncestorFn/tr with
+		// serve() and the reaper) instead.
+		//
+		// ADR 0022 (daemon MUST NOT execute cmux): the delivery slice is
+		// stripped of any CmuxSignaler via WithoutCmux, so the SignalerAdapter
+		// literally cannot resolve a cmux signaler for delivery. This is
+		// structural — it does not depend on CmuxSignaler.Detect returning
+		// false for in-daemon targets in the shipped config (emergent coupling
+		// that a nil-CmuxAncestor or split-instance wiring could reopen). The
+		// D5 keep-awake predicate below deliberately keeps the FULL
+		// opts.NudgerSignalers (it only Detects, never Sends) so a cmux-hosted
+		// disrupt still holds the Mac awake.
+		deliverySignalers := signal.WithoutCmux(opts.NudgerSignalers)
+		inDaemonDel := &inDaemonDeliverer{sig: &SignalerAdapter{Signalers: deliverySignalers}}
 		deliverer := &compositeDeliverer{ancestor: cmuxAncestorFn, bridge: bridgeDel, inDaemon: inDaemonDel}
 		var nr nudger.NudgeRecorder
 		if opts.WriteService != nil && opts.DB != nil {
@@ -484,6 +494,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			state.mu.RUnlock()
 			anyUnattemptedNudgeableDisrupt := false
 			if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
+				// Uses the FULL opts.NudgerSignalers (NOT the cmux-stripped
+				// delivery slice): D5 only calls ResolveSignaler→Detect, never
+				// Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
+				// hold the Mac awake without the daemon ever exec'ing cmux
+				// (ADR 0022). Do not swap this for the delivery slice.
 				anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
 			}
 			keepAwake := anyWorking || anyUnattemptedNudgeableDisrupt
