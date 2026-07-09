@@ -88,9 +88,10 @@ func Reconcile(ctx context.Context, r beads.Runner, prs []PR) (reviewIDs []strin
 // ensureReview finds-or-reuses the pg-pr merge-request bead for pr (NH2: it
 // NEVER creates one — pg-pr's sync daemon is the sole MR producer) from the mrs
 // snapshot, then ensures a review-pr child bead carrying the PR coords. Returns
-// the review-pr id (an existing OPEN bead, or a newly created one), or "" when
-// the PR is skipped: a teammate PR still in draft, no MR bead yet, a closed MR,
-// or an already-CLOSED review-pr (a completed review — not resurrected). On the
+// the review-pr id (an existing OPEN bead; a REOPENED closed bead whose PR head
+// advanced past the reviewed sha; or a newly created one), or "" when the PR is
+// skipped: a teammate PR still in draft, no MR bead yet, a closed MR, or a
+// completed (closed) review whose head has NOT advanced (not resurrected). On the
 // birth path it also creates the active-pr gate exactly once (Phase 2 resolves).
 func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []beads.Issue) (string, error) {
 	// Selection parity with pg-pr's beadsbridge (draftreview): review my PRs even
@@ -109,10 +110,29 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 	}
 
 	if existing := beads.MatchReviewPR(reviews, pr.Repo, pr.Number); existing != nil {
-		if existing.Status == "closed" {
-			return "", nil // review already completed; do NOT resurrect it
+		if existing.Status != "closed" {
+			return existing.ID, nil // idempotent reuse of the open bead
 		}
-		return existing.ID, nil // idempotent reuse of the open bead
+		// A closed review-pr is a COMPLETED review. Re-emit it only when the PR's
+		// head advanced past the reviewed commit — the re-review-on-head-advance
+		// cursor that replaces pg-pr's retired reopenStaleReviews. The reviewed sha
+		// is metadata.head_sha, the exact commit the worker checked out and
+		// submitted at. A missing reviewed sha (a legacy pre-cursor bead) or a
+		// missing/equal current head is NOT an advance -> do NOT resurrect (C1).
+		reviewedSHA, _ := existing.Metadata["head_sha"].(string)
+		if reviewedSHA == "" || pr.HeadSHA == "" || pr.HeadSHA == reviewedSHA {
+			return "", nil
+		}
+		// Reopen the SAME bead with the new head so the worker reviews the new
+		// commit (it checks out metadata.head_sha; reopening without refreshing
+		// would re-review the old sha forever). The PR is confirmed open this pass
+		// (it is in the open list), so the reopened bead is ready immediately — no
+		// active-pr gate is re-created (it would only be created and then resolved
+		// in this same pass; Phase 2 resolves the birth gate for open PRs).
+		if err := beads.ReopenReview(ctx, r, existing.ID, pr.HeadSHA, pr.Branch); err != nil {
+			return "", fmt.Errorf("acl: reopen review-pr %s on head advance: %w", prKey(pr), err)
+		}
+		return existing.ID, nil
 	}
 
 	// Birth path.

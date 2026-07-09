@@ -82,6 +82,25 @@ func Unclaim(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// ReopenReview re-opens a closed review-pr bead and refreshes its review target:
+// `bd update <id> --status=open --set-metadata head_sha=<new> --set-metadata
+// branch=<new> --assignee=`. Overwriting head_sha/branch is essential — the
+// review worker checks out metadata.head_sha, so reopening WITHOUT refreshing it
+// would re-review the same old commit forever (the ACL reopens only on head
+// advance). Clearing the assignee returns the bead to the pool for a fresh
+// worker. --set-metadata is a per-key merge, so the numeric pr_number/repo keys
+// are preserved and MatchReviewPR keeps matching repo#number.
+func ReopenReview(ctx context.Context, r Runner, id, headSHA, branch string) error {
+	_, err := r.Run(ctx, "update", id, "--status=open",
+		"--set-metadata", "head_sha="+headSHA,
+		"--set-metadata", "branch="+branch,
+		"--assignee=")
+	if err != nil {
+		return fmt.Errorf("reopen review-pr %s: %w", id, err)
+	}
+	return nil
+}
+
 // AddHuman flags a bead for a human: `bd update <id> --add-label human`.
 func AddHuman(ctx context.Context, r Runner, id string) error {
 	_, err := r.Run(ctx, "update", id, "--add-label", "human")

@@ -84,6 +84,18 @@ func reviewJSON(id, repo string, num int) string {
 		`","metadata":{"repo":"` + repo + `","pr_number":` + strconv.Itoa(num) + `}}`
 }
 
+// closedReviewJSON builds a CLOSED review-pr task bead. When headSHA is empty the
+// head_sha metadata key is OMITTED (a legacy pre-cursor bead), so the re-review
+// guard treats it as "reviewed sha unknown -> do not re-emit".
+func closedReviewJSON(id, repo string, num int, headSHA string) string {
+	meta := `"repo":"` + repo + `","pr_number":` + strconv.Itoa(num)
+	if headSHA != "" {
+		meta += `,"head_sha":"` + headSHA + `"`
+	}
+	return `{"id":"` + id + `","issue_type":"task","status":"closed","title":"review-pr: ` + repo + "#" + strconv.Itoa(num) +
+		`","metadata":{` + meta + `}}`
+}
+
 // TestReconcile_EnsuresReviewChildGateAndResolves: MR present, no existing
 // review-pr -> creates the review-pr task bead (prefix + metadata), links it as
 // a child of the MR, creates the active-pr gate at birth, and the watcher pass
@@ -227,6 +239,89 @@ func TestReconcile_ClosedReviewNotResurrected(t *testing.T) {
 	}
 	if f.countCalls("create") != 0 {
 		t.Errorf("must NOT resurrect a closed review-pr; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_HeadAdvancedReopensClosedReview (6a): a CLOSED review-pr whose
+// reviewed head_sha is behind the PR's current head_sha means new commits landed
+// after the review — the ACL re-emits it by REOPENING the same bead with the NEW
+// head_sha + branch (the re-review-on-head-advance cursor replacing pg-pr's
+// retired reopenStaleReviews). It must NOT create a second bead.
+func TestReconcile_HeadAdvancedReopensClosedReview(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
+		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "oldsha") + `]}`,
+		"gate list":          `{"data":[]}`,
+	}}
+	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(ids) != 1 || ids[0] != "zr-rv7" {
+		t.Fatalf("expected the reopened review id zr-rv7, got %v", ids)
+	}
+	if f.countCalls("update", "zr-rv7", "--status=open", "head_sha=newsha") != 1 {
+		t.Errorf("expected a reopen update carrying the NEW head_sha; calls=%v", f.calls)
+	}
+	if f.countCalls("update", "zr-rv7", "branch=feat/x") != 1 {
+		t.Errorf("expected the reopen to refresh branch; calls=%v", f.calls)
+	}
+	if f.countCalls("create") != 0 {
+		t.Errorf("head advance must REOPEN, not create a second bead; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_HeadUnchangedNotResurrected (6a): a CLOSED review-pr whose
+// reviewed head_sha equals the PR's current head_sha = already reviewed this head
+// -> no reopen, no create (the ClosedReviewNotResurrected invariant, now keyed on
+// the sha rather than "closed always suppresses").
+func TestReconcile_HeadUnchangedNotResurrected(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
+		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "samesha") + `]}`,
+		"gate list":          `{"data":[]}`,
+	}}
+	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "samesha", Branch: "feat/x", State: "open", Ownership: "team"}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(ids) != 0 {
+		t.Errorf("head unchanged must not re-emit, got %v", ids)
+	}
+	if f.countCalls("update", "--status=open") != 0 {
+		t.Errorf("must not reopen when the head is unchanged; calls=%v", f.calls)
+	}
+	if f.countCalls("create") != 0 {
+		t.Errorf("must not create when the head is unchanged; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_LegacyClosedNoHeadSHANotResurrected (6a / Q9): a CLOSED review-pr
+// created before the cursor (no head_sha metadata) must NOT be re-reviewed even
+// when the PR head has a value — we don't know which commit was reviewed, so
+// re-emitting could re-review an already-reviewed head. Missing reviewed sha =>
+// suppress.
+func TestReconcile_LegacyClosedNoHeadSHANotResurrected(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
+		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "") + `]}`,
+		"gate list":          `{"data":[]}`,
+	}}
+	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(ids) != 0 {
+		t.Errorf("a legacy closed review-pr with no reviewed sha must not be re-emitted, got %v", ids)
+	}
+	if f.countCalls("update", "--status=open") != 0 || f.countCalls("create") != 0 {
+		t.Errorf("legacy closed bead must be left alone; calls=%v", f.calls)
 	}
 }
 
