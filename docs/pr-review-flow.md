@@ -1,36 +1,34 @@
-# PR review flow (`pg-pr` ⇄ `pr-pool`)
+# PR review flow — implementation reference (downstream)
 
-**Status:** Living — this is the source of truth for review-flow behavior across the
-`pg-pr` and `pr-pool` Go modules.
-**Verified against:** `main` @ `9ac29c26` (2026-07-09). Re-verify and update the
-citations whenever review-flow code changes (see the change policy below).
+**Status:** **Downstream implementation reference — NOT a source of truth.** The
+source of truth for review behavior is the behavior docs under
+[`docs/behavior/`](behavior/README.md) (see `reviewing-others-prs`,
+`shepherding-my-prs`, `reviews`, and the cross-cutting `invariants`). This document
+records **how those behavior docs' review-related expectations are realized in the
+`pg-pr` and `pr-pool` code today** — journeys mapped to owning components, code
+paths, and tests. It is allowed to describe current, tool-specific, and
+transitional state; it may lag the behavior docs, and when the two disagree, **the
+behavior doc wins**.
 
-This doc describes the **post-split** review system: `pg-pr` is the PR-**data**
-interface (mirror upstream PR facts into a SQLite store; expose read verbs; push
-writes — comment / review / PR-lifecycle), and `pr-pool` **owns the review
-workflow** via a ccpool `review` role. It documents the end-to-end user journeys,
-each journey's owning component, its acceptance criteria (RFC 2119), the covering
-code paths, and its covering tests / coverage goals — so an agent changing the
-review flow inherits the intended behavior and can verify correctness.
+**Verified against:** `main` @ `9ac29c26` (2026-07-09). Re-verify the cited
+`file:line` anchors when review-flow code changes.
 
 > Scope note: this repository is a standalone, **public** flake. This doc stays
-> deployment-agnostic — it describes mechanisms and code defaults, never a
-> specific organization's repos, services, labels, or identities.
+> deployment-agnostic — mechanisms and code defaults only, never a specific
+> organization's repos, services, labels, or identities.
 
 ---
 
-## 1. Change policy (RFC 2119)
+## 1. How this doc relates to the source of truth
 
-- Any change to review-flow **behavior** (a journey's inputs, outputs, ordering,
-  ownership, acceptance criteria, or the bead/metadata contract) **MUST** update
-  this doc in the **same** change.
-- A change that adds or moves a covering test **SHOULD** update the journey's
-  coverage row here.
-- The `Verified against` commit at the top **MUST** be advanced when the cited
-  `file:line` anchors are re-checked.
-- If observed behavior and this doc disagree, that is a defect: the change **MUST**
-  either fix the code to match the doc or update the doc to match intended
-  behavior — it **MUST NOT** leave the two divergent.
+- Review **behavior** is defined in [`docs/behavior/`](behavior/README.md). A
+  change to what the review flow should do starts **there**; this reference is then
+  re-derived to show how the new behavior is implemented.
+- This reference **MAY** carry implementation detail the behavior docs deliberately
+  exclude: `file:line` anchors, test names, tool names, and current-vs-transitional
+  state.
+- If observed code and a behavior doc disagree, that is a defect in the code (or a
+  gap to close) — this reference does not override the behavior doc.
 
 ---
 

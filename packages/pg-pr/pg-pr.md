@@ -2,7 +2,7 @@
 
 > Unified PR-work CLI for agents and humans.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/tree/main/packages/pg-pr>.
-> Review flow (pg-pr = PR-data interface, pr-pool = review-workflow owner): see the living doc `docs/pr-review-flow.md`.
+> How the review/work flows should behave (source of truth): see the behavior docs `docs/behavior/`. How they're implemented today: `docs/pr-review-flow.md` (downstream reference).
 
 - Print version:
 
