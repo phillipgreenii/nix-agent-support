@@ -5,6 +5,10 @@ dispatches a session per configured role (in config order) up to each role's
 cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 `pr-pool` is equivalent to `pr-pool drain`.
 
+> **Review flow:** for the end-to-end PR-review journeys pr-pool owns (with pg-pr
+> as the PR-data interface), their acceptance criteria, and the review-executor
+> isolation posture, see the repo's living doc `docs/pr-review-flow.md`.
+
 ## Subcommands
 
 | Command                   | Description                                                                                                  |
@@ -29,8 +33,8 @@ back (`ListByMeta`/`Meta`) from the pool `CCPOOL_POOL` resolves (default XDG poo
 
 Roles, their prompts, and their discovery queries are configured in a repo-local
 `<RepoRoot>/.pr-pool/config.toml` (override the path with `PR_POOL_CONFIG`). When
-no config file is present, pr-pool uses the **built-in feedback + worker roles**,
-behaving exactly as before. Run `pr-pool config --print-defaults` to see the full
+no config file is present, pr-pool uses the **built-in feedback, worker, and
+review roles**. Run `pr-pool config --print-defaults` to see the full
 schema and the canonical defaults, then copy it and edit.
 
 Roles and queries are typed tagged unions discriminated by a `type` field:
