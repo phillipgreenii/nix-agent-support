@@ -66,6 +66,55 @@ func TestNudgeResultMsg_SurfacesWorkingSuppression(t *testing.T) {
 	}
 }
 
+// TestNudgeResultMsg_SurfacesWaitingForHumanSuppression is the pg2-gweng
+// regression: the daemon dispatcher suppresses manual nudges for
+// WaitingForHuman (waiting_for_human) symmetrically with Working
+// (session_active), so a queue against a WaitingForHuman session must WARN
+// rather than flash a neutral "queued" that reads as delivered.
+func TestNudgeResultMsg_SurfacesWaitingForHumanSuppression(t *testing.T) {
+	m := NewModel(Options{Tree: makeStatusTree("/proj/a", "sid-1", session.WaitingForHuman)})
+	m.Update(NudgeResultMsg{Queued: []string{"sid-1"}})
+	if !strings.Contains(m.nudgeFlash, "waiting for human") {
+		t.Errorf("flash %q should warn the session is waiting for human", m.nudgeFlash)
+	}
+	if !strings.Contains(m.nudgeFlash, "suppress") {
+		t.Errorf("flash %q should warn about suppression", m.nudgeFlash)
+	}
+	if m.nudgeFlashLevel != flashWarn {
+		t.Errorf("waiting-for-human suppression flash should be flashWarn, got %v", m.nudgeFlashLevel)
+	}
+}
+
+// TestNudgeResultMsg_MixedSuppressionWarns proves a queue spanning a Working
+// and a WaitingForHuman session names both suppression reasons at WARN level.
+func TestNudgeResultMsg_MixedSuppressionWarns(t *testing.T) {
+	sv1 := &aggregate.SessionView{Session: &session.Session{SessionID: "sid-w", Status: session.Working}}
+	sv2 := &aggregate.SessionView{Session: &session.Session{SessionID: "sid-h", Status: session.WaitingForHuman}}
+	d := &aggregate.Directory{Path: "/proj/a", Sessions: []*aggregate.SessionView{sv1, sv2}}
+	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
+	m.Update(NudgeResultMsg{Queued: []string{"sid-w", "sid-h"}})
+	if !strings.Contains(m.nudgeFlash, "1 working") || !strings.Contains(m.nudgeFlash, "1 waiting for human") {
+		t.Errorf("flash %q should name both suppression reasons", m.nudgeFlash)
+	}
+	if m.nudgeFlashLevel != flashWarn {
+		t.Errorf("mixed-suppression flash should be flashWarn, got %v", m.nudgeFlashLevel)
+	}
+}
+
+// TestNudgeResultMsg_IdleQueuedStaysInfo guards the negative: a queue against a
+// purely-idle session (the dispatcher will deliver it) must stay neutral info,
+// not warn.
+func TestNudgeResultMsg_IdleQueuedStaysInfo(t *testing.T) {
+	m := NewModel(Options{Tree: makeStatusTree("/proj/a", "sid-1", session.Idle)})
+	m.Update(NudgeResultMsg{Queued: []string{"sid-1"}})
+	if m.nudgeFlashLevel != flashInfo {
+		t.Errorf("idle queued flash should be flashInfo, got %v", m.nudgeFlashLevel)
+	}
+	if strings.Contains(m.nudgeFlash, "suppress") {
+		t.Errorf("idle queued flash %q should not mention suppression", m.nudgeFlash)
+	}
+}
+
 func TestNudgeResultMsg_SurfacesAlreadyQueued(t *testing.T) {
 	m := NewModel(Options{Tree: makeStatusTree("/proj/a", "sid-1", session.Idle)})
 	m.Update(NudgeResultMsg{Already: []string{"sid-1"}})

@@ -191,9 +191,10 @@ func (m *Model) setNudgeFlash(text string, level flashLevel) {
 
 // formatNudgeResult renders a NudgeResultMsg into a footer line plus its
 // render level. A queued nudge against a session the live snapshot reports as
-// Working is warned about explicitly: the daemon suppresses (session_active)
-// and drops such intents at dispatch time, so implying delivery would repeat
-// the pg2-0cmq silent no-op.
+// Working or WaitingForHuman is warned about explicitly: the daemon dispatcher
+// suppresses both symmetrically (session_active / waiting_for_human) and drops
+// such intents at dispatch time, so implying delivery would repeat the
+// pg2-0cmq silent no-op (see internal/daemon/nudger/dispatcher.go).
 func (m *Model) formatNudgeResult(r NudgeResultMsg) (string, flashLevel) {
 	if r.Cancel {
 		if len(r.Cancelled) == 0 {
@@ -212,16 +213,27 @@ func (m *Model) formatNudgeResult(r NudgeResultMsg) (string, flashLevel) {
 		parts = append(parts, fmt.Sprintf("%d already queued", len(r.Already)))
 	}
 	text := "nudge " + strings.Join(parts, ", ")
-	// Count queued targets the snapshot shows as Working — those will be
-	// suppressed at the next dispatch tick.
-	working := 0
+	// Count queued targets the snapshot shows as suppressible at the next
+	// dispatch tick: Working → session_active, WaitingForHuman →
+	// waiting_for_human. Both are dropped by the dispatcher.
+	working, waiting := 0, 0
 	for _, sid := range r.Queued {
-		if m.sessionStatusWorking(sid) {
+		switch {
+		case m.sessionStatusWorking(sid):
 			working++
+		case m.sessionStatusWaitingForHuman(sid):
+			waiting++
 		}
 	}
-	if working > 0 {
-		return fmt.Sprintf("%s — %d working, suppressed until idle", text, working), flashWarn
+	if working+waiting > 0 {
+		var supp []string
+		if working > 0 {
+			supp = append(supp, fmt.Sprintf("%d working", working))
+		}
+		if waiting > 0 {
+			supp = append(supp, fmt.Sprintf("%d waiting for human", waiting))
+		}
+		return fmt.Sprintf("%s — %s, suppressed until idle", text, strings.Join(supp, ", ")), flashWarn
 	}
 	return text, flashInfo
 }

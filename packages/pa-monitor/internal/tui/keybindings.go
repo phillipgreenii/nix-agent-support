@@ -246,6 +246,22 @@ func allSessionIDsUnderNode(n *aggregate.PathNode) []string {
 // Working in the current snapshot. Used to warn that a freshly-queued manual
 // nudge will be suppressed (session_active) at the next dispatch tick.
 func (m *Model) sessionStatusWorking(sid string) bool {
+	return m.sessionHasStatus(sid, session.Working)
+}
+
+// sessionStatusWaitingForHuman reports whether the session identified by sid is
+// WaitingForHuman in the current snapshot. The daemon dispatcher suppresses
+// manual nudges for this status too (waiting_for_human), symmetrically with
+// Working — see internal/daemon/nudger/dispatcher.go. Surfacing it keeps the N
+// feedback honest instead of implying delivery (pg2-0cmq / pg2-gweng).
+func (m *Model) sessionStatusWaitingForHuman(sid string) bool {
+	return m.sessionHasStatus(sid, session.WaitingForHuman)
+}
+
+// sessionHasStatus reports whether the session identified by sid has the given
+// status in the current snapshot. Shared read-side lookup (nil-guarded) for the
+// suppression predicates above.
+func (m *Model) sessionHasStatus(sid string, status session.Status) bool {
 	if m.tree == nil {
 		return false
 	}
@@ -254,7 +270,7 @@ func (m *Model) sessionStatusWorking(sid string) bool {
 			if sv.Session == nil || sv.SessionID != sid {
 				continue
 			}
-			return sv.Status == session.Working
+			return sv.Status == status
 		}
 	}
 	return false

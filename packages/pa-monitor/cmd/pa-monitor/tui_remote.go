@@ -143,17 +143,14 @@ func runTUIRemote() {
 						errLog.LogString(fmt.Sprintf("remote NudgeCancel(%s): %v", selector, err))
 						return tui.NudgeErrMsg{Err: err}
 					}
-					return tui.NudgeResultMsg{Cancel: true, Cancelled: resp.GetCancelledSessionIds()}
+					return nudgeCancelResultMsg(resp)
 				}
 				resp, err := c.C.NudgeQueue(ctx, &pb.NudgeQueueRequest{Selector: selector})
 				if err != nil {
 					errLog.LogString(fmt.Sprintf("remote NudgeQueue(%s): %v", selector, err))
 					return tui.NudgeErrMsg{Err: err}
 				}
-				return tui.NudgeResultMsg{
-					Queued:  resp.GetQueuedSessionIds(),
-					Already: resp.GetAlreadyQueuedSessionIds(),
-				}
+				return nudgeQueueResultMsg(resp)
 			}
 		},
 	})
@@ -162,4 +159,23 @@ func runTUIRemote() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+}
+
+// nudgeQueueResultMsg maps a NudgeQueue RPC response onto the TUI's
+// NudgeResultMsg. Extracted as a pure function so the field wiring
+// (Queued ← queued_session_ids, Already ← already_queued_session_ids) is unit
+// testable without a live RPC client — a field swap would otherwise pass every
+// existing test.
+func nudgeQueueResultMsg(resp *pb.NudgeQueueResponse) tui.NudgeResultMsg {
+	return tui.NudgeResultMsg{
+		Queued:  resp.GetQueuedSessionIds(),
+		Already: resp.GetAlreadyQueuedSessionIds(),
+	}
+}
+
+// nudgeCancelResultMsg maps a NudgeCancel RPC response onto the TUI's
+// NudgeResultMsg (Cancel=true, Cancelled ← cancelled_session_ids). See
+// nudgeQueueResultMsg for why this is a standalone pure function.
+func nudgeCancelResultMsg(resp *pb.NudgeCancelResponse) tui.NudgeResultMsg {
+	return tui.NudgeResultMsg{Cancel: true, Cancelled: resp.GetCancelledSessionIds()}
 }
