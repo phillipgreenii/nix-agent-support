@@ -91,6 +91,54 @@ func buildTeamQuery(rcfg config.RepoConfig) string {
 	return strings.Join(parts, " ")
 }
 
+// buildTeamQueries returns the searches whose UNION is the not-mine "to-review"
+// roster for one repo: the team-authors bucket (buildTeamQuery) plus — because
+// GitHub ANDs distinct qualifier types and so cannot OR labels/review-requested
+// into one query — a review-requested:<self> bucket and one bucket per configured
+// watch label. The broadened buckets exclude my own PRs (-author:<self>) so a PR
+// I own is never surfaced as someone-else's-to-review (it stays in the mine
+// roster and is still self-reviewed). With no self login the broadened buckets
+// are omitted (cannot exclude-mine); only the authors bucket, if any, remains.
+func buildTeamQueries(rcfg config.RepoConfig, self string) []string {
+	var qs []string
+	if t := buildTeamQuery(rcfg); t != "" {
+		qs = append(qs, t)
+	}
+	if self == "" {
+		return qs
+	}
+	base := "is:pr is:open repo:" + rcfg.Remote
+	qs = append(qs, base+" review-requested:"+self+" -author:"+self)
+	for _, l := range rcfg.WatchLabels {
+		qs = append(qs, base+` label:"`+l+`" -author:`+self)
+	}
+	return qs
+}
+
+// mergeRosters unions the per-bucket fingerprint rosters, de-duping by
+// repo#number (a PR matching several buckets appears once; first-seen wins). The
+// merge is complete only when NO bucket was truncated — an incomplete merge
+// disables diffRoster's disappeared/mass-close detection, since a truncated
+// bucket is missing PRs that must not be mistaken for closures.
+func mergeRosters(results []vcs.FingerprintResult) (roster []vcs.PRFingerprint, complete bool) {
+	complete = true
+	seen := map[prKey]bool{}
+	for _, res := range results {
+		if res.Truncated {
+			complete = false
+		}
+		for _, pr := range res.PRs {
+			k := prKey{Repo: pr.Repo, Number: pr.Number}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			roster = append(roster, pr)
+		}
+	}
+	return roster, complete
+}
+
 // firstFingerprintProvider returns the first registered VCS provider that
 // supports fingerprint polling.
 func (e *Engine) firstFingerprintProvider() (vcs.FingerprintProvider, bool) {
@@ -237,19 +285,33 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 	// included). Accumulate the new prevTeam across all repos.
 	newPrevTeam := map[prKey]string{}
 	for _, rcfg := range cfg.Repos {
-		q := buildTeamQuery(rcfg)
-		if q == "" {
+		// The "to-review" roster is the UNION of the team-authors, review-requested,
+		// and per-label buckets (buildTeamQueries) — each a separate poll, since
+		// GitHub cannot OR those qualifier types in one query.
+		queries := buildTeamQueries(rcfg, cfg.SelfLogin)
+		if len(queries) == 0 {
 			continue
 		}
-		s := e.deps.Now()
-		res, err := prov.FingerprintPRs(ctx, q)
-		e.recordPoll("team", res, err, e.deps.Now().Sub(s))
-		if err != nil {
-			if errors.Is(err, vcs.ErrAuthInvalid) {
-				authErr = true
+		var results []vcs.FingerprintResult
+		bucketErr := false
+		for _, q := range queries {
+			s := e.deps.Now()
+			res, err := prov.FingerprintPRs(ctx, q)
+			e.recordPoll("team", res, err, e.deps.Now().Sub(s))
+			if err != nil {
+				if errors.Is(err, vcs.ErrAuthInvalid) {
+					authErr = true
+				}
+				log.Warn("team fingerprint poll failed", "repo", rcfg.Remote, "err", err.Error())
+				bucketErr = true // partial data -> keep the merge incomplete (no mass-close)
+				continue
 			}
-			log.Warn("team fingerprint poll failed", "repo", rcfg.Remote, "err", err.Error())
-			// preserve this repo's prev entries so we don't lose change-tracking
+			anySuccess = true
+			results = append(results, res)
+		}
+		if len(results) == 0 {
+			// Every bucket failed for this repo: preserve its prev entries so we
+			// don't lose change-tracking (and don't mass-close on the next success).
 			for k, h := range e.prevTeam {
 				if k.Repo == rcfg.Remote {
 					newPrevTeam[k] = h
@@ -257,7 +319,8 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 			}
 			continue
 		}
-		anySuccess = true
+		roster, merged := mergeRosters(results)
+		complete := merged && !bucketErr // a dropped bucket = partial data
 		repoPrev := map[prKey]string{}
 		for k, h := range e.prevTeam {
 			if k.Repo == rcfg.Remote {
@@ -265,7 +328,7 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 			}
 		}
 		repoBeads := e.openBeadsForGroup(ctx, []config.RepoConfig{rcfg}, false)
-		d := diffRoster(repoPrev, res.PRs, repoBeads, !res.Truncated)
+		d := diffRoster(repoPrev, roster, repoBeads, complete)
 		for k := range d.enqueued {
 			teamQ.enqueue(k)
 			telemetry.FingerprintChangesTotal.WithLabelValues("team", d.reasons[k]).Inc()
@@ -273,6 +336,16 @@ func (e *Engine) fingerprintTick(ctx context.Context, mineQ, teamQ *refreshQueue
 		}
 		for k, h := range d.roster {
 			newPrevTeam[k] = h
+		}
+		if !complete {
+			// Partial data (a bucket errored/truncated): carry forward this repo's
+			// prior roster entries not seen this tick, so a PR that was only in the
+			// missing bucket isn't re-detected as new next tick.
+			for k, h := range repoPrev {
+				if _, ok := newPrevTeam[k]; !ok {
+					newPrevTeam[k] = h
+				}
+			}
 		}
 	}
 	e.prevTeam = newPrevTeam
