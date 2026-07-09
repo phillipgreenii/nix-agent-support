@@ -653,6 +653,7 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 		SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
 		Self:                e.cfg().SelfLogin,
 		TeamMembers:         e.allTeamMembers(),
+		WatchLabels:         e.allWatchLabels(),
 		Registry:            e.deps.AgentRegistry,
 		PRs:                 inputs,
 	})
@@ -957,6 +958,24 @@ func (e *Engine) allTeamMembers() []string {
 			}
 			seen[m] = struct{}{}
 			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// allWatchLabels returns the de-duplicated union of WatchLabels across all
+// configured repos — the review labels whose PRs join the "PRs to Review" set
+// (pg2-ynhr.13). Mirrors allTeamMembers.
+func (e *Engine) allWatchLabels() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, r := range e.cfg().Repos {
+		for _, l := range r.WatchLabels {
+			if _, ok := seen[l]; ok {
+				continue
+			}
+			seen[l] = struct{}{}
+			out = append(out, l)
 		}
 	}
 	return out

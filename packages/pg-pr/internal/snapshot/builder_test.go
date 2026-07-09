@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,11 +11,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
 
-// TestBuildSplitsMineFromTeam verifies partitioning: PRs authored by Self go
-// to Mine; non-draft team-member PRs go to Team; draft team PRs and
-// non-self/non-team PRs are excluded. Also checks that LinesChanged equals
-// Additions + Deletions.
-func TestBuildSplitsMineFromTeam(t *testing.T) {
+// TestBuildSplitsMineFromReview verifies the partition under the broadened "PRs
+// to Review" contract (6b/B5): PRs authored by Self go to Mine (even drafts);
+// every OTHER non-draft PR goes to the review set (Team) — the builder trusts
+// ingest to have surfaced only the review set (team-authored ∪ requested ∪
+// labeled), so it no longer filters by team-membership. Others' drafts are
+// excluded. LinesChanged = Additions + Deletions.
+func TestBuildSplitsMineFromReview(t *testing.T) {
 	reg, _ := agentregistry.New(nil) // empty registry
 
 	now := time.Now()
@@ -27,35 +30,84 @@ func TestBuildSplitsMineFromTeam(t *testing.T) {
 		PRs: []PRInput{
 			// Mine: authored by Self
 			{PR: api.PR{Repo: "org/repo", Number: 1, Author: "alice", Title: "my PR", URL: "u1"}},
-			// Team: non-draft team member
+			// To-review: non-draft team member
 			{PR: api.PR{Repo: "org/repo", Number: 2, Author: "bob", Title: "bob PR", URL: "u2", Draft: false, Additions: 10, Deletions: 5, ChangedFiles: 3}},
-			// Excluded: draft team member
+			// Excluded: a DRAFT that isn't mine
 			{PR: api.PR{Repo: "org/repo", Number: 3, Author: "carol", Title: "carol draft", URL: "u3", Draft: true}},
-			// Excluded: non-team, non-self
-			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "outsider PR", URL: "u4"}},
+			// To-review: non-team, non-self, non-draft — ingest surfaced it (requested/labeled)
+			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "review PR", URL: "u4"}},
 		},
 	}
 
 	snap := Build(in)
 
-	if len(snap.Mine) != 1 {
-		t.Fatalf("expected 1 Mine row, got %d", len(snap.Mine))
+	if len(snap.Mine) != 1 || snap.Mine[0].Number != 1 {
+		t.Fatalf("expected Mine=[#1], got %+v", snap.Mine)
 	}
-	if snap.Mine[0].Number != 1 {
-		t.Errorf("Mine row should be PR#1, got #%d", snap.Mine[0].Number)
+	got := map[int]bool{}
+	for _, r := range snap.Team {
+		got[r.Number] = true
 	}
+	if len(snap.Team) != 2 || !got[2] || !got[4] {
+		t.Fatalf("expected PRs-to-Review = {#2,#4}, got %+v", snap.Team)
+	}
+	if got[3] {
+		t.Errorf("a non-mine draft must be excluded from PRs to Review")
+	}
+	for _, r := range snap.Team {
+		if r.Number == 2 && (r.LinesChanged != 15 || r.FilesChanged != 3) {
+			t.Errorf("bob row: LinesChanged=%d FilesChanged=%d, want 15/3", r.LinesChanged, r.FilesChanged)
+		}
+	}
+}
 
-	if len(snap.Team) != 1 {
-		t.Fatalf("expected 1 Team row, got %d", len(snap.Team))
+// TestBuild_MatchReasons: MatchReason explains why each PR is in the review set —
+// team-authored, review-requested (ReviewRequestedOfMe), one label:<name> per
+// matched watch label — and a PR matching several criteria carries all reasons.
+func TestBuild_MatchReasons(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	in := BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		WatchLabels: []string{"team/findev", "team/jvm-guild"},
+		Registry:    reg,
+		PRs: []PRInput{
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}},                                                                // team-authored
+			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}},                                    // requested
+			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"team/findev", "unrelated"}}},                  // labeled
+			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"team/jvm-guild"}}}, // all three
+		},
 	}
-	if snap.Team[0].Number != 2 {
-		t.Errorf("Team row should be PR#2, got #%d", snap.Team[0].Number)
+	snap := Build(in)
+	reasons := map[int][]string{}
+	for _, r := range snap.Team {
+		reasons[r.Number] = r.MatchReason
 	}
-	if snap.Team[0].LinesChanged != 15 {
-		t.Errorf("LinesChanged should be 15 (10+5), got %d", snap.Team[0].LinesChanged)
+	assertReasons(t, reasons[2], []string{"team-authored"})
+	assertReasons(t, reasons[5], []string{"review-requested"})
+	assertReasons(t, reasons[6], []string{"label:team/findev"})
+	assertReasons(t, reasons[7], []string{"team-authored", "review-requested", "label:team/jvm-guild"})
+}
+
+func assertReasons(t *testing.T, got, want []string) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MatchReason = %#v, want %#v", got, want)
 	}
-	if snap.Team[0].FilesChanged != 3 {
-		t.Errorf("FilesChanged should be 3, got %d", snap.Team[0].FilesChanged)
+}
+
+// TestBuild_MinePRStaysMineEvenDraft: my own PR is always Mine, never the review
+// set, even as a draft (Q6 — exclude-mine applies only to the broadened criteria;
+// mine is still self-reviewed elsewhere).
+func TestBuild_MinePRStaysMineEvenDraft(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:     "alice",
+		Registry: reg,
+		PRs:      []PRInput{{PR: api.PR{Repo: "o/r", Number: 1, Author: "alice", Draft: true}}},
+	})
+	if len(snap.Mine) != 1 || len(snap.Team) != 0 {
+		t.Errorf("my draft PR must be Mine, not review set: mine=%+v team=%+v", snap.Mine, snap.Team)
 	}
 }
 

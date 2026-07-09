@@ -60,6 +60,7 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
 			Self:                e.cfg().SelfLogin,
 			TeamMembers:         e.allTeamMembers(),
+			WatchLabels:         e.allWatchLabels(),
 			Registry:            e.deps.AgentRegistry,
 			PRs:                 m.sortedInputs(),
 		}))

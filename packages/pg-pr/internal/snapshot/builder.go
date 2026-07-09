@@ -33,8 +33,46 @@ type BuilderInput struct {
 	SyncIntervalSeconds int
 	Self                string
 	TeamMembers         []string
-	Registry            *agentregistry.Registry
-	PRs                 []PRInput
+	// WatchLabels are the configured review labels (union across repos). A PR
+	// carrying one is part of the review set and gets a MatchReasonLabelPrefix
+	// reason. Nil/empty is fine (label matching just never fires).
+	WatchLabels []string
+	Registry    *agentregistry.Registry
+	PRs         []PRInput
+}
+
+// Match-reason strings on TeamRow.MatchReason, explaining why a PR is in the
+// "PRs to Review" set.
+const (
+	MatchReasonTeamAuthored    = "team-authored"
+	MatchReasonReviewRequested = "review-requested"
+	// MatchReasonLabelPrefix is prepended to each matched watch-label name, e.g.
+	// "label:team/findev".
+	MatchReasonLabelPrefix = "label:"
+)
+
+// matchReasons returns why PR p is in the review set: team-authored, requested
+// of me, and/or carrying configured watch labels (one reason per matched label).
+func matchReasons(p PRInput, team map[string]struct{}, watchLabels []string) []string {
+	var reasons []string
+	if isTeam(p.PR.Author, team) {
+		reasons = append(reasons, MatchReasonTeamAuthored)
+	}
+	if p.PR.ReviewRequestedOfMe {
+		reasons = append(reasons, MatchReasonReviewRequested)
+	}
+	if len(watchLabels) > 0 && len(p.PR.Labels) > 0 {
+		watch := make(map[string]struct{}, len(watchLabels))
+		for _, l := range watchLabels {
+			watch[l] = struct{}{}
+		}
+		for _, l := range p.PR.Labels {
+			if _, ok := watch[l]; ok {
+				reasons = append(reasons, MatchReasonLabelPrefix+l)
+			}
+		}
+	}
+	return reasons
 }
 
 // Build assembles a Snapshot from the given input. Pure; no IO.
@@ -53,8 +91,13 @@ func Build(in BuilderInput) *Snapshot {
 		switch {
 		case p.PR.Author == in.Self:
 			out.Mine = append(out.Mine, buildMineRow(p, in.Registry))
-		case isTeam(p.PR.Author, teamSet) && !p.PR.Draft:
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry))
+		case !p.PR.Draft:
+			// "PRs to Review": any non-mine, non-draft PR. The builder trusts ingest
+			// (detector.go's team ∪ review-requested ∪ label buckets, pg2-ynhr.13 B3)
+			// to have surfaced only the review set, so it no longer filters by
+			// team-membership here — that would drop the requested/labeled PRs. Others'
+			// drafts fall through and are excluded (parity with the ACL's draft skip).
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, teamSet, in.WatchLabels))
 		}
 	}
 	return out
@@ -77,7 +120,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
 	}
 }
 
-func buildTeamRow(p PRInput, reg *agentregistry.Registry) TeamRow {
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, team map[string]struct{}, watchLabels []string) TeamRow {
 	hum, agt := classifyApprovals(p, reg)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
@@ -97,6 +140,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry) TeamRow {
 		JIRA:            mapJIRA(p.JIRA),
 		NeedsAttention:  need,
 		AttentionReason: reason,
+		MatchReason:     matchReasons(p, team, watchLabels),
 	}
 }
 

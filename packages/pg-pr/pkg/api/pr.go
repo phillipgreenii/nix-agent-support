@@ -26,4 +26,9 @@ type PR struct {
 	Body string `json:"body,omitempty"`
 	// Labels are the PR's label names. Used by enrichment's urgency signal.
 	Labels []string `json:"labels,omitempty"`
+	// ReviewRequestedOfMe is true when the authenticated viewer is a requested
+	// reviewer on the PR. Populated by the GitHub GraphQL enrich path (pg2-ynhr.13
+	// B2); consumed by the dashboard's "PRs to Review" match reason. Defaults false
+	// until B2 wires the GraphQL node.
+	ReviewRequestedOfMe bool `json:"review_requested_of_me,omitempty"`
 }

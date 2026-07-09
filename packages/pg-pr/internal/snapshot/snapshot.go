@@ -27,7 +27,9 @@ type MineRow struct {
 	Beads         []BeadItem `json:"beads"`
 }
 
-// TeamRow is one row in the "Team PRs" table.
+// TeamRow is one row in the "PRs to Review" table (the not-mine review set:
+// team-authored ∪ review-requested-of-me ∪ watch-labeled). The JSON key stays
+// "team" for consumer compatibility (the external Grafana panel queries .team).
 type TeamRow struct {
 	Repo          string     `json:"repo"`
 	Number        int        `json:"number"`
@@ -47,6 +49,12 @@ type TeamRow struct {
 	// AttentionReason is the (stable) reason string when NeedsAttention is true;
 	// empty otherwise. See snapshot.AttentionReason* constants.
 	AttentionReason string `json:"attention_reason,omitempty"`
+	// MatchReason explains WHY this PR is in the review set: any of
+	// MatchReasonTeamAuthored, MatchReasonReviewRequested, and one
+	// MatchReasonLabelPrefix+<label> per matched watch label. May be empty for a
+	// PR the ingest surfaced but none of the reasons currently identify (e.g. a
+	// review-requested PR before the B2 GraphQL node populates ReviewRequestedOfMe).
+	MatchReason []string `json:"match_reason,omitempty"`
 }
 
 // JIRAItem is one resolved JIRA issue referenced by a PR.
