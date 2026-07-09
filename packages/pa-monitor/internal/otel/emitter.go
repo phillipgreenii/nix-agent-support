@@ -7,6 +7,8 @@ package otel
 import (
 	"context"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -91,11 +93,21 @@ type Emitter struct {
 	apiErrorObserved     metric.Int64Counter
 	signalerBinMissing   metric.Int64Counter
 
-	mu                  sync.Mutex
-	sessionsObs         []stateObs
-	sessionsErroredObs  map[string]int64 // kind -> count; replaced per tick
-	caffeinateActiveVal int64
-	caffeinateAttrs     []attribute.KeyValue
+	mu                 sync.Mutex
+	sessionsObs        []stateObs
+	sessionsErroredObs map[string]int64 // kind -> count; replaced per tick
+	// prevSessionTuples remembers the FULL attribute-tuples emitted with a
+	// non-zero count on the PREVIOUS RecordSessionGroups call, keyed by a
+	// canonical tupleKey. Drives carry-forward-zero (ADR 0024 D4/R6): a tuple
+	// present last tick but absent now is observed once at 0, then forgotten —
+	// so an orphaned {state,workspace.*,agent.*,plan_tier} series drops to 0
+	// instead of persisting at its last value (OTLP has no staleness markers).
+	prevSessionTuples map[string][]attribute.KeyValue
+	// prevSessionsErroredKinds is the RecordSessionsErrored counterpart: the
+	// set of error `kind`s emitted with a non-zero count last tick.
+	prevSessionsErroredKinds map[string]struct{}
+	caffeinateActiveVal      int64
+	caffeinateAttrs          []attribute.KeyValue
 	// caffeinateGraceVal buffers the grace-remaining countdown (seconds) for
 	// the pa_monitor.caffeinate.grace_remaining_seconds gauge. Shares the
 	// caffeinateAttrs label set; gated by the same caffeinateActiveKnown flag.
@@ -429,6 +441,7 @@ func (e *Emitter) RecordSessionGroups(groups []SessionGroup, baseAttrs map[strin
 		return
 	}
 	obs := make([]stateObs, 0, len(groups))
+	current := make(map[string][]attribute.KeyValue, len(groups))
 	for _, g := range groups {
 		merged := map[string]string{}
 		for k, v := range baseAttrs {
@@ -437,14 +450,31 @@ func (e *Emitter) RecordSessionGroups(groups []SessionGroup, baseAttrs map[strin
 		for k, v := range g.Labels {
 			merged[k] = v
 		}
+		kv := attrsToKV(merged)
 		obs = append(obs, stateObs{
 			state: merged["state"],
 			count: int64(g.Count),
-			attrs: attrsToKV(merged),
+			attrs: kv,
 		})
+		// Only non-zero tuples are worth carrying forward — an explicit 0 is
+		// already reported and needs no re-zeroing.
+		if g.Count != 0 {
+			current[tupleKey(kv)] = kv
+		}
 	}
 	e.mu.Lock()
+	// Carry-forward-zero over the FULL label-tuple (ADR 0024 D4/R6). `state` is
+	// only one label of the tuple, so a vanished tuple must be zeroed WHOLE — a
+	// bare {state} series would not match the orphan. Observe every tuple that
+	// was live last tick but is absent now at 0, then remember only the current
+	// non-zero tuples so each orphan is zeroed exactly once and then drops out.
+	for key, attrs := range e.prevSessionTuples {
+		if _, present := current[key]; !present {
+			obs = append(obs, stateObs{count: 0, attrs: attrs})
+		}
+	}
 	e.sessionsObs = obs
+	e.prevSessionTuples = current
 	e.mu.Unlock()
 }
 
@@ -786,11 +816,24 @@ func (e *Emitter) RecordSessionsErrored(counts map[string]int) {
 		return
 	}
 	obs := make(map[string]int64, len(counts))
+	current := make(map[string]struct{}, len(counts))
 	for k, v := range counts {
 		obs[k] = int64(v)
+		if v != 0 {
+			current[k] = struct{}{}
+		}
 	}
 	e.mu.Lock()
+	// Carry-forward-zero keyed by `kind` (ADR 0024 D4/R6): a kind present last
+	// tick but absent now is observed once at 0 so the orphaned series drops to
+	// 0 instead of persisting at its last value. Zeroed once, then forgotten.
+	for k := range e.prevSessionsErroredKinds {
+		if _, present := obs[k]; !present {
+			obs[k] = 0
+		}
+	}
 	e.sessionsErroredObs = obs
+	e.prevSessionsErroredKinds = current
 	e.mu.Unlock()
 }
 
@@ -812,6 +855,19 @@ func (e *Emitter) LogEvent(name string, attrs map[string]string) {
 		rec.AddAttributes(otellog.String(k, v))
 	}
 	e.logger.Emit(context.Background(), rec)
+}
+
+// tupleKey builds a stable canonical string for a full attribute tuple by
+// sorting its key=value pairs, so two attrsToKV results with identical content
+// but differing map-iteration order compare equal. Used to match a tuple
+// emitted last tick against this tick for carry-forward-zero.
+func tupleKey(attrs []attribute.KeyValue) string {
+	parts := make([]string, 0, len(attrs))
+	for _, kv := range attrs {
+		parts = append(parts, string(kv.Key)+"="+kv.Value.AsString())
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\x1f")
 }
 
 func attrsToKV(m map[string]string) []attribute.KeyValue {
