@@ -34,12 +34,12 @@ schema = 3
     hash = 'sha256-uDPnWjHpSrzXr17KEYEA1yAbizfcsfo5AyztY2tS6ZU='
 
   [mod.'golang.org/x/sys']
-    version = 'v0.46.0'
-    hash = 'sha256-NzRXMSEk6upeudJvUEPVnw6clJ3d8UdC/vdfANWAc8g='
+    version = 'v0.47.0'
+    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
-    version = 'v1.74.0'
-    hash = 'sha256-0TVFeIb0HPpWi4vx5ztRg3Wssoq0weDa2dDSWqC5sGo='
+    version = 'v1.74.1'
+    hash = 'sha256-dkbFqIG1OM1ZnhqWW3LNMl+trbOBZBru6ZjarXhYs3Y='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
