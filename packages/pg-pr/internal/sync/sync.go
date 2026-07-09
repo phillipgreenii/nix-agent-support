@@ -823,6 +823,12 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 	if pr.Repo == "" {
 		pr.Repo = rcfg.Remote
 	}
+	// Derive "requested of me" from the provider's self-agnostic RequestedReviewers
+	// against the configured self login. Done HERE — the single point BOTH the
+	// daemon per-PR refresh (refreshPR) AND the one-shot full-sync snapshot
+	// (buildAndStoreSnapshot) reach — so the dashboard's "PRs to Review" match
+	// reason is consistent across both paths (pg2-ynhr.13 B2/B5 review #2).
+	pr.ReviewRequestedOfMe = reviewRequestedOfSelf(e.cfg().SelfLogin, pr.RequestedReviewers)
 	in := snapshot.PRInput{PR: pr}
 
 	// --- ticket linkage ---

@@ -13,10 +13,11 @@ import (
 
 // TestBuildSplitsMineFromReview verifies the partition under the broadened "PRs
 // to Review" contract (6b/B5): PRs authored by Self go to Mine (even drafts);
-// every OTHER non-draft PR goes to the review set (Team) — the builder trusts
-// ingest to have surfaced only the review set (team-authored ∪ requested ∪
-// labeled), so it no longer filters by team-membership. Others' drafts are
-// excluded. LinesChanged = Additions + Deletions.
+// every OTHER non-draft PR that still carries a live match reason (team-authored
+// ∪ requested ∪ labeled) goes to the review set (Team). Reasons are sourced from
+// ingest; the builder re-checks they hold (B5 review #1). Others' drafts, and
+// non-mine PRs with no live reason, are excluded. LinesChanged = Additions +
+// Deletions.
 func TestBuildSplitsMineFromReview(t *testing.T) {
 	reg, _ := agentregistry.New(nil) // empty registry
 
@@ -34,8 +35,9 @@ func TestBuildSplitsMineFromReview(t *testing.T) {
 			{PR: api.PR{Repo: "org/repo", Number: 2, Author: "bob", Title: "bob PR", URL: "u2", Draft: false, Additions: 10, Deletions: 5, ChangedFiles: 3}},
 			// Excluded: a DRAFT that isn't mine
 			{PR: api.PR{Repo: "org/repo", Number: 3, Author: "carol", Title: "carol draft", URL: "u3", Draft: true}},
-			// To-review: non-team, non-self, non-draft — ingest surfaced it (requested/labeled)
-			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "review PR", URL: "u4"}},
+			// To-review: non-team, non-self, non-draft — ingest surfaced it because
+			// review was requested of me (a live reason, so it survives the B5 guard)
+			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "review PR", URL: "u4", ReviewRequestedOfMe: true}},
 		},
 	}
 
@@ -108,6 +110,30 @@ func TestBuild_MinePRStaysMineEvenDraft(t *testing.T) {
 	})
 	if len(snap.Mine) != 1 || len(snap.Team) != 0 {
 		t.Errorf("my draft PR must be Mine, not review set: mine=%+v team=%+v", snap.Mine, snap.Team)
+	}
+}
+
+// TestBuildExcludesReasonlessReviewPR verifies the self-correcting membership
+// guard (pg2-ynhr.13 B5 review #1): a non-mine, non-draft PR that carries NO
+// qualifying match reason — not team-authored, not review-requested, no watch
+// label — is EXCLUDED from the "PRs to Review" set. This is the removal path for
+// a PR that ENTERED the set (labeled/requested) then lost the qualifier while
+// still open+non-draft; without the guard it would linger with an empty reason.
+func TestBuildExcludesReasonlessReviewPR(t *testing.T) {
+	reg, _ := agentregistry.New(nil)
+	snap := Build(BuilderInput{
+		Self:        "alice",
+		TeamMembers: []string{"bob"},
+		WatchLabels: []string{"team/findev"},
+		Registry:    reg,
+		PRs: []PRInput{
+			// non-mine, non-draft, but NO reason: author is not on the team, not
+			// requested of me, and carries no watch label.
+			{PR: api.PR{Repo: "o/r", Number: 8, Author: "zara", Labels: []string{"unrelated"}}},
+		},
+	})
+	if len(snap.Team) != 0 {
+		t.Errorf("a reasonless non-mine PR must be excluded from PRs to Review; got %+v", snap.Team)
 	}
 }
 

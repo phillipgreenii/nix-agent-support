@@ -88,16 +88,21 @@ func Build(in BuilderInput) *Snapshot {
 		teamSet[m] = struct{}{}
 	}
 	for _, p := range in.PRs {
+		reasons := matchReasons(p, teamSet, in.WatchLabels)
 		switch {
 		case p.PR.Author == in.Self:
 			out.Mine = append(out.Mine, buildMineRow(p, in.Registry))
-		case !p.PR.Draft:
-			// "PRs to Review": any non-mine, non-draft PR. The builder trusts ingest
-			// (detector.go's team ∪ review-requested ∪ label buckets, pg2-ynhr.13 B3)
-			// to have surfaced only the review set, so it no longer filters by
-			// team-membership here — that would drop the requested/labeled PRs. Others'
-			// drafts fall through and are excluded (parity with the ACL's draft skip).
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry, teamSet, in.WatchLabels))
+		case !p.PR.Draft && len(reasons) > 0:
+			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
+			// carries at least one live match reason (team-authored ∪ review-requested
+			// ∪ watch label). Requiring a reason here — rather than admitting every
+			// non-draft non-mine PR — makes membership self-correcting: a PR that
+			// ENTERED the set (labeled/requested) then lost the qualifier while still
+			// open+non-draft drops out instead of lingering with an empty MatchReason
+			// (pg2-ynhr.13 B5 review #1). Reasons are still SOURCED from ingest
+			// (detector.go's buckets, B3); the builder only re-checks they hold. Others'
+			// drafts and now-reasonless PRs fall through and are excluded.
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, reasons))
 		}
 	}
 	return out
@@ -120,7 +125,10 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
 	}
 }
 
-func buildTeamRow(p PRInput, reg *agentregistry.Registry, team map[string]struct{}, watchLabels []string) TeamRow {
+// buildTeamRow builds a "PRs to Review" row. reasons is the non-empty match-reason
+// set Build already computed (and gated membership on), so it is threaded in rather
+// than recomputed here.
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string) TeamRow {
 	hum, agt := classifyApprovals(p, reg)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
@@ -140,7 +148,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, team map[string]struct
 		JIRA:            mapJIRA(p.JIRA),
 		NeedsAttention:  need,
 		AttentionReason: reason,
-		MatchReason:     matchReasons(p, team, watchLabels),
+		MatchReason:     reasons,
 	}
 }
 

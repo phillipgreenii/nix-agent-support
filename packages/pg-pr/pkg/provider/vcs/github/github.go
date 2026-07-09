@@ -140,8 +140,9 @@ type ghPR struct {
 	Labels       []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
-	// ReviewRequests is gh's reviewRequests array. USERS carry a login; TEAMS carry
-	// name/slug (no login) and are ignored for "requested of me".
+	// ReviewRequests is gh's reviewRequests array. Requested accounts (users, bots,
+	// mannequins) carry a login; TEAMS carry name/slug (no login) and are ignored
+	// for "requested of me".
 	ReviewRequests []struct {
 		Login string `json:"login"`
 	} `json:"reviewRequests"`
@@ -169,7 +170,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		out.Labels = append(out.Labels, l.Name)
 	}
 	for _, rr := range p.ReviewRequests {
-		if rr.Login != "" { // users only; teams have no login
+		if rr.Login != "" { // accounts (users/bots/mannequins) have a login; teams do not
 			out.RequestedReviewers = append(out.RequestedReviewers, rr.Login)
 		}
 	}

@@ -49,10 +49,10 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	if err != nil {
 		return nil, fmt.Errorf("refreshPR %s#%d: %w", repo, number, err)
 	}
-	// Derive "requested of me" here (the provider is self-agnostic) so it rides on
-	// the same api.PR that enrichOnePR/buildPRInput carry to the dashboard's "PRs
-	// to Review" match reason (pg2-ynhr.13 B2).
-	pr.ReviewRequestedOfMe = reviewRequestedOfSelf(e.cfg().SelfLogin, pr.RequestedReviewers)
+	// "Requested of me" is derived downstream in buildPRInput (the single point
+	// BOTH the daemon refresh AND the one-shot full-sync snapshot paths converge
+	// on), so it is consistent across both — not re-derived here (pg2-ynhr.13
+	// B2/B5 review #2).
 	summary := &Summary{}
 
 	// Closed/merged: emit pr.closed/pr.merged so the beadsbridge cascade-closes

@@ -26,9 +26,10 @@ type PR struct {
 	Body string `json:"body,omitempty"`
 	// Labels are the PR's label names. Used by enrichment's urgency signal.
 	Labels []string `json:"labels,omitempty"`
-	// RequestedReviewers are the login names of USERS requested to review the PR
-	// (teams excluded). Populated from `gh pr view --json reviewRequests`; the sync
-	// layer derives ReviewRequestedOfMe from this against the configured SelfLogin.
+	// RequestedReviewers are the login names of accounts (users, bots, mannequins)
+	// requested to review the PR — teams, which have no login, are excluded.
+	// Populated from `gh pr view --json reviewRequests`; the sync layer derives
+	// ReviewRequestedOfMe from this against the configured SelfLogin.
 	RequestedReviewers []string `json:"requested_reviewers,omitempty"`
 	// ReviewRequestedOfMe is true when the configured self login is among
 	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
