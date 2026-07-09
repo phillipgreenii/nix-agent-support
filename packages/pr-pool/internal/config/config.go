@@ -100,7 +100,13 @@ func Default() Config {
 		// SECURITY-SENSITIVE default allowlist (HUMAN SIGN-OFF REQUIRED — see plan).
 		// Minimum verbs an autonomous worker needs; deliberately NOT blanket Bash.
 		// Per-entry rationale is in docs/superpowers/plans/2026-06-23-pr-pool-deny-by-default-allowlist.md.
-		AllowedTools:  "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
+		// Bash(pg-pr:*): the review role's ONLY completion action is to post the review
+		// back via `pg-pr review submit` (pg-pr owns the GitHub write; the review prompt
+		// forbids gh), so under dontAsk it MUST be allow-listed or the post-back is
+		// auto-denied (pg2-vmbn7). This is a pool-wide, full-pg-pr grant "for now" to see
+		// the flow work end-to-end; scoping tool access per role (read-only review vs
+		// write-capable worker) is tracked in pg2-f9vcg.
+		AllowedTools:  "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(pg-pr:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
 		SessionPrefix: "pr-pool-",
 		BudgetTokens:  0,                // unlimited until ccpool N3
 		BudgetCost:    0,                // unlimited until ccpool N3

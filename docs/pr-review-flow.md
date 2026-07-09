@@ -236,12 +236,14 @@ flowchart TD
     comment-level dedup. **Coverage goal / fix:** add a viewer-pending skip to the
     submit path (tracked — §10). The `commit_id` 422 anchoring **is** present on
     this path.
-  - **Post-back is denied by the default allowlist.** The review role's only
-    completion action is `pg-pr review submit`, but the pool-wide default
-    `AllowedTools` (`config.go:103`) allow-lists neither `pg-pr` nor `gh`, and
-    `PermissionMode` defaults to `dontAsk` (deny-by-default). Under shipped
-    defaults the post-back is auto-denied and the role escalates. **Coverage goal
-    / fix:** allow-list `pg-pr` for the review role (tracked — §10).
+  - **Post-back access (resolved for now).** The review role's only completion
+    action is `pg-pr review submit`, so under `dontAsk` the pool-wide default
+    `AllowedTools` (`config.go:103`) now allow-lists `Bash(pg-pr:*)` — without it
+    the post-back was auto-denied (`pg2-vmbn7`, resolved). This is a broad,
+    pool-wide, full-`pg-pr` grant chosen deliberately "for now" to exercise the
+    flow end-to-end; scoping tool access **per role** (a read-only review vs a
+    write-capable worker) is deferred (§10). `gh` stays un-allow-listed — the
+    review prompt posts through `pg-pr`, never `gh`.
 
 ### JR3 — Requested-reviewer / watch-label surfacing → "PRs to Review"
 
@@ -352,17 +354,18 @@ These are review-role acceptance criteria; the current posture was audited
 2026-07-09 (read-only). Enforcement of the open deltas is tracked separately (§10)
 — this section states posture, not a remediation plan.
 
-| Dimension           | Requirement (RFC 2119)                                                                           | Current posture                                                                                                                                                                                                                                                                  |
-| ------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Worktree isolation  | Untrusted PR content **MUST** be checked out in a scratch worktree, never the canonical checkout | **SATISFIED** — per-bead worktree off `repoRoot` HEAD at `$XDG_STATE_HOME/pr-pool/worktrees` (`worktree.go:31-47`; `executor/ccpool.go:42-61`). Caveat: shares the monorepo `.git` + bead store; worktree reused, not torn down.                                                 |
-| Permission mode     | The session **MUST** be deny-by-default and **MUST NOT** stall on human prompts                  | **SATISFIED** — `dontAsk` default (`config.go:99`); `--autonomous` denies `AskUserQuestion` (`ccpool hook.go:237-238`).                                                                                                                                                          |
-| Allowlist           | The tool allowlist **MUST** be least-privilege for a read-only review of untrusted code          | **PARTIAL** — enforced pool-wide but not per-role; grants `Edit`/`Write` + code-executing verbs (`go build/test`, `nix flake check`, `prek`) that would execute attacker-controlled code after checkout; human sign-off still pending; `pg-pr` (needed for post-back) is absent. |
-| Budget watchdog     | A runaway session **MUST** be bounded                                                            | **SATISFIED** (wall-clock) — finite time budget + hard-stop (`builtin.go:99`; `watchdog.go:123-127`). Token/cost unlimited by default.                                                                                                                                           |
-| Credential exposure | The session **MUST NOT** inherit ambient credentials / internal-service reach                    | **MISSING** — the session inherits the full ambient env (`SSH_AUTH_SOCK`, `GH_TOKEN`, cloud creds) with no scrub, on the same OS user (no sandbox/unprivileged execution).                                                                                                       |
+| Dimension           | Requirement (RFC 2119)                                                                           | Current posture                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worktree isolation  | Untrusted PR content **MUST** be checked out in a scratch worktree, never the canonical checkout | **SATISFIED** — per-bead worktree off `repoRoot` HEAD at `$XDG_STATE_HOME/pr-pool/worktrees` (`worktree.go:31-47`; `executor/ccpool.go:42-61`). Caveat: shares the monorepo `.git` + bead store; worktree reused, not torn down.                                                                                                                                                                                                      |
+| Permission mode     | The session **MUST** be deny-by-default and **MUST NOT** stall on human prompts                  | **SATISFIED** — `dontAsk` default (`config.go:99`); `--autonomous` denies `AskUserQuestion` (`ccpool hook.go:237-238`).                                                                                                                                                                                                                                                                                                               |
+| Allowlist           | The tool allowlist **MUST** be least-privilege for a read-only review of untrusted code          | **PARTIAL** — enforced pool-wide but not per-role; now grants `Bash(pg-pr:*)` so the review post-back works (`pg2-vmbn7` resolved), but that is a broad full-`pg-pr` grant and the list still allows `Edit`/`Write` + code-executing verbs (`go build/test`, `nix flake check`, `prek`) that would execute attacker-controlled code after checkout; per-role least-privilege + the pending human sign-off are deferred (`pg2-f9vcg`). |
+| Budget watchdog     | A runaway session **MUST** be bounded                                                            | **SATISFIED** (wall-clock) — finite time budget + hard-stop (`builtin.go:99`; `watchdog.go:123-127`). Token/cost unlimited by default.                                                                                                                                                                                                                                                                                                |
+| Credential exposure | The session **MUST NOT** inherit ambient credentials / internal-service reach                    | **MISSING** — the session inherits the full ambient env (`SSH_AUTH_SOCK`, `GH_TOKEN`, cloud creds) with no scrub, on the same OS user (no sandbox/unprivileged execution).                                                                                                                                                                                                                                                            |
 
-The "PARTIAL" allowlist and "MISSING" credential deltas are the open
-isolation work (§10). The allowlist gap also has a **functional** consequence for
-JR2 (post-back denied) tracked as its own item.
+The "PARTIAL" allowlist (broad, pool-wide, still grants code-executing verbs on
+untrusted content) and the "MISSING" credential deltas are the open isolation
+work (§10); scoping tool access per role is tracked as `pg2-f9vcg`. The JR2
+post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 
 ---
 
@@ -409,10 +412,13 @@ issue tracker (bead IDs kept here rather than in the body):
 
 - **Deploy-gated live e2e verification** of path B against these journeys —
   `pg2-ynhr.16`.
-- **Review-executor isolation** deltas (allowlist least-privilege, credential
-  scrub, unprivileged execution) — `pg2-jpfw.9`.
-- **Post-back denied by default allowlist** (JR2 functional blocker) —
-  `pg2-vmbn7`.
+- **Review-executor isolation** deltas (credential scrub, unprivileged
+  execution) — `pg2-jpfw.9`.
+- **Per-role tool access** — the interim grant is a broad, pool-wide
+  full-`pg-pr` allowlist; scoping least-privilege per role (read-only review vs
+  write-capable worker) + the pending sign-off — `pg2-f9vcg`.
+- **Post-back denied by default allowlist** (JR2 functional blocker) — RESOLVED:
+  `Bash(pg-pr:*)` added to the default allowlist — `pg2-vmbn7`.
 - **Skip-if-present missing on the submit path** (JR2 duplicate-PENDING risk) —
   `pg2-3fo3c`.
 - **Both review paths on by default** (double-write hazard; safe-default decision) —

@@ -74,7 +74,10 @@ func TestDefault_allowedTools(t *testing.T) {
 	}
 	// Sanity: the conservative default must grant the worker its core verbs and
 	// must NOT be a blanket "Bash" (which would re-open arbitrary RCE).
-	for _, must := range []string{"Read", "Edit", "Write", "Bash(git "} {
+	// Bash(pg-pr: is required so the review role can post reviews back through
+	// pg-pr (its only completion action) under dontAsk deny-by-default; see
+	// pg2-vmbn7. Scope of per-role access is revisited in pg2-f9vcg.
+	for _, must := range []string{"Read", "Edit", "Write", "Bash(git ", "Bash(pg-pr:"} {
 		if !strings.Contains(d.AllowedTools, must) {
 			t.Errorf("AllowedTools default %q missing required entry %q", d.AllowedTools, must)
 		}
