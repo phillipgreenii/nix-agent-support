@@ -210,7 +210,7 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
 	}()
 
 	waitFor(t, 2*time.Second, func() bool { return stream.firstRegister() != nil })
@@ -244,7 +244,7 @@ func TestBridgeChannelDeliverSuccess(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c1", TargetPid: 4321, Text: "continue"}}}
@@ -291,7 +291,7 @@ func TestBridgeChannelDeliverFailure(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c2", TargetPid: 9999, Text: "continue"}}}
@@ -334,7 +334,7 @@ func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{
@@ -377,7 +377,7 @@ func TestBridgeChannelWatchdogTeardownReturns(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer())
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
 	}()
 
 	// The watchdog budget is ~4s; give generous margin under -race. A hang here

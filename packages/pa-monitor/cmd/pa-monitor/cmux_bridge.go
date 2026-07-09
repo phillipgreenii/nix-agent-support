@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
@@ -245,7 +246,7 @@ func runCmuxBridge(args []string) {
 	}
 
 	for {
-		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer); err != nil {
+		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -318,7 +319,7 @@ const bridgeHeartbeatInterval = 10 * time.Second
 // unblocks Recv on every exit path (watchdog, Send-error, Recv-error, or an
 // outer ctx cancel). The defer here is the backstop for the dial/open error
 // returns above, which never reach runBridgeChannel.
-func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer) error {
+func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -333,7 +334,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 		return err
 	}
 
-	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer)
+	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer, staleAfter)
 }
 
 // runBridgeChannel runs the BridgeChannel message loop over an established
@@ -376,6 +377,7 @@ func runBridgeChannel(
 	reporter cmuxstatus.Reporter,
 	log *bridgeLogger,
 	announcer *connAnnouncer,
+	staleAfter time.Duration,
 ) error {
 	// outbound funnels every non-Register stream.Send through the sole sender
 	// goroutine. Buffered so a delivery handler rarely blocks enqueuing a
@@ -499,7 +501,7 @@ loop:
 			if snap := r.msg.GetSnapshot(); snap != nil {
 				prev = diffAndLog(prev, stateFromDaemon(snap), version, log.Term)
 				prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(snap, ws), log.Term)
-				reporter.Push(snapshotForWorkspace(snap, ws))
+				reporter.Push(snapshotForWorkspace(snap, ws, time.Now(), staleAfter))
 				continue
 			}
 			if d := r.msg.GetDeliver(); d != nil {
@@ -566,7 +568,7 @@ func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Del
 // When no session in the daemon's state carries the bridge's workspace
 // id, the snapshot reflects the global aggregate so the sidebar still
 // shows something useful (e.g. caffeinate state).
-func snapshotForWorkspace(state *pb.DaemonState, ws string) cmuxstatus.Snapshot {
+func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, staleAfter time.Duration) cmuxstatus.Snapshot {
 	var working, idle, dormant int
 	matched := false
 	for _, d := range state.GetDirs() {
@@ -613,10 +615,24 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string) cmuxstatus.Snapshot 
 		out.PausedResetAt = state.GetWindowResetsAt().AsTime()
 	}
 
+	// Prefer the authoritative five_hour used_percentage over the cost/cap estimate
+	// (ADR 0021 §5), matching the on-screen BlockRow and the TUI's own sidebar push,
+	// so the cmux status reflects the real 5h utilisation (claude.ai) rather than the
+	// cost/$cap ratio. Cost/cap stays the fallback only when no authoritative reading
+	// was ever captured.
+	costPct, costOK := 0.0, false
 	if b := state.GetActiveBlock(); b != nil && state.GetPlanCapUsd() > 0 {
+		costPct = b.GetWindowPct() * 100
+		costOK = true
+	}
+	var capturedAt time.Time
+	if ts := state.GetLimitsCapturedAt(); ts != nil {
+		capturedAt = ts.AsTime()
+	}
+	if frac, label, ok := render.CmuxBlockProgress(state.FiveHourPct, capturedAt, costPct, costOK, now, staleAfter); ok {
 		out.HasProgress = true
-		out.Progress = b.GetWindowPct()
-		out.ProgressLabel = fmt.Sprintf("block %.0f%%", b.GetWindowPct()*100)
+		out.Progress = frac
+		out.ProgressLabel = label
 	}
 
 	return out

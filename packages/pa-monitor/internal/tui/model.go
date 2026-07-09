@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -311,7 +310,7 @@ func (noopReporter) Clear()                   {}
 // buildSidebarSnapshot collects current TUI state into a Snapshot for push.
 func (m *Model) buildSidebarSnapshot() cmuxstatus.Snapshot {
 	state, resetAt := aggregateState(m.tree)
-	prog, label, ok := windowProgress(m.tree, time.Now())
+	prog, label, ok := windowProgress(m.tree, time.Now(), m.staleAfter)
 	return cmuxstatus.Snapshot{
 		CaffeinateOn:  m.caffeinateOn,
 		NudgeOn:       m.autoResumeEnabled,
@@ -329,25 +328,21 @@ func (m *Model) buildSidebarSnapshot() cmuxstatus.Snapshot {
 // When PlanCapUSD <= 0 we mirror the TUI's "plan cap unknown" branch and set
 // ok=false so the reporter skips the bar entirely. Paused (rate-limit) state
 // forces 1.0 with an explanatory label.
-func windowProgress(tree *aggregate.Tree, now time.Time) (float64, string, bool) {
-	_ = now // retained for signature parity; the cost-based metric doesn't depend on wall-clock
+func windowProgress(tree *aggregate.Tree, now time.Time, staleAfter time.Duration) (float64, string, bool) {
 	if tree == nil {
 		return 0, "", false
 	}
 	if !tree.WindowResetsAt.IsZero() {
 		return 1.0, "5h block exhausted — waiting for reset", true
 	}
-	b := tree.ActiveBlock
-	if b == nil || tree.PlanCapUSD <= 0 {
-		return 0, "", false
+	// Prefer the authoritative five_hour used_percentage over the cost/cap estimate
+	// (ADR 0021 §5), matching the on-screen BlockRow and the headless cmux-bridge, so
+	// the cmux status agrees with claude.ai. Cost/cap remains the fallback only when
+	// no authoritative reading was ever captured.
+	costPct, costOK := 0.0, false
+	if b := tree.ActiveBlock; b != nil && tree.PlanCapUSD > 0 {
+		costPct = 100 * b.CostUSD / tree.PlanCapUSD
+		costOK = true
 	}
-	pct := 100 * b.CostUSD / tree.PlanCapUSD
-	v := pct / 100
-	if v < 0 {
-		v = 0
-	}
-	if v > 1 {
-		v = 1
-	}
-	return v, fmt.Sprintf("5h block %.0f%% of cap", pct), true
+	return render.CmuxBlockProgress(tree.FiveHourPct, tree.LimitsCapturedAt, costPct, costOK, now, staleAfter)
 }
