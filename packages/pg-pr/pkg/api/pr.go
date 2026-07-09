@@ -26,9 +26,12 @@ type PR struct {
 	Body string `json:"body,omitempty"`
 	// Labels are the PR's label names. Used by enrichment's urgency signal.
 	Labels []string `json:"labels,omitempty"`
-	// ReviewRequestedOfMe is true when the authenticated viewer is a requested
-	// reviewer on the PR. Populated by the GitHub GraphQL enrich path (pg2-ynhr.13
-	// B2); consumed by the dashboard's "PRs to Review" match reason. Defaults false
-	// until B2 wires the GraphQL node.
+	// RequestedReviewers are the login names of USERS requested to review the PR
+	// (teams excluded). Populated from `gh pr view --json reviewRequests`; the sync
+	// layer derives ReviewRequestedOfMe from this against the configured SelfLogin.
+	RequestedReviewers []string `json:"requested_reviewers,omitempty"`
+	// ReviewRequestedOfMe is true when the configured self login is among
+	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
+	// dashboard's "PRs to Review" match reason (pg2-ynhr.13 B2).
 	ReviewRequestedOfMe bool `json:"review_requested_of_me,omitempty"`
 }

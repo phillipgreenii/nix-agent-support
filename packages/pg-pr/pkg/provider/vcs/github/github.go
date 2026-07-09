@@ -115,7 +115,7 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 var errStub = errors.New("github vcs: not implemented")
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels"
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -140,6 +140,11 @@ type ghPR struct {
 	Labels       []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	// ReviewRequests is gh's reviewRequests array. USERS carry a login; TEAMS carry
+	// name/slug (no login) and are ignored for "requested of me".
+	ReviewRequests []struct {
+		Login string `json:"login"`
+	} `json:"reviewRequests"`
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
@@ -162,6 +167,11 @@ func (p ghPR) toAPI(repo string) api.PR {
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
+	}
+	for _, rr := range p.ReviewRequests {
+		if rr.Login != "" { // users only; teams have no login
+			out.RequestedReviewers = append(out.RequestedReviewers, rr.Login)
+		}
 	}
 	return out
 }

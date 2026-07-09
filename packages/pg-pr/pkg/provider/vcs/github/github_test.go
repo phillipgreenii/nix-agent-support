@@ -170,6 +170,31 @@ func TestGetPR_ParsesView(t *testing.T) {
 	}
 }
 
+func TestGetPR_ParsesReviewRequests(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviewRequests": [
+			{"__typename": "User", "login": "phillipg"},
+			{"__typename": "Team", "name": "findev", "slug": "findev"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	// Users become RequestedReviewers; teams (no login) are excluded.
+	if len(pr.RequestedReviewers) != 1 || pr.RequestedReviewers[0] != "phillipg" {
+		t.Fatalf("RequestedReviewers = %v, want [phillipg] (team excluded)", pr.RequestedReviewers)
+	}
+	// The --json field set must request reviewRequests, or gh returns nothing.
+	if len(gh.calls) == 0 || !strings.Contains(strings.Join(gh.calls[0], " "), "reviewRequests") {
+		t.Errorf("gh pr view must request the reviewRequests field; args=%v", gh.calls)
+	}
+}
+
 func TestGetPR_ValidatesInput(t *testing.T) {
 	p := NewWithRunner(newFakeGH())
 	if _, err := p.GetPR(context.Background(), "", 1); err == nil {

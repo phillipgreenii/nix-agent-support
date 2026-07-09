@@ -8,6 +8,22 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
 
+// reviewRequestedOfSelf reports whether self is among the PR's requested
+// reviewers (exact GitHub-login match). Empty self => false. Kept in the sync
+// layer because the VCS provider is self-agnostic (it returns the raw requested
+// reviewers; only the engine knows the configured self login).
+func reviewRequestedOfSelf(self string, requested []string) bool {
+	if self == "" {
+		return false
+	}
+	for _, r := range requested {
+		if r == self {
+			return true
+		}
+	}
+	return false
+}
+
 // refreshPR fetches one PR and reconciles its bead + snapshot from real
 // state. It is the daemon worker's per-PR entry point and the single place
 // beads are closed or marked dormant.
@@ -33,6 +49,10 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	if err != nil {
 		return nil, fmt.Errorf("refreshPR %s#%d: %w", repo, number, err)
 	}
+	// Derive "requested of me" here (the provider is self-agnostic) so it rides on
+	// the same api.PR that enrichOnePR/buildPRInput carry to the dashboard's "PRs
+	// to Review" match reason (pg2-ynhr.13 B2).
+	pr.ReviewRequestedOfMe = reviewRequestedOfSelf(e.cfg().SelfLogin, pr.RequestedReviewers)
 	summary := &Summary{}
 
 	// Closed/merged: emit pr.closed/pr.merged so the beadsbridge cascade-closes
