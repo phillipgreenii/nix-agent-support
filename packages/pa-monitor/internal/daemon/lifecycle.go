@@ -191,6 +191,17 @@ type RunOptions struct {
 	// Decorators are shell-out label producers. Run alongside Detectors;
 	// their output wins on conflicting keys.
 	Decorators []*labels.Decorator
+	// ConfigPath, when non-empty together with ReloadDecorators, enables the
+	// per-tick config-reload watch (bead pg2-r1f1j.8): the daemon re-reads this
+	// file each tick and rebuilds the decorator pipeline when it changes, so a
+	// decorator added by `pn workspace apply` is picked up without a manual
+	// daemon restart (the launchd agent's restart is keyed on the package hash,
+	// not the config, and the daemon can boot before the config is written).
+	ConfigPath string
+	// ReloadDecorators re-loads the config at ConfigPath and returns the fresh
+	// decorator pipeline (already adapted via labels.AsFailable). Nil disables
+	// the reload watch (the startup Decorators are used for the daemon's life).
+	ReloadDecorators func() ([]labels.FailableDetector, error)
 	// LabelCap caps the number of distinct values for any one label key.
 	// Past the cap, additional values bucket as "other". 0 → 50.
 	LabelCap int
@@ -405,6 +416,17 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// (empty) label set for the session's lifetime (ADR 0024 D5).
 	decorators := labels.AsFailable(opts.Decorators)
 
+	// configReloader (bead pg2-r1f1j.8): when enabled, re-reads the config file
+	// each tick and swaps in a freshly-rebuilt decorator pipeline whenever the
+	// file changes — so a decorator written by `pn workspace apply` after the
+	// daemon booted is picked up without a manual restart. Its fingerprint
+	// starts empty, so the first tick always rebuilds, deterministically closing
+	// the boot race regardless of what config the daemon read at startup.
+	var reloader *configReloader
+	if opts.ReloadDecorators != nil && opts.ConfigPath != "" {
+		reloader = &configReloader{path: opts.ConfigPath, rebuild: opts.ReloadDecorators}
+	}
+
 	// previousErrors tracks the last-seen LastError.At per session so we
 	// can detect newly advanced errors and fire the api_error.observed counter.
 	previousErrors := map[string]time.Time{}
@@ -421,6 +443,16 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			return nil
 		case <-t.C:
 			tickCount++
+			// Pick up a changed decorator config without a restart (pg2-r1f1j.8).
+			// Runs in this (the tick) goroutine, so swapping `decorators` and
+			// clearing `labelCache` is race-free — both are owned here.
+			if reloader != nil {
+				if newDecs, ok := reloader.reloadIfChanged(); ok {
+					decorators = newDecs
+					clear(labelCache)
+					fmt.Fprintf(os.Stderr, "daemon: decorator config reloaded (%d decorator(s))\n", len(newDecs))
+				}
+			}
 			if opts.Poller == nil {
 				// no poller — still advance the (toggle-driven) caffeinate
 				// tick to honour RPC-driven on/off requests

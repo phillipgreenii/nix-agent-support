@@ -189,6 +189,17 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 			detectors.Agent{},
 		},
 		Decorators: buildDecorators(cfg.Decorators),
+		// Re-read the config each tick and rebuild the decorator pipeline on
+		// change, so a decorator written by `pn workspace apply` after the
+		// daemon booted is picked up without a manual restart (pg2-r1f1j.8).
+		ConfigPath: config.DefaultPath(),
+		ReloadDecorators: func() ([]labels.FailableDetector, error) {
+			c, err := config.Load(config.DefaultPath())
+			if err != nil {
+				return nil, err
+			}
+			return labels.AsFailable(buildDecorators(c.Decorators)), nil
+		},
 	}
 
 	if !disablePoller {
