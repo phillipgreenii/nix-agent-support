@@ -184,17 +184,25 @@ func symbol(st session.Status, dormant, awaiting, rateLimited bool, theme Theme)
 	case session.Working:
 		return theme.Working.Render("●")
 	case session.Blocked:
-		// Blocked base glyph (◐). sessionGlyph overlays a more specific error
-		// glyph (⊘ auth / ⚠ retryable / ✗ non-retryable) from LastError when
-		// the blocker is an error/authn; usage_limit blockers normally carry a
-		// RateLimitResetsAt and short-circuit above as ⏸.
+		// Blocked on human input (AskUserQuestion / permission prompt) renders
+		// the distinct "?" awaiting glyph — the human-actionable state the legend
+		// documents. Other blockers use the ◐ base: sessionGlyph overlays a more
+		// specific error glyph (⊘ auth / ⚠ retryable / ✗ non-retryable) from
+		// LastError when the blocker is an error/authn; usage_limit blockers
+		// normally carry a RateLimitResetsAt and short-circuit above as ⏸.
+		if awaiting {
+			return theme.Awaiting.Render("?")
+		}
 		return theme.Awaiting.Render("◐")
 	case session.Idle:
 		if awaiting {
 			return theme.Awaiting.Render("?")
 		}
 		if dormant {
-			return theme.Dormant.Render("✕")
+			// ☾ (moon, single-width) evokes "sleeping" and is visually distinct
+			// from the ✗ non-retryable-error glyph, which ✕ was easily confused
+			// with in the legend/tree.
+			return theme.Dormant.Render("☾")
 		}
 		return theme.Idle.Render("○")
 	default:

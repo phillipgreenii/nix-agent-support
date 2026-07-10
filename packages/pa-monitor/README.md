@@ -156,16 +156,17 @@ endpoint = "http://127.0.0.1:4317"
 
 Status glyph shown next to each session (see `internal/render/modals.go` for the in-app legend):
 
-| Glyph | Status   | Meaning                               |
-| ----- | -------- | ------------------------------------- |
-| `●`   | working  | actively producing output             |
-| `○`   | idle     | waiting for input                     |
-| `⏸`   | paused   | rate-limited                          |
-| `?`   | awaiting | asked for clarification               |
-| `✕`   | dormant  | ended (resumable)                     |
-| `⊘`   | auth     | authentication failure — run `/login` |
-| `⚠`   | error    | retryable error (auto-resuming)       |
-| `✗`   | error    | non-retryable error                   |
+| Glyph | Status   | Meaning                                 |
+| ----- | -------- | --------------------------------------- |
+| `●`   | working  | actively producing output               |
+| `○`   | idle     | waiting for input                       |
+| `◐`   | blocked  | has work but can't proceed (see status) |
+| `⏸`   | paused   | blocked on a usage/rate limit           |
+| `?`   | awaiting | blocked on human input                  |
+| `☾`   | dormant  | idle 20m+ (resumable)                   |
+| `⊘`   | auth     | authentication failure — run `/login`   |
+| `⚠`   | error    | retryable error (auto-resuming)         |
+| `✗`   | error    | non-retryable error                     |
 
 ## Keybindings (TUI)
 

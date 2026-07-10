@@ -13,6 +13,21 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
+// The details overlay (Enter on a session) never showed the session's
+// status/blocker, so an idle/working/blocked session revealed nothing about its
+// state. It MUST show Status, and qualify a blocked session with its blocker
+// (e.g. "blocked/usage_limit"), matching the CLI table.
+func TestDetailsShowsStatusAndBlocker(t *testing.T) {
+	working := &aggregate.SessionView{Session: &session.Session{SessionID: "id1", Status: session.Working}}
+	if out := RenderDetails(working, 120); !strings.Contains(out, "Status:") || !strings.Contains(out, "working") {
+		t.Errorf("details missing Status/working:\n%s", out)
+	}
+	blocked := &aggregate.SessionView{Session: &session.Session{SessionID: "id2", Status: session.Blocked, Blocker: session.UsageLimit}}
+	if out := RenderDetails(blocked, 120); !strings.Contains(out, "blocked/usage_limit") {
+		t.Errorf("details missing blocked/usage_limit:\n%s", out)
+	}
+}
+
 func TestDetailsShowsTerminalHost(t *testing.T) {
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1", TerminalHost: "tmux"},

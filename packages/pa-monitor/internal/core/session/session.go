@@ -123,11 +123,13 @@ func KeepAwake(s Status, b Blocker, retryable bool) bool {
 
 // LongIdleThreshold is the display-side age cutoff (ADR 0024: Dormant becomes
 // an idle age-refinement). An Idle session whose last activity is older than
-// this renders as "dormant" (✕) and is hidden from the default TUI view /
+// this renders as "dormant" and is hidden from the default TUI view /
 // excluded from the per-session session.info gauge. It mirrors the daemon's
-// default IdleThreshold (config default 10m); it is a display default, not the
-// authoritative per-poll threshold (the poller uses its configured value).
-const LongIdleThreshold = 10 * time.Minute
+// default IdleThreshold (config default 20m); it is a display default, not the
+// authoritative per-poll threshold (the poller uses its configured value). Kept
+// in sync with the config default so the TUI display and the live path agree at
+// the default (tunable live-path value via idle_threshold_s).
+const LongIdleThreshold = 20 * time.Minute
 
 // IsLongIdle reports whether lastActivity is older than the threshold. Zero
 // lastActivity is never long-idle (unknown age).

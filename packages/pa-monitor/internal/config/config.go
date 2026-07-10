@@ -139,7 +139,11 @@ func defaults() Config {
 		RefreshInterval:  1 * time.Second,
 		CaffeinateGrace:  60 * time.Second,
 		WorkingThreshold: 30 * time.Second,
-		IdleThreshold:    10 * time.Minute,
+		// Governs the idle->dormant (long-idle) age refinement, NOT the
+		// working->idle transition (that's the registry activity verdict). 20m so
+		// a briefly-quiet session is not prematurely marked dormant. Kept in sync
+		// with session.LongIdleThreshold (the TUI display default).
+		IdleThreshold: 20 * time.Minute,
 		// Default ~2*WorkingThreshold: a fresh "waiting" flag should not have a
 		// transcript that has advanced well past statusUpdatedAt.
 		WaitingFreshWindow:       60 * time.Second,

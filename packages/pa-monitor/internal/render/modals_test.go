@@ -67,7 +67,7 @@ func TestModalDimensionsClampToTerminal(t *testing.T) {
 
 func TestLegendModalContainsAllSymbols(t *testing.T) {
 	out := LegendModal(120, 40, 0)
-	for _, sym := range []string{"●", "○", "⏸", "?", "✕", "🤖", "🐚", "🌿", "⊘", "⚠", "✗"} {
+	for _, sym := range []string{"●", "○", "◐", "⏸", "?", "☾", "🤖", "🐚", "⊘", "⚠", "✗"} {
 		if !strings.Contains(out, sym) {
 			t.Errorf("legend modal missing %q; got:\n%s", sym, out)
 		}

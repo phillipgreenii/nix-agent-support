@@ -5,12 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
+
+// isNoCmuxSurface reports whether a delivery error means the target pid has no
+// cmux surface (its pane closed / the process detached from cmux). Matched by
+// string, not errors.As, because the signal layer's *signal.NoCmuxSurfaceError
+// crosses the cmux-bridge as a plain string in DeliverResult.Error, so the type
+// is not recoverable on the daemon side.
+func isNoCmuxSurface(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Cover the same three phrasings internal/signal's classifyCmuxText treats as
+	// no-surface, so the two classifiers can't silently drift if the error text
+	// changes. Substring (not errors.As) because the error crosses the bridge as
+	// a plain string (DeliverResult.Error), losing the *NoCmuxSurfaceError type.
+	s := err.Error()
+	return strings.Contains(s, "no cmux surface") ||
+		strings.Contains(s, "no surface") ||
+		strings.Contains(s, "surface not found")
+}
 
 // noBridgeDropWindow bounds how long a nudge intent is retried against
 // ErrNoBridge before the dispatcher gives up and drops it. Chosen so a
@@ -223,6 +243,29 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 				}
 				// Else: still within the window — leave the intents queued
 				// (no RemoveKeys) to retry next tick.
+				continue
+			}
+			if isNoCmuxSurface(err) {
+				// The target pid has no cmux surface (pane closed / process
+				// detached from cmux). Unlike a transient error this will not
+				// heal by retrying, and unlike ErrNoBridge the bridge IS
+				// connected — so leaving the intent queued spams
+				// signal_send_failures_total forever (bead pg2-2o0p7: one ghost
+				// session drove ~61 failures/15min). Record it as a SUPPRESSION
+				// (not a failure) and drop the intent. NOTE: this stops the
+				// send-FAILURE spam, but the producer re-enqueues every tick
+				// regardless of surface state, so a persistent ghost still logs a
+				// per-tick suppression. Truly stopping the churn needs a
+				// producer-side no-surface gate / reaping the session (follow-up).
+				if hasDisrupt {
+					d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
+				}
+				d.Recorder.RecordSuppressed(sid, sources, "no_surface")
+				d.recordHistory(goCtx, RecordEvent{
+					SessionID: sid, Text: text, Result: "suppressed", ErrorText: "no_surface",
+					CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
+				})
+				store.RemoveKeys(observedKeys)
 				continue
 			}
 			// Delivery failed. Surface it for observability (OTel counter + log)

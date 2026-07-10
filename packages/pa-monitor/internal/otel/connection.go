@@ -156,7 +156,7 @@ func (e *ConnEmitter) LogEvent(name string, attrs map[string]string) {
 	}
 	var rec otellog.Record
 	rec.SetTimestamp(time.Now())
-	rec.SetSeverity(otellog.SeverityInfo)
+	rec.SetSeverity(severityForEvent(name))
 	rec.SetBody(otellog.StringValue(name))
 	rec.AddAttributes(otellog.String("event_name", name))
 	rec.AddAttributes(otellog.String("component", e.component))

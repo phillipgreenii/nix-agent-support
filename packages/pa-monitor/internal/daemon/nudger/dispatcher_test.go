@@ -216,6 +216,38 @@ func TestDispatcherSendFailureRecordsFailure(t *testing.T) {
 	}
 }
 
+// TestDispatcherNoCmuxSurfaceSuppressesNotFails covers the ghost-session bug
+// (bead pg2-...): a session whose cmux surface is gone (pane closed / process
+// orphaned) can never receive a nudge, so Send returns "no cmux surface found
+// for pid N". The old behavior recorded a send-failure and LEFT the intent
+// queued, so it retried and spammed signal_send_failures_total forever (~61/15min
+// observed live). Instead, a no-surface outcome must be recorded as a
+// SUPPRESSION (not a failure) and the intent DROPPED — the target is
+// unreachable, not transiently erroring. The error is matched by string because
+// it crosses the cmux-bridge as a plain string (DeliverResult.Error).
+func TestDispatcherNoCmuxSurfaceSuppressesNotFails(t *testing.T) {
+	store := NewPendingStore()
+	now := time.Now()
+	store.Add(NudgeIntent{Key: IntentKey{"sid-1", SourceWindowReset}, Text: "continue", EmittedAt: now})
+	tree := treeWith(time.Time{}, newSV("sid-1", 45600, session.Idle))
+	sig := &fakeSignaler{err: errors.New("signal: no cmux surface found for pid 45600")}
+	rec := &fakeRecorder{}
+	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}
+	d.Dispatch(context.Background(), TickContext{Now: now, Tree: tree, Watermarks: wmStub{}}, store)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.sendFailed) != 0 {
+		t.Errorf("no-surface must NOT record send-failed (that spams the failure counter forever); got %d", len(rec.sendFailed))
+	}
+	if len(rec.suppressed) != 1 || rec.suppressed[0] != "sid-1" {
+		t.Errorf("no-surface should record ONE suppression for sid-1; got %v", rec.suppressed)
+	}
+	if store.HasAny("sid-1") {
+		t.Errorf("no-surface intent should be dropped (an unreachable surface won't heal by retrying)")
+	}
+}
+
 func TestDispatcherSessionMissingSilently(t *testing.T) {
 	store := NewPendingStore()
 	now := time.Now()

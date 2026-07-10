@@ -19,8 +19,8 @@ func TestDefaultsWhenFileMissing(t *testing.T) {
 	if cfg.WorkingThreshold != 30*time.Second {
 		t.Errorf("WorkingThreshold default: got %v, want 30s", cfg.WorkingThreshold)
 	}
-	if cfg.IdleThreshold != 10*time.Minute {
-		t.Errorf("IdleThreshold default: got %v, want 10m", cfg.IdleThreshold)
+	if cfg.IdleThreshold != 20*time.Minute {
+		t.Errorf("IdleThreshold default: got %v, want 20m", cfg.IdleThreshold)
 	}
 	if cfg.RefreshInterval != 1*time.Second {
 		t.Errorf("RefreshInterval default: got %v, want 1s", cfg.RefreshInterval)
@@ -233,8 +233,8 @@ func TestPartialOverridePreservesDefaults(t *testing.T) {
 	if cfg.PlanTier != "max_5x" {
 		t.Errorf("PlanTier should retain default, got %q", cfg.PlanTier)
 	}
-	if cfg.IdleThreshold != 10*time.Minute {
-		t.Errorf("IdleThreshold should retain default, got %v", cfg.IdleThreshold)
+	if cfg.IdleThreshold != 20*time.Minute {
+		t.Errorf("IdleThreshold should retain default (20m), got %v", cfg.IdleThreshold)
 	}
 	if cfg.RefreshInterval != 1*time.Second {
 		t.Errorf("RefreshInterval should retain default, got %v", cfg.RefreshInterval)

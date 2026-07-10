@@ -33,6 +33,22 @@ type Row struct {
 // FlattenPathTree converts a PathNode tree into an ordered slice of Rows.
 // Collapsed nodes omit all descendant sessions and children.
 // BlankKind rows separate top-level nodes.
+// subtreeHasVisible reports whether n or any descendant has at least one
+// session visible under the current filter. Used to skip parent nodes that
+// would otherwise render as an empty directory with a dead collapse toggle in
+// "active" view (all their sessions dormant/hidden). A no-op when showAll.
+func subtreeHasVisible(n *aggregate.PathNode, showAll bool) bool {
+	if len(visibleSessions(n.DirectSessions, showAll)) > 0 {
+		return true
+	}
+	for _, c := range n.Children {
+		if subtreeHasVisible(c, showAll) {
+			return true
+		}
+	}
+	return false
+}
+
 func FlattenPathTree(nodes []*aggregate.PathNode, state *treestate.State, opts TreeOpts) []Row {
 	var rows []Row
 	flatIdx := 0
@@ -63,10 +79,15 @@ func FlattenPathTree(nodes []*aggregate.PathNode, state *treestate.State, opts T
 			flatIdx++
 		}
 		for _, child := range n.Children {
-			walk(child)
+			if subtreeHasVisible(child, opts.ShowAll) {
+				walk(child)
+			}
 		}
 	}
 	for _, n := range nodes {
+		if !subtreeHasVisible(n, opts.ShowAll) {
+			continue
+		}
 		walk(n)
 		rows = append(rows, Row{Kind: BlankKind, LineCount: 1})
 	}

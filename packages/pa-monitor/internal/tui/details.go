@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/models"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
@@ -29,6 +30,14 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	sb.WriteString(fmt.Sprintf("Terminal:  %s\n", wrap.Line(sv.TerminalHost, valBudget)))
 	sb.WriteString(fmt.Sprintf("Cwd:       %s\n", wrap.Line(sv.Cwd, valBudget)))
 	sb.WriteString(fmt.Sprintf("Kind:      %s\n", wrap.Line(string(sv.Kind), valBudget)))
+	// ADR 0024: show status, and qualify a blocked session with its blocker
+	// ("blocked/usage_limit") so the reason a session is stuck is visible here,
+	// matching the CLI status table.
+	statusStr := sv.Status.String()
+	if sv.Status == session.Blocked && sv.Blocker != session.NoBlocker {
+		statusStr += "/" + sv.Blocker.String()
+	}
+	sb.WriteString(fmt.Sprintf("Status:    %s\n", wrap.Line(statusStr, valBudget)))
 	sb.WriteString(fmt.Sprintf("Model:     %s\n", wrap.Line(sv.SessionEnrichment.Model, valBudget)))
 	win, _ := models.Window(sv.SessionEnrichment.Model)
 	ctxPct := 0.0

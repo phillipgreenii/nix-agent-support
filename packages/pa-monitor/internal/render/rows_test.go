@@ -122,6 +122,35 @@ func TestFlattenPathTreeFiltersDormant(t *testing.T) {
 	}
 }
 
+// A directory whose only sessions are dormant must NOT render a parent node in
+// active view (ShowAll=false) — otherwise it shows an empty dir with a toggle
+// that does nothing (pg2-...). In show-all it renders normally.
+func TestFlattenPathTreeSkipsEmptyParentInActiveView(t *testing.T) {
+	n := &aggregate.PathNode{
+		FullPath:    "/p",
+		DisplayPath: "/p",
+		DirectSessions: []*aggregate.SessionView{
+			{Session: &session.Session{SessionID: "a", Status: session.Idle, TranscriptMTime: time.Now().Add(-time.Hour)}},
+		},
+	}
+	countNodes := func(showAll bool) int {
+		rows := FlattenPathTree([]*aggregate.PathNode{n}, treestate.NewState(), TreeOpts{ShowAll: showAll})
+		c := 0
+		for _, r := range rows {
+			if r.Kind == PathNodeKind {
+				c++
+			}
+		}
+		return c
+	}
+	if got := countNodes(false); got != 0 {
+		t.Errorf("active view: empty (all-dormant) parent should be skipped, got %d node rows", got)
+	}
+	if got := countNodes(true); got != 1 {
+		t.Errorf("show-all: parent should render, got %d node rows", got)
+	}
+}
+
 func TestFlattenPathTreeFlatIdxSpansNodes(t *testing.T) {
 	n1 := &aggregate.PathNode{
 		FullPath:    "/p1",

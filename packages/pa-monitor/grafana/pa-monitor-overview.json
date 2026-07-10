@@ -870,7 +870,7 @@
     },
     {
       "id": 16,
-      "title": "Nudge funnel (5m rate)",
+      "title": "Nudge funnel (counts over range)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -884,22 +884,22 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(pa_monitor_nudge_queued_total[5m]))",
+          "expr": "sum(increase(pa_monitor_nudge_queued_total[$__range]))",
           "legendFormat": "queued",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(pa_monitor_signal_sends_total[5m]))",
+          "expr": "sum(increase(pa_monitor_signal_sends_total[$__range]))",
           "legendFormat": "sent",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(pa_monitor_nudge_suppressed_total[5m]))",
+          "expr": "sum(increase(pa_monitor_nudge_suppressed_total[$__range]))",
           "legendFormat": "suppressed",
           "refId": "C"
         },
         {
-          "expr": "sum(rate(pa_monitor_signal_send_failures_total[5m]))",
+          "expr": "sum(increase(pa_monitor_signal_send_failures_total[$__range]))",
           "legendFormat": "send failed",
           "refId": "D"
         }

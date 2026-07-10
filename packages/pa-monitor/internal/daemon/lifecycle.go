@@ -1046,10 +1046,6 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 	if tree == nil {
 		return
 	}
-	// Key errored counts by (kind, is_terminal) so the dashboard can filter to
-	// terminal errors (ADR 0024 D5): the panel over-counted before because a
-	// single `kind` folded terminal + non-terminal errors together.
-	erroredCounts := map[otel.ErroredKey]int{}
 	for _, dir := range tree.Dirs {
 		for _, sv := range dir.Sessions {
 			le := sv.LastError
@@ -1057,7 +1053,6 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 				continue
 			}
 			kind := string(le.Kind)
-			erroredCounts[otel.ErroredKey{Kind: kind, IsTerminal: le.IsTerminal}]++
 			if le.At.After(previousErrors[sv.SessionID]) {
 				previousErrors[sv.SessionID] = le.At
 				isTerminalStr := "false"
@@ -1081,7 +1076,37 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 			}
 		}
 	}
-	e.RecordSessionsErrored(erroredCounts)
+	e.RecordSessionsErrored(buildErroredCounts(tree))
+}
+
+// buildErroredCounts counts, keyed by (kind, is_terminal), the sessions that
+// are CURRENTLY erroring — i.e. presently blocked on an error or usage-limit
+// (ADR 0024 status model). A session that recovered (working/idle) still
+// carries a stale LastError, but counting those made "Sessions errored" read
+// non-zero when nothing was actually erroring (bead pg2-...). Keyed by
+// is_terminal so the dashboard can filter to terminal errors (ADR 0024 D5).
+func buildErroredCounts(tree *aggregate.Tree) map[otel.ErroredKey]int {
+	counts := map[otel.ErroredKey]int{}
+	if tree == nil {
+		return counts
+	}
+	for _, dir := range tree.Dirs {
+		for _, sv := range dir.Sessions {
+			if sv == nil || sv.Session == nil {
+				continue
+			}
+			le := sv.LastError
+			if le == nil {
+				continue
+			}
+			if sv.Status != session.Blocked ||
+				(sv.Blocker != session.ErrorBlocker && sv.Blocker != session.UsageLimit) {
+				continue
+			}
+			counts[otel.ErroredKey{Kind: string(le.Kind), IsTerminal: le.IsTerminal}]++
+		}
+	}
+	return counts
 }
 
 // deferredNudgeCounts derives, keyed by cause, the count of sessions where

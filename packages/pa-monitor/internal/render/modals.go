@@ -182,15 +182,15 @@ func HelpModal(rows []HelpRow, extraFooter string, width, height, scroll int) st
 var legendRows = []ModalRow{
 	{Left: "●", Right: "working    actively producing output"},
 	{Left: "○", Right: "idle       waiting for input"},
-	{Left: "⏸", Right: "paused     rate-limited"},
-	{Left: "?", Right: "awaiting   asked for clarification"},
-	{Left: "✕", Right: "dormant    ended (resumable)"},
+	{Left: "◐", Right: "blocked    has work but can't proceed (see status)"},
+	{Left: "⏸", Right: "paused     blocked on a usage/rate limit"},
+	{Left: "?", Right: "awaiting   blocked on human input"},
+	{Left: "☾", Right: "dormant    idle 20m+ (resumable)"},
 	{Left: "⊘", Right: "auth       authentication failure — run /login"},
 	{Left: "⚠", Right: "error      retryable error (auto-resuming)"},
 	{Left: "✗", Right: "error      non-retryable error"},
 	{Left: "🤖", Right: "subagents  count of subagent tool uses"},
 	{Left: "🐚", Right: "shells     count of subshell tool uses"},
-	{Left: "🌿", Right: "branch     directory's git branch"},
 }
 
 // LegendModal renders the hand-curated symbol legend.
