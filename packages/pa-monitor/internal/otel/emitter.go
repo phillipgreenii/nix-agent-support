@@ -96,7 +96,11 @@ type Emitter struct {
 
 	mu                 sync.Mutex
 	sessionsObs        []stateObs
-	sessionsErroredObs map[string]int64 // kind -> count; replaced per tick
+	sessionsErroredObs map[ErroredKey]int64 // (kind,is_terminal) -> count; replaced per tick
+	// nudgeDeferredObs is cause -> count for the pa_monitor.nudge.deferred gauge,
+	// replaced per tick (ADR 0024 D5). A GAUGE, not a counter: the nudge producers
+	// re-decide every tick, so this is "how many currently deferred".
+	nudgeDeferredObs map[string]int64
 	// prevSessionTuples remembers the FULL attribute-tuples emitted with a
 	// non-zero count on the PREVIOUS RecordSessionGroups call, keyed by a
 	// canonical tupleKey. Drives carry-forward-zero (ADR 0024 D4/R6): a tuple
@@ -105,10 +109,13 @@ type Emitter struct {
 	// instead of persisting at its last value (OTLP has no staleness markers).
 	prevSessionTuples map[string][]attribute.KeyValue
 	// prevSessionsErroredKinds is the RecordSessionsErrored counterpart: the
-	// set of error `kind`s emitted with a non-zero count last tick.
-	prevSessionsErroredKinds map[string]struct{}
-	caffeinateActiveVal      int64
-	caffeinateAttrs          []attribute.KeyValue
+	// set of (kind, is_terminal) tuples emitted with a non-zero count last tick.
+	prevSessionsErroredKinds map[ErroredKey]struct{}
+	// prevNudgeDeferredCauses is the RecordNudgeDeferred counterpart: the set of
+	// deferral `cause`s emitted with a non-zero count last tick.
+	prevNudgeDeferredCauses map[string]struct{}
+	caffeinateActiveVal     int64
+	caffeinateAttrs         []attribute.KeyValue
 	// caffeinateGraceVal buffers the grace-remaining countdown (seconds) for
 	// the pa_monitor.caffeinate.grace_remaining_seconds gauge. Shares the
 	// caffeinateAttrs label set; gated by the same caffeinateActiveKnown flag.
@@ -235,6 +242,14 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	// Deferral-visibility gauge (ADR 0024 D5): the current count of sessions where
+	// auto-resume is deliberately WAITING on a window rather than broken, carrying
+	// a `cause` attribute. Snapshot semantics (re-decided each tick) — deliberately
+	// a gauge, not a counter that would inflate on every tick.
+	nudgeDeferredGauge, err := meter.Int64ObservableGauge("pa_monitor.nudge.deferred")
+	if err != nil {
+		return err
+	}
 	blockCostGauge, err := meter.Float64ObservableGauge("pa_monitor.block.cost.usd")
 	if err != nil {
 		return err
@@ -336,6 +351,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		e.mu.Lock()
 		obs := e.sessionsObs
 		erroredObs := e.sessionsErroredObs
+		nudgeDeferredObs := e.nudgeDeferredObs
 		caffVal, caffAttrs, caffKnown := e.caffeinateActiveVal, e.caffeinateAttrs, e.caffeinateActiveKnown
 		caffGrace := e.caffeinateGraceVal
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
@@ -357,9 +373,20 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		if autoKnown {
 			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
 		}
-		for kind, count := range erroredObs {
+		for k, count := range erroredObs {
+			isTerminalStr := "false"
+			if k.IsTerminal {
+				isTerminalStr = "true"
+			}
 			o.ObserveInt64(sessionsErroredGauge, count,
-				metric.WithAttributes(attribute.String("kind", kind)))
+				metric.WithAttributes(
+					attribute.String("kind", k.Kind),
+					attribute.String("is_terminal", isTerminalStr),
+				))
+		}
+		for cause, count := range nudgeDeferredObs {
+			o.ObserveInt64(nudgeDeferredGauge, count,
+				metric.WithAttributes(attribute.String("cause", cause)))
 		}
 		if blockKnown {
 			o.ObserveFloat64(blockCostGauge, blockCost, metric.WithAttributes(blockAttrs...))
@@ -394,6 +421,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		}
 		return nil
 	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, sessionsErroredGauge,
+		nudgeDeferredGauge,
 		blockCostGauge, weekCostGauge,
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
 		blockUsagePctGauge, blockUsageResetsGauge, weekUsagePctGauge, weekUsageResetsGauge)
@@ -817,9 +845,53 @@ func (e *Emitter) RecordSessionInfo(rows []SessionInfo) {
 	e.mu.Unlock()
 }
 
+// ErroredKey identifies one pa_monitor.sessions.errored series by error kind and
+// whether that error is terminal (ADR 0024 D5). is_terminal is a DISTINCT
+// dimension: the errored panel over-counted before because a single `kind`
+// folded terminal and non-terminal errors together, so the dashboard could not
+// filter to the terminal (truly stuck) sessions.
+type ErroredKey struct {
+	Kind       string
+	IsTerminal bool
+}
+
 // RecordSessionsErrored replaces the latest sessions-errored observation.
-// counts maps error kind → session count. Called each tick. nil-safe.
-func (e *Emitter) RecordSessionsErrored(counts map[string]int) {
+// counts maps the composite (kind, is_terminal) key → session count. Called
+// each tick. nil-safe.
+func (e *Emitter) RecordSessionsErrored(counts map[ErroredKey]int) {
+	if e == nil {
+		return
+	}
+	obs := make(map[ErroredKey]int64, len(counts))
+	current := make(map[ErroredKey]struct{}, len(counts))
+	for k, v := range counts {
+		obs[k] = int64(v)
+		if v != 0 {
+			current[k] = struct{}{}
+		}
+	}
+	e.mu.Lock()
+	// Carry-forward-zero keyed by the FULL (kind, is_terminal) tuple (ADR 0024
+	// D4/R6): a tuple present last tick but absent now is observed once at 0 so
+	// the orphaned series drops to 0 instead of persisting at its last value.
+	// Zeroed once, then forgotten.
+	for k := range e.prevSessionsErroredKinds {
+		if _, present := obs[k]; !present {
+			obs[k] = 0
+		}
+	}
+	e.sessionsErroredObs = obs
+	e.prevSessionsErroredKinds = current
+	e.mu.Unlock()
+}
+
+// RecordNudgeDeferred replaces the latest nudge-deferred observation. counts
+// maps a deferral `cause` → the count of sessions where auto-resume is
+// deliberately WAITING on that cause (ADR 0024 D5). Called each tick. Uses the
+// SAME carry-forward-zero mechanism as RecordSessionGroups / RecordSessionsErrored
+// so a cause present last tick but absent now drops to 0 (zeroed once) when the
+// window clears. nil-safe.
+func (e *Emitter) RecordNudgeDeferred(counts map[string]int) {
 	if e == nil {
 		return
 	}
@@ -832,16 +904,13 @@ func (e *Emitter) RecordSessionsErrored(counts map[string]int) {
 		}
 	}
 	e.mu.Lock()
-	// Carry-forward-zero keyed by `kind` (ADR 0024 D4/R6): a kind present last
-	// tick but absent now is observed once at 0 so the orphaned series drops to
-	// 0 instead of persisting at its last value. Zeroed once, then forgotten.
-	for k := range e.prevSessionsErroredKinds {
+	for k := range e.prevNudgeDeferredCauses {
 		if _, present := obs[k]; !present {
 			obs[k] = 0
 		}
 	}
-	e.sessionsErroredObs = obs
-	e.prevSessionsErroredKinds = current
+	e.nudgeDeferredObs = obs
+	e.prevNudgeDeferredCauses = current
 	e.mu.Unlock()
 }
 

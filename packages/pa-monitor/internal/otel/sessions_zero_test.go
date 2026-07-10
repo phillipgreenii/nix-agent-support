@@ -119,45 +119,128 @@ func TestSessionsCount_ZeroedOnce(t *testing.T) {
 }
 
 // TestSessionsErrored_CarryForwardZero is the RecordSessionsErrored counterpart
-// (keyed by `kind`): a kind present last tick but absent now MUST be observed
-// at 0 exactly once, then drop out.
+// (keyed by the composite (kind, is_terminal) tuple): a tuple present last tick
+// but absent now MUST be observed at 0 exactly once, then drop out. ADR 0024 D5
+// added is_terminal so the dashboard can filter terminal errors; carry-forward-
+// zero MUST still key off the FULL composite tuple.
 func TestSessionsErrored_CarryForwardZero(t *testing.T) {
 	e, reader := newTestEmitter(t)
 
-	// Tick 1: rate_limit=4.
-	e.RecordSessionsErrored(map[string]int{"rate_limit": 4})
+	// Tick 1: two composite series — (rate_limit, terminal)=4 and
+	// (server_error, non-terminal)=3. Both attributes must appear.
+	e.RecordSessionsErrored(map[ErroredKey]int{
+		{Kind: "rate_limit", IsTerminal: true}:    4,
+		{Kind: "server_error", IsTerminal: false}: 3,
+	})
 	m, ok := collectMetric(t, reader, "pa_monitor.sessions.errored")
 	if !ok {
 		t.Fatal("pa_monitor.sessions.errored not emitted on tick 1")
 	}
 	g := m.Data.(metricdata.Gauge[int64])
-	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit"}); !found || dp.Value != 4 {
-		t.Fatalf("tick1 rate_limit = {found:%v value:%d}, want {true 4}", found, dp.Value)
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit", "is_terminal": "true"}); !found || dp.Value != 4 {
+		t.Fatalf("tick1 (rate_limit,terminal) = {found:%v value:%d}, want {true 4}; points=%+v", found, dp.Value, g.DataPoints)
+	}
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "server_error", "is_terminal": "false"}); !found || dp.Value != 3 {
+		t.Fatalf("tick1 (server_error,non-terminal) = {found:%v value:%d}, want {true 3}", found, dp.Value)
 	}
 
-	// Tick 2: empty — rate_limit vanished, must be observed at 0.
-	e.RecordSessionsErrored(map[string]int{})
+	// Tick 2: server_error gone, rate_limit stays. The orphaned
+	// (server_error, non-terminal) tuple MUST be observed at 0.
+	e.RecordSessionsErrored(map[ErroredKey]int{
+		{Kind: "rate_limit", IsTerminal: true}: 4,
+	})
 	m, ok = collectMetric(t, reader, "pa_monitor.sessions.errored")
 	if !ok {
 		t.Fatal("pa_monitor.sessions.errored not emitted on tick 2")
 	}
 	g = m.Data.(metricdata.Gauge[int64])
-	dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit"})
+	dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "server_error", "is_terminal": "false"})
 	if !found {
-		t.Fatalf("tick2: orphaned rate_limit kind absent; want observed at 0; points=%+v", g.DataPoints)
+		t.Fatalf("tick2: orphaned (server_error,non-terminal) absent; want observed at 0; points=%+v", g.DataPoints)
 	}
 	if dp.Value != 0 {
-		t.Fatalf("tick2: orphaned rate_limit = %d, want 0 (carry-forward-zero)", dp.Value)
+		t.Fatalf("tick2: orphaned (server_error,non-terminal) = %d, want 0 (carry-forward-zero)", dp.Value)
+	}
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit", "is_terminal": "true"}); !found || dp.Value != 4 {
+		t.Fatalf("tick2 (rate_limit,terminal) = {found:%v value:%d}, want {true 4}", found, dp.Value)
 	}
 
-	// Tick 3: still empty — rate_limit must NOT be re-emitted (zeroed once). With
-	// no observations the gauge is omitted entirely, which trivially satisfies
-	// "not re-emitted"; if present it must not carry the rate_limit series.
-	e.RecordSessionsErrored(map[string]int{})
+	// Tick 3: server_error still absent — must NOT be re-emitted (zeroed once).
+	e.RecordSessionsErrored(map[ErroredKey]int{
+		{Kind: "rate_limit", IsTerminal: true}: 4,
+	})
 	if m, ok := collectMetric(t, reader, "pa_monitor.sessions.errored"); ok {
 		g := m.Data.(metricdata.Gauge[int64])
-		if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit"}); found {
-			t.Fatalf("tick3: rate_limit re-emitted (value %d); want absent after zeroing once", dp.Value)
+		if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "server_error", "is_terminal": "false"}); found {
+			t.Fatalf("tick3: (server_error,non-terminal) re-emitted (value %d); want absent after zeroing once", dp.Value)
+		}
+	}
+}
+
+// TestSessionsErrored_IsTerminalSplitsSameKind pins the over-count fix (ADR 0024
+// D5): the SAME kind with mixed terminality was previously folded into one
+// `kind` series (the errored panel showed ~7 vs 4 terminal). is_terminal MUST
+// split them into two distinct series so the dashboard can filter to terminal.
+func TestSessionsErrored_IsTerminalSplitsSameKind(t *testing.T) {
+	e, reader := newTestEmitter(t)
+
+	e.RecordSessionsErrored(map[ErroredKey]int{
+		{Kind: "rate_limit", IsTerminal: true}:  4,
+		{Kind: "rate_limit", IsTerminal: false}: 3,
+	})
+	m, ok := collectMetric(t, reader, "pa_monitor.sessions.errored")
+	if !ok {
+		t.Fatal("pa_monitor.sessions.errored not emitted")
+	}
+	g := m.Data.(metricdata.Gauge[int64])
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit", "is_terminal": "true"}); !found || dp.Value != 4 {
+		t.Errorf("(rate_limit,terminal) = {found:%v value:%d}, want {true 4}; points=%+v", found, dp.Value, g.DataPoints)
+	}
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"kind": "rate_limit", "is_terminal": "false"}); !found || dp.Value != 3 {
+		t.Errorf("(rate_limit,non-terminal) = {found:%v value:%d}, want {true 3}; points=%+v", found, dp.Value, g.DataPoints)
+	}
+}
+
+// TestNudgeDeferred_CarryForwardZero is the ADR 0024 D5 deferral-visibility
+// acceptance test: pa_monitor.nudge.deferred{cause=window_pending} reports the
+// current count of sessions where auto-resume is deliberately WAITING on a
+// window, and drops to 0 (carry-forward-zero, zeroed once) when the window
+// clears — so "auto-resume is waiting" is distinguishable from "broken".
+func TestNudgeDeferred_CarryForwardZero(t *testing.T) {
+	e, reader := newTestEmitter(t)
+
+	// Tick 1: 3 sessions deferred, waiting on the window reset.
+	e.RecordNudgeDeferred(map[string]int{"window_pending": 3})
+	m, ok := collectMetric(t, reader, "pa_monitor.nudge.deferred")
+	if !ok {
+		t.Fatal("pa_monitor.nudge.deferred not emitted on tick 1")
+	}
+	g := m.Data.(metricdata.Gauge[int64])
+	if dp, found := findInt64Point(g.DataPoints, map[string]string{"cause": "window_pending"}); !found || dp.Value != 3 {
+		t.Fatalf("tick1 window_pending = {found:%v value:%d}, want {true 3}; points=%+v", found, dp.Value, g.DataPoints)
+	}
+
+	// Tick 2: window cleared, none deferred. window_pending MUST be observed at 0.
+	e.RecordNudgeDeferred(map[string]int{})
+	m, ok = collectMetric(t, reader, "pa_monitor.nudge.deferred")
+	if !ok {
+		t.Fatal("pa_monitor.nudge.deferred not emitted on tick 2")
+	}
+	g = m.Data.(metricdata.Gauge[int64])
+	dp, found := findInt64Point(g.DataPoints, map[string]string{"cause": "window_pending"})
+	if !found {
+		t.Fatalf("tick2: window_pending absent; want observed at 0; points=%+v", g.DataPoints)
+	}
+	if dp.Value != 0 {
+		t.Fatalf("tick2: window_pending = %d, want 0 (carry-forward-zero)", dp.Value)
+	}
+
+	// Tick 3: still cleared — must NOT be re-emitted (zeroed once).
+	e.RecordNudgeDeferred(map[string]int{})
+	if m, ok := collectMetric(t, reader, "pa_monitor.nudge.deferred"); ok {
+		g := m.Data.(metricdata.Gauge[int64])
+		if dp, found := findInt64Point(g.DataPoints, map[string]string{"cause": "window_pending"}); found {
+			t.Fatalf("tick3: window_pending re-emitted (value %d); want absent after zeroing once", dp.Value)
 		}
 	}
 }

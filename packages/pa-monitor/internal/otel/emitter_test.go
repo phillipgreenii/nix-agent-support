@@ -65,6 +65,8 @@ func TestEmitter_NilSafeMethods(t *testing.T) {
 	e.RecordNudgeDroppedNoBridge(nil)
 	e.RecordApiErrorObserved(nil)
 	e.RecordSessionsErrored(nil)
+	e.RecordNudgeDeferred(nil)
+	e.RecordNudgeDeferred(map[string]int{"window_pending": 2})
 	e.RecordSessionInfo(nil)
 	e.RecordSessionInfo([]SessionInfo{{SessionID: "sid"}})
 	e.LogEvent("test.event", nil)
@@ -76,7 +78,7 @@ func TestEmitter_NilSafeMethods(t *testing.T) {
 func TestEmitter_RecordSessionsErrored_NilSafe(t *testing.T) {
 	var e *Emitter
 	// nil map should not panic
-	e.RecordSessionsErrored(map[string]int{"rate_limit": 2})
+	e.RecordSessionsErrored(map[ErroredKey]int{{Kind: "rate_limit", IsTerminal: true}: 2})
 }
 
 func TestEmitter_RecordApiErrorObserved_NilSafe(t *testing.T) {

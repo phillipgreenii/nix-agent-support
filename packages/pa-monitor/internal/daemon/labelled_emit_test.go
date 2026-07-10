@@ -180,6 +180,51 @@ func TestEmitErrorMetrics_NoError(t *testing.T) {
 	}
 }
 
+// TestDeferredNudgeCounts_WindowPending covers the ADR 0024 D5 deferral
+// derivation: a session counts as window_pending (auto-resume deliberately
+// WAITING, not broken) iff auto-resume is on AND it is Blocked/usage_limit with
+// a still-in-future per-session reset — the window_reset producer will wait
+// rather than nudge. Everything else (working, non-usage-limit blocker,
+// elapsed/absent reset) is excluded, and an auto-resume-off tree defers nothing.
+func TestDeferredNudgeCounts_WindowPending(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	future := now.Add(30 * time.Minute)
+	past := now.Add(-30 * time.Minute)
+
+	mk := func(id string, status session.Status, blocker session.Blocker, reset time.Time) *aggregate.SessionView {
+		return &aggregate.SessionView{
+			Session:           &session.Session{SessionID: id, Status: status, Blocker: blocker},
+			SessionEnrichment: aggregate.SessionEnrichment{RateLimitResetsAt: reset},
+		}
+	}
+
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Sessions: []*aggregate.SessionView{
+		mk("s1", session.Blocked, session.UsageLimit, future),      // deferred: waiting on window
+		mk("s2", session.Blocked, session.UsageLimit, future),      // deferred: waiting on window
+		mk("s3", session.Blocked, session.UsageLimit, past),        // reset elapsed -> would nudge, not deferred
+		mk("s4", session.Blocked, session.UsageLimit, time.Time{}), // reset-less pause -> not window_pending
+		mk("s5", session.Working, session.NoBlocker, future),       // working -> not deferred
+		mk("s6", session.Blocked, session.ErrorBlocker, future),    // blocked on error, not usage_limit
+	}}}}
+
+	got := deferredNudgeCounts(tree, true, now)
+	if got["window_pending"] != 2 {
+		t.Errorf("auto-resume on: window_pending = %d, want 2; got=%v", got["window_pending"], got)
+	}
+
+	// auto-resume off: the producers cancel rather than defer, so nothing is
+	// "deliberately waiting" — the gauge must report nothing (drops to 0 via
+	// the emitter's carry-forward-zero).
+	if off := deferredNudgeCounts(tree, false, now); len(off) != 0 {
+		t.Errorf("auto-resume off: got %v, want empty", off)
+	}
+
+	// nil tree: empty, no panic.
+	if got := deferredNudgeCounts(nil, true, now); len(got) != 0 {
+		t.Errorf("nil tree: got %v, want empty", got)
+	}
+}
+
 func TestPruneLabelCache_DropsVanishedSessions(t *testing.T) {
 	cache := map[string]labels.Set{
 		"alive":   {"a": "1"},

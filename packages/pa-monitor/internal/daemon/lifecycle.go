@@ -548,6 +548,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					"plan_tier": opts.PlanTier,
 				})
 			}
+			// Deferral visibility (ADR 0024 D5): publish how many sessions have
+			// auto-resume deliberately WAITING on a window (window_pending) as a
+			// GAUGE, so the operator can distinguish "auto-resume is waiting" from
+			// "broken". Carry-forward-zero in the emitter drops the cause to 0 when
+			// the window clears (mirrors sessions.count).
+			autoResumeOn := wmForGauge != nil && wmForGauge.AutoResumeEnabled()
+			opts.Emitter.RecordNudgeDeferred(deferredNudgeCounts(tree, autoResumeOn, time.Now()))
 			if tree.ActiveBlock != nil {
 				opts.Emitter.RecordBlockCost(tree.ActiveBlock.CostUSD, map[string]string{
 					"plan_tier": opts.PlanTier,
@@ -962,7 +969,10 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 	if tree == nil {
 		return
 	}
-	erroredCounts := map[string]int{}
+	// Key errored counts by (kind, is_terminal) so the dashboard can filter to
+	// terminal errors (ADR 0024 D5): the panel over-counted before because a
+	// single `kind` folded terminal + non-terminal errors together.
+	erroredCounts := map[otel.ErroredKey]int{}
 	for _, dir := range tree.Dirs {
 		for _, sv := range dir.Sessions {
 			le := sv.LastError
@@ -970,7 +980,7 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 				continue
 			}
 			kind := string(le.Kind)
-			erroredCounts[kind]++
+			erroredCounts[otel.ErroredKey{Kind: kind, IsTerminal: le.IsTerminal}]++
 			if le.At.After(previousErrors[sv.SessionID]) {
 				previousErrors[sv.SessionID] = le.At
 				isTerminalStr := "false"
@@ -995,6 +1005,42 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 		}
 	}
 	e.RecordSessionsErrored(erroredCounts)
+}
+
+// deferredNudgeCounts derives, keyed by cause, the count of sessions where
+// auto-resume is deliberately WAITING on a window rather than broken (ADR 0024
+// D5). During a hit window the window_reset producer defers silently until the
+// reset — previously emitting ZERO telemetry, so an operator could not tell
+// "auto-resume is waiting" from "broken". This feeds the pa_monitor.nudge.deferred
+// GAUGE (a snapshot of how many are currently deferred — the producers re-decide
+// every tick, so a counter would inflate massively).
+//
+// cause="window_pending": auto-resume enabled AND a session is Blocked on
+// usage_limit with a still-in-future per-session reset (RateLimitResetsAt) —
+// exactly the condition under which the window_reset producer waits rather than
+// nudges. A reset-less usage-limit pause (handled by the limit_pause producer)
+// has no future reset and is intentionally NOT counted here (it retries once per
+// window rather than waiting silently). With auto-resume off the producers cancel
+// rather than defer, so nothing is "waiting"; the empty map lets the emitter's
+// carry-forward-zero drop the gauge to 0.
+func deferredNudgeCounts(tree *aggregate.Tree, autoResumeEnabled bool, now time.Time) map[string]int {
+	counts := map[string]int{}
+	if tree == nil || !autoResumeEnabled {
+		return counts
+	}
+	for _, sv := range tree.Sessions() {
+		if sv == nil || sv.Session == nil {
+			continue
+		}
+		if sv.Session.Status != session.Blocked || sv.Session.Blocker != session.UsageLimit {
+			continue
+		}
+		if sv.RateLimitResetsAt.IsZero() || !sv.RateLimitResetsAt.After(now) {
+			continue
+		}
+		counts["window_pending"]++
+	}
+	return counts
 }
 
 // Run is a thin compat wrapper preserving the original signature used by
