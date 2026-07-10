@@ -73,6 +73,94 @@ func TestLabelsForSession_CacheNotMutatedByCaller(t *testing.T) {
 	}
 }
 
+// failThenSucceedDecorator is a FailableDetector that fails on its first
+// invocation (simulating a transient timeout / non-zero exit) then succeeds,
+// emitting a scope label. Used to exercise the ADR 0024 D5 nil-cache rule.
+type failThenSucceedDecorator struct {
+	calls int
+	scope string
+}
+
+func (d *failThenSucceedDecorator) Name() string { return "fake-scope" }
+func (d *failThenSucceedDecorator) Detect(s labels.Session) labels.Set {
+	set, _ := d.DetectOK(s)
+	return set
+}
+
+func (d *failThenSucceedDecorator) DetectOK(s labels.Session) (labels.Set, bool) {
+	d.calls++
+	if d.calls == 1 {
+		return nil, false // transient failure on first sighting
+	}
+	return labels.Set{"workspace.scope": d.scope}, true
+}
+
+// TestLabelsForSession_DoesNotCacheFailedDecorator is the ADR 0024 D5
+// regression guard: a decorator that fails on the first tick must NOT have its
+// (empty) result cached — the next tick retries and the now-successful scope
+// label appears, rather than the session sticking at the DefaultScope
+// (`personal`) for its whole lifetime.
+func TestLabelsForSession_DoesNotCacheFailedDecorator(t *testing.T) {
+	dec := &failThenSucceedDecorator{scope: "ziprecruiter"}
+	cap := labels.NewCardinalityCap(10)
+	cache := map[string]labels.Set{}
+	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1"}}
+
+	// Tick 1: decorator fails -> no scope, and nothing cached for the session.
+	first := labelsForSession(sv, nil, []labels.FailableDetector{dec}, cap, cache)
+	if _, ok := first["workspace.scope"]; ok {
+		t.Errorf("tick 1 should carry no scope (decorator failed): %+v", first)
+	}
+	if _, cached := cache["s1"]; cached {
+		t.Fatalf("a failed decorator result must NOT be cached: %+v", cache["s1"])
+	}
+
+	// Tick 2: decorator succeeds -> scope appears (retry, not stuck), and is
+	// now cached for reuse.
+	second := labelsForSession(sv, nil, []labels.FailableDetector{dec}, cap, cache)
+	if second["workspace.scope"] != "ziprecruiter" {
+		t.Fatalf("retry should surface decorator labels, got %+v", second)
+	}
+	if cache["s1"]["workspace.scope"] != "ziprecruiter" {
+		t.Fatalf("successful result should now be cached: %+v", cache["s1"])
+	}
+}
+
+// successEmptyDecorator always succeeds but returns no labels. It counts calls
+// so the test can prove a successful-empty result is CACHED (not re-run every
+// tick) — only failures skip the cache.
+type successEmptyDecorator struct{ calls int }
+
+func (d *successEmptyDecorator) Name() string { return "empty" }
+func (d *successEmptyDecorator) Detect(s labels.Session) labels.Set {
+	set, _ := d.DetectOK(s)
+	return set
+}
+
+func (d *successEmptyDecorator) DetectOK(s labels.Session) (labels.Set, bool) {
+	d.calls++
+	return labels.Set{}, true
+}
+
+// TestLabelsForSession_CachesSuccessfulEmptyDecorator confirms the nil-cache
+// rule is narrow: a decorator that SUCCEEDS but legitimately emits no labels
+// is still cached, so it is not re-run on every subsequent tick.
+func TestLabelsForSession_CachesSuccessfulEmptyDecorator(t *testing.T) {
+	dec := &successEmptyDecorator{}
+	cache := map[string]labels.Set{}
+	sv := &aggregate.SessionView{Session: &session.Session{SessionID: "s1"}}
+
+	labelsForSession(sv, nil, []labels.FailableDetector{dec}, nil, cache)
+	labelsForSession(sv, nil, []labels.FailableDetector{dec}, nil, cache)
+
+	if dec.calls != 1 {
+		t.Errorf("successful-empty decorator called %d times, want 1 (cached)", dec.calls)
+	}
+	if _, ok := cache["s1"]; !ok {
+		t.Error("successful-empty result should be cached")
+	}
+}
+
 func TestCanonicalKey_StableOrdering(t *testing.T) {
 	a := labels.Set{"workspace.scope": "gascity", "state": "working"}
 	b := labels.Set{"state": "working", "workspace.scope": "gascity"}

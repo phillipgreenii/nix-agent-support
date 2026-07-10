@@ -123,6 +123,9 @@
           pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
             inherit (goBuilders) mkGoApp;
           };
+          pa-monitor-decorator-scope = final.callPackage ./packages/pa-monitor-decorator-scope {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-activity =
             let
               result = import ./packages/claude-activity {
@@ -1296,6 +1299,7 @@
               claude-extended-tool-approver
               pa-monitor
               pa-monitor-decorator-gc
+              pa-monitor-decorator-scope
               pg-pr
               gc-bd-import-breaker
               gc-dolt-maintenance

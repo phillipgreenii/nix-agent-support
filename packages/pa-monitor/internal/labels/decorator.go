@@ -64,8 +64,25 @@ type decoratorOutput struct {
 // Detect runs the decorator binary with session JSON on stdin and parses
 // its stdout JSON. On any failure (timeout, non-zero exit, parse error),
 // returns nil — the failure is swallowed because decorator output is
-// advisory.
+// advisory. Callers that need to distinguish a transient FAILURE from a
+// legitimately-empty result MUST use DetectOK instead.
 func (d *Decorator) Detect(s Session) Set {
+	set, _ := d.DetectOK(s)
+	return set
+}
+
+// DetectOK is Detect plus an explicit success signal. It returns ok=false
+// when this invocation FAILED (timeout, non-zero exit, or parse error) — a
+// distinct outcome from a successful run that legitimately produced no labels
+// (which returns an empty/nil Set with ok=true).
+//
+// The daemon's per-session label cache uses this to avoid caching a failed
+// decorator result: caching a transient failure would freeze the (wrong)
+// empty label set for the session's entire lifetime, so a session that should
+// be scoped (e.g. `workspace.scope=ziprecruiter`) would stick at the
+// DefaultScope (`personal`) until it restarts (ADR 0024 D5). A successful
+// empty result is still safe to cache.
+func (d *Decorator) DetectOK(s Session) (Set, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(d.timeoutMS)*time.Millisecond)
 	defer cancel()
 
@@ -78,11 +95,37 @@ func (d *Decorator) Detect(s Session) Set {
 	cmd.Stdin = strings.NewReader(string(input))
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var parsed decoratorOutput
 	if err := json.Unmarshal(out, &parsed); err != nil {
+		return nil, false
+	}
+	return Set(parsed.Labels), true
+}
+
+// FailableDetector is a Detector whose Detect can fail (e.g. a shell-out
+// Decorator that times out or exits non-zero). DetectOK reports that failure
+// explicitly (ok=false) so callers that cache label results can decline to
+// cache a failed run and retry it on a later tick, instead of freezing a
+// transient failure for the session's lifetime. A successful run with no
+// labels returns (empty-or-nil Set, true) and IS safe to cache.
+type FailableDetector interface {
+	Detector
+	DetectOK(s Session) (Set, bool)
+}
+
+// AsFailable adapts a slice of concrete *Decorator to []FailableDetector so
+// the daemon's label path can treat decorators uniformly (and so tests can
+// inject fakes implementing the interface without shelling out). A nil input
+// yields a nil result.
+func AsFailable(decs []*Decorator) []FailableDetector {
+	if decs == nil {
 		return nil
 	}
-	return Set(parsed.Labels)
+	out := make([]FailableDetector, len(decs))
+	for i, d := range decs {
+		out[i] = d
+	}
+	return out
 }

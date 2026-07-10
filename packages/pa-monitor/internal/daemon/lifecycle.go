@@ -399,6 +399,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 	labelCap := labels.NewCardinalityCap(capLimit)
 	labelCache := map[string]labels.Set{}
+	// Adapt the concrete decorators to the FailableDetector interface once, so
+	// the label path can skip caching a decorator that FAILED this tick (vs a
+	// successful-empty result). Cached failures would otherwise freeze a wrong
+	// (empty) label set for the session's lifetime (ADR 0024 D5).
+	decorators := labels.AsFailable(opts.Decorators)
 
 	// previousErrors tracks the last-seen LastError.At per session so we
 	// can detect newly advanced errors and fire the api_error.observed counter.
@@ -620,8 +625,8 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					"source":    "computed",
 				})
 			}
-			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
-			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
+			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
+			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
 			pruneLabelCache(labelCache, tree)
 
@@ -769,7 +774,7 @@ func updateGauges(
 	tree *aggregate.Tree,
 	planTier string,
 	detectors []labels.Detector,
-	decorators []*labels.Decorator,
+	decorators []labels.FailableDetector,
 	cap *labels.CardinalityCap,
 	labelCache map[string]labels.Set,
 ) {
@@ -822,7 +827,7 @@ func updateSessionInfo(
 	tree *aggregate.Tree,
 	planTier string,
 	detectors []labels.Detector,
-	decorators []*labels.Decorator,
+	decorators []labels.FailableDetector,
 	cap *labels.CardinalityCap,
 	labelCache map[string]labels.Set,
 ) {
@@ -840,7 +845,7 @@ func buildSessionInfoRows(
 	tree *aggregate.Tree,
 	planTier string,
 	detectors []labels.Detector,
-	decorators []*labels.Decorator,
+	decorators []labels.FailableDetector,
 	cap *labels.CardinalityCap,
 	labelCache map[string]labels.Set,
 ) []otel.SessionInfo {
@@ -895,10 +900,18 @@ func buildSessionInfoRows(
 // The returned Set is a fresh copy of the cache entry. Callers may mutate
 // it freely (e.g. to attach transient labels like `state` per tick)
 // without polluting future cache hits.
+//
+// Decorator failures are NOT cached (ADR 0024 D5). A decorator that fails
+// transiently (timeout / non-zero exit / parse error) reports ok=false via
+// DetectOK; on such a tick the merged result is used for THIS tick's emission
+// but is deliberately left out of the cache, so the next tick retries the
+// decorator instead of freezing the (wrong) empty result for the session's
+// whole lifetime. A successful-empty decorator result still caches, and
+// detectors (which never fail) are always cached.
 func labelsForSession(
 	sv *aggregate.SessionView,
 	detectors []labels.Detector,
-	decorators []*labels.Decorator,
+	decorators []labels.FailableDetector,
 	cap *labels.CardinalityCap,
 	cache map[string]labels.Set,
 ) labels.Set {
@@ -914,19 +927,29 @@ func labelsForSession(
 			Env:   sv.Env,
 			Model: sv.Model,
 		}
-		cached = labels.Set{}
+		merged := labels.Set{}
 		for _, d := range detectors {
-			cached = cached.Merge(d.Detect(s))
+			merged = merged.Merge(d.Detect(s))
 		}
+		decoratorFailed := false
 		for _, dec := range decorators {
-			cached = cached.Merge(dec.Detect(s))
+			out, decOK := dec.DetectOK(s)
+			if !decOK {
+				decoratorFailed = true
+			}
+			merged = merged.Merge(out)
 		}
 		if cap != nil {
-			for k, v := range cached {
-				cached[k] = cap.Cap(k, v)
+			for k, v := range merged {
+				merged[k] = cap.Cap(k, v)
 			}
 		}
-		cache[sv.SessionID] = cached
+		// Only cache a clean tick. On a decorator failure we still return the
+		// merged set for this tick but skip the cache so the next tick retries.
+		if !decoratorFailed {
+			cache[sv.SessionID] = merged
+		}
+		cached = merged
 	}
 	// Defensive copy: callers must be free to mutate without affecting
 	// the cache. Cheap — label sets are small.
