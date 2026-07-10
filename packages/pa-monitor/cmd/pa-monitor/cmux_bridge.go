@@ -635,5 +635,26 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 		out.ProgressLabel = label
 	}
 
+	// Workspace accent color for the 5h rate-limit window (clear/yellow/red),
+	// mirroring the claude-status-line 5h logic. Uses the 5h reset (proto field
+	// 24), NOT the paused window reset. FiveHourPct is passed as the *float64 so
+	// nil (unknown) is preserved. HasWorkspaceColor is always true here: the
+	// bridge has an opinion on every live snapshot. The red-branch countdown, when
+	// present, is appended to the progress label.
+	var fiveHourResetsAt time.Time
+	if ts := state.GetFiveHourResetsAt(); ts != nil {
+		fiveHourResetsAt = ts.AsTime()
+	}
+	colorHex, countdown := render.CmuxFiveHourColor(state.FiveHourPct, fiveHourResetsAt, now)
+	out.WorkspaceColor = colorHex
+	out.HasWorkspaceColor = true
+	// The red-branch countdown rides on the progress label by design: it is only
+	// appended when a progress label exists. If there is no progress label (no
+	// captured reading), the red color still shows without a countdown — an
+	// acceptable and rare degradation.
+	if countdown != "" && out.HasProgress {
+		out.ProgressLabel = out.ProgressLabel + " " + countdown
+	}
+
 	return out
 }

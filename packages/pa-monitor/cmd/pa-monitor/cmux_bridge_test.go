@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // captureLog returns a log function that appends each line to lines.
@@ -300,5 +302,109 @@ func TestFormatSessionEntryFallbacks(t *testing.T) {
 	}
 	if got := formatSessionEntry(3, bridgeSessionInfo{}); got != "3 <unknown>" {
 		t.Errorf("empty fallback: got %q want %q", got, "3 <unknown>")
+	}
+}
+
+// TestSnapshotForWorkspaceWorkspaceColor asserts the workspace-color wiring in
+// snapshotForWorkspace: it drives WorkspaceColor/HasWorkspaceColor from
+// render.CmuxFiveHourColor over the 5h fields (FiveHourPct + FiveHourResetsAt),
+// NOT the paused window reset, and appends the red-branch countdown onto the
+// progress label. Uses a fixed now (never time.Now()) so the countdown math is
+// deterministic.
+func TestSnapshotForWorkspaceWorkspaceColor(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	const staleAfter = 10 * time.Minute
+	const ws = "workspace:1"
+	fp := func(v float64) *float64 { return &v }
+	ts := func(tm time.Time) *timestamppb.Timestamp { return timestamppb.New(tm) }
+
+	// workingDirs builds a Dirs slice with one session in ws marked "working" so
+	// snapshotForWorkspace sees a live matching state to roll up.
+	workingDirs := func() []*pb.Directory {
+		return []*pb.Directory{{Sessions: []*pb.SessionView{
+			{CmuxWorkspaceId: ws, Status: "working", Pid: 111, SessionId: "sid-a"},
+		}}}
+	}
+
+	cases := []struct {
+		name            string
+		state           *pb.DaemonState
+		wantHasColor    bool
+		wantColor       string
+		wantLabelSuffix string // "" means don't assert the label
+	}{
+		{
+			// pct 85 -> red; reset now+2h30m -> "(2h 30m)". LimitsCapturedAt=now
+			// (non-stale) + FiveHourPct set makes CmuxBlockProgress yield a label
+			// the countdown rides on: "block 85% (2h 30m)".
+			name: "red with countdown on label",
+			state: &pb.DaemonState{
+				Dirs:             workingDirs(),
+				FiveHourPct:      fp(85),
+				FiveHourResetsAt: ts(now.Add(2*time.Hour + 30*time.Minute)),
+				LimitsCapturedAt: ts(now),
+			},
+			wantHasColor:    true,
+			wantColor:       "#cc3333",
+			wantLabelSuffix: "(2h 30m)",
+		},
+		{
+			// nil pct -> color clears, but the bridge still has an opinion.
+			name: "clear when pct is nil",
+			state: &pb.DaemonState{
+				Dirs:             workingDirs(),
+				FiveHourPct:      nil,
+				FiveHourResetsAt: ts(now.Add(2 * time.Hour)),
+				LimitsCapturedAt: ts(now),
+			},
+			wantHasColor: true,
+			wantColor:    "",
+		},
+		{
+			// WindowResetsAt (paused) differs from FiveHourResetsAt (5h). The
+			// countdown must reflect the 5h reset (now+1h -> "(1h 0m)"), proving
+			// the color/countdown path reads the 5h field, not the pause field.
+			// WindowResetsAt being set flips State to StatePaused — expected; we
+			// assert only the color and label here.
+			name: "uses 5h reset not window_resets_at",
+			state: &pb.DaemonState{
+				Dirs:             workingDirs(),
+				FiveHourPct:      fp(85),
+				FiveHourResetsAt: ts(now.Add(1 * time.Hour)),
+				WindowResetsAt:   ts(now.Add(5 * time.Hour)),
+				LimitsCapturedAt: ts(now),
+			},
+			wantHasColor:    true,
+			wantColor:       "#cc3333",
+			wantLabelSuffix: "(1h 0m)",
+		},
+		{
+			// pct 50, reset now+4h -> rem=14400, ptb=(18000-14400)*100/18000=20;
+			// 50 > 20 -> yellow (ahead of pace).
+			name: "yellow ahead of pace",
+			state: &pb.DaemonState{
+				Dirs:             workingDirs(),
+				FiveHourPct:      fp(50),
+				FiveHourResetsAt: ts(now.Add(4 * time.Hour)),
+				LimitsCapturedAt: ts(now),
+			},
+			wantHasColor: true,
+			wantColor:    "#e0b000",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := snapshotForWorkspace(tc.state, ws, now, staleAfter)
+			if snap.HasWorkspaceColor != tc.wantHasColor {
+				t.Errorf("HasWorkspaceColor = %v, want %v", snap.HasWorkspaceColor, tc.wantHasColor)
+			}
+			if snap.WorkspaceColor != tc.wantColor {
+				t.Errorf("WorkspaceColor = %q, want %q", snap.WorkspaceColor, tc.wantColor)
+			}
+			if tc.wantLabelSuffix != "" && !strings.HasSuffix(snap.ProgressLabel, tc.wantLabelSuffix) {
+				t.Errorf("ProgressLabel = %q, want suffix %q", snap.ProgressLabel, tc.wantLabelSuffix)
+			}
+		})
 	}
 }

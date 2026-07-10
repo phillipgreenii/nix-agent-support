@@ -242,7 +242,7 @@ func TestCmuxNotifyEmitsCmuxNotify(t *testing.T) {
 	}
 }
 
-func TestCmuxClearIssuesTwoCalls(t *testing.T) {
+func TestCmuxClearIssuesThreeCalls(t *testing.T) {
 	var calls []string
 	r := cmuxstatus.NewReporter(cmuxstatus.Options{
 		Enable:    true,
@@ -250,14 +250,119 @@ func TestCmuxClearIssuesTwoCalls(t *testing.T) {
 		LookupEnv: inCmuxEnv(),
 	})
 	r.Clear()
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 calls (1 clear-status + 1 clear-progress), got %d: %v", len(calls), calls)
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 calls (clear-status + clear-progress + clear-color), got %d: %v", len(calls), calls)
 	}
 	if !strings.Contains(calls[0], "clear-status claude-agents") {
 		t.Errorf("call[0] = %q, want clear-status claude-agents", calls[0])
 	}
 	if !strings.Contains(calls[1], "clear-progress") {
 		t.Errorf("call[1] = %q, want clear-progress", calls[1])
+	}
+	if !strings.Contains(calls[2], "workspace-action --action clear-color") {
+		t.Errorf("call[2] = %q, want workspace-action --action clear-color", calls[2])
+	}
+}
+
+// workspaceActionCalls returns just the recorded workspace-action invocations,
+// filtering out the set-status/set-progress calls a Push also records.
+func workspaceActionCalls(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if strings.Contains(c, "workspace-action") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestCmuxPushEmitsClearColorOnFirstPushWithEmptyColor(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	// First push declares an authoritative "clear" color — this is the
+	// stale-color-on-crash-startup fix: we emit clear-color even though the
+	// desired color is the zero value.
+	r.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateIdle, HasWorkspaceColor: true, WorkspaceColor: ""})
+	wa := workspaceActionCalls(calls)
+	if len(wa) != 1 {
+		t.Fatalf("expected 1 workspace-action call, got %d: %v", len(wa), wa)
+	}
+	if !strings.Contains(wa[0], "workspace-action --action clear-color") {
+		t.Errorf("wa[0] = %q, want workspace-action --action clear-color", wa[0])
+	}
+	if strings.Contains(wa[0], "--workspace") {
+		t.Errorf("wa[0] = %q, must not pass --workspace (defaults to $CMUX_WORKSPACE_ID)", wa[0])
+	}
+}
+
+func TestCmuxPushEmitsSetColorOnceThenDedupes(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	snap := cmuxstatus.Snapshot{State: cmuxstatus.StateWorking, HasWorkspaceColor: true, WorkspaceColor: "#cc3333"}
+	r.Push(snap)
+	wa := workspaceActionCalls(calls)
+	if len(wa) != 1 {
+		t.Fatalf("after first push: expected 1 workspace-action call, got %d: %v", len(wa), wa)
+	}
+	if !strings.Contains(wa[0], "workspace-action --action set-color --color #cc3333") {
+		t.Errorf("wa[0] = %q, want set-color --color #cc3333", wa[0])
+	}
+	// A subsequent push with the SAME color must not re-emit.
+	r.Push(snap)
+	wa = workspaceActionCalls(calls)
+	if len(wa) != 1 {
+		t.Fatalf("after second push (same color): expected still 1 workspace-action call, got %d: %v", len(wa), wa)
+	}
+}
+
+func TestCmuxPushHasWorkspaceColorFalseLeavesColorUnchanged(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	// Establish a tracked color.
+	r.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateWorking, HasWorkspaceColor: true, WorkspaceColor: "#cc3333"})
+	// A push with HasWorkspaceColor=false must emit no workspace-action call...
+	r.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateIdle, HasWorkspaceColor: false, WorkspaceColor: "#e0b000"})
+	if n := len(workspaceActionCalls(calls)); n != 1 {
+		t.Fatalf("no-opinion push should not add a workspace-action call, got %d total: %v", n, workspaceActionCalls(calls))
+	}
+	// ...and must not disturb the tracker: a following changed-color push still
+	// dedupes against the original tracked color, then emits the new one.
+	r.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateWorking, HasWorkspaceColor: true, WorkspaceColor: "#e0b000"})
+	wa := workspaceActionCalls(calls)
+	if len(wa) != 2 {
+		t.Fatalf("expected 2 workspace-action calls total, got %d: %v", len(wa), wa)
+	}
+	if !strings.Contains(wa[1], "workspace-action --action set-color --color #e0b000") {
+		t.Errorf("wa[1] = %q, want set-color --color #e0b000", wa[1])
+	}
+}
+
+func TestCmuxClearEmitsClearColor(t *testing.T) {
+	var calls []string
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    recordingRun(&calls),
+		LookupEnv: inCmuxEnv(),
+	})
+	r.Clear()
+	wa := workspaceActionCalls(calls)
+	if len(wa) != 1 {
+		t.Fatalf("expected 1 workspace-action call from Clear, got %d: %v", len(wa), wa)
+	}
+	if !strings.Contains(wa[0], "workspace-action --action clear-color") {
+		t.Errorf("wa[0] = %q, want workspace-action --action clear-color", wa[0])
 	}
 }
 

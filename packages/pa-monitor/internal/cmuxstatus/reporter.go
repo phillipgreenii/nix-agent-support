@@ -28,6 +28,12 @@ type Snapshot struct {
 	Progress      float64
 	ProgressLabel string
 	HasProgress   bool
+	// WorkspaceColor is the cmux workspace accent color hex; "" means clear.
+	// Only consulted when HasWorkspaceColor is true.
+	WorkspaceColor string
+	// HasWorkspaceColor false means "leave the workspace color unchanged" (no
+	// opinion — e.g. daemon disconnected). true means WorkspaceColor is authoritative.
+	HasWorkspaceColor bool
 }
 
 // Reporter pushes sidebar updates and notifications to cmux when invoked from
@@ -79,6 +85,13 @@ func (noop) Clear()                {}
 type cmuxReporter struct {
 	runCmd func(ctx context.Context, name string, args ...string) ([]byte, error)
 	logf   func(string)
+
+	// colorEmitted / lastWorkspaceColor track the last workspace color this
+	// reporter told cmux about so Push can skip redundant CLI calls. Written
+	// only from the bridge's single-threaded push path (single-writer), so no
+	// synchronization is needed.
+	colorEmitted       bool
+	lastWorkspaceColor string
 }
 
 func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -94,10 +107,12 @@ func (c *cmuxReporter) log(msg string) {
 	}
 }
 
-// Push issues 1 cmux set-status call (single pill, key="claude-agents") and,
-// when HasProgress is true, one cmux set-progress call. Both share one 5-second
-// context. Errors per call route to logf but do not short-circuit subsequent
-// calls.
+// Push issues 1 cmux set-status call (single pill, key="claude-agents"),
+// optionally one cmux set-progress call (when HasProgress), and — when the
+// snapshot has an opinion on the workspace color (HasWorkspaceColor) and it
+// differs from the last emitted one — one cmux workspace-action call. All share
+// one 5-second context. Errors per call route to logf but do not short-circuit
+// subsequent calls.
 func (c *cmuxReporter) Push(s Snapshot) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -124,6 +139,25 @@ func (c *cmuxReporter) Push(s Snapshot) {
 			c.log(fmt.Sprintf("cmux set-progress: %v", err))
 		}
 	}
+
+	// Workspace accent color. HasWorkspaceColor false means "no opinion" — leave
+	// whatever cmux currently shows. When it changes (or on the first emit — the
+	// stale-color-on-crash-startup fix), push it once. No --workspace: the cmux
+	// CLI defaults it to $CMUX_WORKSPACE_ID, matching the set-status/set-progress
+	// calls above.
+	if s.HasWorkspaceColor && (!c.colorEmitted || s.WorkspaceColor != c.lastWorkspaceColor) {
+		if s.WorkspaceColor == "" {
+			if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "clear-color"); err != nil {
+				c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
+			}
+		} else {
+			if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "set-color", "--color", s.WorkspaceColor); err != nil {
+				c.log(fmt.Sprintf("cmux workspace-action set-color: %v", err))
+			}
+		}
+		c.colorEmitted = true
+		c.lastWorkspaceColor = s.WorkspaceColor
+	}
 }
 
 // pillContent collapses Snapshot into the single-pill value, icon, and color.
@@ -144,7 +178,7 @@ func pillContent(s Snapshot) (value, icon, color string) {
 func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
 	switch s {
 	case StateWorking:
-		return "working", "play", "#00cc66"
+		return "working", "play", "#008f47"
 	case StateIdle:
 		return "idle", "pause", "#888888"
 	case StatePaused:
@@ -180,4 +214,9 @@ func (c *cmuxReporter) Clear() {
 	if _, err := c.run(ctx, "cmux", "clear-progress"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-progress: %v", err))
 	}
+	if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "clear-color"); err != nil {
+		c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
+	}
+	c.colorEmitted = true
+	c.lastWorkspaceColor = ""
 }
