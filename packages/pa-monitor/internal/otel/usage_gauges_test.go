@@ -145,6 +145,35 @@ func TestUsageGauges_UnknownNotEmitted(t *testing.T) {
 	}
 }
 
+// TestLimitHitCounters_BornAtZero proves the block/week limit-hit counters are
+// Add(0)-initialised at emitter startup (ADR 0024 R7): the zero series must
+// exist immediately after registerMetrics so increase() over a range that
+// includes creation captures the first edge (a counter born at its first Add(1)
+// would miss the initial increment across the range boundary).
+func TestLimitHitCounters_BornAtZero(t *testing.T) {
+	_, reader := newTestEmitter(t)
+
+	for _, name := range []string{
+		"pa_monitor.block.usage.limit_hits_total",
+		"pa_monitor.week.usage.limit_hits_total",
+	} {
+		m, ok := collectMetric(t, reader, name)
+		if !ok {
+			t.Fatalf("%s not present after startup; Add(0) birthing missing", name)
+		}
+		sum, ok := m.Data.(metricdata.Sum[int64])
+		if !ok {
+			t.Fatalf("%s is %T, want metricdata.Sum[int64]", name, m.Data)
+		}
+		if len(sum.DataPoints) != 1 {
+			t.Fatalf("%s data points = %d, want 1 (the born-at-zero series)", name, len(sum.DataPoints))
+		}
+		if sum.DataPoints[0].Value != 0 {
+			t.Errorf("%s born at %d, want 0", name, sum.DataPoints[0].Value)
+		}
+	}
+}
+
 // TestUsageGauges_NilSafe: the new methods must accept a nil receiver.
 func TestUsageGauges_NilSafe(t *testing.T) {
 	var e *Emitter

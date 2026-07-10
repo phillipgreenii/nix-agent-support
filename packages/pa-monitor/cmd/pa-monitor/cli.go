@@ -67,12 +67,10 @@ func runStatus(args []string) {
 	}
 
 	if b := state.GetActiveBlock(); b != nil {
-		fmt.Printf("block %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
-			b.GetId(), b.GetCostUsd(), state.GetPlanCapUsd(), b.GetWindowPct()*100)
+		fmt.Print(formatUsageLine("block", b.GetId(), b.GetCostUsd(), state.GetPlanCapUsd(), state.FiveHourPct))
 	}
 	if w := state.GetActiveWeek(); w != nil {
-		fmt.Printf("week  %s:  cost $%.2f / cap $%.2f (%.1f%%)\n",
-			w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), w.GetWindowPct()*100)
+		fmt.Print(formatUsageLine("week ", w.GetId(), w.GetCostUsd(), state.GetWeekCapUsd(), state.SevenDayPct))
 	}
 	fmt.Printf("caffeinate:    mode %s · process %s\n",
 		onOff(state.GetCaffeinateMode()), caffeinateProcessString(state.GetCaffeinateProcess(), state.GetCaffeinateGraceRemainingS()))
@@ -81,6 +79,22 @@ func runStatus(args []string) {
 	if annotation := formatStatusSessions(details); annotation != "" {
 		fmt.Print(annotation)
 	}
+}
+
+// formatUsageLine renders one usage line for the `status` CLI. The native
+// cost/cap dollars are always shown; the percentage is the AUTHORITATIVE
+// status-line used_percentage (5h FiveHourPct / 7d SevenDayPct) when known
+// (ADR 0021 §5 / ADR 0024 D3). The cost/cap ratio WindowPct is no longer shown
+// — it overstated the 5h window (396%+ cost ratio while the authoritative
+// reading was the real number). authPct is already a percentage in [0,100]
+// (not a fraction), so it is printed verbatim. When the authoritative reading
+// is unknown (nil), the percentage is omitted rather than falling back to the
+// misleading cost ratio.
+func formatUsageLine(label, id string, costUSD, capUSD float64, authPct *float64) string {
+	if authPct != nil {
+		return fmt.Sprintf("%s %s:  cost $%.2f / cap $%.2f (%.1f%%)\n", label, id, costUSD, capUSD, *authPct)
+	}
+	return fmt.Sprintf("%s %s:  cost $%.2f / cap $%.2f\n", label, id, costUSD, capUSD)
 }
 
 // runAgentsBusyCheck implements the `agents-busy-check` subcommand.

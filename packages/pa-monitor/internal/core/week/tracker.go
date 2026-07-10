@@ -1,10 +1,15 @@
-// Package week tracks Anthropic's weekly limit via ccusage weekly data.
-// Folds the current week's entry into an ISO-week correlation ID and
-// fires a limit-hit callback at most once per week.
+// Package week tracks Anthropic's weekly limit via weekly usage data.
+// Folds the current week's entry into an ISO-week correlation ID used as a
+// metric label.
 //
-// Note: ccusage groups weeks by Monday-anchor local time. Anthropic's
-// actual reset boundary is not authoritative here; switch to anchor-
-// relative IDs if/when the discrepancy proves material.
+// Note: weeks are grouped by Monday-anchor local time. Anthropic's actual
+// reset boundary is not authoritative here; switch to anchor-relative IDs
+// if/when the discrepancy proves material.
+//
+// The cost-cap limit-hit trigger this tracker once fired is RETIRED (ADR 0024
+// D3): the account-level weekly limit-hit is now detected from the
+// authoritative SevenDayPct signal in the daemon tick loop. This tracker is
+// retained solely for the week.id correlation.
 package week
 
 import (
@@ -15,18 +20,15 @@ import (
 )
 
 type Tracker struct {
-	capUSD     float64
-	currentID  string
-	hitFired   bool
-	OnLimitHit func()
+	currentID string
 }
 
-func NewTracker(capUSD float64) *Tracker {
-	return &Tracker{capUSD: capUSD}
-}
+func NewTracker() *Tracker { return &Tracker{} }
 
 func (t *Tracker) ID() string { return t.currentID }
 
+// Update folds a fresh weekly entry into the tracker, advancing the week.id
+// correlation. A nil entry or an unparseable period is a no-op.
 func (t *Tracker) Update(e *usage.WeeklyEntry) {
 	if e == nil {
 		return
@@ -36,15 +38,5 @@ func (t *Tracker) Update(e *usage.WeeklyEntry) {
 		return
 	}
 	y, w := d.ISOWeek()
-	id := fmt.Sprintf("%d-W%02d", y, w)
-	if id != t.currentID {
-		t.currentID = id
-		t.hitFired = false
-	}
-	if !t.hitFired && t.capUSD > 0 && e.TotalCost >= t.capUSD {
-		t.hitFired = true
-		if t.OnLimitHit != nil {
-			t.OnLimitHit()
-		}
-	}
+	t.currentID = fmt.Sprintf("%d-W%02d", y, w)
 }

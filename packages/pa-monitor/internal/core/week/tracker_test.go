@@ -7,44 +7,24 @@ import (
 )
 
 func TestTracker_IDFromISOWeek(t *testing.T) {
-	tr := NewTracker(500.0)
+	tr := NewTracker()
 	tr.Update(&usage.WeeklyEntry{Period: "2026-05-18", TotalCost: 50.0})
 	if got := tr.ID(); got != "2026-W21" {
 		t.Errorf("ID = %q", got)
 	}
 }
 
-func TestTracker_LimitHitFiresOnce(t *testing.T) {
-	tr := NewTracker(100.0)
-	hits := 0
-	tr.OnLimitHit = func() { hits++ }
-	tr.Update(&usage.WeeklyEntry{Period: "2026-05-18", TotalCost: 50.0})
-	if hits != 0 {
-		t.Error("under-cap")
-	}
+func TestTracker_NewWeekAdvancesID(t *testing.T) {
+	tr := NewTracker()
 	tr.Update(&usage.WeeklyEntry{Period: "2026-05-18", TotalCost: 120.0})
-	if hits != 1 {
-		t.Error("first over-cap")
-	}
-	tr.Update(&usage.WeeklyEntry{Period: "2026-05-18", TotalCost: 130.0})
-	if hits != 1 {
-		t.Error("dup hit")
-	}
-}
-
-func TestTracker_NewWeekResetsHit(t *testing.T) {
-	tr := NewTracker(100.0)
-	tr.Update(&usage.WeeklyEntry{Period: "2026-05-18", TotalCost: 120.0})
-	hits := 0
-	tr.OnLimitHit = func() { hits++ }
 	tr.Update(&usage.WeeklyEntry{Period: "2026-05-25", TotalCost: 120.0})
-	if hits != 1 {
-		t.Errorf("new week should re-hit, got %d", hits)
+	if got := tr.ID(); got != "2026-W22" {
+		t.Errorf("ID = %q, want 2026-W22 (new week advances the correlation)", got)
 	}
 }
 
 func TestTracker_BadPeriodIsIgnored(t *testing.T) {
-	tr := NewTracker(100.0)
+	tr := NewTracker()
 	tr.Update(&usage.WeeklyEntry{Period: "garbage", TotalCost: 999.0})
 	if tr.ID() != "" {
 		t.Errorf("expected empty ID after bad period")
@@ -52,7 +32,7 @@ func TestTracker_BadPeriodIsIgnored(t *testing.T) {
 }
 
 func TestTracker_NilIsNoop(t *testing.T) {
-	tr := NewTracker(100.0)
+	tr := NewTracker()
 	tr.Update(nil)
 	if tr.ID() != "" {
 		t.Errorf("expected empty ID after nil update")

@@ -336,8 +336,8 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 		Signalers:          signalers,
 	}
 
-	blockTr := block.NewTracker(acct.BlockCap())
-	weekTr := week.NewTracker(acct.WeekCap())
+	blockTr := block.NewTracker()
+	weekTr := week.NewTracker()
 
 	weeklyFn := pricer.CurrentWeekly
 

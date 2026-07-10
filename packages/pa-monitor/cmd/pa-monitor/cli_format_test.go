@@ -235,6 +235,33 @@ func TestFormatSessionInfoAuthHint(t *testing.T) {
 	}
 }
 
+// --- formatUsageLine tests (ADR 0021 §5 / ADR 0024 D3) ---
+
+// TestFormatUsageLineAuthoritative proves the status line shows the
+// AUTHORITATIVE used_percentage (verbatim, already [0,100]) while keeping the
+// native cost/cap dollars — NOT the misleading cost/cap ratio.
+func TestFormatUsageLineAuthoritative(t *testing.T) {
+	pct := 436.0 // authoritative 5h reading well over the cost/cap ratio
+	got := formatUsageLine("block", "2026-06-01T10Z", 100.0, 90.0, &pct)
+	want := "block 2026-06-01T10Z:  cost $100.00 / cap $90.00 (436.0%)\n"
+	if got != want {
+		t.Errorf("block line:\n got  %q\n want %q", got, want)
+	}
+}
+
+// TestFormatUsageLineUnknownOmitsPct proves an unknown (nil) authoritative
+// reading omits the percentage and shows cost-only — never the cost ratio.
+func TestFormatUsageLineUnknownOmitsPct(t *testing.T) {
+	got := formatUsageLine("week ", "2026-W21", 50.0, 200.0, nil)
+	want := "week  2026-W21:  cost $50.00 / cap $200.00\n"
+	if got != want {
+		t.Errorf("week line (unknown pct):\n got  %q\n want %q", got, want)
+	}
+	if strings.Contains(got, "%") {
+		t.Errorf("unknown authoritative reading must omit the percentage, got %q", got)
+	}
+}
+
 // --- apiErrorIsEscalated tests ---
 
 func TestAPIErrorIsEscalatedUnknownFlipped(t *testing.T) {

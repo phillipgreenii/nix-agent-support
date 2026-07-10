@@ -292,9 +292,15 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if e.blockLimitHits, err = meter.Int64Counter("pa_monitor.block.usage.limit_hits_total"); err != nil {
 		return err
 	}
+	// R7 (ADR 0024): birth the zero series at startup so increase() over a range
+	// that includes emitter creation captures the first edge. A counter first
+	// touched by Add(1) is born at 1, so increase() across the birth boundary
+	// misses that initial increment; Add(0) creates the 0 baseline.
+	e.blockLimitHits.Add(context.Background(), 0)
 	if e.weekLimitHits, err = meter.Int64Counter("pa_monitor.week.usage.limit_hits_total"); err != nil {
 		return err
 	}
+	e.weekLimitHits.Add(context.Background(), 0)
 	if e.caffeinateRounds, err = meter.Int64Counter("pa_monitor.caffeinate.rounds_total"); err != nil {
 		return err
 	}

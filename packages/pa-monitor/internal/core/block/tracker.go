@@ -1,6 +1,12 @@
-// Package block tracks 5-hour billing block transitions. Folds ccusage
-// block snapshots into a stable correlation ID (block.id = UTC hour of
-// block start) and fires a limit-hit callback at most once per block.
+// Package block tracks 5-hour billing block transitions. Folds block
+// snapshots into a stable correlation ID (block.id = UTC hour of block
+// start) used as a metric label.
+//
+// The cost-cap limit-hit trigger this tracker once fired (ccusage native
+// cost >= dollar cap) is RETIRED (ADR 0024 D3): ccusage cost is not accurate
+// enough. The account-level limit-hit is now detected from the authoritative
+// FiveHourPct / terminal usage-limit signal in the daemon tick loop. This
+// tracker is retained solely for the block.id correlation.
 package block
 
 import (
@@ -8,35 +14,20 @@ import (
 )
 
 type Tracker struct {
-	capUSD     float64
-	currentID  string
-	hitFired   bool
-	OnLimitHit func()
+	currentID string
 }
 
-func NewTracker(capUSD float64) *Tracker {
-	return &Tracker{capUSD: capUSD}
-}
+func NewTracker() *Tracker { return &Tracker{} }
 
 // ID returns the current block.id label value, or "" if no block has
 // been observed yet.
 func (t *Tracker) ID() string { return t.currentID }
 
-// Update folds a fresh ccusage block snapshot into the tracker. Fires
-// OnLimitHit at most once per block.
+// Update folds a fresh block snapshot into the tracker, advancing the
+// block.id correlation. A nil block is a no-op.
 func (t *Tracker) Update(b *usage.Block) {
 	if b == nil {
 		return
 	}
-	id := b.StartTime.UTC().Format("2006-01-02T15Z")
-	if id != t.currentID {
-		t.currentID = id
-		t.hitFired = false
-	}
-	if !t.hitFired && t.capUSD > 0 && b.CostUSD >= t.capUSD {
-		t.hitFired = true
-		if t.OnLimitHit != nil {
-			t.OnLimitHit()
-		}
-	}
+	t.currentID = b.StartTime.UTC().Format("2006-01-02T15Z")
 }

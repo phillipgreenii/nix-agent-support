@@ -89,8 +89,8 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 		ActiveBlock: activeBlock,
 	}
 
-	bt := block.NewTracker(50.0) // cap below cost → should fire OnLimitHit
-	wt := week.NewTracker(0)     // disabled
+	bt := block.NewTracker() // block.id correlator (cost-cap trigger retired, ADR 0024 D3)
+	wt := week.NewTracker()
 
 	hitCount := atomic.Int32{}
 

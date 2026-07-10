@@ -369,24 +369,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		state.setPendingNudgeQueue(n)
 	}
 
-	// Wire tracker callbacks to emitter counters/events.
-	if opts.BlockTracker != nil && opts.Emitter != nil {
-		opts.BlockTracker.OnLimitHit = func() {
-			opts.Emitter.RecordBlockLimitHit(map[string]string{
-				"plan_tier": opts.PlanTier,
-				"block.id":  opts.BlockTracker.ID(),
-			})
-		}
-	}
-	if opts.WeekTracker != nil && opts.Emitter != nil {
-		opts.WeekTracker.OnLimitHit = func() {
-			opts.Emitter.RecordWeekLimitHit(map[string]string{
-				"plan_tier": opts.PlanTier,
-				"week.id":   opts.WeekTracker.ID(),
-				"source":    "computed",
-			})
-		}
-	}
+	// The account-level limit-hit is fired from the AUTHORITATIVE signal in the
+	// tick loop below (ADR 0024 D3), NOT from the trackers' retired cost-cap
+	// trigger. The trackers are retained only for the block.id / week.id labels.
 
 	tick := opts.Tick
 	if tick <= 0 {
@@ -405,6 +390,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// previousErrors tracks the last-seen LastError.At per session so we
 	// can detect newly advanced errors and fire the api_error.observed counter.
 	previousErrors := map[string]time.Time{}
+
+	// Account-level limit-hit latches (ADR 0024 D3/R7). Each fires at most once
+	// per authoritative window; a changed reset time re-arms. State persists
+	// across ticks (declared outside the loop) like previousErrors above.
+	var blockLimitHit, weekLimitHit limitHitLatch
 
 	tickCount := 0
 	for {
@@ -582,6 +572,34 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			acctAttrs := map[string]string{"plan_tier": opts.PlanTier}
 			opts.Emitter.RecordBlockUsage(tree.FiveHourPct, tree.FiveHourResetsAt, acctAttrs)
 			opts.Emitter.RecordWeekUsage(tree.SevenDayPct, tree.SevenDayResetsAt, acctAttrs)
+
+			// Account-level limit-hit from the AUTHORITATIVE signal (ADR 0024 D3),
+			// latched once-per-window (R7). FiveHourPct is populated by applyLimits
+			// above; the trigger also fires on any terminal per-session usage_limit.
+			// The retired ccusage CostUSD>=capUSD trigger no longer fires this.
+			if blockLimitHit.observe(blockLimitTrigger(tree), tree.FiveHourResetsAt) {
+				blockID := ""
+				if opts.BlockTracker != nil {
+					blockID = opts.BlockTracker.ID()
+				}
+				opts.Emitter.RecordBlockLimitHit(map[string]string{
+					"plan_tier": opts.PlanTier,
+					"block.id":  blockID,
+				})
+			}
+			// Weekly counterpart (R11): SevenDayPct is nil-guarded inside
+			// weekLimitTrigger, so a nil reading never fires and never panics.
+			if weekLimitHit.observe(weekLimitTrigger(tree), tree.SevenDayResetsAt) {
+				weekID := ""
+				if opts.WeekTracker != nil {
+					weekID = opts.WeekTracker.ID()
+				}
+				opts.Emitter.RecordWeekLimitHit(map[string]string{
+					"plan_tier": opts.PlanTier,
+					"week.id":   weekID,
+					"source":    "computed",
+				})
+			}
 			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, opts.Decorators, labelCap, labelCache)
 			// Drop stale label cache entries for sessions that vanished.
@@ -1054,6 +1072,74 @@ func applyLimits(tree *aggregate.Tree, l *Limits) {
 	if !l.CapturedAt.IsZero() {
 		tree.LimitsCapturedAt = l.CapturedAt
 	}
+}
+
+// blockLimitTrigger reports the AUTHORITATIVE account-level 5h-block limit-hit
+// condition (ADR 0024 D3): the account-global authoritative FiveHourPct crossed
+// 100%, OR any session is currently blocked on a terminal usage-limit. This
+// replaces the retired ccusage CostUSD>=capUSD trigger — cost is not accurate
+// enough (the operator sees 436% authoritative while cost-cap reads 0 hits).
+func blockLimitTrigger(tree *aggregate.Tree) bool {
+	if tree == nil {
+		return false
+	}
+	if tree.FiveHourPct != nil && *tree.FiveHourPct >= 100 {
+		return true
+	}
+	return anyUsageLimitBlocked(tree)
+}
+
+// weekLimitTrigger is the 7d counterpart of blockLimitTrigger (ADR 0024 R11):
+// the authoritative SevenDayPct crossed 100%. SevenDayPct is a commonly-nil
+// *float64 on this account, so it is NIL-GUARDED — a nil reading never fires and
+// never panics (weekly essentially never fires here, which is expected).
+func weekLimitTrigger(tree *aggregate.Tree) bool {
+	return tree != nil && tree.SevenDayPct != nil && *tree.SevenDayPct >= 100
+}
+
+// anyUsageLimitBlocked reports whether any session is blocked on a terminal
+// usage-limit. A per-session usage_limit is an authoritative limit-hit signal
+// in its own right (ADR 0024 D3), independent of the account-global percentage.
+func anyUsageLimitBlocked(tree *aggregate.Tree) bool {
+	if tree == nil {
+		return false
+	}
+	for _, sv := range tree.Sessions() {
+		if sv.Session != nil && sv.Session.Status == session.Blocked && sv.Session.Blocker == session.UsageLimit {
+			return true
+		}
+	}
+	return false
+}
+
+// limitHitLatch fires an account-level limit-hit at most once per window (ADR
+// 0024 R7), keyed on the authoritative window reset time. A changed reset time
+// re-arms the latch (window rolled over); the zero-value latch is armed. Mirrors
+// the once-per-window latches block.Tracker (retired) and nudger.LimitPauseFiredFor.
+type limitHitLatch struct {
+	fired    bool
+	firedFor time.Time
+}
+
+// observe reports whether a limit-hit should fire THIS tick given the trigger
+// condition `hit` and the current authoritative window `reset` time, updating
+// the latch. It returns true at most once per distinct reset value; a changed
+// reset re-arms. A reset value that never changes (e.g. the zero time when the
+// authoritative reset is unknown) latches after the first fire until a new reset
+// arrives.
+func (l *limitHitLatch) observe(hit bool, reset time.Time) bool {
+	if !hit {
+		return false
+	}
+	if l.fired && !reset.Equal(l.firedFor) {
+		l.fired = false // window rolled over → re-arm
+	}
+	if l.fired {
+		return false
+	}
+	l.fired = true
+	l.firedFor = reset
+	return true
 }
 
 // weekToStoreWeek converts a usage.WeeklyEntry into a store.Week. The
