@@ -35,7 +35,7 @@ flowchart TD
     place --> stories["write the user stories + journeys you already know"]
     stories --> inv["capture the rules as invariants (stable IDs) and goals"]
     inv --> gaps["record what's undecided as Open questions (don't guess)"]
-    gaps --> live["merge only what's agreed; debate stays in the PR"]
+    gaps --> live["land only what's agreed; debate stays in the change/review"]
 ```
 
 ### Changing intended behavior
@@ -102,3 +102,11 @@ A behavior doc describes intended behavior; reality can lag. A periodic **confor
 pass** reconciles each invariant and each open question against what the code
 actually does, and closes questions already decided elsewhere. Because every
 invariant carries a stable ID, the check is mechanizable.
+
+## Documents
+
+- **[README](README.md)** — this on-ramp: what a behavior doc is, journeys, examples.
+- **[glossary](glossary.md)** — the method's vocabulary.
+- **[invariants](invariants.md)** — the `INV-METHOD-*` / `GOAL-METHOD-*` rules.
+
+_The method currently has no open questions._

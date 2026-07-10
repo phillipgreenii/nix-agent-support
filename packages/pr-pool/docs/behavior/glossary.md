@@ -17,7 +17,7 @@ per-project overlay) are defined in
 - **Query source** — whatever answers a query with items and holds durable claim
   state. Interacts with pr-pool only through the query-source **contract**
   (`INV-QSRC-1`); pr-pool names no specific source. _(A work tracker is one possible
-  query source — an example role, not a dependency on any particular tool.)_
+  query source — an illustrative example, not a dependency on any particular tool.)_
 - **Item** — one result a query returns. **Opaque to pr-pool**: it may _mean_ a pull
   request, an alert, a backlog entry, or a policy hit — pr-pool neither knows nor
   cares. The meaning is the workflow's.

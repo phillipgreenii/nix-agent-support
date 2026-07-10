@@ -9,8 +9,9 @@ concept distinction are defined in the behavior-docs method
 
 ## Orchestration
 
-- **`INV-OP-1`** — A drain works every ready item, then **exits**; it does not idle.
-  Idling is the scheduler's job.
+- **`INV-OP-1`** — A drain works every ready item, then **exits**; it does not idle
+  **waiting for new work** (a usage-limit pause per `INV-CONT-3` is not idling in this
+  sense). Idling between runs is the scheduler's job.
 - **`INV-OP-2`** — **Queries and roles MUST be definable via configuration.** Adding
   a query, a role, or an interfacing tool **MUST NOT** require changing pr-pool
   (`GOAL-SIMPLE-1`).
@@ -22,21 +23,25 @@ concept distinction are defined in the behavior-docs method
 
 - **`INV-RUN-1`** (agent-runner) — pr-pool runs every role through an **agent-runner**
   that **MUST** provide process isolation for untrusted content (`INV-SEC-1`),
-  least-privilege tools scoped to the role, budget enforcement, and an externally
-  monitorable session (`INV-OBS-1`). pr-pool names **no** specific runner; see
+  least-privilege tools scoped to the role, budget enforcement, an externally
+  monitorable session (`INV-OBS-1`), and a terminal outcome pr-pool can classify by
+  failure class (`INV-FAIL-1`). pr-pool names **no** specific runner; see
   [`contracts.md`](contracts.md).
-- **`INV-QSRC-1`** (query-source) — a **query source** is **read-only discovery**: it
-  returns the items to consider and **MUST** expose durable claim/lease state so
-  exclusivity can survive across drains (`INV-CLAIM-1`). pr-pool names **no** specific
+- **`INV-QSRC-1`** (query-source) — a **query source** is **read-only for discovery**
+  (running a query never mutates the work), while also holding **durable claim/lease
+  state** that pr-pool writes on claim/release so exclusivity can survive across drains
+  (`INV-CLAIM-1`). It returns the items to consider. pr-pool names **no** specific
   source; see [`contracts.md`](contracts.md).
 
 ## Budget
 
 - **`INV-BUDGET-1`** — Work runs under a **budget** (wall-clock, optionally
   tokens/cost; per-run and/or per-role). Approaching it triggers an orderly
-  wind-down (save progress, hand back); exceeding it stops the work safely. Mid-work
-  exhaustion is treated like a usage limit — progress is saved and the dispatch
-  **sidelined** (`INV-CONT-2`), never lost (`INV-CONT-1`).
+  wind-down (save progress); exceeding it stops the work safely. On mid-work
+  exhaustion the dispatch is **sidelined** (`INV-CONT-2`) — progress saved, claim
+  released, re-offered on a later drain — and never lost (`INV-CONT-1`). (This is
+  distinct from a provider usage-limit **pause**, `INV-CONT-3`, which holds the same
+  session and resumes it next window.)
 
 ## Continuity (what pr-pool guarantees about work it is coordinating)
 
@@ -74,11 +79,14 @@ concept distinction are defined in the behavior-docs method
 
 ## Safety (untrusted content)
 
-- **`INV-SEC-1`** — When a role processes untrusted content (e.g. a checked-out PR
-  head), pr-pool **MUST** run it isolated, with tools **least-privilege for the role**
-  and **no inheritance of ambient credentials/secrets** — so untrusted content cannot
-  exfiltrate secrets or act under the operator's identity. Realized by the
-  agent-runner (`INV-RUN-1`).
+- **`INV-SEC-1`** — When a role processes untrusted content (e.g. externally-authored
+  code checked out into a scratch workspace), pr-pool **MUST** run it isolated, with
+  tools **least-privilege for the role** and **no inheritance of ambient
+  credentials/secrets** — so untrusted content cannot exfiltrate secrets or act under
+  the operator's identity. Realized by the agent-runner (`INV-RUN-1`).
+- **`INV-SEC-2`** — _retired._ Was "bot attribution"; that rule is a workflow concern
+  and moved to the deployment overlay (see ADR 0026). The ID is kept as a tombstone so
+  the gap between `INV-SEC-1` and `INV-SEC-3` isn't read as an accidental omission.
 - **`INV-SEC-3`** — **Guardrails are not defeatable by config.** Isolation and
   permission-scoping (the rules above) **MUST NOT** be weakened by editing a role's
   prompt or config.

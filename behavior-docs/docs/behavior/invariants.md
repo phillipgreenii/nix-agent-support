@@ -23,6 +23,9 @@ and the [README](README.md) for journeys and examples.
 
 ## Invariant IDs
 
+_(IDs are stable and grouped topically, not renumbered; gaps and out-of-sequence
+numbers are expected and legal — `INV-METHOD-3`.)_
+
 - **`INV-METHOD-3`** — Every invariant **MUST** have a stable ID; downstream artifacts
   (specs, designs, ADRs, tests) **MUST** cite the ID they implement or verify, so the
   `invariant → check` link survives after the disposable spec is discarded. A set
@@ -32,18 +35,20 @@ and the [README](README.md) for journeys and examples.
 ## Living-by-default
 
 - **`INV-METHOD-4`** — Every behavior doc is living; there is **no** per-doc status
-  header. Debate is not merged — it stays in the proposing PR — and a change lands
-  **only when there is agreement**, so what is merged is always the agreed expected
-  behavior.
+  header. Debate is not incorporated — it stays in the proposing change/review — and a
+  change lands **only when there is agreement**, so what lands is always the agreed
+  expected behavior.
 
 ## Decisions & layering
 
 - **`GOAL-METHOD-5`** — Adding or changing an invariant **SHOULD** reference an ADR
   recording the decision.
 - **`GOAL-METHOD-6`** — Org/repo-specific behavior **SHOULD** live in a per-project
-  overlay in that org's own repo; a **generic** set **MUST NOT** reference anything
-  specific to a downstream deployment. The overlay imports the generic set by
-  reference (cites its IDs), never by copying.
+  overlay in that org's own repo. The overlay imports the generic set by reference
+  (cites its IDs), never by copying.
+- **`INV-METHOD-9`** — A **generic** set **MUST NOT** name a specific tool or reference
+  anything specific to a downstream deployment (no org, repo, service, or identity).
+  This is what makes the generic set reusable and its public publication safe.
 
 ## Cross-set references
 

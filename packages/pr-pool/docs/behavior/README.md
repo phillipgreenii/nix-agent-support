@@ -61,8 +61,9 @@ flowchart LR
 ## No org- or tool-specifics here
 
 This set is generic and public. It **MUST NOT** name a tool or reference any
-organization's deployment (`GOAL-SIMPLE-2`, `GOAL-METHOD-6`). Which tool fills the
-agent-runner or a query-source, and every workflow built on pr-pool, is documented by
-the deployment that does it — for example the ZR deployment keeps its set in its own
-(private) repository. That set cites these invariant IDs; this set never points back
-at it.
+organization's deployment
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-METHOD-9`;
+`GOAL-SIMPLE-1`). Which tool fills the agent-runner or a query-source, and every
+workflow built on pr-pool, is documented by the deployment that does it — a deployment
+keeps its own set in its own repository. That set cites these invariant IDs; this set
+never points back at it.
