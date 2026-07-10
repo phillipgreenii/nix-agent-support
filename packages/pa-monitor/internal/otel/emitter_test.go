@@ -3,7 +3,68 @@ package otel
 import (
 	"context"
 	"testing"
+
+	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/embedded"
 )
+
+// capturingLogger is a minimal in-memory otellog.Logger that records every
+// emitted Record, so tests can assert what LogEvent produces without a live
+// OTLP collector. embedded.Logger satisfies the forward-compat sentinel the
+// otellog.Logger interface embeds.
+type capturingLogger struct {
+	embedded.Logger
+	records []otellog.Record
+}
+
+func (c *capturingLogger) Emit(_ context.Context, r otellog.Record) {
+	c.records = append(c.records, r)
+}
+
+func (c *capturingLogger) Enabled(context.Context, otellog.EnabledParameters) bool { return true }
+
+// TestEmitter_LogEvent_ProducesRecord proves the baseline-liveness emit path
+// (daemon.started / daemon.heartbeat both route through LogEvent): a record is
+// produced at info severity with body=name, an event_name attribute, every
+// non-empty attr, and empty-valued attrs dropped.
+func TestEmitter_LogEvent_ProducesRecord(t *testing.T) {
+	cl := &capturingLogger{}
+	e := &Emitter{logger: cl}
+
+	e.LogEvent("daemon.heartbeat", map[string]string{
+		"plan_tier":        "max_5x",
+		"sessions_working": "2",
+		"auto_resume":      "true",
+		"five_hour_pct":    "", // empty -> must be dropped
+	})
+
+	if len(cl.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(cl.records))
+	}
+	rec := cl.records[0]
+	if rec.Body().AsString() != "daemon.heartbeat" {
+		t.Errorf("body = %q, want daemon.heartbeat", rec.Body().AsString())
+	}
+	if rec.Severity() != otellog.SeverityInfo {
+		t.Errorf("severity = %v, want Info", rec.Severity())
+	}
+	got := map[string]string{}
+	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+		got[string(kv.Key)] = kv.Value.AsString()
+		return true
+	})
+	if got["event_name"] != "daemon.heartbeat" {
+		t.Errorf("event_name attr = %q, want daemon.heartbeat", got["event_name"])
+	}
+	for k, want := range map[string]string{"plan_tier": "max_5x", "sessions_working": "2", "auto_resume": "true"} {
+		if got[k] != want {
+			t.Errorf("attr %q = %q, want %q (all=%v)", k, got[k], want, got)
+		}
+	}
+	if _, ok := got["five_hour_pct"]; ok {
+		t.Errorf("empty-valued attr five_hour_pct should be dropped, got %q", got["five_hour_pct"])
+	}
+}
 
 func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")

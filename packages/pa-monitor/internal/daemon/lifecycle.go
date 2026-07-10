@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -380,6 +381,18 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	t := time.NewTicker(tick)
 	defer t.Stop()
 
+	// Baseline liveness (bead pg2-r1f1j.6). The OTel log stream is otherwise
+	// silent between discrete events, so a quiet daemon looks dead on the Loki
+	// panel. A one-shot daemon.started event opens the {service_name="pa-monitor"}
+	// stream the moment the run loop begins, and a modest daemon.heartbeat below
+	// keeps it alive on every healthy tick window (NOT every tick — heartbeatEvery
+	// throttles the ~5s tick down to heartbeatInterval).
+	heartbeatEvery := heartbeatEveryN(tick, heartbeatInterval)
+	opts.Emitter.LogEvent("daemon.started", map[string]string{
+		"version":   version,
+		"plan_tier": opts.PlanTier,
+	})
+
 	capLimit := opts.LabelCap
 	if capLimit <= 0 {
 		capLimit = 50
@@ -615,6 +628,15 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			// Emit api_error.observed for each newly-seen error, and
 			// snapshot sessions.errored gauge per kind.
 			emitErrorMetrics(opts.Emitter, tree, previousErrors)
+
+			// Baseline liveness heartbeat (bead pg2-r1f1j.6): a modest
+			// daemon.heartbeat every heartbeatEvery ticks (~heartbeatInterval)
+			// guarantees the OTel log stream stays alive even when no discrete
+			// event fires, so a healthy-but-quiet daemon isn't NO DATA on Loki.
+			// autoResumeOn is computed earlier in this tick from the WatermarkStore.
+			if shouldHeartbeat(tickCount, heartbeatEvery) {
+				opts.Emitter.LogEvent("daemon.heartbeat", heartbeatAttrs(tree, opts.PlanTier, autoResumeOn))
+			}
 
 			// Run nudger tick after tree is built and before publishing to clients.
 			state.mu.RLock()
@@ -1041,6 +1063,67 @@ func deferredNudgeCounts(tree *aggregate.Tree, autoResumeEnabled bool, now time.
 		counts["window_pending"]++
 	}
 	return counts
+}
+
+// heartbeatInterval is the modest baseline cadence at which RunWith emits a
+// daemon.heartbeat log event. Chosen well above the ~5s tick so a healthy
+// daemon produces a steady but low-volume liveness stream — the tick itself is
+// far too chatty for a log record every time.
+const heartbeatInterval = 60 * time.Second
+
+// heartbeatEveryN converts the desired heartbeat interval into a tick count:
+// emit every Nth tick where N = round(interval/tick). Clamped to a minimum of 1
+// so a zero/oversized tick still heartbeats every tick rather than never
+// (guaranteeing SOME baseline stream on a healthy daemon).
+func heartbeatEveryN(tick, interval time.Duration) int {
+	if tick <= 0 || interval <= 0 {
+		return 1
+	}
+	n := int(math.Round(float64(interval) / float64(tick)))
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// shouldHeartbeat reports whether the given tick should emit a heartbeat: true
+// on tick 0, everyN, 2*everyN, … and false in between. A degenerate everyN (< 1)
+// is treated as 1 (heartbeat every tick) so the baseline stream never stalls.
+func shouldHeartbeat(tickCount, everyN int) bool {
+	if everyN < 1 {
+		everyN = 1
+	}
+	return tickCount%everyN == 0
+}
+
+// heartbeatAttrs builds the small, all-string payload for the daemon.heartbeat
+// log event: session counts by status (working/blocked/idle) summed across the
+// tree, plan_tier, auto_resume, and the authoritative five_hour percentage when
+// known. Kept intentionally small — a baseline liveness signal, not a full
+// snapshot. Safe on a nil tree. An unknown (nil) FiveHourPct is omitted rather
+// than reported as a false 0% (LogEvent also drops any empty-valued attr).
+func heartbeatAttrs(tree *aggregate.Tree, planTier string, autoResumeEnabled bool) map[string]string {
+	working, blocked, idle := 0, 0, 0
+	var fiveHour *float64
+	if tree != nil {
+		for _, d := range tree.Dirs {
+			working += d.WorkingN
+			blocked += d.BlockedN
+			idle += d.IdleN
+		}
+		fiveHour = tree.FiveHourPct
+	}
+	attrs := map[string]string{
+		"sessions_working": strconv.Itoa(working),
+		"sessions_blocked": strconv.Itoa(blocked),
+		"sessions_idle":    strconv.Itoa(idle),
+		"plan_tier":        planTier,
+		"auto_resume":      strconv.FormatBool(autoResumeEnabled),
+	}
+	if fiveHour != nil {
+		attrs["five_hour_pct"] = strconv.FormatFloat(*fiveHour, 'f', 1, 64)
+	}
+	return attrs
 }
 
 // Run is a thin compat wrapper preserving the original signature used by
