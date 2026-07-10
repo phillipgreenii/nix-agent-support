@@ -1,7 +1,7 @@
 # Reviews
 
-**Status:** Living source of truth (part of the shared base). Downstream artifacts
-conform to this.
+See the [glossary](glossary.md) and [invariants](invariants.md) for shared terms
+and IDs.
 
 ## Purpose
 

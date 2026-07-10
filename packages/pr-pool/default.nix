@@ -17,7 +17,10 @@ mkGoApp {
   src = lib.fileset.toSource {
     root = ./..;
     fileset = lib.fileset.unions [
-      ./.
+      # ./docs holds the behavior docs (docs/behavior/), not build inputs. Exclude
+      # them so a doc-only edit does not change the per-source digest and needlessly
+      # rebump the pr-pool version (repo CLAUDE.md "Versioning"; ADR 0025).
+      (lib.fileset.difference ./. ./docs)
       ../ccpool
       ../claude-transcript
     ];

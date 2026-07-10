@@ -1,14 +1,13 @@
 # PR review flow — implementation reference (downstream)
 
-**Status:** **Downstream implementation reference — NOT a source of truth.** The
-source of truth for review behavior is the behavior docs under
-[`docs/behavior/`](behavior/README.md) (see `reviewing-others-prs`,
-`shepherding-my-prs`, `reviews`, and the cross-cutting `invariants`). This document
-records **how those behavior docs' review-related expectations are realized in the
-`pg-pr` and `pr-pool` code today** — journeys mapped to owning components, code
-paths, and tests. It is allowed to describe current, tool-specific, and
-transitional state; it may lag the behavior docs, and when the two disagree, **the
-behavior doc wins**.
+**Status:** **Downstream implementation reference.** The behavior docs under
+[`packages/pr-pool/docs/behavior/`](../packages/pr-pool/docs/behavior/README.md)
+(see `reviewing-others-prs`, `shepherding-my-prs`, `reviews`, and the cross-cutting
+`invariants`) define the intended review behavior. This document records **how those
+behavior docs' review-related expectations are realized in the `pg-pr` and `pr-pool`
+code today** — journeys mapped to owning components, code paths, and tests. It is
+allowed to describe current, tool-specific, and transitional state; it may lag the
+behavior docs, and when the two disagree, **the behavior doc wins**.
 
 **Verified against:** `main` @ `9ac29c26` (2026-07-09). Re-verify the cited
 `file:line` anchors when review-flow code changes.
@@ -19,9 +18,10 @@ behavior doc wins**.
 
 ---
 
-## 1. How this doc relates to the source of truth
+## 1. How this doc relates to the behavior docs
 
-- Review **behavior** is defined in [`docs/behavior/`](behavior/README.md). A
+- Review **behavior** is defined in
+  [`packages/pr-pool/docs/behavior/`](../packages/pr-pool/docs/behavior/README.md). A
   change to what the review flow should do starts **there**; this reference is then
   re-derived to show how the new behavior is implemented.
 - This reference **MAY** carry implementation detail the behavior docs deliberately

@@ -1,7 +1,7 @@
 # Working the backlog
 
-**Status:** Living source of truth (per-project overlay). See the
-[glossary](glossary.md) and [invariants](invariants.md) for shared terms and IDs.
+See the [glossary](glossary.md) and [invariants](invariants.md) for shared terms
+and IDs.
 
 ## Purpose
 
@@ -14,8 +14,10 @@ either way; the difference is only how the item reaches its done state.
 ## Actors
 
 - **Me** — set direction, resolve escalations, approve where required.
-- **Triage agent** — decides readiness: improves an item, sets/clears the readiness
-  signal, or escalates what it can't make ready (owns `GOAL-READY-1`).
+- **Triage** — the activity of deciding readiness: improve an item, set/clear the
+  readiness signal, or escalate what can't be made ready (`GOAL-READY-1`). A
+  deployment MAY run this as a dedicated **triage role** or fold it into another
+  role; that choice lives in the deployment's overlay, not here.
 - **Work agent** — does the item (code, plan, design, troubleshooting, …).
 - **Review agent(s)** — independently review the work in the common review format.
 - **The system** — pulls ready work, routes by kind, tracks, integrates, cleans up.
@@ -118,10 +120,11 @@ triage → "insufficient: no acceptance criteria, no repro. added label
 ## Open questions
 
 - **The readiness signal (central).** A quick capture shows as "ready" but isn't.
-  The **triage role** is the candidate owner (sets/clears signals like
-  `needs-acceptance-criteria` / `has-open-questions`), but the deciding rules — and
-  how it knows to act — are open. This is the crux of the ready-vs-quick-capture
-  tension.
+  The **triage** activity is the candidate owner (sets/clears signals like
+  `needs-acceptance-criteria` / `has-open-questions`), but the deciding rules — how
+  the signal is set/cleared and which role owns it — are a per-deployment overlay
+  concern (see the ZR overlay) left open here. This is the crux of the
+  ready-vs-quick-capture tension.
 - **Work-kind taxonomy** (chore / task / bug / feature / …) and each kind's exact
   path + human touchpoints.
 - **How many review passes** for which situations, and how "what is done when" is

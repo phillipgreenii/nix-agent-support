@@ -1,18 +1,29 @@
 # Capability map
 
-**Status:** Living, but the **most implementation-adjacent** doc here — expect it
-to change most often, and it is a candidate to move downstream. _Placement is an
-open question (see bottom)._ It is part of the **per-project overlay**, not the
-shared base.
+**What this doc is for:** the rest of this set names **capabilities** ("post a
+draft review", "hold a gate") and never the tool behind them, so the docs stay
+tool-neutral and survive a tool swap. The cost of that discipline is that the
+tool→capability knowledge has to live _somewhere_ or it is lost. This is that one
+place. Read it when you need to know **which tool realizes a given capability
+today** and **which invariant that capability exists to satisfy**.
+
+It is the **most implementation-adjacent** doc in the set — expect it to change most
+often as tools evolve.
 
 ## Purpose
 
-The workflow and invariant docs stay tool-neutral: they state **capabilities and
-constraints**, never which tool provides them. This doc is the **one place** that
-records which tool provides each capability **today** — so a requirement like
-`INV-SEC-1` (isolate untrusted content) or "custom gates must exist" is never lost
-just because the narrative doesn't name a tool. Nothing above this doc depends on
-these mappings; a capability can move to a different tool and only its row changes.
+The workflow and invariant docs state **capabilities and constraints**, never which
+tool provides them. This doc records which tool in the **generic toolchain** (pg-pr,
+pr-pool, ccpool, beads, …) provides each capability **today**, tied to the invariant
+it satisfies — so a requirement like `INV-SEC-1` (isolate untrusted content) or
+"custom gates must exist" is never lost just because the narrative doesn't name a
+tool. Nothing above this doc depends on these mappings; a capability can move to a
+different tool and only its row changes.
+
+Org-specific **configuration** of these tools (which labels, which team, which
+identities, per-repo integration style) is _not_ here — it lives in the deployment
+overlay (`phillipg-nix-ziprecruiter · pr-pool-components/docs/behavior`). This doc is
+the generic tool→capability map; the overlay supplies the deployment's values.
 
 ## Map
 
@@ -45,9 +56,11 @@ these mappings; a capability can move to a different tool and only its row chang
 
 ## Open questions
 
-- **Is "capability map" the right home**, or should tool-mapping live in the
-  downstream implementation reference? Given `GOAL-SIMPLE-2` (org/repo config lives
-  in org/repo repos), the per-project half of this map may ultimately belong with a
-  deployment, not in the generic doc set. Deliberately unsettled.
+- **Is "capability map" the right home** for the _generic_ tool→capability mapping,
+  or should that mapping live in the downstream implementation reference
+  (`docs/pr-review-flow.md`)? The org-specific half is settled — it moved to the
+  deployment overlay (per `GOAL-SIMPLE-2`); what remains open is only whether the
+  generic mapping belongs in this behavior set at all, or downstream. Deliberately
+  unsettled.
 - Several capabilities span two tools (gates: pg-pr + tracker; claim: tracker) — is
   that a real seam or an artifact of history?

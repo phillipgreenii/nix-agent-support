@@ -1,14 +1,11 @@
-# Cross-cutting invariants, goals & concepts
+# pr-pool — cross-cutting invariants, goals & concepts
 
-**Status:** Living source of truth. These rules hold across **every** workflow; the
-workflow docs reference them by **ID** rather than restating them.
-
-Each rule has a stable **ID** (e.g. `INV-TRACK-2`). Downstream artifacts (specs,
-designs, ADRs, tests) **MUST** cite the ID they implement or verify, so the durable
-`invariant → check` link survives after the disposable spec is thrown away. This
-file mixes true **invariants** (`INV-*`, absolute) with **goals** (`GOAL-*`,
-desired-but-not-absolute) and **concepts** — each tagged so the distinction stays
-legible.
+These rules hold across **every** pr-pool workflow; the workflow docs reference them
+by **ID** rather than restating them. The ID convention, and the
+invariant / goal / concept distinction (each tagged below), are defined once in the
+behavior-docs method
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`) and are not
+restated here.
 
 ## Precedence
 
@@ -129,8 +126,9 @@ stateDiagram-v2
   glance-view) **MUST** expose its own as-of time and **MUST** flag data stale
   beyond a bound; readiness derived from stale data is not "ready."
 - **`GOAL-READY-1`** — An item that isn't actually ready **should not** surface as
-  ready-to-work. The gating signal (and who sets/clears it) is owned by the triage
-  role and is an open question (see [`working-the-backlog.md`](working-the-backlog.md)).
+  ready-to-work. The gating signal — and which role sets/clears it — is defined by
+  the deployment's overlay via the **triage** activity (see
+  [`working-the-backlog.md`](working-the-backlog.md)).
 
 ## Budget
 

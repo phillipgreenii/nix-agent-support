@@ -1,6 +1,7 @@
 # Operating pr-pool
 
-**Status:** Living source of truth. Downstream artifacts conform to this.
+See the [glossary](glossary.md) and [invariants](invariants.md) for shared terms
+and IDs.
 
 ## Purpose
 
@@ -49,14 +50,16 @@ workflow-agnostic.
 The workflows are where roles are _defined_ (by what an actor does); pr-pool is
 where they are _configured_ (as dispatchable roles with caps/prompts/queries):
 
-| Workflow actor (defined in…)              | Configured role |
-| ----------------------------------------- | --------------- |
-| Review agent (reviewing-others / my PRs)  | a `review` role |
-| Work agent (shepherding my PRs / backlog) | a `work` role   |
-| Triage agent (working the backlog)        | a `triage` role |
+| Workflow actor (defined in…)              | Configured role                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| Review agent (reviewing-others / my PRs)  | a `review` role                                                                |
+| Work agent (shepherding my PRs / backlog) | a `work` role                                                                  |
+| Triage (working the backlog)              | a `triage` role, if the deployment defines one (else folded into another role) |
 
-Adding a workflow generally means defining its actors, then configuring the
-matching roles — no pr-pool code change (`GOAL-SIMPLE-1`).
+Which roles a deployment configures — and whether triage is its own role — is the
+deployment's choice (its overlay), not fixed here. Adding a workflow generally means
+defining its actors, then configuring the matching roles — no pr-pool code change
+(`GOAL-SIMPLE-1`).
 
 ## User stories
 

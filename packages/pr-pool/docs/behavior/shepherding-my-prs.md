@@ -1,7 +1,7 @@
 # Shepherding my PRs to merge
 
-**Status:** Living source of truth (per-project overlay). See the
-[glossary](glossary.md) and [invariants](invariants.md) for shared terms and IDs.
+See the [glossary](glossary.md) and [invariants](invariants.md) for shared terms
+and IDs.
 
 ## Purpose
 
