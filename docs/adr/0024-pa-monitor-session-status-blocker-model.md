@@ -1,6 +1,6 @@
 # pa-monitor session status/blocker model, authoritative usage-limit signalling, and non-stale state metrics
 
-**Status**: Draft
+**Status**: Accepted
 **Date**: 2026-07-09
 **Deciders**: Phillip Green II
 

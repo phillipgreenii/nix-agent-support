@@ -26,4 +26,4 @@
 | [0021](0021-pa-monitor-plan-model-and-rate-limit-source.md)         | pa-monitor Account/Plan model + pluggable limits/cost sources | Accepted                                                                        | 2026-07-01 |
 | [0022](0022-nudge-delivery-via-cmux-bridge.md)                      | Nudge delivery routed through the cmux-bridge                 | Accepted                                                                        | 2026-07-07 |
 | [0023](0023-agent-pr-comments-visible-bot-attribution.md)           | Agent-posted PR comments carry a visible bot attribution      | Accepted                                                                        | 2026-07-08 |
-| [0024](0024-pa-monitor-session-status-blocker-model.md)             | pa-monitor session status/blocker model + authoritative limit | Draft                                                                           | 2026-07-09 |
+| [0024](0024-pa-monitor-session-status-blocker-model.md)             | pa-monitor session status/blocker model + authoritative limit | Accepted                                                                        | 2026-07-09 |
