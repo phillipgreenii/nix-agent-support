@@ -9,17 +9,22 @@ import (
 // Mirrors the spec's `sessions` table 1-to-1 (except surrogate id, which
 // is internal to the SQLite impl).
 type Session struct {
-	SessionID             string
-	PID                   *int // nil when process is dead
-	CommandHash           string
-	Cwd                   string
-	Name                  string
-	Kind                  string
-	Entrypoint            string
-	Model                 string
-	TerminalHost          string
-	Branch                string
-	Status                string
+	SessionID    string
+	PID          *int // nil when process is dead
+	CommandHash  string
+	Cwd          string
+	Name         string
+	Kind         string
+	Entrypoint   string
+	Model        string
+	TerminalHost string
+	Branch       string
+	Status       string
+	// Blocker is the ADR 0024 blocker string ("human_input" | "human_authn" |
+	// "usage_limit" | "error"); empty when Status != "blocked". Persisted so the
+	// DB-path bucketer can render usage_limit even though the DB does not store
+	// RateLimitResetsAt (R9).
+	Blocker               string
 	FirstPrompt           string
 	Labels                map[string]string
 	TranscriptMTime       time.Time

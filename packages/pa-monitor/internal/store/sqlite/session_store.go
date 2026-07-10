@@ -40,7 +40,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 		ctx, `
 		INSERT INTO sessions (
 			session_id, pid, command_hash, cwd, name, kind, entrypoint,
-			model, terminal_host, branch, status, first_prompt, labels,
+			model, terminal_host, branch, status, blocker, first_prompt, labels,
 			transcript_mtime, started_at,
 			context_tokens, session_tokens, subagent_count, subshell_count,
 			burn_rate_short, burn_rate_long, cost_usd, awaiting_input,
@@ -48,7 +48,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 			last_error_terminal, last_error_retryable, last_error_from_subagent,
 			last_processed_at, updated_at, created_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 		ON CONFLICT(session_id) DO UPDATE SET
 			pid = excluded.pid,
@@ -61,6 +61,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 			terminal_host = excluded.terminal_host,
 			branch = excluded.branch,
 			status = excluded.status,
+			blocker = excluded.blocker,
 			first_prompt = excluded.first_prompt,
 			labels = excluded.labels,
 			transcript_mtime = excluded.transcript_mtime,
@@ -84,7 +85,7 @@ func (s *SessionStore) Upsert(ctx context.Context, sess store.Session) error {
 			deleted_at = NULL
 	`,
 		sess.SessionID, pidPtr(sess.PID), sess.CommandHash, sess.Cwd, sess.Name, sess.Kind, sess.Entrypoint,
-		sess.Model, sess.TerminalHost, sess.Branch, sess.Status, sess.FirstPrompt, string(labelsJSON),
+		sess.Model, sess.TerminalHost, sess.Branch, sess.Status, sess.Blocker, sess.FirstPrompt, string(labelsJSON),
 		formatTime(sess.TranscriptMTime), formatTime(sess.StartedAt),
 		sess.ContextTokens, sess.SessionTokens, sess.SubagentCount, sess.SubshellCount,
 		sess.BurnRateShort, sess.BurnRateLong, sess.CostUSD, boolInt(sess.AwaitingInput),
@@ -235,7 +236,7 @@ func (s *SessionStore) AllSessionIDs(ctx context.Context) ([]string, error) {
 
 const sessionSelectColumns = `SELECT
 	s.session_id, s.pid, s.command_hash, s.cwd, s.name, s.kind, s.entrypoint,
-	s.model, s.terminal_host, s.branch, s.status, s.first_prompt, s.labels,
+	s.model, s.terminal_host, s.branch, s.status, COALESCE(s.blocker, ''), s.first_prompt, s.labels,
 	s.transcript_mtime, s.started_at,
 	s.context_tokens, s.session_tokens, s.subagent_count, s.subshell_count,
 	s.burn_rate_short, s.burn_rate_long, s.cost_usd, s.awaiting_input,
@@ -270,7 +271,7 @@ func scanSessionInto(r rowScanner, sess *store.Session, extraCost *float64, extr
 	)
 	dest := []any{
 		&sess.SessionID, &pid, &sess.CommandHash, &sess.Cwd, &sess.Name, &sess.Kind, &sess.Entrypoint,
-		&sess.Model, &sess.TerminalHost, &sess.Branch, &sess.Status, &sess.FirstPrompt, &labelsRaw,
+		&sess.Model, &sess.TerminalHost, &sess.Branch, &sess.Status, &sess.Blocker, &sess.FirstPrompt, &labelsRaw,
 		&transcriptMTime, &startedAt,
 		&sess.ContextTokens, &sess.SessionTokens, &sess.SubagentCount, &sess.SubshellCount,
 		&sess.BurnRateShort, &sess.BurnRateLong, &sess.CostUSD, &awaitingInput,

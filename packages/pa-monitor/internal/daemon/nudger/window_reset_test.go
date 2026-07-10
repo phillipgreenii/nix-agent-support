@@ -39,6 +39,13 @@ func newSV(sid string, pid int, st session.Status) *aggregate.SessionView {
 	}
 }
 
+// newSVBlocked builds a Blocked SessionView with the given blocker (ADR 0024).
+func newSVBlocked(sid string, pid int, b session.Blocker) *aggregate.SessionView {
+	return &aggregate.SessionView{
+		Session: &session.Session{SessionID: sid, PID: pid, Status: session.Blocked, Blocker: b},
+	}
+}
+
 func TestWindowResetProducerNoOpWhenZero(t *testing.T) {
 	p := &WindowResetProducer{}
 	store := NewPendingStore()
@@ -76,7 +83,7 @@ func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 		resetsAt,
 		newSV("idle-1", 1, session.Idle),
 		newSV("work-1", 2, session.Working),
-		newSV("dorm-1", 3, session.Dormant),
+		newSV("dorm-1", 3, session.Idle),
 	)
 	p.Reconcile(TickContext{
 		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
@@ -97,6 +104,24 @@ func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 		if in.Key.SessionID == "work-1" {
 			t.Errorf("Working session should be skipped at queue time")
 		}
+	}
+}
+
+func TestWindowResetProducerNudgesBlockedSession(t *testing.T) {
+	// ADR 0024 R4: a session that formerly read Working while rate-limited now
+	// reads Blocked/usage_limit and MUST become nudge-eligible (only genuinely
+	// Working sessions are skipped).
+	now := time.Date(2026, 5, 28, 15, 0, 30, 0, time.UTC)
+	resetsAt := now.Add(-31 * time.Second)
+	p := &WindowResetProducer{}
+	store := NewPendingStore()
+	tree := treeWith(resetsAt, newSVBlocked("blk-1", 5, session.UsageLimit))
+	p.Reconcile(TickContext{
+		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
+		AutoResumeMessage: "continue", Tree: tree, Watermarks: wmStub{},
+	}, store)
+	if got := len(store.List()); got != 1 {
+		t.Errorf("blocked/usage_limit session intents = %d, want 1 (nudge-eligible)", got)
 	}
 }
 

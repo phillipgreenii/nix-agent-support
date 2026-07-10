@@ -64,11 +64,13 @@ func dirFromProto(pd *Directory) *aggregate.Directory {
 		return nil
 	}
 	d := &aggregate.Directory{
-		Path:         pd.GetPath(),
-		Branch:       pd.GetBranch(),
-		WorkingN:     int(pd.GetWorkingN()),
-		IdleN:        int(pd.GetIdleN()),
-		DormantN:     int(pd.GetDormantN()),
+		Path:     pd.GetPath(),
+		Branch:   pd.GetBranch(),
+		WorkingN: int(pd.GetWorkingN()),
+		BlockedN: int(pd.GetBlockedN()),
+		// Legacy dormant_n (from an older daemon) folds into idle — Dormant is
+		// no longer a status (ADR 0024 R8: dormant → idle).
+		IdleN:        int(pd.GetIdleN()) + int(pd.GetDormantN()),
 		TotalTokens:  int(pd.GetTotalTokens()),
 		TotalCostUSD: pd.GetTotalCostUsd(),
 		BurnRateSum:  pd.GetBurnRateSum(),
@@ -120,6 +122,13 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	out.LastNudgedAt = timeFromTS(sv.GetLastNudgedAt())
 	out.LastNudgeSources = sv.GetLastNudgeSources()
 	out.Status = statusFromString(sv.GetStatus())
+	out.Session.Blocker = session.ParseBlocker(sv.GetBlocker())
+	// Version-skew: an older daemon sends "waiting" with no blocker field. Map
+	// it to blocked + human_input so the human-blocked distinction survives the
+	// transition (ADR 0024 R8).
+	if out.Session.Blocker == session.NoBlocker && sv.GetStatus() == "waiting" {
+		out.Session.Blocker = session.HumanInput
+	}
 	// Reconstruct env subset so clients can filter by workspace.
 	env := map[string]string{}
 	if v := sv.GetCmuxWorkspaceId(); v != "" {
@@ -183,16 +192,20 @@ func weekFromProto(w *Week) *usage.WeeklyEntry {
 	return out
 }
 
+// statusFromString maps the wire status string to session.Status (ADR 0024).
+// The transition-era vocab ("dormant", "waiting") is still parsed: dormant →
+// idle (age refinement), waiting → blocked. An UNKNOWN status maps to idle
+// (visible), NOT the old default → dormant (hidden) (R8).
 func statusFromString(s string) session.Status {
 	switch s {
 	case "working":
 		return session.Working
-	case "idle":
+	case "blocked", "waiting":
+		return session.Blocked
+	case "idle", "dormant":
 		return session.Idle
-	case "waiting":
-		return session.WaitingForHuman
 	default:
-		return session.Dormant
+		return session.Idle
 	}
 }
 

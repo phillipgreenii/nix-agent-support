@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	claudetranscript "github.com/phillipgreenii/claude-transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
@@ -463,17 +466,134 @@ func makeRegistryFixture(t *testing.T, status, waitingFor string, statusUpdatedA
 
 func snapshotStatus(t *testing.T, p *Poller) session.Status {
 	t.Helper()
+	return snapshotSession(t, p).Status
+}
+
+// snapshotSession returns the first SessionView in the snapshot tree, exposing
+// Status/Blocker/LongIdle for the ADR 0024 derivation tests.
+func snapshotSession(t *testing.T, p *Poller) *aggregate.SessionView {
+	t.Helper()
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			return s.Status
+			return s
 		}
 	}
 	t.Fatal("no session in tree")
-	return 0
+	return nil
+}
+
+// makeErrorFixture writes a busy-registry session whose main transcript ends
+// with an isApiErrorMessage assistant event of the given kind/text. When
+// superseded is true a trailing user message is appended so the tail-walk marks
+// the error NON-terminal (newer activity). Returns (sessionsDir, claudeHome).
+func makeErrorFixture(t *testing.T, errKind, errText string, superseded bool) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	claudeHome := filepath.Join(root, "claude-home")
+	cwd := filepath.Join(root, "cwd")
+	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	projectDir := filepath.Join(claudeHome, "projects", slug)
+	for _, d := range []string{sessionsDir, projectDir, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionJSON := fmt.Sprintf(
+		`{"pid":99060,"sessionId":"err-sess","cwd":%q,"startedAt":1776000000000,"kind":"interactive","entrypoint":"cli","status":"busy"}`,
+		cwd,
+	)
+	if err := os.WriteFile(filepath.Join(sessionsDir, "99060.json"), []byte(sessionJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errTS := time.Date(2026, 6, 18, 11, 59, 0, 0, time.UTC).UTC().Format(time.RFC3339Nano)
+	body := fmt.Sprintf(
+		`{"type":"assistant","timestamp":%q,"error":%q,"isApiErrorMessage":true,"message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":%q}]}}`+"\n",
+		errTS, errKind, errText,
+	)
+	if superseded {
+		body += `{"type":"user","message":{"role":"user","content":"continue"}}` + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "err-sess.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return sessionsDir, claudeHome
+}
+
+func newErrorPoller(sessionsDir, claudeHome string, now time.Time) *Poller {
+	return &Poller{
+		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
+		PidAlive:         func(int) bool { return true },
+		Now:              func() time.Time { return now },
+		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
+	}
+}
+
+func TestSnapshotBlocker_AuthFailureIsHumanAuthn(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	sd, ch := makeErrorFixture(t, "authentication_failed", "HTTP 401", false)
+	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	if sv.Status != session.Blocked || sv.Session.Blocker != session.HumanAuthn {
+		t.Errorf("401 → status=%v blocker=%v, want Blocked/human_authn", sv.Status, sv.Session.Blocker)
+	}
+}
+
+func TestSnapshotBlocker_TerminalRateLimitIsUsageLimit(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// Text has no parseable reset, so this exercises the LastError-derived
+	// usage_limit path (NOT RateLimitResetsAt). The registry is busy — the
+	// terminal rate-limit MUST override busy → blocked/usage_limit (the live
+	// findev-deep-dive mis-report this ADR corrects).
+	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your org's monthly spend limit", false)
+	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	if sv.Status != session.Blocked || sv.Session.Blocker != session.UsageLimit {
+		t.Errorf("terminal 429 → status=%v blocker=%v, want Blocked/usage_limit", sv.Status, sv.Session.Blocker)
+	}
+}
+
+func TestSnapshotBlocker_GenericTerminalErrorIsError(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	sd, ch := makeErrorFixture(t, "server_error", "API Error 500", false)
+	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	if sv.Status != session.Blocked || sv.Session.Blocker != session.ErrorBlocker {
+		t.Errorf("generic terminal error → status=%v blocker=%v, want Blocked/error", sv.Status, sv.Session.Blocker)
+	}
+}
+
+func TestSnapshotBlocker_SupersededErrorIsWorking(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	// Same terminal-shaped error but a newer user message supersedes it, so the
+	// error is NOT current (IsTerminal=false). busy is trusted → Working.
+	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your limit", true)
+	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
+	if sv.Status != session.Working || sv.Session.Blocker != session.NoBlocker {
+		t.Errorf("superseded error → status=%v blocker=%v, want Working/none", sv.Status, sv.Session.Blocker)
+	}
+}
+
+// TestDeriveStatusBlocker_SubagentErrorDoesNotBlock guards the fix for the
+// stale-subagent-error blocker: a FromSubagent terminal error is display-only
+// and MUST NOT override the parent's activity verdict. A subagent's one-shot
+// agent-*.jsonl file never receives superseding activity, so its IsTerminal
+// stays true for the life of the parent — treating it as blocking would pin an
+// alive, working parent to Blocked forever (and hold the Mac awake for a
+// retryable disrupt that is never nudged, since the nudge path excludes
+// FromSubagent).
+func TestDeriveStatusBlocker_SubagentErrorDoesNotBlock(t *testing.T) {
+	subErr := &transcript.ErrorRecord{IsTerminal: true, FromSubagent: true, Kind: transcript.ErrRateLimit}
+	if st, bl := deriveStatusBlocker(claudetranscript.Active, subErr, time.Time{}); st != session.Working || bl != session.NoBlocker {
+		t.Errorf("subagent terminal error + active → %v/%v, want Working/none", st, bl)
+	}
+	// Sanity: the SAME error kind on the MAIN session (not FromSubagent) DOES
+	// block — the exclusion is scoped to subagent-surfaced errors only.
+	mainErr := &transcript.ErrorRecord{IsTerminal: true, FromSubagent: false, Kind: transcript.ErrRateLimit}
+	if st, bl := deriveStatusBlocker(claudetranscript.Active, mainErr, time.Time{}); st != session.Blocked || bl != session.UsageLimit {
+		t.Errorf("main terminal 429 + active → %v/%v, want Blocked/usage_limit", st, bl)
+	}
 }
 
 func TestSnapshotVerdict_BusyIsWorking(t *testing.T) {
@@ -492,9 +612,9 @@ func TestSnapshotVerdict_BusyIsWorking(t *testing.T) {
 	}
 }
 
-func TestSnapshotVerdict_FreshWaitingIsWaitingForHuman(t *testing.T) {
+func TestSnapshotVerdict_FreshWaitingIsBlockedHumanInput(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
-	// waiting + transcript fresh relative to statusUpdatedAt → WaitingForHuman.
+	// waiting + transcript fresh relative to statusUpdatedAt → blocked/human_input.
 	sessionsDir, claudeHome := makeRegistryFixture(t, "waiting", "permission prompt", now.Add(-30*time.Second), now.Add(-30*time.Second))
 	p := &Poller{
 		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
@@ -503,8 +623,9 @@ func TestSnapshotVerdict_FreshWaitingIsWaitingForHuman(t *testing.T) {
 		WorkingThreshold: 30 * time.Second, IdleThreshold: 10 * time.Minute,
 		WaitingFreshWindow: 60 * time.Second,
 	}
-	if got := snapshotStatus(t, p); got != session.WaitingForHuman {
-		t.Errorf("fresh waiting Status = %v, want WaitingForHuman", got)
+	sv := snapshotSession(t, p)
+	if sv.Status != session.Blocked || sv.Session.Blocker != session.HumanInput {
+		t.Errorf("fresh waiting → status=%v blocker=%v, want Blocked/human_input", sv.Status, sv.Session.Blocker)
 	}
 }
 
@@ -523,18 +644,19 @@ func TestSnapshotVerdict_StaleWaitingFallsThrough(t *testing.T) {
 		WaitingFreshWindow: 60 * time.Second,
 	}
 	got := snapshotStatus(t, p)
-	if got == session.WaitingForHuman {
-		t.Errorf("stale waiting Status = %v, want non-waiting (fell through)", got)
+	if got == session.Blocked {
+		t.Errorf("stale waiting Status = %v, want non-blocked (fell through)", got)
 	}
 	if got != session.Idle {
 		t.Errorf("stale waiting + alive pid Status = %v, want Idle (clamp bump)", got)
 	}
 }
 
-func TestSnapshotVerdict_DeadIdleStaleIsDormant(t *testing.T) {
+func TestSnapshotVerdict_DeadIdleStaleIsLongIdle(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
-	// idle + 15m-old transcript + dead pid → age-bucketed to Dormant (the
-	// alive-pid clamp does not apply to dead pids).
+	// idle + 15m-old transcript + dead pid → Idle with the LongIdle age
+	// refinement (ADR 0024: Dormant is no longer a status; the alive-pid clamp
+	// does not apply to dead pids).
 	sessionsDir, claudeHome := makeRegistryFixture(t, "idle", "", now.Add(-15*time.Minute), now.Add(-15*time.Minute))
 	p := &Poller{
 		SessionsDir: sessionsDir, ClaudeHome: claudeHome,
@@ -543,8 +665,9 @@ func TestSnapshotVerdict_DeadIdleStaleIsDormant(t *testing.T) {
 		WorkingThreshold: 30 * time.Second,
 		IdleThreshold:    10 * time.Minute,
 	}
-	if got := snapshotStatus(t, p); got != session.Dormant {
-		t.Errorf("dead idle 15m-old Status = %v, want Dormant", got)
+	sv := snapshotSession(t, p)
+	if sv.Status != session.Idle || !sv.Session.LongIdle {
+		t.Errorf("dead idle 15m-old → status=%v longIdle=%v, want Idle/true", sv.Status, sv.Session.LongIdle)
 	}
 }
 

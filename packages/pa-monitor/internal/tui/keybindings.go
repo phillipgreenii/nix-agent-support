@@ -250,12 +250,24 @@ func (m *Model) sessionStatusWorking(sid string) bool {
 }
 
 // sessionStatusWaitingForHuman reports whether the session identified by sid is
-// WaitingForHuman in the current snapshot. The daemon dispatcher suppresses
-// manual nudges for this status too (waiting_for_human), symmetrically with
-// Working — see internal/daemon/nudger/dispatcher.go. Surfacing it keeps the N
-// feedback honest instead of implying delivery (pg2-0cmq / pg2-gweng).
+// blocked on a human (blocker ∈ human_*) in the current snapshot. The daemon
+// dispatcher suppresses manual nudges for this too (waiting_for_human),
+// symmetrically with Working — see internal/daemon/nudger/dispatcher.go.
+// Surfacing it keeps the N feedback honest instead of implying delivery
+// (pg2-0cmq / pg2-gweng; ADR 0024 R4).
 func (m *Model) sessionStatusWaitingForHuman(sid string) bool {
-	return m.sessionHasStatus(sid, session.WaitingForHuman)
+	if m.tree == nil {
+		return false
+	}
+	for _, d := range m.tree.Dirs {
+		for _, sv := range d.Sessions {
+			if sv.Session == nil || sv.SessionID != sid {
+				continue
+			}
+			return sv.Status == session.Blocked && sv.Session.Blocker.IsHuman()
+		}
+	}
+	return false
 }
 
 // sessionHasStatus reports whether the session identified by sid has the given

@@ -120,7 +120,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	}
 
 	enriched := map[string]aggregate.SessionEnrichment{}
-	anyWorking := false
+	anyKeepAwake := false
 
 	for _, s := range sessions {
 		path, mtime, ok := session.ResolveTranscript(p.ClaudeHome, s)
@@ -215,19 +215,20 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			}
 		}
 
-		// Registry-driven activity verdict (§4.2/§4.3). Supersedes the old
-		// mtime-only Classify as the PRIMARY signal. busy is TRUSTED and never
-		// demoted on transcript staleness — that demotion is what reintroduced
-		// the incident bug. Subagent mtime is load-bearing ONLY for the
-		// "waiting"-freshness cross-check and the display/age (dormant) bucket.
+		// Status + blocker derivation (ADR 0024 D1). Registry-driven activity
+		// verdict (§4.2/§4.3) supplies the "has work" question — busy is TRUSTED
+		// and never demoted on transcript staleness — but a CURRENT terminal
+		// blocking condition (auth 401 / usage-limit / other terminal error, or a
+		// still-in-future rate-limit reset) OVERRIDES busy to Blocked + the
+		// appropriate blocker (deriveStatusBlocker). Subagent mtime is load-
+		// bearing ONLY for the "waiting"-freshness cross-check and the LongIdle
+		// age refinement.
 		if !s.PidAlive {
-			// Dead pid: keep last-known (the poller persists state until GC).
-			// Fall back to the mtime age bucket, but never report Working — a
-			// dead process is not actively working.
-			s.Status = session.Classify(now, s.TranscriptMTime, p.WorkingThreshold, p.IdleThreshold)
-			if s.Status == session.Working {
-				s.Status = session.Idle
-			}
+			// Dead pid: never Working (a dead process is not actively working)
+			// and never Blocked (it is gone, not waiting). Idle, refined by age.
+			s.Status = session.Idle
+			s.Blocker = session.NoBlocker
+			s.LongIdle = session.IsLongIdle(now, s.TranscriptMTime, p.IdleThreshold)
 		} else {
 			lastActivity := maxActivity(s.TranscriptMTime, path)
 			reg := claudetranscript.RegistrySession{
@@ -236,25 +237,15 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				StatusUpdatedAt: s.StatusUpdatedAt,
 			}
 			verdict := claudetranscript.ClassifyActivity(reg, snap.AwaitingInput, lastActivity, p.waitingFreshWindow())
-			switch verdict.Activity {
-			case claudetranscript.Active:
-				s.Status = session.Working
-			case claudetranscript.WaitingForHuman:
-				s.Status = session.WaitingForHuman
-			default:
-				s.Status = session.Idle
-			}
-			// Display-only age bucket, orthogonal to the verdict: an Idle
-			// session whose last activity is older than IdleThreshold renders
-			// as Dormant. Working/WaitingForHuman are NOT demoted (busy is
-			// trusted; a fresh wait is a real wait).
-			if s.Status == session.Idle && !lastActivity.IsZero() &&
-				now.Sub(lastActivity) > p.IdleThreshold {
-				s.Status = session.Dormant
-			}
+			s.Status, s.Blocker = deriveStatusBlocker(verdict.Activity, snap.LastError, rlReset)
+			// Dormant → idle age refinement (ADR 0024). Only an Idle session can
+			// be long-idle; Working/Blocked are never age-demoted (busy is
+			// trusted; a blocker is a real, current condition).
+			s.LongIdle = s.Status == session.Idle &&
+				session.IsLongIdle(now, lastActivity, p.IdleThreshold)
 		}
-		if s.Status == session.Working {
-			anyWorking = true
+		if session.KeepAwake(s.Status, s.Blocker, snap.LastErrorRetryable) {
+			anyKeepAwake = true
 		}
 
 		enriched[s.SessionID] = aggregate.SessionEnrichment{
@@ -318,7 +309,9 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	}
 
 	// PID clamp: if a PID is alive and this session has the freshest transcript
-	// for that PID, clamp Dormant → Idle. Sessions superseded by /resume stay Dormant.
+	// for that PID, clear the LongIdle age refinement (formerly the Dormant →
+	// Idle clamp; ADR 0024 preserves it as idle-age). Sessions superseded by
+	// /resume keep their LongIdle flag.
 	pidActiveSID := make(map[int]string)
 	for _, s := range sessions {
 		cur, ok := pidActiveSID[s.PID]
@@ -327,8 +320,8 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 	for _, s := range sessions {
-		if s.Status == session.Dormant && s.PidAlive && pidActiveSID[s.PID] == s.SessionID {
-			s.Status = session.Idle
+		if s.LongIdle && s.PidAlive && pidActiveSID[s.PID] == s.SessionID {
+			s.LongIdle = false
 		}
 	}
 
@@ -358,6 +351,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				TerminalHost:    sv.TerminalHost,
 				Branch:          sv.Branch,
 				Status:          sv.Session.Status.String(),
+				Blocker:         sv.Session.Blocker.String(),
 				FirstPrompt:     sv.SessionEnrichment.FirstPrompt,
 				Labels:          nil, // populated when label pipeline runs in daemon
 				TranscriptMTime: sv.TranscriptMTime,
@@ -407,7 +401,51 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 
-	return tree, anyWorking, nil
+	return tree, anyKeepAwake, nil
+}
+
+// deriveStatusBlocker maps the registry activity verdict plus the current
+// per-session terminal blocking signals to the observable (Status, Blocker)
+// pair (ADR 0024 D1 / R2). A CURRENT terminal blocking condition overrides the
+// activity verdict (including busy → Working); "current" is encoded by
+// LastError.IsTerminal (the snapshot tail-walk clears IsTerminal once newer
+// user/assistant activity supersedes the error). usage_limit is derived from
+// per-session inputs ONLY (a terminal ErrRateLimit, or a still-relevant
+// RateLimitResetsAt) — NEVER the account-global FiveHourPct.
+//
+// A FromSubagent terminal error MUST NOT override the parent's status: it is
+// surfaced only for display (poller resurfaces the newest subagent error when
+// the main session has none of its own), and a subagent's one-shot
+// agent-*.jsonl file never receives superseding activity, so its IsTerminal
+// stays true for the life of the parent process — treating it as a blocking
+// condition would pin an alive, working/idle parent to Blocked forever (and
+// hold the Mac awake for a retryable disrupt that is never nudged). This
+// mirrors the nudge/keep-awake path, which already excludes FromSubagent
+// (see hasUnattemptedNudgeableDisrupt and the disrupt producer).
+//
+// Precedence (highest first): terminal auth 401 → human_authn; terminal
+// rate-limit or live reset → usage_limit; any other terminal error → error;
+// then the activity verdict (waiting → human_input; active → working; else
+// idle). A terminal error therefore wins over a registry "waiting" flag: an
+// API error is the concrete "cannot proceed on its own" signal.
+func deriveStatusBlocker(act claudetranscript.Activity, lastErr *transcript.ErrorRecord, rlReset time.Time) (session.Status, session.Blocker) {
+	terminal := lastErr != nil && lastErr.IsTerminal && !lastErr.FromSubagent
+	switch {
+	case terminal && lastErr.Kind == transcript.ErrAuthFailed:
+		return session.Blocked, session.HumanAuthn
+	case terminal && lastErr.Kind == transcript.ErrRateLimit:
+		return session.Blocked, session.UsageLimit
+	case !rlReset.IsZero():
+		return session.Blocked, session.UsageLimit
+	case terminal:
+		return session.Blocked, session.ErrorBlocker
+	case act == claudetranscript.WaitingForHuman:
+		return session.Blocked, session.HumanInput
+	case act == claudetranscript.Active:
+		return session.Working, session.NoBlocker
+	default:
+		return session.Idle, session.NoBlocker
+	}
 }
 
 // waitingFreshWindow returns the configured WaitingFreshWindow, falling back

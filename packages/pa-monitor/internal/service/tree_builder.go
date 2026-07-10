@@ -6,16 +6,20 @@ import "github.com/phillipgreenii/pa-monitor/internal/store"
 // self-contained. The daemon converts to aggregate.Directory at the proto
 // boundary.
 type Directory struct {
-	Path         string
-	Branch       string
-	WorkingN     int
-	IdleN        int
-	DormantN     int
-	WaitingN     int
-	TotalTokens  uint64
-	TotalCostUSD float64
-	BurnRateSum  float64
-	Sessions     []store.SessionWithContribution
+	Path   string
+	Branch string
+	// ADR 0024 {working, blocked, idle} counts + the blocked-by-blocker rollup.
+	WorkingN           int
+	BlockedN           int
+	IdleN              int
+	BlockedHumanInputN int
+	BlockedHumanAuthnN int
+	BlockedUsageLimitN int
+	BlockedErrorN      int
+	TotalTokens        uint64
+	TotalCostUSD       float64
+	BurnRateSum        float64
+	Sessions           []store.SessionWithContribution
 }
 
 // BuildDirectories rolls a flat session list into directory groups keyed by Cwd.
@@ -37,15 +41,32 @@ func BuildDirectories(sessions []store.SessionWithContribution) []*Directory {
 			d = &Directory{Path: sc.Cwd}
 			byCwd[sc.Cwd] = d
 		}
+		// ADR 0024 R9: parse the persisted status string. "blocked" (and legacy
+		// "waiting") count as blocked; "dormant" folds into idle; unknown → idle.
+		// The persisted blocker column drives the blocked-by-blocker rollup so
+		// the DB path can render usage_limit without RateLimitResetsAt.
 		switch sc.Status {
 		case "working":
 			d.WorkingN++
-		case "idle":
-			d.IdleN++
-		case "waiting":
-			d.WaitingN++
+		case "blocked", "waiting":
+			d.BlockedN++
+			blocker := sc.Blocker
+			if blocker == "" && sc.Status == "waiting" {
+				blocker = "human_input"
+			}
+			switch blocker {
+			case "human_input":
+				d.BlockedHumanInputN++
+			case "human_authn":
+				d.BlockedHumanAuthnN++
+			case "usage_limit":
+				d.BlockedUsageLimitN++
+			case "error":
+				d.BlockedErrorN++
+			}
 		default:
-			d.DormantN++
+			// "idle", "dormant", or unknown → idle.
+			d.IdleN++
 		}
 		d.TotalTokens += sc.SessionTokens
 		d.TotalCostUSD += sc.CostUSD

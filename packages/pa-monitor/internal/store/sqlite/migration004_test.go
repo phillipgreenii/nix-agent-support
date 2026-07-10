@@ -38,8 +38,8 @@ func TestMigrate004_AppliesCleanlyOn003DB(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_migrations").Scan(&maxV); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if maxV != 4 {
-		t.Errorf("schema_migrations max version = %d, want 4", maxV)
+	if maxV != 5 {
+		t.Errorf("schema_migrations max version = %d, want 5", maxV)
 	}
 
 	var n, notnull int

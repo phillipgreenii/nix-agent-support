@@ -490,17 +490,23 @@ func (x *DaemonState) GetFiveHourResetsAt() *timestamppb.Timestamp {
 }
 
 type Directory struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Branch        string                 `protobuf:"bytes,2,opt,name=branch,proto3" json:"branch,omitempty"`
-	PrInfo        *PRInfo                `protobuf:"bytes,3,opt,name=pr_info,json=prInfo,proto3" json:"pr_info,omitempty"`
-	Sessions      []*SessionView         `protobuf:"bytes,4,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	WorkingN      uint32                 `protobuf:"varint,5,opt,name=working_n,json=workingN,proto3" json:"working_n,omitempty"`
-	IdleN         uint32                 `protobuf:"varint,6,opt,name=idle_n,json=idleN,proto3" json:"idle_n,omitempty"`
-	DormantN      uint32                 `protobuf:"varint,7,opt,name=dormant_n,json=dormantN,proto3" json:"dormant_n,omitempty"`
-	TotalTokens   uint64                 `protobuf:"varint,8,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
-	TotalCostUsd  float64                `protobuf:"fixed64,9,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
-	BurnRateSum   float64                `protobuf:"fixed64,10,opt,name=burn_rate_sum,json=burnRateSum,proto3" json:"burn_rate_sum,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Path     string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Branch   string                 `protobuf:"bytes,2,opt,name=branch,proto3" json:"branch,omitempty"`
+	PrInfo   *PRInfo                `protobuf:"bytes,3,opt,name=pr_info,json=prInfo,proto3" json:"pr_info,omitempty"`
+	Sessions []*SessionView         `protobuf:"bytes,4,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	WorkingN uint32                 `protobuf:"varint,5,opt,name=working_n,json=workingN,proto3" json:"working_n,omitempty"`
+	IdleN    uint32                 `protobuf:"varint,6,opt,name=idle_n,json=idleN,proto3" json:"idle_n,omitempty"`
+	// dormant_n (field 7) is retired by ADR 0024 — Dormant is no longer a status
+	// (a long-idle session counts as idle). The field number is NOT reused; it
+	// stays reserved for version-skew with older clients (R8).
+	DormantN     uint32  `protobuf:"varint,7,opt,name=dormant_n,json=dormantN,proto3" json:"dormant_n,omitempty"`
+	TotalTokens  uint64  `protobuf:"varint,8,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	TotalCostUsd float64 `protobuf:"fixed64,9,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	BurnRateSum  float64 `protobuf:"fixed64,10,opt,name=burn_rate_sum,json=burnRateSum,proto3" json:"burn_rate_sum,omitempty"`
+	// blocked_n counts sessions with status == "blocked" (ADR 0024). New field
+	// number 11 (verified free); does NOT repurpose dormant_n (R8).
+	BlockedN      uint32 `protobuf:"varint,11,opt,name=blocked_n,json=blockedN,proto3" json:"blocked_n,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -605,6 +611,13 @@ func (x *Directory) GetBurnRateSum() float64 {
 	return 0
 }
 
+func (x *Directory) GetBlockedN() uint32 {
+	if x != nil {
+		return x.BlockedN
+	}
+	return 0
+}
+
 type PRInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Number        uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
@@ -684,7 +697,7 @@ type SessionView struct {
 	Entrypoint string                 `protobuf:"bytes,6,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`
 	StartedAt  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	// status
-	Status            string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"` // "working", "idle", "dormant"
+	Status            string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"` // ADR 0024: "working", "blocked", "idle" (older daemons may still send "dormant"/"waiting")
 	Branch            string                 `protobuf:"bytes,9,opt,name=branch,proto3" json:"branch,omitempty"`
 	TerminalHost      string                 `protobuf:"bytes,10,opt,name=terminal_host,json=terminalHost,proto3" json:"terminal_host,omitempty"`
 	TranscriptMtime   *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=transcript_mtime,json=transcriptMtime,proto3" json:"transcript_mtime,omitempty"`
@@ -713,8 +726,12 @@ type SessionView struct {
 	// Both fields are zero/empty when no nudge has ever been delivered.
 	LastNudgedAt     *timestamppb.Timestamp `protobuf:"bytes,28,opt,name=last_nudged_at,json=lastNudgedAt,proto3" json:"last_nudged_at,omitempty"`             // wall clock of most recent successful fire
 	LastNudgeSources []string               `protobuf:"bytes,29,rep,name=last_nudge_sources,json=lastNudgeSources,proto3" json:"last_nudge_sources,omitempty"` // sources that fired together at last_nudged_at
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// blocker names WHY a blocked session cannot proceed (ADR 0024): one of
+	// "human_input" | "human_authn" | "usage_limit" | "error". Empty when
+	// status != "blocked". New field number 30 (verified free; R8).
+	Blocker       string `protobuf:"bytes,30,opt,name=blocker,proto3" json:"blocker,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SessionView) Reset() {
@@ -948,6 +965,13 @@ func (x *SessionView) GetLastNudgeSources() []string {
 		return x.LastNudgeSources
 	}
 	return nil
+}
+
+func (x *SessionView) GetBlocker() string {
+	if x != nil {
+		return x.Blocker
+	}
+	return ""
 }
 
 type Block struct {
@@ -2621,7 +2645,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x12limits_captured_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x10limitsCapturedAt\x12I\n" +
 	"\x13five_hour_resets_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x10fiveHourResetsAtB\x10\n" +
 	"\x0e_five_hour_pctB\x10\n" +
-	"\x0e_seven_day_pct\"\xdd\x02\n" +
+	"\x0e_seven_day_pct\"\xfa\x02\n" +
 	"\tDirectory\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12.\n" +
@@ -2633,12 +2657,13 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\ftotal_tokens\x18\b \x01(\x04R\vtotalTokens\x12$\n" +
 	"\x0etotal_cost_usd\x18\t \x01(\x01R\ftotalCostUsd\x12\"\n" +
 	"\rburn_rate_sum\x18\n" +
-	" \x01(\x01R\vburnRateSum\"^\n" +
+	" \x01(\x01R\vburnRateSum\x12\x1b\n" +
+	"\tblocked_n\x18\v \x01(\rR\bblockedN\"^\n" +
 	"\x06PRInfo\x12\x16\n" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
 	"\x05state\x18\x03 \x01(\tR\x05state\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\"\xb7\b\n" +
+	"\x03url\x18\x04 \x01(\tR\x03url\"\xd1\b\n" +
 	"\vSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -2673,7 +2698,8 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\bgc_agent\x18\x1a \x01(\tR\agcAgent\x12#\n" +
 	"\rworkspace_env\x18\x1b \x01(\tR\fworkspaceEnv\x12@\n" +
 	"\x0elast_nudged_at\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\flastNudgedAt\x12,\n" +
-	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\"\xe0\x03\n" +
+	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\x12\x18\n" +
+	"\ablocker\x18\x1e \x01(\tR\ablocker\"\xe0\x03\n" +
 	"\x05Block\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\n" +

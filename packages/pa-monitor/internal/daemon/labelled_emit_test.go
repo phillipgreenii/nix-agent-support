@@ -258,7 +258,8 @@ func TestBuildSessionInfoRows_OnlyNonDormant(t *testing.T) {
 		Session: &session.Session{
 			SessionID: "sid-dorm",
 			Cwd:       "/repo/c",
-			Status:    session.Dormant,
+			Status:    session.Idle,
+			LongIdle:  true, // ADR 0024: dormant is the long-idle age refinement
 		},
 	}
 	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{

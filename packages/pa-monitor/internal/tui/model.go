@@ -276,22 +276,29 @@ func aggregateState(tree *aggregate.Tree) (cmuxstatus.State, time.Time) {
 	if !tree.WindowResetsAt.IsZero() {
 		return cmuxstatus.StatePaused, tree.WindowResetsAt
 	}
-	anyWorking, anyIdle := false, false
+	anyWorking, anyBlocked, anyIdle := false, false, false
 	for _, d := range tree.Dirs {
 		for _, sv := range d.Sessions {
 			switch sv.Status {
 			case session.Working:
 				anyWorking = true
-			case session.Dormant:
-				// ignore
+			case session.Blocked:
+				anyBlocked = true
 			default:
-				anyIdle = true
+				// Idle: ignore the dormant age-refinement, count the rest as idle.
+				if !session.IsLongIdle(time.Now(), sv.TranscriptMTime, session.LongIdleThreshold) {
+					anyIdle = true
+				}
 			}
 		}
 	}
 	switch {
 	case anyWorking:
 		return cmuxstatus.StateWorking, time.Time{}
+	case anyBlocked:
+		// ADR 0024 R3: a blocked session maps to Paused (extending cmuxstatus's
+		// existing Paused notion) rather than being lost to Idle.
+		return cmuxstatus.StatePaused, time.Time{}
 	case anyIdle:
 		return cmuxstatus.StateIdle, time.Time{}
 	default:

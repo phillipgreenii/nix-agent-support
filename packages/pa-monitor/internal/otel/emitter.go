@@ -56,7 +56,8 @@ type SessionInfo struct {
 	SessionName  string
 	Cwd          string
 	TerminalHost string // already-abbreviated host (CMUX/TMUX/...)
-	Status       string // session.Status.String()
+	Status       string // session.Status.String() ("working"/"blocked"/"idle")
+	Blocker      string // ADR 0024 blocker (empty unless Status == "blocked")
 	Model        string
 	ErrorKind    string  // empty when no terminal error
 	Tokens       int64   // SessionEnrichment.SessionTokens
@@ -784,6 +785,7 @@ func (e *Emitter) RecordSessionInfo(rows []SessionInfo) {
 			"cwd":           r.Cwd,
 			"terminal_host": r.TerminalHost,
 			"status":        r.Status,
+			"blocker":       r.Blocker,
 			"model":         r.Model,
 			"error_kind":    r.ErrorKind,
 		}

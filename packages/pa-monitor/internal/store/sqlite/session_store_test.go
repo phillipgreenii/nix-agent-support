@@ -50,6 +50,36 @@ func TestSessionStore_UpsertThenGet(t *testing.T) {
 	}
 }
 
+func TestSessionStore_UpsertThenGet_PreservesBlocker(t *testing.T) {
+	db := openTestDB(t)
+	ss := NewSessionStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s := store.Session{
+		SessionID:       "sid-blocked",
+		Cwd:             "/work",
+		Status:          "blocked",
+		Blocker:         "usage_limit",
+		LastProcessedAt: now,
+		UpdatedAt:       now,
+		CreatedAt:       now,
+	}
+	if err := ss.Upsert(ctx, s); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, err := ss.GetByID(ctx, "sid-blocked", store.DefaultFreshness())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetByID returned nil")
+	}
+	if got.Status != "blocked" || got.Blocker != "usage_limit" {
+		t.Errorf("status/blocker = %q/%q, want blocked/usage_limit", got.Status, got.Blocker)
+	}
+}
+
 func TestSessionStore_UpsertThenGet_PreservesLastErrorFromSubagent(t *testing.T) {
 	db := openTestDB(t)
 	ss := NewSessionStore(db)

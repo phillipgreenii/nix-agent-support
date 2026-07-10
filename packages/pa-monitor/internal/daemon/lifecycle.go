@@ -475,9 +475,17 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.WeekTracker != nil {
 				opts.WeekTracker.Update(tree.ActiveWeek)
 			}
+			// ADR 0024 D2: keep awake when any session is Working OR Blocked on a
+			// machine-recoverable blocker (usage_limit — auto-resume fires at
+			// reset — or a retryable error). session.KeepAwake collapses the
+			// per-session predicate; iterate sessions since the Directory counts
+			// don't carry the blocker/retryable breakdown needed here.
 			anyWorking := false
-			for _, d := range tree.Dirs {
-				if d.WorkingN > 0 {
+			for _, sv := range tree.Sessions() {
+				if sv.Session == nil {
+					continue
+				}
+				if session.KeepAwake(sv.Status, sv.Session.Blocker, sv.SessionEnrichment.LastErrorRetryable) {
 					anyWorking = true
 					break
 				}
@@ -675,11 +683,12 @@ func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, si
 	}
 	for _, dir := range tree.Dirs {
 		for _, sv := range dir.Sessions {
-			// A session blocked on a human (permission prompt / AskUserQuestion)
-			// suppresses BOTH nudges and caffeinate (§6/D3). Even if it carries a
+			// A session blocked on a human (permission prompt / AskUserQuestion /
+			// re-auth) suppresses BOTH nudges and caffeinate (§6/D3; ADR 0024 R4:
+			// WaitingForHuman → blocker ∈ human_*). Even if it carries a
 			// terminal-retryable LastError, no nudge is ever attempted, so it must
 			// not hold the Mac awake via the D5 error keep-awake disjunct.
-			if sv.Status == session.WaitingForHuman {
+			if sv.Status == session.Blocked && sv.Session.Blocker.IsHuman() {
 				continue
 			}
 			le := sv.LastError
@@ -729,6 +738,11 @@ func updateGauges(
 		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
 		// labelsForSession returns a fresh copy — safe to mutate.
 		ls["state"] = session.Status(sv.Status).String()
+		// ADR 0024: attach the blocker as its own attribute when Blocked so the
+		// dashboard can break "blocked" down by reason. Absent otherwise.
+		if sv.Session != nil && sv.Session.Blocker != session.NoBlocker {
+			ls["blocker"] = sv.Session.Blocker.String()
+		}
 		key := groupKey(canonicalKey(ls))
 		counts[key]++
 		if _, ok := groupLabels[key]; !ok {
@@ -791,12 +805,20 @@ func buildSessionInfoRows(
 		if sv == nil || sv.Session == nil {
 			continue
 		}
-		if sv.Status == session.Dormant {
+		// Skip long-idle (formerly Dormant) sessions to bound session_id
+		// cardinality on the exporter (ADR 0024 R10: the idle-age exclusion
+		// survives the Dormant→idle rename). Uses the poller-set LongIdle flag
+		// (which also applies the live-PID clamp) on this live-tree path.
+		if sv.Session.LongIdle {
 			continue
 		}
 		errKind := ""
 		if sv.LastError != nil && sv.LastError.IsTerminal {
 			errKind = string(sv.LastError.Kind)
+		}
+		blocker := ""
+		if sv.Session.Blocker != session.NoBlocker {
+			blocker = sv.Session.Blocker.String()
 		}
 		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
 		// Pass plan_tier through as a baseline label so the dashboard's
@@ -808,6 +830,7 @@ func buildSessionInfoRows(
 			Cwd:          sv.Cwd,
 			TerminalHost: session.TerminalAbbrev(sv.TerminalHost),
 			Status:       session.Status(sv.Status).String(),
+			Blocker:      blocker,
 			Model:        sv.SessionEnrichment.Model,
 			ErrorKind:    errKind,
 			Tokens:       int64(sv.SessionEnrichment.SessionTokens),

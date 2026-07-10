@@ -43,17 +43,25 @@ type PendingNudge struct {
 }
 
 type Directory struct {
-	Path         string
-	Branch       string
-	PRInfo       *session.PRInfo
-	Sessions     []*SessionView
-	WorkingN     int
-	IdleN        int
-	DormantN     int
-	WaitingN     int
-	TotalTokens  int
-	TotalCostUSD float64
-	BurnRateSum  float64 // NEW: sum of children's BurnRateShort
+	Path     string
+	Branch   string
+	PRInfo   *session.PRInfo
+	Sessions []*SessionView
+	// Status counts (ADR 0024): the observable {working, blocked, idle} model.
+	// Dormant/Waiting are gone — a long-idle session counts as idle, a
+	// waiting-for-human session counts as blocked.
+	WorkingN int
+	BlockedN int
+	IdleN    int
+	// Blocked-by-blocker rollup (R9): a breakdown of BlockedN by blocker so
+	// surfaces can show "blocked on usage_limit" etc. without re-scanning.
+	BlockedHumanInputN int
+	BlockedHumanAuthnN int
+	BlockedUsageLimitN int
+	BlockedErrorN      int
+	TotalTokens        int
+	TotalCostUSD       float64
+	BurnRateSum        float64 // NEW: sum of children's BurnRateShort
 }
 
 type SessionView struct {

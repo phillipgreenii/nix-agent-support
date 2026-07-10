@@ -40,8 +40,8 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 		"SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatalf("max version: %v", err)
 	}
-	if version != 4 {
-		t.Errorf("schema_migrations max version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("schema_migrations max version = %d, want 5", version)
 	}
 
 	// Migration 002 adds last_error_from_subagent to sessions.
@@ -52,6 +52,16 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 	}
 	if hasCol != 1 {
 		t.Errorf("sessions.last_error_from_subagent present = %d, want 1", hasCol)
+	}
+
+	// Migration 005 adds the ADR 0024 blocker column to sessions.
+	var hasBlocker int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='blocker'").Scan(&hasBlocker); err != nil {
+		t.Fatalf("pragma_table_info blocker: %v", err)
+	}
+	if hasBlocker != 1 {
+		t.Errorf("sessions.blocker present = %d, want 1", hasBlocker)
 	}
 
 	// Migration 003 adds the status-line rate_limits columns to blocks; 004 adds
@@ -86,7 +96,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		"SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 4 {
-		t.Errorf("schema_migrations rows = %d, want 4 (idempotent)", count)
+	if count != 5 {
+		t.Errorf("schema_migrations rows = %d, want 5 (idempotent)", count)
 	}
 }

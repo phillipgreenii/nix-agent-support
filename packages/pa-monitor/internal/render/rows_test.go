@@ -2,6 +2,7 @@ package render
 
 import (
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
@@ -104,7 +105,8 @@ func TestFlattenPathTreeFiltersDormant(t *testing.T) {
 		DisplayPath: "/p",
 		DirectSessions: []*aggregate.SessionView{
 			{Session: &session.Session{SessionID: "a", Status: session.Working}},
-			{Session: &session.Session{SessionID: "b", Status: session.Dormant}},
+			// Idle + a stale transcript ⇒ long-idle (dormant age refinement).
+			{Session: &session.Session{SessionID: "b", Status: session.Idle, TranscriptMTime: time.Now().Add(-time.Hour)}},
 		},
 	}
 	state := treestate.NewState()

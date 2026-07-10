@@ -361,11 +361,11 @@ func TestDispatcher_RecordsOnSend(t *testing.T) {
 func TestDispatcher_RecordsSuppressed(t *testing.T) {
 	cases := []struct {
 		name      string
-		status    session.Status
+		sv        *aggregate.SessionView
 		wantCause string
 	}{
-		{"session_active", session.Working, "session_active"},
-		{"waiting_for_human", session.WaitingForHuman, "waiting_for_human"},
+		{"session_active", newSV("sid-1", 1234, session.Working), "session_active"},
+		{"waiting_for_human", newSVBlocked("sid-1", 1234, session.HumanInput), "waiting_for_human"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -375,7 +375,7 @@ func TestDispatcher_RecordsSuppressed(t *testing.T) {
 				Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
 				Cause: &transcript.ErrorRecord{Kind: transcript.ErrServerError, At: now},
 			})
-			tree := treeWith(time.Time{}, newSV("sid-1", 1234, tc.status))
+			tree := treeWith(time.Time{}, tc.sv)
 			sig := &fakeSignaler{}
 			rec := &fakeRecorder{}
 			nudgeRec := &fakeNudgeRecorder{}
@@ -618,7 +618,7 @@ func TestDispatcherSuppressesWaitingForHuman(t *testing.T) {
 		Key: IntentKey{"sid-1", SourceDisrupted}, Text: "continue", EmittedAt: now,
 		Cause: &transcript.ErrorRecord{Kind: transcript.ErrUnknown},
 	})
-	tree := treeWith(time.Time{}, newSV("sid-1", 1234, session.WaitingForHuman))
+	tree := treeWith(time.Time{}, newSVBlocked("sid-1", 1234, session.HumanInput))
 	sig := &fakeSignaler{}
 	rec := &fakeRecorder{}
 	d := &Dispatcher{Deliverer: signalerDeliverer{sig}, Recorder: rec}

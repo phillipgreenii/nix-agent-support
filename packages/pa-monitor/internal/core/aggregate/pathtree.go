@@ -15,10 +15,11 @@ type PathNode struct {
 	Depth          int
 	DirectSessions []*SessionView
 	Children       []*PathNode
-	// Rollup stats aggregated from this node and all descendants
+	// Rollup stats aggregated from this node and all descendants (ADR 0024
+	// {working, blocked, idle} model; long-idle counts as idle).
 	WorkingN     int
+	BlockedN     int
 	IdleN        int
-	DormantN     int
 	TotalTokens  int
 	TotalCostUSD float64
 	BurnRateSum  float64
@@ -106,21 +107,19 @@ func computeRollup(n *PathNode) {
 		switch s.Status {
 		case session.Working:
 			n.WorkingN++
-		case session.Idle, session.WaitingForHuman:
-			// WaitingForHuman is an attention state, not dormant — bucket it
-			// with Idle so the path-tree rollup keeps it visible (PathNode has
-			// no dedicated waiting count). The Directory rollup tracks a
-			// separate WaitingN; this compressed view does not.
-			n.IdleN++
+		case session.Blocked:
+			n.BlockedN++
 		default:
-			n.DormantN++
+			// Idle (including the long-idle age refinement) buckets here; the
+			// compressed path view has no separate dormant count (ADR 0024).
+			n.IdleN++
 		}
 	}
 	for _, child := range n.Children {
 		computeRollup(child)
 		n.WorkingN += child.WorkingN
+		n.BlockedN += child.BlockedN
 		n.IdleN += child.IdleN
-		n.DormantN += child.DormantN
 		n.TotalTokens += child.TotalTokens
 		n.TotalCostUSD += child.TotalCostUSD
 		n.BurnRateSum += child.BurnRateSum

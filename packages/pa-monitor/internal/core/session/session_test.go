@@ -11,14 +11,64 @@ func TestStatusString(t *testing.T) {
 		want string
 	}{
 		{Working, "working"},
+		{Blocked, "blocked"},
 		{Idle, "idle"},
-		{Dormant, "dormant"},
-		{WaitingForHuman, "waiting"},
 	}
 	for _, c := range cases {
 		if got := c.s.String(); got != c.want {
 			t.Errorf("Status(%d).String() = %q, want %q", c.s, got, c.want)
 		}
+	}
+}
+
+func TestBlockerString(t *testing.T) {
+	cases := []struct {
+		b    Blocker
+		want string
+	}{
+		{NoBlocker, ""},
+		{HumanInput, "human_input"},
+		{HumanAuthn, "human_authn"},
+		{UsageLimit, "usage_limit"},
+		{ErrorBlocker, "error"},
+	}
+	for _, c := range cases {
+		if got := c.b.String(); got != c.want {
+			t.Errorf("Blocker(%d).String() = %q, want %q", c.b, got, c.want)
+		}
+		if got := ParseBlocker(c.want); c.b != NoBlocker && got != c.b {
+			t.Errorf("ParseBlocker(%q) = %v, want %v", c.want, got, c.b)
+		}
+	}
+}
+
+func TestAwaitsHumanAndKeepAwake(t *testing.T) {
+	cases := []struct {
+		blocker         Blocker
+		retryable       bool
+		wantAwaitsHuman bool
+	}{
+		{HumanInput, false, true},
+		{HumanAuthn, false, true},
+		{UsageLimit, false, false},
+		{ErrorBlocker, true, false},
+		{ErrorBlocker, false, true},
+		{NoBlocker, false, false},
+	}
+	for _, c := range cases {
+		if got := AwaitsHuman(c.blocker, c.retryable); got != c.wantAwaitsHuman {
+			t.Errorf("AwaitsHuman(%v,%v) = %v, want %v", c.blocker, c.retryable, got, c.wantAwaitsHuman)
+		}
+		// KeepAwake for a Blocked session is the inverse of AwaitsHuman.
+		if got := KeepAwake(Blocked, c.blocker, c.retryable); got == c.wantAwaitsHuman {
+			t.Errorf("KeepAwake(Blocked,%v,%v) = %v, want %v", c.blocker, c.retryable, got, !c.wantAwaitsHuman)
+		}
+	}
+	if !KeepAwake(Working, NoBlocker, false) {
+		t.Error("KeepAwake(Working) = false, want true")
+	}
+	if KeepAwake(Idle, NoBlocker, false) {
+		t.Error("KeepAwake(Idle) = true, want false")
 	}
 }
 
@@ -75,7 +125,15 @@ func TestClassifyLiveness(t *testing.T) {
 	if got := Classify(now, now.Add(-30*time.Second), working, idle); got != Idle {
 		t.Errorf("30s ago classified as %v, want Idle", got)
 	}
-	if got := Classify(now, now.Add(-2*time.Hour), working, idle); got != Dormant {
-		t.Errorf("2h ago classified as %v, want Dormant", got)
+	// Dormancy is no longer a Classify bucket (ADR 0024): a very old mtime is
+	// still Idle. Age is surfaced separately via IsLongIdle.
+	if got := Classify(now, now.Add(-2*time.Hour), working, idle); got != Idle {
+		t.Errorf("2h ago classified as %v, want Idle", got)
+	}
+	if !IsLongIdle(now, now.Add(-2*time.Hour), idle) {
+		t.Error("IsLongIdle(2h ago, 1h) = false, want true")
+	}
+	if IsLongIdle(now, now.Add(-30*time.Second), idle) {
+		t.Error("IsLongIdle(30s ago, 1h) = true, want false")
 	}
 }

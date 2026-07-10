@@ -144,10 +144,16 @@ message Directory {
   repeated SessionView sessions = 4;
   uint32 working_n = 5;
   uint32 idle_n = 6;
+  // dormant_n (field 7) is retired by ADR 0024 — Dormant is no longer a status
+  // (a long-idle session counts as idle). The field number is NOT reused; it
+  // stays reserved for version-skew with older clients (R8).
   uint32 dormant_n = 7;
   uint64 total_tokens = 8;
   double total_cost_usd = 9;
   double burn_rate_sum = 10;
+  // blocked_n counts sessions with status == "blocked" (ADR 0024). New field
+  // number 11 (verified free); does NOT repurpose dormant_n (R8).
+  uint32 blocked_n = 11;
 }
 
 message PRInfo {
@@ -168,7 +174,7 @@ message SessionView {
   google.protobuf.Timestamp started_at = 7;
 
   // status
-  string status = 8;            // "working", "idle", "dormant"
+  string status = 8;            // ADR 0024: "working", "blocked", "idle" (older daemons may still send "dormant"/"waiting")
   string branch = 9;
   string terminal_host = 10;
   google.protobuf.Timestamp transcript_mtime = 11;
@@ -200,6 +206,11 @@ message SessionView {
   // Both fields are zero/empty when no nudge has ever been delivered.
   google.protobuf.Timestamp last_nudged_at = 28;     // wall clock of most recent successful fire
   repeated string last_nudge_sources = 29;           // sources that fired together at last_nudged_at
+
+  // blocker names WHY a blocked session cannot proceed (ADR 0024): one of
+  // "human_input" | "human_authn" | "usage_limit" | "error". Empty when
+  // status != "blocked". New field number 30 (verified free; R8).
+  string blocker = 30;
 }
 
 message Block {

@@ -64,6 +64,11 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 			r.term = terminalAbbrev(v.GetTerminalHost())
 			if v.GetStatus() != "" {
 				r.status = v.GetStatus()
+				// ADR 0024: qualify a blocked session with its blocker
+				// ("blocked/usage_limit") so the reason is visible in the table.
+				if b := v.GetBlocker(); b != "" {
+					r.status = v.GetStatus() + "/" + b
+				}
 			}
 		}
 		if le := sd.GetLastError(); le != nil && le.GetIsTerminal() {

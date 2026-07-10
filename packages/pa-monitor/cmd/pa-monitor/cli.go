@@ -29,17 +29,20 @@ func runStatus(args []string) {
 		os.Exit(2)
 	}
 
-	var working, idle, dormant int
+	// ADR 0024 {working, blocked, idle} counts. GetDormantN is folded into idle
+	// for version-skew (an older daemon still sends dormant_n; a new daemon
+	// sends 0).
+	var working, blocked, idle int
 	for _, d := range state.GetDirs() {
 		working += int(d.GetWorkingN())
-		idle += int(d.GetIdleN())
-		dormant += int(d.GetDormantN())
+		blocked += int(d.GetBlockedN())
+		idle += int(d.GetIdleN()) + int(d.GetDormantN())
 	}
 	fmt.Printf("client:        pa-monitor %s\n", version)
 	fmt.Printf("daemon:        pa-monitor %s\n", state.GetDaemonVersion())
 	fmt.Printf("uptime:        %ds\n", state.GetDaemonUptimeSeconds())
 	fmt.Printf("plan_tier:     %s\n", state.GetPlanTier())
-	fmt.Printf("sessions:      %d working, %d idle, %d dormant\n", working, idle, dormant)
+	fmt.Printf("sessions:      %d working, %d blocked, %d idle\n", working, blocked, idle)
 
 	// Collect per-session details (LastError + PendingNudge) and print
 	// annotations only when at least one session has something noteworthy.

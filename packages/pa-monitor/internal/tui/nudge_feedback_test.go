@@ -23,6 +23,16 @@ func makeStatusTree(dirPath, sid string, status session.Status) *aggregate.Tree 
 	return &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
 }
 
+// makeBlockedTree builds a single-session tree Blocked on the given blocker
+// (ADR 0024: WaitingForHuman is now Blocked + a human_* blocker).
+func makeBlockedTree(dirPath, sid string, blocker session.Blocker) *aggregate.Tree {
+	sv := &aggregate.SessionView{
+		Session: &session.Session{SessionID: sid, Status: session.Blocked, Blocker: blocker},
+	}
+	d := &aggregate.Directory{Path: dirPath, Sessions: []*aggregate.SessionView{sv}}
+	return &aggregate.Tree{Dirs: []*aggregate.Directory{d}}
+}
+
 func TestNudgeResultMsg_SurfacesQueued(t *testing.T) {
 	m := NewModel(Options{Tree: makeStatusTree("/proj/a", "sid-1", session.Idle)})
 	m.Update(NudgeResultMsg{Queued: []string{"sid-1"}})
@@ -72,7 +82,7 @@ func TestNudgeResultMsg_SurfacesWorkingSuppression(t *testing.T) {
 // (session_active), so a queue against a WaitingForHuman session must WARN
 // rather than flash a neutral "queued" that reads as delivered.
 func TestNudgeResultMsg_SurfacesWaitingForHumanSuppression(t *testing.T) {
-	m := NewModel(Options{Tree: makeStatusTree("/proj/a", "sid-1", session.WaitingForHuman)})
+	m := NewModel(Options{Tree: makeBlockedTree("/proj/a", "sid-1", session.HumanInput)})
 	m.Update(NudgeResultMsg{Queued: []string{"sid-1"}})
 	if !strings.Contains(m.nudgeFlash, "waiting for human") {
 		t.Errorf("flash %q should warn the session is waiting for human", m.nudgeFlash)
@@ -89,7 +99,7 @@ func TestNudgeResultMsg_SurfacesWaitingForHumanSuppression(t *testing.T) {
 // and a WaitingForHuman session names both suppression reasons at WARN level.
 func TestNudgeResultMsg_MixedSuppressionWarns(t *testing.T) {
 	sv1 := &aggregate.SessionView{Session: &session.Session{SessionID: "sid-w", Status: session.Working}}
-	sv2 := &aggregate.SessionView{Session: &session.Session{SessionID: "sid-h", Status: session.WaitingForHuman}}
+	sv2 := &aggregate.SessionView{Session: &session.Session{SessionID: "sid-h", Status: session.Blocked, Blocker: session.HumanInput}}
 	d := &aggregate.Directory{Path: "/proj/a", Sessions: []*aggregate.SessionView{sv1, sv2}}
 	m := NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
 	m.Update(NudgeResultMsg{Queued: []string{"sid-w", "sid-h"}})

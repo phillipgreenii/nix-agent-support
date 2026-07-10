@@ -93,31 +93,42 @@ const prefixCols = 5
 // minLabelWidth keeps rows readable on narrow terminals.
 const minLabelWidth = 32
 
+// isDormant reports whether a session renders as "dormant" (the ADR 0024 idle
+// age-refinement): an Idle session whose transcript is older than the display
+// threshold. Working/Blocked are never dormant. Derived from TranscriptMTime
+// (which is on the wire) so display clients need no separate stored flag.
+func isDormant(s *aggregate.SessionView) bool {
+	return s.Status == session.Idle &&
+		session.IsLongIdle(nowFn(), s.TranscriptMTime, session.LongIdleThreshold)
+}
+
 func visibleSessions(ss []*aggregate.SessionView, showAll bool) []*aggregate.SessionView {
 	if showAll {
 		return ss
 	}
 	out := ss[:0:len(ss)]
 	for _, s := range ss {
-		if s.Status != session.Dormant {
+		if !isDormant(s) {
 			out = append(out, s)
 		}
 	}
 	return out
 }
 
-// countsString formats the rollup counts column ("3● 1○ 1✕"), omitting zero
-// counts and dormant unless ShowAll is on.
-func countsString(workingN, idleN, dormantN int, showAll bool) string {
+// countsString formats the rollup counts column ("3● 1◐ 1○"), omitting zero
+// counts (ADR 0024 {working, blocked, idle}). Dormant is no longer a rollup
+// bucket — a long-idle session counts as idle. showAll is retained for
+// signature stability; it no longer gates a dormant count.
+func countsString(workingN, blockedN, idleN int, showAll bool) string {
 	parts := []string{}
 	if workingN > 0 {
 		parts = append(parts, fmt.Sprintf("%d●", workingN))
 	}
+	if blockedN > 0 {
+		parts = append(parts, fmt.Sprintf("%d◐", blockedN))
+	}
 	if idleN > 0 {
 		parts = append(parts, fmt.Sprintf("%d○", idleN))
-	}
-	if dormantN > 0 && showAll {
-		parts = append(parts, fmt.Sprintf("%d✕", dormantN))
 	}
 	return strings.Join(parts, " ")
 }
@@ -165,21 +176,25 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selec
 	return out
 }
 
-func symbol(st session.Status, awaiting bool, rateLimited bool, theme Theme) string {
+func symbol(st session.Status, dormant, awaiting, rateLimited bool, theme Theme) string {
 	if rateLimited {
 		return "⏸"
 	}
 	switch st {
 	case session.Working:
 		return theme.Working.Render("●")
-	case session.WaitingForHuman:
-		// Blocked on a human (fresh "waiting" flag / dangling AskUserQuestion).
-		// Distinct from idle+awaiting so it stands out and is not rendered as
-		// Dormant ✕ by the default arm.
+	case session.Blocked:
+		// Blocked base glyph (◐). sessionGlyph overlays a more specific error
+		// glyph (⊘ auth / ⚠ retryable / ✗ non-retryable) from LastError when
+		// the blocker is an error/authn; usage_limit blockers normally carry a
+		// RateLimitResetsAt and short-circuit above as ⏸.
 		return theme.Awaiting.Render("◐")
 	case session.Idle:
 		if awaiting {
 			return theme.Awaiting.Render("?")
+		}
+		if dormant {
+			return theme.Dormant.Render("✕")
 		}
 		return theme.Idle.Render("○")
 	default:
@@ -211,7 +226,7 @@ func authFailed(le *transcript.ErrorRecord) bool {
 // imminent action.
 func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	rateLimited := !s.SessionEnrichment.RateLimitResetsAt.IsZero()
-	primary := symbol(s.Status, s.SessionEnrichment.AwaitingInput, rateLimited, theme)
+	primary := symbol(s.Status, isDormant(s), s.SessionEnrichment.AwaitingInput, rateLimited, theme)
 
 	// Working (and rate-limited pause which also short-circuits symbol) takes
 	// precedence: no error or nudge marker.
@@ -308,7 +323,7 @@ func RenderPathNode(n *aggregate.PathNode, opts TreeOpts, selected, collapsed bo
 
 // nodeRollupCols formats the five stat columns for a path-node rollup row.
 func nodeRollupCols(n *aggregate.PathNode, opts TreeOpts) (col1, pct, bar, amount, burn string) {
-	col1 = countsString(n.WorkingN, n.IdleN, n.DormantN, opts.ShowAll)
+	col1 = countsString(n.WorkingN, n.BlockedN, n.IdleN, opts.ShowAll)
 
 	rollupPct := 0.0
 	if opts.TotalSessionTokens > 0 {

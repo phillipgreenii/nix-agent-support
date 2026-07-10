@@ -84,15 +84,18 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 // aggregate.Directory.
 func convertDirectory(dir *service.Directory) *aggregate.Directory {
 	ad := &aggregate.Directory{
-		Path:         dir.Path,
-		Branch:       dir.Branch,
-		WorkingN:     dir.WorkingN,
-		IdleN:        dir.IdleN,
-		DormantN:     dir.DormantN,
-		WaitingN:     dir.WaitingN,
-		TotalTokens:  int(dir.TotalTokens),
-		TotalCostUSD: dir.TotalCostUSD,
-		BurnRateSum:  dir.BurnRateSum,
+		Path:               dir.Path,
+		Branch:             dir.Branch,
+		WorkingN:           dir.WorkingN,
+		BlockedN:           dir.BlockedN,
+		IdleN:              dir.IdleN,
+		BlockedHumanInputN: dir.BlockedHumanInputN,
+		BlockedHumanAuthnN: dir.BlockedHumanAuthnN,
+		BlockedUsageLimitN: dir.BlockedUsageLimitN,
+		BlockedErrorN:      dir.BlockedErrorN,
+		TotalTokens:        int(dir.TotalTokens),
+		TotalCostUSD:       dir.TotalCostUSD,
+		BurnRateSum:        dir.BurnRateSum,
 	}
 
 	for i := range dir.Sessions {
@@ -137,6 +140,9 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 		TerminalHost:    sc.TerminalHost,
 		TranscriptMTime: sc.TranscriptMTime,
 		Status:          parseSessionStatus(sc.Status),
+		Blocker:         parseSessionBlocker(sc.Status, sc.Blocker),
+		// LongIdle is intentionally NOT set on the DB path: display clients
+		// derive the dormant age-refinement from TranscriptMTime (ADR 0024).
 		// Env is not stored in the DB; consumers that need it (label detectors)
 		// operate on the live-process path. Left nil here — the proto layer
 		// checks sv.Env != nil before forwarding env keys.
@@ -212,16 +218,29 @@ func storeWeekToCCUsageWeek(w *store.Week) *usage.WeeklyEntry {
 	}
 }
 
-// parseSessionStatus maps the stored status string to session.Status.
+// parseSessionStatus maps the stored status string to session.Status (ADR
+// 0024 R9). Legacy vocab still parses: "dormant" → idle, "waiting" → blocked.
+// Unknown → idle (visible), NOT the old default → dormant.
 func parseSessionStatus(s string) session.Status {
 	switch s {
 	case "working":
 		return session.Working
-	case "idle":
+	case "blocked", "waiting":
+		return session.Blocked
+	case "idle", "dormant":
 		return session.Idle
-	case "waiting":
-		return session.WaitingForHuman
 	default:
-		return session.Dormant
+		return session.Idle
 	}
+}
+
+// parseSessionBlocker maps the stored (status, blocker) strings to a
+// session.Blocker. A legacy "waiting" status with no persisted blocker maps to
+// human_input so the human-blocked distinction survives the transition.
+func parseSessionBlocker(status, blocker string) session.Blocker {
+	b := session.ParseBlocker(blocker)
+	if b == session.NoBlocker && status == "waiting" {
+		b = session.HumanInput
+	}
+	return b
 }

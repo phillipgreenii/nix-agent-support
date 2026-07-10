@@ -125,7 +125,8 @@ func TestHasUnattemptedNudgeableDisrupt_WaitingForHumanSkipped(t *testing.T) {
 	// Since no nudge is ever attempted for it, it must NOT keep the Mac awake.
 	le := &transcript.ErrorRecord{Kind: transcript.ErrServerError, IsTerminal: true, At: time.Now()}
 	sv := svWithError("sid-1", 100, le)
-	sv.Status = session.WaitingForHuman
+	sv.Status = session.Blocked
+	sv.Session.Blocker = session.HumanInput
 	tree := treeWithSessions(sv)
 	sigs := []signal.Signaler{detectSignaler{detect: true}}
 	if hasUnattemptedNudgeableDisrupt(tree, wm, sigs) {

@@ -32,12 +32,20 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 		switch s.Status {
 		case session.Working:
 			d.WorkingN++
+		case session.Blocked:
+			d.BlockedN++
+			switch s.Blocker {
+			case session.HumanInput:
+				d.BlockedHumanInputN++
+			case session.HumanAuthn:
+				d.BlockedHumanAuthnN++
+			case session.UsageLimit:
+				d.BlockedUsageLimitN++
+			case session.ErrorBlocker:
+				d.BlockedErrorN++
+			}
 		case session.Idle:
 			d.IdleN++
-		case session.Dormant:
-			d.DormantN++
-		case session.WaitingForHuman:
-			d.WaitingN++
 		}
 		if en.RateLimitResetsAt.After(windowResetsAt) {
 			windowResetsAt = en.RateLimitResetsAt
