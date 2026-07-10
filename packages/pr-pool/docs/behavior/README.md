@@ -1,77 +1,68 @@
 # pr-pool — behavior docs
 
-These documents describe **how pr-pool should behave**, from the user's
-perspective, in terms of user stories, journeys, constraints, goals, and
-invariants. They are **org-agnostic**: how a specific organization _uses_ pr-pool
-(its labels, team, integration styles, added roles) lives in a per-project overlay
-in that org's own repo — see the overlays list below. New to the vocabulary? Start
-with the [glossary](glossary.md).
+These documents describe **how pr-pool should behave**, from the user's perspective.
+pr-pool is a **generic orchestrator** and nothing more: it runs **queries** to
+discover items of work, and for whatever a query returns it dispatches the matching
+**role** to handle it, running that role through an **agent-runner** under a
+**budget**. It repeats until nothing is ready (a **drain**), and a **scheduler**
+re-invokes it.
 
-These follow the behavior-docs method — what a behavior doc is, the in/out rubric,
-the invariant-ID convention, the base/overlay layering, and change-control — defined
-in `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`. This set does
-not restate the method.
+pr-pool is deliberately ignorant of _what the work is_. Whether a query returns a
+pull request, an alert, a backlog item, or a policy violation is **not pr-pool's
+concern** — that meaning, and the workflow around it, is defined by whoever
+configures the queries, roles, and prompts (a deployment). pr-pool therefore names
+**no** specific tool and **no** specific workflow: it defines the **contracts** its
+extensions plug into and guarantees only what an orchestrator can guarantee.
 
-## Design principles for pr-pool
+New to the vocabulary? Start with the [glossary](glossary.md); the rules are in
+[invariants](invariants.md); the extension boundaries are in
+[contracts](contracts.md). These follow the behavior-docs method
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).
 
-- **Keep the orchestrator minimal.** `pr-pool` orchestrates and nothing more; _how_
-  work happens is defined by **configuration and extensions**, not baked into the
-  tool. See [operating pr-pool](operating-pr-pool.md).
-- **Org/repo-specific behavior lives in org/repo-specific repositories** — never in
-  this generic set.
+## What pr-pool is — and is not
 
-## The map
+| pr-pool _is_                                                 | pr-pool is _not_                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------- |
+| A drain: discover ready work → dispatch roles → run to empty | A definition of any workflow (review, merge, backlog, …)   |
+| A dispatcher of configured roles over query results          | Aware of PRs/MRs, reviews, merging, gates, or stacked work |
+| A budget- and failure-aware runner of an agent-runner        | The owner of what a role _does_ once dispatched            |
+| A definer of contracts (agent-runner, query-source)          | A namer of any specific tool or organization               |
+
+The workflows a deployment builds _on top of_ pr-pool — reviewing PRs, shepherding
+changes to merge, working a backlog, escalation, triage — live in that deployment's
+own behavior-doc set, not here.
+
+## The model
 
 ```mermaid
-flowchart TD
-    subgraph wf["Workflow layer (what SHOULD happen; tool-neutral)"]
-      w1["reviewing others' PRs"]
-      w2["shepherding my PRs to merge"]
-      w3["working the backlog"]
+flowchart LR
+    sched["scheduler (re-invokes)"] --> drain
+    subgraph drain["a drain (run to empty)"]
+      q["run each configured query"] --> items{"items returned?"}
+      items -->|yes| role["dispatch the matching role via the agent-runner"]
+      role --> q
+      items -->|no| exit["exit"]
     end
-    rev["reviews (shared review format)"]
-    subgraph op["Operator layer"]
-      o1["operating pr-pool"]
-      o2["capability map"]
-    end
-    base["glossary + invariants — the base every layer stands on"]
-
-    w1 --> rev
-    w2 --> rev
-    w3 --> rev
-    wf --> base
-    op --> base
-    rev --> base
-    base --> adr["ADRs (docs/adr) — referenced by ID"]
+    role -. bounded by .-> budget["budget"]
+    q -. supplied by .-> qsrc["query-source contract"]
+    role -. run through .-> arun["agent-runner contract"]
 ```
 
 ## Documents
 
-- **[glossary](glossary.md)** — pr-pool's vocabulary; read first.
-- **[reviewing others' PRs](reviewing-others-prs.md)** — team/requested/labeled PRs
-  I don't own; first-pass agent draft reviews.
-- **[shepherding my PRs to merge](shepherding-my-prs.md)** — my authored PRs to
-  merge; stacked PRs; merge authority per integration style.
-- **[working the backlog](working-the-backlog.md)** — pulling, triaging, routing,
-  and doing backlog work with a do→review→resolve loop; not all work ends in a PR.
-- **[reviews](reviews.md)** — what a review is and its output format
-  (whole-review / per-file / per-block comments); shared by every workflow.
-- **[cross-cutting invariants, goals & concepts](invariants.md)** — the ID'd rules
-  that hold across every workflow.
-- **[operating pr-pool](operating-pr-pool.md)** — how you drive the (deliberately
-  minimal) orchestrator; workflow-agnostic.
-- **[capability map](capability-map.md)** — which tool provides each capability
-  today; the one place tool names concentrate.
+- **[glossary](glossary.md)** — pr-pool's orchestration vocabulary; read first.
+- **[invariants](invariants.md)** — the orchestrator's own contract (the rules
+  pr-pool guarantees).
+- **[contracts](contracts.md)** — the extension boundaries: the **agent-runner**
+  contract and the **query-source** contract a deployment plugs tools into.
+- **[operating pr-pool](operating-pr-pool.md)** — how you drive it: choosing the
+  queries, roles, and tools that fulfil the contracts.
 
-## Per-project overlays (how pr-pool is actually used)
+## No org- or tool-specifics here
 
-- **pr-pool @ ZR** — `phillipg-nix-ziprecruiter · pr-pool-components/docs/behavior`.
-  ZR's watched labels, team, integration style, configured roles, and `.pr-pool`
-  config. This generic set stays deployment-agnostic; the overlay supplies the
-  specifics.
-
-## Downstream reference
-
-`docs/pr-review-flow.md` (repo root — code paths, tests, tool detail, current-state
-framing) is **downstream**: how the review flow is realized in code today. It may
-lag; when it and a behavior doc disagree, the behavior doc wins.
+This set is generic and public. It **MUST NOT** name a tool or reference any
+organization's deployment (`GOAL-SIMPLE-2`, `GOAL-METHOD-6`). Which tool fills the
+agent-runner or a query-source, and every workflow built on pr-pool, is documented by
+the deployment that does it — for example the ZR deployment keeps its set in its own
+(private) repository. That set cites these invariant IDs; this set never points back
+at it.

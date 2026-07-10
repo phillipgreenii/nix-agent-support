@@ -1,6 +1,6 @@
 # Behavior docs split into method / generic-tool / per-project-overlay sets
 
-**Status**: Accepted
+**Status**: Superseded by [0026](0026-pr-pool-behavior-scope-orchestrator-only.md)
 **Date**: 2026-07-10
 **Deciders**: Phillip Green II
 
