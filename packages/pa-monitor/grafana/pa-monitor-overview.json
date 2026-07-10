@@ -241,6 +241,7 @@
       "id": 1,
       "title": "Sessions by state",
       "type": "timeseries",
+      "description": "Sessions grouped by status over the selected range (working | blocked | idle). Trusts the carry-forward-zero gauge, so a stale series reads 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -248,7 +249,7 @@
       "gridPos": {
         "x": 0,
         "y": 8,
-        "w": 12,
+        "w": 8,
         "h": 7
       },
       "targets": [
@@ -272,23 +273,57 @@
       "id": 19,
       "title": "Session state mix (now)",
       "type": "piechart",
+      "description": "Current (instant) distribution of sessions across working | blocked | idle. Companion to the 'Sessions by state' time series.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
+        "x": 8,
         "y": 8,
-        "w": 12,
+        "w": 8,
         "h": 7
       },
       "targets": [
         {
           "expr": "sum by (state) (pa_monitor_sessions_count{workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
           "legendFormat": "{{state}}",
+          "instant": true,
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 32,
+      "title": "Blocked by reason",
+      "type": "timeseries",
+      "description": "Decomposition of the `blocked` state by `blocker` (human_input | human_authn | usage_limit | error). Only sessions with state=blocked carry a blocker label.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (blocker) (pa_monitor_sessions_count{state=\"blocked\", workspace_scope=~\"$scope\", plan_tier=~\"$plan_tier\"})",
+          "legendFormat": "{{blocker}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
     },
     {
       "id": 21,
@@ -466,9 +501,13 @@
                         "color": "green",
                         "index": 0
                       },
+                      "blocked": {
+                        "color": "orange",
+                        "index": 1
+                      },
                       "idle": {
                         "color": "yellow",
-                        "index": 1
+                        "index": 2
                       }
                     }
                   }
@@ -681,7 +720,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (pa_monitor_sessions_errored)",
+          "expr": "sum by (kind) (pa_monitor_sessions_errored{is_terminal=\"true\"})",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
@@ -743,8 +782,9 @@
     },
     {
       "id": 11,
-      "title": "Stuck on retryable error",
+      "title": "Stuck (blocked: usage_limit/error)",
       "type": "stat",
+      "description": "Sessions blocked on a machine-recoverable condition (blocker usage_limit or error). Pair with 'Auto-resume deferred' to tell 'broken' apart from 'deliberately waiting on a window reset'. Replaces the old kind=~unknown|server_error filter, which never matched rate_limit.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -752,12 +792,12 @@
       "gridPos": {
         "x": 0,
         "y": 49,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
         {
-          "expr": "sum(pa_monitor_sessions_errored{kind=~\"unknown|server_error\"})",
+          "expr": "sum(pa_monitor_sessions_count{state=\"blocked\", blocker=~\"usage_limit|error\"})",
           "refId": "A"
         }
       ]
@@ -771,9 +811,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 8,
+        "x": 6,
         "y": 49,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -792,15 +832,38 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 49,
-        "w": 8,
+        "w": 6,
         "h": 4
       },
       "targets": [
         {
           "expr": "sum(increase(pa_monitor_caffeinate_grace_expirations_total[1h]))",
           "legendFormat": "expirations",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "title": "Auto-resume deferred (waiting on window)",
+      "type": "stat",
+      "description": "Sessions where auto-resume is deliberately WAITING for a rate-limit window reset (pa_monitor_nudge_deferred, cause=window_pending). Distinguishes 'deliberately waiting' from 'broken' — a non-zero value explains why blocked/usage_limit sessions are not being nudged yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 49,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum by (cause) (pa_monitor_nudge_deferred)",
+          "legendFormat": "{{cause}}",
           "refId": "A"
         }
       ]
@@ -1064,7 +1127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(pa_monitor_sessions_errored{kind=\"authentication_failed\"}) or vector(0)",
+          "expr": "sum(pa_monitor_sessions_errored{kind=\"authentication_failed\", is_terminal=\"true\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A"
         }

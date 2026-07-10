@@ -26,7 +26,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum(pa_monitor_sessions_errored{kind="authentication_failed"}) or vector(0)
+              expr: sum(pa_monitor_sessions_errored{kind="authentication_failed", is_terminal="true"}) or vector(0)
           - refId: B
             datasourceUid: __expr__
             model:
