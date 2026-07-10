@@ -25,14 +25,14 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 
 	tree := &aggregate.Tree{
 		GeneratedAt: st.Now,
-		// CCUsageProbed is true on the DB path by definition: if the DB had no
+		// CostProbed is true on the DB path by definition: if the DB had no
 		// data, GetState would return nil and we would never reach this function.
-		CCUsageProbed: true,
+		CostProbed: true,
 	}
 
 	// Convert block.
 	if st.Block != nil {
-		tree.ActiveBlock = storeBlockToCCUsageBlock(st.Block)
+		tree.ActiveBlock = storeBlockToUsageBlock(st.Block)
 		tree.PlanCapUSD = st.Block.PlanCapUSD
 
 		// Carry the authoritative status-line rate_limits windows (ADR 0021 §6)
@@ -55,7 +55,7 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 
 	// Convert week.
 	if st.Week != nil {
-		tree.ActiveWeek = storeWeekToCCUsageWeek(st.Week)
+		tree.ActiveWeek = storeWeekToUsageWeek(st.Week)
 		tree.WeekCapUSD = st.Week.WeekCapUSD
 	}
 
@@ -185,12 +185,12 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 	}
 }
 
-// storeBlockToCCUsageBlock converts a *store.Block into a *usage.Block.
+// storeBlockToUsageBlock converts a *store.Block into a *usage.Block.
 // The BurnRate and Projection fields are not stored in the DB; they are
 // set to zero — callers that need them (ProjectedExhaust, proto render)
 // must recompute them if needed. For the "all sessions" view that Task 20
 // enables, zero burn-rate means the projection simply doesn't render.
-func storeBlockToCCUsageBlock(b *store.Block) *usage.Block {
+func storeBlockToUsageBlock(b *store.Block) *usage.Block {
 	if b == nil {
 		return nil
 	}
@@ -206,8 +206,8 @@ func storeBlockToCCUsageBlock(b *store.Block) *usage.Block {
 	}
 }
 
-// storeWeekToCCUsageWeek converts a *store.Week into a *usage.WeeklyEntry.
-func storeWeekToCCUsageWeek(w *store.Week) *usage.WeeklyEntry {
+// storeWeekToUsageWeek converts a *store.Week into a *usage.WeeklyEntry.
+func storeWeekToUsageWeek(w *store.Week) *usage.WeeklyEntry {
 	if w == nil {
 		return nil
 	}

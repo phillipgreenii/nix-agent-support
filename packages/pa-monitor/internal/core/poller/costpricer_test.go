@@ -50,16 +50,16 @@ func TestSnapshotConsumesCostPricerBlock(t *testing.T) {
 	if tree.ActiveBlock == nil || tree.ActiveBlock.CostUSD != 12.0 {
 		t.Errorf("tree.ActiveBlock = %+v, want the pricer's block (cost 12)", tree.ActiveBlock)
 	}
-	if !tree.CCUsageProbed {
-		t.Error("tree.CCUsageProbed = false, want true (from pricer state)")
+	if !tree.CostProbed {
+		t.Error("tree.CostProbed = false, want true (from pricer state)")
 	}
-	if tree.CCUsageErr == nil {
-		t.Error("tree.CCUsageErr = nil, want the pricer's probe error")
+	if tree.CostProbeErr == nil {
+		t.Error("tree.CostProbeErr = nil, want the pricer's probe error")
 	}
 }
 
 // TestSnapshotNilPricerIsSafe proves a nil CostPricer leaves the block absent
-// and probe state zero, matching the pre-port "no CCUsageFn" behavior.
+// and probe state zero, matching the pre-port "no cost pricer" behavior.
 func TestSnapshotNilPricerIsSafe(t *testing.T) {
 	p := &Poller{
 		SessionsDir: "../../../tests/fixtures/sessions",
@@ -75,7 +75,7 @@ func TestSnapshotNilPricerIsSafe(t *testing.T) {
 	if tree.ActiveBlock != nil {
 		t.Errorf("tree.ActiveBlock = %+v, want nil with nil pricer", tree.ActiveBlock)
 	}
-	if tree.CCUsageProbed {
-		t.Error("tree.CCUsageProbed = true, want false with nil pricer")
+	if tree.CostProbed {
+		t.Error("tree.CostProbed = true, want false with nil pricer")
 	}
 }

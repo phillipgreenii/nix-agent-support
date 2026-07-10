@@ -3,7 +3,6 @@
   stdenv,
   mkGoApp,
   makeWrapper,
-  ccusage,
   gh,
   tmux,
   # cmux is a macOS-only .app from phillipgreenii-nix-overlay (already a
@@ -42,7 +41,6 @@ mkGoApp {
 
   # Wrap the binaries pa-monitor shells out to onto its PATH so they work
   # out-of-the-box under launchd (whose default PATH is /usr/bin:/bin:...):
-  #   - ccusage: 5h billing-block header
   #   - gh: PR-status lookups
   #   - tmux / cmux: signal-layer detection + auto-resume delivery. These are
   #     NOT optional — without them every session on that multiplexer is
@@ -58,7 +56,6 @@ mkGoApp {
       --prefix PATH : ${
         lib.makeBinPath (
           [
-            ccusage
             gh
             tmux
           ]

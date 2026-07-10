@@ -183,11 +183,11 @@ func fixtureCJK() *Model {
 	return NewModel(Options{Tree: &aggregate.Tree{Dirs: []*aggregate.Directory{d}}})
 }
 
-// TestViewRendersSessionsWhenCCUsageReportsNoActiveBlock guards against the
+// TestViewRendersSessionsWhenCostProbeReportsNoActiveBlock guards against the
 // regression where the body suppresses session rows once ccusage successfully
 // probes and reports no active 5h block. Session data is primary; the missing
 // 5h block is metadata already shown in the header.
-func TestViewRendersSessionsWhenCCUsageReportsNoActiveBlock(t *testing.T) {
+func TestViewRendersSessionsWhenCostProbeReportsNoActiveBlock(t *testing.T) {
 	d := &aggregate.Directory{
 		Path: "/p",
 		Sessions: []*aggregate.SessionView{
@@ -201,10 +201,10 @@ func TestViewRendersSessionsWhenCCUsageReportsNoActiveBlock(t *testing.T) {
 		WorkingN: 1,
 	}
 	tree := &aggregate.Tree{
-		Dirs:          []*aggregate.Directory{d},
-		CCUsageProbed: true, // probe completed
-		ActiveBlock:   nil,  // ccusage reports no active block
-		CCUsageErr:    nil,  // no error — it just reports empty
+		Dirs:         []*aggregate.Directory{d},
+		CostProbed:   true, // probe completed
+		ActiveBlock:  nil,  // ccusage reports no active block
+		CostProbeErr: nil,  // no error — it just reports empty
 	}
 	m := NewModel(Options{Tree: tree})
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -242,10 +242,10 @@ func TestPollResultDoesNotResetCursorWhenBlockEmpty(t *testing.T) {
 
 	// Simulate a poll result with ccusage probed but no active block.
 	probedTree := &aggregate.Tree{
-		Dirs:          []*aggregate.Directory{d},
-		CCUsageProbed: true,
-		ActiveBlock:   nil,
-		CCUsageErr:    nil,
+		Dirs:         []*aggregate.Directory{d},
+		CostProbed:   true,
+		ActiveBlock:  nil,
+		CostProbeErr: nil,
 	}
 	m.Update(pollResultMsg{tree: probedTree})
 

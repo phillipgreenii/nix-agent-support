@@ -26,7 +26,7 @@ func PlanCapUSD(tier string) float64 {
 //	Max 5x    : 140–280 hours of Sonnet 4  +  15–35 hours of Opus 4
 //	Max 20x   : 240–480 hours of Sonnet 4  +  24–40 hours of Opus 4
 //
-// pa-monitor measures weekly usage in USD via ccusage (token volume × per-token
+// pa-monitor measures weekly usage in USD from a native transcript scan (token volume × per-token
 // pricing). The conversion is non-deterministic: real $/hour varies with how
 // hard the user pushes the model. The caps below use a conservative
 // upper-bound estimate so the soft-cap warning fires somewhat before the

@@ -18,12 +18,12 @@ func FromTree(tree *aggregate.Tree) *DaemonState {
 		return &DaemonState{}
 	}
 	d := &DaemonState{
-		PlanCapUsd:    tree.PlanCapUSD,
-		WeekCapUsd:    tree.WeekCapUSD,
-		CcusageProbed: tree.CCUsageProbed,
+		PlanCapUsd: tree.PlanCapUSD,
+		WeekCapUsd: tree.WeekCapUSD,
+		CostProbed: tree.CostProbed,
 	}
-	if tree.CCUsageErr != nil {
-		d.CcusageError = tree.CCUsageErr.Error()
+	if tree.CostProbeErr != nil {
+		d.CostProbeError = tree.CostProbeErr.Error()
 	}
 	if !tree.WindowResetsAt.IsZero() {
 		d.WindowResetsAt = timestamppb.New(tree.WindowResetsAt)

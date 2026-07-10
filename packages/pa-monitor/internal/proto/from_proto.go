@@ -25,13 +25,13 @@ func ToTree(s *DaemonState) *aggregate.Tree {
 		return nil
 	}
 	t := &aggregate.Tree{
-		PlanCapUSD:    s.GetPlanCapUsd(),
-		WeekCapUSD:    s.GetWeekCapUsd(),
-		CCUsageProbed: s.GetCcusageProbed(),
-		GeneratedAt:   timeFromTS(s.GetNow()),
+		PlanCapUSD:  s.GetPlanCapUsd(),
+		WeekCapUSD:  s.GetWeekCapUsd(),
+		CostProbed:  s.GetCostProbed(),
+		GeneratedAt: timeFromTS(s.GetNow()),
 	}
-	if e := s.GetCcusageError(); e != "" {
-		t.CCUsageErr = errors.New(e)
+	if e := s.GetCostProbeError(); e != "" {
+		t.CostProbeErr = errors.New(e)
 	}
 	if ts := s.GetWindowResetsAt(); ts != nil {
 		t.WindowResetsAt = timeFromTS(ts)

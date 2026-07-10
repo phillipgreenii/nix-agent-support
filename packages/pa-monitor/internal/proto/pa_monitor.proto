@@ -107,8 +107,8 @@ message DaemonState {
   string plan_tier = 9;
   double plan_cap_usd = 10;
   double week_cap_usd = 11;
-  bool ccusage_probed = 12;
-  string ccusage_error = 13;
+  bool cost_probed = 12;
+  string cost_probe_error = 13;
   bool auto_resume_enabled = 14;
   uint32 auto_resume_delay_s = 15;
 

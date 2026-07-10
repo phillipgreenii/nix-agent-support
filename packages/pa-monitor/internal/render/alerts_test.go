@@ -39,9 +39,9 @@ func TestAlertsAutoResumeCountdown(t *testing.T) {
 
 func TestAlertsTopupShows(t *testing.T) {
 	tree := &aggregate.Tree{
-		CCUsageProbed: true,
-		PlanCapUSD:    50,
-		ActiveBlock:   &usage.Block{CostUSD: 75},
+		CostProbed:  true,
+		PlanCapUSD:  50,
+		ActiveBlock: &usage.Block{CostUSD: 75},
 	}
 	out := Alerts(tree, AlertsOpts{
 		Now:           time.Now(),
@@ -60,7 +60,7 @@ func TestAlertsTopupShows(t *testing.T) {
 func TestAlertsPipeJoinedWhenMultiple(t *testing.T) {
 	now := time.Date(2026, 5, 8, 20, 0, 0, 0, time.UTC)
 	tree := &aggregate.Tree{
-		CCUsageProbed:  true,
+		CostProbed:     true,
 		PlanCapUSD:     50,
 		ActiveBlock:    &usage.Block{CostUSD: 75},
 		WindowResetsAt: now.Add(60 * time.Second),

@@ -326,16 +326,16 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	}
 
 	var block *usage.Block
-	var ccUsageProbed bool
-	var ccUsageErr error
+	var costProbed bool
+	var costProbeErr error
 	if p.Pricer != nil {
 		block, _ = p.Pricer.ActiveBlock(ctx)
-		ccUsageProbed, ccUsageErr = p.Pricer.Probed()
+		costProbed, costProbeErr = p.Pricer.Probed()
 	}
 
 	tree := aggregate.Build(sessions, enriched, prByDir, block, p.BlockCapUSD)
-	tree.CCUsageProbed = ccUsageProbed
-	tree.CCUsageErr = ccUsageErr
+	tree.CostProbed = costProbed
+	tree.CostProbeErr = costProbeErr
 
 	if p.WriteService != nil {
 		nowUTC := now.UTC()

@@ -65,11 +65,6 @@
       ...
     }:
     let
-      # Injects ccusage from llm-agents into pkgs so pa-monitor can callPackage it.
-      llmAgentsCcusageOverlay = final: _prev: {
-        inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
-      };
-
       # Overlay populated incrementally as packages are migrated.
       overlay =
         final: _prev:
@@ -94,7 +89,6 @@
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           _agentSupportPythonBuilders = pythonBuilders; # expose for modules
-          inherit (llm-agents.packages.${final.stdenv.hostPlatform.system}) ccusage;
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit (goBuilders) mkGoApp;
           };
@@ -365,7 +359,6 @@
                   config.allowUnfree = true;
                 };
               })
-              llmAgentsCcusageOverlay
               overlay
             ];
           };
@@ -373,7 +366,7 @@
         in
         {
           # The perSystem pkgs carries the full agent-support overlay stack
-          # (gomod2nix + nix-overlay + unstable + llm-agents ccusage + this
+          # (gomod2nix + nix-overlay + unstable + this
           # flake's overlay). flake-parts' own `pkgs` arg is overridden so the
           # auto-contributed checks (formatting, linting, pre-commit) and the
           # checks below all see the overlaid package set.

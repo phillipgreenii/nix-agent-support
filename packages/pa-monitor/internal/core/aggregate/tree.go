@@ -76,8 +76,8 @@ type Tree struct {
 	PlanCapUSD     float64
 	WeekCapUSD     float64 // used by week tracker integration
 	GeneratedAt    time.Time
-	CCUsageProbed  bool      // true once the CostPricer has probed once (wire field name retained)
-	CCUsageErr     error     // non-nil if the last cost probe (native transcript scan) failed
+	CostProbed     bool      // true once the CostPricer has probed once
+	CostProbeErr   error     // non-nil if the last cost probe (native transcript scan) failed
 	WindowResetsAt time.Time // global: max RateLimitResetsAt across all sessions (zero = none)
 
 	// Authoritative status-line rate_limits windows (ADR 0021 §6). These are

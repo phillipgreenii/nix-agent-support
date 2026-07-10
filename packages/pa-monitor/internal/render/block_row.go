@@ -46,9 +46,9 @@ func BlockRow(tree *aggregate.Tree, opts BlockRowOpts) string {
 		now = time.Now()
 	}
 	switch {
-	case !tree.CCUsageProbed:
+	case !tree.CostProbed:
 		return "5h loading…"
-	case tree.CCUsageErr != nil:
+	case tree.CostProbeErr != nil:
 		return "5h unavailable — cost scan failed"
 	case tree.ActiveBlock == nil:
 		return "5h no active block"

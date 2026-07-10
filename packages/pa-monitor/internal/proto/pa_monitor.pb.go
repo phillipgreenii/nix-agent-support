@@ -261,8 +261,8 @@ type DaemonState struct {
 	PlanTier          string                 `protobuf:"bytes,9,opt,name=plan_tier,json=planTier,proto3" json:"plan_tier,omitempty"`
 	PlanCapUsd        float64                `protobuf:"fixed64,10,opt,name=plan_cap_usd,json=planCapUsd,proto3" json:"plan_cap_usd,omitempty"`
 	WeekCapUsd        float64                `protobuf:"fixed64,11,opt,name=week_cap_usd,json=weekCapUsd,proto3" json:"week_cap_usd,omitempty"`
-	CcusageProbed     bool                   `protobuf:"varint,12,opt,name=ccusage_probed,json=ccusageProbed,proto3" json:"ccusage_probed,omitempty"`
-	CcusageError      string                 `protobuf:"bytes,13,opt,name=ccusage_error,json=ccusageError,proto3" json:"ccusage_error,omitempty"`
+	CostProbed        bool                   `protobuf:"varint,12,opt,name=cost_probed,json=costProbed,proto3" json:"cost_probed,omitempty"`
+	CostProbeError    string                 `protobuf:"bytes,13,opt,name=cost_probe_error,json=costProbeError,proto3" json:"cost_probe_error,omitempty"`
 	AutoResumeEnabled bool                   `protobuf:"varint,14,opt,name=auto_resume_enabled,json=autoResumeEnabled,proto3" json:"auto_resume_enabled,omitempty"`
 	AutoResumeDelayS  uint32                 `protobuf:"varint,15,opt,name=auto_resume_delay_s,json=autoResumeDelayS,proto3" json:"auto_resume_delay_s,omitempty"`
 	// Two unambiguous caffeinate indicators (see CaffeinateProcess).
@@ -398,16 +398,16 @@ func (x *DaemonState) GetWeekCapUsd() float64 {
 	return 0
 }
 
-func (x *DaemonState) GetCcusageProbed() bool {
+func (x *DaemonState) GetCostProbed() bool {
 	if x != nil {
-		return x.CcusageProbed
+		return x.CostProbed
 	}
 	return false
 }
 
-func (x *DaemonState) GetCcusageError() string {
+func (x *DaemonState) GetCostProbeError() string {
 	if x != nil {
-		return x.CcusageError
+		return x.CostProbeError
 	}
 	return ""
 }
@@ -2614,7 +2614,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x10push_interval_ms\x18\x01 \x01(\rR\x0epushIntervalMs\"\r\n" +
 	"\vPingRequest\":\n" +
 	"\fPingResponse\x12*\n" +
-	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xee\t\n" +
+	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xed\t\n" +
 	"\vDaemonState\x12,\n" +
 	"\x03now\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x03now\x122\n" +
 	"\x15daemon_uptime_seconds\x18\x02 \x01(\x04R\x13daemonUptimeSeconds\x12%\n" +
@@ -2630,9 +2630,10 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	" \x01(\x01R\n" +
 	"planCapUsd\x12 \n" +
 	"\fweek_cap_usd\x18\v \x01(\x01R\n" +
-	"weekCapUsd\x12%\n" +
-	"\x0eccusage_probed\x18\f \x01(\bR\rccusageProbed\x12#\n" +
-	"\rccusage_error\x18\r \x01(\tR\fccusageError\x12.\n" +
+	"weekCapUsd\x12\x1f\n" +
+	"\vcost_probed\x18\f \x01(\bR\n" +
+	"costProbed\x12(\n" +
+	"\x10cost_probe_error\x18\r \x01(\tR\x0ecostProbeError\x12.\n" +
 	"\x13auto_resume_enabled\x18\x0e \x01(\bR\x11autoResumeEnabled\x12-\n" +
 	"\x13auto_resume_delay_s\x18\x0f \x01(\rR\x10autoResumeDelayS\x12'\n" +
 	"\x0fcaffeinate_mode\x18\x10 \x01(\bR\x0ecaffeinateMode\x12O\n" +

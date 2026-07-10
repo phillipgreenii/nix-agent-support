@@ -18,9 +18,9 @@ func TestBlockRowPreActiveStates(t *testing.T) {
 		tree *aggregate.Tree
 		want string
 	}{
-		{"loading", &aggregate.Tree{CCUsageProbed: false}, "5h loading…"},
-		{"unavailable", &aggregate.Tree{CCUsageProbed: true, CCUsageErr: errors.New("not found")}, "5h unavailable"},
-		{"no active block", &aggregate.Tree{CCUsageProbed: true}, "5h no active block"},
+		{"loading", &aggregate.Tree{CostProbed: false}, "5h loading…"},
+		{"unavailable", &aggregate.Tree{CostProbed: true, CostProbeErr: errors.New("not found")}, "5h unavailable"},
+		{"no active block", &aggregate.Tree{CostProbed: true}, "5h no active block"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,8 +37,8 @@ func TestBlockRowPreActiveStates(t *testing.T) {
 
 func TestBlockRowActiveBlockTiers(t *testing.T) {
 	tree := &aggregate.Tree{
-		CCUsageProbed: true,
-		PlanCapUSD:    100,
+		CostProbed: true,
+		PlanCapUSD: 100,
 		ActiveBlock: &usage.Block{
 			CostUSD:    35,
 			EndTime:    time.Date(2026, 5, 8, 1, 0, 0, 0, time.UTC),
@@ -95,8 +95,8 @@ func TestBlockRowActiveBlockTiers(t *testing.T) {
 
 func TestBlockRowFitsAtTierFloor(t *testing.T) {
 	tree := &aggregate.Tree{
-		CCUsageProbed: true,
-		PlanCapUSD:    100,
+		CostProbed: true,
+		PlanCapUSD: 100,
 		ActiveBlock: &usage.Block{
 			CostUSD:    35,
 			EndTime:    time.Date(2026, 5, 8, 1, 0, 0, 0, time.UTC),
@@ -121,8 +121,8 @@ func TestBlockRow_AuthoritativeRateLimitPercentage(t *testing.T) {
 	fivePct := 34.0
 	// Cost-derived pct would be 10/100 = 10%; authoritative must win with 34%.
 	base := &aggregate.Tree{
-		CCUsageProbed: true,
-		PlanCapUSD:    100,
+		CostProbed: true,
+		PlanCapUSD: 100,
 		ActiveBlock: &usage.Block{
 			CostUSD: 10,
 			EndTime: now.Add(3 * time.Hour),
@@ -154,9 +154,9 @@ func TestBlockRow_AuthoritativeRateLimitPercentage(t *testing.T) {
 func TestBlockRow_FallsBackToCostPercentageWhenNoRateLimit(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	tree := &aggregate.Tree{
-		CCUsageProbed: true,
-		PlanCapUSD:    100,
-		ActiveBlock:   &usage.Block{CostUSD: 35, EndTime: now.Add(3 * time.Hour)},
+		CostProbed:  true,
+		PlanCapUSD:  100,
+		ActiveBlock: &usage.Block{CostUSD: 35, EndTime: now.Add(3 * time.Hour)},
 		// FiveHourPct nil -> fall back.
 	}
 	out := BlockRow(tree, BlockRowOpts{Width: 200, Now: now, StaleAfter: 10 * time.Minute})
