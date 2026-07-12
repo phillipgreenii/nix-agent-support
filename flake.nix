@@ -14,7 +14,11 @@
     llm-agents.url = "github:numtide/llm-agents.nix";
     phillipgreenii-nix-overlay = {
       url = "github:phillipgreenii/nix-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        phillipgreenii-nix-base.follows = "phillipgreenii-nix-base";
+        flake-parts.follows = "phillipgreenii-nix-base/flake-parts";
+      };
     };
     phillipgreenii-nix-base = {
       url = "github:phillipgreenii/nix-repo-base";
