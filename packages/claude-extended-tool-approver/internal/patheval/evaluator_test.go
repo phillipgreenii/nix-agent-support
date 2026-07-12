@@ -308,9 +308,18 @@ func TestPathEvaluator_SymlinkResolution(t *testing.T) {
 
 	pe := New(projectDir)
 
+	// A symlink inside the project that resolves OUTSIDE it must never be
+	// treated as WRITABLE — that is the escalation the escape check guards
+	// against (see Evaluate: "the concern is only when a symlink could escalate
+	// access"). The exact non-writable value is environment-dependent: natively
+	// the target (a sibling t.TempDir()) is PathUnknown, but under the nix build
+	// sandbox TMPDIR is the build dir beneath /nix/var/nix/builds/..., so the
+	// target lands in the /nix read-only zone and the evaluator (correctly, per
+	// its documented "escape to a less-permissive zone" rule) returns
+	// PathReadOnly. Both are non-writable — assert the invariant, not one value.
 	got := pe.Evaluate(symlinkPath + "/secret.txt")
-	if got != PathUnknown {
-		t.Errorf("Evaluate(symlink escaping project) = %v, want PathUnknown", got)
+	if got.CanWrite() {
+		t.Errorf("Evaluate(symlink escaping project) = %v, want a non-writable zone", got)
 	}
 
 	realFile := filepath.Join(projectDir, "real.txt")

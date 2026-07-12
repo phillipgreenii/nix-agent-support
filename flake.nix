@@ -89,6 +89,7 @@
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           _agentSupportPythonBuilders = pythonBuilders; # expose for modules
+          _agentSupportGoBuilders = goBuilders; # expose for checks (mirrors bash/python)
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit (goBuilders) mkGoApp;
           };
@@ -424,9 +425,52 @@
                     ./home/programs/claude-settings/tests/test_helper.bash
                   ];
                 };
+
+              # Go test gate (bead pg2-adhga). The package builds pin
+              # `subPackages = [ "cmd/<name>" ]`, and the gomod2nix builder's
+              # goCheckHook scopes `go test` to `$subPackages` when set — so the
+              # shipped-binary build (and thus `nix flake check` via that build)
+              # only tests `cmd/`, leaving every `internal/`+`pkg/` suite ungated
+              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). These
+              # dedicated checks call mkGoApp WITHOUT `subPackages`, so
+              # `getGoDirs` (go-config-hook.sh) falls back to `find … *test.go`
+              # and the check phase exercises the FULL module. The shipped-binary
+              # builds keep `subPackages` (stay scoped) — only this gate pays the
+              # test cost, and only under `nix flake check`, never a system build.
+              mkGoTestCheck = pkgs._agentSupportGoBuilders.mkGoApp;
             in
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
+
+              # ceta — the finding's primary motivation: 31 internal rule / engine
+              # / patheval security tests, all sandbox-safe (zero net/exec).
+              claude-extended-tool-approver-go-tests = mkGoTestCheck {
+                pname = "claude-extended-tool-approver-go-tests";
+                src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
+                gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
+              };
+
+              # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
+              # duration, run). git on PATH for the real-git unit tests; bd/pn
+              # tests t.Skip when their tool is absent (matches pb/default.nix
+              # nativeCheckInputs). contract/smoke-tagged files stay off by default.
+              pb-go-tests = mkGoTestCheck {
+                pname = "pb-go-tests";
+                src = lib.cleanSource ./packages/pb; # matches default.nix
+                gomod2nixToml = ./packages/pb/gomod2nix.toml;
+                nativeCheckInputs = [ pkgs.git ];
+              };
+
+              # pg-pr — 100+ internal/pkg suites incl. sync/store/auth security
+              # seams. exec is temp-repo git (git on PATH) + in-process httptest
+              # (loopback, sandbox-ok); the github.com URLs in the fixtures are
+              # struct data, not live calls.
+              pg-pr-go-tests = mkGoTestCheck {
+                pname = "pg-pr-go-tests";
+                src = ./packages/pg-pr; # matches default.nix (raw ./., no cleanSource)
+                gomod2nixToml = ./packages/pg-pr/gomod2nix.toml;
+                nativeCheckInputs = [ pkgs.git ];
+              };
 
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
