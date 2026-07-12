@@ -1,0 +1,17 @@
+{
+  "description": "Refuse AI-authored PR-comment writes that bypass the pg-pr CLI agent marker",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/require-agent-pr-comment-marker.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

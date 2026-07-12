@@ -21,20 +21,22 @@ set -euo pipefail
 
 payload="$(cat -)"
 
-# Only inspect Bash tool calls; other tools are out of scope.
-case "${CLAUDE_TOOL_NAME:-}" in
+# Only inspect Bash tool calls; other tools are out of scope. Claude Code
+# delivers the tool name in the stdin JSON as `.tool_name` (there is no
+# CLAUDE_TOOL_NAME env var), so read it from the same payload the command is
+# read from below.
+tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+case "$tool_name" in
 Bash) ;;
 *)
-  echo "$payload"
   exit 0
   ;;
 esac
 
-# Extract the command. CLAUDE_TOOL_INPUT may carry it as JSON.
+# Extract the command from the stdin payload.
 command="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 
 if [ -z "$command" ]; then
-  echo "$payload"
   exit 0
 fi
 
@@ -42,7 +44,12 @@ fi
 case "$command" in
 *"pg-pr comment add"* | *"pg-pr review post"* | *"pg-pr review submit"* | \
   *"gh pr comment"* | *"gh api"*"reviews"*"--method POST"*)
-  if ! printf '%s' "$command" | grep -q $'\U0001F916'; then
+  # Match the agent marker (🤖 = U+1F916) by its raw UTF-8 bytes so the check is
+  # locale-independent — `$'\U…'` degrades to the literal string "\U0001F916"
+  # under a non-UTF-8 (C) locale parse, e.g. the nix build sandbox (see CLAUDE.md
+  # status-line note). LC_ALL=C makes grep byte-oriented; the \x escapes are
+  # always these bytes. Verified: `printf '\U0001F916' | xxd` -> f0 9f a4 96.
+  if ! printf '%s' "$command" | LC_ALL=C grep -qF -- $'\xf0\x9f\xa4\x96'; then
     echo "Refusing PR-comment write without the agent marker (🤖)." >&2
     echo "The pg-pr CLI auto-applies the marker; reach for 'pg-pr comment add' / 'pg-pr review post' instead of invoking gh directly." >&2
     exit 2
@@ -50,5 +57,4 @@ case "$command" in
   ;;
 esac
 
-echo "$payload"
 exit 0

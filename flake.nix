@@ -364,6 +364,18 @@
             ];
           };
           inherit (pkgs) lib;
+
+          # This repo's Claude Code marketplace derivation, hoisted so both the
+          # `packages` output and the `test-pg-pr-hook-registered` check (bead
+          # pg2-o3eyk) reference the SAME build (no second builder eval).
+          agentSupportMarketplace =
+            (phillipgreenii-nix-base.lib.mkClaudeMarketplaceBuilders { inherit pkgs lib; }).mkClaudeMarketplace
+              {
+                src = lib.fileset.toSource {
+                  root = ./claude-marketplace;
+                  fileset = ./claude-marketplace;
+                };
+              };
         in
         {
           # The perSystem pkgs carries the full agent-support overlay stack
@@ -441,6 +453,61 @@
             in
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
+
+              # pg-pr agent-marker PreToolUse hook (bead pg2-o3eyk). Drives the
+              # fixed script over CC-shaped stdin JSON; gates the tool-name-from-
+              # stdin and byte-escaped-marker fixes (red on the pre-fix behaviour).
+              test-pg-pr-marker-hook = checksHelpers.testBashScripts {
+                package = pkgs.writeShellScriptBin "require-agent-pr-comment-marker" ''
+                  exec ${./claude-marketplace/pg-pr/hooks/require-agent-pr-comment-marker.sh} "$@"
+                '';
+                tests = ./tests/pg-pr-marker.bats;
+                extraInputs = [ pkgs.jq ];
+              };
+
+              # Structural gate for the "never invoked" bug (pg2-o3eyk): the bats
+              # suite cannot test CC auto-discovery, and mkClaudeMarketplace only
+              # cp's hooks.json (never parses it). Assert the BUILT marketplace
+              # ships a valid-JSON hooks.json with a PreToolUse/Bash matcher whose
+              # command targets the script, and that the script is executable at
+              # the install path. Red on the current tree (no hooks.json) and on
+              # a lost exec bit / rename / wrong matcher the copy would pass silently.
+              test-pg-pr-hook-registered =
+                pkgs.runCommand "test-pg-pr-hook-registered" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    hooks="${agentSupportMarketplace}/pg-pr/hooks/hooks.json"
+                    script="${agentSupportMarketplace}/pg-pr/hooks/require-agent-pr-comment-marker.sh"
+
+                    test -f "$hooks" || {
+                      echo "FAIL: pg-pr hooks.json not bundled" >&2
+                      exit 1
+                    }
+                    jq -e . "$hooks" >/dev/null || {
+                      echo "FAIL: hooks.json is not valid JSON" >&2
+                      exit 1
+                    }
+
+                    matcher="$(jq -r '.hooks.PreToolUse[0].matcher' "$hooks")"
+                    [ "$matcher" = "Bash" ] || {
+                      echo "FAIL: PreToolUse matcher != Bash ($matcher)" >&2
+                      exit 1
+                    }
+
+                    cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$hooks")"
+                    case "$cmd" in
+                    *'require-agent-pr-comment-marker.sh') ;;
+                    *)
+                      echo "FAIL: hook command does not target the marker script ($cmd)" >&2
+                      exit 1
+                      ;;
+                    esac
+
+                    test -x "$script" || {
+                      echo "FAIL: hook script not executable at install path" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
 
               # ceta — the finding's primary motivation: 31 internal rule / engine
               # / patheval security tests, all sandbox-safe (zero net/exec).
@@ -1316,14 +1383,7 @@
             # plugin's version is stamped `<declared>+<digest>`; pg-pr ships
             # defaultEnabled=false, the rest default on. Registered into the
             # claude-marketplaces consumer module via marketplaces.nixProvided below.
-            phillipgreenii-nix-agent-support-marketplace =
-              (phillipgreenii-nix-base.lib.mkClaudeMarketplaceBuilders { inherit pkgs lib; }).mkClaudeMarketplace
-                {
-                  src = lib.fileset.toSource {
-                    root = ./claude-marketplace;
-                    fileset = ./claude-marketplace;
-                  };
-                };
+            phillipgreenii-nix-agent-support-marketplace = agentSupportMarketplace;
 
             # Re-export overlay-defined Go packages so `nix-update -F` (used in
             # update-deps.sh) can resolve them via flake.packages.<system>.
