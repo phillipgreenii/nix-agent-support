@@ -24,9 +24,21 @@ case "${1:-}" in
 esac
 
 # Resolve which update-locks-lib.bash to source via the canonical flake resolver.
+# Pin nix-repo-base to the locked rev (closes the unpinned-HEAD code-execution
+# hole that GH_TOKEN-bearing CI would otherwise expose). Fall back to unpinned
+# HEAD when the lock itself is the broken artifact, preserving the self-repair
+# property (see update-locks-lib.bash ANCHOR ul_reexec-self-repair-nrb-rev-fallback).
+NRB_REV=$(nix flake metadata --json 2>/dev/null |
+  jq -r '.locks.nodes."phillipgreenii-nix-base".locked.rev // empty')
+if [ -n "$NRB_REV" ]; then
+  NRB_REF="github:phillipgreenii/nix-repo-base/${NRB_REV}"
+else
+  echo "WARN: could not resolve nix-repo-base from flake.lock; using unpinned HEAD" >&2
+  NRB_REF="github:phillipgreenii/nix-repo-base"
+fi
 # Pass WORKSPACE_ROOT so the resolver can prefer the on-disk sibling when present.
 export WORKSPACE_ROOT
-UL_LIB_DIR="${UL_LIB_DIR:-$(nix run "github:phillipgreenii/nix-repo-base#determine-ul-lib-dir")}"
+UL_LIB_DIR="${UL_LIB_DIR:-$(nix run "${NRB_REF}#determine-ul-lib-dir")}"
 # shellcheck disable=SC1091
 source "${UL_LIB_DIR}/update-locks-lib.bash"
 ul_reexec_in_dev_shell "$@"
