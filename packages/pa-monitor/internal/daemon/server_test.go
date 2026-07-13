@@ -72,8 +72,12 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 	defer conn.Close()
 
 	client := pb.NewPaMonitorClient(conn)
+	// Request a cadence at the floor (minPushInterval); a smaller value
+	// would clamp up to it anyway. The window is a few cadences wide so
+	// we observe multiple periodic pushes.
+	pushInterval := minPushInterval
 	stream, err := client.WatchState(context.Background(), &pb.WatchStateRequest{
-		PushIntervalMs: 100,
+		PushIntervalMs: uint32(pushInterval.Milliseconds()),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +95,7 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 	// tick (was Heartbeats; now State so subscribers see RPC-driven
 	// changes like Caffeinate / SetAutoResume immediately).
 	stateCount := 0
-	deadline := time.Now().Add(350 * time.Millisecond)
+	deadline := time.Now().Add(4 * pushInterval)
 	for time.Now().Before(deadline) {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -106,11 +110,13 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 	}
 }
 
-// TestWatchState_ClampsTooFastInterval verifies the heartbeat handler
-// treats interval<50ms as a request for the minimum floor (50ms), NOT
-// as the default fallback (2s). This is the contract the spec promises:
-// 0 means "use server default", any positive value <50ms means "clamp
-// to 50ms".
+// TestWatchState_ClampsTooFastInterval verifies the handler treats an
+// interval below the floor as a request for the minimum floor
+// (minPushInterval), NOT as the default fallback (defaultPushInterval).
+// This is the contract the spec promises: 0 means "use server default",
+// any positive value below the floor means "clamp to the floor". The
+// floor exists because each push is a full DB materialization, so it
+// bounds the snapshot rate a misbehaving client can force.
 func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 	dir := shortTempDir(t)
 	paths := Paths{
@@ -129,7 +135,7 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 
 	client := pb.NewPaMonitorClient(conn)
 	stream, err := client.WatchState(context.Background(), &pb.WatchStateRequest{
-		PushIntervalMs: 10, // below 50ms floor
+		PushIntervalMs: 10, // below the minPushInterval floor
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -138,11 +144,15 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 	if _, err := stream.Recv(); err != nil {
 		t.Fatal(err)
 	}
-	// Within 300ms we expect at least 4 state pushes if interval was
-	// clamped to 50ms (300/50=6, with timing slop ~4). If the code
-	// fell back to the 2s default we'd see 0 in this window.
+	// Watch for a window a few floors wide but shorter than the 2s
+	// default. If the request was clamped to minPushInterval we expect
+	// roughly window/minPushInterval pushes; if it fell back to the 2s
+	// default we'd see ~0. A too-low count means the floor was mistaken
+	// for the default; an absurdly high count (approaching window/10ms)
+	// would mean the 10ms request was NOT clamped at all.
+	window := 4 * minPushInterval // 1s < 2s default
 	stateCount := 0
-	deadline := time.Now().Add(300 * time.Millisecond)
+	deadline := time.Now().Add(window)
 	for time.Now().Before(deadline) {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -152,8 +162,15 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 			stateCount++
 		}
 	}
-	if stateCount < 3 {
-		t.Errorf("clamp to 50ms expected ~5-6 state pushes in 300ms, got %d (likely fell back to 2s default)", stateCount)
+	if stateCount < 2 {
+		t.Errorf("clamp to %v expected ~%d pushes in %v, got %d (likely fell back to the %v default)",
+			minPushInterval, int(window/minPushInterval), window, stateCount, defaultPushInterval)
+	}
+	// Guard against the floor silently disappearing: an unclamped 10ms
+	// interval would produce ~window/10ms pushes (~100 here).
+	if maxExpected := int(window/minPushInterval) + 5; stateCount > maxExpected {
+		t.Errorf("clamp to %v expected <= %d pushes in %v, got %d (floor not applied?)",
+			minPushInterval, maxExpected, window, stateCount)
 	}
 }
 

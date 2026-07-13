@@ -15,8 +15,10 @@ service PaMonitor {
 
   // WatchState streams DaemonState updates. The daemon pushes a fresh
   // state on every tick (interval requested via push_interval_ms, with
-  // a 50ms server floor and a 2s default). Subscribers detect a hung
-  // daemon by missing pushes within their own watchdog budget.
+  // a 250ms server floor and a 2s default). Each push is a full DB
+  // materialization, so the floor bounds the worst-case snapshot rate a
+  // single client can force. Subscribers detect a hung daemon by missing
+  // pushes within their own watchdog budget.
   rpc WatchState(WatchStateRequest) returns (stream DaemonState);
 
   // Ping is a cheap liveness check used by clients to confirm the daemon
@@ -66,7 +68,7 @@ message GetStateRequest {}
 message WatchStateRequest {
   // Push interval requested by the client, in milliseconds. 0 means
   // "use server default" (2s). Positive values below the server floor
-  // (50ms) are clamped to the floor.
+  // (250ms) are clamped to the floor.
   uint32 push_interval_ms = 1;
 }
 

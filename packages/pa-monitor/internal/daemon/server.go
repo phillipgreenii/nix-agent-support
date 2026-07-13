@@ -89,6 +89,20 @@ type server struct {
 	bridgeSnapshotInterval time.Duration
 }
 
+const (
+	// defaultPushInterval is the WatchState push cadence used when a client
+	// requests push_interval_ms == 0 ("use server default").
+	defaultPushInterval = 2 * time.Second
+	// minPushInterval is the server-side floor for WatchState pushes. Positive
+	// client requests below this are clamped up to it. Each push is a full DB
+	// materialization (snapshot() -> ReadService.GetState), so the floor bounds
+	// the worst-case snapshot rate a single misbehaving client can force
+	// (<= 4 pushes/sec at 250ms, vs. 20/sec at the earlier 50ms floor). No real
+	// client requests faster than 1s (see cmd/pa-monitor/wait.go); the TUI polls
+	// via GetState, not WatchState.
+	minPushInterval = 250 * time.Millisecond
+)
+
 func newServer(s *sharedState) *server {
 	return &server{started: time.Now(), state: s}
 }
@@ -109,9 +123,9 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 	interval := time.Duration(req.GetPushIntervalMs()) * time.Millisecond
 	switch {
 	case interval == 0:
-		interval = 2 * time.Second
-	case interval < 50*time.Millisecond:
-		interval = 50 * time.Millisecond
+		interval = defaultPushInterval
+	case interval < minPushInterval:
+		interval = minPushInterval
 	}
 
 	ticker := time.NewTicker(interval)

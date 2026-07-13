@@ -118,7 +118,7 @@ type WatchStateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Push interval requested by the client, in milliseconds. 0 means
 	// "use server default" (2s). Positive values below the server floor
-	// (50ms) are clamped to the floor.
+	// (250ms) are clamped to the floor.
 	PushIntervalMs uint32 `protobuf:"varint,1,opt,name=push_interval_ms,json=pushIntervalMs,proto3" json:"push_interval_ms,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

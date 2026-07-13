@@ -45,8 +45,10 @@ type PaMonitorClient interface {
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*DaemonState, error)
 	// WatchState streams DaemonState updates. The daemon pushes a fresh
 	// state on every tick (interval requested via push_interval_ms, with
-	// a 50ms server floor and a 2s default). Subscribers detect a hung
-	// daemon by missing pushes within their own watchdog budget.
+	// a 250ms server floor and a 2s default). Each push is a full DB
+	// materialization, so the floor bounds the worst-case snapshot rate a
+	// single client can force. Subscribers detect a hung daemon by missing
+	// pushes within their own watchdog budget.
 	WatchState(ctx context.Context, in *WatchStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DaemonState], error)
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
@@ -233,8 +235,10 @@ type PaMonitorServer interface {
 	GetState(context.Context, *GetStateRequest) (*DaemonState, error)
 	// WatchState streams DaemonState updates. The daemon pushes a fresh
 	// state on every tick (interval requested via push_interval_ms, with
-	// a 50ms server floor and a 2s default). Subscribers detect a hung
-	// daemon by missing pushes within their own watchdog budget.
+	// a 250ms server floor and a 2s default). Each push is a full DB
+	// materialization, so the floor bounds the worst-case snapshot rate a
+	// single client can force. Subscribers detect a hung daemon by missing
+	// pushes within their own watchdog budget.
 	WatchState(*WatchStateRequest, grpc.ServerStreamingServer[DaemonState]) error
 	// Ping is a cheap liveness check used by clients to confirm the daemon
 	// is responsive before issuing a heavier RPC.
