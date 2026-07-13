@@ -42,8 +42,71 @@ var wrapperPrefixes = []struct {
 	{"cloudflared", "access"},
 }
 
+// execPrefixes run an inner command after their own flags / NAME=VALUE
+// assignments. They must be unwrapped so downstream rules evaluate the inner
+// command — otherwise `env rm -rf /etc` / `command rm -rf /etc` hide a
+// dangerous command behind a name that looks read-only.
+var execPrefixes = map[string]bool{"env": true, "command": true}
+
+// unwrapExecPrefix strips an env/command prefix's flags and NAME=VALUE
+// assignments and returns the inner executable + its args. ok is false when no
+// inner command follows (bare `env`, or only flags/assignments) — the caller
+// then leaves the command as-is (a read-only env query).
+func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, ok bool) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "--" { // explicit end of options
+			i++
+			break
+		}
+		// `command -v/-V NAME` describes/locates NAME (like `which`) — it does NOT
+		// execute NAME. Do not unwrap: leave the bare `command` for the safe-commands
+		// rule to approve as a read-only lookup. (`command -p` DOES execute → unwrap.)
+		if base == "command" && (a == "-v" || a == "-V") {
+			return "", nil, false
+		}
+		// env NAME=VALUE assignment (command has none)
+		if base == "env" && !strings.HasPrefix(a, "-") && strings.Contains(a, "=") {
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			// env -u NAME and -C DIR take a following argument; consume it too.
+			if base == "env" && (a == "-u" || a == "-C") {
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+		break // first bare, non-assignment token is the inner executable
+	}
+	if i >= len(args) {
+		return "", nil, false
+	}
+	return args[i], args[i+1:], true
+}
+
 func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	base := filepath.Base(pc.Executable)
+	if execPrefixes[base] {
+		if inner, innerArgs, ok := unwrapExecPrefix(base, pc.Args); ok {
+			return unwrapCommand(ParsedCommand{
+				Executable:           inner,
+				Args:                 innerArgs,
+				EnvVars:              pc.EnvVars,
+				Redirections:         pc.Redirections,
+				ProcessSubstitutions: pc.ProcessSubstitutions,
+				HasHeredoc:           pc.HasHeredoc,
+				Raw:                  pc.Raw,
+				Comment:              pc.Comment,
+			})
+		}
+		// No inner command (bare `env`/`command` or flags only) — leave as-is;
+		// it is a read-only environment query handled by the safe-commands rule.
+		return pc
+	}
 	for _, wp := range wrapperPrefixes {
 		if base != wp.executable {
 			continue
@@ -183,10 +246,22 @@ func Parse(command string) []ParsedCommand {
 		}
 		tokens, redirs, hasHeredoc := extractRedirections(tokens)
 		if len(tokens) == 0 {
+			// A segment that reduces to redirections/heredoc only — e.g. the
+			// trailing "> /etc/passwd" of "(cmd) > /etc/passwd", which
+			// splitCompound emits as its own segment. Keep it as a command-less
+			// leaf so the engine still evaluates the redirection; dropping it
+			// silently loses a write to a protected path.
+			if len(redirs) > 0 || hasHeredoc {
+				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
+			}
 			continue
 		}
 		exec, args, envVars := extractExecAndArgs(tokens)
 		if exec == "" {
+			// Env-assignment-only segment; keep any redirections/heredoc it carries.
+			if len(redirs) > 0 || hasHeredoc {
+				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
+			}
 			continue
 		}
 		result = append(result, unwrapCommand(ParsedCommand{

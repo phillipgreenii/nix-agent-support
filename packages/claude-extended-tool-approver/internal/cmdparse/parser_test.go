@@ -7,6 +7,65 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
+func TestUnwrapCommand_ExecPrefixes(t *testing.T) {
+	// env / command must unwrap to the inner command so downstream rules see it
+	// (pg2-t4uyx review finding 2: `env rm -rf /etc` was auto-approved).
+	tests := []struct {
+		in       string
+		wantExec string
+	}{
+		{"env rm -rf /etc", "rm"},
+		{"command rm -rf /etc", "rm"},
+		{"env FOO=bar go test ./...", "go"},
+		{"env -u HOME -i rm x", "rm"},
+		{"env env rm x", "rm"}, // nested prefixes
+		{"command ls", "ls"},
+	}
+	for _, tt := range tests {
+		got := Parse(tt.in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", tt.in, len(got))
+		}
+		if got[0].Executable != tt.wantExec {
+			t.Errorf("Parse(%q).Executable = %q, want %q", tt.in, got[0].Executable, tt.wantExec)
+		}
+	}
+	// Bare env/command (no inner command) is a read-only query — left as-is.
+	for _, bare := range []string{"env", "command", "env -i"} {
+		got := Parse(bare)
+		if len(got) != 1 || (got[0].Executable != "env" && got[0].Executable != "command") {
+			t.Errorf("Parse(%q): want bare env/command, got %#v", bare, got)
+		}
+	}
+	// `command -v/-V NAME` describes/locates NAME without executing it — a
+	// read-only lookup. It MUST NOT unwrap to NAME (that would gate a common
+	// "is this tool installed?" idiom). `command -p` DOES execute → still unwraps.
+	for _, lookup := range []string{"command -v foobar", "command -V cargo", "command -v rm -rf /etc"} {
+		got := Parse(lookup)
+		if len(got) != 1 || got[0].Executable != "command" {
+			t.Errorf("Parse(%q): want bare command (lookup, not executed), got %#v", lookup, got)
+		}
+	}
+}
+
+func TestParse_SubshellTrailingRedirectRetained(t *testing.T) {
+	// splitCompound emits a subshell's trailing "> file" as its own segment;
+	// it must be retained as a command-less redirection leaf, not dropped
+	// (pg2-t4uyx review finding 1: `(echo x) > /etc/passwd` was auto-approved).
+	for _, in := range []string{"(echo pwned) > /etc/passwd", "(echo pwned)>/etc/passwd"} {
+		got := Parse(in)
+		found := false
+		for i := range got {
+			if got[i].Executable == "" && len(got[i].Redirections) > 0 && got[i].Redirections[0].Path == "/etc/passwd" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Parse(%q): no retained command-less redirection leaf to /etc/passwd; got %#v", in, got)
+		}
+	}
+}
+
 func TestHasUnsafeCommandSubstitution(t *testing.T) {
 	tests := []struct {
 		in   string

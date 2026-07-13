@@ -82,6 +82,14 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		{"git -c config injection", `git -c core.pager="touch /tmp/pwned" log`},
 		{"redirect to syspath", "echo pwned > /etc/passwd"},
 		{"redirect to ssh keys", "printf x > ~/.ssh/authorized_keys"},
+		// Grouped/subshell redirection to a protected path (review finding 1).
+		{"subshell redirect syspath", "(echo pwned) > /etc/passwd"},
+		{"subshell redirect glued", "(echo pwned)>/etc/passwd"},
+		{"subshell git redirect syspath", "(git status) > /etc/passwd"},
+		// env/command wrapper prefixes hiding a dangerous inner command (finding 2).
+		{"env wrapper danger", "env rm -rf /etc"},
+		{"env assignment wrapper danger", "env FOO=bar rm -rf /etc"},
+		{"command wrapper danger", "command rm -rf /etc"},
 	}
 	for _, tt := range bypasses {
 		t.Run("bypass/"+tt.name, func(t *testing.T) {
@@ -106,6 +114,8 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		{"nix develop bare", "nix develop"},
 		{"nix develop -c approved inner", "nix develop -c git status"},
 		{"curl localhost health", "curl http://localhost:8080/health"},
+		{"command -v lookup", "command -v foobar"},
+		{"env passthrough approved", "env FOO=bar git status"},
 	}
 	for _, tt := range controls {
 		t.Run("control/"+tt.name, func(t *testing.T) {

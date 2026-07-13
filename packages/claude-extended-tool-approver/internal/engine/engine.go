@@ -123,6 +123,17 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 	for _, pc := range parsed {
 		if pc.Executable == "" {
+			// Command-less leaf: no executable, but it may carry redirections or a
+			// heredoc (e.g. the trailing "> /etc/passwd" of a subshell) that MUST
+			// still be evaluated — otherwise a write to a protected path is
+			// silently approved.
+			if pc.HasHeredoc {
+				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
+			}
+			redirResult := e.evaluateRedirections(pc.Redirections, origin.PathEval)
+			if redirResult.Decision > mostRestrictive.Decision {
+				mostRestrictive = redirResult
+			}
 			continue
 		}
 
