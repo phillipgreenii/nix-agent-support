@@ -11,6 +11,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/master";
+    # llm-agents.nix — AI-agent packages with a binary cache (cache.numtide.com,
+    # rebuilt 4x daily). Intentionally NOT followed onto our nixpkgs: llm-agents
+    # pins its own nixpkgs for the cache hit, and a `nixpkgs.follows` override
+    # forces a from-source rebuild that defeats the cache (same rationale as the
+    # flox input in ziprecruiter). Fleet policy — keep this bare in every repo;
+    # the llm-agents node itself is deduped to a single node by base's
+    # llm-agents-overlay flakeModule (alignment.requires) + consumer-input-alignment.
     llm-agents.url = "github:numtide/llm-agents.nix";
     phillipgreenii-nix-overlay = {
       url = "github:phillipgreenii/nix-overlay";
