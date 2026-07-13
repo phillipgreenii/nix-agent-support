@@ -10,7 +10,12 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/master";
+    # Track the Hydra-tested nixpkgs-unstable channel, not the raw master tip.
+    # Fleet convention (matches phillipgreenii-nix-personal): master is the
+    # unvetted development tip, while nixpkgs-unstable only advances after the
+    # channel test suite + binary cache population, so composed and standalone
+    # builds resolve the same tested revision.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # llm-agents.nix — AI-agent packages with a binary cache (cache.numtide.com,
     # rebuilt 4x daily). Intentionally NOT followed onto our nixpkgs: llm-agents
     # pins its own nixpkgs for the cache hit, and a `nixpkgs.follows` override
