@@ -29,12 +29,25 @@ func IsAwaitingInput(path string) (bool, error) {
 		return false, err
 	}
 
-	// Walk events: reset pending set on each assistant turn, resolve on tool_result.
+	// Walk events, folding consecutive assistant events that share a message id
+	// into a single logical turn. A turn is written as one JSONL line per content
+	// block, all sharing the same Message.ID (see events.go), so we must reset the
+	// pending-question set only when a NEW turn begins — not on every assistant
+	// event. Resetting per event would let a later line of the same turn (e.g. a
+	// trailing text block) wipe a dangling AskUserQuestion from an earlier line,
+	// falsely reporting "not awaiting". Resolve questions on user tool_result.
 	pending := make(map[string]bool)
+	inTurn := false
+	turnID := ""
 	for _, ev := range events {
 		switch ev.Type {
 		case "assistant":
-			pending = make(map[string]bool)
+			if !inTurn || ev.Message.ID != turnID {
+				// New assistant turn: start a fresh pending set.
+				pending = make(map[string]bool)
+				inTurn = true
+				turnID = ev.Message.ID
+			}
 			for _, b := range ev.Message.Content {
 				if b.Type == "tool_use" && b.Name == "AskUserQuestion" && b.ID != "" {
 					pending[b.ID] = true
@@ -46,6 +59,9 @@ func IsAwaitingInput(path string) (bool, error) {
 					delete(pending, b.ToolUseID)
 				}
 			}
+			// A user message ends the assistant's turn; the next assistant event
+			// begins a new turn.
+			inTurn = false
 		}
 	}
 	return len(pending) > 0, nil
