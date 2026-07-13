@@ -18,12 +18,14 @@ import (
 )
 
 // runTUIRemote launches the TUI against a running daemon over gRPC.
-// The local poller is bypassed; all state comes from GetState calls.
+// The local poller is bypassed; state is delivered by a StreamingPoller that
+// subscribes to the daemon's server-streaming WatchState RPC (one long-lived
+// stream, not a GetState call per render tick).
 //
 // This mode is intentionally minimal: the existing TUI Model is unchanged
-// and consumes the aggregate.Tree the RemotePoller reconstructs from the
-// wire DaemonState. The daemon owns caffeinate, nudge dispatch, and
-// session lifecycle.
+// and consumes the aggregate.Tree the poller reconstructs from the wire
+// DaemonState. The daemon owns caffeinate, nudge dispatch, and session
+// lifecycle.
 func runTUIRemote() {
 	cfg, err := config.Load(config.DefaultPath())
 	if err != nil {
@@ -31,11 +33,12 @@ func runTUIRemote() {
 		os.Exit(2)
 	}
 
-	rp, err := rpcclient.NewRemotePoller()
+	rp, err := rpcclient.NewStreamingPoller(cfg.RefreshInterval)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "remote poller: %v\n", err)
 		os.Exit(2)
 	}
+	defer rp.Close()
 
 	config.ApplyOTelEnv(cfg.OTel)
 	emitCtx, emitCancel := context.WithCancel(context.Background())
@@ -51,8 +54,9 @@ func runTUIRemote() {
 	defer connEmit.Shutdown(emitCtx)
 
 	// Sample the poller's connection state on a ticker and publish the gauge.
-	// IsOffline() is reliable: every backoff in RemotePoller is preceded by
-	// client=nil, so client==nil holds throughout a disconnect window.
+	// IsOffline() is reliable: the StreamingPoller marks itself disconnected the
+	// moment its WatchState stream drops (and while redialing), so the flag holds
+	// throughout a disconnect window.
 	go func() {
 		const sample = 10 * time.Second
 		t := time.NewTicker(sample)
