@@ -71,10 +71,11 @@ func tickCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
-// pollTimeout must be long enough for the native cost scan, which parses every
-// ~/.claude/projects/**/*.jsonl transcript and can take a few seconds on a busy
-// workstation. Too small a timeout aborts the scan and makes the 5h-block
-// header display "unavailable".
+// pollTimeout bounds one GetState RPC. The daemon serves cached state (it does
+// the transcript scanning on its own tick), so the call is normally cheap; the
+// generous ceiling only covers a busy workstation where even a local RPC can be
+// slow to schedule. Recovery after a failure is governed by the RemotePoller
+// backoff (capped small), not by this timeout.
 const pollTimeout = 10 * time.Second
 
 func (m *Model) pollNow() tea.Cmd {

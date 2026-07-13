@@ -107,6 +107,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollResultMsg:
 		m.polling = false
 		m.daemonConnected = true
+		// Clear any prior error so a single transient poll failure cannot latch
+		// the offline screen (view.go gates it on tree==nil && lastErr!=nil) once
+		// the daemon is reachable again.
+		m.lastErr = nil
 		m.tree = msg.tree
 		m.anyWorking = msg.anyWorking
 		m.autoResumeDelay = msg.meta.AutoResumeDelay

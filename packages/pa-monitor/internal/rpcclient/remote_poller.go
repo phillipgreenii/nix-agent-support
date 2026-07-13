@@ -186,11 +186,17 @@ func (r *RemotePoller) LastFreshAt() time.Time {
 	return r.lastFreshAt
 }
 
+// maxBackoff caps the reconnect backoff. The daemon is a local unix socket, so
+// a long backoff only makes the TUI sit on stale/empty state well after the
+// daemon is reachable again (the "TUI shows no information" symptom). Keep it
+// small so recovery is prompt.
+const maxBackoff = 5 * time.Second
+
 func (r *RemotePoller) scheduleBackoff() {
 	r.backoffUntil = time.Now().Add(r.backoff)
 	r.backoff *= 2
-	if r.backoff > 30*time.Second {
-		r.backoff = 30 * time.Second
+	if r.backoff > maxBackoff {
+		r.backoff = maxBackoff
 	}
 }
 

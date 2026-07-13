@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
+	"github.com/phillipgreenii/pa-monitor/internal/timing"
 )
 
 // PIDLock holds the pidfile flock for the lifetime of the daemon process.
@@ -234,6 +235,12 @@ type RunOptions struct {
 	// When non-empty alongside WriteService, an hourly GC sweeper goroutine is
 	// started to reconcile files with the DB and hard-delete stale rows.
 	SessionsDir string
+	// BridgeSnapshotInterval and BridgeStaleAfter are the timing-derived
+	// connection windows (see internal/timing): the per-bridge snapshot push
+	// cadence and the registry stale cutoff. Zero selects timing defaults, so a
+	// caller that does not set them still gets a consistent pair.
+	BridgeSnapshotInterval time.Duration
+	BridgeStaleAfter       time.Duration
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -272,9 +279,23 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// bridgeDeliverer's reg field always non-nil; the bridge route is simply
 	// unreachable in that configuration since cmuxAncestorFn below then also
 	// has nothing to resolve against.
+	// Connection-timing windows. Both derive from the same base cadences (see
+	// internal/timing), so the registry stale cutoff and the per-bridge snapshot
+	// push interval cannot drift into an inversion. Zero opts values fall back to
+	// the timing defaults as a consistent pair.
+	timingDefaults := timing.Derive(timing.Config{})
+	snapshotInterval := opts.BridgeSnapshotInterval
+	if snapshotInterval <= 0 {
+		snapshotInterval = timingDefaults.SnapshotInterval
+	}
+	staleAfter := opts.BridgeStaleAfter
+	if staleAfter <= 0 {
+		staleAfter = timingDefaults.StaleAfter
+	}
+
 	bridgeReg := opts.BridgeRegistry
 	if bridgeReg == nil {
-		bridgeReg = bridge.NewRegistry(30 * time.Second)
+		bridgeReg = bridge.NewRegistry(staleAfter)
 	}
 	// cmuxAncestorFn resolves a target PID's cmux server ancestor for
 	// delivery routing. serve()'s bridges param tolerates nil, so
@@ -296,7 +317,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, tr.resolve, tr.failServer)
+	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, snapshotInterval, tr.resolve, tr.failServer)
 	defer stop()
 
 	// Reap bridge members whose process has died, against the same registry
@@ -749,6 +770,12 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.TreeObserver != nil {
 				opts.TreeObserver(tree)
 			}
+
+			// Refresh the cached snapshot on THIS (tick) goroutine so gRPC
+			// handlers (buildState) serve it without a synchronous SQLite read on
+			// their own goroutine — keeping the BridgeChannel writer's snapshot
+			// cadence independent of DB latency. See sharedState.refreshSnapshot.
+			state.refreshSnapshot()
 		}
 	}
 }

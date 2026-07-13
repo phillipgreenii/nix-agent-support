@@ -45,29 +45,66 @@ func TestCaffeinatePhraseLowercase(t *testing.T) {
 	}
 }
 
-func TestConnAnnouncerTransitions(t *testing.T) {
+// TestConnAnnouncerDebouncesTransientOutage: a drop that recovers within
+// announceAfter never reaches the pane (no "Lost"/"restored" term lines), but
+// the gauge and detail log still record every transition.
+func TestConnAnnouncerDebouncesTransientOutage(t *testing.T) {
 	var term []string
-	var details []string
+	var details int
 	var gauge []bool
+	now := time.Unix(0, 0)
 	a := &connAnnouncer{
-		term:   func(s string) { term = append(term, s) },
-		detail: func(event string, _ map[string]string) { details = append(details, event) },
-		gauge:  func(c bool) { gauge = append(gauge, c) },
+		term:          func(s string) { term = append(term, s) },
+		detail:        func(string, map[string]string) { details++ },
+		gauge:         func(c bool) { gauge = append(gauge, c) },
+		now:           func() time.Time { return now },
+		announceAfter: 20 * time.Second,
 	}
-	a.connected()                                   // clean startup: no "restored", gauge true
-	a.disconnected(map[string]string{"error": "x"}) // one "Lost", detail
-	a.disconnected(map[string]string{"error": "y"}) // still one "Lost", another detail
-	a.connected()                                   // one "restored"
-	wantTerm := []string{"Lost connection to daemon", "Connection to daemon restored"}
-	if !reflect.DeepEqual(term, wantTerm) {
-		t.Errorf("term = %v, want %v", term, wantTerm)
+	a.connected() // clean startup: gauge true, no term
+	now = now.Add(1 * time.Second)
+	a.disconnected(map[string]string{"error": "x"}) // drop begins
+	now = now.Add(2 * time.Second)                  // only 2s down (< 20s)
+	a.disconnected(map[string]string{"error": "y"})
+	a.connected() // recovered inside the debounce window
+
+	if len(term) != 0 {
+		t.Errorf("transient outage must stay off the pane, got term %v", term)
 	}
-	if len(details) != 2 {
-		t.Errorf("details = %v, want 2", details)
+	if details != 2 {
+		t.Errorf("detail log should record both drops, got %d", details)
 	}
 	wantGauge := []bool{true, false, true}
 	if !reflect.DeepEqual(gauge, wantGauge) {
 		t.Errorf("gauge = %v, want %v", gauge, wantGauge)
+	}
+}
+
+// TestConnAnnouncerAnnouncesSustainedOutage: once the daemon has been
+// unreachable for announceAfter, the pane shows "Lost connection", and a later
+// recovery shows "Connection to daemon restored".
+func TestConnAnnouncerAnnouncesSustainedOutage(t *testing.T) {
+	var term []string
+	now := time.Unix(0, 0)
+	a := &connAnnouncer{
+		term:          func(s string) { term = append(term, s) },
+		detail:        func(string, map[string]string) {},
+		gauge:         func(bool) {},
+		now:           func() time.Time { return now },
+		announceAfter: 20 * time.Second,
+	}
+	a.disconnected(map[string]string{"error": "x"}) // t=0
+	now = now.Add(10 * time.Second)
+	a.disconnected(map[string]string{"error": "x"}) // t=10, still under threshold
+	if len(term) != 0 {
+		t.Fatalf("before threshold the pane must be silent, got %v", term)
+	}
+	now = now.Add(15 * time.Second) // t=25, past the 20s threshold
+	a.disconnected(map[string]string{"error": "x"})
+	a.connected()
+
+	wantTerm := []string{"Lost connection to daemon", "Connection to daemon restored"}
+	if !reflect.DeepEqual(term, wantTerm) {
+		t.Errorf("term = %v, want %v", term, wantTerm)
 	}
 }
 
@@ -114,7 +151,7 @@ func TestDiffAndLogNoChange(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	var lines []string
-	got := diffAndLog(prev, curr, "self", captureLog(&lines))
+	got := diffAndLog(prev, curr, captureLog(&lines))
 	if len(lines) != 0 {
 		t.Fatalf("expected no log lines, got %v", lines)
 	}
@@ -129,7 +166,7 @@ func TestDiffAndLogCaffeinateFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: false}
 	var lines []string
-	diffAndLog(prev, curr, "self", captureLog(&lines))
+	diffAndLog(prev, curr, captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
@@ -144,7 +181,7 @@ func TestDiffAndLogAutoResumeFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: true}
 	curr := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	var lines []string
-	diffAndLog(prev, curr, "self", captureLog(&lines))
+	diffAndLog(prev, curr, captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 log line, got %d: %v", len(lines), lines)
 	}
@@ -160,7 +197,7 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	var prev bridgeState // zero value, initialized == false
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true}
 	var lines []string
-	got := diffAndLog(prev, curr, "self", captureLog(&lines))
+	got := diffAndLog(prev, curr, captureLog(&lines))
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 initial-state line, got %d: %v", len(lines), lines)
 	}
@@ -178,54 +215,39 @@ func TestDiffAndLogInitialState(t *testing.T) {
 	}
 }
 
-// TestDiffAndLogInitialStateVersionMismatch asserts that when the bridge's own
-// version and the daemon's reported version are both non-empty and differ, the
-// initial-state tick emits a second "⚠ daemon version differs" line after the
-// "initial state" summary.
-func TestDiffAndLogInitialStateVersionMismatch(t *testing.T) {
-	var prev bridgeState // zero value, initialized == false
-	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true, daemonVersion: "26.07.01+daemon"}
+// TestLogDaemonVersionMismatchWarnsOnDiffer asserts a warning is emitted when
+// the bridge's own version and the daemon's reported version are both non-empty
+// and differ. The check is separate from diffAndLog so it runs on every
+// (re)connection (diffAndLog's "initial state" line is emitted once per process,
+// so it could not carry a per-reconnect version check).
+func TestLogDaemonVersionMismatchWarnsOnDiffer(t *testing.T) {
 	var lines []string
-	diffAndLog(prev, curr, "26.07.08+bridge", captureLog(&lines))
-	if len(lines) != 2 {
-		t.Fatalf("expected exactly 2 lines (initial + mismatch warning), got %d: %v", len(lines), lines)
-	}
-	if !strings.Contains(lines[0], "initial state") {
-		t.Fatalf("expected first line to be the initial-state summary, got %q", lines[0])
-	}
-	if !strings.Contains(lines[1], "⚠ daemon version differs from this bridge — restart daemon") {
-		t.Fatalf("expected second line to be the mismatch warning, got %q", lines[1])
-	}
-}
-
-// TestDiffAndLogInitialStateVersionMatch asserts that equal bridge/daemon
-// versions emit only the single initial-state line (no warning).
-func TestDiffAndLogInitialStateVersionMatch(t *testing.T) {
-	var prev bridgeState // zero value, initialized == false
-	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true, daemonVersion: "26.07.08+same"}
-	var lines []string
-	diffAndLog(prev, curr, "26.07.08+same", captureLog(&lines))
+	logDaemonVersionMismatch("26.07.08+bridge", "26.07.01+daemon", captureLog(&lines))
 	if len(lines) != 1 {
-		t.Fatalf("expected exactly 1 line for matching versions, got %d: %v", len(lines), lines)
+		t.Fatalf("expected exactly 1 warning line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "initial state") {
-		t.Fatalf("expected the single line to be the initial-state summary, got %q", lines[0])
+	if !strings.Contains(lines[0], "⚠ daemon version differs from this bridge — restart daemon") {
+		t.Fatalf("expected the mismatch warning, got %q", lines[0])
 	}
 }
 
-// TestDiffAndLogInitialStateEmptyDaemonVersion asserts that an empty daemon
+// TestLogDaemonVersionMismatchSilentOnMatch asserts equal versions warn nothing.
+func TestLogDaemonVersionMismatchSilentOnMatch(t *testing.T) {
+	var lines []string
+	logDaemonVersionMismatch("26.07.08+same", "26.07.08+same", captureLog(&lines))
+	if len(lines) != 0 {
+		t.Fatalf("expected no lines for matching versions, got %v", lines)
+	}
+}
+
+// TestLogDaemonVersionMismatchSilentOnEmptyDaemonVersion asserts an empty daemon
 // version never warns (Mismatch with "" is false), even when the bridge's own
 // version is non-empty.
-func TestDiffAndLogInitialStateEmptyDaemonVersion(t *testing.T) {
-	var prev bridgeState                                                                    // zero value, initialized == false
-	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true} // daemonVersion == ""
+func TestLogDaemonVersionMismatchSilentOnEmptyDaemonVersion(t *testing.T) {
 	var lines []string
-	diffAndLog(prev, curr, "26.07.08+bridge", captureLog(&lines))
-	if len(lines) != 1 {
-		t.Fatalf("expected exactly 1 line when daemon version is empty, got %d: %v", len(lines), lines)
-	}
-	if !strings.Contains(lines[0], "initial state") {
-		t.Fatalf("expected the single line to be the initial-state summary, got %q", lines[0])
+	logDaemonVersionMismatch("26.07.08+bridge", "", captureLog(&lines))
+	if len(lines) != 0 {
+		t.Fatalf("expected no lines when daemon version is empty, got %v", lines)
 	}
 }
 
@@ -235,7 +257,7 @@ func TestDiffAndLogBothFlip(t *testing.T) {
 	prev := bridgeState{initialized: true, caffeinateActive: false, autoResumeEnabled: false}
 	curr := bridgeState{initialized: true, caffeinateActive: true, autoResumeEnabled: true}
 	var lines []string
-	diffAndLog(prev, curr, "self", captureLog(&lines))
+	diffAndLog(prev, curr, captureLog(&lines))
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 log lines for two simultaneous flips, got %d: %v", len(lines), lines)
 	}

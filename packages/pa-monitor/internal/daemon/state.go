@@ -40,6 +40,14 @@ type sharedState struct {
 	nudgerForPending         pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
 	watermarks               *WatermarkStore
 	autoResumeDelay          time.Duration // static config: how long to wait before auto-nudging
+
+	// cachedSnapshotTree is the most recent snapshot() result, refreshed by the
+	// daemon's tick loop (refreshSnapshot) on the TICK goroutine. gRPC handlers
+	// (buildState) serve this cached copy instead of doing a synchronous SQLite
+	// read on their own goroutine — so a slow DB cannot stall the BridgeChannel
+	// writer past its snapshot watchdog. The DB is only re-read once per tick,
+	// off the request path.
+	cachedSnapshotTree *aggregate.Tree
 }
 
 func newSharedState() *sharedState {
@@ -97,6 +105,31 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 		}
 	}
 	return tree
+}
+
+// refreshSnapshot materialises the tree once (the SQLite read) and stores it as
+// the cached snapshot. The daemon's tick loop calls this on the TICK goroutine,
+// so the expensive DB read happens off the gRPC request path. Because the DB
+// only changes per tick, the cache is as fresh as a per-request read for the
+// tree itself; live pending-nudge annotations may lag by up to one tick.
+func (s *sharedState) refreshSnapshot() {
+	s.setCachedSnapshot(s.snapshot())
+}
+
+// setCachedSnapshot publishes tree as the cached snapshot (pointer swap under
+// the lock; readers never see a torn tree).
+func (s *sharedState) setCachedSnapshot(tree *aggregate.Tree) {
+	s.mu.Lock()
+	s.cachedSnapshotTree = tree
+	s.mu.Unlock()
+}
+
+// cachedSnapshot returns the most recently refreshed snapshot, or nil before
+// the first refresh (cold start).
+func (s *sharedState) cachedSnapshot() *aggregate.Tree {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cachedSnapshotTree
 }
 
 func (s *sharedState) setCaffeinateOn(on bool) {

@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
+	"github.com/phillipgreenii/pa-monitor/internal/timing"
 )
 
 // runDaemon is invoked by the dispatcher when the user runs
@@ -151,12 +152,21 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	// Ensure caffeinate is killed even if Run returns abnormally.
 	cleanups = append(cleanups, func() { _ = caffProc.Kill() })
 
+	// Connection-timing windows, DERIVED from the two base cadences in config
+	// (internal/timing). StaleAfter is guaranteed >= 3x the heartbeat interval
+	// and PushBudget > 2x the snapshot interval, so the daemon's reaper window
+	// and the bridge's watchdog cannot be configured into an inversion. The
+	// bridge derives the very same values from the same config, so the two
+	// processes stay consistent.
+	timings := timing.Derive(timing.Config{
+		SnapshotInterval:  cfg.BridgeSnapshotInterval,
+		HeartbeatInterval: cfg.BridgeHeartbeatInterval,
+	})
 	// cmux-bridge registry: tracks bridges that have called RegisterBridge,
 	// so the poller can refine "cmux" terminal-host labels into "cmux" /
-	// "cmux (no bridge)" / "cmux (bridge disconnected)". staleAfter of 30s
-	// gives bridges ~3 of their default 10s heartbeats before being marked
-	// stale; tune via the bridge's heartbeatInterval if you change it.
-	bridgeRegistry := bridge.NewRegistry(30 * time.Second)
+	// "cmux (no bridge)" / "cmux (bridge disconnected)". staleAfter gives a
+	// bridge >= 3 of its heartbeats before being marked stale (see timing pkg).
+	bridgeRegistry := bridge.NewRegistry(timings.StaleAfter)
 	// CmuxAncestor for the RegisterBridge handler. Fishes the package
 	// singleton CmuxSignaler out of DefaultSignalers() so the daemon's
 	// signal slice and the registry handler share a single ps-cache.
@@ -200,6 +210,8 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 			}
 			return labels.AsFailable(buildDecorators(c.Decorators)), nil
 		},
+		BridgeSnapshotInterval: timings.SnapshotInterval,
+		BridgeStaleAfter:       timings.StaleAfter,
 	}
 
 	if !disablePoller {

@@ -185,6 +185,20 @@ func newTestAnnouncer() *connAnnouncer {
 	}
 }
 
+// testBridgeStreamOpts builds a bridgeStreamOpts for runBridgeChannel tests:
+// fresh (non-persisted) diff state and a benign heartbeat, with the watchdog
+// budget the caller chooses — a long budget keeps the watchdog dormant while a
+// test drives messages, a short one trips it fast.
+func testBridgeStreamOpts(pushBudget time.Duration) bridgeStreamOpts {
+	return bridgeStreamOpts{
+		heartbeat:    10 * time.Second,
+		pushBudget:   pushBudget,
+		selfVersion:  "test",
+		prev:         &bridgeState{},
+		prevSessions: &bridgeSessions{},
+	}
+}
+
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(d)
@@ -210,7 +224,7 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	waitFor(t, 2*time.Second, func() bool { return stream.firstRegister() != nil })
@@ -244,7 +258,7 @@ func TestBridgeChannelDeliverSuccess(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c1", TargetPid: 4321, Text: "continue"}}}
@@ -291,7 +305,7 @@ func TestBridgeChannelDeliverFailure(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c2", TargetPid: 9999, Text: "continue"}}}
@@ -334,7 +348,7 @@ func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{
@@ -377,11 +391,11 @@ func TestBridgeChannelWatchdogTeardownReturns(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(300*time.Millisecond))
 	}()
 
-	// The watchdog budget is ~4s; give generous margin under -race. A hang here
-	// (rather than a returned error) is the pre-fix deadlock.
+	// The watchdog budget here is 300ms; give generous margin under -race. A hang
+	// here (rather than a returned error) is the pre-fix deadlock.
 	select {
 	case err := <-errCh:
 		if err == nil {

@@ -413,7 +413,15 @@ func dirToWire(d *aggregate.Directory) *pb.Directory {
 // buildState constructs the wire DaemonState from the shared tree plus
 // daemon-level fields.
 func (s *server) buildState() *pb.DaemonState {
-	state := pb.FromTree(s.state.snapshot())
+	// Serve the tick-refreshed cache so this (a gRPC handler goroutine, e.g. the
+	// BridgeChannel writer) never does a synchronous SQLite read. Fall back to a
+	// live snapshot only on cold start, before the first tick refresh populates
+	// the cache. See sharedState.refreshSnapshot.
+	tree := s.state.cachedSnapshot()
+	if tree == nil {
+		tree = s.state.snapshot()
+	}
+	state := pb.FromTree(tree)
 	state.Now = timestamppb.Now()
 	state.DaemonUptimeSeconds = uint64(time.Since(s.started).Seconds())
 	state.DaemonVersion = s.version
@@ -446,7 +454,7 @@ func (s *server) buildState() *pb.DaemonState {
 // handler's inbound hooks into the delivery tracker (see delivery.go); both
 // are nil-safe (BridgeChannel checks before calling), so callers that don't
 // wire the delivery path may pass nil for either.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, onDeliverResult func(id string, ok bool, errStr string), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr string), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version
@@ -454,6 +462,7 @@ func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMe
 	srv.autoResumeMessage = autoResumeMessage
 	srv.writeService = writeService
 	srv.bridges = bridges
+	srv.bridgeSnapshotInterval = snapshotInterval
 	srv.onDeliverResult = onDeliverResult
 	srv.onStreamClosed = onStreamClosed
 	pb.RegisterPaMonitorServer(gs, srv)

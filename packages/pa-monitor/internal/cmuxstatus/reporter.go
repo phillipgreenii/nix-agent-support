@@ -53,6 +53,12 @@ type Options struct {
 	RunCmd    func(ctx context.Context, name string, args ...string) ([]byte, error)
 	LookupEnv func(key string) (string, bool)
 	Logf      func(string)
+	// Async wraps the reporter so Push runs its `cmux` subprocess calls on a
+	// dedicated worker (latest-wins) instead of on the caller's goroutine. The
+	// bridge sets this so a slow/hung cmux CLI cannot stall its gRPC receive
+	// loop. When false the reporter is synchronous (the default; tests rely on
+	// it to assert Push's calls inline).
+	Async bool
 }
 
 // NewReporter returns a Cmux reporter when pa-monitor is itself running
@@ -68,10 +74,14 @@ func NewReporter(o Options) Reporter {
 	if v, _ := lookup("CMUX_WORKSPACE_ID"); v == "" {
 		return noop{}
 	}
-	return &cmuxReporter{
+	core := &cmuxReporter{
 		runCmd: o.RunCmd,
 		logf:   o.Logf,
 	}
+	if o.Async {
+		return newAsyncReporter(core)
+	}
+	return core
 }
 
 type noop struct{}

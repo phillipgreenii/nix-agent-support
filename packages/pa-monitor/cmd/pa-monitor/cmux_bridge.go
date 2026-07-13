@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
+	"github.com/phillipgreenii/pa-monitor/internal/timing"
 	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
 
@@ -44,10 +45,16 @@ func stateFromDaemon(s *pb.DaemonState) bridgeState {
 }
 
 // diffAndLog compares prev and curr and emits one log line per observable
-// state-change event. On the very first tick (prev.initialized == false)
-// it emits a single "initial state" summary line instead of synthesizing
+// state-change event. On the very first observation ever (prev.initialized ==
+// false) it emits a single "initial state" summary line instead of synthesizing
 // flips against the zero value — this avoids spurious "caffeinate -> false"
 // noise at startup.
+//
+// prev is persisted ACROSS reconnects by the caller (runCmuxBridge owns it), so
+// the "initial state" line is emitted exactly once per bridge process. A
+// reconnect therefore stays silent unless a toggle actually changed while the
+// daemon was unreachable, in which case only that delta is logged — no repeated
+// "initial state" spam on every reconnect.
 //
 // Nudge dispatch is intentionally NOT diffed here: nudges are RPC-level
 // one-shot events (NudgeQueue/NudgeCancel) that the DaemonState message
@@ -55,24 +62,17 @@ func stateFromDaemon(s *pb.DaemonState) bridgeState {
 // for the bridge to diff against. If a future proto change adds a
 // nudge-event signal to DaemonState, extend bridgeState + diffAndLog here.
 //
-// selfVersion is the bridge's own build id (the package-main `version` global).
-// On the initial tick, if it differs from the daemon's reported version (both
-// non-empty), diffAndLog emits a warning after the summary — surfacing the
-// stale-daemon case (rebuild+activate without restarting the launchd daemon).
-// There is intentionally no diff-across-ticks version check: a daemon's version
-// is fixed for its process lifetime, so such a branch would be unreachable. The
-// initial-state branch fires on the first snapshot of every (re)connection
-// because prev resets per runBridgeChannel call.
+// The daemon-version-mismatch check is intentionally NOT here: because prev
+// persists across reconnects, an initial-branch check would never re-run after
+// the first connection and would miss a daemon that changed version across a
+// reconnect. logDaemonVersionMismatch handles it per (re)connection instead.
 //
-// Returns curr so callers can `prev = diffAndLog(prev, curr, selfVersion, log)`.
-func diffAndLog(prev, curr bridgeState, selfVersion string, log func(string)) bridgeState {
+// Returns curr so callers can `prev = diffAndLog(prev, curr, log)`.
+func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
 	if !prev.initialized {
 		log(fmt.Sprintf("initial state: %s, %s",
 			caffeinatePhrase(curr.caffeinateActive),
 			autoNudgePhrase(curr.autoResumeEnabled)))
-		if versioncmp.Mismatch(selfVersion, curr.daemonVersion) {
-			log("⚠ daemon version differs from this bridge — restart daemon")
-		}
 		return curr
 	}
 	if prev.caffeinateActive != curr.caffeinateActive {
@@ -82,6 +82,18 @@ func diffAndLog(prev, curr bridgeState, selfVersion string, log func(string)) br
 		log(autoNudgePhrase(curr.autoResumeEnabled))
 	}
 	return curr
+}
+
+// logDaemonVersionMismatch warns when the bridge's own build id (selfVersion)
+// and the daemon's reported version are both non-empty and differ — surfacing
+// the stale-daemon case (a rebuild+activate that did not restart the launchd
+// daemon). The caller invokes it on the FIRST snapshot of each (re)connection so
+// that a daemon which changed version across a reconnect is re-flagged, even
+// though diffAndLog's "initial state" line is emitted only once per process.
+func logDaemonVersionMismatch(selfVersion, daemonVersion string, log func(string)) {
+	if versioncmp.Mismatch(selfVersion, daemonVersion) {
+		log("⚠ daemon version differs from this bridge — restart daemon")
+	}
 }
 
 // formatBridgeLine renders one operator-facing terminal line: a local
@@ -216,16 +228,23 @@ func runCmuxBridge(args []string) {
 	home, _ := os.UserHomeDir()
 	log := newBridgeLogger(filepath.Join(home, ".cache", "pa-monitor"), emit)
 
+	// Async: the sidebar paint (which shells out to the `cmux` CLI, potentially
+	// slow under load) runs on the reporter's own worker, never on the gRPC
+	// receive loop below. This is what keeps a hung `cmux` call from stalling the
+	// daemon stream past its watchdog and manufacturing a false "Lost connection".
 	reporter := cmuxstatus.NewReporter(cmuxstatus.Options{
 		Enable: true,
+		Async:  true,
 		Logf:   func(s string) { log.Detail("cmux.reporter", map[string]string{"msg": s}) },
 	})
 	defer reporter.Clear()
 
 	announcer := &connAnnouncer{
-		term:   log.Term,
-		detail: log.Detail,
-		gauge:  emit.RecordDaemonConnected,
+		term:          log.Term,
+		detail:        log.Detail,
+		gauge:         emit.RecordDaemonConnected,
+		now:           time.Now,
+		announceAfter: paneOutageAnnounceAfter,
 	}
 
 	logBridgeVersions(ctx, log)
@@ -245,8 +264,31 @@ func runCmuxBridge(args []string) {
 		return // ctx cancelled before a cmux server ancestor was found
 	}
 
+	// Connection-timing windows, DERIVED from the same base cadences the daemon
+	// reads (internal/timing), so the bridge's watchdog (pushBudget) and
+	// heartbeat cannot invert against the daemon's snapshot interval / stale
+	// window. See the timing package doc.
+	timings := timing.Derive(timing.Config{
+		SnapshotInterval:  cfg.BridgeSnapshotInterval,
+		HeartbeatInterval: cfg.BridgeHeartbeatInterval,
+	})
+
+	// prev / prevSessions persist ACROSS reconnects (owned here, threaded by
+	// pointer into each stream) so the "initial state" summary is emitted once
+	// per process and a reconnect logs only genuine deltas — no per-reconnect
+	// "initial state" spam. See diffAndLog.
+	var prev bridgeState
+	var prevSessions bridgeSessions
+	opts := bridgeStreamOpts{
+		heartbeat:    timings.HeartbeatInterval,
+		pushBudget:   timings.PushBudget,
+		selfVersion:  version,
+		prev:         &prev,
+		prevSessions: &prevSessions,
+	}
+
 	for {
-		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter); err != nil {
+		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter, opts); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -300,12 +342,25 @@ func logBridgeVersions(ctx context.Context, log *bridgeLogger) {
 	log.Term(fmt.Sprintf("pa-monitor bridge v%s (daemon v%s)", version, state.GetDaemonVersion()))
 }
 
-// bridgeHeartbeatInterval is how often the bridge sends a Heartbeat over the
-// BridgeChannel stream to refresh its lastSeen timestamp on the daemon. Must
-// be shorter than the daemon's bridge.Registry staleAfter window (30s) by
-// enough margin to survive a missed message. ~10s gives 3 attempts before the
-// daemon flags us as disconnected.
-const bridgeHeartbeatInterval = 10 * time.Second
+// paneOutageAnnounceAfter is how long the daemon must stay unreachable before
+// the reconnect loop surfaces "Lost connection to daemon" on the pane. It is
+// well above a normal reconnect cycle (~2s) and a daemon restart, so expected
+// churn is logged only; a genuine sustained outage still reaches the operator.
+const paneOutageAnnounceAfter = 20 * time.Second
+
+// bridgeStreamOpts carries the per-connection values a stream needs beyond its
+// wiring: the timing windows DERIVED from config (so the bridge's heartbeat and
+// watchdog stay consistent with the daemon — see internal/timing), the bridge's
+// own build id for the daemon-version check, and pointers to the diff state that
+// persists ACROSS reconnects (so "initial state" is logged once per process, not
+// per reconnect).
+type bridgeStreamOpts struct {
+	heartbeat    time.Duration
+	pushBudget   time.Duration
+	selfVersion  string
+	prev         *bridgeState
+	prevSessions *bridgeSessions
+}
 
 // streamOnce establishes one BridgeChannel session and drives it to
 // completion, returning an error the outer reconnect loop uses to retry. It is
@@ -319,7 +374,7 @@ const bridgeHeartbeatInterval = 10 * time.Second
 // unblocks Recv on every exit path (watchdog, Send-error, Recv-error, or an
 // outer ctx cancel). The defer here is the backstop for the dial/open error
 // returns above, which never reach runBridgeChannel.
-func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration) error {
+func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration, opts bridgeStreamOpts) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -334,7 +389,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 		return err
 	}
 
-	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer, staleAfter)
+	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer, staleAfter, opts)
 }
 
 // runBridgeChannel runs the BridgeChannel message loop over an established
@@ -378,6 +433,7 @@ func runBridgeChannel(
 	log *bridgeLogger,
 	announcer *connAnnouncer,
 	staleAfter time.Duration,
+	opts bridgeStreamOpts,
 ) error {
 	// outbound funnels every non-Register stream.Send through the sole sender
 	// goroutine. Buffered so a delivery handler rarely blocks enqueuing a
@@ -409,7 +465,7 @@ func runBridgeChannel(
 			cancel()
 			return
 		}
-		t := time.NewTicker(bridgeHeartbeatInterval)
+		t := time.NewTicker(opts.heartbeat)
 		defer t.Stop()
 		for {
 			select {
@@ -459,20 +515,23 @@ func runBridgeChannel(
 	// Delivery handlers run concurrently; joined at teardown.
 	var handlerWG sync.WaitGroup
 
-	// Per-stream diff state: tracks observable toggles (caffeinate,
-	// auto_resume) across snapshots so the bridge can emit human-readable
-	// change events on the pane instead of being a silent mirror. Reset per
-	// call: a reconnect re-emits the "initial state" line, which is desirable
-	// since pane operators care about state across reconnects.
-	var prev bridgeState
-	var prevSessions bridgeSessions
+	// Diff state is owned by the caller (runCmuxBridge) and PERSISTS across
+	// reconnects via opts.prev / opts.prevSessions, so "initial state" is logged
+	// once per process and a reconnect logs only genuine deltas. See diffAndLog.
 
-	// Watchdog: the daemon pushes a snapshot every ~2s; a 4s budget on any
-	// received message flags a stalled stream. A single reusable timer (reset
-	// on each received message) avoids allocating a fresh time.After channel
-	// every loop iteration. Timer.Reset is safe here without draining timer.C
-	// because Go 1.23+ timers deliver no stale value after Reset.
-	const pushBudget = 4 * time.Second
+	// versionChecked gates the daemon-version-mismatch warning to the first
+	// snapshot of THIS (re)connection: because the diff state persists, the check
+	// cannot live in diffAndLog's initial branch (which fires only once ever), so
+	// it runs per stream here to catch a daemon that changed version on restart.
+	versionChecked := false
+
+	// Watchdog: the daemon pushes a snapshot every SnapshotInterval; opts.pushBudget
+	// (derived as > 2x that interval, so a single dropped snapshot cannot trip it)
+	// on any received message flags a stalled stream. A single reusable timer
+	// (reset on each received message) avoids allocating a fresh time.After
+	// channel every loop iteration. Timer.Reset is safe here without draining
+	// timer.C because Go 1.23+ timers deliver no stale value after Reset.
+	pushBudget := opts.pushBudget
 	timer := time.NewTimer(pushBudget)
 	defer timer.Stop()
 
@@ -499,8 +558,12 @@ loop:
 			}
 			announcer.connected()
 			if snap := r.msg.GetSnapshot(); snap != nil {
-				prev = diffAndLog(prev, stateFromDaemon(snap), version, log.Term)
-				prevSessions = diffSessionsAndLog(prevSessions, sessionsFromDaemon(snap, ws), log.Term)
+				if !versionChecked {
+					versionChecked = true
+					logDaemonVersionMismatch(opts.selfVersion, snap.GetDaemonVersion(), log.Term)
+				}
+				*opts.prev = diffAndLog(*opts.prev, stateFromDaemon(snap), log.Term)
+				*opts.prevSessions = diffSessionsAndLog(*opts.prevSessions, sessionsFromDaemon(snap, ws), log.Term)
 				reporter.Push(snapshotForWorkspace(snap, ws, time.Now(), staleAfter))
 				continue
 			}

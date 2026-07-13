@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/phillipgreenii/pa-monitor/internal/timing"
 )
 
 type Config struct {
@@ -38,8 +40,16 @@ type Config struct {
 	EscalationAfter          time.Duration
 	CmuxSidebarEnable        bool
 	CmuxSidebarIntervalTicks int
-	Decorators               []DecoratorConfig
-	OTel                     OTelConfig
+	// BridgeSnapshotInterval and BridgeHeartbeatInterval are the two base
+	// connection cadences from which the daemon and the cmux-bridge DERIVE their
+	// watchdog (PushBudget) and reaper (StaleAfter) windows via internal/timing.
+	// Only these two are configurable; the derived values are never set directly,
+	// so a config cannot express an inconsistent (inverted) set. See the timing
+	// package doc.
+	BridgeSnapshotInterval  time.Duration
+	BridgeHeartbeatInterval time.Duration
+	Decorators              []DecoratorConfig
+	OTel                    OTelConfig
 	// Pricing is the per-model price table the native CostPricer uses (ADR 0021
 	// §3). Sourced from [account.pricing]; built-in defaults populate it so
 	// native cost emits with no config (cost is notional on this plan).
@@ -82,25 +92,27 @@ type DecoratorConfig struct {
 }
 
 type tomlConfig struct {
-	PlanTier                 *string         `toml:"plan_tier"`
-	TopupPoolUSD             *float64        `toml:"topup_pool_usd"`
-	BurnWindowShortS         *int            `toml:"burn_window_short_s"`
-	BurnWindowLongS          *int            `toml:"burn_window_long_s"`
-	RefreshIntervalMS        *int            `toml:"refresh_interval_ms"`
-	CaffeinateGraceS         *int            `toml:"caffeinate_grace_s"`
-	WorkingThresholdS        *int            `toml:"working_threshold_s"`
-	IdleThresholdS           *int            `toml:"idle_threshold_s"`
-	WaitingFreshWindowS      *int            `toml:"waiting_fresh_window_s"`
-	StaleAfterS              *int            `toml:"stale_after_s"`
-	AutoResumeDelayS         *int            `toml:"auto_resume_delay_s"`
-	AutoResumeMessage        *string         `toml:"auto_resume_message"`
-	DisruptGraceS            *int            `toml:"disrupt_grace_s"`
-	EscalationAfterS         *int            `toml:"escalation_after_s"`
-	CmuxSidebarEnable        *bool           `toml:"cmux_sidebar_enable"`
-	CmuxSidebarIntervalTicks *int            `toml:"cmux_sidebar_interval_ticks"`
-	Decorators               []tomlDecorator `toml:"decorator"`
-	OTel                     *tomlOTel       `toml:"otel"`
-	Account                  *tomlAccount    `toml:"account"`
+	PlanTier                  *string         `toml:"plan_tier"`
+	TopupPoolUSD              *float64        `toml:"topup_pool_usd"`
+	BurnWindowShortS          *int            `toml:"burn_window_short_s"`
+	BurnWindowLongS           *int            `toml:"burn_window_long_s"`
+	RefreshIntervalMS         *int            `toml:"refresh_interval_ms"`
+	CaffeinateGraceS          *int            `toml:"caffeinate_grace_s"`
+	WorkingThresholdS         *int            `toml:"working_threshold_s"`
+	IdleThresholdS            *int            `toml:"idle_threshold_s"`
+	WaitingFreshWindowS       *int            `toml:"waiting_fresh_window_s"`
+	StaleAfterS               *int            `toml:"stale_after_s"`
+	AutoResumeDelayS          *int            `toml:"auto_resume_delay_s"`
+	AutoResumeMessage         *string         `toml:"auto_resume_message"`
+	DisruptGraceS             *int            `toml:"disrupt_grace_s"`
+	EscalationAfterS          *int            `toml:"escalation_after_s"`
+	CmuxSidebarEnable         *bool           `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks  *int            `toml:"cmux_sidebar_interval_ticks"`
+	BridgeSnapshotIntervalMS  *int            `toml:"bridge_snapshot_interval_ms"`
+	BridgeHeartbeatIntervalMS *int            `toml:"bridge_heartbeat_interval_ms"`
+	Decorators                []tomlDecorator `toml:"decorator"`
+	OTel                      *tomlOTel       `toml:"otel"`
+	Account                   *tomlAccount    `toml:"account"`
 }
 
 type tomlAccount struct {
@@ -154,6 +166,8 @@ func defaults() Config {
 		EscalationAfter:          60 * time.Second,
 		CmuxSidebarEnable:        true,
 		CmuxSidebarIntervalTicks: 5,
+		BridgeSnapshotInterval:   timing.DefaultSnapshotInterval,
+		BridgeHeartbeatInterval:  timing.DefaultHeartbeatInterval,
 		Pricing:                  defaultPricing(),
 	}
 }
@@ -245,6 +259,12 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.CmuxSidebarIntervalTicks != nil {
 		cfg.CmuxSidebarIntervalTicks = *raw.CmuxSidebarIntervalTicks
+	}
+	if raw.BridgeSnapshotIntervalMS != nil {
+		cfg.BridgeSnapshotInterval = time.Duration(*raw.BridgeSnapshotIntervalMS) * time.Millisecond
+	}
+	if raw.BridgeHeartbeatIntervalMS != nil {
+		cfg.BridgeHeartbeatInterval = time.Duration(*raw.BridgeHeartbeatIntervalMS) * time.Millisecond
 	}
 	if raw.OTel != nil {
 		if raw.OTel.Endpoint != nil {
