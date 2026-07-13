@@ -1429,10 +1429,8 @@
                 }
               }/. $out/
             '';
-            fix-lint = pkgs.writeShellScriptBin "fix-lint" ''
-              ${lib.getExe pkgs.statix} fix ${./.}
-            '';
-            # install-pre-commit-hooks REMOVED — pre-commit module auto-contributes it.
+            # fix-lint + install-pre-commit-hooks REMOVED — pre-commit module
+            # auto-contributes both (bead pg2-7vhvn).
             # pa-monitor-codegen wraps the gen-proto.sh script with
             # protoc + plugins on PATH so `nix run .#pa-monitor-codegen`
             # works without relying on the user's devbox.
