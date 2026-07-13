@@ -2,7 +2,8 @@ package cmdparse
 
 // Supported shell syntax:
 //   - Simple commands: cmd arg1 arg2
-//   - Compound commands: cmd1 && cmd2, cmd1 || cmd2, cmd1 ; cmd2, cmd1 | cmd2
+//   - Compound commands: cmd1 && cmd2, cmd1 || cmd2, cmd1 ; cmd2, cmd1 | cmd2,
+//     cmd1 & cmd2 (bare '&' background separator; '&>', '>&', '2>&1' preserved)
 //   - Quoting: double quotes (with backslash escapes), single quotes (literal)
 //   - Environment prefixes: FOO=bar cmd
 //   - Redirections: <, >, >>, 2>, 2>>, &>, heredocs (<<, <<<)
@@ -289,6 +290,18 @@ func splitCompound(s string) []string {
 					i++
 					continue
 				}
+			}
+			// Bare '&' is a background-job separator. '&&' is already consumed by
+			// the two-char block above, so this only fires on a lone '&'. Guard
+			// the redirect / fd-dup forms splitCompound sees before redirection
+			// tokenization: '&>' (redirect-all) and '>&' / '2>&1' / '>&2' (fd dup).
+			if c == '&' && (i+1 >= len(s) || s[i+1] != '>') && (i == 0 || s[i-1] != '>') {
+				if buf.Len() > 0 {
+					result = append(result, buf.String())
+					buf.Reset()
+				}
+				i++
+				continue
 			}
 			if c == ';' || c == '|' || c == '\n' {
 				if buf.Len() > 0 {
@@ -715,6 +728,40 @@ func classifyBacktickSubstitution(value string) ExpansionKind {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown
+}
+
+// HasUnsafeCommandSubstitution reports whether s contains a $(...) (non-arithmetic)
+// or `...` command substitution whose inner command is not on the safe list
+// (safeCmdSubstitutions). Bare $VAR / ${VAR} references and arithmetic $((...))
+// are NOT substitutions and return false; $(date)/$(mktemp) return false.
+//
+// This lets the engine demote ANY leaf whose executable or args embed an
+// arbitrary inner command (e.g. `echo $(rm -rf ~)`), even when the outer command
+// is otherwise "safe" — the outer rule never sees the inner command.
+func HasUnsafeCommandSubstitution(s string) bool {
+	if !strings.ContainsAny(s, "$`") {
+		return false
+	}
+	if strings.Contains(s, "`") && classifyBacktickSubstitution(s) == ExpansionUnknown {
+		return true
+	}
+	idx := 0
+	for {
+		p := strings.Index(s[idx:], "$(")
+		if p < 0 {
+			break
+		}
+		abs := idx + p
+		if strings.HasPrefix(s[abs:], "$((") { // arithmetic, not a command substitution
+			idx = abs + 3
+			continue
+		}
+		if classifyCmdSubstitution(s[abs:]) == ExpansionUnknown {
+			return true
+		}
+		idx = abs + 2
+	}
+	return false
 }
 
 func isEnvAssign(s string) bool {

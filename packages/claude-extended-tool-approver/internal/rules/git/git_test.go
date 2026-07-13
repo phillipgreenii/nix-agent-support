@@ -12,6 +12,41 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+func TestGit_ConfigInjection_Abstain(t *testing.T) {
+	r := New()
+	// A pre-subcommand -c / --config-env injects config that runs on a read-only
+	// subcommand (RCE class) — must Abstain (pg2-t4uyx).
+	abstain := []string{
+		`git -c core.pager="touch /tmp/pwned" log`,
+		"git -c core.pager=EVIL log",
+		"git --config-env=core.pager=X log",
+		"git --config-env core.pager=X log",
+		"git -C /repo -c core.pager=EVIL log", // still fires after a -C option
+	}
+	for _, cmd := range abstain {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (config injection)", cmd, got.Decision)
+		}
+	}
+
+	// The guard MUST NOT fire on a -c that is NOT a pre-subcommand config flag,
+	// nor on -C (a different, legitimate option). These keep their normal verdict.
+	notInjection := []string{
+		"git commit -c HEAD~1", // -c after the subcommand reuses a commit message
+		"git -C /some/path status",
+		"git status",
+	}
+	for _, cmd := range notInjection {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (must not be flagged as injection)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 func TestGit_ReadOnly_Approve(t *testing.T) {
 	readOnly := []string{
 		// Porcelain inspection

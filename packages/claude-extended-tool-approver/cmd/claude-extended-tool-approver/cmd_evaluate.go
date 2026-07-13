@@ -131,7 +131,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 			ToolInput: json.RawMessage(row.ToolInputJSON),
 			CWD:       row.CWD,
 		}
-		result := eng.Evaluate(input)
+		result := eng.EvaluateHook(input)
 		r.ReplayResult = decisionToDBString(result.Decision)
 
 		// Settings evaluation

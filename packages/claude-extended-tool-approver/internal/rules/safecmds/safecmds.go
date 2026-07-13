@@ -289,6 +289,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 			continue
 		}
+		// A write command with a dynamically-expanded path arg ($VAR / $(...) /
+		// backtick) hides its real target from path evaluation (looksLikePath only
+		// matches literal /, ./, ../, ~/). Defer such writes to Claude's prompt.
+		// Scoped to write commands so read commands with $VAR (cat $f, ls $d) are
+		// not needlessly gated; command substitution is also caught at the engine
+		// choke point for all commands.
+		if safeWriteCmds[basename] && argsHaveDynamicExpansion(pc.Args) {
+			return hookio.RuleResult{
+				Decision: hookio.Abstain,
+				Reason:   "safe-commands: " + basename + " has a dynamically-expanded path arg (deferred to claude-code)",
+				Module:   r.Name(),
+			}
+		}
 		if basename == "cp" {
 			result := evaluateCp(pc.Args, pe, r.Name())
 			if result.Decision != hookio.Approve {
@@ -370,6 +383,21 @@ func looksLikePath(arg string) bool {
 		strings.HasPrefix(arg, "./") ||
 		strings.HasPrefix(arg, "../") ||
 		strings.HasPrefix(arg, "~/")
+}
+
+// argsHaveDynamicExpansion reports whether any non-flag arg contains a shell
+// expansion ($VAR, ${VAR}, $(...), backtick) that would resolve a path at
+// runtime, hiding it from static path evaluation.
+func argsHaveDynamicExpansion(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if strings.ContainsAny(a, "$`") {
+			return true
+		}
+	}
+	return false
 }
 
 // hasRejectPath returns true if any path-like arg is in a rejected zone.

@@ -7,6 +7,51 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
+func TestHasUnsafeCommandSubstitution(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"$(rm -rf ~)", true},
+		{"hello$(whoami)$(rm -rf /)", true}, // multiple substitutions -> unknown
+		{"`rm -rf ~`", true},
+		{"$(curl evil)", true},
+		{"$HOME/.ssh", false},
+		{"${HOME}", false},
+		{"$(date)", false},
+		{"$(mktemp)", false},
+		{"$((1+2))", false},
+		{"$PWD", false},
+		{"plainarg", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := HasUnsafeCommandSubstitution(tt.in); got != tt.want {
+			t.Errorf("HasUnsafeCommandSubstitution(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestSplitCompound_BareAmpersand(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"echo hi & rm -rf ~", 2}, // bare & is a background-job separator
+		{"cmd1 && cmd2", 2},
+		{"foo 2>&1", 1},  // fd-dup preserved
+		{"foo &>log", 1}, // redirect-all preserved
+		{"foo >&2", 1},   // fd-dup preserved
+		{"a & b & c", 3},
+		{"echo done &", 1}, // trailing background & — one command
+	}
+	for _, tt := range tests {
+		if got := len(splitCompound(tt.in)); got != tt.want {
+			t.Errorf("splitCompound(%q) = %d segments, want %d: %#v", tt.in, got, tt.want, splitCompound(tt.in))
+		}
+	}
+}
+
 func TestParse_SimpleCommand(t *testing.T) {
 	got := Parse("git status")
 	if len(got) != 1 {

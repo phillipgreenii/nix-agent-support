@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -148,6 +149,10 @@ func TestEngine_EmptyReasonOnNonAbstain_Detected(t *testing.T) {
 type conditionalMockRule struct {
 	approvePrefix string
 	rejectPrefix  string
+	// approveExecs approves any executable matching one of these prefixes (in
+	// addition to approvePrefix). Lets a test own more than one leaf — needed
+	// once an abstaining leaf correctly demotes its siblings.
+	approveExecs []string
 }
 
 func (m *conditionalMockRule) Name() string { return "conditional" }
@@ -163,6 +168,11 @@ func (m *conditionalMockRule) Evaluate(input *hookio.HookInput) hookio.RuleResul
 		}
 		if m.approvePrefix != "" && strings.HasPrefix(pc.Executable, m.approvePrefix) {
 			return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}
+		}
+		for _, p := range m.approveExecs {
+			if strings.HasPrefix(pc.Executable, p) {
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}
+			}
 		}
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
@@ -196,6 +206,56 @@ func TestEngine_EvaluateExpression_MostRestrictiveWins(t *testing.T) {
 	got := e.EvaluateExpression("echo hello && rm -rf /", nil, origin)
 	if got.Decision != hookio.Reject {
 		t.Errorf("Decision = %v, want Reject (most restrictive)", got.Decision)
+	}
+}
+
+func TestEngine_EvaluateHook_BashUsesExpressionFold(t *testing.T) {
+	// EvaluateHook MUST route Bash through EvaluateExpression (per-leaf fold),
+	// not the whole-string first-match Evaluate. A compound with an abstaining
+	// leaf therefore demotes to Abstain — the whole-string Evaluate would have
+	// returned the first rule's Approve for `git status`.
+	rule := &conditionalMockRule{approvePrefix: "git"}
+	e := New(rule)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/tmp/project",
+		ToolInput: json.RawMessage(`{"command":"git status && rm -rf /home/user/x"}`),
+	}
+	got := e.EvaluateHook(input)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("Decision = %v, want Abstain (Bash must route through the EvaluateExpression fold)", got.Decision)
+	}
+}
+
+func TestEngine_EvaluateHook_NonBashUsesEvaluate(t *testing.T) {
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	input := &hookio.HookInput{ToolName: "Write"}
+	got := e.EvaluateHook(input)
+	if got.Decision != hookio.Approve {
+		t.Errorf("Decision = %v, want Approve (non-Bash routes to Evaluate)", got.Decision)
+	}
+}
+
+func TestEngine_EvaluateExpression_AbstainDemotesApprove(t *testing.T) {
+	// pg2-t4uyx regression guard: an Abstaining leaf MUST demote an approving
+	// sibling. A compound is Approve iff EVERY leaf independently approves; any
+	// leaf that only abstains (no rule owns it) demotes the whole compound to
+	// Abstain so Claude's own prompt re-engages. This is the core fold-order fix
+	// (Abstain must outrank Approve in restrictiveness).
+	rule := &conditionalMockRule{approvePrefix: "git"} // rm matches nothing -> Abstain
+	e := New(rule)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+
+	got := e.EvaluateExpression("git status && rm -rf /home/user/important", nil, origin)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("Decision = %v, want Abstain (abstaining rm leaf must demote the git approve)", got.Decision)
+	}
+
+	// Control: a fully-approving compound stays Approve.
+	got2 := e.EvaluateExpression("git status && git log", nil, origin)
+	if got2.Decision != hookio.Approve {
+		t.Errorf("Decision = %v, want Approve (all leaves approve)", got2.Decision)
 	}
 }
 
@@ -256,7 +316,12 @@ func TestEngine_EvaluateExpression_NearCycleNotBlocked(t *testing.T) {
 }
 
 func TestEngine_EvaluateExpression_ProcessSubstitution(t *testing.T) {
-	rule := &conditionalMockRule{approvePrefix: "diff", rejectPrefix: "rm"}
+	// The mock owns BOTH diff (outer) and sort (inner). Under the restrictiveness
+	// fold an abstaining inner command correctly demotes the outer to Abstain, so
+	// "safe process substitution stays Approve" only holds when the inner command
+	// is genuinely approved — which in production `sort file` is (safecmds). We
+	// model that by having the mock approve sort rather than abstain on it.
+	rule := &conditionalMockRule{approvePrefix: "diff", approveExecs: []string{"sort"}, rejectPrefix: "rm"}
 	e := New(rule)
 	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
 

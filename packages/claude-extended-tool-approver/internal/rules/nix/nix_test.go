@@ -283,6 +283,9 @@ func TestNixRule_DevelopCommand(t *testing.T) {
 		{"develop command dangerous", "nix develop --command rm -rf /", hookio.Reject},
 		{"develop command unknown", "nix develop --command unknown-tool", hookio.Abstain},
 		{"develop without command", "nix develop", hookio.Approve},
+		// -c is an alias for --command; must recurse the same way (pg2-t4uyx).
+		{"develop -c bats", "nix develop -c bats", hookio.Approve},
+		{"develop -c dangerous", "nix develop -c rm -rf /", hookio.Reject},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

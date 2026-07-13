@@ -8,9 +8,23 @@ import (
 
 type Decision int
 
+// The iota order IS the restrictiveness order the engine's EvaluateExpression
+// fold depends on: a compound/expression takes the MOST restrictive
+// (numerically largest) decision among its leaves.
+//
+//	Approve < Abstain < Ask < Reject
+//
+// Approve is LEAST restrictive — a green light that suppresses Claude Code's own
+// permission prompt. Abstain means ceta has no opinion and defers to that prompt;
+// it MUST outrank Approve so a compound containing ANY non-approving leaf is never
+// green-lit as a whole (pg2-t4uyx). Reject is most restrictive.
+//
+// Consequence: Approve is now the zero value. Every RuleResult MUST set Decision
+// explicitly (audited: all do). Do not reorder without re-auditing the fold in
+// internal/engine/engine.go and every `Decision`-ordering comparison.
 const (
-	Abstain Decision = iota
-	Approve
+	Approve Decision = iota
+	Abstain
 	Ask
 	Reject
 )

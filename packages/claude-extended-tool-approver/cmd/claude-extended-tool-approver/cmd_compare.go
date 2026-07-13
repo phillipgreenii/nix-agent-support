@@ -108,7 +108,7 @@ func runCompare(settingsPathVal, baselinePathVal, formatVal string) {
 			ToolInput: json.RawMessage(row.ToolInputJSON),
 			CWD:       row.CWD,
 		}
-		result := eng.Evaluate(input)
+		result := eng.EvaluateHook(input)
 		replayResult := decisionToDBString(result.Decision)
 		settingsResult := se.Evaluate(row.ToolName, json.RawMessage(row.ToolInputJSON), row.CWD)
 

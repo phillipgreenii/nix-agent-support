@@ -60,6 +60,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if !isGitExecutable(pc.Executable) {
 			continue
 		}
+		// A pre-subcommand -c / --config-env injects arbitrary git config (e.g.
+		// -c core.pager="touch /tmp/pwned") that runs on an otherwise read-only
+		// subcommand — a known RCE class. Defer to Claude's prompt. Scoped to the
+		// pre-subcommand span so `git commit -c <commit>` (a different flag) and
+		// `git -C <path>` are NOT falsely abstained.
+		if hasGitConfigInjection(pc.Args) {
+			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git: -c/--config-env injects config; deferring to prompt", Module: r.Name()}
+		}
 		subcmd, rest := extractGitSubcommand(pc.Args)
 		if subcmd == "" {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
@@ -145,6 +153,35 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 
 func isGitExecutable(exec string) bool {
 	return exec == "git" || filepath.Base(exec) == "git"
+}
+
+// hasGitConfigInjection reports whether a pre-subcommand -c or --config-env
+// flag is present. It scans only the option span before the git subcommand
+// (mirroring extractGitSubcommand's flag-consuming walk) so that a -c appearing
+// AFTER the subcommand (e.g. `git commit -c <commit>`) is not matched.
+func hasGitConfigInjection(args []string) bool {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "-c" {
+			return true
+		}
+		if a == "--config-env" || strings.HasPrefix(a, "--config-env=") {
+			return true
+		}
+		switch a {
+		case "-C", "--git-dir", "--work-tree", "--namespace":
+			i += 2
+			continue
+		default:
+			if strings.HasPrefix(a, "-") {
+				i++
+				continue
+			}
+			return false // first non-flag token is the subcommand
+		}
+	}
+	return false
 }
 
 func extractGitSubcommand(args []string) (subcmd string, rest []string) {

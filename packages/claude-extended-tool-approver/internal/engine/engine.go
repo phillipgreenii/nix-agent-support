@@ -75,6 +75,21 @@ func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	return result
 }
 
+// EvaluateHook is the single dispatch point for real hook decisions (Facade).
+// Bash commands are routed through EvaluateExpression, which splits compounds
+// and folds every leaf/redirection/process-substitution most-restrictive-wins;
+// all other tools use the first-match-wins Evaluate (EvaluateExpression is
+// Bash-only). All real-decision callers (the PreToolUse hook and offline replay)
+// MUST go through this so baselines match the live hook.
+func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
+	if input.ToolName == "Bash" {
+		if cmd, err := input.BashCommand(); err == nil {
+			return e.EvaluateExpression(cmd, nil, input)
+		}
+	}
+	return e.Evaluate(input)
+}
+
 func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
 	normalized := normalizeExpression(expr)
 	// Check for cycle: has this exact expression been evaluated before?
@@ -101,8 +116,10 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		return hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
 	}
 
-	// Evaluate each sub-command, track most restrictive
-	mostRestrictive := hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
+	// Evaluate each sub-command, track most restrictive.
+	// Seed with Approve — the least-restrictive identity for the fold: an
+	// expression is Approve iff EVERY leaf independently approves.
+	mostRestrictive := hookio.RuleResult{Decision: hookio.Approve, Reason: "all sub-commands approved", Module: "engine"}
 
 	for _, pc := range parsed {
 		if pc.Executable == "" {
@@ -128,12 +145,20 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// Evaluate through rule chain
 		cmdResult := e.Evaluate(syntheticInput)
 
-		// Evaluate I/O redirections
+		// Command-substitution guard: an unresolved, non-safe $(...) / backtick in
+		// the executable or ANY arg runs an inner command the leaf's own rule never
+		// sees (e.g. `echo $(rm -rf ~)` — echo is "always safe" and approves). Demote
+		// such a leaf to at least Abstain. $(date)/$(mktemp) stay approved.
+		if hasUnsafeSubstitution(pc) && hookio.Abstain > cmdResult.Decision {
+			cmdResult = hookio.RuleResult{Decision: hookio.Abstain, Reason: "unresolved command substitution runs an unevaluated inner command", Module: "engine"}
+		}
+
+		// Evaluate I/O redirections. With the restrictiveness ordering
+		// (Approve < Abstain < Ask < Reject) a plain most-restrictive-wins
+		// comparison correctly lets an unknown redirection path (Abstain) demote
+		// an otherwise-approved command — no special case needed.
 		redirResult := e.evaluateRedirections(pc.Redirections, origin.PathEval)
 		if redirResult.Decision > cmdResult.Decision {
-			cmdResult = redirResult
-		} else if redirResult.Decision == hookio.Abstain && cmdResult.Decision == hookio.Approve {
-			// Unknown redirection path demotes an approval to abstain
 			cmdResult = redirResult
 		}
 
@@ -157,6 +182,20 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 func normalizeExpression(expr string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(expr)), " ")
+}
+
+// hasUnsafeSubstitution reports whether a parsed leaf's executable or any arg
+// embeds an unresolved, non-safe command substitution ($(...) / backtick).
+func hasUnsafeSubstitution(pc cmdparse.ParsedCommand) bool {
+	if cmdparse.HasUnsafeCommandSubstitution(pc.Executable) {
+		return true
+	}
+	for _, a := range pc.Args {
+		if cmdparse.HasUnsafeCommandSubstitution(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func mustBashJSON(cmd string) json.RawMessage {

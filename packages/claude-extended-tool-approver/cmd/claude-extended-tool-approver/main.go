@@ -163,7 +163,7 @@ func projectDirForDetect(input *hookio.HookInput) string {
 
 func handlePreToolUse(input *hookio.HookInput) {
 	eng := setup.NewEngineForCWD(input.CWD)
-	result := eng.Evaluate(input)
+	result := eng.EvaluateHook(input)
 
 	var updatedInput map[string]interface{}
 	if (result.Decision == hookio.Approve || result.Decision == hookio.Ask) &&

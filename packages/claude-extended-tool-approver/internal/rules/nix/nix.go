@@ -107,13 +107,20 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) hookio.RuleRe
 		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 	}
 	if subcmd == "develop" && r.exprEval != nil {
-		innerCmd := extractAfterFlag(args, "--command")
+		// `nix develop -c <cmd>` and `nix develop --command <cmd>` both run an
+		// inner command; recurse so it is evaluated (mirrors the `nix shell`
+		// branch). Reading only --command let `nix develop -c rm -rf /etc` slip
+		// through as a plain "approve develop".
+		innerCmd := extractAfterFlag(args, "-c")
+		if innerCmd == "" {
+			innerCmd = extractAfterFlag(args, "--command")
+		}
 		if innerCmd != "" {
 			outerExpr := normalizeExpr("nix " + strings.Join(args, " "))
 			stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix develop", Expression: outerExpr}}
 			return r.exprEval.EvaluateExpression(innerCmd, stack, input)
 		}
-		// No --command flag: approve develop as usual
+		// No inner command: approve develop as usual
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: nix develop is approved",

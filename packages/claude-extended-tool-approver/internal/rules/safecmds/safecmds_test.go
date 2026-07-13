@@ -13,6 +13,37 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+func TestSafecmds_DynamicWritePath_Abstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	// Write commands whose path arg is dynamically expanded ($VAR / $(...) /
+	// backtick) hide their real target from path evaluation — defer to prompt
+	// (pg2-t4uyx). looksLikePath does not match a bare $VAR.
+	abstain := []string{
+		"rm -rf $HOME/.ssh",
+		"cp secret $HOME/exfil",
+		"tee $HOME/.bashrc",
+		"mv a ${TARGET}/b",
+		"touch $BUILD_DIR/marker",
+		"chmod 700 $DIR",
+		"mkdir $HOME/x",
+	}
+	for _, cmd := range abstain {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (dynamic write path)", cmd, got.Decision)
+		}
+	}
+
+	// A literal in-project write path (no expansion) must be unchanged (Approve),
+	// proving the guard is scoped to dynamic args, not all writes.
+	input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": "rm -rf ./build"})}
+	if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		t.Errorf("literal in-project `rm -rf ./build`: got %s (%s), want approve", got.Decision, got.Reason)
+	}
+}
+
 func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
