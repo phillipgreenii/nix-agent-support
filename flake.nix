@@ -1541,7 +1541,18 @@
               name = "phillipgreenii-nix-agent-support";
             };
           };
-        overlays.default = overlay;
+        # Export the package overlay WITH the gomod2nix layer folded in, so any
+        # consumer applying overlays.default gets pkgs.buildGoApplication (required
+        # by the Go packages built via mkGoApp, ADR 0008) without re-adding
+        # gomod2nix themselves. Previously overlays.default carried only `overlay`,
+        # forcing every consumer (e.g. ziprecruiter) to prepend gomod2nix's overlay
+        # to satisfy this flake's own Go packages — a rediscovered burden in the
+        # terminal repo (bead pg2-gkhli). gomod2nix MUST precede `overlay` so
+        # buildGoApplication exists in `final` when the Go packages evaluate.
+        overlays.default = nixpkgs.lib.composeManyExtensions [
+          gomod2nix.overlays.default
+          overlay
+        ];
       };
     };
 }
