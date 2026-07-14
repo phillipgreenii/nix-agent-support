@@ -67,14 +67,14 @@ refs/remotes/origin/HEAD` (git standard) → **`main`**. Rules say "primary bran
   primary branch**, the agent MUST **halt and report** — merging then advances the
   wrong branch and orphans work into hanging branches. (For methods that do not
   touch the canonical primary — e.g. `pull-request` — an off-primary/dirty canonical
-  is an R-3 anomaly to *surface*, not necessarily to halt.)
+  is an R-3 anomaly to _surface_, not necessarily to halt.)
 - **R-9 (integration entry point)** To integrate completed work, the agent MUST use
   the `integrate-branch` skill. The agent MUST NOT use
   `superpowers:finishing-a-development-branch` (plain non-ff merge, no rebase).
 
 ### Tier P — Any `pn`-workspace (in `pn-workspace-rules`)
 
-Tier P *uses* `integrate-branch` per repo; the tool does not depend on Tier P.
+Tier P _uses_ `integrate-branch` per repo; the tool does not depend on Tier P.
 
 - **P-1** A multi-repo change MUST be isolated in a **workforest**. (Overridable, R-5.)
 - **P-2** Landing a workforest set is a **best-effort ordered transaction** (local
@@ -131,7 +131,7 @@ skill and the Tier R rules.
   - **Open merge-request tracker bead** (`bd list --type=merge-request`) →
     `pull-request`. **Optional**; if beads is absent/unreachable it contributes
     nothing and the tool does not fail.
-  - Caveats: a remote merely *existing* does NOT imply PR; a **merged/closed** PR
+  - Caveats: a remote merely _existing_ does NOT imply PR; a **merged/closed** PR
     means work is already integrated.
 - **Graceful degradation:** any optional source that errors (beads down, `gh`
   missing) is simply omitted; the tool still returns what it could gather.
@@ -140,26 +140,26 @@ skill and the Tier R rules.
 
 ```json
 {
-  "strategy": "pull-request",          // or null when the tool can't determine one
+  "strategy": "pull-request", // or null when the tool can't determine one
   "reason": "open PR #42 found for feat-x",
   "primary_branch": "main",
   "canonical": { "branch": "main", "dirty": false },
-  "remote": "origin",                  // null when the repo has no remote
-  "open_pr": { "number": 42, "state": "open", "url": "…" },  // null when none
-  "mr_bead": "pg2-abcd"                // null / omitted when beads unavailable
+  "remote": "origin", // null when the repo has no remote
+  "open_pr": { "number": 42, "state": "open", "url": "…" }, // null when none
+  "mr_bead": "pg2-abcd" // null / omitted when beads unavailable
 }
 ```
 
-| Property | What it is | Why the agent needs it |
-|---|---|---|
-| `strategy` | the determined method, or `null` | the advisory answer; `null` ⇒ agent decides from facts/context |
-| `reason` | human-readable explanation | agent summarizes to the user; transparency (also carries provenance, e.g. "declared" vs "inferred") |
-| `primary_branch` | resolved primary branch | handler target; R-8 comparison; agent computes "commits ahead" |
-| `canonical.branch` | what the canonical clone is on now | agent surfaces R-3 / a canonical-advancing method halts (R-8) if `≠ primary_branch` |
-| `canonical.dirty` | whether the canonical clone is dirty | R-3; ff-merge halts, PR surfaces |
-| `remote` | remote name/url, or `null` | no-remote ⇒ PR impossible |
-| `open_pr` | PR number/state/url, or `null` | PR indicator |
-| `mr_bead` | merge-request bead id, or `null` | optional PR indicator |
+| Property           | What it is                           | Why the agent needs it                                                                              |
+| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `strategy`         | the determined method, or `null`     | the advisory answer; `null` ⇒ agent decides from facts/context                                      |
+| `reason`           | human-readable explanation           | agent summarizes to the user; transparency (also carries provenance, e.g. "declared" vs "inferred") |
+| `primary_branch`   | resolved primary branch              | handler target; R-8 comparison; agent computes "commits ahead"                                      |
+| `canonical.branch` | what the canonical clone is on now   | agent surfaces R-3 / a canonical-advancing method halts (R-8) if `≠ primary_branch`                 |
+| `canonical.dirty`  | whether the canonical clone is dirty | R-3; ff-merge halts, PR surfaces                                                                    |
+| `remote`           | remote name/url, or `null`           | no-remote ⇒ PR impossible                                                                           |
+| `open_pr`          | PR number/state/url, or `null`       | PR indicator                                                                                        |
+| `mr_bead`          | merge-request bead id, or `null`     | optional PR indicator                                                                               |
 
 Dropped after review: `strategy_source` (absence of `strategy` is sufficient;
 provenance lives in `reason`), `subject.*` (the agent already knows its own branch /
@@ -182,7 +182,7 @@ The decision logic lives in the skill (agent judgment), not the tool:
 1. **Nothing to integrate** — the subject is on the primary branch, is detached (no
    feature branch), or has `0` commits ahead of `primary_branch` → report and stop.
 2. **Surface canonical anomalies** — if `canonical.branch ≠ primary_branch` or
-   `canonical.dirty`, report it (R-3). Whether it *blocks* is method-dependent
+   `canonical.dirty`, report it (R-3). Whether it _blocks_ is method-dependent
    (step 3): a canonical-advancing method halts (R-8, enforced by FF-0); a
    `pull-request` surfaces it and proceeds.
 3. `strategy` set **and feasible** given the facts → **invoke that handler skill**
@@ -202,7 +202,7 @@ on values being passed in: the worktree `<WT>` = the current working tree; the f
 branch `<FB>` = its current branch (`git rev-parse --abbrev-ref HEAD`; a detached HEAD
 → halt, nothing to integrate); the canonical clone `<CC>` = the main working tree of
 the common dir (via `git rev-parse --git-common-dir`); the primary branch via the
-shared resolution (§3). The support-tool report is the *agent's* decision input, not
+shared resolution (§3). The support-tool report is the _agent's_ decision input, not
 the handler's data channel; a shared resolution helper is used by both
 `integrate-branch-support` and the handlers so they agree. Each handler MUST re-verify
 Tier R preconditions, integrate by its method, halt-and-report on anomaly, clean up per
@@ -253,21 +253,21 @@ branch/worktree. Surface `canonical.dirty` if set. Report the PR URL.
 1. **Typical nix-\* repo** (`pn` set `pgii-integrate-branch.strategy=ff-merge-to-main`;
    worktree on `feat-x`; canonical on `main`, clean):
    `{strategy:"ff-merge-to-main", reason:"declared", primary_branch:"main",
-   canonical:{branch:"main",dirty:false}, remote:"origin", open_pr:null}`
+canonical:{branch:"main",dirty:false}, remote:"origin", open_pr:null}`
    → agent runs the **ff-merge-to-main** handler.
 2. **ZR monorepo** (`git config pgii-integrate-branch.strategy=pull-request`):
    `{strategy:"pull-request", reason:"declared", remote:"origin", open_pr:null}`
    → agent runs **pull-request** (push + open PR; no auto-merge).
 3. **Local-only repo, no remote:** `{strategy:"ff-merge-to-main", reason:"no remote —
-   PR impossible", remote:null}` → **ff-merge-to-main**.
+PR impossible", remote:null}` → **ff-merge-to-main**.
 4. **Open PR, undeclared:** `{strategy:"pull-request", reason:"open PR #42",
-   open_pr:{number:42,state:"open"}}` → **pull-request** (updates the PR).
+open_pr:{number:42,state:"open"}}` → **pull-request** (updates the PR).
 5. **Undetermined** (remote present, no PR, nothing declared): `{strategy:null,
-   reason:"remote present, no PR, nothing declared — cannot infer", remote:"origin",
-   open_pr:null}` → agent uses other context; if still unsure, **asks the user**
+reason:"remote present, no PR, nothing declared — cannot infer", remote:"origin",
+open_pr:null}` → agent uses other context; if still unsure, **asks the user**
    (offers to persist the choice via git config).
 6. **Anomaly — canonical off primary:** `{strategy:"ff-merge-to-main", primary_branch:
-   "main", canonical:{branch:"some-other-branch"}}` → agent **halts** (R-8) and reports.
+"main", canonical:{branch:"some-other-branch"}}` → agent **halts** (R-8) and reports.
 7. **Nothing to integrate:** report has `primary_branch:"main"`; agent finds `0`
    commits ahead → reports "already integrated / nothing to do".
 8. **Beads unavailable:** `mr_bead:null`; the tool still returns a strategy from the
@@ -275,15 +275,16 @@ branch/worktree. Surface `canonical.dirty` if set. Report the PR URL.
 
 ## 5. Implementation map (verified homes)
 
-| Change | Home |
-|---|---|
-| Tier R (R-1…R-9, incl. "use `integrate-branch`, not `finishing-a-development-branch`") | `phillipgreenii-nix-agent-support/home/programs/agent-rules/pgii-agent-rules.md` (nix source of global `~/.claude/CLAUDE.md`) |
-| New **`integrate-branch`** plugin: the `integrate-branch` skill + `ff-merge-to-main` + `pull-request` handler skills + bats-tested `integrate-branch-support` (+ own README/spec) | `phillipgreenii-nix-agent-support/claude-marketplace/` |
-| **`pn-workspace-rules`** (Tier P; P-2 transaction; P-6 git-config provisioning; remove work-arounds; land via `integrate-branch`) | `phillipg-nix-repo-base/pn-workspace-rules/skills/pn-workspace-rules/SKILL.md` |
-| Delete 6 stale memories | shared `bd` DB, from canonical root |
-| **`wrap-up-session`** | unchanged now (`pg2-8r1rp`) |
+| Change                                                                                                                                                                            | Home                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Tier R (R-1…R-9, incl. "use `integrate-branch`, not `finishing-a-development-branch`")                                                                                            | `phillipgreenii-nix-agent-support/home/programs/agent-rules/pgii-agent-rules.md` (nix source of global `~/.claude/CLAUDE.md`) |
+| New **`integrate-branch`** plugin: the `integrate-branch` skill + `ff-merge-to-main` + `pull-request` handler skills + bats-tested `integrate-branch-support` (+ own README/spec) | `phillipgreenii-nix-agent-support/claude-marketplace/`                                                                        |
+| **`pn-workspace-rules`** (Tier P; P-2 transaction; P-6 git-config provisioning; remove work-arounds; land via `integrate-branch`)                                                 | `phillipg-nix-repo-base/pn-workspace-rules/skills/pn-workspace-rules/SKILL.md`                                                |
+| Delete 6 stale memories                                                                                                                                                           | shared `bd` DB, from canonical root                                                                                           |
+| **`wrap-up-session`**                                                                                                                                                             | unchanged now (`pg2-8r1rp`)                                                                                                   |
 
 Loose coupling example (`pn` provisions git config via its existing post-clone hook, §P-6):
+
 ```toml
 # pn-workspace.toml — existing [[repos.<key>.hooks]] mechanism (ADR 0019)
 [[repos.<key>.hooks]]
@@ -314,7 +315,7 @@ Delete (all confirmed to exist): `worktree-isolation-for-agent-work`,
 ## 8. Rollout notes
 
 - **`agent-support` conforms:** the shared-checkout branch-switching pattern is retired.
-- No per-repo declarations are *required*; undeclared repos use signals, and `pn`
+- No per-repo declarations are _required_; undeclared repos use signals, and `pn`
   provisions `pgii-integrate-branch.strategy` for the `pn` repos so their common case
   isn't ambiguous. `git config` is how any repo (incl. ZR) pins its method.
 - Cleanup is method-specific: ff-merge retires the worktree+branch (FF-4); PR keeps them.
@@ -349,7 +350,7 @@ decides; beads = optional+graceful; `finishing-a-development-branch` → R-9 rul
 Also resolved this pass: the **ad-hoc multi-repo rule is dropped**;
 `finishing-a-development-branch` is enforced by the **R-9 rule only — no hard-disable
 hook**; and the **`pn` defensive off-branch/dirty integration path is kept** as a
-deliberate safety net — a rule stating a state "shouldn't happen" does not *prevent*
+deliberate safety net — a rule stating a state "shouldn't happen" does not _prevent_
 it, so the defensive code stays (no removal planned).
 
 **No open decisions remain.**

@@ -17,7 +17,7 @@
 - **`nix flake check` does NOT auto-gate a package's bats `.check`** — the new package's `.check` MUST be explicitly merged into the flake `checks` attrset (template: `gc-dolt-maintenance` at `flake.nix:1413-1417`).
 - **Package versioning is automatic** via `mkSrcDigest` per-source digest — do NOT thread a repo gitHash.
 - **Custom git-config prefix:** `pgii-integrate-branch.*` (keys: `.strategy`, `.primaryBranch`).
-- **The tool MUST stay decoupled** — no `pn-workspace.toml` / central-registry / required-beads dependency; git-standard sources only. Beads is an *optional*, non-fatal signal.
+- **The tool MUST stay decoupled** — no `pn-workspace.toml` / central-registry / required-beads dependency; git-standard sources only. Beads is an _optional_, non-fatal signal.
 - **Commit style:** conventional commits; no `Refs:` line (branch is `worktree-discipline-design`, no Jira ticket). NEVER `--no-verify`.
 - Work happens in the existing worktree `phillipgreenii-nix-agent-support/.worktrees/worktree-discipline-design` (branch `worktree-discipline-design`); the `repo-base` changes need a second worktree (Phase 4) — this is the cross-repo case, so use a **workforest** if landing together.
 
@@ -26,6 +26,7 @@
 ## File Structure
 
 **`phillipgreenii-nix-agent-support`:**
+
 - `packages/integrate-branch-support/` — NEW bash package (`default.nix`, `integrate-branch-support.sh`, `integrate-branch-support.bash` [logic], `integrate-branch-support.md` [tldr], `completions/`, `tests/*.bats`).
 - `flake.nix` — MODIFY: overlay entry + `packages` re-export + merge `.check` into `checks`.
 - `home/programs/integrate-branch-support/default.nix` — NEW home module (`home.packages = [ pkg ]`).
@@ -35,10 +36,12 @@
 - `home/programs/agent-rules/pgii-agent-rules.md` — MODIFY: add Tier R.
 
 **`phillipg-nix-repo-base`:**
+
 - `pn-workspace-rules/skills/pn-workspace-rules/SKILL.md` — MODIFY: Tier P edits.
 - `docs/worktrees.md` — MODIFY: reconcile work-around narrative.
 
 **Workspace root:**
+
 - `pn-workspace.toml` — MODIFY: per-repo `post-clone` hooks provisioning `pgii-integrate-branch.strategy`.
 - Shared `bd` DB — 6 `bd forget` deletions.
 
@@ -49,6 +52,7 @@
 ### Task 1: Scaffold the package + gated first test
 
 **Files** (mirror `packages/git-tools/` exactly — a two-level aggregate+leaf shape):
+
 - Create aggregate: `packages/integrate-branch-support/default.nix` (`{ pkgs, bashBuilders }` module)
 - Create leaf: `packages/integrate-branch-support/integrate-branch-support/{default.nix, integrate-branch-support.sh, integrate-branch-support.bash, tests/test-integrate-branch-support.bats, tests/test_helper.bash}` (copy `test_helper.bash` from `claude-marketplace/bash-scripting/skills/bash-scripting/assets/test_helper.bash`)
 - Modify: `flake.nix` (overlay entry ~line 178; `packages` re-export ~line 1434; `checks` merge ~line 1413)
@@ -56,6 +60,7 @@
 Note: `SCRIPTS_DIR` in the bats `setup()` = `dirname(BATS_TEST_FILENAME)/..` → the leaf dir; `BIN="${SCRIPTS_DIR}/integrate-branch-support.sh"`.
 
 **Interfaces:**
+
 - Produces: a CLI `integrate-branch-support` that prints a JSON verdict to stdout and exits 0 on success, nonzero on hard error (§4.3–§4.4 of the spec).
 
 - [ ] **Step 1: Write a failing smoke test**
@@ -92,6 +97,7 @@ jq -n '{strategy: null, reason: "stub", primary_branch: "main",
 - [ ] **Step 4: `default.nix` (two files, matching `packages/git-tools`)**
 
 Leaf `packages/integrate-branch-support/integrate-branch-support/default.nix`:
+
 ```nix
 { mkBashScript, pkgs }:
 mkBashScript {
@@ -104,6 +110,7 @@ mkBashScript {
 ```
 
 Aggregate `packages/integrate-branch-support/default.nix`:
+
 ```nix
 { pkgs, bashBuilders }:
 let
@@ -123,6 +130,7 @@ in
 - [ ] **Step 5: Wire into flake.nix (three edits, mirroring `git-tools` + `gc-dolt-maintenance`)**
 
 Overlay entry (~line 178, exactly like `git-tools`):
+
 ```nix
 integrate-branch-support =
   let
@@ -133,8 +141,10 @@ integrate-branch-support =
     paths = result.packages;
   };
 ```
+
 `packages` re-export (~line 1434) — add `integrate-branch-support` to the existing `inherit (pkgs) …;` list.
 `checks` merge (~line 1413, note the **plural** `.checks` via `//`, like `gc-dolt-maintenance`):
+
 ```nix
 # ... existing checks ...
 // (import ./packages/integrate-branch-support {
@@ -197,7 +207,7 @@ resolve_primary_branch() {
 }
 ```
 
-Implementation note: `canonical_root()` uses `git rev-parse --git-common-dir` (verified to return the *shared* `.git` in both the main tree and a linked worktree; `dirname` → `git -C … rev-parse --show-toplevel` yields the main working tree). Add a one-line comment noting the more-robust alternative `git worktree list --porcelain | head` for the rare `--separate-git-dir` layout.
+Implementation note: `canonical_root()` uses `git rev-parse --git-common-dir` (verified to return the _shared_ `.git` in both the main tree and a linked worktree; `dirname` → `git -C … rev-parse --show-toplevel` yields the main working tree). Add a one-line comment noting the more-robust alternative `git worktree list --porcelain | head` for the rare `--separate-git-dir` layout.
 
 - [ ] **Step 2: Run → FAIL.**
 - [ ] **Step 3: Implement** — `canonical_root() { local c; c="$(git rev-parse --git-common-dir)"; git -C "$(dirname "$c")" rev-parse --show-toplevel; }` (the common dir's parent is the main worktree; guard when already in the main tree). `canonical_branch() { git -C "$(canonical_root)" symbolic-ref --short -q HEAD || echo "(detached)"; }`. `canonical_dirty() { [ -n "$(git -C "$(canonical_root)" status --porcelain)" ] && echo true || echo false; }`.
@@ -252,6 +262,7 @@ Implementation note: `canonical_root()` uses `git rev-parse --git-common-dir` (v
 **Files:** Create `claude-marketplace/integrate-branch/skills/integrate-branch/SKILL.md`.
 
 Front-matter:
+
 ```yaml
 ---
 name: integrate-branch
@@ -307,7 +318,7 @@ Content = R-1…R-9 (spec §3 Tier R), RFC 2119, matching the file's existing `-
 > Locate every section by its **heading**, not by line number (numbers drift; the recon's line refs are approximate).
 
 - [ ] **Step 1:** Rewrite the `### Landing a set onto main locally (manual merge-back recipe)` section → describe landing via the `integrate-branch` **skill** (not a `pn workspace` verb — do NOT add it to the `pn workspace` command cheat-sheet) run per repo in dependency (topo) order as a best-effort ordered transaction (spec P-2): rebase the set, run `integrate-branch` in each repo, stop-and-report on a blocked repo, keep the set, remove only when all landed (P-3). **Preserve** the P-1 (workforest-for-multi-repo) and P-4 (`--in-place` escape hatch) text that sits nearby — do not disturb it.
-- [ ] **Step 2 (scope carefully — M2):** Reconcile *agent-facing off-`main` framing* only. In `### Asymmetric-defer recovery` and `### Resuming a left-behind worktree`, the `git reset --hard origin/main` / `git branch -f main origin/main` steps document **`pn workspace update`'s own worktree-recovery flow** (they reference `.pn-update` worktrees, `workforest prune`, ADR 0009) — spec §10 keeps that pn safety net and "changing pn tooling" is a non-goal, so **do NOT delete these sections**. Only adjust any wording that presents off-`main` manipulation as a *general agent recipe* (contradicting R-3), framing it explicitly as "pn's automated recovery," not "what you should do by hand." **KEEP** the "Dirty-repo behavior differs by mode" description verbatim.
+- [ ] **Step 2 (scope carefully — M2):** Reconcile _agent-facing off-`main` framing_ only. In `### Asymmetric-defer recovery` and `### Resuming a left-behind worktree`, the `git reset --hard origin/main` / `git branch -f main origin/main` steps document **`pn workspace update`'s own worktree-recovery flow** (they reference `.pn-update` worktrees, `workforest prune`, ADR 0009) — spec §10 keeps that pn safety net and "changing pn tooling" is a non-goal, so **do NOT delete these sections**. Only adjust any wording that presents off-`main` manipulation as a _general agent recipe_ (contradicting R-3), framing it explicitly as "pn's automated recovery," not "what you should do by hand." **KEEP** the "Dirty-repo behavior differs by mode" description verbatim.
 - [ ] **Step 3:** Add a short note (near `## Coordinated Workforest Sets`) that `bd` works from a worktree/workforest (git-common-dir discovery); no "bd only from canonical root" restriction (spec P-5). (Pure addition — no existing `bd` text to remove.)
 - [ ] **Step 4: Verify** — `cd phillipg-nix-repo-base && nix build .#phillipg-nix-repo-base-marketplace`; `nix flake check`.
 - [ ] **Step 5: Commit** (in repo-base) — `git commit -m "feat(pn-workspace-rules): land via integrate-branch; drop off-main work-arounds; bd-from-worktree note"`
@@ -321,7 +332,7 @@ Content = R-1…R-9 (spec §3 Tier R), RFC 2119, matching the file's existing `-
 
 ### Task 14: Provision `pgii-integrate-branch.strategy` for the pn repos
 
-**Files:** Modify workspace-root `/Users/phillipg/phillipg_mbp/pn-workspace.toml` — for each of the six nix-* repos (ff-merge-to-main), add to its existing `[[repos.<key>.hooks]]` (or a new entry) a `post-clone` `run` that sets the git config, e.g.:
+**Files:** Modify workspace-root `/Users/phillipg/phillipg_mbp/pn-workspace.toml` — for each of the six nix-\* repos (ff-merge-to-main), add to its existing `[[repos.<key>.hooks]]` (or a new entry) a `post-clone` `run` that sets the git config, e.g.:
 
 ```toml
 [[repos.<key>.hooks]]
@@ -334,7 +345,7 @@ run  = [
 
 Also set it directly on the already-cloned canonical checkouts (the hook only fires on future clones): `git -C <repo> config pgii-integrate-branch.strategy ff-merge-to-main` for the six repos.
 
-- [ ] **Step 1:** First **verify the hook `run` grammar** — existing entries use template tokens (`run = ['{nix_run install-pre-commit-hooks}']`); confirm pn executes a plain `run = ['git config …']` as shell (check pn's hook runner / ADR 0019), and use the token form if raw shell isn't supported. Then add the `post-clone` hook per repo **and** set the config on the already-cloned canonical checkouts (the hook only fires on *future* clones): `for r in <the six nix-* repos>; do git -C "$r" config pgii-integrate-branch.strategy ff-merge-to-main; git -C "$r" config pgii-integrate-branch.primaryBranch main; done` (git config is shared via `$GIT_COMMON_DIR/config`, so it propagates to all worktrees).
+- [ ] **Step 1:** First **verify the hook `run` grammar** — existing entries use template tokens (`run = ['{nix_run install-pre-commit-hooks}']`); confirm pn executes a plain `run = ['git config …']` as shell (check pn's hook runner / ADR 0019), and use the token form if raw shell isn't supported. Then add the `post-clone` hook per repo **and** set the config on the already-cloned canonical checkouts (the hook only fires on _future_ clones): `for r in <the six nix-* repos>; do git -C "$r" config pgii-integrate-branch.strategy ff-merge-to-main; git -C "$r" config pgii-integrate-branch.primaryBranch main; done` (git config is shared via `$GIT_COMMON_DIR/config`, so it propagates to all worktrees).
 - [ ] **Step 2: Verify** — from a repo worktree, `integrate-branch-support | jq .strategy` → `"ff-merge-to-main"`.
 - [ ] **Step 3:** (pn-workspace.toml is not git-tracked at the workspace root; no commit — note it in the session summary.)
 
@@ -358,7 +369,7 @@ The tasks build and **build-only-validate** everything (`nix flake check`, `darw
 
 - **Tier R** (Task 11), the **`integrate-branch` plugin** (Tasks 7-10), and the **`pn-workspace-rules`** edits (Task 12) reach agents only after the user runs the apply path (`darwin-rebuild switch` / `pn workspace apply` — **user-only**, per Global Constraints).
 - The **`integrate-branch-support` home module** (Task 6) defaults `enable = false` (matching the `pg-pr`/`git-tools` precedent). A **consuming machine/host flake** (a separate repo — identify at apply time) MUST set `phillipgreenii.programs.integrate-branch-support.enable = true`, else the tool isn't on PATH and `integrate-branch` cannot run its detector.
-- The `pn-workspace.toml` git config on existing clones (Task 14) takes effect immediately; the `post-clone` hook only affects *future* clones.
+- The `pn-workspace.toml` git config on existing clones (Task 14) takes effect immediately; the `post-clone` hook only affects _future_ clones.
 
 Flag this handoff in the session summary so the user knows the explicit apply + enable step remains.
 
