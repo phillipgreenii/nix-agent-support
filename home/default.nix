@@ -25,6 +25,7 @@
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
     ./programs/pg-pr
+    ./programs/integrate-branch-support
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena
