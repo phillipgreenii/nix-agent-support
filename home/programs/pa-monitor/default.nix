@@ -47,7 +47,7 @@ in
   # parallel darwin module (darwin/modules/pa-monitor) because the relevant
   # options are declared at darwin/system scope, not HM scope.
   config = lib.mkMerge [
-    (lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
+    (lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
       home.packages = [ cfg.package ];
     })
     # config.toml is the daemon's single source of OTel settings. Render it
@@ -60,7 +60,7 @@ in
     (lib.mkIf
       (
         cfg.settings != { }
-        && ((config.phillipgreenii.programs.claude.enable && cfg.enable) || cfg.daemon.enable)
+        && ((config.phillipgreenii.programs.claude-code.enable && cfg.enable) || cfg.daemon.enable)
       )
       {
         xdg.configFile."pa-monitor/config.toml".source =

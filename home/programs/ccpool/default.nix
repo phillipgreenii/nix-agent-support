@@ -39,7 +39,7 @@ in
     };
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
+  config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
     home.packages = [ cfg.package ];
 
     # config.toml: the module always pins plugin_dir to the rendered store path;

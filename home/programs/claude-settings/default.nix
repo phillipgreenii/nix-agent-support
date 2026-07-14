@@ -8,7 +8,7 @@
 }:
 
 let
-  cfg = config.phillipgreenii.programs.claude.settings;
+  cfg = config.phillipgreenii.programs.claude-code.settings;
 
   # Build the shared act_* activation-output helpers locally (repo-base ADR 0014;
   # the library form cannot be a flake.lib output, so each consumer builds it from
@@ -107,7 +107,7 @@ let
   hasAnything = hasSettings || hasPlugins || hasManagedKeys;
 in
 {
-  options.phillipgreenii.programs.claude.settings = {
+  options.phillipgreenii.programs.claude-code.settings = {
     claudeCodePackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default = null;
@@ -306,7 +306,7 @@ in
     };
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && hasAnything) {
+  config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && hasAnything) {
     home.activation.claude-settings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       # Source act_* so the inline status lines below match the chained scripts'
       # output. Same byte-identical source as the activation-lib mkBashLibrary

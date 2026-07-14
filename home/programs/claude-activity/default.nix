@@ -15,7 +15,7 @@ in
     package = lib.mkPackageOption pkgs "claude-activity" { };
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
+  config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
     home = {
       # Plugin registration + content (plugin.json, hooks/hooks.json) now live in
       # the committed claude-marketplace/ tree, built by the nix marketplace

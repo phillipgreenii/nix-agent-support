@@ -1,7 +1,7 @@
 { ... }:
 {
   imports = [
-    ./programs/claude
+    ./programs/claude-code
     ./programs/claude-settings
     ./programs/claude-status-line
     ./programs/claude-theme

@@ -4,7 +4,7 @@
   ...
 }:
 let
-  cfg = config.phillipgreenii.programs.claude;
+  cfg = config.phillipgreenii.programs.claude-code;
   th = cfg.plugins.thirdparty;
 
   allMarketplacePlugins = lib.concatLists (
@@ -36,7 +36,7 @@ let
   );
 in
 {
-  options.phillipgreenii.programs.claude.plugins.thirdparty = {
+  options.phillipgreenii.programs.claude-code.plugins.thirdparty = {
     marketplaces = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
@@ -86,7 +86,7 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = th.lspPackages;
 
-    phillipgreenii.programs.claude.settings = {
+    phillipgreenii.programs.claude-code.settings = {
       extraKnownMarketplaces = lib.mapAttrs (_: mkt: {
         source = {
           source = "github";

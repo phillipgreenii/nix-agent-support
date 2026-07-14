@@ -5,16 +5,16 @@
   ...
 }:
 let
-  cfg = config.phillipgreenii.programs.claude;
+  cfg = config.phillipgreenii.programs.claude-code;
 in
 {
-  options.phillipgreenii.programs.claude.enable =
+  options.phillipgreenii.programs.claude-code.enable =
     lib.mkEnableOption "Claude Code and associated tooling";
 
   config = lib.mkIf cfg.enable {
     # Bridge to home-manager so HM modules can gate on the same flag
     home-manager.sharedModules = [
-      { phillipgreenii.programs.claude.enable = lib.mkDefault cfg.enable; }
+      { phillipgreenii.programs.claude-code.enable = lib.mkDefault cfg.enable; }
     ];
     home-manager.users.phillipg = {
       # `claude doctor` / `/doctor` reports a BENIGN warning here, safe to ignore (pg2-zv2v):

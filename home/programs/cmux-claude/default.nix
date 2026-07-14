@@ -8,7 +8,7 @@
   # the cmux module installs when cmux.enable = true. This module declares the
   # claude+cmux integration dependency so the relationship is explicit.
   config = lib.mkIf (
-    config.phillipgreenii.programs.claude.enable
+    config.phillipgreenii.programs.claude-code.enable
     && (config.phillipgreenii.programs.cmux.enable or false)
   ) { };
 }

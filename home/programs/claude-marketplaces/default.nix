@@ -16,7 +16,7 @@
 # program module needs NO `inputs` dependency (the passthru carries everything
 # needed; importing the helper would pull repo-base's lib into the HM module's args).
 #
-# Registration feeds `phillipgreenii.programs.claude.settings.*`, whose single
+# Registration feeds `phillipgreenii.programs.claude-code.settings.*`, whose single
 # `claude-settings` writer owns ~/.claude/settings.json. The marketplace drv itself
 # is threaded in via `homeModules.default` in flake.nix (where `inputs`/`self` are in
 # scope), system-guarded.
@@ -26,10 +26,10 @@
   ...
 }:
 let
-  # Read leaf options DIRECTLY (not via a bound `cfg = config.phillipgreenii.programs.claude`).
+  # Read leaf options DIRECTLY (not via a bound `cfg = config.phillipgreenii.programs.claude-code`).
   # Dereferencing the whole `claude` attrset would force the module system's
   # freeform/unmatchedDefns check on the same subtree this module contributes to.
-  mcfg = config.phillipgreenii.programs.claude.marketplaces;
+  mcfg = config.phillipgreenii.programs.claude-code.marketplaces;
 
   # Per-marketplace on-disk install root. Claude reads the directory source from
   # here and copies it into its versioned cache.
@@ -70,7 +70,7 @@ let
   };
 in
 {
-  options.phillipgreenii.programs.claude.marketplaces = {
+  options.phillipgreenii.programs.claude-code.marketplaces = {
     nixProvided = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
@@ -105,11 +105,11 @@ in
     };
   };
 
-  config = lib.mkIf config.phillipgreenii.programs.claude.enable {
+  config = lib.mkIf config.phillipgreenii.programs.claude-code.enable {
     # Symlink each active built marketplace into a fixed on-disk path.
     home.file = homeFiles;
     # Inline equivalent of mkDirectoryMarketplaceSettings: register each marketplace
     # as a local directory source + resolve per-plugin enablement.
-    phillipgreenii.programs.claude.settings = marketplaceSettings;
+    phillipgreenii.programs.claude-code.settings = marketplaceSettings;
   };
 }

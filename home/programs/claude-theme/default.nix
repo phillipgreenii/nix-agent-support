@@ -19,7 +19,7 @@
   ...
 }:
 let
-  cfg = config.phillipgreenii.programs.claude.theme;
+  cfg = config.phillipgreenii.programs.claude-code.theme;
   c = config.lib.stylix.colors;
 
   # ---------------------------------------------------------------------------
@@ -75,16 +75,16 @@ let
   tokenMap = import ./colors.nix { colors = c; };
 in
 {
-  options.phillipgreenii.programs.claude.theme = {
+  options.phillipgreenii.programs.claude-code.theme = {
     enable = lib.mkEnableOption "Stylix-aligned Claude Code theme";
   };
 
-  config = lib.mkIf (config.phillipgreenii.programs.claude.enable && cfg.enable) {
+  config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
     assertions = [
       {
         assertion = config.stylix.enable;
         message = ''
-          phillipgreenii.programs.claude.theme.enable = true requires stylix.enable = true.
+          phillipgreenii.programs.claude-code.theme.enable = true requires stylix.enable = true.
           Enable Stylix before enabling the Claude Code Stylix theme integration.
         '';
       }
@@ -101,12 +101,12 @@ in
 
     # Set theme preference in ~/.claude/settings.json.
     # "custom:stylix" selects ~/.claude/themes/stylix.json.
-    phillipgreenii.programs.claude.settings.theme = "custom:stylix";
+    phillipgreenii.programs.claude-code.settings.theme = "custom:stylix";
 
     # Inject Stylix 24-bit truecolor escapes into the status-line segment scripts.
     # Keys match the named colors used in scripts.nix (yellow, green, red, cyan, magenta).
     # BOLD and DIM are ANSI attribute codes (not colors) and remain hardcoded.
-    phillipgreenii.programs.claude.status-line-colors = {
+    phillipgreenii.programs.claude-code.status-line-colors = {
       yellow = truecolorFg c.base0A; # worktree name, context-warning mid
       green = truecolorFg c.base0B; # host indicator H, git branch, context OK
       red = truecolorFg c.base08; # context-warning high threshold

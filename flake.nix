@@ -568,8 +568,8 @@
                             # and contributes to (the real options live in
                             # claude/claude-settings, not pulled in here).
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude.settings = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.settings = {
                                 extraKnownMarketplaces = lib.mkOption {
                                   type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
                                   default = { };
@@ -600,16 +600,16 @@
 
                   # Baseline: registered, claude enabled, no overrides.
                   base = evalCfg {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = true;
                       marketplaces.nixProvided = [ mockMarketplace ];
                     };
                   };
-                  baseSettings = base.phillipgreenii.programs.claude.settings;
+                  baseSettings = base.phillipgreenii.programs.claude-code.settings;
 
                   # Per-plugin override flips on-plugin off.
                   overridden = evalCfg {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = true;
                       marketplaces.nixProvided = [ mockMarketplace ];
                       marketplaces.overrides."on-plugin@mock-repo-marketplace-local" = false;
@@ -618,13 +618,13 @@
 
                   # Per-marketplace disable removes all keys.
                   disabled = evalCfg {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = true;
                       marketplaces.nixProvided = [ mockMarketplace ];
                       marketplaces.enabled."mock-repo-marketplace-local" = false;
                     };
                   };
-                  disabledSettings = disabled.phillipgreenii.programs.claude.settings;
+                  disabledSettings = disabled.phillipgreenii.programs.claude-code.settings;
                 in
                 # Registration: directory source + on-disk path.
                 assert baseSettings.extraKnownMarketplaces ? "mock-repo-marketplace-local";
@@ -643,7 +643,7 @@
                 assert base.home.file ? ".local/share/pgii-marketplaces/mock-repo-marketplace-local";
                 # Override flips on-plugin off.
                 assert
-                  overridden.phillipgreenii.programs.claude.settings.enabledPlugins."on-plugin@mock-repo-marketplace-local"
+                  overridden.phillipgreenii.programs.claude-code.settings.enabledPlugins."on-plugin@mock-repo-marketplace-local"
                   == false;
                 # Per-marketplace disable removes ALL keys (settings + symlink).
                 assert disabledSettings.extraKnownMarketplaces == { };
@@ -796,7 +796,7 @@
                           { lib, ... }:
                           {
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
                               home.activation = lib.mkOption {
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
@@ -812,7 +812,7 @@
                   # plugin so the install loop (and thus the CLAUDE block) renders.
                   activation =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
@@ -835,7 +835,7 @@
                   # invocation should be emitted at all.
                   activationNoDir =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
@@ -914,7 +914,7 @@
                           { lib, ... }:
                           {
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
                               home.activation = lib.mkOption {
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
@@ -929,7 +929,7 @@
                   activationFor =
                     ttl:
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings.promptCacheTtl = ttl;
                       };
@@ -944,7 +944,7 @@
                   # therefore wins (jq's left-to-right `|` chain, last write wins).
                   ordered =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           env.ENABLE_PROMPT_CACHING_1H = "bogus";
@@ -959,7 +959,7 @@
                   # key so each `cfg.env ? KEY` guard is exercised independently.
                   nullPins1h =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           env.ENABLE_PROMPT_CACHING_1H = "keep";
@@ -970,7 +970,7 @@
 
                   nullPins5m =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           env.FORCE_PROMPT_CACHING_5M = "keep";
@@ -983,7 +983,7 @@
                   # via `env` — the dedicated option wins over env whenever it is set.
                   oppositePinned =
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         settings = {
                           env.FORCE_PROMPT_CACHING_5M = "keep";
@@ -1072,7 +1072,7 @@
                           { lib, ... }:
                           {
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
                               home.activation = lib.mkOption {
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
@@ -1087,7 +1087,7 @@
                   activationWith =
                     settings:
                     (evalActivation {
-                      phillipgreenii.programs.claude = {
+                      phillipgreenii.programs.claude-code = {
                         enable = true;
                         inherit settings;
                       };
@@ -1164,7 +1164,7 @@
                           { lib, ... }:
                           {
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
                               home.packages = lib.mkOption {
                                 type = lib.types.listOf lib.types.anything;
                                 default = [ ];
@@ -1190,7 +1190,7 @@
                     };
                   };
                   tuiOnly = evalCfg {
-                    phillipgreenii.programs.claude.enable = true;
+                    phillipgreenii.programs.claude-code.enable = true;
                     phillipgreenii.programs.pa-monitor = {
                       enable = true;
                       settings = endpoint;
@@ -1200,7 +1200,7 @@
                     phillipgreenii.programs.pa-monitor.settings = endpoint;
                   };
                   bothEnabled = evalCfg {
-                    phillipgreenii.programs.claude.enable = true;
+                    phillipgreenii.programs.claude-code.enable = true;
                     phillipgreenii.programs.pa-monitor = {
                       enable = true;
                       daemon.enable = true;
@@ -1626,7 +1626,7 @@
             # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
             # rev may predate the package. The `? …` guards make a missing package a
             # graceful empty no-op instead of an eval error.
-            config.phillipgreenii.programs.claude.marketplaces.nixProvided =
+            config.phillipgreenii.programs.claude-code.marketplaces.nixProvided =
               let
                 p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
                 own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };

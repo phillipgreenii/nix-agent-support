@@ -4,7 +4,7 @@
   ...
 }:
 let
-  cfg = config.phillipgreenii.programs.claude;
+  cfg = config.phillipgreenii.programs.claude-code;
   rulesFile = ./pgii-agent-rules.md;
 in
 {

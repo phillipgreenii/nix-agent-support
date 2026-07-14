@@ -5,10 +5,10 @@
   ...
 }:
 let
-  cfg = config.phillipgreenii.programs.claude.status-line-parts;
-  cfgColors = config.phillipgreenii.programs.claude.status-line-colors;
-  cfgReserve = config.phillipgreenii.programs.claude.status-line-notification-reserve;
-  cfgNerdFont = config.phillipgreenii.programs.claude.status-line-nerd-font;
+  cfg = config.phillipgreenii.programs.claude-code.status-line-parts;
+  cfgColors = config.phillipgreenii.programs.claude-code.status-line-colors;
+  cfgReserve = config.phillipgreenii.programs.claude-code.status-line-notification-reserve;
+  cfgNerdFont = config.phillipgreenii.programs.claude-code.status-line-nerd-font;
   scripts = import ./scripts.nix {
     inherit pkgs lib;
     colors = cfgColors;
@@ -20,7 +20,7 @@ let
   };
 in
 {
-  options.phillipgreenii.programs.claude = {
+  options.phillipgreenii.programs.claude-code = {
     status-line-parts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -81,14 +81,14 @@ in
     };
   };
 
-  config = lib.mkIf config.phillipgreenii.programs.claude.enable {
+  config = lib.mkIf config.phillipgreenii.programs.claude-code.enable {
     # Base parts occupy the default order band (1000). Downstream modules MUST place their
     # parts with lib.mkBefore / lib.mkAfter / lib.mkOrder (never plain assignment) so the
     # merged order stays deterministic as contributors grow.
     # See docs/adr/0020-status-line-parts-ordering-convention.md.
-    phillipgreenii.programs.claude.status-line-parts = lib.mkOrder 1000 scripts.defaultParts;
+    phillipgreenii.programs.claude-code.status-line-parts = lib.mkOrder 1000 scripts.defaultParts;
 
-    phillipgreenii.programs.claude.settings.statusLine = lib.mkIf (cfg != [ ]) {
+    phillipgreenii.programs.claude-code.settings.statusLine = lib.mkIf (cfg != [ ]) {
       type = "command";
       command = "bash ${wrapperScript}";
     };
