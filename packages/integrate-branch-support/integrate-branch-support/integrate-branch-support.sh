@@ -7,8 +7,13 @@ if ! declare -F resolve_primary_branch >/dev/null 2>&1; then
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/integrate-branch-support.bash"
 fi
 
-# Stub: signal detection + strategy selection land in later tasks.
+# Stub: remote/PR/MR signal detection + strategy selection land in later tasks.
 primary_branch="$(resolve_primary_branch)"
+canonical_branch_val="$(canonical_branch)"
+canonical_dirty_val="$(canonical_dirty)"
 jq -n --arg primary_branch "$primary_branch" \
+  --arg canonical_branch "$canonical_branch_val" \
+  --argjson canonical_dirty "$canonical_dirty_val" \
   '{strategy: null, reason: "stub", primary_branch: $primary_branch,
-    canonical: {branch: "main", dirty: false}, remote: null, open_pr: null, mr_bead: null}'
+    canonical: {branch: $canonical_branch, dirty: $canonical_dirty},
+    remote: null, open_pr: null, mr_bead: null}'
