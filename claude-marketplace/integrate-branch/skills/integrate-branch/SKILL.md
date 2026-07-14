@@ -111,7 +111,7 @@ pgii-integrate-branch.strategy`) is a fail-safe you MUST catch here, not somethi
      may want to add a remote, or re-declare a different strategy).
 3. **Installed and feasible** → invoke that handler skill (via the `Skill` tool,
    using the strategy string as the skill name). Relay the handler's outcome
-   (`landed | pr-opened | stopped:<reason>`) to the user, and when `reason` in the
+   (`landed | pr-opened | pr-updated | stopped:<reason>`) to the user, and when `reason` in the
    report indicated the strategy was _inferred_ rather than _declared_, say so —
    the user should know the method wasn't pinned by config.
 

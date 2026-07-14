@@ -74,9 +74,11 @@ to the sole remote if there's exactly one; anything else is ambiguous.
 ```bash
 REMOTE="$(git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null | cut -d/ -f1)"
 if [ -z "$REMOTE" ]; then
-  REMOTES="$(git -C "$WT" remote)"
-  REMOTE="$(printf '%s\n' "$REMOTES" | head -n1)"
-  # more than one line in $REMOTES with no upstream set → ambiguous, halt instead of guessing
+  n="$(git -C "$WT" remote | grep -c .)"
+  # 2+ candidate remotes and no upstream set → AMBIGUOUS: stop and report
+  # `stopped:ambiguous-remote` (do NOT fall through to the push and guess a remote).
+  [ "$n" -gt 1 ] && exit 1
+  REMOTE="$(git -C "$WT" remote)"   # the sole remote when n==1 (empty if none)
 fi
 git -C "$WT" push -u "$REMOTE" "$FB"
 ```
