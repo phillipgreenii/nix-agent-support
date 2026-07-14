@@ -30,5 +30,8 @@
     ./programs/serena
     ./programs/pw-reset-agents
     ./programs/pw-agent-activity
+    # Relocated from nix-personal (Plan 5): agent tooling belongs here.
+    ./programs/perles
+    ./programs/rtk
   ];
 }

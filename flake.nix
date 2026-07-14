@@ -1148,6 +1148,24 @@
                 assert !(hasSub ".sandbox = " sandboxEnabledSet);
                 pkgs.runCommand "claude-settings-nullor-noop-ok" { } "touch $out";
 
+              # Plan 5: agent-tooling capability/bundle -> feature-flag wiring
+              # (claude-code binary+ceta default-on, ccusage off, perles human-only,
+              # bundle enable + child veto). Pure eval; supplies the framework +
+              # mkCapability/mkBundle from nix-repo-base (override nix-base locally
+              # to exercise the unmerged framework).
+              capabilities-wiring-eval =
+                let
+                  r = import ./tests/capabilities-eval.nix {
+                    inherit lib;
+                    inherit (phillipgreenii-nix-base.lib) mkCapability mkBundle;
+                    framework = phillipgreenii-nix-base.homeModules.capability-framework;
+                  };
+                  failures = builtins.attrNames (lib.filterAttrs (_: v: v == false) (removeAttrs r [ "allPass" ]));
+                in
+                pkgs.runCommand "capabilities-wiring-eval" { } (
+                  if r.allPass then "touch $out" else throw "capabilities wiring failed: ${toString failures}"
+                );
+
               # Regression guard for pg2-w6us.20: the daemon's OTel config.toml
               # must render on daemon.enable even when the TUI (enable/
               # claude.enable) is off, and must NOT render when nothing is
@@ -1597,57 +1615,72 @@
       flake = {
         darwinModules.default = ./darwin;
         nixosModules.default = ./nixos;
-        homeModules.default =
-          { lib, pkgs, ... }:
-          let
-            # Thread the bash-builders factory + inputs to the ./home modules so
-            # consumers (e.g. claude-settings) can build activation-lib and their
-            # framework scripts WITHOUT any downstream flake having to provide
-            # these args. Mirrors how ziprecruiter's modules receive them.
-            mkBashBuildersFor =
-              p:
-              inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
-                pkgs = p;
-                inherit self;
-                inherit (p) lib;
-              };
-          in
-          {
-            imports = [ ./home ];
-            # `_module.args` must sit under `config` here: this module also sets a
-            # top-level `config.<...>` (nixProvided below), and the module system
-            # forbids a bare top-level `_module` alongside an explicit `config`.
-            config._module.args = { inherit mkBashBuildersFor inputs; };
-            # Auto-register repo-base's nix-built Claude marketplace AND this repo's
-            # own (consumer half of the pattern documented in repo-base
-            # docs/claude-marketplaces.md).
-            #
-            # System-guarded: repo-base publishes its package only on x86_64-linux +
-            # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
-            # rev may predate the package. The `? …` guards make a missing package a
-            # graceful empty no-op instead of an eval error.
-            config.phillipgreenii.programs.claude-code.marketplaces.nixProvided =
-              let
-                p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
-                own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
-              in
-              (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
-              ++ (lib.optional (
-                own ? phillipgreenii-nix-agent-support-marketplace
-              ) own.phillipgreenii-nix-agent-support-marketplace);
-          };
-        # Shape-B wrapper: imports the producer's HM module and sets options
-        # with this flake's self + name. Downstream consumers see the configured
-        # module shape (no further options to set).
-        homeModules.install-metadata =
-          { ... }:
-          {
-            imports = [ inputs.phillipgreenii-nix-base.homeModules.install-metadata ];
-            phillipgreenii.install-metadata = {
-              flakeSelf = self;
-              name = "phillipgreenii-nix-agent-support";
+        homeModules = {
+          default =
+            { lib, pkgs, ... }:
+            let
+              # Thread the bash-builders factory + inputs to the ./home modules so
+              # consumers (e.g. claude-settings) can build activation-lib and their
+              # framework scripts WITHOUT any downstream flake having to provide
+              # these args. Mirrors how ziprecruiter's modules receive them.
+              mkBashBuildersFor =
+                p:
+                inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                  pkgs = p;
+                  inherit self;
+                  inherit (p) lib;
+                };
+            in
+            {
+              imports = [ ./home ];
+              # `_module.args` must sit under `config` here: this module also sets a
+              # top-level `config.<...>` (nixProvided below), and the module system
+              # forbids a bare top-level `_module` alongside an explicit `config`.
+              config._module.args = { inherit mkBashBuildersFor inputs; };
+              # Auto-register repo-base's nix-built Claude marketplace AND this repo's
+              # own (consumer half of the pattern documented in repo-base
+              # docs/claude-marketplaces.md).
+              #
+              # System-guarded: repo-base publishes its package only on x86_64-linux +
+              # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
+              # rev may predate the package. The `? …` guards make a missing package a
+              # graceful empty no-op instead of an eval error.
+              config.phillipgreenii.programs.claude-code.marketplaces.nixProvided =
+                let
+                  p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                  own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                in
+                (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
+                ++ (lib.optional (
+                  own ? phillipgreenii-nix-agent-support-marketplace
+                ) own.phillipgreenii-nix-agent-support-marketplace);
             };
+          # Shape-B wrapper: imports the producer's HM module and sets options
+          # with this flake's self + name. Downstream consumers see the configured
+          # module shape (no further options to set).
+          install-metadata =
+            { ... }:
+            {
+              imports = [ inputs.phillipgreenii-nix-base.homeModules.install-metadata ];
+              phillipgreenii.install-metadata = {
+                flakeSelf = self;
+                name = "phillipgreenii-nix-agent-support";
+              };
+            };
+          # Light capability model (Plan 5): the agent-tooling capabilities + bundles.
+          # Self-contained — bundles in the capability-framework (account.* + bundles.*
+          # namespaces), so a consumer imports this ONE module alongside
+          # homeModules.default (the feature modules the capabilities enable) to opt
+          # accounts into agent tooling via phillipgreenii.{capabilities,bundles}.*.
+          capabilities = {
+            imports = [
+              inputs.phillipgreenii-nix-base.homeModules.capability-framework
+              (import ./home/capabilities {
+                inherit (inputs.phillipgreenii-nix-base.lib) mkCapability mkBundle;
+              })
+            ];
           };
+        };
         # Export the package overlay WITH the gomod2nix layer folded in, so any
         # consumer applying overlays.default gets pkgs.buildGoApplication (required
         # by the Go packages built via mkGoApp, ADR 0008) without re-adding
