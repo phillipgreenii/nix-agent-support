@@ -25,3 +25,17 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'has("strategy")'
 }
+
+@test "primary branch: honors pgii-integrate-branch.primaryBranch" {
+  git config pgii-integrate-branch.primaryBranch trunk
+  run bash "$BIN"; echo "$output" | jq -e '.primary_branch == "trunk"'
+}
+
+@test "primary branch: defaults to main when unset and no origin" {
+  run bash "$BIN"; echo "$output" | jq -e '.primary_branch == "main"'
+}
+
+@test "primary branch: falls back to origin/HEAD when config is unset" {
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+  run bash "$BIN"; echo "$output" | jq -e '.primary_branch == "develop"'
+}
