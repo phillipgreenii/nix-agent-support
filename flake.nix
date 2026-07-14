@@ -186,6 +186,17 @@
               name = "git-tools-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
+          integrate-branch-support =
+            let
+              result = import ./packages/integrate-branch-support {
+                pkgs = final;
+                inherit bashBuilders;
+              };
+            in
+            final.symlinkJoin {
+              name = "integrate-branch-support-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
+              paths = result.packages;
+            };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
           # Single source of truth for the gas city package across the
@@ -1392,6 +1403,10 @@
               bashBuilders = pkgs._agentSupportBashBuilders;
               inherit (pkgs) gascity;
             }).checks
+            // (import ./packages/integrate-branch-support {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
             # <module>-golangci for each of the six Pattern-A modules plus the
             # three Pattern-B (local-replace) modules.
@@ -1425,6 +1440,7 @@
               gc-bd-import-breaker
               gc-dolt-maintenance
               gascity
+              integrate-branch-support
               ;
             # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
             # Pattern-B consumers (bead pg2-wtjz). phillipg-nix-ziprecruiter's
