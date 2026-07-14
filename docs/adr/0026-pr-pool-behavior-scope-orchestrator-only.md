@@ -51,7 +51,7 @@ workflow/domain behavior to the deployment overlay.**
   (safety/isolation > never-drop-work > efficiency), dropping "authority"/"right-sizing";
   `INV-CONT-1`/`INV-FAIL-1` "hand the item back" rather than "escalate"; `INV-OBS-1`
   lists only orchestrator telemetry; `INV-SEC-3` drops the authorship example.
-- **Everything else moves to the deployment overlay** (`pr-pool-components/docs/behavior/`
+- **Everything else moves to the deployment overlay** (`docs/behavior/`
   in `phillipg-nix-ziprecruiter`): the workflows (reviewing others' PRs, shepherding my
   PRs, working the backlog), the review artifact, a `capability-map` (which tool fills
   which contract and why), and the domain invariants — renumbered into a **ZR-distinct
@@ -116,6 +116,6 @@ ambiguous even with full citations. ZR-owned rules use a `ZR-` prefix.
 ## Related Decisions
 
 - Supersedes [0025](0025-behavior-docs-three-set-split.md).
-- See also: phillipg-nix-ziprecruiter `pr-pool-components/docs/behavior/` (the overlay).
+- See also: phillipg-nix-ziprecruiter `docs/behavior/` (the overlay).
 - `INV-SEC-2` → `ZR-INV-ATTR-1` still records the decision in
   [0023](0023-agent-pr-comments-visible-bot-attribution.md).
