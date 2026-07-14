@@ -27,6 +27,11 @@ compute them fresh:
 WT="$(pwd)"                                   # the current working tree
 FB="$(git rev-parse --abbrev-ref HEAD)"        # the feature branch
 CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"   # canonical clone (main worktree)
+# primary branch — same resolution integrate-branch-support uses (declared → origin/HEAD → main)
+PRIMARY="$(git config --get pgii-integrate-branch.primaryBranch \
+  || git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null \
+  || echo origin/main)"
+PRIMARY="${PRIMARY#origin/}"                    # strip the remote prefix if it came from origin/HEAD
 ```
 
 - **`<WT>`** = the current working tree — wherever this handler is running.
