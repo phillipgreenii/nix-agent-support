@@ -1,0 +1,5 @@
+#compdef integrate-branch-support
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]'

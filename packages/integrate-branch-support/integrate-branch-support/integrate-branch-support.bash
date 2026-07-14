@@ -116,3 +116,57 @@ detect_mr_bead() {
   json="$(bd list --type=merge-request --json 2>/dev/null)" || return 0
   printf '%s' "$json" | jq -r '.data[0].id // empty' 2>/dev/null || true
 }
+
+# resolve_strategy: print exactly two lines — (1) the resolved strategy
+# (empty for "cannot infer", i.e. JSON null); (2) a human-readable reason.
+# Two lines for the same subshell-survival reason as detect_remote (this
+# runs inside a `$(...)`/`< <(...)` caller).
+#
+# Implements the resolution order (spec §4.2/§4.3). The tool is advisory
+# ONLY — it never emits ask/halt/none, and it never overrides a declared
+# strategy even when that strategy looks infeasible; flagging the conflict
+# in the reason is as far as the tool goes (§4.4: the agent decides):
+#   1. declared `pgii-integrate-branch.strategy` wins outright. A declared
+#      `pull-request` with no resolvable remote is kept as-is but flagged
+#      infeasible in the reason.
+#   2. else an ambiguous remote (detect_remote's line-2 reason) means the
+#      tool cannot even resolve what "no remote" vs. "has a remote" means,
+#      so it cannot infer either — reported as-is.
+#   3. else no remote at all rules out `pull-request` outright ->
+#      `ff-merge-to-main`.
+#   4. else an open PR or an open merge-request bead -> `pull-request`.
+#   5. else the tool cannot infer -> null (empty line 1).
+resolve_strategy() {
+  local declared="$1" remote="$2" remote_reason="$3" open_pr_json="$4" mr_bead="$5"
+
+  if [ -n "$declared" ]; then
+    if [ "$declared" = "pull-request" ] && [ -z "$remote" ]; then
+      printf '%s\ndeclared strategy is '"'"'pull-request'"'"' but no remote could be resolved -- pull request is infeasible; the agent decides how to proceed\n' "$declared"
+      return
+    fi
+    printf '%s\ndeclared strategy: %s (pgii-integrate-branch.strategy)\n' "$declared" "$declared"
+    return
+  fi
+
+  if [ -n "$remote_reason" ]; then
+    printf '\n%s\n' "$remote_reason"
+    return
+  fi
+
+  if [ -z "$remote" ]; then
+    printf 'ff-merge-to-main\nno remote configured -- a pull request is impossible\n'
+    return
+  fi
+
+  if [ -n "$open_pr_json" ] && [ "$open_pr_json" != "null" ]; then
+    printf 'pull-request\nan open pull request was found for the current branch\n'
+    return
+  fi
+
+  if [ -n "$mr_bead" ]; then
+    printf 'pull-request\nan open merge-request bead was found: %s\n' "$mr_bead"
+    return
+  fi
+
+  printf '\nremote present, no open PR or merge-request bead, and no strategy declared -- cannot infer a strategy\n'
+}

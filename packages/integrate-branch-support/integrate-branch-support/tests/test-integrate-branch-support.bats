@@ -160,3 +160,70 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.open_pr == null and .mr_bead == null'
 }
+
+@test "strategy: declared ff-merge-to-main wins outright" {
+  git config pgii-integrate-branch.strategy ff-merge-to-main
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "ff-merge-to-main" and (.reason | test("declared"))'
+}
+
+@test "strategy: no remote and undeclared infers ff-merge-to-main" {
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "ff-merge-to-main" and (.reason | test("no remote"; "i"))'
+}
+
+@test "strategy: an open PR (undeclared, remote present) infers pull-request" {
+  git remote add origin https://example.invalid/o/r.git
+  mkdir -p "$TEST_DIR/bin"
+  cat >"$TEST_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
+EOF
+  chmod +x "$TEST_DIR/bin/gh"
+  PATH="$TEST_DIR/bin:$PATH"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "pull-request"'
+}
+
+@test "strategy: an open merge-request bead (undeclared, remote present) infers pull-request" {
+  git remote add origin https://example.invalid/o/r.git
+  mkdir -p "$TEST_DIR/bin"
+  cat >"$TEST_DIR/bin/bd" <<'EOF'
+#!/usr/bin/env bash
+echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
+EOF
+  chmod +x "$TEST_DIR/bin/bd"
+  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "pull-request"'
+}
+
+@test "strategy: remote present, no PR/bead, undeclared cannot be inferred" {
+  git remote add origin https://example.invalid/o/r.git
+  mkdir -p "$TEST_DIR/bin"
+  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == null'
+}
+
+@test "strategy: declared pull-request with no remote is flagged infeasible, not overridden" {
+  git config pgii-integrate-branch.strategy pull-request
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.strategy == "pull-request" and (.reason | test("infeasible"; "i"))'
+}
+
+@test "fail-safe: exits nonzero when run outside a git repository" {
+  local nogit_dir
+  nogit_dir="$(mktemp -d)"
+  cd "$nogit_dir" || return 1
+  run bash "$BIN"
+  cd "$TEST_DIR" || true
+  rm -rf "$nogit_dir"
+  [ "$status" -ne 0 ]
+}

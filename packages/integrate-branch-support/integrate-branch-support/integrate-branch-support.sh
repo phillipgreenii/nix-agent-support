@@ -7,7 +7,15 @@ if ! declare -F resolve_primary_branch >/dev/null 2>&1; then
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/integrate-branch-support.bash"
 fi
 
-# Stub: strategy selection lands in a later task.
+# Fail-safe (spec §4.3): this tool has nothing meaningful to report outside
+# a git repository, and every helper below assumes one exists -- guard
+# up front and exit nonzero rather than let some later `git` call fail
+# confusingly deep in the pipeline.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "integrate-branch-support: not inside a git repository" >&2
+  exit 1
+fi
+
 primary_branch="$(resolve_primary_branch)"
 canonical_branch_val="$(canonical_branch)"
 canonical_dirty_val="$(canonical_dirty)"
@@ -25,24 +33,30 @@ remote_reason=""
   IFS= read -r remote_val
   IFS= read -r remote_reason
 } < <(detect_remote)
-# reason/strategy assembly proper is a later task; "stub" is still the
-# default, but an ambiguous remote is worth surfacing now.
-reason_val="stub"
-[ -n "$remote_reason" ] && reason_val="$remote_reason"
 
 open_pr_json="$(detect_open_pr)"
 [ -n "$open_pr_json" ] || open_pr_json="null"
 
 mr_bead_val="$(detect_mr_bead)"
 
+declared_strategy="$(git config --get pgii-integrate-branch.strategy 2>/dev/null || true)"
+
+strategy_val=""
+reason_val=""
+{
+  IFS= read -r strategy_val
+  IFS= read -r reason_val
+} < <(resolve_strategy "$declared_strategy" "$remote_val" "$remote_reason" "$open_pr_json" "$mr_bead_val")
+
 jq -n --arg primary_branch "$primary_branch" \
   --arg canonical_branch "$canonical_branch_val" \
   --argjson canonical_dirty "$canonical_dirty_val" \
+  --arg strategy "$strategy_val" \
   --arg reason "$reason_val" \
   --arg remote "$remote_val" \
   --argjson open_pr "$open_pr_json" \
   --arg mr_bead "$mr_bead_val" \
-  '{strategy: null, reason: $reason, primary_branch: $primary_branch,
+  '{strategy: (if $strategy == "" then null else $strategy end), reason: $reason, primary_branch: $primary_branch,
     canonical: {branch: $canonical_branch, dirty: $canonical_dirty},
     remote: (if $remote == "" then null else $remote end),
     open_pr: $open_pr,
