@@ -28,10 +28,10 @@ func TestConvertSessionWithContribution_PreservesLastErrorFromSubagent(t *testin
 	if sv == nil {
 		t.Fatal("convertSessionWithContribution returned nil")
 	}
-	if sv.SessionEnrichment.LastError == nil {
+	if sv.LastError == nil {
 		t.Fatal("LastError is nil; expected reconstructed error record")
 	}
-	if !sv.SessionEnrichment.LastError.FromSubagent {
+	if !sv.LastError.FromSubagent {
 		t.Error("LastError.FromSubagent = false; want true (provenance dropped on the DB->client path)")
 	}
 }

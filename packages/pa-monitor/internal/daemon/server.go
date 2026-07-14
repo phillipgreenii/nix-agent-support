@@ -389,19 +389,9 @@ func matchesSelector(sv *aggregate.SessionView, sel *pb.Selector) bool {
 	return false
 }
 
-// sessionViewToWire / dirToWire — bridges into the proto translator
-// without exposing internal-only functions outside the daemon package.
-// (The proto package itself owns the public conversion.)
-func sessionViewToWire(sv *aggregate.SessionView) *pb.SessionView {
-	d := pb.FromTree(&aggregate.Tree{Dirs: []*aggregate.Directory{
-		{Sessions: []*aggregate.SessionView{sv}},
-	}})
-	if len(d.GetDirs()) > 0 && len(d.GetDirs()[0].GetSessions()) > 0 {
-		return d.GetDirs()[0].GetSessions()[0]
-	}
-	return nil
-}
-
+// dirToWire bridges into the proto translator without exposing internal-only
+// functions outside the daemon package. (The proto package itself owns the
+// public conversion.)
 func dirToWire(d *aggregate.Directory) *pb.Directory {
 	t := pb.FromTree(&aggregate.Tree{Dirs: []*aggregate.Directory{d}})
 	if len(t.GetDirs()) > 0 {

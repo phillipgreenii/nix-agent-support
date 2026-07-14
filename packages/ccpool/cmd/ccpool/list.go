@@ -76,7 +76,7 @@ func runList(args []string) int {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	rows, err := st.List(context.Background())
 	if err != nil {

@@ -335,8 +335,8 @@ func TestConfigOTelDefaultsEmpty(t *testing.T) {
 func TestApplyOTelEnvSetsWhenUnset(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
-	os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	os.Unsetenv("OTEL_RESOURCE_ATTRIBUTES")
+	_ = os.Unsetenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	_ = os.Unsetenv("OTEL_RESOURCE_ATTRIBUTES")
 	ApplyOTelEnv(OTelConfig{
 		Endpoint:      "http://127.0.0.1:4317",
 		ResourceAttrs: map[string]string{"host.name": "mbp-02"},

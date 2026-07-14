@@ -98,7 +98,7 @@ func TestSend_recordsOrderedInputSequence(t *testing.T) {
 			idxDone = i
 		}
 	}
-	if !(idxWorking >= 0 && idxClear > idxWorking && idxDone > idxClear) {
+	if idxWorking < 0 || idxClear <= idxWorking || idxDone <= idxClear {
 		t.Errorf("expected ordered working < clear-input < done; got working=%d clear=%d done=%d (evs=%+v)",
 			idxWorking, idxClear, idxDone, evs)
 	}

@@ -80,7 +80,7 @@ func TestMigrate003_AppliesCleanlyOn002DB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	// Bring the DB to version 002 only.

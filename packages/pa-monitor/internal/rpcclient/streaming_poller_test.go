@@ -192,7 +192,7 @@ func TestStreamingPoller_ConsumesPushesAndReconnects(t *testing.T) {
 	p.watch = watch
 	p.reconnectPause = time.Millisecond
 	p.start()
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	// First stream pushes a state -> poller applies it and reports connected.
 	fs1 := <-streams
@@ -237,7 +237,7 @@ func TestStreamingPoller_WatchdogTripsOnSilence(t *testing.T) {
 	p.watchdogBudget = 20 * time.Millisecond
 	p.reconnectPause = time.Millisecond
 	p.start()
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	// Connect, then go silent.
 	fs1 := <-streams
@@ -334,7 +334,7 @@ func TestStreamingPoller_LiveRecoversFromDaemonRestart(t *testing.T) {
 
 	cmd := start()
 	p := NewStreamingPollerForSocket(sockPath, 200*time.Millisecond)
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	// Stream connects and pushes -> Snapshot returns a tree, online.
 	eventually(t, 5*time.Second, func() bool {

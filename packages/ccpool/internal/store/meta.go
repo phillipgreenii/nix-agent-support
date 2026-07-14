@@ -47,7 +47,7 @@ func (s *Store) Meta(ctx context.Context, externalID string) (map[string]string,
 	if err != nil {
 		return nil, fmt.Errorf("meta %q: %w", externalID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]string{}
 	for rows.Next() {
 		var k, v string
@@ -106,7 +106,7 @@ func (s *Store) scanExternalIDs(ctx context.Context, q string, args ...any) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("list external_ids by meta: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var id string

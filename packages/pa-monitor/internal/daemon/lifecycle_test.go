@@ -108,7 +108,7 @@ func TestBindSocket_CreatesAndChmods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	info, err := os.Stat(paths.Socket)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestBindSocket_RemovesStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 }
 
 func TestRun_CleanShutdownRemovesArtifacts(t *testing.T) {

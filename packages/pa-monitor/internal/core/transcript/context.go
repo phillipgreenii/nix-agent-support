@@ -21,7 +21,7 @@ func LatestContext(path string) (ContextSnapshot, error) {
 	if err != nil {
 		return ContextSnapshot{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	var last ContextSnapshot

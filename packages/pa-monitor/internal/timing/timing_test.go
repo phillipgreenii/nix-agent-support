@@ -44,10 +44,10 @@ func TestDeriveInvariantsHoldForAnyBase(t *testing.T) {
 	}
 	for _, c := range bases {
 		d := timing.Derive(c)
-		if !(d.PushBudget > 2*d.SnapshotInterval) {
+		if d.PushBudget <= 2*d.SnapshotInterval {
 			t.Errorf("base %+v: PushBudget %s !> 2 x SnapshotInterval %s", c, d.PushBudget, 2*d.SnapshotInterval)
 		}
-		if !(d.StaleAfter >= 3*d.HeartbeatInterval) {
+		if d.StaleAfter < 3*d.HeartbeatInterval {
 			t.Errorf("base %+v: StaleAfter %s !>= 3 x HeartbeatInterval %s", c, d.StaleAfter, 3*d.HeartbeatInterval)
 		}
 	}

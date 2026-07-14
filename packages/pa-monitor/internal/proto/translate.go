@@ -93,7 +93,7 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 		Kind:          sv.Kind,
 		Entrypoint:    sv.Entrypoint,
 		Status:        session.Status(sv.Status).String(),
-		Blocker:       sv.Session.Blocker.String(),
+		Blocker:       sv.Blocker.String(),
 		Branch:        sv.Branch,
 		TerminalHost:  sv.TerminalHost,
 		ContextTokens: uint64(sv.ContextTokens),

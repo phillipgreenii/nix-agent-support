@@ -70,7 +70,7 @@ func runShow(formatVal string, args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryRowsByIDs(ids)
 	if err != nil {
@@ -118,7 +118,7 @@ func runShow(formatVal string, args []string) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results)
+		_ = enc.Encode(results)
 	default:
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tTOOL\tSUMMARY\tHOOK\tOUTCOME\tCORRECT\tSANDBOX")
@@ -148,6 +148,6 @@ func runShow(formatVal string, args []string) {
 				}
 			}
 		}
-		w.Flush()
+		_ = w.Flush()
 	}
 }

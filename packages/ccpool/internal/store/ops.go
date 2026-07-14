@@ -97,7 +97,7 @@ func (s *Store) List(ctx context.Context) ([]Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Session
 	for rows.Next() {
 		sess, err := scanRow(rows)

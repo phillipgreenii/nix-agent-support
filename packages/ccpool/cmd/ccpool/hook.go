@@ -77,7 +77,7 @@ func runHook(args []string) int {
 		logHook(stateDir, fmt.Sprintf("hook %s: store open: %v", event, err))
 		return 0
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)
 	// Build the transient-retry actuator (StopFailure in-place retry). It is

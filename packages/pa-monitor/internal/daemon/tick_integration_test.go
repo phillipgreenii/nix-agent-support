@@ -153,7 +153,7 @@ func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	// A single read of either can therefore race the publish under -race's
 	// slower timing, so wait for both to converge.
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := pb.NewPaMonitorClient(conn)
 
 	var dirCount int
@@ -296,7 +296,7 @@ func TestCaffeinate_TogglePersistsAcrossTicks(t *testing.T) {
 	waitForFile(t, paths.Socket)
 
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := pb.NewPaMonitorClient(conn)
 
 	// Flip caffeinate ON while no agents are working.

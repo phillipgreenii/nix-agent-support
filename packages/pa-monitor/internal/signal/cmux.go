@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -93,13 +92,6 @@ func enrichCmdErr(err error) error {
 		return fmt.Errorf("%w: %s", err, bytes.TrimSpace(ee.Stderr))
 	}
 	return err
-}
-
-func (c *CmuxSignaler) lookupEnv(key string) (string, bool) {
-	if c.LookupEnv != nil {
-		return c.LookupEnv(key)
-	}
-	return os.LookupEnv(key)
 }
 
 // Detect returns true when targetPID has a cmux server in its ancestry.

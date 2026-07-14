@@ -268,24 +268,6 @@ func PidAlive(pid int) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
-// metadataEventTypes are trailing-record types that do NOT count as human/user
-// or assistant MESSAGE activity. They are bookkeeping records Claude Code writes
-// around real turns (some, like queue-operation, even carry a timestamp), so
-// filtering by type — not by timestamp presence — is required.
-var metadataEventTypes = map[string]bool{
-	"mode":                  true,
-	"permission-mode":       true,
-	"last-prompt":           true,
-	"custom-title":          true,
-	"ai-title":              true,
-	"agent-name":            true,
-	"pr-link":               true,
-	"queue-operation":       true,
-	"file-history-snapshot": true,
-	"system":                true, // includes turn_duration / stop_hook_summary / api_error / local_command
-	"attachment":            true,
-}
-
 // LastMessageActivity returns the timestamp of the last REAL assistant/user
 // MESSAGE event in the transcript, scanning from the end and skipping trailing
 // metadata records (mode, permission-mode, last-prompt, custom-title, ai-title,
@@ -303,7 +285,7 @@ func LastMessageActivity(path string) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	type scan struct {
 		Type              string    `json:"type"`

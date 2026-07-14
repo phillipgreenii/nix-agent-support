@@ -24,7 +24,7 @@ func TestMigrateRuntimeJSON_PopulatesToggles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("sqlite.Migrate: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestMigrateRuntimeJSON_NewShapeFileLeftUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("sqlite.Migrate: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestMigrateRuntimeJSON_MissingFile_IsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("sqlite.Migrate: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestMigrateRuntimeJSON_Idempotent_AfterDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("sqlite.Migrate: %v", err)
 	}

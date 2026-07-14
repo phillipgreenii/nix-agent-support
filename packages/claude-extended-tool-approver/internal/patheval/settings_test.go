@@ -113,7 +113,7 @@ func TestLoadSandboxFilesystemConfig_MissingSandboxKey(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"statusLine": {}}`), 0o644)
+	_ = os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"statusLine": {}}`), 0o644)
 
 	t.Setenv("HOME", dir)
 	cfg := LoadSandboxFilesystemConfig("")

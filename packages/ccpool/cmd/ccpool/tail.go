@@ -29,7 +29,7 @@ func runTail(args []string) int {
 	if err != nil {
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	row, ok, err := st.GetByExternalID(context.Background(), fs.Arg(0))
 	if err != nil || !ok || row.TranscriptPath == "" {
 		fmt.Fprintln(os.Stderr, "no transcript for", fs.Arg(0))
@@ -40,7 +40,7 @@ func runTail(args []string) int {
 		fmt.Fprintln(os.Stderr, "open transcript:", err)
 		return 1
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadString('\n')

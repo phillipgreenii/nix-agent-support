@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// fake pidAlive hook for tests
-func fakePidAlive(alive map[int]bool) func(int) bool {
-	return func(pid int) bool { return alive[pid] }
-}
-
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
@@ -126,7 +121,7 @@ func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d sessions", len(got))
 	}
-	if got[0].Env != nil && len(got[0].Env) != 0 {
+	if len(got[0].Env) != 0 {
 		t.Errorf("expected empty env on reader failure, got %+v", got[0].Env)
 	}
 }

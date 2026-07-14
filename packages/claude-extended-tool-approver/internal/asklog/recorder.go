@@ -67,13 +67,13 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 			s.sandboxEnabledArg(),
 		)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return err
 		}
 
 		decID, err := res.LastInsertId()
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("last insert id: %w", err)
 		}
 
@@ -87,7 +87,7 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 				hookDecisionString(entry.Decision), entry.Reason,
 			)
 			if err != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				return fmt.Errorf("insert trace entry %d: %w", i+1, err)
 			}
 		}

@@ -1,0 +1,20 @@
+version: "2"
+
+# Mirrors phillipg-nix-repo-base/.golangci.yml — keep in sync. Pins the linter
+# set so every Go module in this repo lints identically and results do not drift
+# with the tool's built-in defaults. "standard" = errcheck, govet, ineffassign,
+# staticcheck, unused. golangci-lint v2 excludes generated files (lax) by
+# default, so pa-monitor's *.pb.go are not flagged.
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Writes to stdout/stderr via fmt.Fprint* essentially never fail in a CLI,
+      # and there is nothing actionable to do if they do; checking every such
+      # call would add pervasive `_, _ =` noise. Exclude the whole family rather
+      # than pepper the codebase. Best-effort cleanup errors (os.Remove, Close in
+      # an error path) ARE handled explicitly at each call site.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln

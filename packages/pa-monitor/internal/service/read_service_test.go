@@ -11,7 +11,7 @@ import (
 
 func TestReadService_GetState_AllFilter(t *testing.T) {
 	db, _ := sqlite.Open(":memory:")
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestReadService_GetState_AllFilter(t *testing.T) {
 
 func TestReadService_GetState_NoActiveBlock(t *testing.T) {
 	db, _ := sqlite.Open(":memory:")
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestReadService_GetState_NoActiveBlock(t *testing.T) {
 
 func TestReadService_GetSessionByID(t *testing.T) {
 	db, _ := sqlite.Open(":memory:")
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = sqlite.Migrate(context.Background(), db)
 	ctx := context.Background()
 	now := time.Now().UTC()

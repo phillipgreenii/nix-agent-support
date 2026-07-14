@@ -264,7 +264,7 @@ func (m *Model) sessionStatusWaitingForHuman(sid string) bool {
 			if sv.Session == nil || sv.SessionID != sid {
 				continue
 			}
-			return sv.Status == session.Blocked && sv.Session.Blocker.IsHuman()
+			return sv.Status == session.Blocked && sv.Blocker.IsHuman()
 		}
 	}
 	return false
@@ -299,10 +299,10 @@ func (m *Model) sessionHasPendingManual(sid string) bool {
 			if sv.Session == nil || sv.SessionID != sid {
 				continue
 			}
-			if sv.SessionEnrichment.PendingNudge == nil {
+			if sv.PendingNudge == nil {
 				return false
 			}
-			for _, src := range sv.SessionEnrichment.PendingNudge.Sources {
+			for _, src := range sv.PendingNudge.Sources {
 				if src == "manual" {
 					return true
 				}

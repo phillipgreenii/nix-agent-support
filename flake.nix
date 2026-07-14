@@ -232,101 +232,6 @@
             };
         };
 
-      # Custom pre-commit hooks merged into the base set (which already provides
-      # treefmt, statix, deadnix, shellcheck --severity=warning, trailing-whitespace,
-      # end-of-file-fixer, check-merge-conflicts, check-case-conflicts). Those are
-      # DROPPED here as redundant.
-      #
-      # Defined as a FUNCTION of the per-system `pkgs`: the pre-commit module
-      # (phillipg-nix-repo-base flake-modules/pre-commit.nix) applies it inside its
-      # `perSystem`, so every hook `entry` store path (go, golangci-lint) follows the
-      # building/committing system. Previously these were pinned to aarch64-darwin,
-      # which meant the hooks could not build on a linux dev host (install-pre-commit-hooks
-      # silently skipped) and — worse — an aarch64-darwin remote builder would let install
-      # SUCCEED writing darwin store paths, poisoning every subsequent linux commit (tc-yyx8l).
-      extraHooks = pkgs: {
-        gofmt = {
-          enable = true;
-          name = "gofmt (pg-pr/pr-pool/pb)";
-          entry = "${pkgs.go}/bin/gofmt -l -w";
-          files = "^packages/(pg-pr|pr-pool|pb)/.*\\.go$";
-          types_or = [ "go" ];
-        };
-        golangci-lint = {
-          enable = true;
-          name = "golangci-lint (pg-pr)";
-          # Default hook runs `golangci-lint run ./<dir>` from the repo root,
-          # which fails for monorepo modules (no enclosing go.mod). Override
-          # entry to chdir into the pg-pr module first.
-          entry = toString (
-            pkgs.writeShellScript "precommit-golangci-lint-pg-pr" ''
-              set -e
-              # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${pkgs.go}/bin:$PATH"
-              # The auto checks.pre-commit runs this hook inside a pure nix build
-              # sandbox (NIX_BUILD_TOP set, HOME=/homeless-shelter, no network).
-              # golangci-lint needs to download pg-pr's external module deps,
-              # which the sandbox cannot do. Skip there; lint normally on a dev
-              # machine. Preserves the pre-migration behaviour, where this hook
-              # only ran at commit time (it never ran in flake check before).
-              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                echo "golangci-lint (pg-pr): skipped — nix build sandbox (no network for go module download)"
-                exit 0
-              fi
-              cd packages/pg-pr
-              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
-            ''
-          );
-          files = "^packages/pg-pr/.*\\.go$";
-          pass_filenames = false;
-        };
-        golangci-lint-pr-pool = {
-          enable = true;
-          name = "golangci-lint (pr-pool)";
-          entry = toString (
-            pkgs.writeShellScript "precommit-golangci-lint-pr-pool" ''
-              set -e
-              # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${pkgs.go}/bin:$PATH"
-              # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
-              # pr-pool has external deps + a local replace to ../claude-transcript
-              # that golangci-lint cannot resolve offline. Lint normally on a dev
-              # machine. Mirrors the pg-pr hook guard above.
-              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                echo "golangci-lint (pr-pool): skipped — nix build sandbox (no network for go module download)"
-                exit 0
-              fi
-              cd packages/pr-pool
-              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
-            ''
-          );
-          files = "^packages/pr-pool/.*\\.go$";
-          pass_filenames = false;
-        };
-        golangci-lint-pb = {
-          enable = true;
-          name = "golangci-lint (pb)";
-          entry = toString (
-            pkgs.writeShellScript "precommit-golangci-lint-pb" ''
-              set -e
-              # golangci-lint shells out to `go`; put it on PATH.
-              export PATH="${pkgs.go}/bin:$PATH"
-              # Skip inside the pure nix build sandbox (the auto checks.pre-commit):
-              # pb has external deps (cobra) that golangci-lint cannot download
-              # offline. Lint normally on a dev machine. Mirrors the pg-pr/pr-pool
-              # hook guards above.
-              if [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                echo "golangci-lint (pb): skipped — nix build sandbox (no network for go module download)"
-                exit 0
-              fi
-              cd packages/pb
-              ${pkgs.golangci-lint}/bin/golangci-lint run ./...
-            ''
-          );
-          files = "^packages/pb/.*\\.go$";
-          pass_filenames = false;
-        };
-      };
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
       # Mirror flake-utils.lib.eachDefaultSystem verbatim — standalone,
@@ -344,11 +249,6 @@
         inputs.phillipgreenii-nix-base.flakeModules.devshell
         inputs.phillipgreenii-nix-base.flakeModules.checks
       ];
-
-      phillipgreenii = {
-        # Custom hooks merged into the base pre-commit set.
-        pre-commit.extraHooks = extraHooks;
-      };
 
       perSystem =
         {
@@ -466,6 +366,83 @@
               # builds keep `subPackages` (stay scoped) — only this gate pays the
               # test cost, and only under `nix flake check`, never a system build.
               mkGoTestCheck = pkgs._agentSupportGoBuilders.mkGoApp;
+
+              # golangci-lint (offline, gomod2nix vendor env) per Go module — the
+              # base-sanctioned replacement (pg2-6wly, pg2-2cuzv) for the removed
+              # network-dependent golangci-lint pre-commit hooks. Runs INSIDE the
+              # `nix flake check` sandbox (no NIX_BUILD_TOP skip), so it is a real
+              # Tier-1 gate. Mirrors base's pn-golangci/pjira-golangci. mkGoLint
+              # reads <pwd>/gomod2nix.toml from src; `config` lives outside src, so
+              # it MUST be passed explicitly. Pattern-B modRoot forwarding is base
+              # bead pg2-sjxhy.
+              goLint =
+                {
+                  module,
+                  modRoot ? null,
+                  src ? (./packages + "/${module}"),
+                }:
+                {
+                  name = "${module}-golangci";
+                  value = pkgs._agentSupportGoBuilders.mkGoLint {
+                    pname = module;
+                    inherit src modRoot;
+                    gomod2nixToml = ./packages + "/${module}/gomod2nix.toml";
+                    config = ./.golangci.yml;
+                  };
+                };
+
+              # Pattern A (no local `replace`): flat src at the module dir. One
+              # entry per go.mod module without a sibling replace.
+              simpleGoLintModules = [
+                "pg-pr"
+                "pb"
+                "claude-extended-tool-approver"
+                "pa-monitor-decorator-gc"
+                "pa-monitor-decorator-scope"
+                "claude-transcript"
+              ];
+
+              # Pattern B (local `replace => ../sibling`): root the fileset at
+              # packages/ so every replaced sibling lives in one store tree, and
+              # pass modRoot. Filesets mirror each module's own default.nix.
+              patternBGoLints = [
+                (goLint {
+                  module = "ccpool";
+                  modRoot = "ccpool";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pa-monitor";
+                  modRoot = "pa-monitor";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pa-monitor
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pr-pool";
+                  modRoot = "pr-pool";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      # ./docs holds behavior docs, not build inputs — mirror
+                      # pr-pool/default.nix and exclude it from the digest.
+                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+              ];
             in
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
@@ -1414,7 +1391,12 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
               inherit (pkgs) gascity;
-            }).checks;
+            }).checks
+            # Nine offline golangci-lint gates, one per Go module (pg2-2cuzv):
+            # <module>-golangci for each of the six Pattern-A modules plus the
+            # three Pattern-B (local-replace) modules.
+            // lib.listToAttrs (map (module: goLint { inherit module; }) simpleGoLintModules)
+            // lib.listToAttrs patternBGoLints;
 
           packages = {
             # This repo's own Claude Code marketplace, bundled into the store with

@@ -90,7 +90,7 @@ func TestNew_WiresExportHealth(t *testing.T) {
 	if e == nil {
 		t.Fatal("want non-nil emitter when endpoint set")
 	}
-	defer e.Shutdown(context.Background())
+	defer func() { _ = e.Shutdown(context.Background()) }()
 	if e.health == nil {
 		t.Fatal("New should wire an exportHealth tracker")
 	}

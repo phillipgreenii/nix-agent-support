@@ -132,7 +132,7 @@ func transcriptHasTitle(path, wantTitle string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1<<16), 1<<20)

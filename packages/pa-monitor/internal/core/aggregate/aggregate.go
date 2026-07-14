@@ -72,7 +72,7 @@ func Build(sessions []*session.Session, enriched map[string]SessionEnrichment, p
 		for _, d := range byDir {
 			d.TotalCostUSD = block.CostUSD * float64(d.TotalTokens) / float64(grandTokens)
 			for _, s := range d.Sessions {
-				s.SessionEnrichment.CostUSD = block.CostUSD * float64(s.SessionEnrichment.SessionTokens) / float64(grandTokens)
+				s.CostUSD = block.CostUSD * float64(s.SessionTokens) / float64(grandTokens)
 			}
 		}
 	}

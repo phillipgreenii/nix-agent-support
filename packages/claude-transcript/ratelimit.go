@@ -116,7 +116,7 @@ func RateLimitPause(path string) (resetsAt time.Time, err error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	type rateLimitScan struct {
 		Type      string    `json:"type"`

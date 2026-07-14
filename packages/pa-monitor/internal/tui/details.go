@@ -24,12 +24,12 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	valBudget := max(ew-detailsLabelCols, 1)
 	var sb strings.Builder
 	sb.WriteString(detailsRuleLine(ew) + "\n")
-	sb.WriteString(fmt.Sprintf("Name:      %s\n", wrap.Line(sv.Name, valBudget)))
-	sb.WriteString(fmt.Sprintf("ID:        %s\n", wrap.Line(sv.SessionID, valBudget)))
-	sb.WriteString(fmt.Sprintf("PID:       %d\n", sv.PID))
-	sb.WriteString(fmt.Sprintf("Terminal:  %s\n", wrap.Line(sv.TerminalHost, valBudget)))
-	sb.WriteString(fmt.Sprintf("Cwd:       %s\n", wrap.Line(sv.Cwd, valBudget)))
-	sb.WriteString(fmt.Sprintf("Kind:      %s\n", wrap.Line(string(sv.Kind), valBudget)))
+	fmt.Fprintf(&sb, "Name:      %s\n", wrap.Line(sv.Name, valBudget))
+	fmt.Fprintf(&sb, "ID:        %s\n", wrap.Line(sv.SessionID, valBudget))
+	fmt.Fprintf(&sb, "PID:       %d\n", sv.PID)
+	fmt.Fprintf(&sb, "Terminal:  %s\n", wrap.Line(sv.TerminalHost, valBudget))
+	fmt.Fprintf(&sb, "Cwd:       %s\n", wrap.Line(sv.Cwd, valBudget))
+	fmt.Fprintf(&sb, "Kind:      %s\n", wrap.Line(string(sv.Kind), valBudget))
 	// ADR 0024: show status, and qualify a blocked session with its blocker
 	// ("blocked/usage_limit") so the reason a session is stuck is visible here,
 	// matching the CLI status table.
@@ -37,42 +37,42 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	if sv.Status == session.Blocked && sv.Blocker != session.NoBlocker {
 		statusStr += "/" + sv.Blocker.String()
 	}
-	sb.WriteString(fmt.Sprintf("Status:    %s\n", wrap.Line(statusStr, valBudget)))
-	sb.WriteString(fmt.Sprintf("Model:     %s\n", wrap.Line(sv.SessionEnrichment.Model, valBudget)))
-	win, _ := models.Window(sv.SessionEnrichment.Model)
+	fmt.Fprintf(&sb, "Status:    %s\n", wrap.Line(statusStr, valBudget))
+	fmt.Fprintf(&sb, "Model:     %s\n", wrap.Line(sv.Model, valBudget))
+	win, _ := models.Window(sv.Model)
 	ctxPct := 0.0
 	if win > 0 {
-		ctxPct = 100 * float64(sv.SessionEnrichment.ContextTokens) / float64(win)
+		ctxPct = 100 * float64(sv.ContextTokens) / float64(win)
 	}
-	sb.WriteString(fmt.Sprintf("Context:   %s / %s tokens (%.0f%%)\n",
-		render.FmtTok(sv.SessionEnrichment.ContextTokens), render.FmtTok(win), ctxPct))
-	sb.WriteString(fmt.Sprintf("Subagents: %d\n", sv.SessionEnrichment.SubagentCount))
-	sb.WriteString(fmt.Sprintf("Subshells: %d\n", sv.SessionEnrichment.SubshellCount))
+	fmt.Fprintf(&sb, "Context:   %s / %s tokens (%.0f%%)\n",
+		render.FmtTok(sv.ContextTokens), render.FmtTok(win), ctxPct)
+	fmt.Fprintf(&sb, "Subagents: %d\n", sv.SubagentCount)
+	fmt.Fprintf(&sb, "Subshells: %d\n", sv.SubshellCount)
 	sb.WriteString("\nFirst prompt:\n")
-	for line := range strings.SplitSeq(sv.SessionEnrichment.FirstPrompt, "\n") {
+	for line := range strings.SplitSeq(sv.FirstPrompt, "\n") {
 		sb.WriteString(wrap.Line(line, ew))
 		sb.WriteString("\n")
 	}
 
 	// Last error section: only shown when the error is terminal.
-	le := sv.SessionEnrichment.LastError
+	le := sv.LastError
 	if le != nil && le.IsTerminal {
 		kindStr := string(le.Kind)
 		if le.FromSubagent {
 			kindStr += "  (in subagent)"
 		}
-		if isEscalated(le, sv.SessionEnrichment.LastErrorRetryable) {
+		if isEscalated(le, sv.LastErrorRetryable) {
 			kindStr += "  (escalated)"
 		}
-		sb.WriteString(fmt.Sprintf("\nLast error:  %s\n", kindStr))
+		fmt.Fprintf(&sb, "\nLast error:  %s\n", kindStr)
 		errText := le.Text
 		if len(errText) > 200 {
 			errText = errText[:200] + "…"
 		}
 		if errText != "" {
-			sb.WriteString(fmt.Sprintf("             %s\n", wrap.Line(errText, valBudget)))
+			fmt.Fprintf(&sb, "             %s\n", wrap.Line(errText, valBudget))
 		}
-		sb.WriteString(fmt.Sprintf("             %s\n", humanizeAge(time.Since(le.At))))
+		fmt.Fprintf(&sb, "             %s\n", humanizeAge(time.Since(le.At)))
 	}
 
 	// Nudge section: shows pending intents (when queued) and most recent
@@ -80,17 +80,17 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	// can appear. The block is preceded by a blank line so it stands apart
 	// from the error block above.
 	pendingSources := nudgeSources(sv)
-	hasLast := !sv.SessionEnrichment.LastNudgedAt.IsZero()
+	hasLast := !sv.LastNudgedAt.IsZero()
 	if len(pendingSources) > 0 || hasLast {
 		sb.WriteString("\nNudge:\n")
 		if len(pendingSources) > 0 {
-			sb.WriteString(fmt.Sprintf("  pending: [%s]\n", strings.Join(pendingSources, ", ")))
+			fmt.Fprintf(&sb, "  pending: [%s]\n", strings.Join(pendingSources, ", "))
 		}
 		if hasLast {
-			ageStr := humanizeAge(time.Since(sv.SessionEnrichment.LastNudgedAt))
-			sb.WriteString(fmt.Sprintf("  last sent: %s\n", ageStr))
-			if len(sv.SessionEnrichment.LastNudgeSources) > 0 {
-				sb.WriteString(fmt.Sprintf("  via: [%s]\n", strings.Join(sv.SessionEnrichment.LastNudgeSources, ", ")))
+			ageStr := humanizeAge(time.Since(sv.LastNudgedAt))
+			fmt.Fprintf(&sb, "  last sent: %s\n", ageStr)
+			if len(sv.LastNudgeSources) > 0 {
+				fmt.Fprintf(&sb, "  via: [%s]\n", strings.Join(sv.LastNudgeSources, ", "))
 			}
 		}
 	}
@@ -103,10 +103,10 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 // nothing is pending. Pulled out so RenderDetails can show "Nudge:" header
 // only when at least one of the sub-fields applies.
 func nudgeSources(sv *aggregate.SessionView) []string {
-	if sv.SessionEnrichment.PendingNudge == nil {
+	if sv.PendingNudge == nil {
 		return nil
 	}
-	return sv.SessionEnrichment.PendingNudge.Sources
+	return sv.PendingNudge.Sources
 }
 
 // RenderDetailsWindow renders a height-bounded viewport over the full

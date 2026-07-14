@@ -60,7 +60,7 @@ func runCaffeinate(args []string) {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	resp, err := client.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action})
 	if err != nil {
@@ -139,7 +139,7 @@ func runNudge(args []string) {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if doCancel {
 		resp, err := client.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selRaw})
@@ -194,7 +194,7 @@ func runInfo(args []string) {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if path := sel.GetPath(); path != "" {
 		resp, err := client.C.GetPathInfo(ctx, &pb.GetPathInfoRequest{Path: path})

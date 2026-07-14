@@ -114,9 +114,6 @@ func TestControlsDaemonConnectedIndicator(t *testing.T) {
 	for _, w := range []int{60, 100, 140} {
 		connected := Controls(ControlsOpts{Width: w, DaemonConnected: true})
 		offline := Controls(ControlsOpts{Width: w, DaemonConnected: false})
-		if !strings.HasPrefix(lipgloss.NewStyle().Render(connected), "") {
-			// no-op; placeholder for clarity
-		}
 		if connected == offline {
 			t.Errorf("width=%d: connected and offline controls must differ; both =\n%s", w, connected)
 		}

@@ -14,7 +14,7 @@ import (
 // zero RateLimitResetsAt (no parseable reset time), and not from a subagent.
 func qualifyingLimitPauseSV(sid string, pid int) *aggregate.SessionView {
 	sv := newSV(sid, pid, session.Idle)
-	sv.SessionEnrichment.LastError = &transcript.ErrorRecord{
+	sv.LastError = &transcript.ErrorRecord{
 		Kind:       transcript.ErrRateLimit,
 		IsTerminal: true,
 	}
@@ -138,8 +138,8 @@ func TestLimitPauseProducerPerSessionGateExcludesParseableReset(t *testing.T) {
 	store := NewPendingStore()
 
 	parseable := qualifyingLimitPauseSV("sid-parseable", 1)
-	parseable.SessionEnrichment.RateLimitResetsAt = reset.Add(30 * time.Minute) // has a parsed reset → excluded
-	noReset := qualifyingLimitPauseSV("sid-noreset", 2)                         // zero reset → fires
+	parseable.RateLimitResetsAt = reset.Add(30 * time.Minute) // has a parsed reset → excluded
+	noReset := qualifyingLimitPauseSV("sid-noreset", 2)       // zero reset → fires
 
 	tree := treeWithFiveHour(reset, parseable, noReset)
 	p.Reconcile(TickContext{

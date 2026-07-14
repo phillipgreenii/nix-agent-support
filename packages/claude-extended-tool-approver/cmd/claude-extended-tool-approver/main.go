@@ -23,17 +23,6 @@ func sandboxEnabledPtr(v sql.NullInt64) *int {
 	return &x
 }
 
-// sandboxEnabledLabel returns a three-value human label: "on", "off", "-".
-func sandboxEnabledLabel(v sql.NullInt64) string {
-	if !v.Valid {
-		return "-"
-	}
-	if v.Int64 != 0 {
-		return "on"
-	}
-	return "off"
-}
-
 // sandboxEnabledKey returns a three-value key suitable for grouping in
 // map[string]int aggregations: "on", "off", "unknown".
 func sandboxEnabledKey(v sql.NullInt64) string {
@@ -178,7 +167,7 @@ func handlePreToolUse(input *hookio.HookInput) {
 	}
 
 	if store, err := asklog.NewStore(asklog.DefaultDBPath()); err == nil {
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
 		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
@@ -188,7 +177,7 @@ func handlePreToolUse(input *hookio.HookInput) {
 	}
 
 	output := hookio.FormatOutput(result, updatedInput)
-	os.Stdout.Write(output)
+	_, _ = os.Stdout.Write(output)
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -199,7 +188,7 @@ func handlePermissionRequest(input *hookio.HookInput) {
 		fmt.Println("{}")
 		return
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
 
 	var suggestions string
@@ -220,7 +209,7 @@ func handlePostToolUse(input *hookio.HookInput) {
 		fmt.Println("{}")
 		return
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := asklog.ResolveApproved(store, input, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
@@ -235,7 +224,7 @@ func handlePermissionDenied(input *hookio.HookInput) {
 		fmt.Println("{}")
 		return
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
 
 	if err := asklog.RecordPermissionDenied(store, input); err != nil {
@@ -251,7 +240,7 @@ func handleSessionEnd(input *hookio.HookInput) {
 		fmt.Println("{}")
 		return
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := asklog.ResolveDeniedAll(store, input.SessionID); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)

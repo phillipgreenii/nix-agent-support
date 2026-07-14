@@ -67,20 +67,20 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA busy_timeout=3000"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
@@ -127,7 +127,7 @@ func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []DecisionRow
 	for rows.Next() {
@@ -188,7 +188,7 @@ func (s *Store) QueryRowsByIDs(ids []int) ([]ShowRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []ShowRow
 	for rows.Next() {
@@ -251,7 +251,7 @@ func (s *Store) QueryTraceByDecisionID(decisionID int) ([]TraceRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []TraceRow
 	for rows.Next() {
@@ -375,11 +375,11 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("begin migration %d: %w", m.version, err)
 		}
 		if err := m.up(tx); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("migration %d: %w", m.version, err)
 		}
 		if _, err := tx.Exec("INSERT INTO schema_version (version) VALUES (?)", m.version); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("record version %d: %w", m.version, err)
 		}
 		if err := tx.Commit(); err != nil {

@@ -22,7 +22,7 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 	if b.UpdatedAt.IsZero() {
 		b.UpdatedAt = now
 	}
-	res, err := s.db.ExecContext(
+	_, err := s.db.ExecContext(
 		ctx, `
 		INSERT INTO blocks (
 			block_id, started_at, ended_at, plan_cap_usd, total_cost_usd, total_tokens,
@@ -61,10 +61,8 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// SQLite ON CONFLICT returns LastInsertId of the matched row on update too in modernc.
-	if id, err := res.LastInsertId(); err == nil && id > 0 {
-		// Need to map back to the actual row id even on conflict; safer to look up.
-	}
+	// LastInsertId is unreliable on an ON CONFLICT update in modernc, so map
+	// back to the actual row id by looking it up by block_id.
 	var id int64
 	if err := s.db.QueryRowContext(ctx, "SELECT id FROM blocks WHERE block_id = ?", b.BlockID).Scan(&id); err != nil {
 		return 0, err

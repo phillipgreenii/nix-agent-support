@@ -323,7 +323,7 @@ func runCmuxBridge(args []string) {
 	if err != nil {
 		emit = nil // best-effort; never block the sidebar on OTel
 	}
-	defer emit.Shutdown(ctx)
+	defer func() { _ = emit.Shutdown(ctx) }()
 
 	home, _ := os.UserHomeDir()
 	log := newBridgeLogger(filepath.Join(home, ".cache", "pa-monitor"), emit)
@@ -459,7 +459,7 @@ func logBridgeVersions(ctx context.Context, log *bridgeLogger) {
 		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	state, err := client.C.GetState(dialCtx, &pb.GetStateRequest{})
 	if err != nil {
 		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
@@ -520,7 +520,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	stream, err := client.C.BridgeChannel(ctx)
 	if err != nil {

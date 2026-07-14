@@ -126,7 +126,7 @@ func TestHasUnattemptedNudgeableDisrupt_WaitingForHumanSkipped(t *testing.T) {
 	le := &transcript.ErrorRecord{Kind: transcript.ErrServerError, IsTerminal: true, At: time.Now()}
 	sv := svWithError("sid-1", 100, le)
 	sv.Status = session.Blocked
-	sv.Session.Blocker = session.HumanInput
+	sv.Blocker = session.HumanInput
 	tree := treeWithSessions(sv)
 	sigs := []signal.Signaler{detectSignaler{detect: true}}
 	if hasUnattemptedNudgeableDisrupt(tree, wm, sigs) {

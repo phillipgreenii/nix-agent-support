@@ -41,7 +41,7 @@ func TestConnectionEmitterConstructsAndRecords(t *testing.T) {
 	if e == nil {
 		t.Fatal("want non-nil emitter when endpoint set")
 	}
-	defer e.Shutdown(context.Background())
+	defer func() { _ = e.Shutdown(context.Background()) }()
 	e.RecordDaemonConnected(true)
 	e.RecordDaemonConnected(false)
 	if got := e.connectedValue(); got != 0 {
@@ -64,7 +64,7 @@ func TestConnectionEmitterLogEvent(t *testing.T) {
 	if e == nil {
 		t.Fatal("want non-nil emitter when endpoint set")
 	}
-	defer e.Shutdown(context.Background())
+	defer func() { _ = e.Shutdown(context.Background()) }()
 	// Non-empty and empty values: the empty value must be skipped by the loop.
 	e.LogEvent("daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
 	e.LogEvent("daemon.reconnect", nil)

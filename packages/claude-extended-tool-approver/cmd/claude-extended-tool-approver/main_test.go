@@ -24,19 +24,19 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	f.Close()
+	_ = f.Close()
 	cliBinary = f.Name()
 
 	build := exec.Command("go", "build", "-o", cliBinary, "./cmd/claude-extended-tool-approver")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build failed: %v\n%s\n", err, out)
-		os.Remove(cliBinary)
+		_ = os.Remove(cliBinary)
 		os.Exit(1)
 	}
 
 	code := m.Run()
-	os.Remove(cliBinary)
+	_ = os.Remove(cliBinary)
 	os.Exit(code)
 }
 

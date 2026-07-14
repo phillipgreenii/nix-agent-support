@@ -62,7 +62,7 @@ func TestStatusBlockerSurfacesAgree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

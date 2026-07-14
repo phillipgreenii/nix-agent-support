@@ -272,8 +272,8 @@ func TestEvaluator_WorkspaceRoot(t *testing.T) {
 
 func TestPathEvaluator_EnvVarExpansion(t *testing.T) {
 	orig := os.Getenv("HOME")
-	defer os.Setenv("HOME", orig)
-	os.Setenv("HOME", "/home/testuser")
+	defer func() { _ = os.Setenv("HOME", orig) }()
+	_ = os.Setenv("HOME", "/home/testuser")
 
 	pe := New("/home/testuser/project")
 
@@ -323,7 +323,7 @@ func TestPathEvaluator_SymlinkResolution(t *testing.T) {
 	}
 
 	realFile := filepath.Join(projectDir, "real.txt")
-	os.WriteFile(realFile, []byte("ok"), 0o644)
+	_ = os.WriteFile(realFile, []byte("ok"), 0o644)
 	got = pe.Evaluate(realFile)
 	if got != PathReadWrite {
 		t.Errorf("Evaluate(real project file) = %v, want PathReadWrite", got)
@@ -344,7 +344,7 @@ func TestPathEvaluator_NonExistentFileInExistingDir(t *testing.T) {
 func TestPathEvaluator_BrokenSymlink(t *testing.T) {
 	projectDir := t.TempDir()
 	brokenLink := filepath.Join(projectDir, "broken")
-	os.Symlink("/nonexistent/target", brokenLink)
+	_ = os.Symlink("/nonexistent/target", brokenLink)
 
 	pe := New(projectDir)
 	got := pe.Evaluate(brokenLink)

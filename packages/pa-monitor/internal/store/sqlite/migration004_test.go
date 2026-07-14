@@ -17,7 +17,7 @@ func TestMigrate004_AppliesCleanlyOn003DB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	applyMigrationsUpTo(t, db, 3)

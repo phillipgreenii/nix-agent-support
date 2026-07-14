@@ -134,7 +134,7 @@ func (m *Model) selectionStatus() string {
 	if row.Kind != render.SessionKind || row.Session == nil {
 		return ""
 	}
-	fp := row.Session.SessionEnrichment.FirstPrompt
+	fp := row.Session.FirstPrompt
 	if fp == "" {
 		return ""
 	}

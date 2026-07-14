@@ -14,7 +14,7 @@ func testStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -118,7 +118,7 @@ func TestRecordPreToolDecision_Deny(t *testing.T) {
 	}
 
 	var hookDec, reason string
-	s.db.QueryRow("SELECT hook_decision, hook_reason FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &reason)
+	_ = s.db.QueryRow("SELECT hook_decision, hook_reason FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &reason)
 	if hookDec != "deny" {
 		t.Errorf("hook_decision = %q, want deny", hookDec)
 	}
@@ -142,7 +142,7 @@ func TestRecordPreToolDecision_Ask(t *testing.T) {
 	}
 
 	var toolUseID string
-	s.db.QueryRow("SELECT tool_use_id FROM tool_decisions WHERE session_id='sess1'").Scan(&toolUseID)
+	_ = s.db.QueryRow("SELECT tool_use_id FROM tool_decisions WHERE session_id='sess1'").Scan(&toolUseID)
 	if toolUseID != "tool-2" {
 		t.Errorf("tool_use_id = %q, want tool-2", toolUseID)
 	}
@@ -163,7 +163,7 @@ func TestRecordPreToolDecision_Approve(t *testing.T) {
 	}
 
 	var hookDec string
-	s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "allow" {
 		t.Errorf("hook_decision = %q, want allow", hookDec)
 	}
@@ -184,7 +184,7 @@ func TestRecordPreToolDecision_Abstain(t *testing.T) {
 	}
 
 	var hookDec string
-	s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "abstain" {
 		t.Errorf("hook_decision = %q, want abstain", hookDec)
 	}
@@ -195,8 +195,8 @@ func TestFullLifecycle_Abstain_ThenApproved(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-abs2", json.RawMessage(`{"command":"unknown-cmd"}`))
 	result := hookio.RuleResult{Decision: hookio.Abstain}
 
-	RecordPreToolDecision(s, input, result)
-	ResolveApproved(s, input, "")
+	_ = RecordPreToolDecision(s, input, result)
+	_ = ResolveApproved(s, input, "")
 
 	if o := getOutcome(t, s, "sess1"); o != "approved" {
 		t.Errorf("outcome = %q, want approved", o)
@@ -208,8 +208,8 @@ func TestFullLifecycle_Abstain_ThenDenied(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-abs3", json.RawMessage(`{"command":"unknown-cmd"}`))
 	result := hookio.RuleResult{Decision: hookio.Abstain}
 
-	RecordPreToolDecision(s, input, result)
-	ResolveDeniedAll(s, "sess1")
+	_ = RecordPreToolDecision(s, input, result)
+	_ = ResolveDeniedAll(s, "sess1")
 
 	if o := getOutcome(t, s, "sess1"); o != "denied" {
 		t.Errorf("outcome = %q, want denied", o)
@@ -230,7 +230,7 @@ func TestRecordPermissionRequest_NewBuiltinASK(t *testing.T) {
 	}
 
 	var hookDec *string
-	s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL for built-in ASK", *hookDec)
 	}
@@ -241,7 +241,7 @@ func TestRecordPermissionRequest_ExistingPreToolRow(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-3", json.RawMessage(`{"command":"git push --force"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "force push"}
 
-	RecordPreToolDecision(s, input, result)
+	_ = RecordPreToolDecision(s, input, result)
 	err := RecordPermissionRequest(s, input, `[{"type":"toolAlwaysAllow"}]`)
 	if err != nil {
 		t.Fatalf("RecordPermissionRequest: %v", err)
@@ -252,7 +252,7 @@ func TestRecordPermissionRequest_ExistingPreToolRow(t *testing.T) {
 	}
 
 	var suggestions string
-	s.db.QueryRow("SELECT permission_suggestions FROM tool_decisions WHERE session_id='sess1'").Scan(&suggestions)
+	_ = s.db.QueryRow("SELECT permission_suggestions FROM tool_decisions WHERE session_id='sess1'").Scan(&suggestions)
 	if suggestions != `[{"type":"toolAlwaysAllow"}]` {
 		t.Errorf("permission_suggestions = %q", suggestions)
 	}
@@ -262,7 +262,7 @@ func TestResolveApproved_ByToolUseID(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-4", json.RawMessage(`{"command":"git push --force"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "force push"}
-	RecordPreToolDecision(s, input, result)
+	_ = RecordPreToolDecision(s, input, result)
 
 	err := ResolveApproved(s, input, "")
 	if err != nil {
@@ -274,7 +274,7 @@ func TestResolveApproved_ByToolUseID(t *testing.T) {
 	}
 
 	var resolvedAt string
-	s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
+	_ = s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
 	if resolvedAt == "" {
 		t.Error("resolved_at should be set")
 	}
@@ -283,7 +283,7 @@ func TestResolveApproved_ByToolUseID(t *testing.T) {
 func TestResolveApproved_ByHash(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Write", "", json.RawMessage(`{"file_path":"/etc/hosts"}`))
-	RecordPermissionRequest(s, input, "")
+	_ = RecordPermissionRequest(s, input, "")
 
 	err := ResolveApproved(s, input, "")
 	if err != nil {
@@ -312,9 +312,9 @@ func TestResolveDeniedAll(t *testing.T) {
 	input3 := testInput("sess2", "Bash", "tool-c", json.RawMessage(`{"command":"cmd3"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "test"}
 
-	RecordPreToolDecision(s, input1, result)
-	RecordPreToolDecision(s, input2, result)
-	RecordPreToolDecision(s, input3, result)
+	_ = RecordPreToolDecision(s, input1, result)
+	_ = RecordPreToolDecision(s, input2, result)
+	_ = RecordPreToolDecision(s, input3, result)
 
 	err := ResolveDeniedAll(s, "sess1")
 	if err != nil {
@@ -342,9 +342,9 @@ func TestFullLifecycle_Approved(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-lc1", json.RawMessage(`{"command":"git push --force"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "force push"}
 
-	RecordPreToolDecision(s, input, result)
-	RecordPermissionRequest(s, input, `[{"type":"toolAlwaysAllow"}]`)
-	ResolveApproved(s, input, "")
+	_ = RecordPreToolDecision(s, input, result)
+	_ = RecordPermissionRequest(s, input, `[{"type":"toolAlwaysAllow"}]`)
+	_ = ResolveApproved(s, input, "")
 
 	if o := getOutcome(t, s, "sess1"); o != "approved" {
 		t.Errorf("outcome = %q, want approved", o)
@@ -359,9 +359,9 @@ func TestFullLifecycle_Denied(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-lc2", json.RawMessage(`{"command":"rm -rf /"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "dangerous command"}
 
-	RecordPreToolDecision(s, input, result)
-	RecordPermissionRequest(s, input, "")
-	ResolveDeniedAll(s, "sess1")
+	_ = RecordPreToolDecision(s, input, result)
+	_ = RecordPermissionRequest(s, input, "")
+	_ = ResolveDeniedAll(s, "sess1")
 
 	if o := getOutcome(t, s, "sess1"); o != "denied" {
 		t.Errorf("outcome = %q, want denied", o)
@@ -372,15 +372,15 @@ func TestFullLifecycle_BuiltinASK_Approved(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Write", "", json.RawMessage(`{"file_path":"/etc/hosts"}`))
 
-	RecordPermissionRequest(s, input, "")
-	ResolveApproved(s, input, "")
+	_ = RecordPermissionRequest(s, input, "")
+	_ = ResolveApproved(s, input, "")
 
 	if o := getOutcome(t, s, "sess1"); o != "approved" {
 		t.Errorf("outcome = %q, want approved", o)
 	}
 
 	var hookDec *string
-	s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL", *hookDec)
 	}
@@ -391,7 +391,7 @@ func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-pd1", json.RawMessage(`{"command":"rm -rf /tmp/build"}`))
 	result := hookio.RuleResult{Decision: hookio.Abstain}
 
-	RecordPreToolDecision(s, input, result)
+	_ = RecordPreToolDecision(s, input, result)
 	if n := countRows(t, s, "outcome='pending'"); n != 1 {
 		t.Fatalf("setup: pending rows = %d, want 1", n)
 	}
@@ -407,7 +407,7 @@ func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	}
 
 	var outcome, outcomeNotes string
-	s.db.QueryRow("SELECT outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome, &outcomeNotes)
+	_ = s.db.QueryRow("SELECT outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome, &outcomeNotes)
 	if outcome != "denied" {
 		t.Errorf("outcome = %q, want denied", outcome)
 	}
@@ -416,7 +416,7 @@ func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	}
 
 	var resolvedAt string
-	s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
+	_ = s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
 	if resolvedAt == "" {
 		t.Error("resolved_at should be set")
 	}
@@ -426,7 +426,7 @@ func TestRecordPermissionDenied_UpdatesByHashWhenNoToolUseID(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Write", "", json.RawMessage(`{"file_path":"/etc/hosts"}`))
 
-	RecordPermissionRequest(s, input, "")
+	_ = RecordPermissionRequest(s, input, "")
 	if n := countRows(t, s, "outcome='pending'"); n != 1 {
 		t.Fatalf("setup: pending rows = %d, want 1", n)
 	}
@@ -442,7 +442,7 @@ func TestRecordPermissionDenied_UpdatesByHashWhenNoToolUseID(t *testing.T) {
 	}
 
 	var outcome string
-	s.db.QueryRow("SELECT outcome FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome)
+	_ = s.db.QueryRow("SELECT outcome FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome)
 	if outcome != "denied" {
 		t.Errorf("outcome = %q, want denied", outcome)
 	}
@@ -464,7 +464,7 @@ func TestRecordPermissionDenied_InsertsWhenNoPendingRow(t *testing.T) {
 
 	var outcome, outcomeNotes string
 	var hookDec *string
-	s.db.QueryRow("SELECT hook_decision, outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &outcome, &outcomeNotes)
+	_ = s.db.QueryRow("SELECT hook_decision, outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &outcome, &outcomeNotes)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL", *hookDec)
 	}
@@ -500,7 +500,7 @@ func TestRecordPreToolDecision_WithTrace(t *testing.T) {
 	}
 
 	var decID int
-	s.db.QueryRow("SELECT id FROM tool_decisions WHERE session_id='sess1'").Scan(&decID)
+	_ = s.db.QueryRow("SELECT id FROM tool_decisions WHERE session_id='sess1'").Scan(&decID)
 
 	entries, err := s.QueryTraceByDecisionID(decID)
 	if err != nil {
@@ -533,7 +533,7 @@ func TestRecordPreToolDecision_NilTrace_NoTraceEntries(t *testing.T) {
 	}
 
 	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries").Scan(&count)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries").Scan(&count)
 	if count != 0 {
 		t.Errorf("trace entries = %d, want 0 (tracing disabled)", count)
 	}
@@ -544,17 +544,17 @@ func TestFullLifecycle_Abstain_ThenPermissionDenied(t *testing.T) {
 	input := testInput("sess1", "Bash", "tool-pd4", json.RawMessage(`{"command":"dangerous-cmd"}`))
 	result := hookio.RuleResult{Decision: hookio.Abstain}
 
-	RecordPreToolDecision(s, input, result)
+	_ = RecordPreToolDecision(s, input, result)
 
 	input.Reason = "Auto mode denied: unrecognized command"
-	RecordPermissionDenied(s, input)
+	_ = RecordPermissionDenied(s, input)
 
 	if o := getOutcome(t, s, "sess1"); o != "denied" {
 		t.Errorf("outcome = %q, want denied", o)
 	}
 
 	var hookDec string
-	s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "abstain" {
 		t.Errorf("hook_decision = %q, want abstain (original hook decision preserved)", hookDec)
 	}

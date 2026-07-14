@@ -71,7 +71,7 @@ func (l *Logger) Log(ts time.Time, level, msg string) error {
 	if err != nil {
 		return fmt.Errorf("open diag log: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write diag entry: %w", err)
 	}

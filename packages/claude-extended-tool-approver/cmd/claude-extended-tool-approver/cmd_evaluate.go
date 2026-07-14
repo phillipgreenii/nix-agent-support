@@ -70,7 +70,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryRows(sinceDate)
 	if err != nil {
@@ -153,7 +153,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results)
+		_ = enc.Encode(results)
 	default:
 		total := 0
 		for _, c := range counts {

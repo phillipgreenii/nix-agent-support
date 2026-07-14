@@ -164,12 +164,6 @@ func (s *sharedState) setCaffeinateState(active bool, cause string, process caff
 	s.mu.Unlock()
 }
 
-func (s *sharedState) caffeinateView() (active bool, cause string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.caffeinateActive, s.caffeinateCause
-}
-
 // caffeinateIndicators returns the full two-indicator view for surfacing:
 // mode (the user toggle), the legacy collapsed active flag, the PROCESS state,
 // its grace-remaining countdown, and the cause.

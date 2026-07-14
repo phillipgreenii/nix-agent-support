@@ -46,7 +46,7 @@ func Scan(path string) (Snapshot, error) {
 		}
 		return Snapshot{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	type scanEv struct {
 		Type      string          `json:"type"`

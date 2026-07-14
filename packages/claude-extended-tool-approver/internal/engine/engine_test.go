@@ -89,7 +89,7 @@ func TestEngine_LogsToStderr(t *testing.T) {
 	defer func() { os.Stderr = oldStderr }()
 
 	_ = e.Evaluate(input)
-	w.Close()
+	_ = w.Close()
 	buf := make([]byte, 256)
 	n, _ := r.Read(buf)
 	output := string(buf[:n])
@@ -422,7 +422,7 @@ func TestEngine_TraceEnabled_LogsToStderr(t *testing.T) {
 	defer func() { os.Stderr = oldStderr }()
 
 	_ = e.Evaluate(input)
-	w.Close()
+	_ = w.Close()
 	buf := make([]byte, 1024)
 	n, _ := r.Read(buf)
 	output := string(buf[:n])

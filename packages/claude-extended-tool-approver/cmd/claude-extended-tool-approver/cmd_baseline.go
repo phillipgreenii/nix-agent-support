@@ -55,7 +55,7 @@ func runBaseline(settingsPathVal, outputVal string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryRows("")
 	if err != nil {
@@ -119,7 +119,7 @@ func runBaseline(settingsPathVal, outputVal string) {
 		fmt.Fprintf(os.Stderr, "error creating output file: %v\n", err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")

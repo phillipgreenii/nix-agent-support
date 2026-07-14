@@ -132,7 +132,7 @@ func (t *Tree) TopupShouldDisplay() bool {
 func (t *Tree) AuthFailedCount() int {
 	n := 0
 	for _, s := range t.Sessions() {
-		le := s.SessionEnrichment.LastError
+		le := s.LastError
 		if le != nil && le.IsTerminal && le.Kind == transcript.ErrAuthFailed {
 			n++
 		}

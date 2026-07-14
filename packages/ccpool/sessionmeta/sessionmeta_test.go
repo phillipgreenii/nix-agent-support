@@ -16,7 +16,7 @@ func TestOpenSetGet_roundTripsOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	ctx := context.Background()
 	if err := s.Set(ctx, "zr-abc", "role", "worker"); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -30,7 +30,7 @@ func TestOpenSetGet_roundTripsOnDisk(t *testing.T) {
 func TestListByMeta_andFilter(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "ccpool.db")
 	s, _ := sessionmeta.Open(db)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	ctx := context.Background()
 	_ = s.Set(ctx, "ext-a", "role", "worker")
 	_ = s.Set(ctx, "ext-a", "pool", "pr-pool")
@@ -47,7 +47,7 @@ func TestListByMeta_andFilter(t *testing.T) {
 func TestMeta_nonNilEmpty(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "ccpool.db")
 	s, _ := sessionmeta.Open(db)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	m, err := s.Meta(context.Background(), "none")
 	if err != nil || m == nil || len(m) != 0 {
 		t.Fatalf("Meta = (%v,%v), want non-nil empty map, nil err", m, err)
@@ -57,7 +57,7 @@ func TestMeta_nonNilEmpty(t *testing.T) {
 func TestDelete_removesKey(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "ccpool.db")
 	s, _ := sessionmeta.Open(db)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	ctx := context.Background()
 	_ = s.Set(ctx, "ext-a", "role", "worker")
 	if err := s.Delete(ctx, "ext-a", "role"); err != nil {
@@ -81,12 +81,12 @@ func TestConcurrentWriters_twoHandlesSameDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open a: %v", err)
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 	b, err := sessionmeta.Open(db) // "pr-pool" writer
 	if err != nil {
 		t.Fatalf("Open b: %v", err)
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 
 	ctx := context.Background()
 	const n = 50

@@ -31,7 +31,7 @@ func runCancel(args []string) int {
 	if code != 0 {
 		return code
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := svc.Cancel(context.Background(), fs.Arg(0)); err != nil {
 		if errors.Is(err, session.ErrCancelUnconfirmed) {
 			fmt.Fprintf(os.Stderr, "cancel may not have landed for %q — re-run `ccpool cancel %s` or `ccpool attach %s`\n",

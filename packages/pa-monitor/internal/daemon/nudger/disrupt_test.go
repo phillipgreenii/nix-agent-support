@@ -222,7 +222,7 @@ func TestDisruptProducerCancelsOnSubagentError(t *testing.T) {
 	p.NoteFirstSeen("sid-1", now.Add(-1*time.Minute))
 	store := NewPendingStore()
 	sv := sessionWithError("sid-1", transcript.ErrUnknown, errAt, true)
-	sv.SessionEnrichment.LastError.FromSubagent = true
+	sv.LastError.FromSubagent = true
 	tree := treeWith(time.Time{}, sv)
 	// Not a new error (LastDisruptNudgeFor == errAt) and nudged recently
 	// (within EscalationAfter) so neither the new-error reset nor escalation

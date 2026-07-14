@@ -123,7 +123,7 @@ func TestBridgeLoggerRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	bl.out = f
 
 	bl.Detail("daemon.disconnect", map[string]string{"error": "x"})

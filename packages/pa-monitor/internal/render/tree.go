@@ -140,29 +140,29 @@ func renderSession(s *aggregate.SessionView, opts TreeOpts, prefix string, selec
 	}
 	sym := sessionGlyph(s, opts.Theme)
 	var label string
-	if !s.SessionEnrichment.RateLimitResetsAt.IsZero() {
+	if !s.RateLimitResetsAt.IsZero() {
 		resetStr := s.SessionEnrichment.RateLimitResetsAt.Local().Format("15:04")
 		label = fmt.Sprintf("%s %s %s", sym, resetStr, s.Label(opts.ForceID))
 	} else {
 		label = fmt.Sprintf("%s %s", sym, s.Label(opts.ForceID))
 	}
 
-	col1 := shortModel(s.SessionEnrichment.Model)
-	pct := sessionSharePct(s.SessionEnrichment.SessionTokens, opts.TotalSessionTokens)
+	col1 := shortModel(s.Model)
+	pct := sessionSharePct(s.SessionTokens, opts.TotalSessionTokens)
 	pctStr := fmt.Sprintf("%.0f%%", pct)
 	barStr := progressBar(pct, colBarWidth)
-	amount := FmtTok(s.SessionEnrichment.SessionTokens)
+	amount := FmtTok(s.SessionTokens)
 	if opts.CostMode {
-		amount = fmt.Sprintf("$%.2f", s.SessionEnrichment.CostUSD)
+		amount = fmt.Sprintf("$%.2f", s.CostUSD)
 	}
-	burn := fmt.Sprintf("%sk/m", fmtK(s.SessionEnrichment.BurnRateShort))
+	burn := fmt.Sprintf("%sk/m", fmtK(s.BurnRateShort))
 
 	tail := ""
-	if s.SessionEnrichment.SubagentCount > 0 {
-		tail += fmt.Sprintf(" %d🤖", s.SessionEnrichment.SubagentCount)
+	if s.SubagentCount > 0 {
+		tail += fmt.Sprintf(" %d🤖", s.SubagentCount)
 	}
-	if s.SessionEnrichment.SubshellCount > 0 {
-		tail += fmt.Sprintf(" %d🐚", s.SessionEnrichment.SubshellCount)
+	if s.SubshellCount > 0 {
+		tail += fmt.Sprintf(" %d🐚", s.SubshellCount)
 	}
 
 	out := fmt.Sprintf(
@@ -233,8 +233,8 @@ func authFailed(le *transcript.ErrorRecord) bool {
 // fire), and PendingNudge takes visual priority since it represents
 // imminent action.
 func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
-	rateLimited := !s.SessionEnrichment.RateLimitResetsAt.IsZero()
-	primary := symbol(s.Status, isDormant(s), s.SessionEnrichment.AwaitingInput, rateLimited, theme)
+	rateLimited := !s.RateLimitResetsAt.IsZero()
+	primary := symbol(s.Status, isDormant(s), s.AwaitingInput, rateLimited, theme)
 
 	// Working (and rate-limited pause which also short-circuits symbol) takes
 	// precedence: no error or nudge marker.
@@ -243,12 +243,12 @@ func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	}
 
 	// Apply error glyph when terminal.
-	le := s.SessionEnrichment.LastError
+	le := s.LastError
 	if le != nil && le.IsTerminal {
 		switch {
 		case authFailed(le):
 			primary = theme.Error.Render("⊘") // auth failure — run /login
-		case s.SessionEnrichment.LastErrorRetryable:
+		case s.LastErrorRetryable:
 			primary = "⚠"
 		default:
 			primary = "✗"
@@ -256,12 +256,12 @@ func sessionGlyph(s *aggregate.SessionView, theme Theme) string {
 	}
 
 	// Nudge markers.
-	hasPending := s.SessionEnrichment.PendingNudge != nil && len(s.SessionEnrichment.PendingNudge.Sources) > 0
+	hasPending := s.PendingNudge != nil && len(s.PendingNudge.Sources) > 0
 	switch {
 	case hasPending:
 		primary += "↪"
-	case !s.SessionEnrichment.LastNudgedAt.IsZero() &&
-		nowFn().Sub(s.SessionEnrichment.LastNudgedAt) < recentNudgeWindow:
+	case !s.LastNudgedAt.IsZero() &&
+		nowFn().Sub(s.LastNudgedAt) < recentNudgeWindow:
 		primary += "✉"
 	}
 

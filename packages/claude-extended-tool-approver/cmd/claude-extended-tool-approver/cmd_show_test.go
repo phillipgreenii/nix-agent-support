@@ -30,7 +30,7 @@ func setupShowTestDB(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	store.Close()
+	_ = store.Close()
 	return dir
 }
 
@@ -101,7 +101,7 @@ func setupShowTestDBWithTrace(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	store.Close()
+	_ = store.Close()
 	return dir
 }
 

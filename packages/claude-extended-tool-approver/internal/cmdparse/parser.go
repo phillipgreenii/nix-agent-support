@@ -334,9 +334,10 @@ func splitCompound(s string) []string {
 					start := i + 1
 					j := start
 					for j < len(s) && depth > 0 {
-						if s[j] == '(' {
+						switch s[j] {
+						case '(':
 							depth++
-						} else if s[j] == ')' {
+						case ')':
 							depth--
 						}
 						j++
@@ -538,16 +539,17 @@ func tokenize(s string) ([]string, []string) {
 			start := i + 2
 			j := start
 			for j < len(s) && depth > 0 {
-				if s[j] == '(' {
+				switch s[j] {
+				case '(':
 					depth++
-				} else if s[j] == ')' {
+				case ')':
 					depth--
 				}
 				j++
 			}
 			if depth == 0 {
 				procSubs = append(procSubs, s[start:j-1])
-				buf.WriteString("/dev/fd/63")
+				_, _ = buf.WriteString("/dev/fd/63")
 				i = j - 1 // loop will i++
 			} else {
 				buf.WriteByte(c) // malformed, pass through

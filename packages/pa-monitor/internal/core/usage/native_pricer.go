@@ -123,7 +123,7 @@ func scanFile(path string) ([]Record, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var out []Record
 	sc := bufio.NewScanner(f)

@@ -62,7 +62,7 @@ func runWaitUntilAgentsFinished(args []string) {
 		stream, err := client.C.WatchState(ctx, &pb.WatchStateRequest{PushIntervalMs: 1000})
 		if err != nil {
 			cancel()
-			client.Close()
+			_ = client.Close()
 			continue
 		}
 
@@ -113,7 +113,7 @@ func runWaitUntilAgentsFinished(args []string) {
 					streak++
 					if streak >= *consecutive {
 						cancel()
-						client.Close()
+						_ = client.Close()
 						fmt.Fprintln(os.Stderr, "all idle")
 						os.Exit(0)
 					}
@@ -122,7 +122,7 @@ func runWaitUntilAgentsFinished(args []string) {
 		}
 
 		cancel()
-		client.Close()
+		_ = client.Close()
 
 		if time.Now().After(deadline) {
 			fmt.Fprintln(os.Stderr, "wait-until-agents-finished: timeout")
@@ -141,7 +141,7 @@ func waitForDaemon(grace time.Duration) error {
 		client, err := rpcclient.Dial(ctx)
 		cancel()
 		if err == nil {
-			client.Close()
+			_ = client.Close()
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)

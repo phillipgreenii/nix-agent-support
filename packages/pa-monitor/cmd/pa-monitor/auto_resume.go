@@ -41,7 +41,7 @@ func runAutoResume(args []string) {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var enabled bool
 	if action == "toggle" {

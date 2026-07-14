@@ -38,7 +38,7 @@ func fakePsRun(procs []fakeProc) func(context.Context, string, ...string) ([]byt
 			var sb strings.Builder
 			sb.WriteString("  PID COMMAND\n")
 			for _, p := range procs {
-				sb.WriteString(fmt.Sprintf("%5d %s\n", p.pid, p.comm))
+				fmt.Fprintf(&sb, "%5d %s\n", p.pid, p.comm)
 			}
 			return []byte(sb.String()), nil
 		}

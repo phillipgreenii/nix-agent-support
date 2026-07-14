@@ -19,7 +19,7 @@ func runClose(args []string) int {
 	if code != 0 {
 		return code
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := svc.Close(context.Background(), pos[0], *purge); err != nil {
 		fmt.Fprintln(os.Stderr, "close:", err)
 		return 1

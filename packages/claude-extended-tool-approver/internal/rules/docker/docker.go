@@ -405,9 +405,9 @@ func stripDockerPassthroughs(expr string) string {
 	var buf strings.Builder
 	for i, seg := range segments {
 		if i > 0 {
-			buf.WriteString(" " + seg.operator + " ")
+			_, _ = buf.WriteString(" " + seg.operator + " ")
 		}
-		buf.WriteString(stripSinglePassthrough(strings.TrimSpace(seg.command)))
+		_, _ = buf.WriteString(stripSinglePassthrough(strings.TrimSpace(seg.command)))
 	}
 	return buf.String()
 }

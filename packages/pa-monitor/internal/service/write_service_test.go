@@ -18,7 +18,7 @@ func TestWriteService_SerializesWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestWriteService_SerializesWrites(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			ws.UpsertSession(ctx, store.Session{
+			_ = ws.UpsertSession(ctx, store.Session{
 				SessionID:       string(rune('a' + i)),
 				LastProcessedAt: now,
 				UpdatedAt:       now,
@@ -168,7 +168,7 @@ func TestWriteService_StopUnblocksFullQueueSenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestWriteService_StopUnblocksFullQueueSenders(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			ws.UpsertSession(ctx, store.Session{
+			_ = ws.UpsertSession(ctx, store.Session{
 				SessionID:       strconv.Itoa(i),
 				LastProcessedAt: now,
 				UpdatedAt:       now,
@@ -230,7 +230,7 @@ func TestWriteService_OpsRunOnSingleGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestWriteService_OpsRunOnSingleGoroutine(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			ws.UpsertSession(ctx, store.Session{
+			_ = ws.UpsertSession(ctx, store.Session{
 				SessionID:       strconv.Itoa(i),
 				LastProcessedAt: now,
 				UpdatedAt:       now,

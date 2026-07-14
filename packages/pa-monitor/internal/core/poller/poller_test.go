@@ -64,8 +64,8 @@ func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
 	}
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			if !s.SessionEnrichment.RateLimitResetsAt.IsZero() {
-				t.Errorf("RateLimitResetsAt = %v, want zero (stale beyond grace)", s.SessionEnrichment.RateLimitResetsAt)
+			if !s.RateLimitResetsAt.IsZero() {
+				t.Errorf("RateLimitResetsAt = %v, want zero (stale beyond grace)", s.RateLimitResetsAt)
 			}
 		}
 	}
@@ -94,7 +94,7 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 	found := false
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			if s.SessionEnrichment.RateLimitResetsAt.Equal(want) {
+			if s.RateLimitResetsAt.Equal(want) {
 				found = true
 			}
 		}
@@ -150,9 +150,9 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 				contextTokens int
 				model         string
 			}{
-				sessionTokens: s.SessionEnrichment.SessionTokens,
-				contextTokens: s.SessionEnrichment.ContextTokens,
-				model:         s.SessionEnrichment.Model,
+				sessionTokens: s.SessionTokens,
+				contextTokens: s.ContextTokens,
+				model:         s.Model,
 			}
 		}
 	}
@@ -353,11 +353,11 @@ func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 	var found bool
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			if s.Session.SessionID != "sub-sess" {
+			if s.SessionID != "sub-sess" {
 				continue
 			}
 			found = true
-			le := s.SessionEnrichment.LastError
+			le := s.LastError
 			if le == nil {
 				t.Fatal("LastError = nil, want subagent error surfaced")
 			}
@@ -384,7 +384,7 @@ func TestPoller_WritesToStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := sqlite.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -537,8 +537,8 @@ func TestSnapshotBlocker_AuthFailureIsHumanAuthn(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	sd, ch := makeErrorFixture(t, "authentication_failed", "HTTP 401", false)
 	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
-	if sv.Status != session.Blocked || sv.Session.Blocker != session.HumanAuthn {
-		t.Errorf("401 → status=%v blocker=%v, want Blocked/human_authn", sv.Status, sv.Session.Blocker)
+	if sv.Status != session.Blocked || sv.Blocker != session.HumanAuthn {
+		t.Errorf("401 → status=%v blocker=%v, want Blocked/human_authn", sv.Status, sv.Blocker)
 	}
 }
 
@@ -550,8 +550,8 @@ func TestSnapshotBlocker_TerminalRateLimitIsUsageLimit(t *testing.T) {
 	// findev-deep-dive mis-report this ADR corrects).
 	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your org's monthly spend limit", false)
 	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
-	if sv.Status != session.Blocked || sv.Session.Blocker != session.UsageLimit {
-		t.Errorf("terminal 429 → status=%v blocker=%v, want Blocked/usage_limit", sv.Status, sv.Session.Blocker)
+	if sv.Status != session.Blocked || sv.Blocker != session.UsageLimit {
+		t.Errorf("terminal 429 → status=%v blocker=%v, want Blocked/usage_limit", sv.Status, sv.Blocker)
 	}
 }
 
@@ -559,8 +559,8 @@ func TestSnapshotBlocker_GenericTerminalErrorIsError(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	sd, ch := makeErrorFixture(t, "server_error", "API Error 500", false)
 	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
-	if sv.Status != session.Blocked || sv.Session.Blocker != session.ErrorBlocker {
-		t.Errorf("generic terminal error → status=%v blocker=%v, want Blocked/error", sv.Status, sv.Session.Blocker)
+	if sv.Status != session.Blocked || sv.Blocker != session.ErrorBlocker {
+		t.Errorf("generic terminal error → status=%v blocker=%v, want Blocked/error", sv.Status, sv.Blocker)
 	}
 }
 
@@ -570,8 +570,8 @@ func TestSnapshotBlocker_SupersededErrorIsWorking(t *testing.T) {
 	// error is NOT current (IsTerminal=false). busy is trusted → Working.
 	sd, ch := makeErrorFixture(t, "rate_limit", "You've hit your limit", true)
 	sv := snapshotSession(t, newErrorPoller(sd, ch, now))
-	if sv.Status != session.Working || sv.Session.Blocker != session.NoBlocker {
-		t.Errorf("superseded error → status=%v blocker=%v, want Working/none", sv.Status, sv.Session.Blocker)
+	if sv.Status != session.Working || sv.Blocker != session.NoBlocker {
+		t.Errorf("superseded error → status=%v blocker=%v, want Working/none", sv.Status, sv.Blocker)
 	}
 }
 
@@ -624,8 +624,8 @@ func TestSnapshotVerdict_FreshWaitingIsBlockedHumanInput(t *testing.T) {
 		WaitingFreshWindow: 60 * time.Second,
 	}
 	sv := snapshotSession(t, p)
-	if sv.Status != session.Blocked || sv.Session.Blocker != session.HumanInput {
-		t.Errorf("fresh waiting → status=%v blocker=%v, want Blocked/human_input", sv.Status, sv.Session.Blocker)
+	if sv.Status != session.Blocked || sv.Blocker != session.HumanInput {
+		t.Errorf("fresh waiting → status=%v blocker=%v, want Blocked/human_input", sv.Status, sv.Blocker)
 	}
 }
 
@@ -666,8 +666,8 @@ func TestSnapshotVerdict_DeadIdleStaleIsLongIdle(t *testing.T) {
 		IdleThreshold:    10 * time.Minute,
 	}
 	sv := snapshotSession(t, p)
-	if sv.Status != session.Idle || !sv.Session.LongIdle {
-		t.Errorf("dead idle 15m-old → status=%v longIdle=%v, want Idle/true", sv.Status, sv.Session.LongIdle)
+	if sv.Status != session.Idle || !sv.LongIdle {
+		t.Errorf("dead idle 15m-old → status=%v longIdle=%v, want Idle/true", sv.Status, sv.LongIdle)
 	}
 }
 

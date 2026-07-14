@@ -256,7 +256,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
-	defer lis.Close()
+	defer func() { _ = lis.Close() }()
 
 	state := newSharedState()
 	state.mu.Lock()
@@ -324,7 +324,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// instance the gRPC server and delivery path use.
 	go RunReaper(ctx, bridgeReg, 30*time.Second, pidAlive)
 
-	defer opts.Emitter.Shutdown(context.Background())
+	defer func() { _ = opts.Emitter.Shutdown(context.Background()) }()
 
 	// One-shot migration: copy runtime.json toggles into the DB, then delete
 	// the file. Runs before NewWatermarkStore so that, on first startup after
@@ -546,7 +546,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				if sv.Session == nil {
 					continue
 				}
-				if session.KeepAwake(sv.Status, sv.Session.Blocker, sv.SessionEnrichment.LastErrorRetryable) {
+				if session.KeepAwake(sv.Status, sv.Blocker, sv.LastErrorRetryable) {
 					anyWorking = true
 					break
 				}
@@ -799,7 +799,7 @@ func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, si
 			// WaitingForHuman → blocker ∈ human_*). Even if it carries a
 			// terminal-retryable LastError, no nudge is ever attempted, so it must
 			// not hold the Mac awake via the D5 error keep-awake disjunct.
-			if sv.Status == session.Blocked && sv.Session.Blocker.IsHuman() {
+			if sv.Status == session.Blocked && sv.Blocker.IsHuman() {
 				continue
 			}
 			le := sv.LastError
@@ -851,8 +851,8 @@ func updateGauges(
 		ls["state"] = session.Status(sv.Status).String()
 		// ADR 0024: attach the blocker as its own attribute when Blocked so the
 		// dashboard can break "blocked" down by reason. Absent otherwise.
-		if sv.Session != nil && sv.Session.Blocker != session.NoBlocker {
-			ls["blocker"] = sv.Session.Blocker.String()
+		if sv.Session != nil && sv.Blocker != session.NoBlocker {
+			ls["blocker"] = sv.Blocker.String()
 		}
 		key := groupKey(canonicalKey(ls))
 		counts[key]++
@@ -920,7 +920,7 @@ func buildSessionInfoRows(
 		// cardinality on the exporter (ADR 0024 R10: the idle-age exclusion
 		// survives the Dormant→idle rename). Uses the poller-set LongIdle flag
 		// (which also applies the live-PID clamp) on this live-tree path.
-		if sv.Session.LongIdle {
+		if sv.LongIdle {
 			continue
 		}
 		errKind := ""
@@ -928,8 +928,8 @@ func buildSessionInfoRows(
 			errKind = string(sv.LastError.Kind)
 		}
 		blocker := ""
-		if sv.Session.Blocker != session.NoBlocker {
-			blocker = sv.Session.Blocker.String()
+		if sv.Blocker != session.NoBlocker {
+			blocker = sv.Blocker.String()
 		}
 		ls := labelsForSession(sv, detectors, decorators, cap, labelCache)
 		// Pass plan_tier through as a baseline label so the dashboard's
@@ -937,15 +937,15 @@ func buildSessionInfoRows(
 		ls["plan_tier"] = planTier
 		rows = append(rows, otel.SessionInfo{
 			SessionID:    sv.SessionID,
-			SessionName:  sv.Session.Name,
+			SessionName:  sv.Name,
 			Cwd:          sv.Cwd,
 			TerminalHost: session.TerminalAbbrev(sv.TerminalHost),
 			Status:       session.Status(sv.Status).String(),
 			Blocker:      blocker,
-			Model:        sv.SessionEnrichment.Model,
+			Model:        sv.Model,
 			ErrorKind:    errKind,
-			Tokens:       int64(sv.SessionEnrichment.SessionTokens),
-			CostUSD:      sv.SessionEnrichment.CostUSD,
+			Tokens:       int64(sv.SessionTokens),
+			CostUSD:      sv.CostUSD,
 			Labels:       ls,
 		})
 	}
@@ -1161,7 +1161,7 @@ func deferredNudgeCounts(tree *aggregate.Tree, autoResumeEnabled bool, now time.
 		if sv == nil || sv.Session == nil {
 			continue
 		}
-		if sv.Session.Status != session.Blocked || sv.Session.Blocker != session.UsageLimit {
+		if sv.Status != session.Blocked || sv.Blocker != session.UsageLimit {
 			continue
 		}
 		if sv.RateLimitResetsAt.IsZero() || !sv.RateLimitResetsAt.After(now) {
@@ -1341,7 +1341,7 @@ func anyUsageLimitBlocked(tree *aggregate.Tree) bool {
 		return false
 	}
 	for _, sv := range tree.Sessions() {
-		if sv.Session != nil && sv.Session.Status == session.Blocked && sv.Session.Blocker == session.UsageLimit {
+		if sv.Session != nil && sv.Status == session.Blocked && sv.Blocker == session.UsageLimit {
 			return true
 		}
 	}

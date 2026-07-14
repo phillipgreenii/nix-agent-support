@@ -69,7 +69,7 @@ func runNew(args []string) int {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	svc := session.New(newSessionDeps(cfg, st, el))
 

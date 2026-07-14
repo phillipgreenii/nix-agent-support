@@ -145,7 +145,7 @@ func LastAPIError(path string) (ErrorRecord, error) {
 	if err != nil {
 		return ErrorRecord{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	type apiErrorScan struct {
 		Type              string    `json:"type"`

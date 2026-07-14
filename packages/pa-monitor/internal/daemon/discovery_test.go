@@ -77,10 +77,8 @@ func TestRunReaper_TicksAndPrunesUntilCancelled(t *testing.T) {
 	// Poll until the tick has pruned the dead bridge, or fail after a
 	// generous bound relative to the interval.
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if reg.StatusForServer(6000) == bridge.Unknown {
-			break
-		}
+	for reg.StatusForServer(6000) != bridge.Unknown {
+
 		if time.Now().After(deadline) {
 			t.Fatal("RunReaper: dead bridge was not pruned within deadline")
 		}

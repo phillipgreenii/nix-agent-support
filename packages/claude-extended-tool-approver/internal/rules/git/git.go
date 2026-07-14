@@ -206,31 +206,6 @@ func extractGitSubcommand(args []string) (subcmd string, rest []string) {
 	return "", nil
 }
 
-func hasNonFlagArg(args []string, target string) bool {
-	for _, a := range args {
-		if a == "--" {
-			continue
-		}
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
-		if a == target {
-			return true
-		}
-	}
-	return false
-}
-
-func hasTagDestructiveFlags(args []string) bool {
-	for _, a := range args {
-		switch a {
-		case "-d", "-f", "--delete", "-a":
-			return true
-		}
-	}
-	return false
-}
-
 func hasFlag(args []string, flag string) bool {
 	for _, a := range args {
 		if a == flag {

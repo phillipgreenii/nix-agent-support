@@ -368,7 +368,7 @@ func TestRunWith_SetAutoResumePersistsViaGetState(t *testing.T) {
 	waitForFile(t, paths.Socket)
 
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := pb.NewPaMonitorClient(conn)
 
 	// SetAutoResume must succeed (not FailedPrecondition).
@@ -445,7 +445,7 @@ func TestRunWith_SeedsAutoResumeFromOption(t *testing.T) {
 
 	waitForFile(t, paths.Socket)
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := pb.NewPaMonitorClient(conn)
 
 	state, err := client.GetState(context.Background(), &pb.GetStateRequest{})
@@ -500,7 +500,7 @@ func TestRunWith_RejectsConfigWithoutNudgerSignalers(t *testing.T) {
 	waitForFile(t, paths.Socket)
 
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client := pb.NewPaMonitorClient(conn)
 
 	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err == nil {

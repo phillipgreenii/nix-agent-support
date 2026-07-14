@@ -44,7 +44,7 @@ func runTUIRemote() {
 		fmt.Fprintf(os.Stderr, "remote poller: %v\n", err)
 		os.Exit(2)
 	}
-	defer rp.Close()
+	defer func() { _ = rp.Close() }()
 
 	config.ApplyOTelEnv(cfg.OTel)
 	emitCtx, emitCancel := context.WithCancel(context.Background())
@@ -57,7 +57,7 @@ func runTUIRemote() {
 	if emitErr != nil {
 		connEmit = nil
 	}
-	defer connEmit.Shutdown(emitCtx)
+	defer func() { _ = connEmit.Shutdown(emitCtx) }()
 
 	// Sample the poller's connection state on a ticker and publish the gauge.
 	// IsOffline() is reliable: the StreamingPoller marks itself disconnected the
@@ -119,10 +119,10 @@ func runTUIRemote() {
 				if err != nil {
 					return tui.CaffeinateErrMsg{Err: fmt.Errorf("dial: %w", err)}
 				}
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				resp, err := c.C.Caffeinate(ctx, &pb.CaffeinateRequest{Action: action})
 				if err != nil {
-					return tui.CaffeinateErrMsg{Err: fmt.Errorf("Caffeinate %s: %w", action, err)}
+					return tui.CaffeinateErrMsg{Err: fmt.Errorf("caffeinate %s: %w", action, err)}
 				}
 				return tui.CaffeinateResultMsg{Active: resp.GetActive()}
 			}
@@ -135,7 +135,7 @@ func runTUIRemote() {
 				if err != nil {
 					return tui.AutoResumeErrMsg{Err: fmt.Errorf("dial: %w", err)}
 				}
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				resp, err := c.C.SetAutoResume(ctx, &pb.SetAutoResumeRequest{Enabled: want})
 				if err != nil {
 					return tui.AutoResumeErrMsg{Err: fmt.Errorf("SetAutoResume(%v): %w", want, err)}
@@ -152,7 +152,7 @@ func runTUIRemote() {
 					errLog.LogString(fmt.Sprintf("remote nudge dial: %v", err))
 					return tui.NudgeErrMsg{Err: fmt.Errorf("dial: %w", err)}
 				}
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				if cancel {
 					resp, err := c.C.NudgeCancel(ctx, &pb.NudgeCancelRequest{Selector: selector})
 					if err != nil {

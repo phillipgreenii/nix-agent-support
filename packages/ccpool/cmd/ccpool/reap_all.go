@@ -68,6 +68,6 @@ func reapOnePool(root string) error {
 	if code != 0 {
 		return fmt.Errorf("build service failed (exit %d)", code)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	return svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL))
 }

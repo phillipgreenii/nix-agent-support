@@ -100,7 +100,7 @@ func runMeta(args []string) int {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
 	switch verb {

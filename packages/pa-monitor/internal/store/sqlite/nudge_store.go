@@ -96,7 +96,7 @@ func scanNudgeWithSources(ctx context.Context, db *sql.DB, row *sql.Row) (*store
 	if err != nil {
 		return nil, err
 	}
-	defer srows.Close()
+	defer func() { _ = srows.Close() }()
 	for srows.Next() {
 		var src string
 		if err := srows.Scan(&src); err != nil {

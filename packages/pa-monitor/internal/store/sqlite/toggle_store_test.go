@@ -10,7 +10,7 @@ func TestToggleStore_GetAfterSet(t *testing.T) {
 	ts := NewToggleStore(db)
 	ctx := context.Background()
 
-	val, present, err := ts.Get(ctx, "caffeinate_on")
+	_, present, err := ts.Get(ctx, "caffeinate_on")
 	if err != nil {
 		t.Fatalf("Get pre-set: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestToggleStore_GetAfterSet(t *testing.T) {
 	if err := ts.Set(ctx, "caffeinate_on", true); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	val, present, err = ts.Get(ctx, "caffeinate_on")
+	val, present, err := ts.Get(ctx, "caffeinate_on")
 	if err != nil {
 		t.Fatalf("Get post-set: %v", err)
 	}

@@ -39,7 +39,7 @@ func runDoctor(args []string) int {
 		fmt.Fprintln(os.Stderr, "store:", err)
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	cl := tmux.NewClient(cfg.Tmux.Socket)
 	home, _ := os.UserHomeDir()
 	claudeJSON := filepath.Join(home, ".claude.json")

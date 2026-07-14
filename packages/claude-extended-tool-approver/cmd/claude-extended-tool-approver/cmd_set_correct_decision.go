@@ -55,7 +55,7 @@ func runSetCorrectDecision(decisionVal, explanationVal string, args []string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := store.SetCorrectDecision(ids, *decision, *explanation); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

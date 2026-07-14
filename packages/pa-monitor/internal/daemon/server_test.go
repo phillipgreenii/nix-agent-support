@@ -35,7 +35,7 @@ func TestServer_PingReturnsTimestamp(t *testing.T) {
 	waitForFile(t, paths.Socket)
 
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := pb.NewPaMonitorClient(conn)
 	resp, err := client.Ping(context.Background(), &pb.PingRequest{})
@@ -69,7 +69,7 @@ func TestWatchState_PushesPeriodicState(t *testing.T) {
 	waitForFile(t, paths.Socket)
 
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := pb.NewPaMonitorClient(conn)
 	// Request a cadence at the floor (minPushInterval); a smaller value
@@ -131,7 +131,7 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 
 	waitForFile(t, paths.Socket)
 	conn := dialUnix(t, paths.Socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := pb.NewPaMonitorClient(conn)
 	stream, err := client.WatchState(context.Background(), &pb.WatchStateRequest{
@@ -176,7 +176,7 @@ func TestWatchState_ClampsTooFastInterval(t *testing.T) {
 
 func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 	t.Helper()
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		"unix:"+sockPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {

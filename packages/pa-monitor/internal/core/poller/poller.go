@@ -347,34 +347,34 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				Name:            sv.Name,
 				Kind:            sv.Kind,
 				Entrypoint:      sv.Entrypoint,
-				Model:           sv.SessionEnrichment.Model,
+				Model:           sv.Model,
 				TerminalHost:    sv.TerminalHost,
 				Branch:          sv.Branch,
-				Status:          sv.Session.Status.String(),
-				Blocker:         sv.Session.Blocker.String(),
-				FirstPrompt:     sv.SessionEnrichment.FirstPrompt,
+				Status:          sv.Status.String(),
+				Blocker:         sv.Blocker.String(),
+				FirstPrompt:     sv.FirstPrompt,
 				Labels:          nil, // populated when label pipeline runs in daemon
 				TranscriptMTime: sv.TranscriptMTime,
 				StartedAt:       sv.StartedAt,
-				ContextTokens:   uint64(sv.SessionEnrichment.ContextTokens),
-				SessionTokens:   uint64(sv.SessionEnrichment.SessionTokens),
-				SubagentCount:   uint32(sv.SessionEnrichment.SubagentCount),
-				SubshellCount:   uint32(sv.SessionEnrichment.SubshellCount),
-				BurnRateShort:   sv.SessionEnrichment.BurnRateShort,
-				BurnRateLong:    sv.SessionEnrichment.BurnRateLong,
-				CostUSD:         sv.SessionEnrichment.CostUSD,
-				AwaitingInput:   sv.SessionEnrichment.AwaitingInput,
+				ContextTokens:   uint64(sv.ContextTokens),
+				SessionTokens:   uint64(sv.SessionTokens),
+				SubagentCount:   uint32(sv.SubagentCount),
+				SubshellCount:   uint32(sv.SubshellCount),
+				BurnRateShort:   sv.BurnRateShort,
+				BurnRateLong:    sv.BurnRateLong,
+				CostUSD:         sv.CostUSD,
+				AwaitingInput:   sv.AwaitingInput,
 				LastProcessedAt: nowUTC,
 				UpdatedAt:       nowUTC,
 			}
 			// fold LastError if present
-			if sv.SessionEnrichment.LastError != nil {
-				le := sv.SessionEnrichment.LastError
+			if sv.LastError != nil {
+				le := sv.LastError
 				ss.LastErrorKind = string(le.Kind)
 				ss.LastErrorText = le.Text
 				ss.LastErrorAt = le.At
 				ss.LastErrorTerminal = le.IsTerminal
-				ss.LastErrorRetryable = sv.SessionEnrichment.LastErrorRetryable
+				ss.LastErrorRetryable = sv.LastErrorRetryable
 				ss.LastErrorFromSubagent = le.FromSubagent
 			}
 			// Best-effort write — DB failures must not abort the tick.
@@ -387,13 +387,13 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 					if p.ActiveBlockID > 0 {
 						_ = p.WriteService.UpsertBlockContribution(ctx, store.Contribution{
 							SessionID: sessRowID, ParentID: p.ActiveBlockID,
-							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionTokens), UpdatedAt: nowUTC,
 						})
 					}
 					if p.ActiveWeekID > 0 {
 						_ = p.WriteService.UpsertWeekContribution(ctx, store.Contribution{
 							SessionID: sessRowID, ParentID: p.ActiveWeekID,
-							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionEnrichment.SessionTokens), UpdatedAt: nowUTC,
+							CostUSD: sv.CostUSD, Tokens: uint64(sv.SessionTokens), UpdatedAt: nowUTC,
 						})
 					}
 				}

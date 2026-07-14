@@ -92,7 +92,7 @@ func (l *Logger) Append(e Event) error {
 	if err != nil {
 		return fmt.Errorf("open event log: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write event: %w", err)
 	}
@@ -138,7 +138,7 @@ func Read(path string) ([]Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open event log: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []Event
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

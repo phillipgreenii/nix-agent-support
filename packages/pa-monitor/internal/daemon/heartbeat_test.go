@@ -124,7 +124,7 @@ func TestHeartbeatAttrs_NilTreeSafe(t *testing.T) {
 func TestHeartbeatAttrs_AllValuesAreStrings(t *testing.T) {
 	// The signature already returns map[string]string; this test documents the
 	// intent and fails to compile if the shape ever regresses to map[string]any.
-	var attrs map[string]string = heartbeatAttrs(&aggregate.Tree{
+	attrs := heartbeatAttrs(&aggregate.Tree{
 		Dirs: []*aggregate.Directory{{Sessions: []*aggregate.SessionView{
 			{Session: &session.Session{Status: session.Working}},
 		}}},

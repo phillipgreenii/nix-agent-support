@@ -209,7 +209,7 @@ func Load(path string) (Config, error) {
 		}
 		return cfg, fmt.Errorf("open config: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var raw tomlConfig
 	if _, err := toml.NewDecoder(f).Decode(&raw); err != nil {

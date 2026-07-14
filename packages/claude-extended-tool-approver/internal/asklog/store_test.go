@@ -17,7 +17,7 @@ func TestNewStore_CreatesDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Error("database file not created")
@@ -31,7 +31,7 @@ func TestNewStore_CreatesParentDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Error("database file not created in nested dir")
@@ -44,7 +44,7 @@ func TestNewStore_WALMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var mode string
 	err = s.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
@@ -62,7 +62,7 @@ func TestNewStore_TableExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var count int
 	err = s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions").Scan(&count)
@@ -73,9 +73,9 @@ func TestNewStore_TableExists(t *testing.T) {
 
 func TestDefaultDBPath(t *testing.T) {
 	orig := os.Getenv("XDG_DATA_HOME")
-	defer os.Setenv("XDG_DATA_HOME", orig)
+	defer func() { _ = os.Setenv("XDG_DATA_HOME", orig) }()
 
-	os.Setenv("XDG_DATA_HOME", "/custom/data")
+	_ = os.Setenv("XDG_DATA_HOME", "/custom/data")
 	got := DefaultDBPath()
 	want := "/custom/data/claude-extended-tool-approver/asks.db"
 	if got != want {
@@ -85,9 +85,9 @@ func TestDefaultDBPath(t *testing.T) {
 
 func TestDefaultDBPath_NoXDG(t *testing.T) {
 	orig := os.Getenv("XDG_DATA_HOME")
-	defer os.Setenv("XDG_DATA_HOME", orig)
+	defer func() { _ = os.Setenv("XDG_DATA_HOME", orig) }()
 
-	os.Unsetenv("XDG_DATA_HOME")
+	_ = os.Unsetenv("XDG_DATA_HOME")
 	got := DefaultDBPath()
 	home, _ := os.UserHomeDir()
 	want := filepath.Join(home, ".local", "share", "claude-extended-tool-approver", "asks.db")
@@ -102,7 +102,7 @@ func TestNewStore_SchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var version int
 	err = s.db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
@@ -120,7 +120,7 @@ func TestNewStore_Migration2_NewColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Verify new columns exist by inserting a row that uses them
 	_, err = s.db.Exec(`INSERT INTO tool_decisions
@@ -159,7 +159,7 @@ func TestNewStore_Migration2_ExcludedDefaultsToZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	_, err = s.db.Exec(`INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
@@ -169,7 +169,7 @@ func TestNewStore_Migration2_ExcludedDefaultsToZero(t *testing.T) {
 	}
 
 	var excluded int
-	s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 's1'").Scan(&excluded)
+	_ = s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 's1'").Scan(&excluded)
 	if excluded != 0 {
 		t.Errorf("excluded default = %d, want 0", excluded)
 	}
@@ -201,25 +201,25 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 	_, _ = db.Exec(`INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
 		VALUES ('old-sess', '/tmp', 'Bash', 'h1', '{}', '2026-01-01T00:00:00Z')`)
-	db.Close()
+	_ = db.Close()
 
 	// Open with NewStore to trigger migration 2
 	s, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewStore upgrade: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Verify schema version is now 3
 	var version int
-	s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
+	_ = s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
 	if version != 4 {
 		t.Errorf("schema_version = %d, want 4", version)
 	}
 
 	// Verify old row has excluded = 0 (default)
 	var excluded int
-	s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 'old-sess'").Scan(&excluded)
+	_ = s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 'old-sess'").Scan(&excluded)
 	if excluded != 0 {
 		t.Errorf("existing row excluded = %d, want 0", excluded)
 	}
@@ -255,13 +255,13 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create old table: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	s, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewStore on existing DB: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var version int
 	err = s.db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
@@ -281,16 +281,16 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first NewStore: %v", err)
 	}
-	s1.Close()
+	_ = s1.Close()
 
 	s2, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("second NewStore: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 
 	var count int
-	s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
+	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
 	if count != 4 {
 		t.Errorf("schema_version rows = %d, want 4", count)
 	}
@@ -303,7 +303,7 @@ func setupTestDB(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Insert test rows directly
 	for _, q := range []string{
@@ -383,7 +383,7 @@ func TestStore_ForeignKeysEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var fkEnabled int
 	err = s.db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
@@ -400,7 +400,7 @@ func TestStore_TraceTableExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var name string
 	err = s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='decision_trace_entries'").Scan(&name)
@@ -414,7 +414,7 @@ func TestStore_CascadeDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	res, err := s.db.Exec(`INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
@@ -434,7 +434,7 @@ func TestStore_CascadeDelete(t *testing.T) {
 	}
 
 	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
 	if count != 3 {
 		t.Fatalf("trace entries = %d, want 3", count)
 	}
@@ -444,7 +444,7 @@ func TestStore_CascadeDelete(t *testing.T) {
 		t.Fatalf("delete tool_decisions: %v", err)
 	}
 
-	s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
 	if count != 0 {
 		t.Errorf("trace entries after cascade = %d, want 0", count)
 	}
@@ -455,7 +455,7 @@ func TestStore_QueryTraceByDecisionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	res, err := s.db.Exec(`INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
@@ -465,8 +465,8 @@ func TestStore_QueryTraceByDecisionID(t *testing.T) {
 	}
 	decID, _ := res.LastInsertId()
 
-	s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 1, 'envvars', 'abstain', 'not relevant')`, decID)
-	s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 2, 'git', 'allow', 'safe command')`, decID)
+	_, _ = s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 1, 'envvars', 'abstain', 'not relevant')`, decID)
+	_, _ = s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 2, 'git', 'allow', 'safe command')`, decID)
 
 	entries, err := s.QueryTraceByDecisionID(int(decID))
 	if err != nil {

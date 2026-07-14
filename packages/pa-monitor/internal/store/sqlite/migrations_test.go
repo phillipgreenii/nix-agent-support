@@ -10,7 +10,7 @@ func TestMigrate_FreshDB_CreatesAllTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -83,7 +83,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := Migrate(context.Background(), db); err != nil {
 		t.Fatalf("Migrate first: %v", err)

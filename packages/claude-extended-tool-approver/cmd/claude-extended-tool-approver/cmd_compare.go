@@ -58,7 +58,7 @@ func runCompare(settingsPathVal, baselinePathVal, formatVal string) {
 		fmt.Fprintf(os.Stderr, "error opening baseline: %v\n", err)
 		os.Exit(1)
 	}
-	defer baselineFile.Close()
+	defer func() { _ = baselineFile.Close() }()
 
 	var baseline baselineData
 	if err := json.NewDecoder(baselineFile).Decode(&baseline); err != nil {
@@ -77,7 +77,7 @@ func runCompare(settingsPathVal, baselinePathVal, formatVal string) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryRows("")
 	if err != nil {
@@ -157,7 +157,7 @@ func runCompare(settingsPathVal, baselinePathVal, formatVal string) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(cr)
+		_ = enc.Encode(cr)
 	default:
 		fmt.Println("=== Baseline vs Current ===")
 		fmt.Printf("%-25s %8s %8s %8s\n", "Category", "Baseline", "Current", "Delta")

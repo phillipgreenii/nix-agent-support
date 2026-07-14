@@ -58,7 +58,7 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryRows(sinceDate)
 	if err != nil {
@@ -109,7 +109,7 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(entries)
+		_ = enc.Encode(entries)
 	default:
 		for _, e := range entries {
 			fmt.Printf("%-50s %5d\n", e.Key, e.Count)

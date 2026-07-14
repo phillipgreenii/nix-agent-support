@@ -152,7 +152,7 @@ func (s *SessionStore) List(ctx context.Context, filter store.Filter, activeBloc
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []store.SessionWithContribution
 	for rows.Next() {
@@ -220,7 +220,7 @@ func (s *SessionStore) AllSessionIDs(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var id string

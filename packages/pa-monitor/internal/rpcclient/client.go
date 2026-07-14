@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/phillipgreenii/pa-monitor/internal/daemon"
@@ -37,16 +38,27 @@ func DialPath(ctx context.Context, socket string) (*Client, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(
-		dialCtx, "unix:"+socket,
+	conn, err := grpc.NewClient(
+		"unix:"+socket,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", socket, err)
+	}
+	// grpc.NewClient connects lazily. The prior grpc.DialContext used
+	// grpc.WithBlock so a returned client always meant the daemon answered;
+	// every caller relies on Dial failing fast when the socket is unreachable.
+	// Reproduce that blocking handshake: kick off the connect and wait for
+	// READY within dialCtx, tearing the conn down and erroring on timeout.
+	conn.Connect()
+	for state := conn.GetState(); state != connectivity.Ready; state = conn.GetState() {
+		if !conn.WaitForStateChange(dialCtx, state) {
+			_ = conn.Close()
+			return nil, fmt.Errorf("dial %s: %w", socket, dialCtx.Err())
+		}
 	}
 	return &Client{
 		conn:   conn,

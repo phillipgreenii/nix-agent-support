@@ -101,9 +101,9 @@ func compressAndBuild(n *trieNode, parentFullPath string, depth int) []*PathNode
 
 func computeRollup(n *PathNode) {
 	for _, s := range n.DirectSessions {
-		n.TotalTokens += s.SessionEnrichment.SessionTokens
-		n.TotalCostUSD += s.SessionEnrichment.CostUSD
-		n.BurnRateSum += s.SessionEnrichment.BurnRateShort
+		n.TotalTokens += s.SessionTokens
+		n.TotalCostUSD += s.CostUSD
+		n.BurnRateSum += s.BurnRateShort
 		switch s.Status {
 		case session.Working:
 			n.WorkingN++

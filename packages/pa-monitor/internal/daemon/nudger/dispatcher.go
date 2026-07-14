@@ -204,7 +204,7 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 		// Never inject "continue" over a permission prompt / AskUserQuestion /
 		// re-auth — the session is blocked on a human, not on a recoverable
 		// error (§6/D3; ADR 0024 R4: WaitingForHuman → blocker ∈ human_*).
-		if view.Status == session.Blocked && view.Session.Blocker.IsHuman() {
+		if view.Status == session.Blocked && view.Blocker.IsHuman() {
 			d.Recorder.RecordSuppressed(sid, sources, "waiting_for_human")
 			d.recordHistory(goCtx, RecordEvent{
 				SessionID: sid, Text: text, Result: "suppressed", ErrorText: "waiting_for_human",

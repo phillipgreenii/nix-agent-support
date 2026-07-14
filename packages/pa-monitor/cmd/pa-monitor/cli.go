@@ -21,7 +21,7 @@ func runStatus(args []string) {
 		fmt.Fprintln(os.Stderr, rpcclient.DaemonUnavailableMessage("<unknown>"))
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	state, err := client.C.GetState(ctx, &pb.GetStateRequest{})
 	if err != nil {
@@ -125,7 +125,7 @@ func runAgentsBusyCheck(args []string) {
 		fmt.Fprintln(os.Stderr, "daemon unreachable")
 		os.Exit(2)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	resp, err := client.C.IsAnyBusy(ctx, &pb.IsAnyBusyRequest{})
 	if err != nil {

@@ -95,12 +95,12 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 	var sb strings.Builder
 	sb.WriteString("session errors/nudges:\n")
 	for _, r := range rows {
-		sb.WriteString(fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %s\n",
+		fmt.Fprintf(&sb, "  %-*s  %-*s  %-*s  %-*s  %s\n",
 			nameW, r.name,
 			termW, r.term,
 			statusW, r.status,
 			errW, r.errKind,
-			r.nudge))
+			r.nudge)
 	}
 	return sb.String()
 }
@@ -146,23 +146,23 @@ func formatSessionInfo(sd *pb.SessionDetail) string {
 		} else if apiErrorIsEscalated(le) {
 			kindStr += "  (escalated)"
 		}
-		sb.WriteString(fmt.Sprintf("last_error:     %s\n", kindStr))
+		fmt.Fprintf(&sb, "last_error:     %s\n", kindStr)
 		errText := le.GetText()
 		if len(errText) > 200 {
 			errText = errText[:200] + "…"
 		}
 		if errText != "" {
-			sb.WriteString(fmt.Sprintf("                %s\n", errText))
+			fmt.Fprintf(&sb, "                %s\n", errText)
 		}
 		if ts := le.GetAt(); ts != nil {
-			sb.WriteString(fmt.Sprintf("                %s\n", humanizeAgeCLI(time.Since(ts.AsTime()))))
+			fmt.Fprintf(&sb, "                %s\n", humanizeAgeCLI(time.Since(ts.AsTime())))
 		}
 	}
 
 	// Pending nudge section.
 	pn := sd.GetPendingNudge()
 	if pn != nil && len(pn.GetSources()) > 0 {
-		sb.WriteString(fmt.Sprintf("pending_nudge:  [%s]\n", strings.Join(pn.GetSources(), ", ")))
+		fmt.Fprintf(&sb, "pending_nudge:  [%s]\n", strings.Join(pn.GetSources(), ", "))
 	}
 
 	return sb.String()

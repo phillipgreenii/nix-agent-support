@@ -29,7 +29,7 @@ func PendingScheduledResume(path string) (resumeAt time.Time, ok bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	type wakeupScan struct {
 		Type      string    `json:"type"`

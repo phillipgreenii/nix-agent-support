@@ -122,12 +122,12 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	out.LastNudgedAt = timeFromTS(sv.GetLastNudgedAt())
 	out.LastNudgeSources = sv.GetLastNudgeSources()
 	out.Status = statusFromString(sv.GetStatus())
-	out.Session.Blocker = session.ParseBlocker(sv.GetBlocker())
+	out.Blocker = session.ParseBlocker(sv.GetBlocker())
 	// Version-skew: an older daemon sends "waiting" with no blocker field. Map
 	// it to blocked + human_input so the human-blocked distinction survives the
 	// transition (ADR 0024 R8).
-	if out.Session.Blocker == session.NoBlocker && sv.GetStatus() == "waiting" {
-		out.Session.Blocker = session.HumanInput
+	if out.Blocker == session.NoBlocker && sv.GetStatus() == "waiting" {
+		out.Blocker = session.HumanInput
 	}
 	// Reconstruct env subset so clients can filter by workspace.
 	env := map[string]string{}
@@ -147,7 +147,7 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 		env["WORKSPACE"] = v
 	}
 	if len(env) > 0 {
-		out.Session.Env = env
+		out.Env = env
 	}
 	return out
 }
