@@ -48,6 +48,22 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - Always commit to the correct branch. Before committing, run `git branch --show-current` to verify. If changes were made on the wrong branch, alert the user before proceeding.
 - When pre-commit hooks exist, always run `git diff --cached` and address any formatting/lint issues before attempting to commit. If subagents generate changes, ensure files are properly staged.
 
+### Git Worktree / Integration Discipline
+
+> The "primary branch" is the repo's default integration branch, resolved as
+> `pgii-integrate-branch.primaryBranch` (git config) → `git symbolic-ref refs/remotes/origin/HEAD`
+> (git standard) → `main`.
+
+- **R-1** The canonical clone MUST have its primary branch checked out as steady state.
+- **R-2** Only the canonical clone MAY have the primary branch checked out; a worktree/workforest member MUST use a feature branch.
+- **R-3** An agent MUST NOT switch the canonical clone off its primary branch or leave it dirty in steady state. On finding it unexpectedly off-branch/dirty, the agent MUST stop and report — not reset, re-checkout, stash, or work around it.
+- **R-4** By default an isolated single-repo change MUST be done in a git worktree.
+- **R-5** The worktree (R-4) and workforest requirements MAY be overridden when the user explicitly says so.
+- **R-6** For a change judged very small/quick, the agent MAY take the direct-commit path (commit on the primary branch in the canonical clone) — but if it does, it MUST first ask the user.
+- **R-7** Concurrent agents in different worktrees are expected; the primary branch advancing during work is absorbed by the rebase. Only a rebase conflict or a persistent ff-race during landing warrants attention.
+- **R-8 (floating-branch halt)** If an integration would advance the canonical primary branch (e.g. a local ff-merge) and the canonical clone is not on its primary branch, the agent MUST halt and report — merging then advances the wrong branch and orphans work into hanging branches. (For methods that do not touch the canonical primary — e.g. `pull-request` — an off-primary/dirty canonical is an R-3 anomaly to surface, not necessarily to halt.)
+- **R-9 (integration entry point)** To integrate completed work, the agent MUST use the `integrate-branch` skill. The agent MUST NOT use `superpowers:finishing-a-development-branch` (plain non-ff merge, no rebase).
+
 ### Prohibited Actions
 
 #### System Commands
