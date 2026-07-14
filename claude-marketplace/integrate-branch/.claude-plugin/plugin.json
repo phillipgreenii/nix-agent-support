@@ -1,0 +1,6 @@
+{
+  "name": "integrate-branch",
+  "description": "Integrate the current branch by the repo's method (ff-merge / PR / custom)",
+  "version": "0.1.0",
+  "defaultEnabled": true
+}

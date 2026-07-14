@@ -43,6 +43,11 @@
       "name": "pb",
       "source": "./pb",
       "description": "Teaches the pn:applied gate lifecycle (pb gate create) for agents finishing gated follow-up work"
+    },
+    {
+      "name": "integrate-branch",
+      "source": "./integrate-branch",
+      "description": "Integrate the current branch by the repo's method (ff-merge / PR / custom)"
     }
   ]
 }
