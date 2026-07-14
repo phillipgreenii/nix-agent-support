@@ -82,3 +82,81 @@ add_worktree() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.canonical.branch=="develop"'
 }
+
+@test "remote: reports null when the repo has no remote" {
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == null'
+}
+
+@test "remote: uses the sole remote when no upstream is configured" {
+  git remote add origin https://example.invalid/o/r.git
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == "origin"'
+}
+
+@test "remote: prefers the branch's upstream remote even when another remote also exists" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add fork https://example.invalid/o2/r2.git
+  git update-ref refs/remotes/fork/main HEAD
+  git branch --set-upstream-to=fork/main main
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == "fork"'
+}
+
+@test "remote: two remotes with no upstream set is ambiguous" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add fork https://example.invalid/o2/r2.git
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == null and (.reason | test("ambig"; "i"))'
+}
+
+@test "open_pr: an open PR surfaces as open_pr.number" {
+  mkdir -p "$TEST_DIR/bin"
+  cat >"$TEST_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
+EOF
+  chmod +x "$TEST_DIR/bin/gh"
+  PATH="$TEST_DIR/bin:$PATH"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.open_pr.number == 42'
+}
+
+@test "open_pr: a merged PR is treated as no open PR" {
+  mkdir -p "$TEST_DIR/bin"
+  cat >"$TEST_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo '{"number":42,"state":"MERGED","url":"https://example.invalid/o/r/pull/42"}'
+EOF
+  chmod +x "$TEST_DIR/bin/gh"
+  PATH="$TEST_DIR/bin:$PATH"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.open_pr == null'
+}
+
+@test "mr_bead: a merge-request bead surfaces as mr_bead" {
+  mkdir -p "$TEST_DIR/bin"
+  cat >"$TEST_DIR/bin/bd" <<'EOF'
+#!/usr/bin/env bash
+echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
+EOF
+  chmod +x "$TEST_DIR/bin/bd"
+  PATH="$TEST_DIR/bin:$PATH"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mr_bead == "pg2-abcd"'
+}
+
+@test "gh/bd absent: open_pr and mr_bead are null and the tool still exits 0" {
+  mkdir -p "$TEST_DIR/bin"
+  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.open_pr == null and .mr_bead == null'
+}
