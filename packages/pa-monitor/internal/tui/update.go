@@ -142,6 +142,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tickCount%n == 0 {
 			m.reporter.Push(m.buildSidebarSnapshot())
 		}
+		// After daemonVersion is refreshed, decide whether to self-restart. A
+		// tea.Quit here hands control to runTUIRemote, which performs the exec.
+		if cmd := m.evalReexec(); cmd != nil {
+			return m, cmd
+		}
 	case pollErrMsg:
 		m.polling = false
 		m.daemonConnected = false
@@ -168,10 +173,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AutoResumeErrMsg:
 		m.signalLog("SetAutoResume RPC failed: " + msg.Err.Error())
 	case NudgeResultMsg:
+		m.nudgePending = false
 		text, level := m.formatNudgeResult(msg)
 		m.setNudgeFlash(text, level)
 		return m, nudgeFlashClearCmd()
 	case NudgeErrMsg:
+		m.nudgePending = false
 		m.signalLog("nudge RPC failed: " + msg.Err.Error())
 		m.setNudgeFlash("nudge failed: "+msg.Err.Error(), flashWarn)
 		return m, nudgeFlashClearCmd()

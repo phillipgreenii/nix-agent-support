@@ -40,6 +40,11 @@ type Config struct {
 	EscalationAfter          time.Duration
 	CmuxSidebarEnable        bool
 	CmuxSidebarIntervalTicks int
+	// AutoRestartOnVersionMismatch opts the cmux-bridge and TUI into
+	// re-executing themselves in place when the daemon reports a newer build
+	// (see internal/reexec). Default false (opt-in); no defaults() entry — the
+	// Go zero value is the intended default.
+	AutoRestartOnVersionMismatch bool
 	// BridgeSnapshotInterval and BridgeHeartbeatInterval are the two base
 	// connection cadences from which the daemon and the cmux-bridge DERIVE their
 	// watchdog (PushBudget) and reaper (StaleAfter) windows via internal/timing.
@@ -92,27 +97,30 @@ type DecoratorConfig struct {
 }
 
 type tomlConfig struct {
-	PlanTier                  *string         `toml:"plan_tier"`
-	TopupPoolUSD              *float64        `toml:"topup_pool_usd"`
-	BurnWindowShortS          *int            `toml:"burn_window_short_s"`
-	BurnWindowLongS           *int            `toml:"burn_window_long_s"`
-	RefreshIntervalMS         *int            `toml:"refresh_interval_ms"`
-	CaffeinateGraceS          *int            `toml:"caffeinate_grace_s"`
-	WorkingThresholdS         *int            `toml:"working_threshold_s"`
-	IdleThresholdS            *int            `toml:"idle_threshold_s"`
-	WaitingFreshWindowS       *int            `toml:"waiting_fresh_window_s"`
-	StaleAfterS               *int            `toml:"stale_after_s"`
-	AutoResumeDelayS          *int            `toml:"auto_resume_delay_s"`
-	AutoResumeMessage         *string         `toml:"auto_resume_message"`
-	DisruptGraceS             *int            `toml:"disrupt_grace_s"`
-	EscalationAfterS          *int            `toml:"escalation_after_s"`
-	CmuxSidebarEnable         *bool           `toml:"cmux_sidebar_enable"`
-	CmuxSidebarIntervalTicks  *int            `toml:"cmux_sidebar_interval_ticks"`
-	BridgeSnapshotIntervalMS  *int            `toml:"bridge_snapshot_interval_ms"`
-	BridgeHeartbeatIntervalMS *int            `toml:"bridge_heartbeat_interval_ms"`
-	Decorators                []tomlDecorator `toml:"decorator"`
-	OTel                      *tomlOTel       `toml:"otel"`
-	Account                   *tomlAccount    `toml:"account"`
+	PlanTier                 *string  `toml:"plan_tier"`
+	TopupPoolUSD             *float64 `toml:"topup_pool_usd"`
+	BurnWindowShortS         *int     `toml:"burn_window_short_s"`
+	BurnWindowLongS          *int     `toml:"burn_window_long_s"`
+	RefreshIntervalMS        *int     `toml:"refresh_interval_ms"`
+	CaffeinateGraceS         *int     `toml:"caffeinate_grace_s"`
+	WorkingThresholdS        *int     `toml:"working_threshold_s"`
+	IdleThresholdS           *int     `toml:"idle_threshold_s"`
+	WaitingFreshWindowS      *int     `toml:"waiting_fresh_window_s"`
+	StaleAfterS              *int     `toml:"stale_after_s"`
+	AutoResumeDelayS         *int     `toml:"auto_resume_delay_s"`
+	AutoResumeMessage        *string  `toml:"auto_resume_message"`
+	DisruptGraceS            *int     `toml:"disrupt_grace_s"`
+	EscalationAfterS         *int     `toml:"escalation_after_s"`
+	CmuxSidebarEnable        *bool    `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks *int     `toml:"cmux_sidebar_interval_ticks"`
+	// Longer field name than the aligned block above; the comment breaks the
+	// gofmt alignment run so the whole struct is not reflowed.
+	AutoRestartOnVersionMismatch *bool           `toml:"auto_restart_on_version_mismatch"`
+	BridgeSnapshotIntervalMS     *int            `toml:"bridge_snapshot_interval_ms"`
+	BridgeHeartbeatIntervalMS    *int            `toml:"bridge_heartbeat_interval_ms"`
+	Decorators                   []tomlDecorator `toml:"decorator"`
+	OTel                         *tomlOTel       `toml:"otel"`
+	Account                      *tomlAccount    `toml:"account"`
 }
 
 type tomlAccount struct {
@@ -256,6 +264,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.CmuxSidebarEnable != nil {
 		cfg.CmuxSidebarEnable = *raw.CmuxSidebarEnable
+	}
+	if raw.AutoRestartOnVersionMismatch != nil {
+		cfg.AutoRestartOnVersionMismatch = *raw.AutoRestartOnVersionMismatch
 	}
 	if raw.CmuxSidebarIntervalTicks != nil {
 		cfg.CmuxSidebarIntervalTicks = *raw.CmuxSidebarIntervalTicks

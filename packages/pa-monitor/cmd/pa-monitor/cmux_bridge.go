@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,12 +13,39 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/reexec"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
 	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
+
+// errReexecRequested is returned by runBridgeChannel (and propagated by
+// streamOnce) as an EXPECTED control outcome — NOT a connection failure — to
+// request that the outer loop re-exec the bridge into the newer build. It is
+// matched with errors.Is and MUST be intercepted (see classifyBridgeResult)
+// ABOVE the generic disconnect branch, so a re-exec request is never surfaced
+// as a lost connection.
+var errReexecRequested = errors.New("reexec requested: daemon version mismatch")
+
+// Operator-facing pane lines for the self-restart feature. These target the
+// newer-daemon case (a rebuild restarted the daemon under a stale bridge), so
+// the advised fix is to restart the CLIENT, not the daemon.
+const (
+	// reexecMismatchWarnLine is the disabled-behavior warning (auto-restart off).
+	reexecMismatchWarnLine = "⚠ daemon version differs from this bridge — restart this bridge to pick up the new build"
+	// reexecRestartingLine is printed just before a re-exec attempt.
+	reexecRestartingLine = "↻ restarting bridge to match the new daemon build…"
+	// reexecGaveUpLine is the persistent give-up error: auto-restart could not
+	// converge within the attempt budget (or the exec failed).
+	reexecGaveUpLine = "⚠ bridge could not auto-restart to match the daemon — restart this bridge manually"
+)
+
+// bridgeReexec is the re-exec entrypoint, a package var so the outer-loop wire
+// (runCmuxBridge, which has no fake-stream seam) is unit-testable. Production
+// points at reexec.Run; on success it never returns.
+var bridgeReexec = reexec.Run
 
 // bridgeState captures the small slice of DaemonState whose flips the
 // bridge surfaces as log lines. It is the input to diffAndLog and is
@@ -86,14 +114,86 @@ func diffAndLog(prev, curr bridgeState, log func(string)) bridgeState {
 
 // logDaemonVersionMismatch warns when the bridge's own build id (selfVersion)
 // and the daemon's reported version are both non-empty and differ — surfacing
-// the stale-daemon case (a rebuild+activate that did not restart the launchd
-// daemon). The caller invokes it on the FIRST snapshot of each (re)connection so
+// the skew case (typically a rebuild that restarted the daemon under a stale
+// bridge). The caller invokes it on the FIRST snapshot of each (re)connection so
 // that a daemon which changed version across a reconnect is re-flagged, even
 // though diffAndLog's "initial state" line is emitted only once per process.
 func logDaemonVersionMismatch(selfVersion, daemonVersion string, log func(string)) {
 	if versioncmp.Mismatch(selfVersion, daemonVersion) {
-		log("⚠ daemon version differs from this bridge — restart daemon")
+		log(reexecMismatchWarnLine)
 	}
+}
+
+// evalDaemonVersion runs the per-connection daemon-version check and decides the
+// self-restart action. It returns errReexecRequested when the caller SHOULD tear
+// down and re-exec (mismatch + auto-restart on + attempt budget remaining); it
+// returns nil in EVERY other case — matched versions, auto-restart off, or the
+// give-up state — so the stream keeps serving.
+//
+// Side effects: on a matched (converged) version it resets *opts.attemptBase to
+// 0 so a client that has legitimately restarted over its lifetime never
+// permanently disables itself; on the attempt cap it sets *opts.gaveUp, records
+// the exhausted metric, and prints the persistent give-up line; on a mismatch
+// with auto-restart off it prints the disabled-behavior warning.
+//
+// When auto-restart is off the reexec bookkeeping pointers (gaveUp/attemptBase)
+// and recordReexec may be nil, so that branch never touches them.
+func evalDaemonVersion(daemonVersion string, log *bridgeLogger, opts bridgeStreamOpts) error {
+	self := opts.selfVersion
+	mismatch := versioncmp.Mismatch(self, daemonVersion)
+
+	// Disabled (default) behavior: warn on mismatch, do nothing on match. No
+	// attempt-budget bookkeeping — the reexec pointers may be nil here.
+	if !opts.autoRestart {
+		if mismatch {
+			logDaemonVersionMismatch(self, daemonVersion, log.Term)
+		}
+		return nil
+	}
+
+	// Auto-restart enabled; attemptBase/gaveUp are owned by runCmuxBridge and
+	// persist across reconnects.
+	if !mismatch {
+		*opts.attemptBase = 0 // converged: next attempt sequence starts fresh
+		return nil
+	}
+	if *opts.gaveUp {
+		log.Term(reexecGaveUpLine) // persistent: re-surface on every reconnect
+		return nil
+	}
+	if *opts.attemptBase >= reexec.MaxAttempts {
+		*opts.gaveUp = true
+		opts.recordReexec(*opts.attemptBase, otel.ReexecOutcomeExhausted)
+		log.Term(reexecGaveUpLine)
+		return nil
+	}
+	return errReexecRequested
+}
+
+// bridgeLoopVerdict classifies a streamOnce result for the outer reconnect loop.
+type bridgeLoopVerdict int
+
+const (
+	bridgeStop       bridgeLoopVerdict = iota // err==nil, or ctx cancelled: return
+	bridgeReexecNow                           // reexec sentinel: metric + re-exec
+	bridgeDisconnect                          // any other error: announce + retry
+)
+
+// classifyBridgeResult decides the outer-loop action. The reexec sentinel is
+// intercepted ABOVE the generic disconnect branch so a re-exec request is never
+// reported as a lost connection; a cancelled outer ctx (process shutdown) wins
+// over everything, so a shutdown never triggers a re-exec.
+func classifyBridgeResult(err, ctxErr error) bridgeLoopVerdict {
+	if err == nil {
+		return bridgeStop
+	}
+	if ctxErr != nil {
+		return bridgeStop
+	}
+	if errors.Is(err, errReexecRequested) {
+		return bridgeReexecNow
+	}
+	return bridgeDisconnect
 }
 
 // formatBridgeLine renders one operator-facing terminal line: a local
@@ -279,25 +379,51 @@ func runCmuxBridge(args []string) {
 	// "initial state" spam. See diffAndLog.
 	var prev bridgeState
 	var prevSessions bridgeSessions
+	// Self-restart state persists across reconnects for the process's life.
+	// attemptBase is seeded from the env so a re-exec'd process inherits the
+	// running attempt count; it resets to 0 whenever a connection converges (see
+	// evalDaemonVersion). gaveUp latches once the attempt budget is spent or an
+	// exec fails, reverting the bridge to warn-only.
+	attemptBase := reexec.Attempt(os.Environ())
+	gaveUp := false
 	opts := bridgeStreamOpts{
 		heartbeat:    timings.HeartbeatInterval,
 		pushBudget:   timings.PushBudget,
 		selfVersion:  version,
 		prev:         &prev,
 		prevSessions: &prevSessions,
+		autoRestart:  cfg.AutoRestartOnVersionMismatch,
+		gaveUp:       &gaveUp,
+		attemptBase:  &attemptBase,
+		recordReexec: emit.RecordReexec, // nil-safe method value even if emit==nil
 	}
 
 	for {
-		if err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter, opts); err != nil {
-			if ctx.Err() != nil {
-				return
+		err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter, opts)
+		switch classifyBridgeResult(err, ctx.Err()) {
+		case bridgeStop:
+			return
+		case bridgeReexecNow:
+			// An expected control outcome, NOT a disconnect: do not push
+			// StateUnknown or announce a disconnect. Record the attempt, then
+			// re-exec into the new build (never returns on success).
+			emit.RecordReexec(attemptBase, otel.ReexecOutcomeAttempt)
+			log.Term(reexecRestartingLine)
+			if rerr := bridgeReexec(os.Args[0], os.Args, os.Environ(), attemptBase); rerr != nil {
+				// A broken exec will not fix itself: give up, surface the
+				// persistent error, and revert to serving (warn-only).
+				emit.RecordReexec(attemptBase, otel.ReexecOutcomeExecFailed)
+				gaveUp = true
+				log.Term(reexecGaveUpLine)
+				log.Detail("bridge.reexec_failed", map[string]string{"error": rerr.Error()})
+				continue
 			}
+			return // unreachable on exec success
+		case bridgeDisconnect:
 			reporter.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateUnknown})
 			announcer.disconnected(map[string]string{"error": err.Error()})
 			time.Sleep(2 * time.Second)
-			continue
 		}
-		return
 	}
 }
 
@@ -360,6 +486,18 @@ type bridgeStreamOpts struct {
 	selfVersion  string
 	prev         *bridgeState
 	prevSessions *bridgeSessions
+
+	// Self-restart wiring (internal/reexec), all nil/zero when the feature is
+	// off (the default). autoRestart mirrors config.AutoRestartOnVersionMismatch.
+	// gaveUp and attemptBase are owned by runCmuxBridge and PERSIST across
+	// reconnects (like prev/prevSessions) so the attempt budget and give-up state
+	// span the process, not one stream. recordReexec emits the give-up metric
+	// from inside the message loop, because the cap-reached give-up keeps serving
+	// and so never reaches the outer loop (injected as a seam for tests).
+	autoRestart  bool
+	gaveUp       *bool
+	attemptBase  *int
+	recordReexec func(attempt int, outcome string)
 }
 
 // streamOnce establishes one BridgeChannel session and drives it to
@@ -560,7 +698,12 @@ loop:
 			if snap := r.msg.GetSnapshot(); snap != nil {
 				if !versionChecked {
 					versionChecked = true
-					logDaemonVersionMismatch(opts.selfVersion, snap.GetDaemonVersion(), log.Term)
+					// A reexec request tears the stream down (below) so the outer
+					// loop can re-exec; every other outcome keeps serving.
+					if rerr := evalDaemonVersion(snap.GetDaemonVersion(), log, opts); rerr != nil {
+						loopErr = rerr
+						break loop
+					}
 				}
 				*opts.prev = diffAndLog(*opts.prev, stateFromDaemon(snap), log.Term)
 				*opts.prevSessions = diffSessionsAndLog(*opts.prevSessions, sessionsFromDaemon(snap, ws), log.Term)

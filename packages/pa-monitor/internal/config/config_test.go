@@ -184,6 +184,64 @@ func TestConfigDefaultsCmuxSidebar(t *testing.T) {
 	}
 }
 
+func TestConfigDefaultsAutoRestartOnVersionMismatch(t *testing.T) {
+	// Deliberately NO defaults() entry: the Go zero value (false) IS the
+	// intended default — client self-restart is opt-in.
+	cfg := defaults()
+	if cfg.AutoRestartOnVersionMismatch {
+		t.Errorf("AutoRestartOnVersionMismatch = %v, want false by default", cfg.AutoRestartOnVersionMismatch)
+	}
+}
+
+func TestConfigAutoRestartOnVersionMismatchAbsent(t *testing.T) {
+	// A file that sets an unrelated key must leave the flag off.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("disrupt_grace_s = 45\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoRestartOnVersionMismatch {
+		t.Errorf("AutoRestartOnVersionMismatch = %v, want false when absent", cfg.AutoRestartOnVersionMismatch)
+	}
+}
+
+func TestConfigAutoRestartOnVersionMismatchExplicitTrue(t *testing.T) {
+	// Load-bearing: proves the toml tag `auto_restart_on_version_mismatch`
+	// matches the key rendered by the nix home module (home/programs/pa-monitor)
+	// and enabled on this machine (phillipg-nix-ziprecruiter).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("auto_restart_on_version_mismatch = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AutoRestartOnVersionMismatch {
+		t.Errorf("AutoRestartOnVersionMismatch = %v, want true", cfg.AutoRestartOnVersionMismatch)
+	}
+}
+
+func TestConfigAutoRestartOnVersionMismatchExplicitFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("auto_restart_on_version_mismatch = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoRestartOnVersionMismatch {
+		t.Errorf("AutoRestartOnVersionMismatch = %v, want false", cfg.AutoRestartOnVersionMismatch)
+	}
+}
+
 func TestConfigDefaultsNudge(t *testing.T) {
 	cfg := defaults()
 	if cfg.DisruptGrace != 30*time.Second {

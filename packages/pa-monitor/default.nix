@@ -34,8 +34,15 @@ mkGoApp {
 
   subPackages = [ "cmd/pa-monitor" ];
 
-  # Binary version (`-X main.version`) is derived from this package's own
-  # source by mkGoApp; `main.version` (lowercase) is mkGoApp's default target.
+  # cmd/pa-monitor/main.go declares the version global in LOWERCASE
+  # (`var version = "dev"`), but mkGoApp's default ldflag target is capital-V
+  # `main.Version` (go-builders.nix, matching the fleet `var Version`
+  # convention). Without this override `-X main.Version=` targets a symbol the
+  # code never declares, the linker silently drops it, and every role reports
+  # the "dev" fallback — which makes versioncmp.Mismatch a permanent false and
+  # disables both the stale-daemon warning and the client self-restart feature.
+  # Guarded by the `test-pa-monitor-version-stamped` flake check.
+  versionPath = "main.version";
 
   nativeBuildInputs = [ makeWrapper ];
 

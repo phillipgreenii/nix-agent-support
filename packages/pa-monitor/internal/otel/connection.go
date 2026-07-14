@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,6 +29,15 @@ type ConnOptions struct {
 	Component      string
 }
 
+// Outcome values for the pa_monitor.client.reexec counter's "outcome"
+// attribute. "exhausted"/"exec_failed" are the give-up states — a persistent
+// condition worth alerting on, unlike the one-shot "attempt".
+const (
+	ReexecOutcomeAttempt    = "attempt"
+	ReexecOutcomeExhausted  = "exhausted"
+	ReexecOutcomeExecFailed = "exec_failed"
+)
+
 // ConnEmitter is a minimal OTel emitter for the cmux-bridge and TUI. It owns
 // exactly one observable gauge, pa_monitor.daemon.connected, plus a logger for
 // low-level detail. A nil *ConnEmitter is a valid no-op (mirrors *Emitter).
@@ -36,6 +46,7 @@ type ConnEmitter struct {
 	logProvider     *sdklog.LoggerProvider
 	logger          otellog.Logger
 	component       string
+	reexecs         metric.Int64Counter
 
 	mu             sync.Mutex
 	connectedVal   int64
@@ -119,7 +130,7 @@ func (e *ConnEmitter) registerGauge(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
-	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+	if _, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		e.mu.Lock()
 		val, known := e.connectedVal, e.connectedKnown
 		e.mu.Unlock()
@@ -128,8 +139,13 @@ func (e *ConnEmitter) registerGauge(mp *sdkmetric.MeterProvider) error {
 				metric.WithAttributes(attribute.String("component", e.component)))
 		}
 		return nil
-	}, gauge)
-	return err
+	}, gauge); err != nil {
+		return err
+	}
+	if e.reexecs, err = meter.Int64Counter("pa_monitor.client.reexec"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RecordDaemonConnected buffers the latest connection state for the gauge
@@ -146,6 +162,27 @@ func (e *ConnEmitter) RecordDaemonConnected(connected bool) {
 	e.connectedVal = v
 	e.connectedKnown = true
 	e.mu.Unlock()
+}
+
+// RecordReexec increments pa_monitor.client.reexec once per self-restart
+// decision, tagged with the attempt number and outcome (ReexecOutcome*). It
+// also emits a companion "client.reexec" log event so the metric increment has
+// trace context. nil-safe.
+func (e *ConnEmitter) RecordReexec(attempt int, outcome string) {
+	if e == nil {
+		return
+	}
+	if e.reexecs != nil {
+		e.reexecs.Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("component", e.component),
+			attribute.Int("attempt", attempt),
+			attribute.String("outcome", outcome),
+		))
+	}
+	e.LogEvent("client.reexec", map[string]string{
+		"attempt": strconv.Itoa(attempt),
+		"outcome": outcome,
+	})
 }
 
 // LogEvent emits one info-level log record with event_name + component +

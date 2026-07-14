@@ -226,8 +226,14 @@ func TestLogDaemonVersionMismatchWarnsOnDiffer(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly 1 warning line, got %d: %v", len(lines), lines)
 	}
-	if !strings.Contains(lines[0], "⚠ daemon version differs from this bridge — restart daemon") {
-		t.Fatalf("expected the mismatch warning, got %q", lines[0])
+	// §6: the warning must advise restarting the CLIENT (this bridge), since the
+	// feature targets the newer-daemon case. Assert against the shared constant
+	// so a future reword updates both sites together.
+	if lines[0] != reexecMismatchWarnLine {
+		t.Fatalf("expected the mismatch warning %q, got %q", reexecMismatchWarnLine, lines[0])
+	}
+	if !strings.Contains(lines[0], "restart this bridge") {
+		t.Fatalf("mismatch warning must advise restarting the client, got %q", lines[0])
 	}
 }
 

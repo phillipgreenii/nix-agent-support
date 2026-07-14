@@ -22,6 +22,10 @@ type AlertsOpts struct {
 	TopupConsumed   float64
 	ClientVersion   string
 	DaemonVersion   string
+	// ReexecGaveUp, when true, means client self-restart exhausted its attempts
+	// (or the exec failed): the version-mismatch segment becomes a persistent
+	// "restart manually" give-up notice instead of the ordinary remediation.
+	ReexecGaveUp bool
 }
 
 // Alerts returns "" when no alert is active, otherwise a single-line,
@@ -55,17 +59,32 @@ func Alerts(tree *aggregate.Tree, opts AlertsOpts) string {
 
 	if versioncmp.Mismatch(opts.ClientVersion, opts.DaemonVersion) {
 		var seg string
-		// WIDE shows both versions in full. NARROW/TINY save space by showing
-		// only the daemon version (the stale one that needs restarting) — never
-		// by splitting/shortening the id, which has no reliable delimiter.
-		switch tier {
-		case wrap.TierWide:
-			seg = fmt.Sprintf("⚠ daemon %s ≠ this %s — restart daemon",
-				opts.DaemonVersion, opts.ClientVersion)
-		case wrap.TierNarrow:
-			seg = fmt.Sprintf("⚠ daemon %s — restart", opts.DaemonVersion)
+		switch {
+		case opts.ReexecGaveUp:
+			// Persistent give-up: auto-restart could not converge within the
+			// attempt budget (or the exec failed). Advise a manual client restart.
+			switch tier {
+			case wrap.TierWide:
+				seg = fmt.Sprintf("⚠ auto-restart failed (daemon %s) — restart this TUI manually", opts.DaemonVersion)
+			case wrap.TierNarrow:
+				seg = "⚠ auto-restart failed — restart TUI"
+			default:
+				seg = "⚠ restart TUI"
+			}
 		default:
-			seg = fmt.Sprintf("⚠ daemon %s", opts.DaemonVersion)
+			// This feature targets the newer-daemon case, so the remediation is
+			// to restart the CLIENT. WIDE shows both versions in full; NARROW/TINY
+			// save space by showing only the daemon version — never by
+			// splitting/shortening the id, which has no reliable delimiter.
+			switch tier {
+			case wrap.TierWide:
+				seg = fmt.Sprintf("⚠ daemon %s ≠ this %s — restart this TUI",
+					opts.DaemonVersion, opts.ClientVersion)
+			case wrap.TierNarrow:
+				seg = fmt.Sprintf("⚠ daemon %s — restart TUI", opts.DaemonVersion)
+			default:
+				seg = fmt.Sprintf("⚠ daemon %s", opts.DaemonVersion)
+			}
 		}
 		segs = append(segs, opts.Theme.Error.Render(seg))
 	}

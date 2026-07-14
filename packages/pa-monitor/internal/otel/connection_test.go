@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -67,6 +68,69 @@ func TestConnectionEmitterLogEvent(t *testing.T) {
 	// Non-empty and empty values: the empty value must be skipped by the loop.
 	e.LogEvent("daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
 	e.LogEvent("daemon.reconnect", nil)
+}
+
+func TestConnectionEmitterRecordReexecNilSafe(t *testing.T) {
+	var e *ConnEmitter
+	// A nil emitter (endpoint unset) must no-op, not panic.
+	e.RecordReexec(0, ReexecOutcomeAttempt)
+}
+
+// TestConnectionEmitterRecordReexec asserts the pa_monitor.client.reexec counter
+// increments by one and carries {component, attempt, outcome} attributes. A
+// ManualReader lets us inspect the recorded datapoint without a live collector.
+func TestConnectionEmitterRecordReexec(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	e := &ConnEmitter{metricsProvider: mp, component: "cmux-bridge"}
+	if err := e.registerGauge(mp); err != nil {
+		t.Fatalf("registerGauge: %v", err)
+	}
+
+	e.RecordReexec(2, ReexecOutcomeExecFailed)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	dp := findReexecCounter(t, &rm)
+	if dp.Value != 1 {
+		t.Errorf("counter value = %d, want 1", dp.Value)
+	}
+	assertStrAttr(t, dp.Attributes, "component", "cmux-bridge")
+	assertStrAttr(t, dp.Attributes, "outcome", "exec_failed")
+	if v, ok := dp.Attributes.Value(attribute.Key("attempt")); !ok || v.AsInt64() != 2 {
+		t.Errorf("attempt attr = %v (ok=%v), want 2", v, ok)
+	}
+}
+
+func findReexecCounter(t *testing.T, rm *metricdata.ResourceMetrics) metricdata.DataPoint[int64] {
+	t.Helper()
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "pa_monitor.client.reexec" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("reexec metric data type = %T, want Sum[int64]", m.Data)
+			}
+			if len(sum.DataPoints) != 1 {
+				t.Fatalf("reexec datapoints = %d, want 1", len(sum.DataPoints))
+			}
+			return sum.DataPoints[0]
+		}
+	}
+	t.Fatal("pa_monitor.client.reexec counter not found")
+	return metricdata.DataPoint[int64]{}
+}
+
+func assertStrAttr(t *testing.T, set attribute.Set, key, want string) {
+	t.Helper()
+	v, ok := set.Value(attribute.Key(key))
+	if !ok || v.AsString() != want {
+		t.Errorf("attr %q = %v (ok=%v), want %q", key, v, ok, want)
+	}
 }
 
 // stubMetricExporter implements sdkmetric.Exporter. Export/ForceFlush succeed

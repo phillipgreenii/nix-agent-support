@@ -165,11 +165,35 @@ func TestAlertsVersionMismatchWide(t *testing.T) {
 	if !strings.Contains(out, "≠") {
 		t.Errorf("expected mismatch glyph '≠', got: %q", out)
 	}
-	if !strings.Contains(out, "restart daemon") {
-		t.Errorf("expected 'restart daemon' remediation, got: %q", out)
+	// §6: the feature targets the newer-daemon case, so the remediation advises
+	// restarting the CLIENT (this TUI), not the daemon.
+	if !strings.Contains(out, "restart this TUI") {
+		t.Errorf("expected 'restart this TUI' remediation, got: %q", out)
+	}
+	if strings.Contains(out, "restart daemon") {
+		t.Errorf("mismatch alert must no longer advise restarting the daemon, got: %q", out)
 	}
 	if !strings.Contains(out, "⚠") {
 		t.Errorf("expected warning glyph, got: %q", out)
+	}
+}
+
+// TestAlertsVersionMismatchGaveUp asserts the persistent give-up alert replaces
+// the ordinary mismatch remediation once client self-restart has exhausted its
+// attempts (ReexecGaveUp), telling the user to restart manually.
+func TestAlertsVersionMismatchGaveUp(t *testing.T) {
+	out := Alerts(&aggregate.Tree{}, AlertsOpts{
+		Now:           time.Now(),
+		Width:         200, // WIDE
+		ClientVersion: "26.07.08+abcd1234",
+		DaemonVersion: "26.07.01+deadbeef",
+		ReexecGaveUp:  true,
+	})
+	if !strings.Contains(out, "auto-restart failed") {
+		t.Errorf("expected give-up alert 'auto-restart failed', got: %q", out)
+	}
+	if !strings.Contains(out, "restart this TUI") {
+		t.Errorf("give-up alert must advise a manual client restart, got: %q", out)
 	}
 }
 

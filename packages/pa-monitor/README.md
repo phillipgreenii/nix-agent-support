@@ -96,16 +96,40 @@ The cmux-bridge and TUI additionally emit:
 - **`pa_monitor.daemon.connected{component="cmux-bridge"|"tui"}`** — gauge, 1 = connected, 0 =
   disconnected. A provisioned Grafana alert (`grafana/alerting/daemon-connection.yaml`) fires when
   `min by (component)(pa_monitor_daemon_connected) < 1` for more than 1m (`noDataState: OK`).
+- **`pa_monitor.client.reexec{component,attempt,outcome}`** — counter, incremented once per
+  client self-restart decision (see [Client self-restart](#client-self-restart-on-version-mismatch)).
+  `outcome` is `attempt` (a re-exec is about to run), `exhausted` (the attempt budget was spent), or
+  `exec_failed` (the exec itself failed). The `exhausted`/`exec_failed` increments make the give-up
+  state alertable — a persistent condition, not a one-shot log. Each increment carries a companion
+  `client.reexec` log event for trace context.
 
 ### cmux-bridge pane output
 
 The cmux-bridge pane shows only timestamped (`2006-01-02 15:04:05`), prefix-less, operator-facing
-lines: startup banner, a `⚠ daemon version differs … — restart daemon` warning (emitted on each
-(re)connect when the running daemon's build differs from the bridge's own), caffeinate/auto-nudge
+lines: startup banner, a `⚠ daemon version differs from this bridge — restart this bridge …` warning
+(emitted on each (re)connect when the running daemon's build differs from the bridge's own; with
+client self-restart enabled this is replaced by a `↻ restarting …` notice or a persistent
+`⚠ bridge could not auto-restart …` give-up line — see
+[Client self-restart](#client-self-restart-on-version-mismatch)), caffeinate/auto-nudge
 state changes, session roster events (`+/-<pid>`), and `Lost connection to daemon` /
 `Connection to daemon restored` (shown once per episode). Low-level
 RPC/transport/retry detail goes to `~/.cache/pa-monitor/cmux-bridge.log` and to OTel logs — never
 the pane.
+
+### Client self-restart on version mismatch
+
+When a `darwin-rebuild` restarts the launchd **daemon** on a new build, any long-running
+`cmux-bridge` / `tui` keeps executing the **old** client binary against the newer daemon. With
+`auto_restart_on_version_mismatch = true` (default off — see [Configuration](#configuration)), on a
+wire-version mismatch the client re-executes itself in place via `execve(2)` (same PID and
+controlling TTY, so cmux keeps tracking the same pane) to pick up the new build. The exec target is
+resolved via `PATH` (the `darwin-rebuild`-flipped profile symlink), not the running build's
+`/nix/store` path. Restarts are bounded (a small fixed cap with a short backoff so the attempts span
+the activation window); if the mismatch does not clear within the budget the client **gives up**,
+reverts to the disabled warn-only behavior, and surfaces a persistent "restart this client manually"
+error. Config is read once at startup, so a client already running when the flag is first enabled
+only warns on the first upgrade — restart it once manually; every later upgrade auto-restarts. See
+`docs/adr/0027-pa-monitor-client-self-restart-on-version-mismatch.md` and `internal/reexec`.
 
 A Grafana dashboard ships at `grafana/pa-monitor-overview.json` and is registered via
 `phillipgreenii.observability.dashboardProviders.pa-monitor` when observability is enabled.
@@ -151,6 +175,12 @@ endpoint = "http://127.0.0.1:4317"
 | ---------------------------- | ---------- | ---------------------------------------------- |
 | `otel.endpoint`              | string     | OTLP gRPC endpoint. Omit to disable OTel.      |
 | `otel.resource_attributes.*` | string map | Extra resource attributes (key = value pairs). |
+
+### Other keys
+
+| Key                                | Type | Default | Description                                                                                                                                                     |
+| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto_restart_on_version_mismatch` | bool | `false` | Opt the `cmux-bridge` and `tui` into re-executing themselves on a daemon-version upgrade — see [Client self-restart](#client-self-restart-on-version-mismatch). |
 
 ## TUI symbols
 

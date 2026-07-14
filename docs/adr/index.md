@@ -29,3 +29,4 @@
 | [0024](0024-pa-monitor-session-status-blocker-model.md)             | pa-monitor session status/blocker model + authoritative limit   | Accepted                                                                        | 2026-07-09 |
 | [0025](0025-behavior-docs-three-set-split.md)                       | Behavior docs split into method / generic-tool / overlay sets   | Superseded by [0026](0026-pr-pool-behavior-scope-orchestrator-only.md)          | 2026-07-10 |
 | [0026](0026-pr-pool-behavior-scope-orchestrator-only.md)            | pr-pool behavior scope = bare orchestrator; workflow is overlay | Accepted                                                                        | 2026-07-10 |
+| [0027](0027-pa-monitor-client-self-restart-on-version-mismatch.md)  | pa-monitor client self-restart on daemon version mismatch       | Accepted                                                                        | 2026-07-13 |

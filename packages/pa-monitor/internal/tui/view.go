@@ -51,6 +51,7 @@ func (m *Model) View() string {
 		AutoResumeDelay: m.autoResumeDelay,
 		ClientVersion:   m.clientVersion,
 		DaemonVersion:   m.daemonVersion,
+		ReexecGaveUp:    m.reexecGaveUp,
 	})
 	footer := render.Footer(m.width, m.footerStatus(now), now)
 
@@ -158,7 +159,9 @@ func (m *Model) renderModal() string {
 		}
 		header := fmt.Sprintf("pa-monitor %s (TUI) ⇄ %s (daemon)", m.clientVersion, dv)
 		if mm {
-			header += m.theme.Error.Render(" — MISMATCH (restart daemon)")
+			// §6: advise restarting the CLIENT (this TUI) — the feature targets
+			// the newer-daemon case.
+			header += m.theme.Error.Render(" — MISMATCH (restart this TUI)")
 		}
 		lines := []string{header}
 		if m.cacheDir != "" {

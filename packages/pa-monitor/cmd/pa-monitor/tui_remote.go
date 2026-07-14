@@ -13,9 +13,15 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/reexec"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
 )
+
+// tuiReexec is the re-exec entrypoint, a package var mirroring bridgeReexec so
+// the TUI restart wire has an injectable seam. Production points at reexec.Run;
+// on success it never returns.
+var tuiReexec = reexec.Run
 
 // runTUIRemote launches the TUI against a running daemon over gRPC.
 // The local poller is bypassed; state is delivered by a StreamingPoller that
@@ -95,6 +101,12 @@ func runTUIRemote() {
 		ErrorLogger:          errLog,
 		Version:              version,
 		StaleAfter:           cfg.StaleAfter,
+
+		AutoRestartOnVersionMismatch: cfg.AutoRestartOnVersionMismatch,
+		// Seed the attempt counter from the env so a re-exec'd TUI inherits the
+		// running count; the daemon-version convergence resets it (see Model).
+		ReexecAttemptBase: reexec.Attempt(os.Environ()),
+		RecordReexec:      connEmit.RecordReexec, // nil-safe even if connEmit==nil
 		OnCaffeinateToggle: func(want bool) tea.Cmd {
 			action := "off"
 			if want {
@@ -158,10 +170,36 @@ func runTUIRemote() {
 			}
 		},
 	})
-	prog := tea.NewProgram(model, tea.WithAltScreen())
-	if _, err := prog.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+	// Run the program in a loop so a re-exec request (version mismatch, feature
+	// enabled) can restart the process in place. bubbletea restores the terminal
+	// before Run() returns, so the exec inherits a clean TTY. On exec failure the
+	// TUI MUST NOT silently exit: it re-enters Run() in warn-only (gave-up) mode.
+	for {
+		prog := tea.NewProgram(model, tea.WithAltScreen())
+		finalModel, err := prog.Run()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fm, ok := finalModel.(*tui.Model)
+		if !ok || !fm.ReexecRequested() {
+			return // normal quit (user pressed q / ctrl-c)
+		}
+
+		attempt := fm.ReexecAttempt()
+		connEmit.RecordReexec(attempt, otel.ReexecOutcomeAttempt)
+		fmt.Fprintln(os.Stderr, "pa-monitor: restarting to match the new daemon build…")
+		if rerr := tuiReexec(os.Args[0], os.Args, os.Environ(), attempt); rerr != nil {
+			// A broken exec will not fix itself: record it, tell the user to
+			// restart manually, flip the model into warn-only mode so the next
+			// poll does not immediately re-request, and re-enter Run().
+			connEmit.RecordReexec(attempt, otel.ReexecOutcomeExecFailed)
+			fmt.Fprintf(os.Stderr, "pa-monitor: auto-restart failed (%v) — restart this TUI manually\n", rerr)
+			fm.MarkReexecGaveUp()
+			model = fm
+			continue
+		}
+		return // unreachable on exec success (execve replaced the process)
 	}
 }
 

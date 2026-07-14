@@ -337,5 +337,11 @@ func handleManualResume(m *Model) tea.Cmd {
 	// Update loop turns into a footer flash. The selector carries the CURRENT
 	// session id straight off the live snapshot row, so it is inherently
 	// tolerant of daemon-side session-id churn.
-	return m.onManualNudge(selector, allPending)
+	cmd := m.onManualNudge(selector, allPending)
+	if cmd != nil {
+		// Mark the nudge in flight so a self-restart quit is deferred until its
+		// result arrives (cleared in the NudgeResultMsg/NudgeErrMsg cases).
+		m.nudgePending = true
+	}
+	return cmd
 }

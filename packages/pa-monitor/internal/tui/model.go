@@ -9,7 +9,10 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/treestate"
+	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/reexec"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
+	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
 
 // ModalKind selects which full-screen modal is currently open.
@@ -67,6 +70,17 @@ type Options struct {
 	// A captured value older than this renders as stale(age) in the 5h block row.
 	// Zero disables staleness labeling.
 	StaleAfter time.Duration
+	// AutoRestartOnVersionMismatch opts the TUI into re-executing itself when the
+	// daemon reports a newer build (see internal/reexec). Default false (opt-in).
+	AutoRestartOnVersionMismatch bool
+	// ReexecAttemptBase seeds the re-exec attempt counter (from the env, via
+	// reexec.Attempt) so a re-exec'd TUI inherits the running attempt count. The
+	// caller reads it from the env; the Model stays free of os/env coupling.
+	ReexecAttemptBase int
+	// RecordReexec emits the client.reexec metric (nil-safe). The Model uses it
+	// only for the exhausted give-up outcome; runTUIRemote emits the attempt and
+	// exec_failed outcomes around the actual exec.
+	RecordReexec func(attempt int, outcome string)
 }
 
 type Model struct {
@@ -125,6 +139,22 @@ type Model struct {
 	clientVersion string
 	daemonVersion string
 
+	// Self-restart state (internal/reexec). autoRestart mirrors the config flag.
+	// reexecAttemptBase is seeded from the env and reset to 0 on convergence.
+	// reexecRequested latches when Update decides to quit-and-re-exec (read by
+	// runTUIRemote after prog.Run). reexecGaveUp latches at the attempt cap (or
+	// on exec failure) and drives the persistent give-up alert. recordReexec
+	// emits the exhausted metric (nil-safe).
+	autoRestart       bool
+	reexecAttemptBase int
+	reexecRequested   bool
+	reexecGaveUp      bool
+	recordReexec      func(attempt int, outcome string)
+
+	// nudgePending is true while a manual-nudge RPC (N key) is in flight; it
+	// defers a disruptive self-restart quit until the interaction settles.
+	nudgePending bool
+
 	reporter             cmuxstatus.Reporter
 	sidebarIntervalTicks int
 	tickCount            int
@@ -169,6 +199,9 @@ func NewModel(o Options) *Model {
 		onManualNudge:        o.OnManualNudge,
 		clientVersion:        o.Version,
 		staleAfter:           o.StaleAfter,
+		autoRestart:          o.AutoRestartOnVersionMismatch,
+		reexecAttemptBase:    o.ReexecAttemptBase,
+		recordReexec:         o.RecordReexec,
 	}
 	if m.clientVersion == "" {
 		m.clientVersion = "dev"
@@ -182,6 +215,64 @@ func NewModel(o Options) *Model {
 	}
 	m.rebuildFlatRows()
 	return m
+}
+
+// ReexecRequested reports whether Update decided the TUI should quit and
+// re-exec into a newer build. runTUIRemote reads it after prog.Run returns
+// (bubbletea discards the model there otherwise) to perform the actual exec.
+func (m *Model) ReexecRequested() bool { return m.reexecRequested }
+
+// ReexecAttempt returns the current re-exec attempt base (after any
+// convergence reset), which runTUIRemote passes to reexec.Run so the child
+// inherits attempt+1.
+func (m *Model) ReexecAttempt() int { return m.reexecAttemptBase }
+
+// MarkReexecGaveUp flips the TUI into the give-up state after runTUIRemote's
+// exec fails. Without it, re-entering the program with the same (still
+// mismatched) model would immediately request another doomed re-exec — a busy
+// loop. Afterwards evalReexec warns only (persistent give-up alert).
+func (m *Model) MarkReexecGaveUp() {
+	m.reexecGaveUp = true
+	m.reexecRequested = false
+}
+
+// busyInteracting reports whether the user is mid-interaction, so a disruptive
+// self-restart quit should be deferred to a later (idle) poll: a modal open, a
+// session-details window open, or a manual-nudge RPC still in flight.
+func (m *Model) busyInteracting() bool {
+	return m.activeModal != ModalNone || m.selected != nil || m.nudgePending
+}
+
+// evalReexec decides the self-restart action after a poll refreshes
+// daemonVersion. It returns tea.Quit when the TUI should exit so runTUIRemote
+// can re-exec into the new build; nil in every other case. Convergence resets
+// the attempt base; the attempt cap latches reexecGaveUp + records the
+// exhausted metric (no quit); a mid-interaction state defers the quit to the
+// next poll. The exhausted give-up fires regardless of interaction (it does not
+// disrupt anything), but the quit itself is deferred while busy.
+func (m *Model) evalReexec() tea.Cmd {
+	if !m.autoRestart {
+		return nil
+	}
+	if !versioncmp.Mismatch(m.clientVersion, m.daemonVersion) {
+		m.reexecAttemptBase = 0 // converged: next attempt sequence starts fresh
+		return nil
+	}
+	if m.reexecGaveUp {
+		return nil // persistent alert already latched; warn-only
+	}
+	if m.reexecAttemptBase >= reexec.MaxAttempts {
+		m.reexecGaveUp = true
+		if m.recordReexec != nil {
+			m.recordReexec(m.reexecAttemptBase, otel.ReexecOutcomeExhausted)
+		}
+		return nil
+	}
+	if m.busyInteracting() {
+		return nil // defer the disruptive quit; re-checked on the next poll
+	}
+	m.reexecRequested = true
+	return tea.Quit
 }
 
 func (m *Model) Init() tea.Cmd {

@@ -168,6 +168,7 @@ func runConfigShow(args []string) {
 	fmt.Printf("working_threshold:         %s\n", cfg.WorkingThreshold)
 	fmt.Printf("idle_threshold:            %s\n", cfg.IdleThreshold)
 	fmt.Printf("cmux_sidebar_enable:       %v\n", cfg.CmuxSidebarEnable)
+	fmt.Printf("auto_restart_on_version_mismatch: %v\n", cfg.AutoRestartOnVersionMismatch)
 	for _, d := range cfg.Decorators {
 		fmt.Printf("decorator:                 %s -> %s (timeout %dms)\n", d.Name, d.Command, d.TimeoutMS)
 	}

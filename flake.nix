@@ -1144,6 +1144,32 @@
                 assert hasConfig bothEnabled; # both gates ⇒ still rendered
                 pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
 
+              # Regression guard that the pa-monitor binary's version string is
+              # actually stamped by the build-time ldflag (versionPath =
+              # "main.version" in packages/pa-monitor/default.nix). Before that
+              # fix, mkGoApp's default `-X main.Version=` targeted a symbol the
+              # code does not declare (cmd/pa-monitor/main.go declares lowercase
+              # `var version`), so the linker silently dropped it and every role
+              # reported the `var version = "dev"` fallback. That made
+              # versioncmp.Mismatch a permanent false-negative, disabling both
+              # the stale-daemon warning and the client self-restart feature. The
+              # stamped string is baseVersion "0.0.0" + an 8-char lowercase-hex
+              # per-source content digest (mkSrcDigest, ADR 0006), i.e. exactly
+              # `pa-monitor 0.0.0-XXXXXXXX`; the "dev" fallback fails the glob.
+              # This build-time linker behavior is invisible to the Go unit tests
+              # (main_test.go only asserts version != "", which "dev" passes), so
+              # this check is the sole automated guard for it.
+              test-pa-monitor-version-stamped = pkgs.runCommand "pa-monitor-version-stamped" { } ''
+                v=$(${pkgs.pa-monitor}/bin/pa-monitor --version)
+                case "$v" in
+                  "pa-monitor 0.0.0-"????????) touch "$out" ;;
+                  *)
+                    echo "pa-monitor version not stamped (got: '$v', want 'pa-monitor 0.0.0-<8hex>')" >&2
+                    exit 1
+                    ;;
+                esac
+              '';
+
               test-ollama-wrapper =
                 let
                   wrapper = import ./home/programs/ollama/wrapper.nix {
