@@ -10,7 +10,6 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
-	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -57,7 +56,11 @@ func runRunRole(roleName, beadID string) int {
 		printUsageErr(fmt.Sprintf("run-role: unknown role %q (configured: %s)", roleName, roleNames(cfg.Roles)))
 		return exitUsage
 	}
-	dctx := discover.DispatchContext{Role: role, Item: item.Item{ID: beadID}}
+	dctx, err := buildRunRoleDispatch(ctx, br, role, beadID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run-role:", err)
+		return exitGeneric
+	}
 	if err := dctx.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitUsage
@@ -73,6 +76,19 @@ func runRunRole(roleName, beadID string) int {
 		return exitGeneric
 	}
 	return exitOK
+}
+
+// buildRunRoleDispatch builds the (role, item) dispatch for the direct-bead run-role
+// path. It loads the bead via `bd show` and maps its metadata into the dispatched
+// Item through the same query.FromIssue adapter the query/drain path uses (pg2-jpci),
+// so the review prompt template renders the real pr_number/repo/head_sha instead of
+// <no value>.
+func buildRunRoleDispatch(ctx context.Context, br beads.Runner, role roles.Role, beadID string) (discover.DispatchContext, error) {
+	iss, err := beads.ShowObj(ctx, br, beadID)
+	if err != nil {
+		return discover.DispatchContext{}, fmt.Errorf("load bead %s: %w", beadID, err)
+	}
+	return discover.DispatchContext{Role: role, Item: query.FromIssue(iss)}, nil
 }
 
 // runRunQuery runs one role's discovery query read-only and prints the matches

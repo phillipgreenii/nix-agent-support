@@ -37,11 +37,19 @@ type Query interface {
 	Run(ctx context.Context, env Env) ([]item.Item, error)
 }
 
-// fromIssues maps bd issues to items (keeps item a leaf — the adapter lives here).
+// FromIssue maps a single bd issue to an item, copying its metadata (keeps item a
+// leaf — the adapter lives here). The query/drain path (fromIssues) and the
+// direct-bead run-role path (pg2-jpci) share this one adapter, so a dispatched Item
+// carries the bead's metadata identically no matter which path built it.
+func FromIssue(i beads.Issue) item.Item {
+	return item.Item{ID: i.ID, Type: i.Type, Title: i.Title, Metadata: i.Metadata}
+}
+
+// fromIssues maps bd issues to items via FromIssue.
 func fromIssues(in []beads.Issue) []item.Item {
 	out := make([]item.Item, 0, len(in))
 	for _, i := range in {
-		out = append(out, item.Item{ID: i.ID, Type: i.Type, Title: i.Title, Metadata: i.Metadata})
+		out = append(out, FromIssue(i))
 	}
 	return out
 }
