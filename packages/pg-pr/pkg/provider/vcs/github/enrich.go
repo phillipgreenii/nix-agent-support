@@ -585,7 +585,7 @@ func commentsFromGHNode(n ghPRNode) []api.Comment {
 // ciRunsFromGHNode flattens the last commit's statusCheckRollup into
 // []api.CIRun. Both CheckRun (Actions/native) and StatusContext (old
 // commit-status API) nodes are normalized to the same shape so the
-// snapshot's rollupCI computation works unchanged.
+// snapshot's cirollup computation works unchanged.
 //
 // HeadSHA is set from the commit OID that owns the statusCheckRollup —
 // this is the PR's current head commit, which is the SHA all the CI

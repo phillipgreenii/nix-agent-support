@@ -1031,7 +1031,7 @@ func (e *Engine) isSelfAuthored(author string) bool {
 // "ciContexts". Both downstream consumers read this enumerated set as
 // authoritative: ci-failure ingestion (ingestFeedbackToStore iterates CIRuns
 // for Conclusion==failure) would MISS a failing check beyond context 30, and
-// draft auto-promote (maybePromoteDraft -> allRunsSuccessful over a truncated
+// draft auto-promote (maybePromoteDraft -> cirollup.Compute(...).State over a truncated
 // "all green" set) would WRONGLY promote a draft whose >30 check is failing —
 // maybePromoteDraft does not consult the aggregate rollup .state as a guard.
 //

@@ -221,7 +221,7 @@ func itoa(n int) string {
 
 // fakeCICD is a minimal CICDProvider for tests. runs is keyed by
 // "repo#prNumber"; missing keys return an empty slice (treated by
-// allRunsSuccessful as "no runs" → not promotable).
+// cirollup.Compute as "no runs" (state "none") → not promotable).
 type fakeCICD struct {
 	runs map[string][]api.CIRun
 }
@@ -235,7 +235,7 @@ func (c *fakeCICD) ListRuns(_ context.Context, repo string, n int) ([]api.CIRun,
 }
 
 // successRun returns a single completed+successful CI run, the shape
-// allRunsSuccessful requires for draft promotion to fire.
+// cirollup.Compute requires (state "success") for draft promotion to fire.
 func successRun() api.CIRun {
 	return api.CIRun{Status: "completed", Conclusion: "success"}
 }
