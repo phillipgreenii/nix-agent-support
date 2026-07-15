@@ -71,22 +71,30 @@ type Config struct {
 	// CONSUMER (SetReviewHook is skipped, so reviewHookEnabled() is false) nor
 	// PRODUCES draft-review beads on pr.updated (beadsbridge skips
 	// EnsureDraftReviewBead). Merge-request / attention / process-feedback
-	// production is unaffected. Absent → enabled (today's behavior).
+	// production, and PR-data sync, are unaffected. Absent → disabled: the legacy
+	// pg-pr review path is the NON-owner in the pg-pr↔pr-pool split, so the
+	// resting-safe built-in default is off (pr-pool owns reviews); see
+	// ReviewEnabled and pg2-3ho1r.
 	Review ReviewConfig `yaml:"review,omitempty" json:"review,omitempty"`
 }
 
 // ReviewConfig gates the draft-review machinery. Enabled is a tri-state pointer
-// so an absent config defaults to on: nil → true.
+// so an absent config takes the resting-safe default: nil → false.
 type ReviewConfig struct {
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }
 
-// ReviewEnabled reports whether the daemon's draft-review machinery is on. It
-// defaults to true (nil receiver, absent section, or absent enabled key) so the
-// kill switch is strictly opt-in.
+// ReviewEnabled reports whether the daemon's legacy draft-review machinery is
+// on. It defaults to FALSE (nil receiver, absent section, or absent enabled key)
+// so the repo's built-in default is a single review owner: pr-pool owns reviews
+// (its built-in review role ships enabled), and the pg-pr review hook is off
+// unless a deployment explicitly opts in with review.enabled=true. This avoids
+// the double-write hazard of running both paths against one shared bead store
+// (design hazard H1; bead pg2-3ho1r). The full pg-pr review strip is deferred
+// (pg2-ynhr.5); until then this flag is the kill switch.
 func (c *Config) ReviewEnabled() bool {
 	if c == nil || c.Review.Enabled == nil {
-		return true
+		return false
 	}
 	return *c.Review.Enabled
 }

@@ -9,7 +9,8 @@ review-related capabilities today** — journeys mapped to owning components, co
 and tests. It is allowed to describe current, tool-specific, and transitional state; it
 may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 
-**Verified against:** `main` @ `9ac29c26` (2026-07-09). Re-verify the cited
+**Verified against:** `main` @ `9ac29c26` (2026-07-09); §2.2 / JR5 re-verified
+2026-07-15 for the `review.enabled` default flip (pg2-3ho1r). Re-verify the cited
 `file:line` anchors when review-flow code changes.
 
 > Scope note: this repository is a standalone, **public** flake. This doc stays
@@ -75,25 +76,30 @@ flowchart LR
 
 ### 2.2 As-shipped defaults vs. intended deployment (read this before changing anything)
 
-The code contains **two** review implementations, and which one runs is a
-**deployment-config** decision, not a code fact:
+The code contains **two** review implementations. The repo's built-in defaults
+now select a **single owner** — **(B) `pr-pool`** — with **(A) `pg-pr`'s review
+hook off by default**:
 
 | Implementation                                         | What it is                                                                                                                                                          | Gating                                                                                                                                                     |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(A) `pg-pr` in-daemon review**                       | draft-review beads → `reviewHookCycle` → mine/team sinks (self-review feedback + GitHub PENDING with skip-if-present) → `reopenStaleReviews` → 3-strike dead-letter | `review.enabled` — **defaults `true`** (`packages/pg-pr/internal/config/config.go:87-92`)                                                                  |
+| **(A) `pg-pr` in-daemon review** (legacy, non-owner)   | draft-review beads → `reviewHookCycle` → mine/team sinks (self-review feedback + GitHub PENDING with skip-if-present) → `reopenStaleReviews` → 3-strike dead-letter | `review.enabled` — **defaults `false`** (`packages/pg-pr/internal/config/config.go:83-100`); enabling the legacy path is explicit opt-in                   |
 | **(B) `pr-pool` review workflow** (the intended owner) | reconcile ACL → `review-pr` beads → ccpool `review` role → post back via `pg-pr review submit`                                                                      | the review role ships **enabled by default** in the built-in role set (`packages/pr-pool/internal/roles/builtin.go:83-101`; `Cap = MaxWorker` default `1`) |
 
-**In this repo's built-in defaults, BOTH (A) and (B) are on.** The safe
-single-owner resting state depends entirely on an **out-of-repo deployment**
-setting `review.enabled=false` (the transition delivered by the epic). This doc
-describes **(B) as the target architecture**; it does not claim (A) is off — that
-is not true of the code defaults.
+**In this repo's built-in defaults, only (B) is on** — a resting-safe single
+owner (pg2-3ho1r). A bare consumer that materializes no `pg-pr` config gets the
+in-code default `review.enabled=false`, so it does not double-write the shared
+bead store. This is the state a deployment previously had to reach by setting the
+flag explicitly; the default now matches it, so the safe resting state no longer
+depends on any out-of-repo override. This doc describes **(B) as the target
+architecture**.
 
 - **Hard rule:** exactly **one** review owner **MUST** be active against a given
   shared bead store at a time. Running (A) and (B) concurrently double-writes the
-  shared store. The safe-default question is tracked (see §10).
-- The transition from (A) to (B) is a **config flip** (`review.enabled=false`),
-  not a code deletion. The full code strip of (A) is deferred (see §10).
+  shared store; the built-in defaults enforce this by shipping (A) off.
+- Enabling **both** owners requires an explicit, deliberate `review.enabled=true`
+  **and** the `pr-pool` review role — do not do this against one shared store.
+- The full code strip of (A) is deferred (see §10); until then `review.enabled`
+  is the opt-in switch that re-enables the legacy path.
 - Kill-switch mechanics: `review.enabled=false` disables the entire `pg-pr` chain —
   draft-review bead production and the review consumer both
   (`packages/pg-pr/cmd/pg-pr/sync.go:95-118`, `:187-204`;
@@ -327,7 +333,10 @@ from `pg-pr` facts and never strands the following drain.
     silently retry.
   - **Cutover:** exactly one review owner **MUST** be active against a shared bead
     store; `pg-pr`'s review hook **MUST** be disabled (`review.enabled=false`)
-    **before** `pr-pool` drains against that store.
+    **before** `pr-pool` drains against that store. This is now the built-in
+    default (`review.enabled` defaults `false`, pg2-3ho1r), so re-enabling the
+    legacy `pg-pr` hook against a store `pr-pool` also drains is the hazard to
+    avoid, not the default.
 - **Code paths:** `packages/pr-pool/cmd/pr-pool/main.go:30-31`,
   `reconcile_cmd.go:15-81` (exit-0-on-partial `:57-81`);
   `packages/pr-pool/internal/prpoolacl/acl.go:42-163`;
@@ -423,7 +432,8 @@ issue tracker (bead IDs kept here rather than in the body):
 - **Skip-if-present missing on the submit path** (JR2 duplicate-PENDING risk) —
   `pg2-3fo3c`.
 - **Both review paths on by default** (double-write hazard; safe-default decision) —
-  `pg2-3ho1r`.
+  RESOLVED: `review.enabled` now defaults `false`, so the built-in defaults ship a
+  single review owner (`pr-pool`); `pg2-3ho1r`.
 - **ADR for the split** (none exists yet) — `pg2-388yn`.
 - **Deferred split parity** (full `pg-pr` review strip, multi-repo fan-out, store
   cleanup, scheduler, legacy dead-letter reconcile) — `pg2-ynhr.5`/`.7`/`.8`/`.9`/`.10`.
