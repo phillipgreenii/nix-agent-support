@@ -104,6 +104,13 @@ compact / fork; see `internal/core/session/transcript.go:15-28`), and it MUST
 ignore the near-duplicate records that concurrent sessions emit for the same
 global value.
 
+> **Refined by [ADR 0029](0029-pa-monitor-rate-limit-window-peak.md):** the
+> per-render `used_percentage` is non-monotonic near the cap, so "newest record by
+> `ts`" can surface a spurious sub-peak dip. The reader now returns the **current
+> window's peak** `used_percentage` (max across records sharing the newest
+> `resets_at`), holding it until a record with a newer `resets_at` confirms a new
+> window; the newest record still defines the current window and `CapturedAt`.
+
 **Burn-rate/projection is derived by the daemon from its own periodic sampling**
 of that current value — the same way it already trends block cost — NOT by
 parsing the file's historical series. Append-on-change is therefore chosen to

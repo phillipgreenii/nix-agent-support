@@ -31,3 +31,4 @@
 | [0026](0026-pr-pool-behavior-scope-orchestrator-only.md)            | pr-pool behavior scope = bare orchestrator; workflow is overlay | Accepted                                                                        | 2026-07-10 |
 | [0027](0027-pa-monitor-client-self-restart-on-version-mismatch.md)  | pa-monitor client self-restart on daemon version mismatch       | Accepted                                                                        | 2026-07-13 |
 | [0028](0028-pa-monitor-general-daemon-config-hot-reload.md)         | pa-monitor general daemon config hot-reload                     | Proposed                                                                        | 2026-07-15 |
+| [0029](0029-pa-monitor-rate-limit-window-peak.md)                   | pa-monitor rate-limit reader holds current window's peak        | Accepted                                                                        | 2026-07-15 |
