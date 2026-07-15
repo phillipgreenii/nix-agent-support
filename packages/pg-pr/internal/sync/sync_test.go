@@ -1438,6 +1438,58 @@ func TestMaybePromoteDraftEmitsUpdate(t *testing.T) {
 	}
 }
 
+// TestMaybePromoteDraftIgnoresExcludedCICheck verifies a draft PR whose ONLY
+// failing check is an excluded advisory check (e.g. policy-bot) still
+// promotes once the real checks are green — the shared cirollup classifier
+// drops the excluded check from the rollup entirely, so it no longer blocks
+// promotion. (pg2-qs46b)
+func TestMaybePromoteDraftIgnoresExcludedCICheck(t *testing.T) {
+	ctx := context.Background()
+
+	vcs := newFakeVCS()
+	ci := newFakeCICD()
+
+	// Self-authored draft PR: real check green, policy-bot failing.
+	pr := selfDraftPR(56, "foo/bar", "feat/draft-promote-excl")
+	pr.State = "open"
+	vcs.my["foo/bar"] = []api.PR{pr}
+	ci.runs[keyOf("foo/bar", 56)] = []api.CIRun{
+		successRun(),
+		{Name: "policy-bot: approval required", Status: "completed", Conclusion: "failure"},
+	}
+
+	bd := newRealBDClient(t)
+	db := store.OpenForTest(t)
+
+	cfg := cfgWithCICD()
+	cfg.Repos[0].ExcludedCIChecks = []string{"^policy-bot"}
+
+	e, err := New(Deps{
+		Cfg:      cfg,
+		VCS:      map[string]VCSProvider{"github": vcs},
+		CICD:     map[string]CICDProvider{"ci": ci},
+		Beads:    bd,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sum, err := e.Sync(ctx)
+	if err != nil {
+		t.Fatalf("Sync: %v (errors=%+v)", err, sum.Errors)
+	}
+
+	if len(vcs.setDraftCalls) != 1 {
+		t.Fatalf("expected 1 SetDraft call (excluded check must not block promotion); got %d: %+v",
+			len(vcs.setDraftCalls), vcs.setDraftCalls)
+	}
+	if sum.DraftPromoted != 1 {
+		t.Fatalf("DraftPromoted: got %d want 1", sum.DraftPromoted)
+	}
+}
+
 func TestBuildEnrichedSearchQuery(t *testing.T) {
 	cases := []struct {
 		name string

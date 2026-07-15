@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
@@ -1636,10 +1637,11 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 	if err != nil {
 		return nil
 	}
+	ciExcl := cirollup.NewExcluder(rcfg.ExcludedCIChecks)
 	if enriched != nil {
 		// Bulk-fetched CI runs cover every check; the rollup is over the
 		// PR's last commit so it's authoritative for "all green".
-		if !allRunsSuccessful(enriched.CIRuns) {
+		if cirollup.Compute(enriched.CIRuns, ciExcl).State != "success" {
 			return nil
 		}
 	} else {
@@ -1658,7 +1660,7 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 			if err != nil {
 				return nil
 			}
-			if !allRunsSuccessful(runs) {
+			if cirollup.Compute(runs, ciExcl).State != "success" {
 				return nil
 			}
 		}
@@ -1679,23 +1681,6 @@ func (e *Engine) maybePromoteDraft(ctx context.Context, enriched *vcs.EnrichedPR
 	}
 	summary.DraftPromoted++
 	return nil
-}
-
-// allRunsSuccessful returns true when there is at least one run and every
-// completed run has conclusion=success.
-func allRunsSuccessful(runs []api.CIRun) bool {
-	if len(runs) == 0 {
-		return false
-	}
-	for _, r := range runs {
-		if r.Status != "completed" {
-			return false
-		}
-		if r.Conclusion != "success" {
-			return false
-		}
-	}
-	return true
 }
 
 // ---------------------------------------------------------------------
