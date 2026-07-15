@@ -17,6 +17,7 @@ import (
 type fakeReviewBeads struct {
 	ready       []beads.DraftReviewRef
 	readyErr    error
+	readyCalls  int // number of times ListReadyDraftReviews was invoked
 	claimed     []string
 	unclaimed   []string
 	closed      map[string]string // id -> reason
@@ -41,6 +42,7 @@ func newFakeReviewBeads() *fakeReviewBeads {
 }
 
 func (f *fakeReviewBeads) ListReadyDraftReviews(context.Context) ([]beads.DraftReviewRef, error) {
+	f.readyCalls++
 	return f.ready, f.readyErr
 }
 
@@ -154,7 +156,7 @@ func (r *recordingSinks) teamSink(_ context.Context, res reviewstage.Result) err
 func newReviewHookEngine(t *testing.T, bdc *fakeReviewBeads, sp Spawner, sinks *recordingSinks, db *store.DB, reviewsDir string) *Engine {
 	t.Helper()
 	e, err := New(Deps{
-		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		Cfg:   cfgWithReview(true), // review.enabled=true: these tests exercise the enabled path
 		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
 		Beads: &fakeDepBeads{},
 		Store: db,
@@ -406,8 +408,12 @@ func TestReviewHookCycle_PreFetchFailure_LeavesBeadOpen_NoBump(t *testing.T) {
 		Cert:     fakeCert{valid: false},
 		Fetcher:  &fakeFetcher{err: errors.New("Permission denied (publickey).")},
 	}
+	reviewEnabled := true
 	e, err := New(Deps{
-		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}}},
+		Cfg: &config.Config{
+			Repos:  []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}},
+			Review: config.ReviewConfig{Enabled: &reviewEnabled},
+		},
 		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
 		Beads: &fakeDepBeads{},
 		Store: db,
@@ -453,8 +459,12 @@ func TestReviewHookCycle_PreFetchSuccess_Spawns(t *testing.T) {
 		Cert:     fakeCert{valid: true},
 		Fetcher:  &fakeFetcher{},
 	}
+	reviewEnabled := true
 	e, err := New(Deps{
-		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}}},
+		Cfg: &config.Config{
+			Repos:  []config.RepoConfig{{Remote: "o/r", Path: t.TempDir()}},
+			Review: config.ReviewConfig{Enabled: &reviewEnabled},
+		},
 		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
 		Beads: &fakeDepBeads{},
 		Store: db,
@@ -515,5 +525,66 @@ func TestReviewHookCycle_ReReviewOnHeadAdvance(t *testing.T) {
 	}
 	if latest.HeadSHA != "h2" || latest.ReviewedByAgentAt == "" {
 		t.Fatalf("h2 should be agent-reviewed after re-review, got %+v", latest)
+	}
+}
+
+// cfgWithReview builds a minimal engine config with review.enabled set to the
+// given value. Repos carries one entry so reopenStaleReviews/ready scans have a
+// well-formed config; the store is nil in these tests so no repo I/O occurs.
+func cfgWithReview(enabled bool) *config.Config {
+	e := enabled
+	return &config.Config{
+		Repos:  []config.RepoConfig{{Remote: "o/r"}},
+		Review: config.ReviewConfig{Enabled: &e},
+	}
+}
+
+// TestReviewHookCycle_ReReadsReviewEnabledPerPoll is the regression test for
+// bead pg2-bw30: review.enabled must be honored per poll, not latched at daemon
+// startup. With the review-hook deps wired once, flipping review.enabled on the
+// engine's config between cycles (as a per-poll disk reload does) must change
+// whether the hook runs on the very next cycle — with no restart.
+//
+// Before the fix, reviewHookEnabled() consulted only whether deps were wired,
+// so the disabled cycle still scanned bd ready (readyCalls == 2) and the test
+// failed.
+func TestReviewHookCycle_ReReadsReviewEnabledPerPoll(t *testing.T) {
+	ctx := context.Background()
+	bdc := newFakeReviewBeads() // empty ready set; we assert on the scan happening
+
+	e, err := New(Deps{
+		Cfg:   cfgWithReview(true),
+		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
+		Beads: &fakeDepBeads{},
+		Review: ReviewHookDeps{
+			Beads:   bdc,
+			Spawner: &fakeSpawner{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Poll 1 — review.enabled=true: the hook runs, so it scans bd ready.
+	e.reviewHookCycle(ctx, NewTextLogger())
+	if bdc.readyCalls != 1 {
+		t.Fatalf("enabled poll must scan ready once; readyCalls=%d", bdc.readyCalls)
+	}
+
+	// Between polls, review.enabled flips to false (as a per-poll disk reload
+	// would apply after `pn workspace apply` rewrote config.yaml). No restart.
+	e.ReplaceCfg(cfgWithReview(false))
+
+	// Poll 2 — review.enabled=false: the hook MUST NOT run this cycle.
+	e.reviewHookCycle(ctx, NewTextLogger())
+	if bdc.readyCalls != 1 {
+		t.Fatalf("disabled poll must NOT scan (config change was latched?); readyCalls=%d", bdc.readyCalls)
+	}
+
+	// Flip back on: the hook resumes on the next poll, still without a restart.
+	e.ReplaceCfg(cfgWithReview(true))
+	e.reviewHookCycle(ctx, NewTextLogger())
+	if bdc.readyCalls != 2 {
+		t.Fatalf("re-enabled poll must scan again; readyCalls=%d", bdc.readyCalls)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -16,7 +15,7 @@ import (
 func newReviewHookEngineDefaultSinks(t *testing.T, bdc *fakeReviewBeads, sp Spawner, db *store.DB, reviewsDir string) *Engine {
 	t.Helper()
 	e, err := New(Deps{
-		Cfg:   &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		Cfg:   cfgWithReview(true), // review.enabled=true: exercises the enabled path
 		VCS:   map[string]VCSProvider{"github": newFakeVCS()},
 		Beads: &fakeDepBeads{},
 		Store: db,

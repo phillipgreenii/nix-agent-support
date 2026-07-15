@@ -41,8 +41,9 @@ func (r *reviewerVCS) PostReview(_ context.Context, repo string, pr int, _ strin
 
 func newReviewHookEngineTeamDefault(t *testing.T, bdc *fakeReviewBeads, sp Spawner, rv *reviewerVCS, db *store.DB, reviewsDir string, repos []config.RepoConfig) *Engine {
 	t.Helper()
+	reviewEnabled := true
 	e, err := New(Deps{
-		Cfg:   &config.Config{Repos: repos},
+		Cfg:   &config.Config{Repos: repos, Review: config.ReviewConfig{Enabled: &reviewEnabled}},
 		VCS:   map[string]VCSProvider{"github": rv},
 		Beads: &fakeDepBeads{},
 		Store: db,

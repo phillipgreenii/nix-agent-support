@@ -100,9 +100,14 @@ type ReviewHookDeps struct {
 	PreFetch *PreFetchGate
 }
 
-// reviewHookEnabled reports whether the hook has enough deps to run.
+// reviewHookEnabled reports whether the review consumer should run THIS cycle.
+// It is re-evaluated every poll (bead pg2-bw30): the deps are wired once at
+// startup, but the gate consults the LIVE review.enabled from e.cfg() (which the
+// daemon re-reads from disk each poll), so flipping review.enabled takes effect
+// on the next cycle without a restart. A nil e.cfg() (bare Engine) reports
+// disabled via ReviewEnabled's nil-receiver default.
 func (e *Engine) reviewHookEnabled() bool {
-	return e.deps.Review.Beads != nil && e.deps.Review.Spawner != nil
+	return e.cfg().ReviewEnabled() && e.deps.Review.Beads != nil && e.deps.Review.Spawner != nil
 }
 
 // reviewsDir resolves the on-disk reviews directory.

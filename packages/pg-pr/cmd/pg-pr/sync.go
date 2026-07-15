@@ -180,28 +180,29 @@ configured repo.`,
 			// the mine/team sink stubs (.34/.35 fill them). A per-repo bd
 			// multiplexer scans every configured workspace's `bd ready`.
 			//
-			// Review kill switch (bead pg2-ynhr.11): when review.enabled is
-			// false, we skip wiring the hook entirely, so reviewHookEnabled()
-			// stays false (nil deps) and no reviewHookCycle runs. pg-pr keeps
-			// syncing PR data; only the review CONSUMER is off.
-			if cfg.ReviewEnabled() {
-				engine.SetReviewHook(sync.ReviewHookDeps{
-					Beads:   newMultiRepoReviewBeads(cfg),
-					Spawner: newClaudeSpawner(cfg),
-					// Pre-fetch the PR head (and verify SSH-cert creds) before
-					// spawning, so `step`/SSH never enters the Claude environment
-					// and a cert expiry never dead-letters the backlog. The resolver
-					// finds the cert-bearing ssh-agent socket at runtime (the ambient
-					// SSH_AUTH_SOCK is the empty macOS-default agent).
-					PreFetch: &sync.PreFetchGate{
-						Resolver: sync.NewCLIAgentSocketResolver(),
-						Cert:     sync.NewCLICertChecker(),
-						Fetcher:  sync.NewCLIPRFetcher(),
-					},
-				})
-			} else {
-				logger.Info("review hook disabled via config (review.enabled=false); pg-pr will sync PR data but not run reviews")
-			}
+			// Review kill switch (bead pg2-ynhr.11 / pg2-bw30): the deps are
+			// wired UNCONDITIONALLY; whether the hook actually runs is gated per
+			// poll by review.enabled (reviewHookEnabled reads the LIVE config,
+			// which the daemon re-reads from disk each poll). So a review.enabled
+			// change — e.g. from `pn workspace apply` rewriting config.yaml —
+			// takes effect on the next poll WITHOUT a daemon restart: the review
+			// CONSUMER stops/starts with the flag while PR-data sync is unaffected.
+			engine.SetReviewHook(sync.ReviewHookDeps{
+				Beads:   newMultiRepoReviewBeads(cfg),
+				Spawner: newClaudeSpawner(cfg),
+				// Pre-fetch the PR head (and verify SSH-cert creds) before
+				// spawning, so `step`/SSH never enters the Claude environment
+				// and a cert expiry never dead-letters the backlog. The resolver
+				// finds the cert-bearing ssh-agent socket at runtime (the ambient
+				// SSH_AUTH_SOCK is the empty macOS-default agent).
+				PreFetch: &sync.PreFetchGate{
+					Resolver: sync.NewCLIAgentSocketResolver(),
+					Cert:     sync.NewCLICertChecker(),
+					Fetcher:  sync.NewCLIPRFetcher(),
+				},
+			})
+			logger.Info("review hook wired; runs are gated per poll by review.enabled",
+				"review_enabled", cfg.ReviewEnabled())
 			return engine.Daemon(ctx, sync.DaemonOpts{
 				Interval:    interval,
 				Logger:      logger,

@@ -238,6 +238,10 @@ func (e *Engine) Daemon(ctx context.Context, opts DaemonOpts) error {
 				opts.Logger.Info("config reloaded", "path", cfg.Path)
 			}
 		case <-time.After(opts.Interval):
+			// Per-poll config re-read (bead pg2-bw30): pick up an out-of-band
+			// rewrite of the config file (e.g. `pn workspace apply` flipping
+			// review.enabled) on this poll — no restart, no SIGHUP required.
+			e.reloadCfgFromDisk(opts.Logger)
 		}
 		if ctx.Err() != nil {
 			break
@@ -301,6 +305,35 @@ func (e *Engine) ReplaceCfg(cfg *config.Config) {
 		return
 	}
 	e.cfgP.Store(cfg)
+}
+
+// reloadCfgFromDisk re-reads the config from the file it was originally loaded
+// from and atomically swaps it in. The daemon loop calls it once per poll
+// interval so an out-of-band rewrite of the config file (e.g. a
+// `pn workspace apply` that flips review.enabled) takes effect on the NEXT poll
+// without a restart or a SIGHUP (bead pg2-bw30 — apply raced the daemon restart
+// ahead of the config write, so the daemon came up latched on the old value).
+//
+// Best-effort and non-fatal: an empty source path (in-memory config, e.g.
+// tests), a missing file, or a malformed file leaves the previous config in
+// place — the daemon never crashes on a transient mid-rewrite read. Safe to
+// call only from the daemon loop goroutine; it swaps via ReplaceCfg, exactly
+// like the SIGHUP path.
+func (e *Engine) reloadCfgFromDisk(log *slog.Logger) {
+	path := e.cfg().Path
+	if path == "" {
+		return // no source file to re-read (in-memory config)
+	}
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		return // transient during a rewrite / partial write; keep last good config
+	}
+	before := e.cfg().ReviewEnabled()
+	e.ReplaceCfg(cfg)
+	if after := cfg.ReviewEnabled(); after != before {
+		log.Info("review.enabled changed on disk; applied on next poll",
+			"review_enabled", after, "path", path)
+	}
 }
 
 // xdgRuntimeDir returns $XDG_RUNTIME_DIR or os.TempDir() if unset.
