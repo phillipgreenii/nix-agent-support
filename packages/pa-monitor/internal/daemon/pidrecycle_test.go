@@ -1,3 +1,9 @@
+//go:build hostile
+
+// Sandbox-hostile: spawns a real `sleep` subprocess to seed a recycled pid
+// (bead pg2-ymi3l). Gated behind the `hostile` build tag so the default
+// `pa-monitor-go-tests` gate stays subprocess-free; run with
+// `go test -tags hostile ./...`. Uses shortTempDir from lifecycle_test.go.
 package daemon
 
 import (

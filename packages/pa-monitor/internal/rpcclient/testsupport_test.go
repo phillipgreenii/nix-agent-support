@@ -1,3 +1,11 @@
+//go:build hostile
+
+// Sandbox-hostile test helpers (bead pg2-ymi3l): shortTempDir/buildDaemonBinary/
+// waitForFile exist only to `go build` and subprocess the real daemon, which is
+// unavailable/flaky inside the `pa-monitor-go-tests` nix build sandbox. They are
+// used exclusively by the hostile streaming-poller E2E, so this whole file is
+// gated behind the `hostile` build tag (matching that test in
+// streaming_poller_hostile_test.go). Build with `go test -tags hostile ./...`.
 package rpcclient
 
 import (

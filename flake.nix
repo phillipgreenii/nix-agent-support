@@ -543,6 +543,34 @@
                 nativeCheckInputs = [ pkgs.git ];
               };
 
+              # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
+              # pg2-adhga / ADR 0021). Pattern-B module (local replace
+              # ../claude-transcript), so root the fileset at packages/ and pass
+              # modRoot, mirroring the pa-monitor goLint + default.nix. Uses base
+              # `mkGoTest` directly (ADR 0021's preferred builder, not the mkGoApp
+              # fallback the other checks still use). Sandbox-hostile tests are
+              # guarded two ways (both sanctioned by ADR 0021): (1) tests that
+              # spawn the built daemon binary / send real OS signals across
+              # processes are split into `*_hostile_test.go` files carrying
+              # `//go:build hostile` and stay OFF the default `go test ./...`
+              # (developers run `go test -tags hostile ./...`); (2) tests that
+              # merely shell out to a system tool absent from the sandbox PATH
+              # (`caffeinate`, `ps`) `t.Skip` when the tool is missing, matching
+              # the repo's tool-absent skip idiom (pb's bd/pn tests) so a dev
+              # machine still exercises them.
+              pa-monitor-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pa-monitor-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pa-monitor
+                    ./packages/claude-transcript
+                  ];
+                };
+                modRoot = "pa-monitor";
+                gomod2nixToml = ./packages/pa-monitor/gomod2nix.toml;
+              };
+
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
               # passthru shape repo-base's mkClaudeMarketplace produces — no build
