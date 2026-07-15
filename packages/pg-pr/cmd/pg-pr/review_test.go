@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,9 @@ type reviewFakeVCS struct {
 	postedBody       string
 	postedCommitID   string
 	postedComments   []api.Comment
+	postCalls        int
+	hasPending       bool
+	hasPendingErr    error
 	addBody          string
 	resolveErr       error
 	replyThreadID    string
@@ -65,10 +69,17 @@ func (f *reviewFakeVCS) ReplyToThread(_ context.Context, repo, threadID, body st
 }
 func (f *reviewFakeVCS) ResolveThread(context.Context, string, string) error { return f.resolveErr }
 func (f *reviewFakeVCS) PostReview(_ context.Context, _ string, _ int, commitID, body string, comments []api.Comment) (*api.Review, error) {
+	f.postCalls++
 	f.postedCommitID = commitID
 	f.postedBody = body
 	f.postedComments = comments
 	return &api.Review{ID: "RV_x", State: "pending", Body: body}, nil
+}
+
+// HasPendingReviewByViewer satisfies the optional pendingReviewChecker
+// capability probed by the review post/submit skip-if-pending guard (pg2-3fo3c).
+func (f *reviewFakeVCS) HasPendingReviewByViewer(context.Context, string, int) (bool, error) {
+	return f.hasPending, f.hasPendingErr
 }
 
 func (f *reviewFakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error) {
@@ -175,6 +186,91 @@ func TestReviewSubmit_NoStaging(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
 	if len(files) != 0 {
 		t.Fatalf("submit should not persist staging, got %d files", len(files))
+	}
+}
+
+// TestReviewSubmit_SkipsWhenPendingReviewExists: re-running the submit path (the
+// path the pr-pool review role drives) against a PR that already has this
+// reviewer's PENDING review must NOT stack a second PENDING review (pg2-3fo3c).
+func TestReviewSubmit_SkipsWhenPendingReviewExists(t *testing.T) {
+	resetReviewFlags()
+	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{hasPending: true}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	in := `{"body":"top","comments":[{"path":"a.go","line":1,"body":"x"}]}`
+	rootCmd.SetIn(strings.NewReader(in))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+	}
+
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called when a pending review already exists, got %d call(s)", fake.postCalls)
+	}
+	if !strings.Contains(stdout.String(), "Skipped") {
+		t.Fatalf("expected a skip message on stdout, got %q", stdout.String())
+	}
+}
+
+// TestReviewSubmit_SkipsWhenPendingReviewExists_JSON: the --json skip emits the
+// documented machine shape (status=skipped, reason=pending_review_exists) so a
+// programmatic caller (the pr-pool review role) can distinguish skip from post.
+func TestReviewSubmit_SkipsWhenPendingReviewExists_JSON(t *testing.T) {
+	resetReviewFlags()
+	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{hasPending: true}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(`{"body":"top"}`))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "42", "--repo", "foo/bar", "--json"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+	}
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called, got %d call(s)", fake.postCalls)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v (%q)", err, stdout.String())
+	}
+	if got["status"] != "skipped" || got["reason"] != "pending_review_exists" {
+		t.Fatalf("unexpected skip JSON: %v", got)
+	}
+}
+
+// TestReviewSubmit_PendingCheckError_Propagates: a failure detecting an existing
+// pending review must fail closed (abort, do not post) so we never post over a
+// review we merely could not see (mirrors the daemon team sink) (pg2-3fo3c).
+func TestReviewSubmit_PendingCheckError_Propagates(t *testing.T) {
+	resetReviewFlags()
+	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{hasPendingErr: errors.New("gh graphql boom")}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	in := `{"body":"top"}`
+	rootCmd.SetIn(strings.NewReader(in))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatalf("expected error from pending-check failure, got nil (stdout=%s)", stdout.String())
+	}
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called when pending detection errors, got %d call(s)", fake.postCalls)
 	}
 }
 

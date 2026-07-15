@@ -216,6 +216,12 @@ post immediately. No state is persisted.`,
 		if err != nil {
 			return err
 		}
+		// Skip if this reviewer already has a PENDING review on the PR, so a
+		// re-run (the pr-pool review role may re-review on head advance) does
+		// not stack a second PENDING review (pg2-3fo3c).
+		if skip, err := skipExistingPendingReview(ctx, vcsProviderFor(repo), repo, num, cmd.OutOrStdout(), output.Resolve(rvF.json)); err != nil || skip {
+			return err
+		}
 		draft, err := readDraftInput(cmd, rvF.fromFile)
 		if err != nil {
 			return err
@@ -224,6 +230,44 @@ post immediately. No state is persisted.`,
 		draft.PR = num
 		return postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json))
 	},
+}
+
+// pendingReviewChecker is the optional provider capability for detecting an
+// existing PENDING review authored by the authenticated viewer. It mirrors the
+// optional capability-interface pattern in pkg/provider/vcs (AuthChecker,
+// FingerprintProvider): a provider that cannot see pending reviews (e.g. an
+// exec: plugin) simply does not implement it, and the guard is skipped.
+type pendingReviewChecker interface {
+	HasPendingReviewByViewer(ctx context.Context, repo string, number int) (bool, error)
+}
+
+// skipExistingPendingReview reports whether a review submit should be skipped
+// because the authenticated viewer already has a PENDING review on the PR — the
+// idempotency guard that stops a re-run from stacking a second PENDING review
+// (pg2-3fo3c). Detection failure is fatal (fail closed) so we never post over a
+// review we merely could not see, matching the daemon team sink
+// (internal/reviewsink.ApplyPendingReview). The provider is probed for the
+// capability; providers without it proceed unguarded.
+func skipExistingPendingReview(ctx context.Context, provider any, repo string, num int, w io.Writer, emitJSON bool) (bool, error) {
+	pc, ok := provider.(pendingReviewChecker)
+	if !ok {
+		return false, nil
+	}
+	hasPending, err := pc.HasPendingReviewByViewer(ctx, repo, num)
+	if err != nil {
+		return false, fmt.Errorf("detect pending review %s#%d: %w", repo, num, err)
+	}
+	if !hasPending {
+		return false, nil
+	}
+	if emitJSON {
+		return true, writeJSON(w, map[string]any{
+			"status": "skipped",
+			"reason": "pending_review_exists",
+		})
+	}
+	_, err = fmt.Fprintf(w, "ok Skipped review for PR #%d: a PENDING review by this reviewer already exists\n", num)
+	return true, err
 }
 
 // readyDraftReviewJSON is the machine-readable shape of one ready
