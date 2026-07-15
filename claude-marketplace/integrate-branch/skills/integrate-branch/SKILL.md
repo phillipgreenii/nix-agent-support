@@ -95,14 +95,23 @@ contract) whether that report ends in a halt.
 
 When the report names a `strategy`:
 
-1. **Confirm it names an installed handler skill.** The `strategy` string IS the
-   handler skill's name (e.g. `ff-merge-to-main`, `pull-request`, or an org-declared
-   custom handler). Check it's actually available before invoking it — an unknown
-   or misspelled `strategy` (e.g. from a stale or hand-edited `git config
+1. **Confirm it names an installed handler skill.** A handler is registered simply
+   as a skill whose name equals the strategy string: each ships as a sibling
+   directory of this one — `<plugin>/skills/<strategy>/SKILL.md` with a matching
+   `name:` in its frontmatter (the two built-ins are `skills/ff-merge-to-main/` and
+   `skills/pull-request/`, beside this `skills/integrate-branch/`). So `strategy` is
+   installed iff a skill of exactly that name is available to you. **Concretely,
+   before invoking:** confirm a skill named exactly `<strategy>` appears in the
+   available-skills list the `Skill` tool draws from; since handlers are siblings of
+   this skill on disk, the equivalent filesystem check is that `../<strategy>/SKILL.md`
+   exists relative to this dispatcher's own directory (e.g. `test -f
+"$(dirname "<this SKILL.md>")/../<strategy>/SKILL.md"`). An unknown or misspelled
+   `strategy` (e.g. from a stale or hand-edited `git config
 pgii-integrate-branch.strategy`) is a fail-safe you MUST catch here, not something
    to guess your way past.
-   - **Unknown/not installed** → do not invoke anything. Surface the conflict
-     ("declared strategy `foo` has no matching handler skill") and ask the user.
+   - **Unknown/not installed** (no skill of that name in the available-skills list, and
+     no matching sibling `../<strategy>/SKILL.md`) → do not invoke anything. Surface the
+     conflict ("declared strategy `foo` has no matching handler skill") and ask the user.
 2. **Confirm it's feasible given the facts.** A declared strategy can be correctly
    spelled but impossible right now — e.g. `strategy: "pull-request"` with
    `remote: null` (no remote, so there is nothing to push to and nowhere to open a

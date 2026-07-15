@@ -73,9 +73,11 @@ detect_remote() {
   remotes="$(git remote 2>/dev/null || true)"
   count=0
   if [ -n "$remotes" ]; then
-    # Pure-bash line count (no grep/wc dependency): this must also work
-    # under whatever `bash` a scrubbed PATH resolves to (e.g. macOS's
-    # ancient system /bin/bash), not just a modern one.
+    # Pure-bash line count via a read loop, not `grep -c`/`wc -l`: grep and
+    # wc are external commands that may be absent from a scrubbed PATH, so a
+    # bash builtin avoids that coreutils dependency. (This is the external-
+    # tool concern, distinct from the bash-version `mapfile` rationale
+    # documented at the .sh call site.)
     while IFS= read -r _line; do
       [ -n "$_line" ] && count=$((count + 1))
     done <<<"$remotes"

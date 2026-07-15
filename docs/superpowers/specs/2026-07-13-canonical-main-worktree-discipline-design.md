@@ -203,8 +203,10 @@ branch `<FB>` = its current branch (`git rev-parse --abbrev-ref HEAD`; a detache
 → halt, nothing to integrate); the canonical clone `<CC>` = the main working tree of
 the common dir (via `git rev-parse --git-common-dir`); the primary branch via the
 shared resolution (§3). The support-tool report is the _agent's_ decision input, not
-the handler's data channel; a shared resolution helper is used by both
-`integrate-branch-support` and the handlers so they agree. Each handler MUST re-verify
+the handler's data channel; the resolution is **mirrored** rather than shared —
+`integrate-branch-support` and each handler independently reimplement the same §3
+resolution order (the handlers are skills and so cannot source the tool's bash lib),
+which is what keeps the two agreeing. Each handler MUST re-verify
 Tier R preconditions, integrate by its method, halt-and-report on anomaly, clean up per
 its method, and report `landed | pr-opened | stopped:<reason>`. Uniformity lets an org
 add its own handler (declared as the `strategy` value) without changing

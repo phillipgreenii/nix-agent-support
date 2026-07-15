@@ -11,6 +11,10 @@ setup() {
   fi
   BIN="${SCRIPTS_DIR}/integrate-branch-support.sh"
   TEST_DIR="$(mktemp -d)"
+  # STUB_BIN: dir for fake gh/bd executables placed on PATH. Deliberately
+  # OUTSIDE the fixture repo ($TEST_DIR) — creating it inside would leave the
+  # bin dir as untracked content and falsely dirty the repo under test.
+  STUB_BIN="$(mktemp -d)"
   cd "$TEST_DIR" || return 1
   git init -q --initial-branch=main
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
@@ -18,6 +22,7 @@ setup() {
 
 teardown() {
   rm -rf "$TEST_DIR"
+  [ -n "${STUB_BIN:-}" ] && rm -rf "$STUB_BIN"
   # WT_DIR: set only by tests that create a linked worktree (see add_worktree
   # below); cleaned up here so it doesn't leak into the shared temp area.
   if [ -n "${WT_DIR:-}" ]; then
@@ -115,47 +120,47 @@ add_worktree() {
 }
 
 @test "open_pr: an open PR surfaces as open_pr.number" {
-  mkdir -p "$TEST_DIR/bin"
-  cat >"$TEST_DIR/bin/gh" <<'EOF'
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
 EOF
-  chmod +x "$TEST_DIR/bin/gh"
-  PATH="$TEST_DIR/bin:$PATH"
+  chmod +x "$STUB_BIN/gh"
+  PATH="$STUB_BIN:$PATH"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.open_pr.number == 42'
 }
 
 @test "open_pr: a merged PR is treated as no open PR" {
-  mkdir -p "$TEST_DIR/bin"
-  cat >"$TEST_DIR/bin/gh" <<'EOF'
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 echo '{"number":42,"state":"MERGED","url":"https://example.invalid/o/r/pull/42"}'
 EOF
-  chmod +x "$TEST_DIR/bin/gh"
-  PATH="$TEST_DIR/bin:$PATH"
+  chmod +x "$STUB_BIN/gh"
+  PATH="$STUB_BIN:$PATH"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.open_pr == null'
 }
 
 @test "mr_bead: a merge-request bead surfaces as mr_bead" {
-  mkdir -p "$TEST_DIR/bin"
-  cat >"$TEST_DIR/bin/bd" <<'EOF'
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/bd" <<'EOF'
 #!/usr/bin/env bash
 echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
 EOF
-  chmod +x "$TEST_DIR/bin/bd"
-  PATH="$TEST_DIR/bin:$PATH"
+  chmod +x "$STUB_BIN/bd"
+  PATH="$STUB_BIN:$PATH"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.mr_bead == "pg2-abcd"'
 }
 
 @test "gh/bd absent: open_pr and mr_bead are null and the tool still exits 0" {
-  mkdir -p "$TEST_DIR/bin"
-  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  mkdir -p "$STUB_BIN"
+  PATH="$STUB_BIN:/usr/bin:/bin"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.open_pr == null and .mr_bead == null'
@@ -176,13 +181,13 @@ EOF
 
 @test "strategy: an open PR (undeclared, remote present) infers pull-request" {
   git remote add origin https://example.invalid/o/r.git
-  mkdir -p "$TEST_DIR/bin"
-  cat >"$TEST_DIR/bin/gh" <<'EOF'
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
 EOF
-  chmod +x "$TEST_DIR/bin/gh"
-  PATH="$TEST_DIR/bin:$PATH"
+  chmod +x "$STUB_BIN/gh"
+  PATH="$STUB_BIN:$PATH"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == "pull-request"'
@@ -190,13 +195,13 @@ EOF
 
 @test "strategy: an open merge-request bead (undeclared, remote present) infers pull-request" {
   git remote add origin https://example.invalid/o/r.git
-  mkdir -p "$TEST_DIR/bin"
-  cat >"$TEST_DIR/bin/bd" <<'EOF'
+  mkdir -p "$STUB_BIN"
+  cat >"$STUB_BIN/bd" <<'EOF'
 #!/usr/bin/env bash
 echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
 EOF
-  chmod +x "$TEST_DIR/bin/bd"
-  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  chmod +x "$STUB_BIN/bd"
+  PATH="$STUB_BIN:/usr/bin:/bin"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == "pull-request"'
@@ -204,8 +209,8 @@ EOF
 
 @test "strategy: remote present, no PR/bead, undeclared cannot be inferred" {
   git remote add origin https://example.invalid/o/r.git
-  mkdir -p "$TEST_DIR/bin"
-  PATH="$TEST_DIR/bin:/usr/bin:/bin"
+  mkdir -p "$STUB_BIN"
+  PATH="$STUB_BIN:/usr/bin:/bin"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == null'
