@@ -28,6 +28,49 @@ func TestDetailsShowsStatusAndBlocker(t *testing.T) {
 	}
 }
 
+// TestDetailsStatusQualifierByState is the negative / complementary coverage to
+// TestDetailsShowsStatusAndBlocker (which asserts only that "working" appears and
+// the usage_limit qualifier renders). RenderDetails appends "/blocker" to the
+// Status line ONLY for a Blocked session (details.go). This verifies the
+// current behavior across states:
+//   - a non-blocked status (working/idle) must NOT gain a slash-qualifier — even
+//     when a stray Blocker is set, proving the Status==Blocked guard (not merely
+//     the NoBlocker check) is what suppresses it; and
+//   - the human_input / error / human_authn blocker strings (only usage_limit was
+//     previously asserted) render as "blocked/<blocker>".
+func TestDetailsStatusQualifierByState(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  session.Status
+		blocker session.Blocker
+		want    string // substring that MUST appear
+		notWant string // substring that MUST NOT appear ("" = no negative assertion)
+	}{
+		{"working has no qualifier", session.Working, session.NoBlocker, "working", "working/"},
+		// Intentionally-inconsistent input (a blocker on a non-blocked session): the
+		// Status==Blocked guard must still suppress the "/usage_limit" suffix.
+		{"working ignores stray blocker", session.Working, session.UsageLimit, "working", "working/"},
+		{"idle has no qualifier", session.Idle, session.NoBlocker, "idle", "idle/"},
+		{"blocked human_input", session.Blocked, session.HumanInput, "blocked/human_input", ""},
+		{"blocked error", session.Blocked, session.ErrorBlocker, "blocked/error", ""},
+		{"blocked human_authn", session.Blocked, session.HumanAuthn, "blocked/human_authn", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sv := &aggregate.SessionView{
+				Session: &session.Session{SessionID: "id1", Status: c.status, Blocker: c.blocker},
+			}
+			out := RenderDetails(sv, 120)
+			if !strings.Contains(out, c.want) {
+				t.Errorf("Status line: want %q in output:\n%s", c.want, out)
+			}
+			if c.notWant != "" && strings.Contains(out, c.notWant) {
+				t.Errorf("Status line: %q must NOT appear (a non-blocked status carries no qualifier):\n%s", c.notWant, out)
+			}
+		})
+	}
+}
+
 func TestDetailsShowsTerminalHost(t *testing.T) {
 	sv := &aggregate.SessionView{
 		Session:           &session.Session{SessionID: "id1", TerminalHost: "tmux"},

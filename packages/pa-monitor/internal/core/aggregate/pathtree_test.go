@@ -148,6 +148,63 @@ func TestBuildPathTreeRollupStats(t *testing.T) {
 	}
 }
 
+// TestBuildPathTreeEmptyParentRollupRecursion covers computeRollup's
+// child-recursion when the PARENT node has NO direct sessions of its own. A
+// branch point kept because it has 2+ children (see TestBuildPathTreeBranchPointKept)
+// must still aggregate the full working/blocked/idle counts and token/cost/burn
+// totals from its descendants. TestBuildPathTreeRollupStats only exercises a
+// parent that ALSO has a direct session, so the pure empty-parent recursion —
+// every rollup value sourced solely from the child loop — was untested.
+func TestBuildPathTreeEmptyParentRollupRecursion(t *testing.T) {
+	b1 := &Directory{
+		Path: "/a/b1",
+		Sessions: []*SessionView{{
+			Session:           &session.Session{Status: session.Working},
+			SessionEnrichment: SessionEnrichment{SessionTokens: 100, CostUSD: 0.5, BurnRateShort: 10},
+		}},
+	}
+	b2 := &Directory{
+		Path: "/a/b2",
+		Sessions: []*SessionView{
+			{
+				Session:           &session.Session{Status: session.Idle},
+				SessionEnrichment: SessionEnrichment{SessionTokens: 200, CostUSD: 1.0, BurnRateShort: 20},
+			},
+			{
+				Session:           &session.Session{Status: session.Blocked},
+				SessionEnrichment: SessionEnrichment{SessionTokens: 300, CostUSD: 2.0, BurnRateShort: 30},
+			},
+		},
+	}
+	nodes := BuildPathTree([]*Directory{b1, b2})
+	if len(nodes) != 1 {
+		t.Fatalf("want 1 root (branch /a), got %d", len(nodes))
+	}
+	root := nodes[0]
+	if root.FullPath != "/a" || len(root.DirectSessions) != 0 {
+		t.Fatalf("want empty branch parent /a with no direct sessions, got path=%q direct=%d",
+			root.FullPath, len(root.DirectSessions))
+	}
+	if len(root.Children) != 2 {
+		t.Fatalf("want 2 children under the empty parent, got %d", len(root.Children))
+	}
+	// Every value below is produced purely by the child-recursion branch of
+	// computeRollup, since the parent contributes no direct sessions.
+	if root.WorkingN != 1 || root.IdleN != 1 || root.BlockedN != 1 {
+		t.Errorf("empty-parent rollup counts: want working/idle/blocked = 1/1/1, got %d/%d/%d",
+			root.WorkingN, root.IdleN, root.BlockedN)
+	}
+	if root.TotalTokens != 600 {
+		t.Errorf("empty-parent rollup tokens: want 600, got %d", root.TotalTokens)
+	}
+	if root.TotalCostUSD != 3.5 {
+		t.Errorf("empty-parent rollup cost: want 3.5, got %v", root.TotalCostUSD)
+	}
+	if root.BurnRateSum != 60 {
+		t.Errorf("empty-parent rollup burnrate: want 60, got %v", root.BurnRateSum)
+	}
+}
+
 func TestBuildPathTreeSortedChildren(t *testing.T) {
 	d1 := &Directory{Path: "/a/z", Sessions: []*SessionView{{Session: &session.Session{Status: session.Working}}}}
 	d2 := &Directory{Path: "/a/a", Sessions: []*SessionView{{Session: &session.Session{Status: session.Working}}}}

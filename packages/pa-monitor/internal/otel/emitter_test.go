@@ -66,6 +66,47 @@ func TestEmitter_LogEvent_ProducesRecord(t *testing.T) {
 	}
 }
 
+// TestEmitter_RecordNudgeSendFailed_EmitsWarnEndToEnd is the END-TO-END WARN
+// assertion that ties together the two lower-level pieces already covered in
+// isolation: TestSeverityForEvent (the name→severity map) and
+// TestEmitter_LogEvent_ProducesRecord (LogEvent for an INFO event). It drives
+// the full path from a producer's ingestion point through to the emitted
+// record: RecordNudgeSendFailed → LogEvent → severityForEvent("nudge.send_failed")
+// → a Record carrying SeverityWarn. Regressing ANY link (the severity map, the
+// LogEvent severity wiring, or the producer's event name) fails this. The rich
+// log attrs (session_id, error) must also reach the record.
+func TestEmitter_RecordNudgeSendFailed_EmitsWarnEndToEnd(t *testing.T) {
+	cl := &capturingLogger{}
+	e := &Emitter{logger: cl} // no SDK counter; RecordNudgeSendFailed is nil-safe on it
+
+	e.RecordNudgeSendFailed(
+		map[string]string{"reason": "other"},
+		map[string]string{"session_id": "sid-1", "error": "boom"},
+	)
+
+	if len(cl.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(cl.records))
+	}
+	rec := cl.records[0]
+	if rec.Severity() != otellog.SeverityWarn {
+		t.Errorf("severity = %v, want Warn (nudge.send_failed is an error-like event)", rec.Severity())
+	}
+	if rec.Body().AsString() != "nudge.send_failed" {
+		t.Errorf("body = %q, want nudge.send_failed", rec.Body().AsString())
+	}
+	got := map[string]string{}
+	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+		got[string(kv.Key)] = kv.Value.AsString()
+		return true
+	})
+	if got["event_name"] != "nudge.send_failed" {
+		t.Errorf("event_name attr = %q, want nudge.send_failed", got["event_name"])
+	}
+	if got["session_id"] != "sid-1" {
+		t.Errorf("logAttr session_id = %q, want sid-1 (rich log attrs must propagate to the record)", got["session_id"])
+	}
+}
+
 func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	e, err := New(context.Background(), Options{ServiceName: "test"})

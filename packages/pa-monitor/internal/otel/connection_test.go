@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
+	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -68,6 +69,41 @@ func TestConnectionEmitterLogEvent(t *testing.T) {
 	// Non-empty and empty values: the empty value must be skipped by the loop.
 	e.LogEvent("daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
 	e.LogEvent("daemon.reconnect", nil)
+}
+
+// TestConnEmitter_LogEvent_BridgeDeliverFailedIsWarn is the end-to-end WARN
+// assertion for the SECOND severity path: the cmux-bridge's "bridge.deliver_failed"
+// detail event (emitted via bridgeLogger.Detail → ConnEmitter.LogEvent) flows
+// through a *separate* LogEvent implementation from *Emitter.LogEvent, yet MUST
+// also land at WARN so a failed injection is distinguishable from routine bridge
+// traffic. TestConnectionEmitterLogEvent only proves emission does not panic;
+// this pins the severity + event_name/component attributes. A capturing logger
+// is injected directly (the SDK logger field is otherwise only set by the
+// constructor), so no live collector is required.
+func TestConnEmitter_LogEvent_BridgeDeliverFailedIsWarn(t *testing.T) {
+	cl := &capturingLogger{}
+	e := &ConnEmitter{logger: cl, component: "cmux-bridge"}
+
+	e.LogEvent("bridge.deliver_failed", map[string]string{"error": "no live bridge"})
+
+	if len(cl.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(cl.records))
+	}
+	rec := cl.records[0]
+	if rec.Severity() != otellog.SeverityWarn {
+		t.Errorf("severity = %v, want Warn (bridge.deliver_failed is error-like)", rec.Severity())
+	}
+	got := map[string]string{}
+	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+		got[string(kv.Key)] = kv.Value.AsString()
+		return true
+	})
+	if got["event_name"] != "bridge.deliver_failed" {
+		t.Errorf("event_name attr = %q, want bridge.deliver_failed", got["event_name"])
+	}
+	if got["component"] != "cmux-bridge" {
+		t.Errorf("component attr = %q, want cmux-bridge", got["component"])
+	}
 }
 
 func TestConnectionEmitterRecordReexecNilSafe(t *testing.T) {
