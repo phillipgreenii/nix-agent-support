@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
 
 // fakeDepBeads embeds noopBeads (which already satisfies the BeadClient
@@ -69,6 +70,32 @@ func TestBuildPRInput_AppliesHumanLabelWithoutCache(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("human label not applied on cache-less path; WaitingOnMe will regress")
+	}
+}
+
+// TestBuildPRInput_OverlaysMergeability guards against the pg2-dwfld daemon
+// gap: on the daemon refresh path, `pr` comes from REST GetPR and never
+// carries GitHub's merge-state fields, while `enriched.PR` (from GraphQL, via
+// enrichOnePR) does. buildPRInput must overlay those fields onto in.PR so
+// MineRow.NeedsMergeReminder can fire from the live snapshot, not just from
+// one-shot `pg-pr sync`.
+func TestBuildPRInput_OverlaysMergeability(t *testing.T) {
+	bdc := &fakeDepBeads{}
+	e, err := New(Deps{
+		Cfg:   &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}},
+		VCS:   map[string]VCSProvider{"github": &fakeVCS{}},
+		Beads: bdc,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pr := api.PR{Repo: "o/r", Number: 1, Author: "me", State: "open"}
+	enriched := &vcs.EnrichedPR{PR: api.PR{MergeStateStatus: "CLEAN", AutoMergeEnabled: false}}
+
+	in := e.buildPRInput(context.Background(), pr, enriched, bdc, nil, config.RepoConfig{Remote: "o/r"}, "")
+
+	if in.PR.MergeStateStatus != "CLEAN" {
+		t.Errorf("expected in.PR.MergeStateStatus overlaid from enriched.PR, got %q", in.PR.MergeStateStatus)
 	}
 }
 

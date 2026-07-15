@@ -743,6 +743,12 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 				out.Comments = ep.Comments
 				out.Files = ep.Files
 				out.Commits = ep.Commits
+				// GraphQL is the only source of these merge-state fields; the
+				// REST GetPR path (refreshPR) leaves them empty. Carry them so the
+				// daemon snapshot / mine-panel reminder work, not just one-shot sync. (pg2-dwfld)
+				out.PR.Mergeable = ep.PR.Mergeable
+				out.PR.MergeStateStatus = ep.PR.MergeStateStatus
+				out.PR.AutoMergeEnabled = ep.PR.AutoMergeEnabled
 				if tt := threadBearingTruncations(ep.Truncated); len(tt) > 0 {
 					fmt.Fprintf(os.Stderr, "pg-pr: enrichOnePR %s#%d: GraphQL thread data truncated %v (using partial, correctly-keyed data)\n", pr.Repo, pr.Number, tt)
 				}
@@ -850,6 +856,11 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 		in.Reviews = enriched.Reviews
 		in.Comments = enriched.Comments
 		in.CIRuns = enriched.CIRuns
+		// enriched.PR carries GraphQL-only merge-state the REST-built `pr` lacks
+		// on the daemon refresh path; overlay so MineRow reminder fields populate. (pg2-dwfld)
+		in.PR.Mergeable = enriched.PR.Mergeable
+		in.PR.MergeStateStatus = enriched.PR.MergeStateStatus
+		in.PR.AutoMergeEnabled = enriched.PR.AutoMergeEnabled
 	} else {
 		if vp, err := e.providerFor(rcfg); err == nil {
 			if rl, ok := vp.(ReviewLister); ok {

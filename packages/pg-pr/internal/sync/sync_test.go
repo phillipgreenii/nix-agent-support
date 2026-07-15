@@ -55,6 +55,35 @@ func TestEnrichOnePR_PrefersGraphQL(t *testing.T) {
 	}
 }
 
+// TestEnrichOnePR_CarriesMergeability guards against the pg2-dwfld daemon gap:
+// GraphQL is the only source of Mergeable/MergeStateStatus/AutoMergeEnabled
+// (the REST GetPR path used by refreshPR leaves them empty), so enrichOnePR
+// must carry those three fields from ep.PR onto the returned out.PR even
+// though out.PR otherwise starts from the REST-observed pr.
+func TestEnrichOnePR_CarriesMergeability(t *testing.T) {
+	vp := &enricherVCS{ep: &vcs.EnrichedPR{
+		PR: api.PR{
+			Mergeable:        "MERGEABLE",
+			MergeStateStatus: "CLEAN",
+			AutoMergeEnabled: true,
+		},
+	}}
+	e := &Engine{deps: Deps{VCS: map[string]VCSProvider{"github": vp}}}
+	got := e.enrichOnePR(context.Background(), config.RepoConfig{Remote: "o/r", VCS: "github"}, api.PR{Repo: "o/r", Number: 42})
+	if got.PR.MergeStateStatus != "CLEAN" {
+		t.Errorf("expected MergeStateStatus to be carried from GraphQL, got %q", got.PR.MergeStateStatus)
+	}
+	if !got.PR.AutoMergeEnabled {
+		t.Error("expected AutoMergeEnabled to be carried from GraphQL, got false")
+	}
+	if got.PR.Mergeable != "MERGEABLE" {
+		t.Errorf("expected Mergeable to be carried from GraphQL, got %q", got.PR.Mergeable)
+	}
+	if got.PR.Number != 42 {
+		t.Errorf("observed REST PR fields should be preserved, got %+v", got.PR)
+	}
+}
+
 func TestEnrichOnePR_FallsBackOnError(t *testing.T) {
 	vp := &enricherVCS{enrichErr: errors.New("graphql boom")}
 	e := &Engine{deps: Deps{VCS: map[string]VCSProvider{"github": vp}}}
