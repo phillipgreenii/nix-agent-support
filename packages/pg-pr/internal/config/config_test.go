@@ -488,3 +488,26 @@ func issuePaths(rep *ValidationReport) []string {
 func contains(ss []string, want string) bool {
 	return slices.Contains(ss, want)
 }
+
+func TestExcludedCIChecksParsed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+self_login: me
+worktree_root: /tmp/wt
+repos:
+  - remote: owner/name
+    excluded_ci_checks:
+      - "^policy-bot"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	got := cfg.Repos[0].ExcludedCIChecks
+	if len(got) != 1 || got[0] != "^policy-bot" {
+		t.Errorf("ExcludedCIChecks = %v, want [^policy-bot]", got)
+	}
+}

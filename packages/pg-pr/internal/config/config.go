@@ -141,6 +141,12 @@ type RepoConfig struct {
 	// extraction for this repo. No patterns are hardcoded in pg-pr itself;
 	// the consuming config (e.g. phillipg-nix-ziprecruiter) supplies them.
 	TicketPatterns []string `yaml:"ticket_patterns,omitempty" json:"ticket_patterns,omitempty"`
+	// ExcludedCIChecks is a list of Go regular-expression strings matched
+	// against each CI check's name. A matched check is EXCLUDED from the CI
+	// failure rollup entirely (never fails/pends/passes it) — see
+	// internal/cirollup. Nothing is hardcoded in pg-pr; the consuming config
+	// (e.g. phillipg-nix-ziprecruiter) supplies patterns such as `^policy-bot`.
+	ExcludedCIChecks []string `yaml:"excluded_ci_checks,omitempty" json:"excluded_ci_checks,omitempty"`
 }
 
 // Load reads and parses the config file using the resolution order described
