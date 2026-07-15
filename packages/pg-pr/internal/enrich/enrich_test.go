@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
@@ -93,6 +94,19 @@ func TestScoreUrgency(t *testing.T) {
 		lvl, score, _ := scoreUrgency(Input{PR: api.PR{Title: "hotfix outage"}, CIRuns: []api.CIRun{failingRun()}})
 		if lvl != "high" || score < 3 {
 			t.Fatalf("got %q score=%d; want high/>=3", lvl, score)
+		}
+	})
+	// Excluded advisory checks (e.g. policy-bot) must not inflate urgency —
+	// the shared cirollup classifier drops them from the rollup entirely,
+	// so a PR whose ONLY failing run is excluded is not "ci failing". (pg2-qs46b)
+	t.Run("excluded ci check does not count as failing", func(t *testing.T) {
+		lvl, score, reasons := scoreUrgency(Input{
+			PR:       api.PR{Title: "x"},
+			CIRuns:   []api.CIRun{{Name: "policy-bot: x", Status: "completed", Conclusion: "failure"}},
+			Excluder: cirollup.NewExcluder([]string{"^policy-bot"}),
+		})
+		if lvl != "low" || score != 0 || len(reasons) != 0 {
+			t.Fatalf("got %q score=%d reasons=%v; want low/0/[] (excluded check must not count)", lvl, score, reasons)
 		}
 	})
 }

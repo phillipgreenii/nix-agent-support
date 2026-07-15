@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/enrich"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -34,7 +35,7 @@ func (e *Engine) enrichAndStore(ctx context.Context, repo string, pr api.PR, enr
 	if e.deps.Store == nil {
 		return nil
 	}
-	in := enrich.Input{PR: pr, Labels: pr.Labels}
+	in := enrich.Input{PR: pr, Labels: pr.Labels, Excluder: cirollup.NewExcluder(rcfg.ExcludedCIChecks)}
 	if enriched != nil {
 		in.Files = enriched.Files
 		in.Commits = enriched.Commits
