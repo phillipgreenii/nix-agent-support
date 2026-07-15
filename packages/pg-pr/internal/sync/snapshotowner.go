@@ -56,13 +56,14 @@ func (e *Engine) runSnapshotOwner(updates <-chan snapshotUpdate, store *snapshot
 			m.upsert(*u.Input)
 		}
 		store.Set(snapshot.Build(snapshot.BuilderInput{
-			GeneratedAt:         e.deps.Now(),
-			SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
-			Self:                e.cfg().SelfLogin,
-			TeamMembers:         e.allTeamMembers(),
-			WatchLabels:         e.allWatchLabels(),
-			Registry:            e.deps.AgentRegistry,
-			PRs:                 m.sortedInputs(),
+			GeneratedAt:          e.deps.Now(),
+			SyncIntervalSeconds:  int(e.deps.SyncInterval.Seconds()),
+			Self:                 e.cfg().SelfLogin,
+			TeamMembers:          e.allTeamMembers(),
+			WatchLabels:          e.allWatchLabels(),
+			Registry:             e.deps.AgentRegistry,
+			PRs:                  m.sortedInputs(),
+			ExcludedChecksByRepo: e.excludedChecksByRepo(),
 		}))
 		// A snapshot has been published for the dashboard. The retired
 		// full-Sync path set this; the daemon's per-PR owner must too, or the

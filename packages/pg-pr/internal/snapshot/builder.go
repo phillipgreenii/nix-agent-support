@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -39,6 +40,10 @@ type BuilderInput struct {
 	WatchLabels []string
 	Registry    *agentregistry.Registry
 	PRs         []PRInput
+	// ExcludedChecksByRepo maps a repo remote (PR.Repo) to its excluded_ci_checks
+	// regex patterns. Rebuilt from live config each snapshot (like WatchLabels) so
+	// SIGHUP edits apply immediately. nil/absent → nothing excluded. (pg2-qs46b)
+	ExcludedChecksByRepo map[string][]string
 }
 
 // Match-reason strings on TeamRow.MatchReason, explaining why a PR is in the
@@ -87,11 +92,16 @@ func Build(in BuilderInput) *Snapshot {
 	for _, m := range in.TeamMembers {
 		teamSet[m] = struct{}{}
 	}
+	excluders := make(map[string]*cirollup.Excluder, len(in.ExcludedChecksByRepo))
+	for repo, pats := range in.ExcludedChecksByRepo {
+		excluders[repo] = cirollup.NewExcluder(pats)
+	}
 	for _, p := range in.PRs {
 		reasons := matchReasons(p, teamSet, in.WatchLabels)
+		excl := excluders[p.PR.Repo]
 		switch {
 		case p.PR.Author == in.Self:
-			out.Mine = append(out.Mine, buildMineRow(p, in.Registry))
+			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl))
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
 			// carries at least one live match reason (team-authored ∪ review-requested
@@ -102,13 +112,13 @@ func Build(in BuilderInput) *Snapshot {
 			// (pg2-ynhr.13 B5 review #1). Reasons are still SOURCED from ingest
 			// (detector.go's buckets, B3); the builder only re-checks they hold. Others'
 			// drafts and now-reasonless PRs fall through and are excluded.
-			out.Team = append(out.Team, buildTeamRow(p, in.Registry, reasons))
+			out.Team = append(out.Team, buildTeamRow(p, in.Registry, reasons, excl))
 		}
 	}
 	return out
 }
 
-func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
+func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder) MineRow {
 	hum, agt := classifyApprovals(p, reg)
 	return MineRow{
 		Repo:          p.PR.Repo,
@@ -116,7 +126,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
 		Title:         p.PR.Title,
 		URL:           p.PR.URL,
 		Draft:         p.PR.Draft,
-		CIStatus:      rollupCI(p.CIRuns),
+		CIStatus:      cirollup.Compute(p.CIRuns, excl).State,
 		HumanApproved: hum,
 		AgentApproved: agt,
 		WaitingOnMe:   beads.AllNonClosedHumanLabeled(p.BeadsDeps),
@@ -128,7 +138,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry) MineRow {
 // buildTeamRow builds a "PRs to Review" row. reasons is the non-empty match-reason
 // set Build already computed (and gated membership on), so it is threaded in rather
 // than recomputed here.
-func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string) TeamRow {
+func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl *cirollup.Excluder) TeamRow {
 	hum, agt := classifyApprovals(p, reg)
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
@@ -140,7 +150,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string) Team
 		Title:           p.PR.Title,
 		Owner:           p.PR.Author,
 		URL:             p.PR.URL,
-		CIStatus:        rollupCI(p.CIRuns),
+		CIStatus:        cirollup.Compute(p.CIRuns, excl).State,
 		HumanApproved:   hum,
 		AgentApproved:   agt,
 		LinesChanged:    p.PR.Additions + p.PR.Deletions,
@@ -207,27 +217,6 @@ func classifyApprovals(p PRInput, reg *agentregistry.Registry) (human bool, agen
 		}
 	}
 	return
-}
-
-// rollupCI reduces a slice of CIRun into success | failure | pending | none.
-func rollupCI(runs []api.CIRun) string {
-	if len(runs) == 0 {
-		return "none"
-	}
-	pending := false
-	for _, r := range runs {
-		switch r.Conclusion {
-		case "failure", "cancelled", "timed_out":
-			return "failure"
-		}
-		if r.Status == "in_progress" || r.Status == "queued" || r.Conclusion == "" {
-			pending = true
-		}
-	}
-	if pending {
-		return "pending"
-	}
-	return "success"
 }
 
 func mapJIRA(issues []api.Issue) []JIRAItem {

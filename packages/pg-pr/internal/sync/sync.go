@@ -649,13 +649,14 @@ func (e *Engine) buildAndStoreSnapshot(ctx context.Context, observed map[prKey]a
 	}
 
 	snap := snapshot.Build(snapshot.BuilderInput{
-		GeneratedAt:         e.deps.Now(),
-		SyncIntervalSeconds: int(e.deps.SyncInterval.Seconds()),
-		Self:                e.cfg().SelfLogin,
-		TeamMembers:         e.allTeamMembers(),
-		WatchLabels:         e.allWatchLabels(),
-		Registry:            e.deps.AgentRegistry,
-		PRs:                 inputs,
+		GeneratedAt:          e.deps.Now(),
+		SyncIntervalSeconds:  int(e.deps.SyncInterval.Seconds()),
+		Self:                 e.cfg().SelfLogin,
+		TeamMembers:          e.allTeamMembers(),
+		WatchLabels:          e.allWatchLabels(),
+		Registry:             e.deps.AgentRegistry,
+		PRs:                  inputs,
+		ExcludedChecksByRepo: e.excludedChecksByRepo(),
 	})
 	e.deps.Snapshot.Set(snap)
 	telemetry.SnapshotPresent.Set(1)
@@ -982,6 +983,19 @@ func (e *Engine) allWatchLabels() []string {
 			}
 			seen[l] = struct{}{}
 			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// excludedChecksByRepo maps each configured repo's remote to its
+// excluded_ci_checks patterns, for the snapshot's cirollup excluder. (pg2-qs46b)
+func (e *Engine) excludedChecksByRepo() map[string][]string {
+	repos := e.cfg().Repos
+	out := make(map[string][]string, len(repos))
+	for _, r := range repos {
+		if len(r.ExcludedCIChecks) > 0 {
+			out[r.Remote] = r.ExcludedCIChecks
 		}
 	}
 	return out

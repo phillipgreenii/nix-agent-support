@@ -308,87 +308,29 @@ func TestBuildAgentApprovedViaInlineCommentIgnored(t *testing.T) {
 	}
 }
 
-// TestRollupCI is a table-driven test covering all four rollupCI states.
-func TestRollupCI(t *testing.T) {
-	cases := []struct {
-		name     string
-		runs     []api.CIRun
-		expected string
-	}{
-		{
-			name:     "none when empty",
-			runs:     []api.CIRun{},
-			expected: "none",
-		},
-		{
-			name: "success when all completed success",
-			runs: []api.CIRun{
-				{Status: "completed", Conclusion: "success"},
-				{Status: "completed", Conclusion: "success"},
-			},
-			expected: "success",
-		},
-		{
-			name: "failure on any failure",
-			runs: []api.CIRun{
-				{Status: "completed", Conclusion: "success"},
-				{Status: "completed", Conclusion: "failure"},
-			},
-			expected: "failure",
-		},
-		{
-			name: "failure on cancelled",
-			runs: []api.CIRun{
-				{Status: "completed", Conclusion: "cancelled"},
-			},
-			expected: "failure",
-		},
-		{
-			name: "failure on timed_out",
-			runs: []api.CIRun{
-				{Status: "completed", Conclusion: "timed_out"},
-			},
-			expected: "failure",
-		},
-		{
-			name: "pending when in_progress",
-			runs: []api.CIRun{
-				{Status: "in_progress", Conclusion: ""},
-			},
-			expected: "pending",
-		},
-		{
-			name: "pending when queued",
-			runs: []api.CIRun{
-				{Status: "queued", Conclusion: ""},
-			},
-			expected: "pending",
-		},
-		{
-			name: "pending when conclusion empty",
-			runs: []api.CIRun{
-				{Status: "completed", Conclusion: "success"},
-				{Status: "completed", Conclusion: ""},
-			},
-			expected: "pending",
-		},
-		{
-			name: "failure beats pending",
-			runs: []api.CIRun{
-				{Status: "in_progress", Conclusion: ""},
-				{Status: "completed", Conclusion: "failure"},
-			},
-			expected: "failure",
+// TestBuildExcludesAdvisoryCIChecks verifies the snapshot rollup drops
+// excluded checks per repo via the shared cirollup classifier. (pg2-qs46b)
+func TestBuildExcludesAdvisoryCIChecks(t *testing.T) {
+	prInput := PRInput{
+		PR: api.PR{Repo: "o/n", Number: 1, Author: "me"},
+		CIRuns: []api.CIRun{
+			{Name: "build", Status: "completed", Conclusion: "success"},
+			{Name: "policy-bot: approval required (click for details): main", Status: "completed", Conclusion: "failure"},
 		},
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := rollupCI(tc.runs)
-			if got != tc.expected {
-				t.Errorf("rollupCI(%v) = %q, want %q", tc.runs, got, tc.expected)
-			}
-		})
+	// No exclusion: policy-bot failure makes CIStatus "failure".
+	snap := Build(BuilderInput{Self: "me", PRs: []PRInput{prInput}})
+	if len(snap.Mine) != 1 || snap.Mine[0].CIStatus != "failure" {
+		t.Fatalf("no exclusion: got %+v, want CIStatus=failure", snap.Mine)
+	}
+	// With exclusion: policy-bot dropped, real check passes → "success".
+	snap = Build(BuilderInput{
+		Self:                 "me",
+		PRs:                  []PRInput{prInput},
+		ExcludedChecksByRepo: map[string][]string{"o/n": {"^policy-bot"}},
+	})
+	if len(snap.Mine) != 1 || snap.Mine[0].CIStatus != "success" {
+		t.Fatalf("with exclusion: got %+v, want CIStatus=success", snap.Mine)
 	}
 }
 
