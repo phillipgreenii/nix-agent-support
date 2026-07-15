@@ -23,8 +23,10 @@ type Limits struct {
 // authoritative status-line rate_limits. Current returns the account-global
 // CURRENT-WINDOW reading, or nil when none is available yet: the capture time is
 // the newest record's ts, and each window's used_percentage is that window's PEAK
-// (ADR 0029, refining §1's original "single most-recent record" — the per-render
-// value is non-monotonic near the cap, so the newest record can be a spurious dip).
+// (ADR 0029, refining §1's original "single most-recent record"). Account-global
+// usage only rises within a fixed window, so the peak is correct; a session's
+// REPORTED value can lag (it shows its last-seen snapshot), which is why the
+// newest record — not the newest usage — can be a stale sub-peak.
 // It MUST NOT correlate by session_id and MUST NOT substitute 0 for an absent value.
 //
 // Phase 2 defines the port and ships NO adapter; the daemon wires it as nil so

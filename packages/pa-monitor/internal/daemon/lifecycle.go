@@ -511,10 +511,12 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if err != nil {
 				continue
 			}
-			// Sample the authoritative status-line rate_limits (ADR 0021 §1). The
-			// reading is account-global (newest record across all sibling files,
-			// ignoring session_id). A nil source or a nil/err reading leaves the
-			// tree's rate_limits at whatever the poller set — never clobbered with 0.
+			// Sample the authoritative status-line rate_limits (ADR 0021 §1, refined
+			// by ADR 0029). The reading is account-global — the current window's PEAK
+			// used_percentage across all sibling files, ignoring session_id (not the
+			// literal newest record, which can be a lagging session's stale snapshot).
+			// A nil source or a nil/err reading leaves the tree's rate_limits at
+			// whatever the poller set — never clobbered with 0.
 			if opts.Limits != nil {
 				if lr, lerr := opts.Limits.Current(ctx); lerr == nil {
 					applyLimits(tree, lr)

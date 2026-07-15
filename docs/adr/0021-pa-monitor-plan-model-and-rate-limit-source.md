@@ -104,12 +104,13 @@ compact / fork; see `internal/core/session/transcript.go:15-28`), and it MUST
 ignore the near-duplicate records that concurrent sessions emit for the same
 global value.
 
-> **Refined by [ADR 0029](0029-pa-monitor-rate-limit-window-peak.md):** the
-> per-render `used_percentage` is non-monotonic near the cap, so "newest record by
-> `ts`" can surface a spurious sub-peak dip. The reader now returns the **current
-> window's peak** `used_percentage` (max across records sharing the newest
-> `resets_at`), holding it until a record with a newer `resets_at` confirms a new
-> window; the newest record still defines the current window and `CapturedAt`.
+> **Refined by [ADR 0029](0029-pa-monitor-rate-limit-window-peak.md):** a session's
+> _reported_ `used_percentage` lags (it shows its last-seen snapshot), so "newest
+> record by `ts`" can surface a stale sub-peak even though account-global usage only
+> rises within a fixed window. The reader now returns the **current window's peak**
+> `used_percentage` (max across records sharing the **greatest** `resets_at`), holding
+> it until a record with a greater `resets_at` confirms a new window. The greatest
+> `resets_at` defines the current window; the newest record defines only `CapturedAt`.
 
 **Burn-rate/projection is derived by the daemon from its own periodic sampling**
 of that current value — the same way it already trends block cost — NOT by

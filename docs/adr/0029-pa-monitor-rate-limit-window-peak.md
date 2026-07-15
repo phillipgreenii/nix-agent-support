@@ -19,9 +19,10 @@ window is hit, the daemon/bridge/TUI MUST keep indicating the window is hit unti
 
 ### Root cause (from the live on-disk record trail)
 
-Claude's per-render `five_hour.used_percentage` is **non-monotonic near the cap**.
-Within a single fixed window (constant `five_hour_resets_at = 1784135400`), the captured
-records were:
+Account-global usage within a fixed window only rises (see the assumption below), but the
+**per-render `five_hour.used_percentage` values captured across sessions are not monotonic
+in `ts`** — a later record can report a lower value. Within a single fixed window (constant
+`five_hour_resets_at = 1784135400`), the captured records were:
 
 | `ts`       | `five_hour_pct` |
 | ---------- | --------------- |

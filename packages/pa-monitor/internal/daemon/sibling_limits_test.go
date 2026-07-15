@@ -402,3 +402,36 @@ func TestSiblingLimitsSource_SevenDayWindowPeak(t *testing.T) {
 		t.Errorf("SevenDayResetsAt = %v, want %v", got.SevenDayResetsAt, want)
 	}
 }
+
+// TestSiblingLimitsSource_NoWindowFallbackNewestByTS covers the degenerate no-window
+// fallback (ADR 0029): when NO record carries a resets_at there is no window to key on,
+// so the pct falls back to the globally-newest record by ts — deliberately NOT the max,
+// since without a resets_at unrelated readings must not be pooled into a "window peak".
+func TestSiblingLimitsSource_NoWindowFallbackNewestByTS(t *testing.T) {
+	home := t.TempDir()
+	writeStatusFile(
+		t, home, "-proj-a", "a.status.jsonl",
+		`{"ts":1700000000,"session_id":"a","five_hour_pct":90}`,
+	)
+	writeStatusFile(
+		t, home, "-proj-b", "b.status.jsonl",
+		`{"ts":1700000100,"session_id":"b","five_hour_pct":20}`,
+	)
+	src := &SiblingLimitsSource{ClaudeHome: home}
+	got, err := src.Current(context.Background())
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got == nil || got.FiveHourPct == nil {
+		t.Fatal("want a record with FiveHourPct set")
+	}
+	if *got.FiveHourPct != 20 {
+		t.Errorf("FiveHourPct = %v, want 20 (no window: newest-by-ts, NOT the max 90)", *got.FiveHourPct)
+	}
+	if !got.FiveHourResetsAt.IsZero() {
+		t.Errorf("FiveHourResetsAt = %v, want zero (no window)", got.FiveHourResetsAt)
+	}
+	if want := time.Unix(1700000100, 0); !got.CapturedAt.Equal(want) {
+		t.Errorf("CapturedAt = %v, want %v (newest ts)", got.CapturedAt, want)
+	}
+}
