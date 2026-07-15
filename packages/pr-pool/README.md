@@ -48,12 +48,16 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   optional `title_prefix` / `item_type` post-filters), `command` (run an
   executable that emits items as JSON/JSONL), `github-issues` (open issues via
   `gh issue list`, optionally narrowed by `labels`), and `jira-issues` (unresolved
-  issues via `pg-pr-issues-jira-zr search --jql <jql> --limit 100`, which queries
-  Atlassian's `/rest/api/3/search/jql` endpoint and returns a normalized
-  `{items,truncated}` JSON envelope; `jql` overrides the `project`/`labels`
-  default, and a truncation warning is logged when the backlog exceeds one page).
-  `gh` supplies its own authentication; `pg-pr-issues-jira-zr` reads `JIRA_*` env
-  vars (injected by its nix wrapper).
+  issues from a Jira search tool that returns a normalized `{items,truncated}` JSON
+  envelope over Atlassian's `/rest/api/3/search/jql` endpoint; `jql` overrides the
+  `project`/`labels` default, and a truncation warning is logged when the backlog
+  exceeds one page). `gh` supplies its own authentication; the Jira tool reads
+  `JIRA_*` env vars from its environment.
+
+> **Known deployment coupling (tool-migration debt):** the `jira-issues` query
+> currently invokes a hardcoded `pg-pr-issues-jira-zr` command, and
+> `PR_POOL_BEADS_PREFIX` defaults to `zr` — both deployment-specific and slated to be
+> decoupled from the generic tool.
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
 (`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),
@@ -64,7 +68,7 @@ externalizing the prompt never weakens the guardrails. A role's prompt is inline
 (`prompt`) or an external file (`prompt_file`, resolved relative to the config
 dir) — exactly one.
 
-> **ZipRecruiter monorepo:** add `.pr-pool/` to the monorepo's
+> **Monorepo config hygiene:** add `.pr-pool/` to your monorepo's
 > `.git/info/exclude` so a repo-local pr-pool config (and its prompts) is never
 > committed there. `pr-pool drain` warns at pre-flight if `.pr-pool/config.toml`
 > is git-tracked.
@@ -75,7 +79,8 @@ Pool-wide settings come from `PR_POOL_*` environment variables; roles are NOT
 configured via env (use `config.toml`). See `internal/config` for the full set.
 
 - `PR_POOL_REPO_ROOT` — monorepo root the drain operates in (default: cwd)
-- `PR_POOL_BEADS_PREFIX` — expected bead prefix, asserted at precheck (default `zr`)
+- `PR_POOL_BEADS_PREFIX` — expected bead prefix, asserted at precheck (default `zr`, a
+  deployment-specific default — set it to your prefix)
 - `PR_POOL_CONFIG` — explicit `config.toml` path (default `<RepoRoot>/.pr-pool/config.toml`)
 - `PR_POOL_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PR_POOL_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
