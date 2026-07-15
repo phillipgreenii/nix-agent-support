@@ -35,4 +35,15 @@ type PR struct {
 	// RequestedReviewers. Set by the sync layer (which knows self); consumed by the
 	// dashboard's "PRs to Review" match reason (pg2-ynhr.13 B2).
 	ReviewRequestedOfMe bool `json:"review_requested_of_me,omitempty"`
+	// Mergeable is GitHub's merge-conflict signal: MERGEABLE | CONFLICTING |
+	// UNKNOWN. Populated by the GraphQL enrich path; empty on REST fallback.
+	Mergeable string `json:"mergeable,omitempty"`
+	// MergeStateStatus is GitHub's authoritative merge-readiness: CLEAN |
+	// BLOCKED | BEHIND | DIRTY | UNSTABLE | DRAFT | HAS_HOOKS | UNKNOWN. It
+	// reflects branch protection (approvals, required checks, policy-bot) and is
+	// the source of truth for "can I merge now" — distinct from the CI-health
+	// rollup. Empty on REST fallback.
+	MergeStateStatus string `json:"merge_state_status,omitempty"`
+	// AutoMergeEnabled is true when GitHub auto-merge is armed on the PR.
+	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
 }

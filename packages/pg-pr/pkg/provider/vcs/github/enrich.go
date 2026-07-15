@@ -55,6 +55,9 @@ func prNodeSelection(connFirst int) string {
         isDraft
         state
         merged
+        mergeable
+        mergeStateStatus
+        autoMergeRequest { enabledAt }
         additions
         deletions
         changedFiles
@@ -231,19 +234,24 @@ type ghPageInfo struct {
 }
 
 type ghPRNode struct {
-	Number       int     `json:"number"`
-	Title        string  `json:"title"`
-	URL          string  `json:"url"`
-	Author       *ghUser `json:"author"`
-	BaseRefName  string  `json:"baseRefName"`
-	BaseRefOid   string  `json:"baseRefOid"`
-	HeadRefName  string  `json:"headRefName"`
-	IsDraft      bool    `json:"isDraft"`
-	State        string  `json:"state"`
-	Merged       bool    `json:"merged"`
-	Additions    int     `json:"additions"`
-	Deletions    int     `json:"deletions"`
-	ChangedFiles int     `json:"changedFiles"`
+	Number           int     `json:"number"`
+	Title            string  `json:"title"`
+	URL              string  `json:"url"`
+	Author           *ghUser `json:"author"`
+	BaseRefName      string  `json:"baseRefName"`
+	BaseRefOid       string  `json:"baseRefOid"`
+	HeadRefName      string  `json:"headRefName"`
+	IsDraft          bool    `json:"isDraft"`
+	State            string  `json:"state"`
+	Merged           bool    `json:"merged"`
+	Mergeable        string  `json:"mergeable"`
+	MergeStateStatus string  `json:"mergeStateStatus"`
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+	ChangedFiles int `json:"changedFiles"`
 	Repository   struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
@@ -481,22 +489,25 @@ func prFromGHNode(n ghPRNode, repo string) api.PR {
 		headSHA = n.Commits.Nodes[len(n.Commits.Nodes)-1].Commit.OID
 	}
 	pr := api.PR{
-		Repo:         owner,
-		Number:       n.Number,
-		Title:        n.Title,
-		State:        strings.ToLower(n.State),
-		Branch:       n.HeadRefName,
-		Base:         n.BaseRefName,
-		Author:       author,
-		URL:          n.URL,
-		Draft:        n.IsDraft,
-		Merged:       n.Merged,
-		Additions:    n.Additions,
-		Deletions:    n.Deletions,
-		ChangedFiles: n.ChangedFiles,
-		HeadSHA:      headSHA,
-		BaseSHA:      n.BaseRefOid,
-		Body:         n.Body,
+		Repo:             owner,
+		Number:           n.Number,
+		Title:            n.Title,
+		State:            strings.ToLower(n.State),
+		Branch:           n.HeadRefName,
+		Base:             n.BaseRefName,
+		Author:           author,
+		URL:              n.URL,
+		Draft:            n.IsDraft,
+		Merged:           n.Merged,
+		Additions:        n.Additions,
+		Deletions:        n.Deletions,
+		ChangedFiles:     n.ChangedFiles,
+		HeadSHA:          headSHA,
+		BaseSHA:          n.BaseRefOid,
+		Body:             n.Body,
+		Mergeable:        n.Mergeable,
+		MergeStateStatus: n.MergeStateStatus,
+		AutoMergeEnabled: n.AutoMergeRequest != nil,
 	}
 	for _, l := range n.Labels.Nodes {
 		pr.Labels = append(pr.Labels, l.Name)

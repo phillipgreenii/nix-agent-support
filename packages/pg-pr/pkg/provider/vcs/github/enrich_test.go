@@ -558,3 +558,31 @@ var _ = func() bool {
 	var resp ghGraphQLResponse
 	return json.Unmarshal([]byte(`{}`), &resp) == nil
 }()
+
+// TestPRFromGHNodeMergeability verifies the mergeable/mergeStateStatus/
+// autoMergeRequest GraphQL fields map onto api.PR. (pg2-dwfld)
+func TestPRFromGHNodeMergeability(t *testing.T) {
+	raw := []byte(`{
+	  "number": 7, "title": "t", "url": "u",
+	  "author": {"__typename":"User","login":"a"},
+	  "baseRefName":"main","headRefName":"f","repository":{"nameWithOwner":"o/n"},
+	  "mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","autoMergeRequest":null
+	}`)
+	var n ghPRNode
+	if err := json.Unmarshal(raw, &n); err != nil {
+		t.Fatal(err)
+	}
+	pr := prFromGHNode(n, "o/n")
+	if pr.Mergeable != "MERGEABLE" || pr.MergeStateStatus != "CLEAN" || pr.AutoMergeEnabled {
+		t.Errorf("got mergeable=%q state=%q aut=%v", pr.Mergeable, pr.MergeStateStatus, pr.AutoMergeEnabled)
+	}
+
+	raw2 := []byte(`{"number":8,"author":{"login":"a"},"repository":{"nameWithOwner":"o/n"},"autoMergeRequest":{"enabledAt":"2026-01-01T00:00:00Z"}}`)
+	var n2 ghPRNode
+	if err := json.Unmarshal(raw2, &n2); err != nil {
+		t.Fatal(err)
+	}
+	if !prFromGHNode(n2, "o/n").AutoMergeEnabled {
+		t.Errorf("AutoMergeEnabled should be true when autoMergeRequest present")
+	}
+}
