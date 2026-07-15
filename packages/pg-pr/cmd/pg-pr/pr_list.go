@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -47,9 +48,10 @@ from the local store — this is the cheap default the pr-pool ACL polls, and it
 makes no network calls.
 
 With --reviewers, each PR is additionally augmented with its labels and a
-classified reviewer roster from a live provider round-trip (one round-trip per
-PR). That augmentation is best-effort: a provider failure leaves labels/roster
-empty rather than failing the command.`,
+classified reviewer roster from a live provider round-trip. When the provider
+supports bulk enrichment this is one round-trip for the whole repo; otherwise it
+falls back to one round-trip per PR. That augmentation is best-effort: a provider
+failure leaves labels/roster empty rather than failing the command.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
@@ -113,12 +115,64 @@ func listOpenPRItems(ctx context.Context, repo string, augment bool) ([]prListIt
 // PR's labels/roster empty rather than failing the listing (the base fields
 // from the store are authoritative). This keeps the read verb exit-0 on a
 // transient upstream failure, which the pr-pool ACL relies on.
+//
+// When the provider implements the vcs.EnrichedPRsProvider bulk capability, the
+// per-PR GetPR+ListReviews fan-out (2 gh subprocess spawns per PR, sequential)
+// collapses into ONE bulk round-trip that bundles labels + reviews for every
+// open PR — mirroring the sync engine's short-circuit (internal/sync
+// Engine.tryEnumerateEnriched). The bulk result is matched onto the store's base
+// list by PR number. Falls back to the per-PR path when the capability is absent
+// OR the single bulk call fails, so behavior (and best-effort semantics) are
+// unchanged for providers that cannot bulk-fetch.
 func augmentPRItems(ctx context.Context, repo string, items []prListItem) {
 	if len(items) == 0 {
 		return
 	}
 	reg := prListAgentRegistry(ctx)
 	prov := vcsProviderFor(repo)
+	if enricher, ok := prov.(vcs.EnrichedPRsProvider); ok {
+		if augmentPRItemsBulk(ctx, enricher, repo, items, reg) {
+			return
+		}
+	}
+	augmentPRItemsPerPR(ctx, prov, repo, items, reg)
+}
+
+// augmentPRItemsBulk augments items via ONE EnrichedPRs round-trip, matching the
+// bulk result onto the base list by PR number. It reports false (having mutated
+// nothing) when the bulk call fails, so the caller falls back to the per-PR
+// path. Output parity with augmentPRItemsPerPR is preserved by reusing the same
+// nonNilStrings / classifyRoster helpers on the same source data (the bulk
+// EnrichedPR carries PR.Labels and Reviews); base-list ordering is preserved
+// because items are iterated in place — only the map lookup source changes.
+func augmentPRItemsBulk(ctx context.Context, enricher vcs.EnrichedPRsProvider, repo string, items []prListItem, reg *agentregistry.Registry) bool {
+	enriched, err := enricher.EnrichedPRs(ctx, repo, buildListEnrichedQuery(repo))
+	if err != nil {
+		return false
+	}
+	byNumber := make(map[int]vcs.EnrichedPR, len(enriched))
+	for _, ep := range enriched {
+		byNumber[ep.PR.Number] = ep
+	}
+	for i := range items {
+		ep, ok := byNumber[items[i].Number]
+		if !ok {
+			// Not in the bulk result — leave base-only fields (empty
+			// labels/roster), matching the per-PR path's error-leaves-empty
+			// best-effort contract.
+			continue
+		}
+		items[i].Labels = nonNilStrings(ep.PR.Labels)
+		items[i].Reviewers = classifyRoster(ep.Reviews, reg)
+	}
+	return true
+}
+
+// augmentPRItemsPerPR is the original per-PR path: one GetPR (labels) + one
+// ListReviews (roster) per PR. Used when the provider lacks the bulk capability
+// or the bulk call fails. Each round-trip is best-effort — an error leaves that
+// PR's labels/roster empty.
+func augmentPRItemsPerPR(ctx context.Context, prov vcs.Provider, repo string, items []prListItem, reg *agentregistry.Registry) {
 	for i := range items {
 		num := items[i].Number
 		if pr, err := prov.GetPR(ctx, repo, num); err == nil && pr != nil {
@@ -128,6 +182,16 @@ func augmentPRItems(ctx context.Context, repo string, items []prListItem) {
 			items[i].Reviewers = classifyRoster(reviews, reg)
 		}
 	}
+}
+
+// buildListEnrichedQuery composes the provider-native search string for the bulk
+// augmentation: all open PRs in the repo. The store's base list is the authority
+// for WHICH PRs are surfaced (matched by number in augmentPRItemsBulk); this
+// query only needs to bring back their labels + reviews, so — unlike the sync
+// engine's buildEnrichedSearchQuery — no author: constraint is applied. Mirrors
+// the `is:pr is:open repo:<repo>` shape the github EnrichedPRs query consumes.
+func buildListEnrichedQuery(repo string) string {
+	return "is:pr is:open repo:" + repo
 }
 
 // prListAgentRegistry builds the agent registry from the loaded config,
@@ -213,6 +277,6 @@ func init() {
 	prListCmd.Flags().StringVar(&prF.repo, "repo", "",
 		"Repository in owner/name form (defaults to auto-detected remote)")
 	prListCmd.Flags().BoolVar(&prF.reviewers, "reviewers", false,
-		"Augment each PR with its live reviewer roster and labels (one provider round-trip per PR)")
+		"Augment each PR with its live reviewer roster and labels (one bulk round-trip when the provider supports it, else one per PR)")
 	prCmd.AddCommand(prListCmd)
 }

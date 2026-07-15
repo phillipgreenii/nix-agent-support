@@ -307,6 +307,244 @@ func TestPRList_EmptyStore(t *testing.T) {
 	}
 }
 
+// fakeBulkListVCS adds the vcs.EnrichedPRsProvider bulk capability on top of
+// fakeListVCS so `pr list --reviewers` can collapse the 2N per-PR fan-out into
+// one round-trip. It embeds fakeListVCS so the per-PR GetPR/ListReviews counters
+// remain available — the bulk-path test asserts they stay at zero.
+type fakeBulkListVCS struct {
+	fakeListVCS
+	enriched  []vcs.EnrichedPR
+	enrErr    error
+	bulkCalls int
+	lastQuery string
+}
+
+func (f *fakeBulkListVCS) EnrichedPRs(_ context.Context, _ string, query string) ([]vcs.EnrichedPR, error) {
+	f.bulkCalls++
+	f.lastQuery = query
+	if f.enrErr != nil {
+		return nil, f.enrErr
+	}
+	return f.enriched, nil
+}
+
+var (
+	_ vcs.Provider            = (*fakeBulkListVCS)(nil)
+	_ vcs.EnrichedPRsProvider = (*fakeBulkListVCS)(nil)
+)
+
+// TestPRList_ReviewersBulkOneRoundTrip verifies that when the provider
+// implements vcs.EnrichedPRsProvider, the --reviewers augmentation collapses to
+// ONE bulk round-trip (not 2N per-PR GetPR+ListReviews calls) and that the
+// augmented labels + classified roster match the per-PR path (output parity),
+// preserving base-list ordering.
+func TestPRList_ReviewersBulkOneRoundTrip(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	prov := &fakeBulkListVCS{
+		enriched: []vcs.EnrichedPR{
+			// Deliberately returned out of base-list order to prove the merge
+			// keys by PR number and preserves the store's ordering.
+			{
+				PR: api.PR{Repo: "foo/bar", Number: 11, Labels: []string{"docs"}},
+				Reviews: []api.Review{
+					{Author: "bob", State: "COMMENTED"},
+				},
+			},
+			{
+				PR: api.PR{Repo: "foo/bar", Number: 10, Labels: []string{"p0", "backend"}},
+				Reviews: []api.Review{
+					{Author: "reviewbot", State: "APPROVED"},
+					{Author: "alice", State: "CHANGES_REQUESTED"},
+				},
+			},
+		},
+	}
+	wireListFakes(t, prov, []agentregistry.Entry{{Login: "reviewbot"}})
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		},
+		store.PullRequest{
+			Repo: "foo/bar", Number: 11, Ownership: "team", State: "draft",
+			Author: "octocat", Branch: "feat/b", Base: "main", HeadSHA: "bbb222",
+		},
+	)
+
+	got := runPRList(t, "--repo", "foo/bar", "--reviewers")
+
+	// ONE bulk round-trip, and NONE of the 2N per-PR calls.
+	if prov.bulkCalls != 1 {
+		t.Errorf("expected exactly 1 bulk EnrichedPRs call, got %d", prov.bulkCalls)
+	}
+	if prov.getCalls != 0 || prov.revCalls != 0 {
+		t.Errorf("bulk path must make NO per-PR calls, got get=%d rev=%d", prov.getCalls, prov.revCalls)
+	}
+	if !strings.Contains(prov.lastQuery, "repo:foo/bar") {
+		t.Errorf("bulk search query should scope to the repo, got %q", prov.lastQuery)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 PRs, got %d: %+v", len(got), got)
+	}
+	// Base-list ordering preserved: 10 then 11.
+	if got[0].Number != 10 || got[1].Number != 11 {
+		t.Errorf("base-list ordering not preserved: %+v", got)
+	}
+
+	byNum := map[int]prListItem{}
+	for _, it := range got {
+		byNum[it.Number] = it
+	}
+	pr10 := byNum[10]
+	if len(pr10.Labels) != 2 || pr10.Labels[0] != "p0" || pr10.Labels[1] != "backend" {
+		t.Errorf("PR 10 labels wrong (parity with per-PR path): %+v", pr10.Labels)
+	}
+	kind := map[string]string{}
+	state := map[string]string{}
+	for _, r := range pr10.Reviewers {
+		kind[r.Login] = r.Kind
+		state[r.Login] = r.State
+	}
+	if kind["reviewbot"] != "agent" || kind["alice"] != "person" {
+		t.Errorf("roster classification wrong: %+v", pr10.Reviewers)
+	}
+	if state["reviewbot"] != "APPROVED" || state["alice"] != "CHANGES_REQUESTED" {
+		t.Errorf("roster states wrong: %+v", pr10.Reviewers)
+	}
+	pr11 := byNum[11]
+	if len(pr11.Labels) != 1 || pr11.Labels[0] != "docs" {
+		t.Errorf("PR 11 labels wrong: %+v", pr11.Labels)
+	}
+	if len(pr11.Reviewers) != 1 || pr11.Reviewers[0].Login != "bob" || pr11.Reviewers[0].Kind != "person" {
+		t.Errorf("PR 11 roster wrong: %+v", pr11.Reviewers)
+	}
+}
+
+// TestPRList_ReviewersFallsBackToPerPRWithoutBulk verifies that a provider
+// WITHOUT the bulk capability keeps the existing per-PR path: one GetPR + one
+// ListReviews per PR (2N calls), with identical augmented output.
+func TestPRList_ReviewersFallsBackToPerPRWithoutBulk(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	prov := &fakeListVCS{
+		labels: map[int][]string{10: {"p0"}, 11: {"docs"}},
+		reviews: map[int][]api.Review{
+			10: {{Author: "alice", State: "APPROVED"}},
+			11: {{Author: "bob", State: "COMMENTED"}},
+		},
+	}
+	// Guard: the plain fake must NOT satisfy the bulk capability, otherwise
+	// this test would not exercise the fallback path.
+	if _, ok := vcs.Provider(prov).(vcs.EnrichedPRsProvider); ok {
+		t.Fatal("fakeListVCS must NOT implement vcs.EnrichedPRsProvider")
+	}
+	wireListFakes(t, prov, nil)
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		},
+		store.PullRequest{
+			Repo: "foo/bar", Number: 11, Ownership: "team", State: "draft",
+			Author: "octocat", Branch: "feat/b", Base: "main", HeadSHA: "bbb222",
+		},
+	)
+
+	got := runPRList(t, "--repo", "foo/bar", "--reviewers")
+
+	// Per-PR fallback: one GetPR + one ListReviews per PR (2N).
+	if prov.getCalls != 2 || prov.revCalls != 2 {
+		t.Errorf("expected per-PR fallback (2 GetPR + 2 ListReviews), got get=%d rev=%d", prov.getCalls, prov.revCalls)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 PRs, got %d: %+v", len(got), got)
+	}
+	byNum := map[int]prListItem{}
+	for _, it := range got {
+		byNum[it.Number] = it
+	}
+	if len(byNum[10].Labels) != 1 || byNum[10].Labels[0] != "p0" {
+		t.Errorf("PR 10 labels wrong on fallback: %+v", byNum[10].Labels)
+	}
+	if len(byNum[10].Reviewers) != 1 || byNum[10].Reviewers[0].Login != "alice" {
+		t.Errorf("PR 10 roster wrong on fallback: %+v", byNum[10].Reviewers)
+	}
+	if len(byNum[11].Reviewers) != 1 || byNum[11].Reviewers[0].Login != "bob" {
+		t.Errorf("PR 11 roster wrong on fallback: %+v", byNum[11].Reviewers)
+	}
+}
+
+// TestPRList_ReviewersBulkErrorFallsBackToPerPR verifies that when the provider
+// HAS the bulk capability but the single EnrichedPRs call fails, augmentPRItems
+// falls back to the per-PR path: the one bulk attempt is made (bulkCalls==1) and
+// then GetPR+ListReviews run once per PR (2N). Items are still correctly
+// augmented via the per-PR path, and the failed bulk attempt leaves no partial
+// mutation (final values come entirely from the per-PR fake data).
+func TestPRList_ReviewersBulkErrorFallsBackToPerPR(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	prov := &fakeBulkListVCS{
+		// Bulk call fails; embedded fakeListVCS supplies the per-PR data the
+		// fallback path must use. `enriched` is left nil to prove no bulk data
+		// can leak: EnrichedPRs returns (nil, enrErr) before the merge loop.
+		enrErr: errors.New("boom bulk"),
+		fakeListVCS: fakeListVCS{
+			labels: map[int][]string{10: {"p0"}, 11: {"docs"}},
+			reviews: map[int][]api.Review{
+				10: {{Author: "alice", State: "APPROVED"}},
+				11: {{Author: "bob", State: "COMMENTED"}},
+			},
+		},
+	}
+	wireListFakes(t, prov, nil)
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		},
+		store.PullRequest{
+			Repo: "foo/bar", Number: 11, Ownership: "team", State: "draft",
+			Author: "octocat", Branch: "feat/b", Base: "main", HeadSHA: "bbb222",
+		},
+	)
+
+	got := runPRList(t, "--repo", "foo/bar", "--reviewers")
+
+	// One failed bulk attempt, then the full 2N per-PR fallback.
+	if prov.bulkCalls != 1 {
+		t.Errorf("expected exactly 1 (failed) bulk attempt, got %d", prov.bulkCalls)
+	}
+	if prov.getCalls != 2 || prov.revCalls != 2 {
+		t.Errorf("expected per-PR fallback after bulk error (2 GetPR + 2 ListReviews), got get=%d rev=%d", prov.getCalls, prov.revCalls)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 PRs, got %d: %+v", len(got), got)
+	}
+	byNum := map[int]prListItem{}
+	for _, it := range got {
+		byNum[it.Number] = it
+	}
+	// Augmented via the per-PR path (parity); no partial data from the failed
+	// bulk attempt.
+	if len(byNum[10].Labels) != 1 || byNum[10].Labels[0] != "p0" {
+		t.Errorf("PR 10 labels wrong on bulk-error fallback: %+v", byNum[10].Labels)
+	}
+	if len(byNum[10].Reviewers) != 1 || byNum[10].Reviewers[0].Login != "alice" || byNum[10].Reviewers[0].State != "APPROVED" {
+		t.Errorf("PR 10 roster wrong on bulk-error fallback: %+v", byNum[10].Reviewers)
+	}
+	if len(byNum[11].Labels) != 1 || byNum[11].Labels[0] != "docs" {
+		t.Errorf("PR 11 labels wrong on bulk-error fallback: %+v", byNum[11].Labels)
+	}
+	if len(byNum[11].Reviewers) != 1 || byNum[11].Reviewers[0].Login != "bob" {
+		t.Errorf("PR 11 roster wrong on bulk-error fallback: %+v", byNum[11].Reviewers)
+	}
+}
+
 // TestPRList_HumanOutput verifies the non-JSON table renderer includes the PR
 // number, ownership, and branch.
 func TestPRList_HumanOutput(t *testing.T) {
