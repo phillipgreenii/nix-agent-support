@@ -146,8 +146,10 @@ var (
 
 	// ReviewPreFetchFailuresTotal counts daemon pre-spawn PR-head fetch
 	// failures by reason. "credential" is transient (cert expiry / network) and
-	// self-heals on retry; "step_missing" is a deploy bug (the `step` binary is
-	// not on the daemon PATH) and needs operator attention.
+	// self-heals on retry; "step_missing" means the `step` SSH cert helper was
+	// not found on the fetch PATH — most often the ssh ProxyCommand shell's
+	// environment, not a missing deploy — an SSH ProxyCommand/credential-env
+	// issue that needs operator attention (waiting will not fix it).
 	ReviewPreFetchFailuresTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "pg_pr_review_prefetch_failures_total",

@@ -150,6 +150,70 @@ func TestCLIAgentSocketResolver_CacheHitThenMiss(t *testing.T) {
 	}
 }
 
+// wedgingResolver builds a resolver whose probe for any socket in `wedged`
+// blocks until its (per-candidate) context is cancelled, and otherwise returns
+// certOn[sock]. A probe handed an already-expired context fails — modelling
+// `ssh-add` under exec.CommandContext once the deadline has passed. A tiny
+// per-candidate probeTimeout keeps the test fast and deterministic.
+func wedgingResolver(cands []string, certOn, wedged map[string]bool) (*CLIAgentSocketResolver, *[]string) {
+	var probes []string
+	r := &CLIAgentSocketResolver{
+		probeTimeout: 20 * time.Millisecond,
+		list:         func() ([]string, error) { return cands, nil },
+		hasCert: func(ctx context.Context, sock string) bool {
+			probes = append(probes, sock)
+			if ctx.Err() != nil {
+				return false
+			}
+			if wedged[sock] {
+				<-ctx.Done()
+				return false
+			}
+			return certOn[sock]
+		},
+	}
+	return r, &probes
+}
+
+// TestCLIAgentSocketResolver_SkipsWedgedCandidate: a wedged candidate (ssh-add
+// hangs) must not consume the whole resolve budget — the per-candidate probe
+// timeout bounds it so a later good candidate is still reached (pg2-h7c9).
+func TestCLIAgentSocketResolver_SkipsWedgedCandidate(t *testing.T) {
+	r, _ := wedgingResolver(
+		[]string{"/wedged", "/good"},
+		map[string]bool{"/good": true},
+		map[string]bool{"/wedged": true},
+	)
+	// Overall budget models the caller's context.WithTimeout(defaultProbeTimeout).
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	got, err := r.Resolve(ctx)
+	if err != nil || got != "/good" {
+		t.Fatalf("resolve = %q, %v; want /good, nil (wedged candidate must be skipped)", got, err)
+	}
+}
+
+// TestCLIAgentSocketResolver_WedgedLastGoodDoesNotStarve: a cached lastGood that
+// is now wedged must be bounded by the per-candidate timeout, invalidated, and
+// the scan must still return the good candidate (pg2-h7c9).
+func TestCLIAgentSocketResolver_WedgedLastGoodDoesNotStarve(t *testing.T) {
+	r, _ := wedgingResolver(
+		[]string{"/good"},
+		map[string]bool{"/good": true},
+		map[string]bool{"/wedged": true},
+	)
+	r.lastGood = "/wedged" // stale + hung cached entry
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	got, err := r.Resolve(ctx)
+	if err != nil || got != "/good" {
+		t.Fatalf("resolve = %q, %v; want /good, nil (wedged lastGood must be invalidated + skipped)", got, err)
+	}
+	if r.lastGood != "/good" {
+		t.Fatalf("lastGood = %q; want /good (a lastGood that no longer probes clean must be invalidated)", r.lastGood)
+	}
+}
+
 func TestClassifyFetch(t *testing.T) {
 	if classifyFetch(nil) != FetchOK {
 		t.Fatal("nil error must classify as FetchOK")
@@ -166,6 +230,13 @@ func TestClassifyFetch(t *testing.T) {
 	// zsh phrasing (interactive shells) — the reversed token order.
 	if classifyFetch(errors.New("zsh:1: command not found: step")) != FetchStepMissing {
 		t.Fatal("command not found: step must classify as FetchStepMissing")
+	}
+	// A DIFFERENT missing binary (git/ssh) must NOT be mislabeled a step problem:
+	// the "executable file not found" token is generic to Go's exec, so it must
+	// only classify as FetchStepMissing when `step` is actually the missing
+	// binary (pg2-h7c9).
+	if classifyFetch(errors.New(`git fetch: exec: "git": executable file not found in $PATH`)) != FetchFailed {
+		t.Fatal("a missing non-step binary must classify as FetchFailed, not FetchStepMissing")
 	}
 	if classifyFetch(errors.New("Permission denied (publickey).")) != FetchFailed {
 		t.Fatal("auth failure must classify as FetchFailed")

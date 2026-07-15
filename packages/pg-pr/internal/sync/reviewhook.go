@@ -225,7 +225,7 @@ func (e *Engine) ensurePRFetched(ctx context.Context, log *slog.Logger, ref bead
 			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
 	case FetchStepMissing:
 		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("step_missing").Inc()
-		log.Error("review hook: pre-fetch failed — `step` not resolvable on daemon PATH (deploy bug); leaving bead open",
+		log.Error("review hook: pre-fetch failed — `step` (SSH cert helper) not found on the fetch PATH, most likely the ssh ProxyCommand shell's environment rather than a missing deploy; check the ProxyCommand/credential setup; leaving bead open",
 			"id", ref.ID, "repo", ref.Repo, "number", ref.Number)
 	case FetchFailed:
 		telemetry.ReviewPreFetchFailuresTotal.WithLabelValues("credential").Inc()

@@ -40,8 +40,12 @@ const (
 	// bead open and retry next cycle with backoff. MUST NOT bump the
 	// dead-letter fail count.
 	FetchFailed
-	// FetchStepMissing — the `step` binary is not resolvable on the daemon's
-	// PATH (a deploy bug). Waiting will not fix it; emit a distinct alert.
+	// FetchStepMissing — the `step` SSH cert helper was not found on the PATH of
+	// the process that ran the fetch. This is most often NOT a missing deploy:
+	// `step` is typically on the daemon's own PATH, but the ssh ProxyCommand runs
+	// under a shell whose PATH differs from the daemon's, so `step` is not found
+	// there. An SSH ProxyCommand/credential-environment issue; waiting will not
+	// fix it, so emit a distinct alert.
 	FetchStepMissing
 )
 
@@ -85,6 +89,12 @@ const (
 	// resolution, cert-validity check) so a wedged ssh-add/ssh-keygen can't
 	// block the serial review loop.
 	defaultProbeTimeout = 10 * time.Second
+	// perCandidateProbeTimeout bounds a SINGLE ssh-agent socket probe inside
+	// socket resolution. It MUST be well below defaultProbeTimeout (the overall
+	// resolve budget) so one wedged socket (ssh-add hangs) is skipped instead of
+	// consuming the whole budget before a good socket is reached. Generous vs a
+	// healthy local unix-socket probe (milliseconds), even under load.
+	perCandidateProbeTimeout = 3 * time.Second
 )
 
 // PreFetchGate is the daemon's pre-spawn credential gate. It is stateful
@@ -198,15 +208,17 @@ func classifyFetch(err error) FetchOutcome {
 		return FetchOK
 	}
 	s := err.Error()
-	// A missing `step` binary surfaces differently depending on who ran it: the
-	// daemon's ~/.ssh/config ProxyCommand runs under /bin/sh ("sh: step: command
-	// not found"), an interactive zsh would say "command not found: step", and
-	// Go's own exec says "executable file not found". Match those concrete
-	// tokens rather than a broad step+not-found predicate (which would also
-	// catch unrelated errors).
+	// `step` (the SSH cert helper the fetch's ssh ProxyCommand invokes) not being
+	// found surfaces differently depending on which shell ran it: the daemon's
+	// ~/.ssh/config ProxyCommand runs under /bin/sh ("sh: step: command not
+	// found"), an interactive zsh says "command not found: step", and Go's own
+	// exec says `exec: "step": executable file not found`. The exec token is
+	// GENERIC (it fires for any missing binary — git, ssh, …), so only treat it
+	// as a step problem when `step` is actually the missing binary; otherwise a
+	// missing git/ssh would be mislabeled a step/credential-env failure.
 	if strings.Contains(s, "step: command not found") ||
 		strings.Contains(s, "command not found: step") ||
-		strings.Contains(s, "executable file not found") {
+		(strings.Contains(s, "executable file not found") && strings.Contains(s, "step")) {
 		return FetchStepMissing
 	}
 	return FetchFailed
@@ -274,6 +286,11 @@ type CLIAgentSocketResolver struct {
 	// hasCert reports whether the agent at sock exposes a certificate line.
 	// nil → run `SSH_AUTH_SOCK=<sock> ssh-add -L` and test with firstCertLine.
 	hasCert func(ctx context.Context, sock string) bool
+	// probeTimeout bounds a SINGLE candidate probe so one wedged ssh-add cannot
+	// consume the whole resolve budget before a good socket is reached. Zero →
+	// perCandidateProbeTimeout. Injectable so tests exercise the skip-hung path
+	// deterministically without real sleeps.
+	probeTimeout time.Duration
 
 	mu       stdsync.Mutex
 	lastGood string
@@ -296,9 +313,31 @@ func (r *CLIAgentSocketResolver) Resolve(ctx context.Context) (string, error) {
 		hasCert = probeSocketCert
 	}
 
+	// probe bounds ONE candidate check with its own timeout so a wedged ssh-add
+	// (which would otherwise hang until the caller's overall resolve budget
+	// expired) is skipped and the next candidate is still reached (pg2-h7c9).
+	pt := r.probeTimeout
+	if pt <= 0 {
+		pt = perCandidateProbeTimeout
+	}
+	probe := func(sock string) bool {
+		pctx, cancel := context.WithTimeout(ctx, pt)
+		defer cancel()
+		return hasCert(pctx, sock)
+	}
+
 	// Cache hit: re-probe ONLY the last good socket (one cheap `ssh-add -L`).
-	if r.lastGood != "" && hasCert(ctx, r.lastGood) {
-		return r.lastGood, nil
+	staleLastGood := ""
+	if r.lastGood != "" {
+		if probe(r.lastGood) {
+			return r.lastGood, nil
+		}
+		// The cached socket no longer probes clean (rotated away, or wedged and
+		// timed out above): invalidate it so a stale/hung entry is not retried on
+		// the next call, then fall through to a full re-scan (skipping it there —
+		// it was just probed).
+		staleLastGood = r.lastGood
+		r.lastGood = ""
 	}
 
 	// Cache miss (cold, or the agent restarted and the socket rotated): probe
@@ -309,7 +348,10 @@ func (r *CLIAgentSocketResolver) Resolve(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("list agent sockets: %w", err)
 	}
 	for _, cand := range cands {
-		if hasCert(ctx, cand) {
+		if cand == staleLastGood {
+			continue // already probed (and failed) as the cache-hit above
+		}
+		if probe(cand) {
 			r.lastGood = cand
 			return cand, nil
 		}
