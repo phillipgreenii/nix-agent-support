@@ -735,6 +735,48 @@ func TestIngestCIFailure_SubjectSHASet(t *testing.T) {
 	}
 }
 
+// TestIngestSkipsExcludedCICheck verifies that a CI run matching the repo's
+// excluded_ci_checks pattern (e.g. policy-bot) does NOT produce a ci-failure
+// feedback row — the ingest loop guard is now cirollup.Classify, which
+// short-circuits excluded checks to Excluded regardless of conclusion.
+// (pg2-qs46b)
+func TestIngestSkipsExcludedCICheck(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 21, State: "open",
+		Branch: "feat/w", Base: "main", Author: "alice",
+		URL: "https://github.com/o/r/pull/21", HeadSHA: "deadbeef",
+	}
+	run := api.CIRun{
+		ID: "run-y", Name: "policy-bot: approval required", Status: "completed",
+		Conclusion: "failure", URL: "https://u", Provider: "github-actions",
+		HeadSHA: "deadbeef",
+	}
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "bot",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github", ExcludedCIChecks: []string{"^policy-bot"}}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, &vcs.EnrichedPR{PR: pr, CIRuns: []api.CIRun{run}}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	storedPR, _ := db.GetPR(ctx, "o/r", 21)
+	rows, _ := db.ListFeedback(ctx, storedPR.ID, store.ListFilter{Kind: "ci-failure"})
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 ci-failure rows for excluded check; got %d: %+v", len(rows), rows)
+	}
+}
+
 func TestSync_RecordsRevisionWithCIAndReview(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)

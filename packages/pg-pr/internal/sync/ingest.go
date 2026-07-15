@@ -287,9 +287,12 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 
 	// --- CI failures ---
 	for _, r := range enriched.CIRuns {
-		// Only ingest failures (matches the existing processFeedback notion
-		// of which runs count — skip non-failure conclusions).
-		if r.Conclusion != "failure" {
+		// Route through the shared cirollup classifier (pg2-qs46b) so ingest
+		// agrees with every other "is CI failed?" decision site: excluded
+		// checks (e.g. policy-bot) create no feedback, and the full Failed
+		// taxonomy (error/cancelled/timed_out/action_required/...) is covered,
+		// not just the literal "failure" conclusion.
+		if cirollup.Classify(r, ciExcl) != cirollup.Failed {
 			continue
 		}
 
