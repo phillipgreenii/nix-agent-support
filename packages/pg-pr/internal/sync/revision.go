@@ -3,22 +3,18 @@ package sync
 import (
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
-// ciRollupFromSync maps []api.CIRun to a store.CIRollup.
-// Classification:
-//   - passed:  Status=="completed" && Conclusion=="success"
-//   - failed:  Status=="completed" && Conclusion!="success" (covers failure,
-//     error, cancelled, timed_out, neutral, skipped, etc.)
-//   - pending: anything else (Status != "completed")
-//
-// Overall State: any failed → "failure"; else any pending → "pending";
-// else (≥1 run, all passed) → "success"; no runs → "none".
+// ciRollupFromSync maps []api.CIRun to a store.CIRollup. Classification and
+// aggregation are delegated to internal/cirollup — the single source of
+// truth for "is CI failed?" (pg2-qs46b). excl drops advisory checks (e.g.
+// policy-bot) from the rollup entirely.
 //
 // now is an injectable clock; when nil it defaults to time.Now.
-func ciRollupFromSync(runs []api.CIRun, now func() time.Time) store.CIRollup {
+func ciRollupFromSync(runs []api.CIRun, now func() time.Time, excl *cirollup.Excluder) store.CIRollup {
 	if now == nil {
 		now = time.Now
 	}
@@ -26,29 +22,12 @@ func ciRollupFromSync(runs []api.CIRun, now func() time.Time) store.CIRollup {
 	if len(runs) == 0 {
 		return store.CIRollup{State: "none", CapturedAt: capturedAt}
 	}
-	var passed, failed, pending int
-	for _, r := range runs {
-		switch {
-		case r.Status == "completed" && r.Conclusion == "success":
-			passed++
-		case r.Status == "completed":
-			// conclusion != "success": failure, error, cancelled, timed_out, etc.
-			failed++
-		default:
-			pending++
-		}
-	}
-	state := "success"
-	if failed > 0 {
-		state = "failure"
-	} else if pending > 0 {
-		state = "pending"
-	}
+	r := cirollup.Compute(runs, excl)
 	return store.CIRollup{
-		State:      state,
-		Passed:     passed,
-		Failed:     failed,
-		Pending:    pending,
+		State:      r.State,
+		Passed:     r.Passed,
+		Failed:     r.Failed,
+		Pending:    r.Pending,
 		CapturedAt: capturedAt,
 	}
 }

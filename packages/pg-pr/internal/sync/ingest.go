@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/feedbackclassify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -43,6 +44,9 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	self := e.cfg().SelfLogin
 	mine := e.isSelfAuthored(pr.Author)
 
+	rcfg, _ := e.repoConfig(repo) // repo is guaranteed in config here (processFeedback gates on it)
+	ciExcl := cirollup.NewExcluder(rcfg.ExcludedCIChecks)
+
 	// UpsertPR once, outside the per-feedback transactions, so we capture
 	// prID before the item loop. This is idempotent with the authoritative
 	// UpsertPR the Sync per-PR loop already performs for every observed PR;
@@ -66,7 +70,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	if err != nil {
 		return fmt.Errorf("ingest: record revision %s#%d: %w", repo, pr.Number, err)
 	}
-	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns, e.deps.Now)); err != nil {
+	if err := e.deps.Store.SetRevisionCI(ctx, rev.ID, ciRollupFromSync(enriched.CIRuns, e.deps.Now, ciExcl)); err != nil {
 		return fmt.Errorf("ingest: set revision ci %s#%d: %w", repo, pr.Number, err)
 	}
 	for _, rv := range mySubmittedReviews(enriched.Reviews, self) {

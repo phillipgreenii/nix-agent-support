@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
@@ -82,11 +83,20 @@ func TestCIRollupFromSync(t *testing.T) {
 			wantPassed: 1,
 			wantFailed: 1,
 		},
+		{
+			name: "policy-bot failure excluded → success",
+			runs: []api.CIRun{
+				{Name: "build", Status: "completed", Conclusion: "success"},
+				{Name: "policy-bot: approval required", Status: "completed", Conclusion: "failure"},
+			},
+			wantState:  "success",
+			wantPassed: 1,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ciRollupFromSync(tc.runs, fixed)
+			got := ciRollupFromSync(tc.runs, fixed, cirollup.NewExcluder([]string{"^policy-bot"}))
 
 			if got.State != tc.wantState {
 				t.Errorf("State: got %q want %q", got.State, tc.wantState)
@@ -110,7 +120,7 @@ func TestCIRollupFromSync(t *testing.T) {
 
 func TestCIRollupFromSync_NilClockDoesNotPanic(t *testing.T) {
 	// Passing nil must not panic; it should fall back to time.Now.
-	got := ciRollupFromSync([]api.CIRun{}, nil)
+	got := ciRollupFromSync([]api.CIRun{}, nil, nil)
 	if got.State != "none" {
 		t.Errorf("State: got %q want \"none\"", got.State)
 	}
