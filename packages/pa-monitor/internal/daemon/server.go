@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -87,6 +88,14 @@ type server struct {
 	// by BridgeChannel. Zero selects the default (defaultBridgeSnapshotInterval);
 	// tests set a small value to exercise the ticker quickly.
 	bridgeSnapshotInterval time.Duration
+	// shutdown is closed by serve()'s stop func to tell the long-lived
+	// server-stream handlers (WatchState, BridgeChannel) to return. GracefulStop
+	// waits for in-flight handlers but does NOT cancel their stream contexts, so
+	// without this signal a graceful stop blocks until every streaming client
+	// disconnects (bead pg2-fcjpr). A nil channel — the state newServer leaves it
+	// in for unit tests that construct the server without serve() — is never
+	// selected, so those handlers keep their prior ctx-only teardown behaviour.
+	shutdown <-chan struct{}
 }
 
 const (
@@ -101,6 +110,14 @@ const (
 	// client requests faster than 1s (see cmd/pa-monitor/wait.go); the TUI polls
 	// via GetState, not WatchState.
 	minPushInterval = 250 * time.Millisecond
+	// gracefulStopTimeout bounds how long serve()'s stop func waits for in-flight
+	// RPC handlers to drain after signalling shutdown, before forcing a hard
+	// gs.Stop(). The shutdown signal makes the long-lived stream handlers return
+	// at once, so GracefulStop normally completes far inside this budget; the
+	// timeout is only a safety net for a handler wedged in stream.Send to a
+	// stalled client. It MUST stay well under launchd's ExitTimeOut (default 20s)
+	// so a graceful daemon restart never falls back to SIGKILL (bead pg2-fcjpr).
+	gracefulStopTimeout = 5 * time.Second
 )
 
 func newServer(s *sharedState) *server {
@@ -136,6 +153,11 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-s.shutdown:
+			// Daemon is shutting down. End the stream cleanly (nil, a normal EOF
+			// the client redials on) so GracefulStop is not blocked waiting on
+			// this long-lived handler (bead pg2-fcjpr).
+			return nil
 		case <-ticker.C:
 			// Push the current state on every tick so subscribers see
 			// RPC-driven changes (Caffeinate, SetAutoResume) immediately.
@@ -455,11 +477,39 @@ func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMe
 	srv.bridgeSnapshotInterval = snapshotInterval
 	srv.onDeliverResult = onDeliverResult
 	srv.onStreamClosed = onStreamClosed
+	// shutdown tells the long-lived stream handlers (WatchState, BridgeChannel)
+	// to return when stop() runs, so GracefulStop does not block on a live
+	// client (bead pg2-fcjpr).
+	shutdown := make(chan struct{})
+	srv.shutdown = shutdown
 	pb.RegisterPaMonitorServer(gs, srv)
 
 	go func() {
 		_ = gs.Serve(lis)
 	}()
 
-	return gs, func() { gs.GracefulStop() }
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			// Signal the stream handlers to return, then wait for in-flight
+			// handlers to drain. The signal normally makes GracefulStop complete
+			// promptly; gracefulStopTimeout then forces a hard gs.Stop() (which
+			// cancels handler contexts and closes transports) as a bounded safety
+			// net, so a graceful daemon restart never depends on launchd's
+			// SIGKILL fallback (bead pg2-fcjpr).
+			close(shutdown)
+			done := make(chan struct{})
+			go func() {
+				gs.GracefulStop()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(gracefulStopTimeout):
+				gs.Stop()
+				<-done
+			}
+		})
+	}
+	return gs, stop
 }

@@ -49,10 +49,16 @@ var errBridgeStreamClosed = errors.New("bridge stream closed")
 //     on a closed channel — out is never closed; a done signal only makes the
 //     hook stop enqueuing.
 //
-// Teardown ordering: main breaks its select on ctx.Done() or the reader's exit,
-// stops the ticker, closes done (so the hook stops enqueuing), joins the reader
-// (guaranteed to exit because Recv is ctx-interruptible), then — if the stream
-// had registered — deregisters the bridge and invokes onStreamClosed.
+// Teardown ordering: main breaks its select on ctx.Done(), the server-shutdown
+// signal (s.shutdown), the reader's exit, or a Send error; it stops the ticker,
+// closes done (so the hook stops enqueuing), and returns. It does NOT join the
+// reader — the reader owns the registration lifecycle and deregisters the
+// bridge (and invokes onStreamClosed) in its own defer, which runs when its
+// ctx-interruptible Recv unblocks (on client disconnect, or when the handler's
+// return cancels the stream context on a server-shutdown exit). Not joining is
+// what lets the handler return promptly on shutdown (bead pg2-fcjpr): the
+// reader is parked in Recv, which GracefulStop never cancels, so joining here
+// would re-block the handler until a client disconnected.
 func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 	if s.bridges == nil {
 		return status.Error(codes.FailedPrecondition, "bridge registry not configured")
@@ -99,18 +105,30 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 		}
 	}
 
-	// Reader goroutine: dispatch inbound messages. It records the stream's
-	// registration so teardown can deregister it. That registration state is
-	// read by the main goroutine only after joining this goroutine
-	// (readerDone), so the channel close provides the happens-before edge.
-	var (
-		registered   bool
-		regServerPID int
-		regBridgePID int
-	)
+	// Reader goroutine: dispatch inbound messages and own the stream's
+	// registration lifecycle. The registration state is reader-local and the
+	// bridge is deregistered in this goroutine's defer, so the main writer loop
+	// does NOT join the reader on teardown. That lets the handler return promptly
+	// on a server-shutdown signal (bead pg2-fcjpr); the reader — parked in the
+	// ctx-interruptible Recv — then unwinds when the stream context is cancelled
+	// (on client disconnect, or as the handler returns on shutdown) and its defer
+	// deregisters and notifies.
 	readerDone := make(chan struct{})
 	go func() {
-		defer close(readerDone)
+		var (
+			registered   bool
+			regServerPID int
+			regBridgePID int
+		)
+		defer func() {
+			if registered {
+				s.bridges.Deregister(regServerPID, regBridgePID)
+				if s.onStreamClosed != nil {
+					s.onStreamClosed(regServerPID)
+				}
+			}
+			close(readerDone)
+		}()
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
@@ -165,6 +183,12 @@ loop:
 		select {
 		case <-ctx.Done():
 			break loop
+		case <-s.shutdown:
+			// Daemon is shutting down; break so the handler returns instead of
+			// blocking GracefulStop until the (often always-connected) bridge
+			// client disconnects (bead pg2-fcjpr). A nil s.shutdown — the state
+			// newServer leaves it in for unit tests — is never selected.
+			break loop
 		case <-readerDone:
 			break loop
 		case <-ticker.C:
@@ -180,18 +204,11 @@ loop:
 		}
 	}
 
-	// Teardown. Order: stop the ticker, close done (the hook stops enqueuing),
-	// join the reader (Recv is ctx-interruptible, so it always exits), then
-	// deregister and notify.
+	// Teardown: stop the ticker and signal the send hook to stop enqueuing, then
+	// return. We do NOT join the reader — returning cancels the stream context,
+	// which unblocks the reader's ctx-interruptible Recv, and the reader's defer
+	// then deregisters the bridge and invokes onStreamClosed (bead pg2-fcjpr).
 	ticker.Stop()
 	close(done)
-	<-readerDone
-
-	if registered {
-		s.bridges.Deregister(regServerPID, regBridgePID)
-		if s.onStreamClosed != nil {
-			s.onStreamClosed(regServerPID)
-		}
-	}
 	return sendErr
 }
