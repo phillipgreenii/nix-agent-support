@@ -1,0 +1,38 @@
+name: Update Flake Dependencies
+
+# Thin caller of the reusable workflow hosted in the public phillipg-nix-repo-base
+# (beads pg2-wwpy9 / pg2-xt0sp). The schedule stays local; everything else is
+# centralized in update-flakes-reusable.yml. agent-support was the one composable
+# fleet repo with no scheduled update CI (pg2-xt0sp); this brings it in line with
+# overlay / personal / support-apps.
+#
+# automerge: none — agent-support has no ci.yml and no branch protection, so there
+# are no required status checks for `gh pr merge --auto` to gate on. A human merges
+# the lock-bump PR after confirming the change (mirrors phillipgreenii-nix-personal's
+# rationale). Flip to squash once agent-support gains a ci.yml with required checks.
+#
+# needs_private_deps_auth omitted (default false): every phillipgreenii input
+# (nix-repo-base, nix-overlay) is public and this flake does not consume the private
+# nix-personal, so no read token is needed to run `nix flake update`.
+
+on:
+  schedule:
+    # Run every Monday at 09:00 AM UTC (fleet-dominant cadence)
+    - cron: "0 9 * * 1"
+  workflow_dispatch: # Allow manual trigger
+
+concurrency:
+  group: update-flakes
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write # required for FlakeHub Cache OIDC auth when enabled
+
+jobs:
+  update-flakes:
+    uses: phillipgreenii/nix-repo-base/.github/workflows/update-flakes-reusable.yml@main
+    secrets: inherit
+    with:
+      automerge: none
