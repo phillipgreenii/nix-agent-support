@@ -370,3 +370,25 @@ func TestBuildNilRegistry(t *testing.T) {
 		t.Error("expected AgentApproved=false when registry is nil")
 	}
 }
+
+// TestBuildMineRowMergeReminder verifies MineRow surfaces GitHub's
+// authoritative MergeStateStatus/AutoMergeEnabled and derives the
+// "ready to merge / automerge-forgotten" NeedsMergeReminder signal. (pg2-dwfld)
+func TestBuildMineRowMergeReminder(t *testing.T) {
+	mk := func(state string, auto bool) MineRow {
+		p := PRInput{PR: api.PR{Repo: "o/n", Number: 1, Author: "me", MergeStateStatus: state, AutoMergeEnabled: auto}}
+		return buildMineRow(p, nil, nil)
+	}
+	if !mk("CLEAN", false).NeedsMergeReminder {
+		t.Errorf("CLEAN + no automerge should need reminder")
+	}
+	if mk("CLEAN", true).NeedsMergeReminder {
+		t.Errorf("CLEAN + automerge armed should NOT need reminder")
+	}
+	if mk("BLOCKED", false).NeedsMergeReminder {
+		t.Errorf("BLOCKED should NOT need reminder")
+	}
+	if got := mk("CLEAN", false).MergeStateStatus; got != "CLEAN" {
+		t.Errorf("MergeStateStatus passthrough got %q", got)
+	}
+}

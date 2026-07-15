@@ -14,17 +14,25 @@ type Snapshot struct {
 
 // MineRow is one row in the "My PRs" table.
 type MineRow struct {
-	Repo          string     `json:"repo"`
-	Number        int        `json:"number"`
-	Title         string     `json:"title"`
-	URL           string     `json:"url"`
-	Draft         bool       `json:"draft"`
-	CIStatus      string     `json:"ci_status"`
-	HumanApproved bool       `json:"human_approved"`
-	AgentApproved bool       `json:"agent_approved"`
-	WaitingOnMe   bool       `json:"waiting_on_me"`
-	JIRA          []JIRAItem `json:"jira"`
-	Beads         []BeadItem `json:"beads"`
+	Repo          string `json:"repo"`
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	URL           string `json:"url"`
+	Draft         bool   `json:"draft"`
+	CIStatus      string `json:"ci_status"`
+	HumanApproved bool   `json:"human_approved"`
+	AgentApproved bool   `json:"agent_approved"`
+	WaitingOnMe   bool   `json:"waiting_on_me"`
+	// MergeStateStatus is GitHub's authoritative merge-readiness (CLEAN/BLOCKED/
+	// …); the mine panel shows it separately from CIStatus. (pg2-dwfld)
+	MergeStateStatus string `json:"merge_state_status,omitempty"`
+	// AutoMergeEnabled is true when GitHub auto-merge is armed.
+	AutoMergeEnabled bool `json:"auto_merge_enabled"`
+	// NeedsMergeReminder is true for MY PR that is ready to merge (CLEAN) but has
+	// no auto-merge armed — the "you forgot to merge / arm automerge" nudge. (pg2-dwfld)
+	NeedsMergeReminder bool       `json:"needs_merge_reminder"`
+	JIRA               []JIRAItem `json:"jira"`
+	Beads              []BeadItem `json:"beads"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:

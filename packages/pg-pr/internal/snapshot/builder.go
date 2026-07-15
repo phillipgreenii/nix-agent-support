@@ -121,17 +121,20 @@ func Build(in BuilderInput) *Snapshot {
 func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Excluder) MineRow {
 	hum, agt := classifyApprovals(p, reg)
 	return MineRow{
-		Repo:          p.PR.Repo,
-		Number:        p.PR.Number,
-		Title:         p.PR.Title,
-		URL:           p.PR.URL,
-		Draft:         p.PR.Draft,
-		CIStatus:      cirollup.Compute(p.CIRuns, excl).State,
-		HumanApproved: hum,
-		AgentApproved: agt,
-		WaitingOnMe:   beads.AllNonClosedHumanLabeled(p.BeadsDeps),
-		JIRA:          mapJIRA(p.JIRA),
-		Beads:         mapBeads(p.BeadsDeps),
+		Repo:               p.PR.Repo,
+		Number:             p.PR.Number,
+		Title:              p.PR.Title,
+		URL:                p.PR.URL,
+		Draft:              p.PR.Draft,
+		CIStatus:           cirollup.Compute(p.CIRuns, excl).State,
+		HumanApproved:      hum,
+		AgentApproved:      agt,
+		WaitingOnMe:        beads.AllNonClosedHumanLabeled(p.BeadsDeps),
+		MergeStateStatus:   p.PR.MergeStateStatus,
+		AutoMergeEnabled:   p.PR.AutoMergeEnabled,
+		NeedsMergeReminder: p.PR.MergeStateStatus == "CLEAN" && !p.PR.AutoMergeEnabled,
+		JIRA:               mapJIRA(p.JIRA),
+		Beads:              mapBeads(p.BeadsDeps),
 	}
 }
 
