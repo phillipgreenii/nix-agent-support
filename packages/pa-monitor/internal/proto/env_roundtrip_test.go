@@ -68,6 +68,40 @@ func TestSessionEnvRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSessionLabelsRoundTrip confirms that the computed label set
+// (workspace.scope etc.) survives FromTree → ToTree so status/tui can display
+// it after the DB read path materialises the session. See pg2-4xbrm.
+func TestSessionLabelsRoundTrip(t *testing.T) {
+	in := &aggregate.Tree{
+		Dirs: []*aggregate.Directory{
+			{
+				Sessions: []*aggregate.SessionView{
+					{
+						Session: &session.Session{SessionID: "s-lbl", PID: 7},
+						SessionEnrichment: aggregate.SessionEnrichment{
+							Labels: map[string]string{
+								"workspace.scope": "ziprecruiter",
+								"agent.kind":      "polecat",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	out := ToTree(FromTree(in))
+	if len(out.Dirs) != 1 || len(out.Dirs[0].Sessions) != 1 {
+		t.Fatal("shape lost")
+	}
+	got := out.Dirs[0].Sessions[0].Labels
+	if got["workspace.scope"] != "ziprecruiter" {
+		t.Errorf("workspace.scope lost: %+v", got)
+	}
+	if got["agent.kind"] != "polecat" {
+		t.Errorf("agent.kind lost: %+v", got)
+	}
+}
+
 // TestSessionDetailLastErrorPendingNudgeRoundTrip confirms that LastError
 // and PendingNudge survive SessionDetailFromView → SessionDetailToView.
 func TestSessionDetailLastErrorPendingNudgeRoundTrip(t *testing.T) {

@@ -213,6 +213,13 @@ message SessionView {
   // "human_input" | "human_authn" | "usage_limit" | "error". Empty when
   // status != "blocked". New field number 30 (verified free; R8).
   string blocker = 30;
+
+  // labels is the session's computed label set (workspace.scope, agent.*,
+  // repo.*, …) as produced by the daemon's label pipeline and persisted to
+  // the DB. Forwarded so status/tui can display e.g. workspace.scope. Unlike
+  // the raw env fields above, these are derived (detectors + decorators).
+  // Field number 31 (verified free). (pg2-4xbrm)
+  map<string, string> labels = 31;
 }
 
 message Block {

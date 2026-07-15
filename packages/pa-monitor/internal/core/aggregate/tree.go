@@ -9,16 +9,22 @@ import (
 )
 
 type SessionEnrichment struct {
-	ContextTokens     int
-	Model             string
-	FirstPrompt       string
-	SubagentCount     int
-	SubshellCount     int
-	SessionTokens     int                     // cumulative output_tokens across session
-	BurnRateShort     float64                 // tokens/min, short window
-	BurnRateLong      float64                 // tokens/min, long window
-	CostUSD           float64                 // estimated share, filled by Build
-	AwaitingInput     bool                    // true when last assistant turn contains unresolved AskUserQuestion
+	ContextTokens int
+	Model         string
+	FirstPrompt   string
+	SubagentCount int
+	SubshellCount int
+	SessionTokens int     // cumulative output_tokens across session
+	BurnRateShort float64 // tokens/min, short window
+	BurnRateLong  float64 // tokens/min, long window
+	CostUSD       float64 // estimated share, filled by Build
+	AwaitingInput bool    // true when last assistant turn contains unresolved AskUserQuestion
+	// Labels is the computed label set for this session (workspace.scope,
+	// agent.*, repo.*, etc.), produced by the daemon's label pipeline
+	// (detectors + decorators). Persisted to the DB by the poller so the
+	// store->tree read path can surface e.g. workspace.scope in status/tui.
+	// Nil/empty when the pipeline has not run (e.g. a fake in tests).
+	Labels            map[string]string
 	RateLimitResetsAt time.Time               // non-zero: session paused; window resets at this time
 	LastError         *transcript.ErrorRecord // most recent api error from snapshot; nil if none
 	// LastErrorRetryable is pa-monitor's auto-resume verdict for LastError

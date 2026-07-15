@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
 
@@ -426,6 +427,65 @@ func TestPoller_WritesToStores(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "sid-a" {
 		t.Errorf("AllSessionIDs = %v, want [sid-a]", ids)
+	}
+}
+
+// TestPoller_PersistsLabels verifies that when a Labeler is wired, Snapshot
+// persists the computed label set (e.g. workspace.scope) onto the session row
+// instead of the former hardcoded nil, so the DB read path can surface it in
+// status/tui. See pg2-4xbrm.
+func TestPoller_PersistsLabels(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := sqlite.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ws := service.NewWriteService(service.WriteDeps{
+		Sessions:      sqlite.NewSessionStore(db),
+		Blocks:        sqlite.NewBlockStore(db),
+		Weeks:         sqlite.NewWeekStore(db),
+		Contributions: sqlite.NewContributionStore(db),
+		Toggles:       sqlite.NewToggleStore(db),
+		Nudges:        sqlite.NewNudgeStore(db),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ws.Start(ctx)
+
+	dir := t.TempDir()
+	mustWrite(t, dir, "a.json", `{"pid":12345,"sessionId":"sid-a","cwd":"/p"}`)
+
+	p := &Poller{
+		SessionsDir:      dir,
+		PidAlive:         func(int) bool { return true },
+		WorkingThreshold: 30 * time.Second,
+		IdleThreshold:    10 * time.Minute,
+		Now:              time.Now,
+		WriteService:     ws,
+		Labeler: func(sv *aggregate.SessionView) map[string]string {
+			return map[string]string{"workspace.scope": "ziprecruiter"}
+		},
+	}
+	if _, _, err := p.Snapshot(ctx); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if err := ws.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	sess, err := sqlite.NewSessionStore(db).GetByID(ctx, "sid-a", store.DefaultFreshness())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("GetByID returned nil session")
+	}
+	if got := sess.Labels["workspace.scope"]; got != "ziprecruiter" {
+		t.Errorf("persisted Labels[workspace.scope] = %q; want %q (poller still hardcodes nil?)", got, "ziprecruiter")
 	}
 }
 

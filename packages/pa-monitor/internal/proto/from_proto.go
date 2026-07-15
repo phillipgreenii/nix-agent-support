@@ -149,6 +149,11 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	if len(env) > 0 {
 		out.Env = env
 	}
+	// Computed label set (workspace.scope etc.) — reconstructed so status/tui
+	// can display it (pg2-4xbrm).
+	if lbls := sv.GetLabels(); len(lbls) > 0 {
+		out.Labels = lbls
+	}
 	return out
 }
 

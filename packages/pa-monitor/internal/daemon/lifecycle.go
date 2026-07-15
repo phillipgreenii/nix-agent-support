@@ -134,6 +134,16 @@ type BlockWeekIDSetter interface {
 	SetActiveWeekID(id int64)
 }
 
+// SessionLabeler is an optional extension of PollerInterface. When the
+// PollerInterface value also implements it, RunWith injects a label function
+// wired to the daemon's label pipeline (detectors + decorators + cardinality
+// cap + per-session cache) so Snapshot PERSISTS each session's computed labels
+// (workspace.scope etc.) to the DB — the same pipeline that feeds OTEL, so the
+// stored labels and the emitted labels agree (pg2-4xbrm).
+type SessionLabeler interface {
+	SetLabeler(fn func(sv *aggregate.SessionView) map[string]string)
+}
+
 // When Poller is non-nil, each tick calls Snapshot, folds the result
 // into the shared state visible to gRPC handlers, and feeds the block
 // and week trackers (if provided).
@@ -436,6 +446,19 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// successful-empty result). Cached failures would otherwise freeze a wrong
 	// (empty) label set for the session's lifetime (ADR 0024 D5).
 	decorators := labels.AsFailable(opts.Decorators)
+
+	// Wire the poller's persistence labeler to the same pipeline that feeds
+	// OTEL so Snapshot stores workspace.scope etc. on the session row instead
+	// of nil (pg2-4xbrm). The closure captures `decorators`/`labelCache` by
+	// reference: both are reassigned/cleared on config reload below, and the
+	// closure runs on this (the tick) goroutine via Snapshot — race-free, same
+	// as updateGauges/updateSessionInfo. Snapshot runs each tick BEFORE those,
+	// so it warms the shared cache the OTEL calls then reuse.
+	if sl, ok := opts.Poller.(SessionLabeler); ok {
+		sl.SetLabeler(func(sv *aggregate.SessionView) map[string]string {
+			return labelsForSession(sv, opts.Detectors, decorators, labelCap, labelCache)
+		})
+	}
 
 	// configReloader (bead pg2-r1f1j.8): when enabled, re-reads the config file
 	// each tick and swaps in a freshly-rebuilt decorator pipeline whenever the

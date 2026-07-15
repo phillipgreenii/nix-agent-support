@@ -163,6 +163,9 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 		// column and is not the right value for per-block display.
 		CostUSD:       sc.BlockCostUSD,
 		AwaitingInput: sc.AwaitingInput,
+		// Carry the persisted label set (workspace.scope etc.) so the
+		// store->tree->wire path can surface it in status/tui (pg2-4xbrm).
+		Labels: sc.Labels,
 	}
 
 	// Reconstruct LastError from the stored fields. The escalation-aware

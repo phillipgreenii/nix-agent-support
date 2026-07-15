@@ -729,7 +729,13 @@ type SessionView struct {
 	// blocker names WHY a blocked session cannot proceed (ADR 0024): one of
 	// "human_input" | "human_authn" | "usage_limit" | "error". Empty when
 	// status != "blocked". New field number 30 (verified free; R8).
-	Blocker       string `protobuf:"bytes,30,opt,name=blocker,proto3" json:"blocker,omitempty"`
+	Blocker string `protobuf:"bytes,30,opt,name=blocker,proto3" json:"blocker,omitempty"`
+	// labels is the session's computed label set (workspace.scope, agent.*,
+	// repo.*, …) as produced by the daemon's label pipeline and persisted to
+	// the DB. Forwarded so status/tui can display e.g. workspace.scope. Unlike
+	// the raw env fields above, these are derived (detectors + decorators).
+	// Field number 31 (verified free). (pg2-4xbrm)
+	Labels        map[string]string `protobuf:"bytes,31,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -972,6 +978,13 @@ func (x *SessionView) GetBlocker() string {
 		return x.Blocker
 	}
 	return ""
+}
+
+func (x *SessionView) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
 }
 
 type Block struct {
@@ -2664,7 +2677,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
 	"\x05state\x18\x03 \x01(\tR\x05state\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\"\xd1\b\n" +
+	"\x03url\x18\x04 \x01(\tR\x03url\"\xcc\t\n" +
 	"\vSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -2700,7 +2713,11 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\rworkspace_env\x18\x1b \x01(\tR\fworkspaceEnv\x12@\n" +
 	"\x0elast_nudged_at\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\flastNudgedAt\x12,\n" +
 	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\x12\x18\n" +
-	"\ablocker\x18\x1e \x01(\tR\ablocker\"\xe0\x03\n" +
+	"\ablocker\x18\x1e \x01(\tR\ablocker\x12>\n" +
+	"\x06labels\x18\x1f \x03(\v2&.pa_monitor.v1.SessionView.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x03\n" +
 	"\x05Block\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\n" +
@@ -2850,7 +2867,7 @@ func file_internal_proto_pa_monitor_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_proto_pa_monitor_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_internal_proto_pa_monitor_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(CaffeinateProcess)(0),         // 0: pa_monitor.v1.CaffeinateProcess
 	(*GetStateRequest)(nil),        // 1: pa_monitor.v1.GetStateRequest
@@ -2888,71 +2905,73 @@ var file_internal_proto_pa_monitor_proto_goTypes = []any{
 	(*SessionDetail)(nil),          // 33: pa_monitor.v1.SessionDetail
 	(*GetPathInfoRequest)(nil),     // 34: pa_monitor.v1.GetPathInfoRequest
 	(*PathRollup)(nil),             // 35: pa_monitor.v1.PathRollup
-	(*timestamppb.Timestamp)(nil),  // 36: google.protobuf.Timestamp
+	nil,                            // 36: pa_monitor.v1.SessionView.LabelsEntry
+	(*timestamppb.Timestamp)(nil),  // 37: google.protobuf.Timestamp
 }
 var file_internal_proto_pa_monitor_proto_depIdxs = []int32{
-	36, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
-	36, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
+	37, // 0: pa_monitor.v1.PingResponse.ts:type_name -> google.protobuf.Timestamp
+	37, // 1: pa_monitor.v1.DaemonState.now:type_name -> google.protobuf.Timestamp
 	6,  // 2: pa_monitor.v1.DaemonState.dirs:type_name -> pa_monitor.v1.Directory
 	9,  // 3: pa_monitor.v1.DaemonState.active_block:type_name -> pa_monitor.v1.Block
 	10, // 4: pa_monitor.v1.DaemonState.active_week:type_name -> pa_monitor.v1.Week
-	36, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
+	37, // 5: pa_monitor.v1.DaemonState.window_resets_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: pa_monitor.v1.DaemonState.caffeinate_process:type_name -> pa_monitor.v1.CaffeinateProcess
-	36, // 7: pa_monitor.v1.DaemonState.seven_day_resets_at:type_name -> google.protobuf.Timestamp
-	36, // 8: pa_monitor.v1.DaemonState.limits_captured_at:type_name -> google.protobuf.Timestamp
-	36, // 9: pa_monitor.v1.DaemonState.five_hour_resets_at:type_name -> google.protobuf.Timestamp
+	37, // 7: pa_monitor.v1.DaemonState.seven_day_resets_at:type_name -> google.protobuf.Timestamp
+	37, // 8: pa_monitor.v1.DaemonState.limits_captured_at:type_name -> google.protobuf.Timestamp
+	37, // 9: pa_monitor.v1.DaemonState.five_hour_resets_at:type_name -> google.protobuf.Timestamp
 	7,  // 10: pa_monitor.v1.Directory.pr_info:type_name -> pa_monitor.v1.PRInfo
 	8,  // 11: pa_monitor.v1.Directory.sessions:type_name -> pa_monitor.v1.SessionView
-	36, // 12: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
-	36, // 13: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
-	36, // 14: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
-	36, // 15: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
-	36, // 16: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
-	36, // 17: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
-	36, // 18: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
-	36, // 19: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
-	36, // 20: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
-	0,  // 21: pa_monitor.v1.CaffeinateResponse.process:type_name -> pa_monitor.v1.CaffeinateProcess
-	24, // 22: pa_monitor.v1.BridgeMsg.register:type_name -> pa_monitor.v1.Register
-	25, // 23: pa_monitor.v1.BridgeMsg.heartbeat:type_name -> pa_monitor.v1.Heartbeat
-	27, // 24: pa_monitor.v1.BridgeMsg.result:type_name -> pa_monitor.v1.DeliverResult
-	5,  // 25: pa_monitor.v1.DaemonMsg.snapshot:type_name -> pa_monitor.v1.DaemonState
-	26, // 26: pa_monitor.v1.DaemonMsg.deliver:type_name -> pa_monitor.v1.Deliver
-	36, // 27: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
-	13, // 28: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
-	8,  // 29: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
-	28, // 30: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
-	29, // 31: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
-	6,  // 32: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
-	1,  // 33: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
-	2,  // 34: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
-	3,  // 35: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
-	11, // 36: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
-	30, // 37: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
-	32, // 38: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
-	34, // 39: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
-	14, // 40: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
-	16, // 41: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
-	18, // 42: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
-	20, // 43: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
-	22, // 44: pa_monitor.v1.PaMonitor.BridgeChannel:input_type -> pa_monitor.v1.BridgeMsg
-	5,  // 45: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
-	5,  // 46: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
-	4,  // 47: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
-	12, // 48: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
-	31, // 49: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
-	33, // 50: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
-	35, // 51: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
-	15, // 52: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
-	17, // 53: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
-	19, // 54: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
-	21, // 55: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
-	23, // 56: pa_monitor.v1.PaMonitor.BridgeChannel:output_type -> pa_monitor.v1.DaemonMsg
-	45, // [45:57] is the sub-list for method output_type
-	33, // [33:45] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	37, // 12: pa_monitor.v1.SessionView.started_at:type_name -> google.protobuf.Timestamp
+	37, // 13: pa_monitor.v1.SessionView.transcript_mtime:type_name -> google.protobuf.Timestamp
+	37, // 14: pa_monitor.v1.SessionView.rate_limit_resets_at:type_name -> google.protobuf.Timestamp
+	37, // 15: pa_monitor.v1.SessionView.last_nudged_at:type_name -> google.protobuf.Timestamp
+	36, // 16: pa_monitor.v1.SessionView.labels:type_name -> pa_monitor.v1.SessionView.LabelsEntry
+	37, // 17: pa_monitor.v1.Block.start_time:type_name -> google.protobuf.Timestamp
+	37, // 18: pa_monitor.v1.Block.end_time:type_name -> google.protobuf.Timestamp
+	37, // 19: pa_monitor.v1.Block.cap_hit_at:type_name -> google.protobuf.Timestamp
+	37, // 20: pa_monitor.v1.Week.cap_hit_at:type_name -> google.protobuf.Timestamp
+	37, // 21: pa_monitor.v1.CaffeinateResponse.until:type_name -> google.protobuf.Timestamp
+	0,  // 22: pa_monitor.v1.CaffeinateResponse.process:type_name -> pa_monitor.v1.CaffeinateProcess
+	24, // 23: pa_monitor.v1.BridgeMsg.register:type_name -> pa_monitor.v1.Register
+	25, // 24: pa_monitor.v1.BridgeMsg.heartbeat:type_name -> pa_monitor.v1.Heartbeat
+	27, // 25: pa_monitor.v1.BridgeMsg.result:type_name -> pa_monitor.v1.DeliverResult
+	5,  // 26: pa_monitor.v1.DaemonMsg.snapshot:type_name -> pa_monitor.v1.DaemonState
+	26, // 27: pa_monitor.v1.DaemonMsg.deliver:type_name -> pa_monitor.v1.Deliver
+	37, // 28: pa_monitor.v1.ApiError.at:type_name -> google.protobuf.Timestamp
+	13, // 29: pa_monitor.v1.GetSessionInfoRequest.selector:type_name -> pa_monitor.v1.Selector
+	8,  // 30: pa_monitor.v1.SessionDetail.view:type_name -> pa_monitor.v1.SessionView
+	28, // 31: pa_monitor.v1.SessionDetail.last_error:type_name -> pa_monitor.v1.ApiError
+	29, // 32: pa_monitor.v1.SessionDetail.pending_nudge:type_name -> pa_monitor.v1.PendingNudge
+	6,  // 33: pa_monitor.v1.PathRollup.directory:type_name -> pa_monitor.v1.Directory
+	1,  // 34: pa_monitor.v1.PaMonitor.GetState:input_type -> pa_monitor.v1.GetStateRequest
+	2,  // 35: pa_monitor.v1.PaMonitor.WatchState:input_type -> pa_monitor.v1.WatchStateRequest
+	3,  // 36: pa_monitor.v1.PaMonitor.Ping:input_type -> pa_monitor.v1.PingRequest
+	11, // 37: pa_monitor.v1.PaMonitor.Caffeinate:input_type -> pa_monitor.v1.CaffeinateRequest
+	30, // 38: pa_monitor.v1.PaMonitor.IsAnyBusy:input_type -> pa_monitor.v1.IsAnyBusyRequest
+	32, // 39: pa_monitor.v1.PaMonitor.GetSessionInfo:input_type -> pa_monitor.v1.GetSessionInfoRequest
+	34, // 40: pa_monitor.v1.PaMonitor.GetPathInfo:input_type -> pa_monitor.v1.GetPathInfoRequest
+	14, // 41: pa_monitor.v1.PaMonitor.NudgeQueue:input_type -> pa_monitor.v1.NudgeQueueRequest
+	16, // 42: pa_monitor.v1.PaMonitor.NudgeCancel:input_type -> pa_monitor.v1.NudgeCancelRequest
+	18, // 43: pa_monitor.v1.PaMonitor.SetAutoResume:input_type -> pa_monitor.v1.SetAutoResumeRequest
+	20, // 44: pa_monitor.v1.PaMonitor.RegisterBridge:input_type -> pa_monitor.v1.RegisterBridgeRequest
+	22, // 45: pa_monitor.v1.PaMonitor.BridgeChannel:input_type -> pa_monitor.v1.BridgeMsg
+	5,  // 46: pa_monitor.v1.PaMonitor.GetState:output_type -> pa_monitor.v1.DaemonState
+	5,  // 47: pa_monitor.v1.PaMonitor.WatchState:output_type -> pa_monitor.v1.DaemonState
+	4,  // 48: pa_monitor.v1.PaMonitor.Ping:output_type -> pa_monitor.v1.PingResponse
+	12, // 49: pa_monitor.v1.PaMonitor.Caffeinate:output_type -> pa_monitor.v1.CaffeinateResponse
+	31, // 50: pa_monitor.v1.PaMonitor.IsAnyBusy:output_type -> pa_monitor.v1.IsAnyBusyResponse
+	33, // 51: pa_monitor.v1.PaMonitor.GetSessionInfo:output_type -> pa_monitor.v1.SessionDetail
+	35, // 52: pa_monitor.v1.PaMonitor.GetPathInfo:output_type -> pa_monitor.v1.PathRollup
+	15, // 53: pa_monitor.v1.PaMonitor.NudgeQueue:output_type -> pa_monitor.v1.NudgeQueueResponse
+	17, // 54: pa_monitor.v1.PaMonitor.NudgeCancel:output_type -> pa_monitor.v1.NudgeCancelResponse
+	19, // 55: pa_monitor.v1.PaMonitor.SetAutoResume:output_type -> pa_monitor.v1.SetAutoResumeResponse
+	21, // 56: pa_monitor.v1.PaMonitor.RegisterBridge:output_type -> pa_monitor.v1.RegisterBridgeResponse
+	23, // 57: pa_monitor.v1.PaMonitor.BridgeChannel:output_type -> pa_monitor.v1.DaemonMsg
+	46, // [46:58] is the sub-list for method output_type
+	34, // [34:46] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_pa_monitor_proto_init() }
@@ -2981,7 +3000,7 @@ func file_internal_proto_pa_monitor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_pa_monitor_proto_rawDesc), len(file_internal_proto_pa_monitor_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   35,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

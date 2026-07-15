@@ -28,6 +28,29 @@ func TestDetailsShowsStatusAndBlocker(t *testing.T) {
 	}
 }
 
+// The details overlay must surface the session's workspace.scope label (from
+// the persisted label set) so a viewer can tell which workspace a session
+// belongs to (personal / gascity / ziprecruiter). It is shown only when the
+// label is present. See pg2-4xbrm.
+func TestDetailsShowsWorkspaceScope(t *testing.T) {
+	withScope := &aggregate.SessionView{
+		Session: &session.Session{SessionID: "id-scope"},
+		SessionEnrichment: aggregate.SessionEnrichment{
+			Labels: map[string]string{"workspace.scope": "ziprecruiter"},
+		},
+	}
+	out := RenderDetails(withScope, 120)
+	if !strings.Contains(out, "Scope:") || !strings.Contains(out, "ziprecruiter") {
+		t.Errorf("details missing workspace.scope:\n%s", out)
+	}
+
+	// Absent label: no Scope line (avoid a blank/misleading row).
+	noScope := &aggregate.SessionView{Session: &session.Session{SessionID: "id-noscope"}}
+	if out := RenderDetails(noScope, 120); strings.Contains(out, "Scope:") {
+		t.Errorf("details should omit Scope line when workspace.scope is absent:\n%s", out)
+	}
+}
+
 // TestDetailsStatusQualifierByState is the negative / complementary coverage to
 // TestDetailsShowsStatusAndBlocker (which asserts only that "working" appears and
 // the usage_limit qualifier renders). RenderDetails appends "/blocker" to the

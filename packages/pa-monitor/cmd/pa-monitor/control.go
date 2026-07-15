@@ -230,6 +230,11 @@ func runInfo(args []string) {
 	fmt.Printf("model:          %s\n", v.GetModel())
 	fmt.Printf("cwd:            %s\n", v.GetCwd())
 	fmt.Printf("branch:         %s\n", v.GetBranch())
+	// workspace.scope from the persisted label set (pg2-4xbrm); shown only when
+	// present so an unlabeled session has no empty line.
+	if scope := v.GetLabels()["workspace.scope"]; scope != "" {
+		fmt.Printf("scope:          %s\n", scope)
+	}
 	fmt.Printf("context_tokens: %d\n", v.GetContextTokens())
 	fmt.Printf("subagents:      %d\n", v.GetSubagentCount())
 	fmt.Printf("subshells:      %d\n", v.GetSubshellCount())

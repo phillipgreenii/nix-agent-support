@@ -132,6 +132,11 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 		out.GcAgent = sv.Env["GC_AGENT"]
 		out.WorkspaceEnv = sv.Env["WORKSPACE"]
 	}
+	// Computed label set (workspace.scope etc.) persisted on the session row —
+	// forwarded so status/tui can display it (pg2-4xbrm).
+	if len(sv.Labels) > 0 {
+		out.Labels = sv.Labels
+	}
 	return out
 }
 

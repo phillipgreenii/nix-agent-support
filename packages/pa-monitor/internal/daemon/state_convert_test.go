@@ -36,6 +36,32 @@ func TestConvertSessionWithContribution_PreservesLastErrorFromSubagent(t *testin
 	}
 }
 
+// convertSessionWithContribution must carry the persisted label set onto the
+// SessionView so the store->tree read path (and the gRPC/status/tui it feeds)
+// can surface workspace.scope after a daemon restart. See pg2-4xbrm.
+func TestConvertSessionWithContribution_CarriesLabels(t *testing.T) {
+	sc := &store.SessionWithContribution{
+		Session: store.Session{
+			SessionID: "sid-lbl",
+			Labels: map[string]string{
+				"workspace.scope": "ziprecruiter",
+				"agent.kind":      "polecat",
+			},
+		},
+	}
+
+	sv := convertSessionWithContribution(sc)
+	if sv == nil {
+		t.Fatal("convertSessionWithContribution returned nil")
+	}
+	if got := sv.Labels["workspace.scope"]; got != "ziprecruiter" {
+		t.Errorf("Labels[workspace.scope] = %q; want %q (labels dropped on the DB->view path)", got, "ziprecruiter")
+	}
+	if got := sv.Labels["agent.kind"]; got != "polecat" {
+		t.Errorf("Labels[agent.kind] = %q; want %q", got, "polecat")
+	}
+}
+
 // convertStateToAggregateTree must carry the block's status-line rate_limits
 // windows (ADR 0021 §6) onto the tree so they can be threaded to the wire.
 // A present value round-trips; an unset (nil / NULL) value stays unknown —

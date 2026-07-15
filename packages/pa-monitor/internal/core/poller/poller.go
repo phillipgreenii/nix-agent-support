@@ -72,6 +72,13 @@ type Poller struct {
 	// The in-memory aggregate.Tree path also remains until Task 19 cuts over.
 	WriteService *service.WriteService
 
+	// Labeler, when non-nil, computes the label set (workspace.scope, agent.*,
+	// etc.) for a session so Snapshot can PERSIST it on the session row instead
+	// of nil. The daemon wires this to its label pipeline (detectors +
+	// decorators); the same pipeline feeds OTEL, so the DB and OTEL agree.
+	// Nil (e.g. the TUI's read-only poller, or tests) persists no labels.
+	Labeler func(sv *aggregate.SessionView) map[string]string
+
 	// DB is used to look up the surrogate session id (SELECT id FROM sessions
 	// WHERE session_id = ?) so contribution rows can reference the correct
 	// parent. This is intentional short-term coupling; a later refactor will
@@ -99,6 +106,10 @@ func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
 
 // SetActiveWeekID implements daemon.BlockWeekIDSetter.
 func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
+
+// SetLabeler implements daemon.SessionLabeler. The daemon wires its label
+// pipeline here so Snapshot persists each session's computed labels (pg2-4xbrm).
+func (p *Poller) SetLabeler(fn func(sv *aggregate.SessionView) map[string]string) { p.Labeler = fn }
 
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
@@ -340,6 +351,10 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	if p.WriteService != nil {
 		nowUTC := now.UTC()
 		for _, sv := range tree.Sessions() {
+			var svLabels map[string]string
+			if p.Labeler != nil {
+				svLabels = p.Labeler(sv)
+			}
 			ss := store.Session{
 				SessionID:       sv.SessionID,
 				PID:             pidPtrIfAlive(sv.PID, sv.Session),
@@ -353,7 +368,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				Status:          sv.Status.String(),
 				Blocker:         sv.Blocker.String(),
 				FirstPrompt:     sv.FirstPrompt,
-				Labels:          nil, // populated when label pipeline runs in daemon
+				Labels:          svLabels, // computed by p.Labeler (daemon label pipeline); nil when unwired
 				TranscriptMTime: sv.TranscriptMTime,
 				StartedAt:       sv.StartedAt,
 				ContextTokens:   uint64(sv.ContextTokens),
