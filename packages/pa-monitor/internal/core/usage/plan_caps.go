@@ -1,7 +1,7 @@
 package usage
 
 // PlanCapUSD returns the per-5h-block soft cap for a plan tier. Figures are
-// approximate ccusage-published budget mappings. Update when Anthropic changes.
+// Anthropic-published plan limits. Update when Anthropic changes.
 // Unknown tiers return 0 (meaning: do not compute exhaust time).
 func PlanCapUSD(tier string) float64 {
 	switch tier {
