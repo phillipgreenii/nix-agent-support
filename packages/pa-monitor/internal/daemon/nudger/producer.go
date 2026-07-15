@@ -26,6 +26,31 @@ type TickContext struct {
 	// State the dispatcher has updated for past fires; producers read these
 	// for cancellation/escalation decisions.
 	Watermarks WatermarkView
+
+	// HasSurface reports whether pid currently has a terminal surface a nudge
+	// could be delivered to (a resolvable Signaler). It is the producer-side
+	// no-surface gate (bead pg2-gjekd): a surfaceless "ghost" session — a dead
+	// pid, or a live pid whose cmux pane closed and whose process detached from
+	// the cmux server ancestry — has nowhere to deliver, so auto-resume
+	// producers REAP it from the candidate set rather than enqueue an intent the
+	// dispatcher can only per-tick-suppress ("no_surface"). This is the deeper
+	// fix complementing pg2-2o0p7's dispatcher-side suppress-and-drop backstop.
+	//
+	// The daemon wires this from signal.ResolveSignaler over its full signaler
+	// slice (Detect-only, never Send — the same predicate the D5 keep-awake
+	// disjunct uses). Nil means "assume a surface is present" so tests and
+	// early-startup paths that don't wire a resolver keep their prior behavior.
+	HasSurface func(pid int) bool
+}
+
+// hasSurface reports whether pid has a deliverable surface per the HasSurface
+// predicate. A nil predicate defaults to true (surface assumed present) so
+// callers that do not wire a resolver are unaffected.
+func (ctx TickContext) hasSurface(pid int) bool {
+	if ctx.HasSurface == nil {
+		return true
+	}
+	return ctx.HasSurface(pid)
 }
 
 // WatermarkView is the nudger state visible to producers. Producers may

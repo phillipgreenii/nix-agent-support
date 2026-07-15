@@ -738,6 +738,17 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 					DisruptGrace:      opts.DisruptGrace,
 					EscalationAfter:   opts.EscalationAfter,
 					Watermarks:        wm,
+					// Producer-side no-surface gate (bead pg2-gjekd): reap
+					// surfaceless "ghost" sessions from the candidate set so they
+					// are never enqueued. Uses the FULL opts.NudgerSignalers
+					// (Detect-only, never Send) — the same predicate the D5
+					// keep-awake disjunct uses (hasUnattemptedNudgeableDisrupt),
+					// so a cmux-hosted target resolves without the daemon exec'ing
+					// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
+					// dispatcher-side suppress-and-drop backstop.
+					HasSurface: func(pid int) bool {
+						return signal.ResolveSignaler(opts.NudgerSignalers, pid) != nil
+					},
 				}
 				n.Reconcile(tctx)
 				// Annotate sessions BEFORE dispatch so clients see what's queued.

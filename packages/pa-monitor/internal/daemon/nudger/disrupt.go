@@ -58,6 +58,16 @@ func (p *DisruptProducer) reconcileSession(ctx TickContext, store *PendingStore,
 		cancel()
 		return
 	}
+	// Producer-side no-surface gate (bead pg2-gjekd): a surfaceless "ghost"
+	// session has nowhere to deliver an auto-resume, so reap it from the
+	// candidate set instead of enqueuing an intent the dispatcher can only
+	// per-tick-suppress ("no_surface"). Deeper fix complementing pg2-2o0p7's
+	// dispatcher-side suppress-and-drop backstop. Checked before the error gates
+	// so a surfaceless session is reaped regardless of its LastError.
+	if !ctx.hasSurface(s.PID) {
+		cancel()
+		return
+	}
 	if s.LastError == nil || !s.LastError.IsTerminal {
 		cancel()
 		return

@@ -54,6 +54,13 @@ func (p *LimitPauseProducer) Reconcile(ctx TickContext, store *PendingStore) {
 				store.Cancel(key)
 				continue
 			}
+			// Producer-side no-surface gate (bead pg2-gjekd): reap a surfaceless
+			// "ghost" session from the candidate set — nowhere to deliver, so
+			// never enqueue it (and thus never per-tick-suppress it).
+			if !ctx.hasSurface(s.PID) {
+				store.Cancel(key)
+				continue
+			}
 			le := s.LastError
 			if le == nil || !le.IsTerminal || le.Kind != transcript.ErrRateLimit || !s.RateLimitResetsAt.IsZero() || le.FromSubagent {
 				store.Cancel(key)

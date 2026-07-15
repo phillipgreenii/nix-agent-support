@@ -35,11 +35,19 @@ func (p *WindowResetProducer) Reconcile(ctx TickContext, store *PendingStore) {
 	}
 	for _, dir := range ctx.Tree.Dirs {
 		for _, s := range dir.Sessions {
+			key := IntentKey{SessionID: s.SessionID, Source: SourceWindowReset}
 			if s.Status == session.Working {
 				continue
 			}
+			// Producer-side no-surface gate (bead pg2-gjekd): reap a surfaceless
+			// "ghost" session from the candidate set — nowhere to deliver, so
+			// never enqueue it (and thus never per-tick-suppress it).
+			if !ctx.hasSurface(s.PID) {
+				store.Cancel(key)
+				continue
+			}
 			store.Add(NudgeIntent{
-				Key:       IntentKey{SessionID: s.SessionID, Source: SourceWindowReset},
+				Key:       key,
 				Text:      ctx.AutoResumeMessage,
 				EmittedAt: ctx.Now,
 			})
