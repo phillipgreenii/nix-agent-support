@@ -90,9 +90,15 @@ type OTelConfig struct {
 // daemon turns each entry into a labels.Decorator that shells out to the
 // command on every session-label refresh. See ADR-0011 for why per-host
 // extension lives here and not in detector code.
+//
+// Command is shell-split into a binary + args (the binary must be under
+// /nix/store/), and Env carries extra environment variables forwarded to the
+// child — so a generic decorator can be configured with flags and env from the
+// [decorator.env] table instead of a bespoke writeShellScriptBin wrapper.
 type DecoratorConfig struct {
 	Name      string
 	Command   string
+	Env       map[string]string
 	TimeoutMS int
 }
 
@@ -140,9 +146,10 @@ type tomlModelPricing struct {
 }
 
 type tomlDecorator struct {
-	Name      string `toml:"name"`
-	Command   string `toml:"command"`
-	TimeoutMS *int   `toml:"timeout_ms"`
+	Name      string            `toml:"name"`
+	Command   string            `toml:"command"`
+	Env       map[string]string `toml:"env"`
+	TimeoutMS *int              `toml:"timeout_ms"`
 }
 
 type tomlOTel struct {
@@ -286,7 +293,7 @@ func apply(cfg *Config, raw tomlConfig) {
 		}
 	}
 	for _, d := range raw.Decorators {
-		dc := DecoratorConfig{Name: d.Name, Command: d.Command}
+		dc := DecoratorConfig{Name: d.Name, Command: d.Command, Env: d.Env}
 		if d.TimeoutMS != nil {
 			dc.TimeoutMS = *d.TimeoutMS
 		}

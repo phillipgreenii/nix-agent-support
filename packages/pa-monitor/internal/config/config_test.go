@@ -390,3 +390,44 @@ command = "/nix/store/def-pa-monitor-decorator-gc/bin/pa-monitor-decorator-gc"
 		t.Errorf("Decorators[1] = %+v (TimeoutMS 0 means use runner default)", cfg.Decorators[1])
 	}
 }
+
+// TestConfigDecoratorEnvRoundTrip verifies a per-decorator [decorator.env] table
+// parses into cfg.Decorators[i].Env (bead pg2-r1f1j.10). This lets a generic
+// decorator receive its configuration (e.g. PA_MONITOR_SCOPE_RULES) without a
+// writeShellScriptBin wrapper, mirroring the [otel.resource_attributes] string-map
+// convention.
+func TestConfigDecoratorEnvRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[[decorator]]
+name = "scope"
+command = "/nix/store/abc-generic-decorator/bin/decorator -rule scope"
+timeout_ms = 1500
+
+[decorator.env]
+PA_MONITOR_SCOPE_RULES = "ziprecruiter:~/zr"
+EXTRA = "1"
+
+[[decorator]]
+name = "no-env"
+command = "/nix/store/def-decorator/bin/decorator"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Decorators) != 2 {
+		t.Fatalf("Decorators: got %d entries, want 2", len(cfg.Decorators))
+	}
+	got := cfg.Decorators[0].Env
+	if got["PA_MONITOR_SCOPE_RULES"] != "ziprecruiter:~/zr" || got["EXTRA"] != "1" {
+		t.Errorf("Decorators[0].Env = %+v", got)
+	}
+	if cfg.Decorators[1].Env != nil {
+		t.Errorf("Decorators[1].Env = %+v, want nil for a decorator with no [decorator.env]", cfg.Decorators[1].Env)
+	}
+}

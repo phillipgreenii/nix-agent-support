@@ -111,3 +111,37 @@ func TestDecorator_DetectOK_FailureReportsNotOK(t *testing.T) {
 		t.Errorf("expected (nil,false) on timeout, got (%+v,%v)", set, ok)
 	}
 }
+
+// TestDecorator_PassesArgs confirms end-to-end that argv split from the config
+// command reaches the child process (bead pg2-r1f1j.10). The fake decorator
+// echoes its first two positional args back as labels.
+func TestDecorator_PassesArgs(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "args-decorator")
+	script := "#!/bin/sh\nprintf '{\"labels\":{\"a1\":\"%s\",\"a2\":\"%s\"}}' \"$1\" \"$2\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := newDecoratorRawArgv("args", []string{bin, "-rule", "scope"}, nil, 2000)
+	got := d.Detect(Session{ID: "s1"})
+	if got["a1"] != "-rule" || got["a2"] != "scope" {
+		t.Errorf("args not forwarded, got %+v", got)
+	}
+}
+
+// TestDecorator_ForwardsConfigEnv confirms end-to-end that a config-provided env
+// var reaches the child (bead pg2-r1f1j.10). The fake decorator echoes the
+// forwarded var back as a label; the base env alone would leave it empty.
+func TestDecorator_ForwardsConfigEnv(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "env-decorator")
+	script := "#!/bin/sh\nprintf '{\"labels\":{\"scope\":\"%s\"}}' \"$PA_MONITOR_SCOPE_RULES\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := newDecoratorRawArgv("env", []string{bin}, map[string]string{"PA_MONITOR_SCOPE_RULES": "zr-rules"}, 2000)
+	got := d.Detect(Session{ID: "s1"})
+	if got["scope"] != "zr-rules" {
+		t.Errorf("config env not forwarded, got %+v", got)
+	}
+}

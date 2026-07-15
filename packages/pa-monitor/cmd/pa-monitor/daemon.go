@@ -311,6 +311,7 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 		dec, err := labels.NewDecorator(labels.DecoratorConfig{
 			Name:      c.Name,
 			Command:   c.Command,
+			Env:       c.Env,
 			TimeoutMS: c.TimeoutMS,
 		})
 		if err != nil {

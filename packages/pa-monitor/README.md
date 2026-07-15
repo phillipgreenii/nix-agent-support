@@ -140,7 +140,21 @@ Generic label keys (the contract) populated by built-in detectors and shell-out 
 
 `workspace.terminal`, `workspace.scope`, `workspace.project`, `workspace.repo`, `agent.kind`, `agent.role`, `agent.mode`, `model`, `plan_tier`, `block.id`, `week.id`.
 
-Consumer-specific values (e.g. `workspace.scope=zr`) come from external shell-out decorators registered via the nix module. Decorators must reside under `/nix/store/` — paths are `filepath.Clean`-canonicalised and prefix-checked.
+Consumer-specific values (e.g. `workspace.scope=zr`) come from external shell-out decorators registered via the nix module. Decorators must reside under `/nix/store/` — the binary path is `filepath.Clean`-canonicalised and prefix-checked.
+
+A decorator's `command` is a shell-words string: the first word is the `/nix/store/` binary and any remaining words are passed as arguments, and an optional `[decorator.env]` table forwards extra environment variables to the child (merged onto the minimal base env of `PA_MONITOR_DECORATE=1` + a fixed `PATH`). This lets a **generic** decorator be configured with flags and env directly from `config.toml` — no per-consumer `writeShellScriptBin` wrapper is required:
+
+```toml
+[[decorator]]
+name = "scope"
+command = "/nix/store/…-pa-monitor-decorator/bin/decorator -rule scope"
+timeout_ms = 1500
+
+[decorator.env]
+PA_MONITOR_SCOPE_RULES = "ziprecruiter:~/zr"
+```
+
+A single-path `command` with no arguments and no `[decorator.env]` behaves exactly as before.
 
 ## Storage (XDG)
 
