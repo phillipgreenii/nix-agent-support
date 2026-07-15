@@ -5,8 +5,8 @@ description: >-
   wrapup", "wrap up the session", "land the plane", "let's call it / call it here", "finish up
   before I go", "clean up and stop". Autonomously lands the work this session touched: commits
   outstanding changes, closes completed beads and files beads for discovered + unfinished work,
-  runs the repo's test/lint/build gates, integrates each touched repo (local ff-merge to main,
-  or push branch + open/update PR for PR-based repos), removes spent branches and worktrees,
+  runs the repo's test/lint/build gates, integrates each touched repo via the integrate-branch
+  skill (local ff-merge, or push + open/update PR — detected per repo), removes spent branches and worktrees,
   syncs beads to the remote, and — if any work carries over, including work deferred to next
   session — writes a single P0 next-session bead (or, in repos without beads, records the same
   in a committed markdown handoff doc) so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
@@ -62,41 +62,25 @@ If after this you're still unsure whether a given branch/repo/change belongs to 
 
 ## Reading the terrain
 
-The same ritual has to work in three shapes. Detect which you're in, don't assume:
+Session hygiene has to work in two workspace shapes. Detect which you're in, don't assume:
 
 - **Standalone repo** — cwd is (or is under) a single git repo, no `pn-workspace.toml`
   upward. Operate on that one repo.
 - **pn workspace** — a `pn-workspace.toml` exists at/above cwd (or `PN_WORKSPACE_ROOT` is
   set). Multiple repos share a root and may share coordinated workforest _sets_. Scope still
   applies: act only on the repos this session changed, but be aware that a `pn` workforest set
-  spans repos and is removed as a unit. See `references/integration-and-cleanup.md`.
-- **PR-based repo** — a repo where finished work lands via pull request, not a local merge.
-  Detected per repo (below), not assumed globally — in this workspace `homelab` and the
-  `nix-*` repos can differ.
+  spans repos and is torn down as a unit — that cross-repo teardown is wrap-up's to coordinate
+  (see `references/cleanup.md`).
 
-Per-repo integration flow is **detected, not hardcoded**. For each in-scope repo on a feature
-branch:
-
-- An **open PR** for the branch (`gh pr view` / forgejo / `pg-pr pr show`) **or** a `pg-pr`
-  merge-request tracker bead (`bd list --type=merge-request`) → **PR flow**: push the branch,
-  open or update the PR, do **not** merge it.
-- **Neither** → **local ff-merge flow**: rebase onto `main`, fast-forward merge into `main`,
-  then retire the branch + worktree. **No push** — landing on local `main` _is_ the
-  integration; publishing `main` to a remote is not part of wrapup for a merge-to-main repo.
-- Work done **directly on `main`** → just commit; there's nothing to merge, push, or retire.
-
-Pushing is a **PR-flow-only** action: you push a branch so it can be reviewed. A merge-to-main
-repo never pushes during wrapup — that's the single most important thing to get right here, and
-it's why this skill won't trip a "don't push to the default branch" guard.
-
-Why PRs are never auto-merged: a PR is a request for _someone else's_ judgment, and merging it
-is that person's call (this mirrors the `pg-pr` rule that agents never run `pg-pr pr merge`).
-A local ff-merge is different — it's your own linear history on your own checkout, so landing
-it autonomously is exactly the habit this skill automates.
-
-The mechanics of each flow — exact commands, the bitbucket mirror, coordinated workforest
-teardown, conflict handling — live in **`references/integration-and-cleanup.md`**. Read it
-before running the integrate/cleanup phases.
+**Integration is not wrap-up's to decide or hand-roll.** How a repo's finished work lands —
+local ff-merge, a pull request, or an org-declared method — is chosen and executed by the
+**`integrate-branch`** skill, which wrap-up invokes per in-scope repo in phase 5.
+`integrate-branch` runs its own advisory detector, picks the method, does the rebase / merge /
+push / PR, and (for a local ff-merge) retires the standalone worktree + branch; it never
+auto-merges a PR. wrap-up does none of that itself — it gates first (phase 3), invokes
+`integrate-branch`, and reads back each repo's outcome to drive capture and cleanup. Keeping the
+integration flow in one place is deliberate: a wrap-up-triggered landing and a direct
+`integrate-branch` invocation must not diverge.
 
 ## Where captured work goes: beads, or a markdown handoff
 
@@ -123,7 +107,9 @@ last and only after the gates pass.
 ### 1. Take stock (read-only)
 
 Build the in-scope set per "Why scope is the whole game" above. For each in-scope repo,
-capture: current branch, worktree kind, dirty state, commits ahead of `main`, detected flow.
+capture: current branch, worktree kind, dirty state, and commits ahead of `main` (i.e.
+whether there's anything to integrate). Method detection — ff-merge vs PR vs a declared
+handler — is `integrate-branch`'s job in phase 5, not wrap-up's; don't pre-decide it here.
 Identify the repo's quality-gate commands (see phase 3). Produce nothing destructive here —
 this is the picture everything else acts on.
 
@@ -182,38 +168,49 @@ End git commit messages with the trailer:
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ```
 
-### 5. Integrate (per detected flow)
+### 5. Integrate: invoke `integrate-branch` per in-scope repo
 
-For each in-scope repo, follow its detected flow from "Reading the terrain", using the
-commands in `references/integration-and-cleanup.md`:
+Integration is delegated **in full** to the **`integrate-branch`** skill — wrap-up does not
+rebase, merge, push, or open/update PRs itself. For each in-scope repo that has work to land,
+`cd` into that repo (or its worktree) and invoke the `integrate-branch` skill. It runs its own
+advisory detector, picks the method (local ff-merge, pull request, or an org-declared handler),
+and executes it end to end: a local ff-merge lands on that repo's local `main` (no push) and
+retires the standalone worktree + branch; a PR flow pushes the one branch and opens/updates the
+PR without merging. A repo already on `main` with nothing ahead is a no-op — `integrate-branch`
+reports that and does nothing.
 
-- **Local ff-merge:** rebase the branch onto fresh `main`, fast-forward merge into `main`.
-  That ff-merge _is_ the integration — **do not push**. If the rebase hits a non-trivial
-  conflict, **stop** for that repo — don't force it; keep the branch and roll it into the
-  handoff. (If the `merge-executor` agent is available you may dispatch it for this
-  rebase+ff-merge+cleanup step; it has the same stop-on-conflict contract.)
-- **PR flow:** push the branch to its remote and open or update the PR (prefer the `pg-pr`
-  CLI where present). Do not merge it.
-- **On `main`:** commit only — nothing to merge or push.
+Read back each repo's outcome; it drives capture (phases 2/7) and cleanup (phase 6):
 
-When you do push (PR flow only), push just the one branch for the repo this session touched —
-never `pn workspace push` (which hits untouched repos and violates scope).
+- **`landed`** — local ff-merge completed; that repo's merged branch + standalone worktree are
+  already retired.
+- **`pr-opened` / `pr-updated`** — the branch was pushed and the PR opened/updated (never
+  merged); branch + worktree are kept.
+- **`stopped:<reason>`** — integration did not complete (e.g. a rebase conflict, or a canonical
+  off-primary/dirty anomaly halt); branch + worktree are intact. Don't force it — roll the reason
+  into the handoff (phase 7).
+
+Invoke `integrate-branch` once per in-scope repo — never `pn workspace push` (which hits
+untouched repos and violates scope). Keeping the whole integration flow inside `integrate-branch`
+is precisely what guarantees a wrap-up-triggered landing and a direct `integrate-branch`
+invocation never diverge.
 
 ### 6. Clean up — only what's spent
 
-Cleanup is the most destructive phase, so it's gated on "this work is truly done and landed."
+`integrate-branch` already retired each repo's own worktree + branch as its phase-5 outcome
+dictated (`landed` → the standalone worktree and merged branch were removed; `pr-opened` /
+`pr-updated` / `stopped:*` → kept by design). Do **not** repeat that per-repo retirement here.
+What's left for wrap-up is the cleanup `integrate-branch` doesn't own — still the most
+destructive work, so it's gated on "this work is truly done and landed":
 
-- **Local ff-merge repos** whose branch is now merged into `main`: retire the worktree, then
-  delete the branch, then prune. For a standalone worktree: `git worktree remove` +
-  `git branch -d`. For a `pn` coordinated set: only `pn workspace workforest remove` the set
-  once **every** repo in the set is clean and integrated — otherwise keep it and note which
-  repo blocks teardown.
-- **PR-flow repos:** keep the branch and worktree — the work isn't merged yet. They get
-  retired in a future wrapup after the PR lands.
+- **`pn` coordinated workforest set:** a set is one branch materialized across _every_ workspace
+  repo at once, so `integrate-branch` (which acts one repo at a time) can't tear it down —
+  wrap-up coordinates that. Remove the set only once **every** repo in it reported `landed`; if
+  any repo is `pr-opened` / `pr-updated` / `stopped:*`, keep the whole set and note which repo
+  blocks teardown (removing it would strand that work).
 - **Stashes:** clear only stashes this session created. Pre-existing stashes are out of scope;
   leave them and list them.
 
-Details and the exact command order are in `references/integration-and-cleanup.md`.
+Exact commands and the outcome-to-cleanup mapping are in `references/cleanup.md`.
 
 ### 7. Decide done vs. more-work, and hand off
 
@@ -356,14 +353,20 @@ rather than file a second" rule for beads.
   rather than duplicated — is identical.
 - **Never touch out-of-scope work** — unrelated branches, others' worktrees, pre-existing
   stashes, dirty files you didn't create. Skip and report.
-- **Never auto-merge a PR.** Pushing + opening/updating is the boundary.
-- **Never land red code.** A failed gate stops integration for that repo.
-- **Never `pn workspace push`/`rebase`** for a scoped wrapup — they hit every repo. Use
-  per-repo git.
+- **Integration is `integrate-branch`'s job.** wrap-up never rebases, merges, pushes, or
+  opens/merges PRs itself — it gates first, invokes `integrate-branch` per in-scope repo, and
+  acts on the outcome. (That's also why a PR is never auto-merged and a merge-to-main repo never
+  pushes during wrapup — those are the handlers' contracts, not steps wrap-up re-implements.)
+- **Never land red code.** A failed gate stops integration for that repo — don't invoke
+  `integrate-branch` on a repo whose gates are red.
+- **A stopped integration stays stopped.** When `integrate-branch` returns `stopped:<reason>`
+  (e.g. a rebase conflict or canonical anomaly), don't force-resolve or blindly retry — keep the
+  branch/worktree and roll the reason into the handoff.
+- **Never `pn workspace push`/`rebase`** for a scoped wrapup — they hit every repo. Integrate
+  per repo via `integrate-branch`.
 - **Don't reconfigure beads to local.** Beads writes go to the shared remote automatically in
   server mode; if beads access fails, stop and surface it rather than switching to local
   (project rule).
-- **Stop on non-trivial merge conflicts** — don't force-resolve; keep the branch and hand off.
 
 ## End-of-run summary
 
@@ -372,11 +375,11 @@ Close with a compact report the user can scan without opening anything:
 ```
 Session wrapup — <standalone | pn workspace>
 
-Integrated:
-| repo      | flow         | result                                  |
+Integrated (via `integrate-branch`):
+| repo      | outcome      | result                                  |
 |-----------|--------------|-----------------------------------------|
-| homelab   | local merge  | feat-x → main (ff-merge); worktree removed |
-| nix-personal | PR        | branch pushed, PR #42 updated (unmerged) |
+| homelab   | landed       | feat-x → main (ff-merge); worktree removed |
+| nix-personal | pr-updated | branch pushed, PR #42 updated (unmerged) |
 
 Beads: closed 3 (tc-12, tc-13, tc-15); filed 2 (tc-88 follow-up, tc-89 bug).
 Next session: P0 tc-90 — resume nix-personal PR #42 after review.
@@ -393,19 +396,18 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                            | command                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| in-progress beads               | `bd list --status in_progress`                                                 |
-| PR-tracker beads                | `bd list --type=merge-request`                                                 |
-| close finished work             | `bd close <id> [<id>...] --reason="..."`                                       |
-| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                  |
-| dirty state                     | `git status` ; ahead of main: `git log main..`                                 |
-| detect PR (per repo)            | `gh pr view` / `pg-pr pr show` / `bd list --type=merge-request`                |
-| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`    |
-| local ff-merge + cleanup        | see `references/integration-and-cleanup.md`                                    |
-| push branch (PR flow only)      | `git push -u origin <branch>` (NOT `pn workspace push`)                        |
-| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when whole set clean)          |
-| prune stale worktree admin      | `pn workspace workforest prune`                                                |
-| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                           |
-| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)") |
-| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                             |
+| need                            | command                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| in-progress beads               | `bd list --status in_progress`                                                       |
+| PR-tracker beads                | `bd list --type=merge-request`                                                       |
+| close finished work             | `bd close <id> [<id>...] --reason="..."`                                             |
+| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                        |
+| dirty state                     | `git status` ; ahead of main: `git log main..`                                       |
+| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`          |
+| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree) |
+| set teardown / stash cleanup    | see `references/cleanup.md`                                                          |
+| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)   |
+| prune stale worktree admin      | `pn workspace workforest prune`                                                      |
+| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                 |
+| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")       |
+| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                   |
