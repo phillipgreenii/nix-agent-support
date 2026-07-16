@@ -140,6 +140,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		JIRA:               mapJIRA(p.JIRA),
 		Beads:              mapBeads(p.BeadsDeps),
 		CoOwned:            p.Ownership == ownership.CoOwned,
+		HasConflicts:       p.PR.HasConflict(),
 	}
 }
 
@@ -167,6 +168,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl
 		NeedsAttention:  need,
 		AttentionReason: reason,
 		MatchReason:     reasons,
+		HasConflicts:    p.PR.HasConflict(),
 	}
 }
 

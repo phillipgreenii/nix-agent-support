@@ -421,3 +421,39 @@ func TestBuild_CoOwnedInMinePanelBadged(t *testing.T) {
 		t.Errorf("MineRow.CoOwned = false, want true")
 	}
 }
+
+// TestBuild_MineConflictFlags verifies a mine PR flagged CONFLICTING by GitHub
+// surfaces HasConflicts on its MineRow.
+func TestBuild_MineConflictFlags(t *testing.T) {
+	in := BuilderInput{
+		Self: "me",
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 1, Author: "me", Mergeable: "CONFLICTING"},
+			Ownership: ownership.Mine,
+		}},
+	}
+	out := Build(in)
+	if len(out.Mine) != 1 {
+		t.Fatalf("want 1 mine row, got %d", len(out.Mine))
+	}
+	if !out.Mine[0].HasConflicts {
+		t.Errorf("mine HasConflicts = %v, want true", out.Mine[0].HasConflicts)
+	}
+}
+
+// TestBuild_TeamConflictFlag verifies a team PR flagged DIRTY by GitHub
+// surfaces HasConflicts on its TeamRow.
+func TestBuild_TeamConflictFlag(t *testing.T) {
+	in := BuilderInput{
+		Self:        "me",
+		TeamMembers: []string{"you"},
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 2, Author: "you", Draft: false, MergeStateStatus: "DIRTY"},
+			Ownership: ownership.Team,
+		}},
+	}
+	out := Build(in)
+	if len(out.Team) != 1 || !out.Team[0].HasConflicts {
+		t.Fatalf("want 1 team row with HasConflicts; got %d rows", len(out.Team))
+	}
+}

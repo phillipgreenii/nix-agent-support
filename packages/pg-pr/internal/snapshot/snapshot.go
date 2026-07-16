@@ -36,6 +36,10 @@ type MineRow struct {
 	// CoOwned marks a teammate-authored PR I have pushed commits onto (I can act
 	// on it but did not open it). Rendered in the Mine panel with a badge.
 	CoOwned bool `json:"co_owned,omitempty"`
+	// HasConflicts is true when GitHub signals a merge conflict (CONFLICTING/DIRTY).
+	// On a Mine-panel row (mine/co-owned) this IS the "resolve conflicts" nudge —
+	// the panel is already scoped to PRs I can fix.
+	HasConflicts bool `json:"has_conflicts,omitempty"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:
@@ -66,6 +70,10 @@ type TeamRow struct {
 	// PR the ingest surfaced but none of the reasons currently identify (e.g. a
 	// review-requested PR before the B2 GraphQL node populates ReviewRequestedOfMe).
 	MatchReason []string `json:"match_reason,omitempty"`
+	// HasConflicts is true when GitHub signals a merge conflict; a conflicting
+	// team PR is also dampened out of NeedsAttention (not worth reviewing until
+	// the author rebases).
+	HasConflicts bool `json:"has_conflicts,omitempty"`
 }
 
 // JIRAItem is one resolved JIRA issue referenced by a PR.
