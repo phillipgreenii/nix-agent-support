@@ -33,6 +33,9 @@ type MineRow struct {
 	NeedsMergeReminder bool       `json:"needs_merge_reminder"`
 	JIRA               []JIRAItem `json:"jira"`
 	Beads              []BeadItem `json:"beads"`
+	// CoOwned marks a teammate-authored PR I have pushed commits onto (I can act
+	// on it but did not open it). Rendered in the Mine panel with a badge.
+	CoOwned bool `json:"co_owned,omitempty"`
 }
 
 // TeamRow is one row in the "PRs to Review" table (the not-mine review set:

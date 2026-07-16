@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -30,14 +31,14 @@ func TestBuildSplitsMineFromReview(t *testing.T) {
 		Registry:            reg,
 		PRs: []PRInput{
 			// Mine: authored by Self
-			{PR: api.PR{Repo: "org/repo", Number: 1, Author: "alice", Title: "my PR", URL: "u1"}},
+			{PR: api.PR{Repo: "org/repo", Number: 1, Author: "alice", Title: "my PR", URL: "u1"}, Ownership: ownership.Mine},
 			// To-review: non-draft team member
-			{PR: api.PR{Repo: "org/repo", Number: 2, Author: "bob", Title: "bob PR", URL: "u2", Draft: false, Additions: 10, Deletions: 5, ChangedFiles: 3}},
+			{PR: api.PR{Repo: "org/repo", Number: 2, Author: "bob", Title: "bob PR", URL: "u2", Draft: false, Additions: 10, Deletions: 5, ChangedFiles: 3}, Ownership: ownership.Team},
 			// Excluded: a DRAFT that isn't mine
-			{PR: api.PR{Repo: "org/repo", Number: 3, Author: "carol", Title: "carol draft", URL: "u3", Draft: true}},
+			{PR: api.PR{Repo: "org/repo", Number: 3, Author: "carol", Title: "carol draft", URL: "u3", Draft: true}, Ownership: ownership.Team},
 			// To-review: non-team, non-self, non-draft — ingest surfaced it because
 			// review was requested of me (a live reason, so it survives the B5 guard)
-			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "review PR", URL: "u4", ReviewRequestedOfMe: true}},
+			{PR: api.PR{Repo: "org/repo", Number: 4, Author: "zara", Title: "review PR", URL: "u4", ReviewRequestedOfMe: true}, Ownership: ownership.Team},
 		},
 	}
 
@@ -74,10 +75,10 @@ func TestBuild_MatchReasons(t *testing.T) {
 		WatchLabels: []string{"team/findev", "team/jvm-guild"},
 		Registry:    reg,
 		PRs: []PRInput{
-			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}},                                                                // team-authored
-			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}},                                    // requested
-			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"team/findev", "unrelated"}}},                  // labeled
-			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"team/jvm-guild"}}}, // all three
+			{PR: api.PR{Repo: "o/r", Number: 2, Author: "bob"}, Ownership: ownership.Team},                                                                // team-authored
+			{PR: api.PR{Repo: "o/r", Number: 5, Author: "zara", ReviewRequestedOfMe: true}, Ownership: ownership.Team},                                    // requested
+			{PR: api.PR{Repo: "o/r", Number: 6, Author: "yin", Labels: []string{"team/findev", "unrelated"}}, Ownership: ownership.Team},                  // labeled
+			{PR: api.PR{Repo: "o/r", Number: 7, Author: "bob", ReviewRequestedOfMe: true, Labels: []string{"team/jvm-guild"}}, Ownership: ownership.Team}, // all three
 		},
 	}
 	snap := Build(in)
@@ -106,7 +107,7 @@ func TestBuild_MinePRStaysMineEvenDraft(t *testing.T) {
 	snap := Build(BuilderInput{
 		Self:     "alice",
 		Registry: reg,
-		PRs:      []PRInput{{PR: api.PR{Repo: "o/r", Number: 1, Author: "alice", Draft: true}}},
+		PRs:      []PRInput{{PR: api.PR{Repo: "o/r", Number: 1, Author: "alice", Draft: true}, Ownership: ownership.Mine}},
 	})
 	if len(snap.Mine) != 1 || len(snap.Team) != 0 {
 		t.Errorf("my draft PR must be Mine, not review set: mine=%+v team=%+v", snap.Mine, snap.Team)
@@ -129,7 +130,7 @@ func TestBuildExcludesReasonlessReviewPR(t *testing.T) {
 		PRs: []PRInput{
 			// non-mine, non-draft, but NO reason: author is not on the team, not
 			// requested of me, and carries no watch label.
-			{PR: api.PR{Repo: "o/r", Number: 8, Author: "zara", Labels: []string{"unrelated"}}},
+			{PR: api.PR{Repo: "o/r", Number: 8, Author: "zara", Labels: []string{"unrelated"}}, Ownership: ownership.Team},
 		},
 	})
 	if len(snap.Team) != 0 {
@@ -162,7 +163,8 @@ func TestBuildDerivesApprovalAndWaiting(t *testing.T) {
 		Registry:            reg,
 		PRs: []PRInput{
 			{
-				PR: api.PR{Repo: "org/repo", Number: 5, Author: "alice", Title: "feat", URL: "u5"},
+				PR:        api.PR{Repo: "org/repo", Number: 5, Author: "alice", Title: "feat", URL: "u5"},
+				Ownership: ownership.Mine,
 				Reviews: []api.Review{
 					{ID: "r1", Author: "humanreviewer", State: "APPROVED", Body: "LGTM"},
 					{ID: "r2", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve\nDetails here"},
@@ -211,11 +213,13 @@ func TestBuildEmptyArraysNotNil(t *testing.T) {
 		Registry:            reg,
 		PRs: []PRInput{
 			{
-				PR: api.PR{Repo: "org/repo", Number: 10, Author: "alice", Title: "empty", URL: "u10"},
+				PR:        api.PR{Repo: "org/repo", Number: 10, Author: "alice", Title: "empty", URL: "u10"},
+				Ownership: ownership.Mine,
 				// No JIRA, no BeadsDeps
 			},
 			{
-				PR: api.PR{Repo: "org/repo", Number: 11, Author: "bob", Title: "team empty", URL: "u11"},
+				PR:        api.PR{Repo: "org/repo", Number: 11, Author: "bob", Title: "team empty", URL: "u11"},
+				Ownership: ownership.Team,
 				// No JIRA
 			},
 		},
@@ -280,7 +284,8 @@ func TestBuildAgentApprovedViaInlineCommentIgnored(t *testing.T) {
 		Registry:            reg,
 		PRs: []PRInput{
 			{
-				PR: api.PR{Repo: "org/repo", Number: 20, Author: "alice", Title: "test", URL: "u20"},
+				PR:        api.PR{Repo: "org/repo", Number: 20, Author: "alice", Title: "test", URL: "u20"},
+				Ownership: ownership.Mine,
 				// Inline comment — should be ignored for approval
 				Comments: []api.Comment{
 					{Author: "claude[bot]", Body: "Verdict: approve", Path: "foo.go", Line: 42},
@@ -312,7 +317,8 @@ func TestBuildAgentApprovedViaInlineCommentIgnored(t *testing.T) {
 // excluded checks per repo via the shared cirollup classifier. (pg2-qs46b)
 func TestBuildExcludesAdvisoryCIChecks(t *testing.T) {
 	prInput := PRInput{
-		PR: api.PR{Repo: "o/n", Number: 1, Author: "me"},
+		PR:        api.PR{Repo: "o/n", Number: 1, Author: "me"},
+		Ownership: ownership.Mine,
 		CIRuns: []api.CIRun{
 			{Name: "build", Status: "completed", Conclusion: "success"},
 			{Name: "policy-bot: approval required (click for details): main", Status: "completed", Conclusion: "failure"},
@@ -345,7 +351,8 @@ func TestBuildNilRegistry(t *testing.T) {
 		Registry:            nil, // explicit nil
 		PRs: []PRInput{
 			{
-				PR: api.PR{Repo: "org/repo", Number: 30, Author: "alice", Title: "nil-reg", URL: "u30"},
+				PR:        api.PR{Repo: "org/repo", Number: 30, Author: "alice", Title: "nil-reg", URL: "u30"},
+				Ownership: ownership.Mine,
 				Reviews: []api.Review{
 					{ID: "r4", Author: "anyone", State: "APPROVED", Body: ""},
 					{ID: "r5", Author: "claude[bot]", State: "APPROVED", Body: "Verdict: approve"},
@@ -376,7 +383,7 @@ func TestBuildNilRegistry(t *testing.T) {
 // "ready to merge / automerge-forgotten" NeedsMergeReminder signal. (pg2-dwfld)
 func TestBuildMineRowMergeReminder(t *testing.T) {
 	mk := func(state string, auto bool) MineRow {
-		p := PRInput{PR: api.PR{Repo: "o/n", Number: 1, Author: "me", MergeStateStatus: state, AutoMergeEnabled: auto}}
+		p := PRInput{PR: api.PR{Repo: "o/n", Number: 1, Author: "me", MergeStateStatus: state, AutoMergeEnabled: auto}, Ownership: ownership.Mine}
 		return buildMineRow(p, nil, nil)
 	}
 	if !mk("CLEAN", false).NeedsMergeReminder {
@@ -390,5 +397,27 @@ func TestBuildMineRowMergeReminder(t *testing.T) {
 	}
 	if got := mk("CLEAN", false).MergeStateStatus; got != "CLEAN" {
 		t.Errorf("MergeStateStatus passthrough got %q", got)
+	}
+}
+
+// TestBuild_CoOwnedInMinePanelBadged verifies the partition keys on the
+// ownership classifier, not raw author-equality: a teammate-authored PR
+// classified CoOwned (I pushed a commit onto it) lands in the Mine panel,
+// badged, rather than the Team panel.
+func TestBuild_CoOwnedInMinePanelBadged(t *testing.T) {
+	in := BuilderInput{
+		Self:        "me",
+		TeamMembers: []string{"you"},
+		PRs: []PRInput{{
+			PR:        api.PR{Repo: "o/r", Number: 5, Author: "you", Draft: false},
+			Ownership: ownership.CoOwned,
+		}},
+	}
+	out := Build(in)
+	if len(out.Mine) != 1 || len(out.Team) != 0 {
+		t.Fatalf("want 1 mine / 0 team; got %d / %d", len(out.Mine), len(out.Team))
+	}
+	if !out.Mine[0].CoOwned {
+		t.Errorf("MineRow.CoOwned = false, want true")
 	}
 }

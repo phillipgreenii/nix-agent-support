@@ -853,7 +853,12 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 	// (buildAndStoreSnapshot) reach — so the dashboard's "PRs to Review" match
 	// reason is consistent across both paths (pg2-ynhr.13 B2/B5 review #2).
 	pr.ReviewRequestedOfMe = reviewRequestedOfSelf(e.cfg().SelfLogin, pr.RequestedReviewers)
-	in := snapshot.PRInput{PR: pr}
+	in := snapshot.PRInput{
+		PR: pr,
+		Ownership: ownership.Classify(ownership.Engagement{
+			Self: e.cfg().SelfLogin, PRAuthor: pr.Author, CommitAuthors: commitAuthorsOf(enriched),
+		}),
+	}
 
 	// --- ticket linkage ---
 	// Extract linked external ticket key(s) from the PR's branch, title, and

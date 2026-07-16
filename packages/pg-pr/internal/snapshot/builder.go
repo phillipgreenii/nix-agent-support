@@ -5,6 +5,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -26,6 +27,9 @@ type PRInput struct {
 	// DraftReviewClosed is true iff pg2-4c5i.36 closed this PR's draft-review
 	// bead (the "draft review ready" signal). Also feeds needsAttention.
 	DraftReviewClosed bool
+	// Ownership is the PR's classification (mine/co-owned/team), computed by the
+	// sync layer (buildPRInput) via internal/ownership. Build partitions on it.
+	Ownership ownership.Ownership
 }
 
 // BuilderInput is the full snapshot input.
@@ -100,7 +104,7 @@ func Build(in BuilderInput) *Snapshot {
 		reasons := matchReasons(p, teamSet, in.WatchLabels)
 		excl := excluders[p.PR.Repo]
 		switch {
-		case p.PR.Author == in.Self:
+		case p.Ownership.ActsAsMine():
 			out.Mine = append(out.Mine, buildMineRow(p, in.Registry, excl))
 		case !p.PR.Draft && len(reasons) > 0:
 			// "PRs to Review": a non-mine, non-draft PR that STILL qualifies — it
@@ -135,6 +139,7 @@ func buildMineRow(p PRInput, reg *agentregistry.Registry, excl *cirollup.Exclude
 		NeedsMergeReminder: p.PR.MergeStateStatus == "CLEAN" && !p.PR.AutoMergeEnabled,
 		JIRA:               mapJIRA(p.JIRA),
 		Beads:              mapBeads(p.BeadsDeps),
+		CoOwned:            p.Ownership == ownership.CoOwned,
 	}
 }
 
