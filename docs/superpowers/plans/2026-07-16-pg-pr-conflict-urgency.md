@@ -91,14 +91,14 @@ git commit -m "feat(pg-pr): add PR.HasConflict predicate (pg2-tsgkj)"
 
 **Files:**
 
-- Modify: `internal/snapshot/snapshot.go` (`MineRow`: `HasConflicts`, `NeedsConflictResolution`; `TeamRow`: `HasConflicts`)
+- Modify: `internal/snapshot/snapshot.go` (`MineRow`: `HasConflicts`; `TeamRow`: `HasConflicts`)
 - Modify: `internal/snapshot/builder.go` (`buildMineRow`, `buildTeamRow`)
 - Test: `internal/snapshot/builder_test.go`
 
 **Interfaces:**
 
 - Consumes: `api.PR.HasConflict()`.
-- Produces: `MineRow.HasConflicts`/`.NeedsConflictResolution`, `TeamRow.HasConflicts`.
+- Produces: `MineRow.HasConflicts`, `TeamRow.HasConflicts`.
 
 - [ ] **Step 1: Write the failing test** (append to `builder_test.go`)
 
@@ -115,9 +115,8 @@ func TestBuild_MineConflictFlags(t *testing.T) {
 	if len(out.Mine) != 1 {
 		t.Fatalf("want 1 mine row, got %d", len(out.Mine))
 	}
-	if !out.Mine[0].HasConflicts || !out.Mine[0].NeedsConflictResolution {
-		t.Errorf("mine conflict flags = (%v,%v), want (true,true)",
-			out.Mine[0].HasConflicts, out.Mine[0].NeedsConflictResolution)
+	if !out.Mine[0].HasConflicts {
+		t.Errorf("mine HasConflicts = %v, want true", out.Mine[0].HasConflicts)
 	}
 }
 
@@ -148,10 +147,9 @@ Expected: FAIL — fields undefined.
 
 ```go
 	// HasConflicts is true when GitHub signals a merge conflict (CONFLICTING/DIRTY).
+	// On a Mine-panel row (mine/co-owned) this IS the "resolve conflicts" nudge —
+	// the panel is already scoped to PRs I can fix.
 	HasConflicts bool `json:"has_conflicts,omitempty"`
-	// NeedsConflictResolution nudges me to rebase/resolve MY (or co-owned) PR —
-	// a PR I can fix. Mirrors the NeedsMergeReminder idiom.
-	NeedsConflictResolution bool `json:"needs_conflict_resolution,omitempty"`
 ```
 
 `TeamRow`:
@@ -168,8 +166,7 @@ Expected: FAIL — fields undefined.
 `buildMineRow` return literal — add:
 
 ```go
-		HasConflicts:            p.PR.HasConflict(),
-		NeedsConflictResolution: p.PR.HasConflict(),
+		HasConflicts: p.PR.HasConflict(),
 ```
 
 `buildTeamRow` return literal — add:

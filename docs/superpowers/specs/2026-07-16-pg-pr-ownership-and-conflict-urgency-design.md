@@ -263,9 +263,11 @@ func HasConflict(pr api.PR) bool {
 
 ### 5.2 Dashboard signals
 
-- `MineRow` gains `HasConflicts bool` and `NeedsConflictResolution bool`
-  (`HasConflicts` — mirrors the existing `NeedsMergeReminder` idiom). Applies to
-  `mine` and `co-owned` rows (both in the Mine panel; both are PRs I can fix).
+- `MineRow` gains `HasConflicts bool`. Applies to `mine` and `co-owned` rows
+  (both in the Mine panel; both are PRs I can fix). Because the Mine panel is
+  already scoped to PRs I can fix, `HasConflicts` on a Mine row IS the
+  "resolve conflicts" nudge — no separate `NeedsConflictResolution` field
+  (it would be identically equal to `HasConflicts` there).
 - `TeamRow` gains `HasConflicts bool`.
 - **Attention dampening (MUST):** a conflicting `team` PR is not worth reviewing
   until rebased. Extend the shared predicate to
@@ -294,11 +296,12 @@ bead's priority by one level, preserving the manual baseline:
 - `team` conflicting ⇒ **lower one level** (increment, e.g. P2→P3).
 - conflict cleared ⇒ **restore the baseline**.
 
-**Statelessness / idempotency (MUST):** store the pre-adjustment priority in a
-new merge-request metadata field `priority_baseline` the first tick a conflict is
-seen; each subsequent conflicting tick is a no-op (baseline already set, priority
-already adjusted). On clear, restore `priority_baseline` and delete the field.
-Clamp at P0 (can't raise above) and P4 (can't lower below).
+**Statelessness / idempotency (MUST):** stash the pre-adjustment priority the
+first tick a conflict is seen (implemented as a `pbase:<n>` bead label — labels
+add/remove cleanly and avoid bd-metadata zero-omission/removal pitfalls; see the
+plan); each subsequent conflicting tick is a no-op (baseline already stashed,
+priority already adjusted). On clear, restore the stashed priority and remove the
+marker. Clamp at P0 (can't raise above) and P4 (can't lower below).
 
 **New beads-client surface:**
 
@@ -316,15 +319,13 @@ existing bead client so it stays idempotent per tick.
 
 - **AC-B1** `HasConflict` true iff `Mergeable=="CONFLICTING"` or
   `MergeStateStatus=="DIRTY"`; `"UNKNOWN"`/`"MERGEABLE"` ⇒ false.
-- **AC-B2** Conflicting `mine`/`co-owned` PR: `MineRow.HasConflicts` and
-  `NeedsConflictResolution` true; merge-request bead priority raised one level
-  (baseline stored), clamped at P0.
+- **AC-B2** Conflicting `mine`/`co-owned` PR: `MineRow.HasConflicts` true;
+  merge-request bead priority raised one level (baseline stored), clamped at P0.
 - **AC-B3** Conflicting `team` PR: `TeamRow.HasConflicts` true; `NeedsAttention`
   forced false; attention bead closed; merge-request bead priority lowered one
   level (baseline stored), clamped at P4.
-- **AC-B4** Conflict cleared ⇒ priority restored to baseline, `priority_baseline`
-  removed, `HasConflicts`/`NeedsConflictResolution` false, team `NeedsAttention`
-  re-derives normally.
+- **AC-B4** Conflict cleared ⇒ priority restored to baseline, the baseline
+  marker removed, `HasConflicts` false, team `NeedsAttention` re-derives normally.
 - **AC-B5** Repeated conflicting ticks do not compound the adjustment
   (idempotent).
 - **AC-B6** Unit tests cover AC-B1..B5.
