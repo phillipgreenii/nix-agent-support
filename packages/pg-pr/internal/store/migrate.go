@@ -7,7 +7,7 @@ import (
 
 // schemaVersion is the current schema. Bump it and append a migration step
 // whenever the DDL changes. Stored in SQLite's user_version pragma.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // migrations is the ordered list of DDL applied to reach schemaVersion. Index i
 // migrates user_version i -> i+1.
@@ -239,6 +239,45 @@ CREATE INDEX idx_feedback_pr ON feedback(pr_id);
 	`
 ALTER TABLE pr_revision ADD COLUMN others_approved    INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pr_revision ADD COLUMN others_approved_at TEXT;
+`,
+	// v7 -> v8: widen the pull_request.ownership CHECK to add 'co-owned'
+	// (pg2-aag72). A column CHECK cannot be altered in place, so the table is
+	// rebuilt (SQLite 12-step ALTER, as v6 did for feedback.kind). pull_request
+	// has ON DELETE CASCADE children (feedback, pr_revision) keyed on its id;
+	// applyMigration disables foreign_keys around the tx and runs
+	// foreign_key_check after, so the rebuild preserves ids and child links.
+	// Column set = v1 base + v2 enrichment columns; no indexes to recreate
+	// (only the inline UNIQUE(repo,number)).
+	`
+CREATE TABLE pull_request_new (
+    id             INTEGER PRIMARY KEY,
+    repo           TEXT NOT NULL,
+    number         INTEGER NOT NULL,
+    ownership      TEXT NOT NULL CHECK (ownership IN ('mine','co-owned','team')),
+    author         TEXT,
+    state          TEXT NOT NULL,
+    branch         TEXT,
+    base           TEXT,
+    url            TEXT,
+    head_sha       TEXT,
+    last_synced_at TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    kind            TEXT    NOT NULL DEFAULT '',
+    languages       TEXT    NOT NULL DEFAULT '[]',
+    size            TEXT    NOT NULL DEFAULT '',
+    urgency         TEXT    NOT NULL DEFAULT '',
+    urgency_score   INTEGER NOT NULL DEFAULT 0,
+    urgency_reasons TEXT    NOT NULL DEFAULT '[]',
+    UNIQUE (repo, number)
+);
+INSERT INTO pull_request_new
+  SELECT id, repo, number, ownership, author, state, branch, base, url, head_sha,
+         last_synced_at, created_at, updated_at, kind, languages, size, urgency,
+         urgency_score, urgency_reasons
+  FROM pull_request;
+DROP TABLE pull_request;
+ALTER TABLE pull_request_new RENAME TO pull_request;
 `,
 }
 

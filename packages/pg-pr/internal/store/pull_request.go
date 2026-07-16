@@ -14,7 +14,7 @@ type PullRequest struct {
 	ID             int64
 	Repo           string
 	Number         int
-	Ownership      string // "mine" | "team"
+	Ownership      string // "mine" | "co-owned" | "team"
 	Author         string
 	State          string
 	Branch         string

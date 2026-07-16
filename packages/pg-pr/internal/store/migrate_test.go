@@ -125,3 +125,29 @@ func TestMigrate_V3MyReviewStateCHECK(t *testing.T) {
 		t.Fatal("expected my_review_state CHECK to reject 'bogus'")
 	}
 }
+
+func TestMigrate_V8CoOwnedOwnership(t *testing.T) {
+	db := OpenForTest(t)
+
+	// co-owned is now accepted.
+	if _, err := db.sql.Exec(`INSERT INTO pull_request
+		(repo,number,ownership,state,head_sha,created_at,updated_at)
+		VALUES ('o/r',1,'co-owned','open','s','t','t')`); err != nil {
+		t.Fatalf("insert co-owned should succeed: %v", err)
+	}
+	// bogus ownership still rejected.
+	if _, err := db.sql.Exec(`INSERT INTO pull_request
+		(repo,number,ownership,state,head_sha,created_at,updated_at)
+		VALUES ('o/r',2,'bogus','open','s','t','t')`); err == nil {
+		t.Fatal("expected ownership CHECK to reject 'bogus'")
+	}
+	// Pre-existing rows preserved (id retained), and idempotent re-migrate.
+	var cnt int
+	_ = db.sql.QueryRow("SELECT count(*) FROM pull_request WHERE ownership='co-owned'").Scan(&cnt)
+	if cnt != 1 {
+		t.Fatalf("want 1 co-owned row, got %d", cnt)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
