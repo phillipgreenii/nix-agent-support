@@ -76,6 +76,8 @@ func (noopBeadClient) EnsureAttentionBead(context.Context, string, string) (stri
 }
 func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
+func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
+
 // errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
 // as "no open cycle" — that's the duplicate-cycle bug).
@@ -406,6 +408,8 @@ type draftReviewClient struct {
 	lastPRBeadID  string
 	lastTitle     string
 	lastMine      bool
+	relabelCalls  int
+	lastRelabelID string
 }
 
 func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
@@ -419,6 +423,12 @@ func (c *draftReviewClient) EnsureDraftReviewBead(_ context.Context, prBeadID, t
 	c.lastTitle = title
 	c.lastMine = mine
 	return "dr-1", nil
+}
+
+func (c *draftReviewClient) EnsureDraftReviewMineLabel(_ context.Context, prBeadID string) error {
+	c.relabelCalls++
+	c.lastRelabelID = prBeadID
+	return nil
 }
 
 func TestPROpenedMinePRCreatesDraftReview(t *testing.T) {
@@ -441,6 +451,9 @@ func TestPROpenedMinePRCreatesDraftReview(t *testing.T) {
 	if c.lastTitle != "o/r#7" {
 		t.Fatalf("expected title o/r#7, got %q", c.lastTitle)
 	}
+	if c.relabelCalls != 0 {
+		t.Fatalf("relabel must only fire on team->co-owned transition, got %d calls for a mine PR", c.relabelCalls)
+	}
 }
 
 func TestPROpenedTeamDraftSkipsDraftReview(t *testing.T) {
@@ -453,6 +466,9 @@ func TestPROpenedTeamDraftSkipsDraftReview(t *testing.T) {
 	}
 	if c.drCalls != 0 {
 		t.Fatalf("expected no draft-review for a teammate draft PR, got %d", c.drCalls)
+	}
+	if c.relabelCalls != 0 {
+		t.Fatalf("relabel must not fire for a team PR, got %d calls", c.relabelCalls)
 	}
 }
 
@@ -469,6 +485,9 @@ func TestPROpenedTeamReadyCreatesDraftReview(t *testing.T) {
 	}
 	if c.lastMine {
 		t.Fatalf("expected mine=false for a teammate PR")
+	}
+	if c.relabelCalls != 0 {
+		t.Fatalf("relabel must not fire for a team PR, got %d calls", c.relabelCalls)
 	}
 }
 
@@ -490,6 +509,31 @@ func TestPRUpdatedTeamDraftToReadyCreatesDraftReview(t *testing.T) {
 	}
 	if c.drCalls != 1 {
 		t.Fatalf("expected 1 draft-review ensure after draft→ready, got %d", c.drCalls)
+	}
+}
+
+// TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels asserts a co-owned PR
+// projects a mine-style draft-review (mine=true, per "ownership != team") and
+// additionally triggers the team->co-owned relabel call, so a pre-existing
+// team-style draft-review bead flips to mine on the transition.
+func TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels(t *testing.T) {
+	c := &draftReviewClient{}
+	h := New(c)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "co-owned", Draft: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if c.drCalls != 1 {
+		t.Fatalf("expected 1 draft-review ensure for a co-owned PR, got %d", c.drCalls)
+	}
+	if !c.lastMine {
+		t.Fatalf("expected mine=true for a co-owned PR")
+	}
+	if c.relabelCalls != 1 {
+		t.Fatalf("expected EnsureDraftReviewMineLabel called once on team->co-owned transition, got %d", c.relabelCalls)
+	}
+	if c.lastRelabelID != "mr-1" {
+		t.Fatalf("expected relabel called with parent bead id mr-1, got %q", c.lastRelabelID)
 	}
 }
 

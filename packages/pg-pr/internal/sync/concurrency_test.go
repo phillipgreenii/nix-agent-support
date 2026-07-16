@@ -115,6 +115,8 @@ func (c *concurrentBeadClient) EnsureAttentionBead(context.Context, string, stri
 
 func (c *concurrentBeadClient) CloseAttentionBead(context.Context, string, string) error { return nil }
 
+func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
+
 // compile-time check.
 var _ beadsbridge.BeadClient = (*concurrentBeadClient)(nil)
 

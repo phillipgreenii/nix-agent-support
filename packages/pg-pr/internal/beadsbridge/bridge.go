@@ -25,6 +25,7 @@ type BeadClient interface {
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
 	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
+	EnsureDraftReviewMineLabel(ctx context.Context, prBeadID string) error
 	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
 	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
 }
@@ -85,14 +86,26 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		if alreadyClosed {
 			return nil // closed PR bead: do not attach a draft-review under it
 		}
-		// Emit the review work item. My PRs are reviewed even while a GitHub
-		// draft; teammate PRs wait until the draft flag is removed (which fires
-		// on the pr.updated that flips it). EnsureDraftReviewBead is idempotent.
-		// When the review kill switch is on (suppressDraftReviews), production is
-		// skipped entirely — the merge-request bead above is still ensured.
-		if !h.suppressDraftReviews && (p.Ownership == "mine" || !p.Draft) {
-			_, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), p.Ownership == "mine")
-			return err
+		// Emit the review work item. My PRs and co-owned PRs are reviewed even
+		// while a GitHub draft; team PRs wait until the draft flag is removed
+		// (which fires on the pr.updated that flips it). EnsureDraftReviewBead
+		// is idempotent. When the review kill switch is on
+		// (suppressDraftReviews), production is skipped entirely — the
+		// merge-request bead above is still ensured.
+		mine := p.Ownership != "team" // mine OR co-owned
+		if !h.suppressDraftReviews && (mine || !p.Draft) {
+			drID, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), mine)
+			if err != nil {
+				return err
+			}
+			// team->co-owned: an earlier team-style review bead must flip to mine.
+			if p.Ownership == "co-owned" {
+				if err := h.client.EnsureDraftReviewMineLabel(ctx, mrID); err != nil {
+					return err
+				}
+			}
+			_ = drID
+			return nil
 		}
 		return nil
 	case store.EventFeedbackCreated:

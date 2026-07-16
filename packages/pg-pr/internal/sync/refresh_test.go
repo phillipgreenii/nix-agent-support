@@ -340,6 +340,8 @@ func (f *outboxFakeBeads) EnsureAttentionBead(context.Context, string, string) (
 }
 func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
 
+func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
+
 // compile-time check: the same fake serves the bridge interface too.
 var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)
 

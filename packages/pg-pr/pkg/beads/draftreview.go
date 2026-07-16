@@ -141,6 +141,49 @@ func (c *Client) EnsureDraftReviewBead(ctx context.Context, prBeadID, title stri
 	return id, nil
 }
 
+// EnsureDraftReviewMineLabel adds the "mine" ownership label to the OPEN
+// draft-review child of prBeadID when it lacks it — used on a team->co-owned
+// transition so routing treats the review as mine-style. Closed (completed)
+// review beads are left untouched. Idempotent; a lookup error PROPAGATES.
+func (c *Client) EnsureDraftReviewMineLabel(ctx context.Context, prBeadID string) error {
+	if prBeadID == "" {
+		return errors.New("draft-review: pr bead id required")
+	}
+	childIDs, err := c.ListChildrenOfPR(ctx, prBeadID)
+	if err != nil {
+		return fmt.Errorf("relabel draft-review: list children of %s: %w", prBeadID, err)
+	}
+	if len(childIDs) == 0 {
+		return nil
+	}
+	isChild := make(map[string]struct{}, len(childIDs))
+	for _, id := range childIDs {
+		isChild[id] = struct{}{}
+	}
+	out, err := c.Runner.Run(ctx, "list", "--type=task", "--json", "--limit=0") // open only (no --all)
+	if err != nil {
+		return fmt.Errorf("relabel draft-review: list tasks: %w", err)
+	}
+	issues, err := parseBDList(out)
+	if err != nil {
+		return err
+	}
+	for _, iss := range issues {
+		if !strings.HasPrefix(iss.Title, draftReviewTitlePrefix) {
+			continue
+		}
+		if _, ok := isChild[iss.ID]; !ok {
+			continue
+		}
+		if hasLabel(iss.Labels, "mine") {
+			return nil // already mine-style
+		}
+		_, err := c.Runner.Run(ctx, "update", iss.ID, "--add-label", "mine")
+		return err
+	}
+	return nil
+}
+
 // FindDraftReviewForPR resolves the draft-review bead (open OR closed) for a
 // given upstream PR, mapping (repo, number) → merge-request bead → draft-review
 // child. It returns the child id, whether it is currently closed, whether one

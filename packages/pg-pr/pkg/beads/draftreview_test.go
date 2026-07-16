@@ -128,6 +128,87 @@ func TestEnsureDraftReviewDoesNotResurrectClosedChild(t *testing.T) {
 	}
 }
 
+func (r *draftReviewRunner) sawUpdate(id string) bool {
+	for _, c := range r.calls {
+		if len(c) >= 1 && c[0] == "update" && len(c) >= 2 && c[1] == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEnsureDraftReviewMineLabel_AddsWhenMissing(t *testing.T) {
+	r := &draftReviewRunner{
+		children: `[{"id":"dr-1"}]`,
+		tasks:    `{"data":[{"id":"dr-1","title":"draft-review: o/r#1","status":"open","labels":[]}]}`,
+	}
+	c := NewClientWithRunner(r)
+	if err := c.EnsureDraftReviewMineLabel(context.Background(), "mr-1"); err != nil {
+		t.Fatalf("EnsureDraftReviewMineLabel: %v", err)
+	}
+	if !r.sawUpdate("dr-1") {
+		t.Fatalf("expected `update dr-1 --add-label mine`, calls: %v", r.calls)
+	}
+	var updateCall []string
+	for _, call := range r.calls {
+		if len(call) > 0 && call[0] == "update" {
+			updateCall = call
+		}
+	}
+	joined := strings.Join(updateCall, " ")
+	if !strings.Contains(joined, "--add-label mine") {
+		t.Fatalf("expected --add-label mine, got: %v", updateCall)
+	}
+}
+
+func TestEnsureDraftReviewMineLabel_NoopWhenPresent(t *testing.T) {
+	r := &draftReviewRunner{
+		children: `[{"id":"dr-1"}]`,
+		tasks:    `{"data":[{"id":"dr-1","title":"draft-review: o/r#1","status":"open","labels":["mine"]}]}`,
+	}
+	c := NewClientWithRunner(r)
+	if err := c.EnsureDraftReviewMineLabel(context.Background(), "mr-1"); err != nil {
+		t.Fatalf("EnsureDraftReviewMineLabel: %v", err)
+	}
+	if r.sawUpdate("dr-1") {
+		t.Fatalf("must not update when mine label already present, calls: %v", r.calls)
+	}
+}
+
+func TestEnsureDraftReviewMineLabel_PropagatesLookupError(t *testing.T) {
+	r := &draftReviewRunner{
+		children: `[{"id":"dr-1"}]`,
+		tasksErr: errors.New("boom"),
+	}
+	c := NewClientWithRunner(r)
+	err := c.EnsureDraftReviewMineLabel(context.Background(), "mr-1")
+	if err == nil {
+		t.Fatal("expected lookup error to propagate, got nil")
+	}
+	if r.sawUpdate("dr-1") {
+		t.Fatalf("must not update on lookup error, calls: %v", r.calls)
+	}
+}
+
+func TestEnsureDraftReviewMineLabel_NoopWhenNoChildren(t *testing.T) {
+	r := &draftReviewRunner{children: "[]"}
+	c := NewClientWithRunner(r)
+	if err := c.EnsureDraftReviewMineLabel(context.Background(), "mr-1"); err != nil {
+		t.Fatalf("EnsureDraftReviewMineLabel: %v", err)
+	}
+	if r.sawUpdate("dr-1") {
+		t.Fatalf("must not update when there are no children, calls: %v", r.calls)
+	}
+}
+
+func TestEnsureDraftReviewMineLabel_RequiresPRBeadID(t *testing.T) {
+	r := &draftReviewRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.EnsureDraftReviewMineLabel(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty prBeadID, got nil")
+	}
+}
+
 func TestEnsureDraftReviewPropagatesLookupError(t *testing.T) {
 	// Children exist, but the task-list lookup errors → must NOT create.
 	r := &draftReviewRunner{
