@@ -50,8 +50,8 @@ schema = 3
     hash = 'sha256-DJ0re9mGqZb6PROQI8NPC0JVyDHdZ/y4uehNH7MbczY='
 
   [mod.'github.com/mattn/go-isatty']
-    version = 'v0.0.22'
-    hash = 'sha256-6O/0jc33pKUzlzUGpH8Ekk54XgJvx6Qe7kJtbcNJAV4='
+    version = 'v0.0.23'
+    hash = 'sha256-CbvLefXb6HYNFEsPyLDGj5jhnYwXNNC4aOM2oJsGhnk='
 
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
@@ -158,16 +158,16 @@ schema = 3
     hash = 'sha256-LJfnki46XEreGbSgjl+DeqgcTsINTOu2owyXNvijMcA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260713224248-f5fc221cf8c4'
+    version = 'v0.0.0-20260715232425-e75dac1f907d'
     hash = 'sha256-y3/iHn2MoRtZL6ICYcdQfAUg/YUSismg/1Ekrfx7Emg='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260713224248-f5fc221cf8c4'
+    version = 'v0.0.0-20260715232425-e75dac1f907d'
     hash = 'sha256-ldJTTb7hhj1mdmzTn9IEkQVwCoj3KRlENZtUSEKHABU='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.82.0'
-    hash = 'sha256-qmNBIHFIpR3bCGwtjXBCa79fBK4sTkpxgqsQMy2GsAw='
+    version = 'v1.82.1'
+    hash = 'sha256-5Q85pZWiKulJSGRAjYcVrlBe7y4tfa9gsjCqYiBhLUU='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.11'
@@ -190,5 +190,5 @@ schema = 3
     hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.53.0'
-    hash = 'sha256-G8pXCpu2jJlPxd+7p1vQd8GzWGCTnKQug58fnQzTVRY='
+    version = 'v1.54.0'
+    hash = 'sha256-qXMv1gVl9th9DDp8/dVyJh9kKOFt3qRl74BgZ82Fnew='
