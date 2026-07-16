@@ -851,7 +851,7 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 	if ts := state.GetFiveHourResetsAt(); ts != nil {
 		fiveHourResetsAt = ts.AsTime()
 	}
-	colorHex, countdown := render.CmuxFiveHourColor(state.FiveHourPct, fiveHourResetsAt, now)
+	colorHex, countdown := render.CmuxFiveHourColor(state.FiveHourPct, fiveHourResetsAt, capturedAt, now, staleAfter)
 	out.WorkspaceColor = colorHex
 	out.HasWorkspaceColor = true
 	// The red-branch countdown rides on the progress label by design: it is only

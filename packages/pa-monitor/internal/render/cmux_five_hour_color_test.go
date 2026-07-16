@@ -17,6 +17,8 @@ func TestCmuxFiveHourColor(t *testing.T) {
 		name          string
 		fivePct       *float64
 		resetsAt      time.Time
+		capturedAt    time.Time     // zero => no staleness (fresh)
+		staleAfter    time.Duration // 0 => staleness disabled (fresh)
 		wantColor     string
 		wantCountdown string
 	}{
@@ -79,11 +81,39 @@ func TestCmuxFiveHourColor(t *testing.T) {
 			name: "under-80 exactly on pace boundary is clear", fivePct: fp(60), resetsAt: now.Add(2 * time.Hour),
 			wantColor: "", wantCountdown: "",
 		},
+		// Staleness (pg2-be8jy): a reading older than staleAfter must render a
+		// DIMMED color, not a confident fresh red/yellow — consistent with the
+		// "(stale)" progress label.
+		{
+			name: "stale red is dimmed (with countdown)", fivePct: fp(85), resetsAt: now.Add(2*time.Hour + 30*time.Minute),
+			capturedAt: now.Add(-10 * time.Minute), staleAfter: 90 * time.Second,
+			wantColor: "#7a2b2b", wantCountdown: "(2h 30m)",
+		},
+		{
+			name: "stale yellow is dimmed", fivePct: fp(50), resetsAt: now.Add(3 * time.Hour),
+			capturedAt: now.Add(-10 * time.Minute), staleAfter: 90 * time.Second,
+			wantColor: "#8a6d00", wantCountdown: "",
+		},
+		{
+			name: "fresh reading (recent capture) keeps confident red", fivePct: fp(85), resetsAt: now.Add(2*time.Hour + 30*time.Minute),
+			capturedAt: now.Add(-30 * time.Second), staleAfter: 90 * time.Second,
+			wantColor: "#cc3333", wantCountdown: "(2h 30m)",
+		},
+		{
+			name: "stale but clear stays clear (nothing to dim)", fivePct: fp(50), resetsAt: now.Add(1 * time.Hour),
+			capturedAt: now.Add(-10 * time.Minute), staleAfter: 90 * time.Second,
+			wantColor: "", wantCountdown: "",
+		},
+		{
+			name: "staleAfter=0 disables staleness (fresh red)", fivePct: fp(85), resetsAt: now.Add(2*time.Hour + 30*time.Minute),
+			capturedAt: now.Add(-10 * time.Minute), staleAfter: 0,
+			wantColor: "#cc3333", wantCountdown: "(2h 30m)",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			color, countdown := render.CmuxFiveHourColor(tc.fivePct, tc.resetsAt, now)
+			color, countdown := render.CmuxFiveHourColor(tc.fivePct, tc.resetsAt, tc.capturedAt, now, tc.staleAfter)
 			if color != tc.wantColor {
 				t.Errorf("color = %q, want %q", color, tc.wantColor)
 			}

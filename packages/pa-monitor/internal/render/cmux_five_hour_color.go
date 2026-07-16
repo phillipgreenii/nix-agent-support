@@ -11,6 +11,12 @@ import (
 const (
 	fiveHourRed    = "#cc3333"
 	fiveHourYellow = "#e0b000"
+	// Dimmed variants shown when the reading is stale (older than staleAfter):
+	// same hue, darker/muted, so a stale window reads as visibly less confident
+	// than a fresh red/yellow — consistent with the "(stale)" progress label
+	// (pg2-be8jy).
+	fiveHourRedStale    = "#7a2b2b"
+	fiveHourYellowStale = "#8a6d00"
 )
 
 // blockSecs is the 5h window length in seconds (matches the bash render_limit
@@ -28,11 +34,24 @@ const blockSecs int64 = 18000
 // exceeds the percent-through-block pace and clear otherwise; the pace guard
 // keeps a missing/expired reset from yellowing everything. The countdown is
 // produced only in the red branch (yellow never shows one), matching the bash.
-func CmuxFiveHourColor(fivePct *float64, resetsAt time.Time, now time.Time) (colorHex string, countdown string) {
+//
+// Staleness (pg2-be8jy): when the authoritative reading is older than staleAfter
+// (capturedAt set, staleAfter > 0, now-capturedAt > staleAfter), the red/yellow
+// accent is DIMMED rather than shown as a confident fresh color — mirroring the
+// "(stale)" progress label so the two surfaces agree. A "clear" (no-color)
+// reading has nothing to dim and stays clear. The countdown is unaffected (it is
+// derived from resetsAt, independent of capture age).
+func CmuxFiveHourColor(fivePct *float64, resetsAt time.Time, capturedAt time.Time, now time.Time, staleAfter time.Duration) (colorHex string, countdown string) {
 	if fivePct == nil || math.IsNaN(*fivePct) {
 		return "", ""
 	}
 	used := math.Floor(*fivePct)
+
+	stale := staleAfter > 0 && !capturedAt.IsZero() && now.Sub(capturedAt) > staleAfter
+	red, yellow := fiveHourRed, fiveHourYellow
+	if stale {
+		red, yellow = fiveHourRedStale, fiveHourYellowStale
+	}
 
 	var remSecs int64 = -1
 	if !resetsAt.IsZero() {
@@ -43,9 +62,9 @@ func CmuxFiveHourColor(fivePct *float64, resetsAt time.Time, now time.Time) (col
 		if remSecs > 0 {
 			h := remSecs / 3600
 			m := (remSecs % 3600) / 60
-			return fiveHourRed, fmt.Sprintf("(%dh %dm)", h, m)
+			return red, fmt.Sprintf("(%dh %dm)", h, m)
 		}
-		return fiveHourRed, ""
+		return red, ""
 	}
 
 	var ptb int64 = -1
@@ -59,7 +78,7 @@ func CmuxFiveHourColor(fivePct *float64, resetsAt time.Time, now time.Time) (col
 		}
 	}
 	if ptb >= 0 && int64(used) > ptb {
-		return fiveHourYellow, ""
+		return yellow, ""
 	}
 	return "", ""
 }
