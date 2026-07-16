@@ -297,6 +297,8 @@ func (f *outboxFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields
 	return "mr-1", false, nil
 }
 
+func (f *outboxFakeBeads) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
+
 // FindByRepoAndNumber returns the projected bead only AFTER EnsureMergeRequest
 // has run — modelling that the bead exists once the bridge projected it from
 // the outbox event. This proves buildPRInput finds the bead only because the

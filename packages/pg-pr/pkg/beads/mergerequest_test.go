@@ -373,6 +373,75 @@ func TestNewClientForRepo_EmptyDirMatchesNewClient(t *testing.T) {
 	}
 }
 
+// coOwnedRunner returns canned (empty) output and records calls, for
+// asserting the exact `update <id> --add-label/--remove-label co-owned`
+// arguments SetMergeRequestCoOwned sends to bd.
+type coOwnedRunner struct {
+	calls [][]string
+}
+
+func (r *coOwnedRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, args)
+	return "", nil
+}
+
+func (r *coOwnedRunner) lastCall() []string {
+	if len(r.calls) == 0 {
+		return nil
+	}
+	return r.calls[len(r.calls)-1]
+}
+
+// TestSetMergeRequestCoOwned asserts coOwned=true sends
+// `update <id> --add-label co-owned` and coOwned=false sends
+// `update <id> --remove-label co-owned`.
+func TestSetMergeRequestCoOwned(t *testing.T) {
+	t.Run("coOwned=true adds the label", func(t *testing.T) {
+		r := &coOwnedRunner{}
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(context.Background(), "mr-1", true); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		got := r.lastCall()
+		want := []string{"update", "mr-1", "--add-label", "co-owned"}
+		if len(got) != len(want) {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("call = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("coOwned=false removes the label", func(t *testing.T) {
+		r := &coOwnedRunner{}
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(context.Background(), "mr-1", false); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		got := r.lastCall()
+		want := []string{"update", "mr-1", "--remove-label", "co-owned"}
+		if len(got) != len(want) {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("call = %v, want %v", got, want)
+			}
+		}
+	})
+}
+
+// TestSetMergeRequestCoOwned_Validates asserts an empty id is rejected before
+// bd is invoked.
+func TestSetMergeRequestCoOwned_Validates(t *testing.T) {
+	c := NewClientWithRunner(&fakeRunner{})
+	if err := c.SetMergeRequestCoOwned(context.Background(), "", true); err == nil {
+		t.Fatalf("expected validation error on empty id")
+	}
+}
+
 // TestNewClientForRepo_HitsRepoWorkspace creates two real bd workspaces in
 // distinct temp dirs and verifies that NewClientForRepo(dirA) writes to
 // workspace A only — beads created on the A-scoped client are not visible

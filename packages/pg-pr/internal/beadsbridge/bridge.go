@@ -17,6 +17,7 @@ import (
 // BeadClient is the subset of *beads.Client the bridge needs (narrow for tests).
 type BeadClient interface {
 	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (string, bool, error)
+	SetMergeRequestCoOwned(ctx context.Context, id string, coOwned bool) error
 	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
 	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
@@ -85,6 +86,11 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		}
 		if alreadyClosed {
 			return nil // closed PR bead: do not attach a draft-review under it
+		}
+		// Keep the co-owned visibility label in sync with the current
+		// ownership verdict — added when co-owned, removed otherwise.
+		if err := h.client.SetMergeRequestCoOwned(ctx, mrID, p.Ownership == "co-owned"); err != nil {
+			return err
 		}
 		// Emit the review work item. My PRs and co-owned PRs are reviewed even
 		// while a GitHub draft; team PRs wait until the draft flag is removed

@@ -52,6 +52,8 @@ func (noopBeadClient) EnsureMergeRequest(context.Context, string, beads.MergeReq
 	return "", false, nil
 }
 
+func (noopBeadClient) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
+
 func (noopBeadClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return nil, nil
 }

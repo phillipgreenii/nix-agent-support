@@ -66,6 +66,11 @@ func (c *concurrentBeadClient) EnsureMergeRequest(_ context.Context, _ string, f
 	return id, true, nil
 }
 
+// SetMergeRequestCoOwned is a no-op: this fake does not track labels.
+func (c *concurrentBeadClient) SetMergeRequestCoOwned(context.Context, string, bool) error {
+	return nil
+}
+
 // FindByRepoAndNumber returns the recorded bead, or nil if not yet projected.
 func (c *concurrentBeadClient) FindByRepoAndNumber(_ context.Context, repo string, number int) (*beads.MergeRequest, error) {
 	c.mu.Lock()

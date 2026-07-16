@@ -258,6 +258,22 @@ func (c *Client) EnsureMergeRequest(ctx context.Context, userTitle string, field
 	return id, false, err
 }
 
+// SetMergeRequestCoOwned adds (coOwned=true) or removes (false) the "co-owned"
+// label on a merge-request bead — a visibility marker for a teammate PR I have
+// pushed commits onto. Idempotent (bd add/remove-label are no-ops when already
+// in the desired state).
+func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned bool) error {
+	if id == "" {
+		return errors.New("merge-request: id required")
+	}
+	flag := "--remove-label"
+	if coOwned {
+		flag = "--add-label"
+	}
+	_, err := c.Runner.Run(ctx, "update", id, flag, "co-owned")
+	return err
+}
+
 // findByRepoPR finds a merge-request bead by repo + pr_number metadata.
 // Returns nil if not found. Includes closed beads.
 func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeRequest, error) {

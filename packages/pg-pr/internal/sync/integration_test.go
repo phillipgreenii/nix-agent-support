@@ -47,6 +47,10 @@ func (f *fullChainBeadClient) EnsureMergeRequest(_ context.Context, _ string, fi
 	return "mr-chain-1", false, nil
 }
 
+func (f *fullChainBeadClient) SetMergeRequestCoOwned(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
 func (f *fullChainBeadClient) FindByRepoAndNumber(_ context.Context, repo string, _ int) (*beads.MergeRequest, error) {
 	f.findCalls = append(f.findCalls, repo)
 	return f.findResult, nil
