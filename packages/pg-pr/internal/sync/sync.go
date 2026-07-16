@@ -38,6 +38,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/replyposter"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
@@ -378,16 +379,15 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 		}()
 	}
 
-	// Partition by ownership BEFORE running per-PR phases. Local-bead
-	// phases (EnsureMergeRequest, processFeedback) run for both subsets;
-	// upstream-write phases (maybePromoteDraft) only run for mine.
-	// Empty Author / empty SelfLogin → treated as team (do not modify
-	// upstream). Future write-side phases must consciously consult
-	// mineSet — defense against the original bug class.
-	mineSet := make(map[prKey]bool, len(observed))
+	// authoredByMe gates UPSTREAM WRITES that assert readiness on the author's
+	// behalf (maybePromoteDraft). It stays AUTHORSHIP-ONLY: a co-owned PR (I
+	// pushed commits onto a teammate's PR) must NOT be auto-promoted out of
+	// draft. This deliberately diverges from the `ownership` string below, which
+	// is 3-way. Empty Author / empty SelfLogin => not mine.
+	authoredByMe := make(map[prKey]bool, len(observed))
 	for key, pr := range observed {
 		if e.isSelfAuthored(pr.Author) {
-			mineSet[key] = true
+			authoredByMe[key] = true
 		}
 	}
 
@@ -412,7 +412,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			defer prSpan.End()
 			startedAt := e.deps.Now()
 			group := "team"
-			if mineSet[key] {
+			if authoredByMe[key] {
 				group = "mine"
 			}
 			defer func() {
@@ -428,16 +428,36 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				return
 			}
 
+			// Pluck this PR's bulk-fetched enrichment BEFORE deciding ownership
+			// (commit authors drive co-owned) and before emitPREvent writes the
+			// row. nil means the EnrichedPRs path didn't populate the cache;
+			// downstream helpers fall back to per-PR REST calls.
+			var prEnriched *vcs.EnrichedPR
+			if byNum := enrichByRepo[key.Repo]; byNum != nil {
+				if ep, ok := byNum[pr.Number]; ok {
+					prEnriched = &ep
+				}
+			}
+
+			// 3-way ownership string for the store row + event (drives
+			// dashboard, replyposter, beadsbridge, attention). Degrades to
+			// authorship-only when enrichment is absent (prEnriched == nil).
+			var commitAuthors []string
+			if prEnriched != nil {
+				commitAuthors = prEnriched.CommitAuthors
+			}
+			own := ownership.Classify(ownership.Engagement{
+				Self: e.cfg().SelfLogin, PRAuthor: pr.Author, CommitAuthors: commitAuthors,
+			})
+			ownershipStr := own.String()
+
 			// Event-ownership refactor (Task 6): the PR (merge-request) bead is
 			// no longer created inline. emitPREvent writes the authoritative
 			// store row for EVERY observed PR AND emits pr.opened/pr.updated in
 			// one transaction (drives Task 8 close-detection via
 			// store.ListOpenPRs); the beadsbridge handler projects the bead at
 			// outbox flush. It no-ops when Store is nil (test/legacy configs).
-			ownership := "team"
-			if mineSet[key] {
-				ownership = "mine"
-			}
+			//
 			// Emit pr.opened/pr.updated BEFORE this PR's feedback.created events
 			// (enqueued inside processFeedback) so the bridge ensures the PR
 			// bead before attaching a processing cycle. The serial loop within
@@ -446,7 +466,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			if _, was := repoPreExisting[key.Repo][key]; was {
 				eventType = store.EventPRUpdated
 			}
-			if err := e.emitPREvent(prCtx, eventType, key.Repo, pr, ownership); err != nil {
+			if err := e.emitPREvent(prCtx, eventType, key.Repo, pr, ownershipStr); err != nil {
 				telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 				recordSpanErr(prSpan, err)
 				summary.Errors = append(summary.Errors, SummaryError{
@@ -461,15 +481,6 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 				summary.BeadsUpdated++
 			}
 
-			// Pluck this PR's bulk-fetched VCS data (reviews/comments/CI
-			// runs) if the EnrichedPRs path populated the cache; nil means
-			// downstream helpers fall back to per-PR REST calls.
-			var prEnriched *vcs.EnrichedPR
-			if byNum := enrichByRepo[key.Repo]; byNum != nil {
-				if ep, ok := byNum[pr.Number]; ok {
-					prEnriched = &ep
-				}
-			}
 			// Resolve the repo config once for this PR: used by both
 			// reconcileTruncatedCI and enrichAndStore (ticket-pattern extraction).
 			// On a miss, fall back to a minimal RepoConfig carrying the remote so
@@ -505,7 +516,7 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 			}
 			// Upstream-write phase: only for self-authored PRs.
 			// See partition above.
-			if mineSet[key] {
+			if authoredByMe[key] {
 				if err := e.maybePromoteDraft(prCtx, prEnriched, key.Repo, pr, summary); err != nil {
 					telemetry.SyncErrorsTotal.WithLabelValues(key.Repo).Inc()
 					recordSpanErr(prSpan, err)
