@@ -132,3 +132,34 @@ func TestReconcileOwnershipGate(t *testing.T) {
 		t.Errorf("team-owned PR feedback must not have response_id set, got %q", teamFB.ResponseID)
 	}
 }
+
+// TestReplyPoster_PostsOnCoOwned verifies M2: pending replies on co-owned PRs
+// ARE posted — the ownership gate only skips team-owned PRs, not co-owned ones.
+func TestReplyPoster_PostsOnCoOwned(t *testing.T) {
+	db := store.OpenForTest(t)
+	ctx := context.Background()
+
+	coOwnedPRID, _ := db.UpsertPR(ctx, store.PullRequest{Repo: "o/r", Number: 4, Ownership: "co-owned", State: "open"})
+	fbID, _ := db.UpsertFeedback(ctx, store.Feedback{PRID: coOwnedPRID, Kind: "pr-comments", Fingerprint: "f-coowned", ExternalID: "cc1"})
+	_ = db.SetDisposition(ctx, fbID, "wont-fix", "noted", "Not acting — intentional.")
+
+	fake := &fakeReplier{id: "resp-coowned"}
+	p := New(db, fake)
+	if _, err := p.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// The co-owned PR's reply should have been posted (1 comment post).
+	if fake.commentPosts != 1 {
+		t.Fatalf("commentPosts = %d, want 1 (co-owned PR reply should post)", fake.commentPosts)
+	}
+
+	// Feedback row must be marked replied (response_id set via MarkReplied).
+	fb, err := db.GetFeedback(ctx, fbID)
+	if err != nil || fb == nil {
+		t.Fatalf("GetFeedback: %v", err)
+	}
+	if fb.ResponseID != "resp-coowned" {
+		t.Errorf("co-owned PR feedback response_id = %q, want %q", fb.ResponseID, "resp-coowned")
+	}
+}
