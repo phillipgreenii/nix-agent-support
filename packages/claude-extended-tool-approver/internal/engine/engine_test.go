@@ -343,6 +343,72 @@ func TestEngine_EvaluateExpression_ProcessSubstitution(t *testing.T) {
 	}
 }
 
+func TestEngine_EvaluateExpression_SafeDeviceRedirects(t *testing.T) {
+	// pg2-9ctmb: a redirect whose target is a standard special device file
+	// (/dev/null, /dev/stdout, /dev/stderr, /dev/tty, /dev/fd/<n>) MUST NOT demote
+	// an otherwise-approved command. The PathEvaluator does not know these
+	// pseudo-files (it returns PathUnknown), which previously demoted the whole
+	// command to Abstain — so `bd list 2>/dev/null` abstained while `bd list` allowed.
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	pe := patheval.New("/tmp/project")
+	e.SetPathEvaluator(pe)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+
+	exprs := []struct {
+		name string
+		expr string
+	}{
+		{"stderr to /dev/null", "echo hi 2>/dev/null"},
+		{"stdout to /dev/null", "echo hi >/dev/null"},
+		{"fd1 to /dev/null", "echo hi 1>/dev/null"},
+		{"all to /dev/null", "echo hi &>/dev/null"},
+		{"stderr to /dev/stderr", "echo hi 2>/dev/stderr"},
+		{"stdout to /dev/stdout", "echo hi >/dev/stdout"},
+		{"stderr to /dev/fd/2", "echo hi 2>/dev/fd/2"},
+		{"stdin from /dev/null", "cat </dev/null"},
+		{"compound with /dev/null redirect", "echo one && echo two 2>/dev/null"},
+	}
+	for _, tt := range exprs {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.EvaluateExpression(tt.expr, nil, origin)
+			if got.Decision != hookio.Approve {
+				t.Errorf("Decision = %v, want Approve (%s)", got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+func TestEngine_EvaluateExpression_NonDeviceRedirectsStillEvaluated(t *testing.T) {
+	// Negative guard for pg2-9ctmb: the safe-device short-circuit MUST be scoped to
+	// the standard special files only. Genuine read-only targets still Reject, unknown
+	// non-writable targets still Abstain, and an arbitrary /dev/* device is not a free
+	// pass.
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	pe := patheval.New("/tmp/project")
+	e.SetPathEvaluator(pe)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+
+	tests := []struct {
+		name string
+		expr string
+		want hookio.Decision
+	}{
+		{"write to read-only nix path still rejects", "echo hi > /nix/store/bad.txt", hookio.Reject},
+		{"write to unknown path still abstains", "echo hi > /home/other/nope.txt", hookio.Abstain},
+		{"non-special /dev device still abstains", "echo hi > /dev/sda", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.EvaluateExpression(tt.expr, nil, origin)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (%s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
 func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
 	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "not relevant"}
 	a2 := &mockRule{name: "rule-b", decision: hookio.Abstain, reason: "also not relevant"}

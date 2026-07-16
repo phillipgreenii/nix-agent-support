@@ -4,12 +4,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
+
+// devFdPattern matches /dev/fd/<n> for any file-descriptor number.
+var devFdPattern = regexp.MustCompile(`^/dev/fd/[0-9]+$`)
+
+// isSafeRedirectTarget reports whether path is one of the standard special
+// device files that are always safe as an I/O redirection target — for reading
+// (stdin) and writing (stdout/stderr) alike: /dev/null, /dev/stdout,
+// /dev/stderr, /dev/tty, and /dev/fd/<n>. The PathEvaluator does not model these
+// pseudo-files (it classifies them PathUnknown), so without this short-circuit a
+// redirect to one would demote an otherwise-approved command to Abstain
+// (pg2-9ctmb). Kept redirect-scoped on purpose: it does NOT make these paths
+// writable to the rest of the ruleset (e.g. `rm /dev/null` is unaffected).
+func isSafeRedirectTarget(path string) bool {
+	switch path {
+	case "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty":
+		return true
+	}
+	return devFdPattern.MatchString(path)
+}
 
 type Engine struct {
 	rules    []hookio.RuleModule
@@ -228,6 +248,12 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 		return hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
 	}
 	for _, r := range redirs {
+		// Standard special device files are always-safe redirect targets; skip
+		// them before consulting the PathEvaluator, which would otherwise report
+		// PathUnknown and wrongly demote/reject the command (pg2-9ctmb).
+		if isSafeRedirectTarget(r.Path) {
+			continue
+		}
 		access := pe.Evaluate(r.Path)
 		switch r.Kind {
 		case hookio.RedirectStdin:
