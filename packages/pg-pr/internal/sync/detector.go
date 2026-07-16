@@ -166,6 +166,15 @@ func (e *Engine) firstAuthChecker() (vcs.AuthChecker, bool) {
 // (each repo's own bd workspace), keyed by prKey, filtered to mine (mine=true)
 // or team (mine=false) by author. Per-repo list errors are skipped (conservative:
 // a missing repo just won't contribute "disappeared" candidates this tick).
+//
+// This partition is deliberately by AUTHOR (isSelfAuthored), NOT by the 3-way
+// ownership.Classify — a co-owned PR (teammate-authored, my commits) intentionally
+// groups as team here. The fingerprint rosters it is diffed against are built from
+// author/reviewer/label GitHub queries (buildMineQuery vs buildTeamQueries), which
+// have no notion of my commits, so a co-owned PR is enumerated by the TEAM query;
+// grouping its bead as team keeps bead-vs-roster close-detection consistent.
+// Classifying it as mine here would compare it against the author:self roster it
+// never appears in, spuriously re-enqueueing it every tick. (pg2-aag72)
 func (e *Engine) openBeadsForGroup(ctx context.Context, repos []config.RepoConfig, mine bool) map[prKey]bool {
 	out := map[prKey]bool{}
 	for _, rcfg := range repos {
