@@ -24,8 +24,10 @@ var approvedTools = map[string]bool{
 	"TodoWrite":       true,
 	"ToolSearch":      true,
 	"WebSearch":       true,
-	// First-party agent-control / read-only tools — inherently safe, no
-	// filesystem or external side effects of their own (pg2-9cist).
+	// First-party agent-control / read-only tools. Most have no filesystem or
+	// external side effects; EnterWorktree does create a git worktree on disk,
+	// but it is agent-initiated, low-risk, and reversible, so it is auto-approved
+	// alongside the rest (pg2-9cist; comment corrected in pg2-zu6xj).
 	"Monitor":          true,
 	"StructuredOutput": true,
 	"ScheduleWakeup":   true,
