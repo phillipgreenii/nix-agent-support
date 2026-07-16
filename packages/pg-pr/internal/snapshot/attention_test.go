@@ -19,6 +19,7 @@ func TestNeedsAttention(t *testing.T) {
 		name              string
 		revs              []store.Revision
 		draftReviewClosed bool
+		hasConflict       bool
 		wantNeed          bool
 		wantReason        string
 	}{
@@ -87,11 +88,18 @@ func TestNeedsAttention(t *testing.T) {
 			draftReviewClosed: true,
 			wantNeed:          false,
 		},
+		{
+			name:              "conflicting → NO attention even though draft review is ready (dampened)",
+			revs:              []store.Revision{rev(1, "h1", "", false)},
+			draftReviewClosed: true,
+			hasConflict:       true,
+			wantNeed:          false,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			need, reason := NeedsAttention(tc.revs, tc.draftReviewClosed)
+			need, reason := NeedsAttention(tc.revs, tc.draftReviewClosed, tc.hasConflict)
 			if need != tc.wantNeed {
 				t.Errorf("need = %v, want %v (reason=%q)", need, tc.wantNeed, reason)
 			}
@@ -102,5 +110,20 @@ func TestNeedsAttention(t *testing.T) {
 				t.Errorf("no-attention must carry empty reason, got %q", reason)
 			}
 		})
+	}
+}
+
+// TestNeedsAttention_ConflictDampens is the dedicated regression guard for the
+// pg2-tsgkj dampening rule: a conflicting team PR is not worth reviewing until
+// the author rebases, so hasConflict short-circuits the predicate to
+// (false, "") regardless of what the rest of the state machine would say.
+func TestNeedsAttention_ConflictDampens(t *testing.T) {
+	// A revision set that WOULD need attention (draft review ready, unapproved).
+	revs := []store.Revision{{Seq: 1, HeadSHA: "h"}}
+	if need, _ := NeedsAttention(revs, true, false); !need {
+		t.Fatal("precondition: expected need=true without conflict")
+	}
+	if need, reason := NeedsAttention(revs, true, true); need || reason != "" {
+		t.Errorf("with conflict: need=%v reason=%q, want false/\"\"", need, reason)
 	}
 }

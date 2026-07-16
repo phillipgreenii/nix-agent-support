@@ -27,18 +27,28 @@ const (
 //   - draftReviewClosed: true iff pg2-4c5i.36 CLOSED the draft-review bead for
 //     this PR (the "draft review ready" signal — NOT the on-disk Draft, which
 //     .35 clears; design D1#1).
+//   - hasConflict: GitHub's merge-conflict signal (api.PR.HasConflict()). A
+//     conflicting team PR is dampened out of the attention signal entirely —
+//     it isn't worth reviewing until the author rebases (pg2-tsgkj).
 //
 // The state machine (§2.7), X3-correct (a teammate's approval is the persisted
 // others_approved marker; the viewer's own approval lives in my_review_state and
 // never counts as "someone else approved"):
-//   - teammate approved the latest head  → off the hook (no attention).
-//   - I reviewed the latest head          → off the hook (no attention).
+//   - the PR has a merge conflict            → off the hook (no attention).
+//   - teammate approved the latest head      → off the hook (no attention).
+//   - I reviewed the latest head             → off the hook (no attention).
 //   - I approved an EARLIER head but not the latest (new commits landed) →
 //     needs a re-review.
 //   - a draft review is ready and none of the above → needs attention.
 //   - otherwise → no attention.
-func NeedsAttention(revs []store.Revision, draftReviewClosed bool) (need bool, reason string) {
+func NeedsAttention(revs []store.Revision, draftReviewClosed bool, hasConflict bool) (need bool, reason string) {
 	if len(revs) == 0 {
+		return false, ""
+	}
+	// A conflicting team PR is not worth reviewing until the author rebases —
+	// dampen it out of the attention signal entirely (dashboard + bead both, via
+	// this shared predicate). (pg2-tsgkj)
+	if hasConflict {
 		return false, ""
 	}
 	latest := revs[len(revs)-1]

@@ -74,16 +74,20 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 
 // emitAttention re-derives the teammate-attention verdict for a PR from
 // PERSISTED store facts (its revision timeline + the draft-review-bead-closed
-// signal) through the SHARED snapshot.NeedsAttention predicate, and emits a
-// pr.attention event carrying that verdict. Called once per tick from refreshPR
-// for team AND co-owned PRs.
+// signal) plus the live hasConflict signal, through the SHARED
+// snapshot.NeedsAttention predicate, and emits a pr.attention event carrying
+// that verdict. Called once per tick from refreshPR for team AND co-owned
+// PRs.
 //
 // own gates the verdict: a non-TEAM PR (co-owned) is never a review target for
 // me, so its attention bead must not stay open — emitAttention short-circuits
 // to Need=false without consulting the revision timeline, which idempotently
 // CLOSES any attention bead a prior team-owned tick opened (a team->co-owned
 // transition, e.g. I pushed a commit onto a teammate's PR). Only the TEAM path
-// below runs the real predicate.
+// below runs the real predicate — hasConflict (the caller's pr.HasConflict(),
+// with GitHub's merge-state overlaid via overlayMergeState so the daemon REST
+// path carries it) dampens that verdict to Need=false when the PR conflicts
+// (pg2-tsgkj).
 //
 // Because it re-derives + re-emits from facts EVERY tick (never a one-shot
 // transition), a dropped fire-once pr.attention event self-heals on the next
@@ -93,7 +97,7 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 // It uses the SAME predicate + SAME store inputs the dashboard builder feeds
 // buildTeamRow, so the dashboard NeedsAttention signal and the open-attention-
 // bead set can never diverge (D4/R4). No-op when the store is nil.
-func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string, number int, prID int64, own ownership.Ownership) error {
+func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string, number int, prID int64, own ownership.Ownership, hasConflict bool) error {
 	if e.deps.Store == nil {
 		return nil
 	}
@@ -123,7 +127,7 @@ func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string,
 		}
 		draftReviewClosed = found && closed
 	}
-	need, reason := snapshot.NeedsAttention(revs, draftReviewClosed)
+	need, reason := snapshot.NeedsAttention(revs, draftReviewClosed, hasConflict)
 	payload, err := json.Marshal(store.AttentionPayload{
 		Repo: repo, Number: number, Need: need, Reason: reason,
 	})

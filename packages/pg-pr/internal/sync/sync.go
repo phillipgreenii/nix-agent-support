@@ -438,6 +438,12 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 					prEnriched = &ep
 				}
 			}
+			// The bulk-enumerated pr leaves Mergeable/MergeStateStatus/
+			// AutoMergeEnabled empty; overlay GraphQL's merge-state so
+			// pr.HasConflict() (emitPREvent's row/payload, and the attention
+			// predicate downstream) reflects reality. pr is a loop-local copy of
+			// the observed map's value, so mutating it here is safe (pg2-tsgkj).
+			overlayMergeState(&pr, prEnriched)
 
 			// 3-way ownership string for the store row + event (drives
 			// dashboard, replyposter, beadsbridge, attention). Degrades to
@@ -1276,6 +1282,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 // rare — most issues are recorded into summary.Errors and return nil — and
 // fail-fast is the intended shape for the daemon's per-PR refresh.
 func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr *api.PR, enriched *vcs.EnrichedPR, summary *Summary) error {
+	// refreshPR already overlays merge-state before calling in on the daemon
+	// path, but overlayMergeState is idempotent, so re-applying here makes
+	// applyFetchedPR correct for ANY caller (pg2-tsgkj).
+	overlayMergeState(pr, enriched)
 	var commitAuthors []string
 	if enriched != nil {
 		commitAuthors = enriched.CommitAuthors

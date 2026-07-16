@@ -717,6 +717,93 @@ func TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention(t *testing.T) {
 	}
 }
 
+// TestRefreshPR_ConflictingTeamPR_DampensAttention is the emit-path
+// regression guard for the pg2-tsgkj STEP 0 fix + dampening rule together: a
+// non-draft TEAM PR that WOULD need attention (draft-review bead closed,
+// nobody approved, I haven't reviewed) but whose GraphQL enrichment reports a
+// DIRTY merge state must still emit pr.attention{Need:false}.
+//
+// This proves two things end-to-end on the daemon refreshPR path:
+//   - overlayMergeState copies the GraphQL-only merge-state (enricherVCS's ep)
+//     onto the REST-sourced `pr` var. Without that STEP 0 fix, pr.HasConflict()
+//     would stay false (the fakeVCS.GetPR path never populates Mergeable/
+//     MergeStateStatus) and this test would observe Need=true instead.
+//   - the hasConflict parameter now threaded through emitAttention actually
+//     reaches and dampens the shared snapshot.NeedsAttention predicate.
+//
+// Deliberately does NOT assert on store.PRPayload.HasConflict — that field
+// does not exist yet (added in Task B5); only the attention outcome is
+// checked here.
+func TestRefreshPR_ConflictingTeamPR_DampensAttention(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 11, State: "open", Draft: false,
+		Author: "you", HeadSHA: "h1", URL: "https://github.com/o/r/pull/11",
+	}
+	// enricherVCS (sync_test.go) embeds fakeVCS and adds the SinglePREnricher
+	// capability, so enrichOnePR routes through EnrichPR and returns ep as the
+	// enrichment bundle — the ONLY source of merge-state on this path; the
+	// REST fallback (fakeVCS alone) never populates Mergeable/MergeStateStatus.
+	vp := &enricherVCS{
+		fakeVCS: fakeVCS{views: map[string]api.PR{keyOf("o/r", pr.Number): pr}},
+		ep:      &vcs.EnrichedPR{PR: api.PR{MergeStateStatus: "DIRTY"}},
+	}
+	// attnFinderBeads (attention_emit_test.go, same package) adds the
+	// draft-review-closed capability the attention emitter needs; closed+found
+	// = true is the "draft review ready" precondition that WOULD need
+	// attention absent the conflict dampening.
+	bdc := &attnFinderBeads{closed: true, found: true}
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", VCS: "github", TeamMembers: []string{"you"}},
+			},
+		},
+		VCS:      map[string]VCSProvider{"github": vp},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No dispatcher wired: flushOutbox is a no-op, so emitted events stay in
+	// the raw outbox for direct inspection (mirrors newRefreshEngineWithStore's
+	// pattern used by the sibling tests above).
+
+	in, err := e.refreshPR(ctx, "o/r", pr.Number)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in == nil {
+		t.Fatal("active non-draft team PR must be surfaced (non-nil snapshot input)")
+	}
+
+	var sawAttention bool
+	for _, ev := range collectOutboxEvents(t, db) {
+		if ev.Type != store.EventPRAttention {
+			continue
+		}
+		var p store.AttentionPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal AttentionPayload: %v", err)
+		}
+		if p.Repo != "o/r" || p.Number != pr.Number {
+			continue
+		}
+		sawAttention = true
+		if p.Need {
+			t.Errorf("conflicting team PR must dampen attention to Need=false, got Need=true reason=%q", p.Reason)
+		}
+	}
+	if !sawAttention {
+		t.Fatalf("expected a pr.attention event for o/r#%d", pr.Number)
+	}
+}
+
 func TestEngineCfg_AtomicSwap(t *testing.T) {
 	e, err := New(Deps{
 		Cfg:   &config.Config{SelfLogin: "old"},

@@ -7,8 +7,29 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
+
+// overlayMergeState copies GitHub merge-state from the enriched PR onto the
+// observed PR (the REST GetPR/enumerate paths leave it empty). Idempotent.
+//
+// The REST provider.GetPR field list (used by refreshPR) and the plain
+// enumerate path omit mergeable/mergeStateStatus entirely, so pr.HasConflict()
+// would otherwise ALWAYS be false on those paths — silently defeating the
+// attention-dampening predicate (snapshot.NeedsAttention's hasConflict guard)
+// in production. GraphQL enrichment (enrichOnePR/bulk EnrichedPRs) is the only
+// source of these fields; overlay them onto the observed pr so every
+// emit/attention site downstream sees the real merge state. No-op when
+// enriched is nil (single-PR enrich failure). (pg2-tsgkj)
+func overlayMergeState(pr *api.PR, enriched *vcs.EnrichedPR) {
+	if enriched == nil {
+		return
+	}
+	pr.Mergeable = enriched.PR.Mergeable
+	pr.MergeStateStatus = enriched.PR.MergeStateStatus
+	pr.AutoMergeEnabled = enriched.PR.AutoMergeEnabled
+}
 
 // commitAuthorsOf returns enriched.CommitAuthors, tolerating a nil enriched
 // (single-PR enrich failure) — nil degrades ownership to authorship-only.
@@ -97,6 +118,11 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	// pushed commits onto) is detected and surfaced rather than hidden as a team
 	// draft. (Closed/merged PRs returned above never reach here.)
 	enriched := e.enrichOnePR(ctx, rcfg, *pr)
+	// The REST GetPR path leaves Mergeable/MergeStateStatus/AutoMergeEnabled
+	// empty; overlay GraphQL's merge-state onto pr so pr.HasConflict() (used
+	// below by applyFetchedPR's emit AND the attention block) reflects reality
+	// on the daemon path (pg2-tsgkj).
+	overlayMergeState(pr, enriched)
 	own := ownership.Classify(ownership.Engagement{
 		Self: e.cfg().SelfLogin, PRAuthor: pr.Author, CommitAuthors: commitAuthorsOf(enriched),
 	})
@@ -138,7 +164,7 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	// attention signal.
 	if e.deps.Store != nil && own != ownership.Mine {
 		if stored, gerr := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); gerr == nil && stored != nil {
-			if aerr := e.emitAttention(ctx, bdc, rcfg.Remote, pr.Number, stored.ID, own); aerr != nil {
+			if aerr := e.emitAttention(ctx, bdc, rcfg.Remote, pr.Number, stored.ID, own, pr.HasConflict()); aerr != nil {
 				// Non-fatal: a failed attention emit self-heals next tick.
 				summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: aerr.Error()})
 			} else {

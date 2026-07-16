@@ -152,7 +152,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
 	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
-	need, reason := NeedsAttention(p.Revisions, p.DraftReviewClosed)
+	need, reason := NeedsAttention(p.Revisions, p.DraftReviewClosed, p.PR.HasConflict())
 	return TeamRow{
 		Repo:            p.PR.Repo,
 		Number:          p.PR.Number,
