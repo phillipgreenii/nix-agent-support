@@ -68,6 +68,10 @@ type EnrichedPR struct {
 	// Commits are the PR's commit messages (for kind/urgency). Empty on the
 	// REST fallback path.
 	Commits []string
+	// CommitAuthors are the PR's per-commit GitHub author logins
+	// (author.user.login). Commits with no linked user contribute no entry.
+	// Empty on the REST fallback path. Used to classify co-owned ownership.
+	CommitAuthors []string
 
 	// Truncated reports the embedded connections whose pagination cap was
 	// hit during the bulk fetch (so the caller can decide whether to fall

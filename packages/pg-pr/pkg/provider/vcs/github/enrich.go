@@ -121,6 +121,7 @@ func prNodeSelection(connFirst int) string {
             commit {
               oid
               message
+              author { user { login } }
               statusCheckRollup {
                 state
                 contexts(first: 30) {
@@ -278,8 +279,13 @@ type ghPRNode struct {
 		PageInfo   ghPageInfo `json:"pageInfo"`
 		Nodes      []struct {
 			Commit struct {
-				OID               string `json:"oid"`
-				Message           string `json:"message"`
+				OID     string `json:"oid"`
+				Message string `json:"message"`
+				Author  *struct {
+					User *struct {
+						Login string `json:"login"`
+					} `json:"user"`
+				} `json:"author"`
 				StatusCheckRollup *struct {
 					State    string         `json:"state"`
 					Contexts ghContextsConn `json:"contexts"`
@@ -416,6 +422,9 @@ func enrichedPRFromNode(n ghPRNode, repo string) vcs.EnrichedPR {
 	}
 	for _, c := range n.Commits.Nodes {
 		ep.Commits = append(ep.Commits, c.Commit.Message)
+		if c.Commit.Author != nil && c.Commit.Author.User != nil && c.Commit.Author.User.Login != "" {
+			ep.CommitAuthors = append(ep.CommitAuthors, c.Commit.Author.User.Login)
+		}
 	}
 	ep.Truncated = truncationFlags(n)
 	return ep

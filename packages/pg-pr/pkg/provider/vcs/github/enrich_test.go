@@ -586,3 +586,33 @@ func TestPRFromGHNodeMergeability(t *testing.T) {
 		t.Errorf("AutoMergeEnabled should be true when autoMergeRequest present")
 	}
 }
+
+// TestParseEnrichedPRs_CommitAuthors verifies commit author logins map onto
+// vcs.EnrichedPR.CommitAuthors, dropping commits whose author has no linked user.
+func TestParseEnrichedPRs_CommitAuthors(t *testing.T) {
+	const resp = `{"data":{"search":{"nodes":[
+	  {"number":44,"title":"x","author":{"__typename":"User","login":"alice"},
+	   "headRefName":"f","baseRefName":"main","url":"https://gh/44","isDraft":false,
+	   "state":"OPEN","merged":false,"additions":1,"deletions":0,"changedFiles":1,
+	   "repository":{"nameWithOwner":"x/y"},
+	   "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]},
+	   "body":"","labels":{"nodes":[]},"files":{"nodes":[]},
+	   "commits":{"nodes":[
+	     {"commit":{"oid":"a","message":"m1","author":{"user":{"login":"alice"}},"statusCheckRollup":null}},
+	     {"commit":{"oid":"b","message":"m2","author":{"user":{"login":"bob"}},"statusCheckRollup":null}},
+	     {"commit":{"oid":"c","message":"m3","author":{"user":null},"statusCheckRollup":null}}
+	   ]}}
+	]}}}`
+
+	got, err := parseEnrichedPRs([]byte(resp), "x/y")
+	if err != nil {
+		t.Fatalf("parseEnrichedPRs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 PR, got %d", len(got))
+	}
+	want := []string{"alice", "bob"}
+	if !sliceEq(got[0].CommitAuthors, want) {
+		t.Errorf("CommitAuthors = %v, want %v", got[0].CommitAuthors, want)
+	}
+}
