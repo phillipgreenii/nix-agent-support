@@ -32,10 +32,12 @@ workspace depends on and continues to use for every repo, including this one. Th
 are unrelated products sharing a host org; removing gascity MUST NOT be read as, or
 executed as, touching beads.
 
-pa-monitor (`packages/pa-monitor`) still carries Go-level `gascity` label-detection code
-(`internal/labels/detectors/gascity.go` and its tests) and a Grafana panel description
-mentioning gascity sessions. That is intentionally **out of scope** for this decision —
-it is tracked as a separate, follow-on piece of work.
+pa-monitor (`packages/pa-monitor`) also carried Go-level `gascity` label-detection code
+(`internal/labels/detectors/gascity.go` and its tests, wired into the daemon's detector
+chain), a dedicated `pa-monitor-decorator-gc` package, `gc_rig`/`gc_agent` fields on its
+wire proto, and a Grafana panel description mentioning gascity sessions. Because
+pa-monitor lives in this same workspace and gascity is gone workspace-wide, that
+Go-level surface is in scope for this decommission as well, not a separate decision.
 
 ## Decision
 
@@ -65,9 +67,14 @@ gascity`, and the `packages.<system>.gascity` export).
 7. Any `beads` / `gastownhall-beads` / `pkgs/beads` reference, and any `beads`-input
    flake wiring, MUST NOT be touched by this decision — beads is a distinct, actively
    used product that happens to share a GitHub org with gascity.
-8. pa-monitor's Go-level gascity label detectors and its Grafana panel copy are
-   explicitly OUT OF SCOPE here; they MAY be removed by separate, dedicated follow-on
-   work, not folded into this decommission.
+8. pa-monitor's Go-level gascity surface MUST be removed as part of this decommission:
+   the `Gascity` detector (`internal/labels/detectors/gascity.go` + tests) and its entry
+   in the daemon's detector chain (`cmd/pa-monitor/daemon.go`), the
+   `pa-monitor-decorator-gc` package in its entirety, the `GC_RIG` detection branch in
+   `detectors/project.go`, and the Grafana panel description naming gascity sessions.
+   The `gc_rig`/`gc_agent` proto fields MUST be purged from `pa_monitor.proto` — field
+   numbers 25 and 26 and both field names MUST be `reserved` so they can never be
+   reused — with `pa_monitor.pb.go` regenerated to match.
 
 ```mermaid
 flowchart TD
@@ -84,7 +91,7 @@ flowchart TD
         flakeOverlay["flake.nix overlay attrs:<br/>gascity, gc-dolt-maintenance,<br/>gc-bd-import-breaker"] -->|removed| pkgGascity
 
         pkgBeads["beads wiring<br/>(gastownhall-beads, pkgs/beads)"] -->|kept, untouched| beadsProj
-        paMonitor["pa-monitor gascity detectors<br/>(Go code)"] -.->|out of scope,<br/>follow-on bead| gascity
+        paMonitor["pa-monitor gascity detectors,<br/>decorator-gc pkg, GC proto fields"] -->|removed| gascity
     end
 ```
 
@@ -113,9 +120,9 @@ flowchart TD
 
 ### Neutral
 
-- pa-monitor's Go-level gascity workspace-scope detector and its Grafana panel text are
-  unaffected by this ADR and remain exactly as they were; removing them is deferred to
-  separate follow-on work.
+- Purging the `gc_rig`/`gc_agent` proto fields leaves field numbers 25 and 26
+  permanently reserved and unused in `pa_monitor.proto` — a harmless, permanent gap in
+  the field numbering that documents where gascity-specific data used to live.
 
 ## Related
 
@@ -129,7 +136,9 @@ flowchart TD
 - Supersedes in part [0011](0011-pa-monitor-daemon-otel-split.md) (pa-monitor Daemon +
   OTel Split): its rejected-alternatives section discusses a `gascity.*` OTel label
   namespace in the context of an active gascity consumer. The namespace question is now
-  moot for this repo's overlay/package surface (though pa-monitor's Go-level gascity
-  label detector itself is untouched here — see Context above).
+  moot for this repo's overlay/package surface, and pa-monitor's Go-level gascity label
+  detector, its `pa-monitor-decorator-gc` package, and the `gc_rig`/`gc_agent` proto
+  fields were removed by this same decommission — see Context and Decision point 8
+  above.
 - `docs/adr/0000-use-architecture-decision-records.md` (ADR process: historical ADRs are
   not rewritten).
