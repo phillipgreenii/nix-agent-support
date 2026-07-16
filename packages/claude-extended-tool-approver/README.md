@@ -94,7 +94,7 @@ Rules are evaluated in order; first non-ABSTAIN wins:
 3. **webfetch** -- WebFetch to allowed hosts
 4. **claudetools** -- AskQuestion, Glob, Grep, etc.
 5. **pathsafety** -- file operations with path-based policies
-6. **mcp** -- MCP tool allowlist
+6. **mcp** -- MCP tool allowlist + read-only-verb approval (search/get/list/read/fetch/check); mutating verbs (create/edit/update/delete/…) abstain
 7. **git** -- git subcommands
 8. **gh** -- GitHub CLI
 9. **monorepo** -- monorepo bin commands
