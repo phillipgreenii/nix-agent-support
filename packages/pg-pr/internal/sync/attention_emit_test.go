@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/snapshot"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
@@ -74,7 +75,7 @@ func TestEmitAttention_NeedTrue(t *testing.T) {
 	bdc := &attnFinderBeads{closed: true, found: true}
 	e := newAttnEngine(t, bdc, db)
 
-	if err := e.emitAttention(ctx, e.bdClientFor(config.RepoConfig{Remote: "o/r"}), "o/r", 7, prID); err != nil {
+	if err := e.emitAttention(ctx, e.bdClientFor(config.RepoConfig{Remote: "o/r"}), "o/r", 7, prID, ownership.Team); err != nil {
 		t.Fatalf("emitAttention: %v", err)
 	}
 
@@ -109,7 +110,7 @@ func TestEmitAttention_NeedFalseWhenApproved(t *testing.T) {
 	bdc := &attnFinderBeads{closed: true, found: true} // draft review ready, but teammate approved wins
 	e := newAttnEngine(t, bdc, db)
 
-	if err := e.emitAttention(ctx, e.bdClientFor(config.RepoConfig{Remote: "o/r"}), "o/r", 8, prID); err != nil {
+	if err := e.emitAttention(ctx, e.bdClientFor(config.RepoConfig{Remote: "o/r"}), "o/r", 8, prID, ownership.Team); err != nil {
 		t.Fatalf("emitAttention: %v", err)
 	}
 	evs := attentionEvents(t, db)
@@ -130,7 +131,7 @@ func TestEmitAttention_DraftReviewNotClosed(t *testing.T) {
 	bdc := &attnFinderBeads{closed: false, found: true} // bead exists but still OPEN → not ready
 	e := newAttnEngine(t, bdc, db)
 
-	if err := e.emitAttention(ctx, bdc, "o/r", 9, prID); err != nil {
+	if err := e.emitAttention(ctx, bdc, "o/r", 9, prID, ownership.Team); err != nil {
 		t.Fatalf("emitAttention: %v", err)
 	}
 	evs := attentionEvents(t, db)
@@ -185,7 +186,7 @@ func TestEmitAttention_ConsistentWithDashboard(t *testing.T) {
 			e := newAttnEngine(t, bdc, db)
 
 			// The write-model path: emit and read the need bit.
-			if err := e.emitAttention(ctx, bdc, "o/r", number, prID); err != nil {
+			if err := e.emitAttention(ctx, bdc, "o/r", number, prID, ownership.Team); err != nil {
 				t.Fatalf("emitAttention: %v", err)
 			}
 			evs := attentionEvents(t, db)

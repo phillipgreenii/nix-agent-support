@@ -638,6 +638,81 @@ func TestRefreshPRHiddenDraftEmitsUpdate(t *testing.T) {
 	}
 }
 
+// TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention: a draft PR authored
+// by a teammate ("you") whose enriched CommitAuthors include SelfLogin ("me")
+// classifies as CoOwned (ownership.Classify: authored-by-self wins Mine; else
+// a self-authored commit wins CoOwned; else Team) — NOT Team. So the
+// draft-hide guard (own == ownership.Team && pr.Draft) must NOT hide it:
+// refreshPR must surface it (non-nil snapshot input) rather than treating it
+// as a hidden team draft. It must also emit pr.attention{Need:false} so any
+// attention bead opened while the PR was still team-owned is idempotently
+// CLOSED on the team->co-owned transition.
+func TestRefreshPR_TeamToCoOwned_SurfacesAndClearsAttention(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{
+		Repo: "o/r", Number: 6, State: "open", Draft: true,
+		Author: "you", URL: "https://github.com/o/r/pull/6",
+	}
+	// enricherVCS (sync_test.go) embeds fakeVCS and adds the SinglePREnricher
+	// capability, so enrichOnePR routes through EnrichPR and returns ep as the
+	// enrichment bundle — giving us control over CommitAuthors, which the plain
+	// REST fallback path (fakeVCS alone) never populates.
+	vp := &enricherVCS{
+		fakeVCS: fakeVCS{views: map[string]api.PR{keyOf("o/r", pr.Number): pr}},
+		ep:      &vcs.EnrichedPR{CommitAuthors: []string{"you", "me"}},
+	}
+	bdc := &refreshFakeBeads{}
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos: []config.RepoConfig{
+				{Remote: "o/r", VCS: "github", TeamMembers: []string{"you"}},
+			},
+		},
+		VCS:      map[string]VCSProvider{"github": vp},
+		Beads:    bdc,
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Intentionally no dispatcher wired (Deps.Dispatch nil): flushOutbox becomes
+	// a no-op and emitted events stay in the raw outbox for direct inspection,
+	// mirroring newRefreshEngineWithStore's pattern used by the sibling
+	// hidden-draft/closed/merged tests above.
+
+	in, err := e.refreshPR(ctx, "o/r", pr.Number)
+	if err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if in == nil {
+		t.Fatal("co-owned draft must be surfaced (non-nil snapshot input), not hidden as a team draft")
+	}
+	if in.PR.Number != pr.Number {
+		t.Fatalf("input PR.Number: got %d want %d", in.PR.Number, pr.Number)
+	}
+
+	var sawAttentionCleared bool
+	for _, ev := range collectOutboxEvents(t, db) {
+		if ev.Type != store.EventPRAttention {
+			continue
+		}
+		var p store.AttentionPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatalf("unmarshal AttentionPayload: %v", err)
+		}
+		if p.Repo == "o/r" && p.Number == pr.Number && !p.Need {
+			sawAttentionCleared = true
+		}
+	}
+	if !sawAttentionCleared {
+		t.Fatal("expected a pr.attention event with Need=false clearing any prior team-attention bead on the team->co-owned transition")
+	}
+}
+
 func TestEngineCfg_AtomicSwap(t *testing.T) {
 	e, err := New(Deps{
 		Cfg:   &config.Config{SelfLogin: "old"},

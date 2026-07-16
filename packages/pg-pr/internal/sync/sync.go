@@ -754,6 +754,11 @@ func (e *Engine) enrichOnePR(ctx context.Context, rcfg config.RepoConfig, pr api
 				out.Comments = ep.Comments
 				out.Files = ep.Files
 				out.Commits = ep.Commits
+				// CommitAuthors drives ownership.Classify's co-owned detection
+				// (pg2-aag72 A7). Without this, refreshPR's hoisted enrichOnePR call
+				// would never see per-commit authors on the GraphQL single-PR path,
+				// silently defeating co-owned detection in the daemon.
+				out.CommitAuthors = ep.CommitAuthors
 				// GraphQL is the only source of these merge-state fields; the
 				// REST GetPR path (refreshPR) leaves them empty. Carry them so the
 				// daemon snapshot / mine-panel reminder work, not just one-shot sync. (pg2-dwfld)
