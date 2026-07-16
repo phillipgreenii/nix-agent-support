@@ -412,11 +412,19 @@ type draftReviewClient struct {
 	lastMine      bool
 	relabelCalls  int
 	lastRelabelID string
+	coOwnedCalls  int
+	lastCoOwned   bool
 }
 
 func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
 	c.mrCalls++
 	return "mr-1", c.alreadyClosed, nil
+}
+
+func (c *draftReviewClient) SetMergeRequestCoOwned(_ context.Context, _ string, coOwned bool) error {
+	c.coOwnedCalls++
+	c.lastCoOwned = coOwned
+	return nil
 }
 
 func (c *draftReviewClient) EnsureDraftReviewBead(_ context.Context, prBeadID, title string, mine bool) (string, error) {
@@ -456,6 +464,12 @@ func TestPROpenedMinePRCreatesDraftReview(t *testing.T) {
 	if c.relabelCalls != 0 {
 		t.Fatalf("relabel must only fire on team->co-owned transition, got %d calls for a mine PR", c.relabelCalls)
 	}
+	if c.coOwnedCalls != 1 {
+		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
+	}
+	if c.lastCoOwned {
+		t.Fatalf("expected SetMergeRequestCoOwned(false) for a mine PR (removes the label), got true")
+	}
 }
 
 func TestPROpenedTeamDraftSkipsDraftReview(t *testing.T) {
@@ -490,6 +504,12 @@ func TestPROpenedTeamReadyCreatesDraftReview(t *testing.T) {
 	}
 	if c.relabelCalls != 0 {
 		t.Fatalf("relabel must not fire for a team PR, got %d calls", c.relabelCalls)
+	}
+	if c.coOwnedCalls != 1 {
+		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
+	}
+	if c.lastCoOwned {
+		t.Fatalf("expected SetMergeRequestCoOwned(false) for a team PR (removes the label), got true")
 	}
 }
 
@@ -537,6 +557,12 @@ func TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels(t *testing.T) {
 	if c.lastRelabelID != "mr-1" {
 		t.Fatalf("expected relabel called with parent bead id mr-1, got %q", c.lastRelabelID)
 	}
+	if c.coOwnedCalls != 1 {
+		t.Fatalf("expected SetMergeRequestCoOwned called once, got %d", c.coOwnedCalls)
+	}
+	if !c.lastCoOwned {
+		t.Fatalf("expected SetMergeRequestCoOwned(true) for a co-owned PR, got false")
+	}
 }
 
 func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
@@ -549,6 +575,9 @@ func TestPROpenedClosedParentSkipsDraftReview(t *testing.T) {
 	}
 	if c.drCalls != 0 {
 		t.Fatalf("closed-parent guard failed: expected 0 draft-review ensures, got %d", c.drCalls)
+	}
+	if c.coOwnedCalls != 0 {
+		t.Fatalf("closed-parent guard failed: SetMergeRequestCoOwned must not be called for a closed parent, got %d calls", c.coOwnedCalls)
 	}
 }
 
