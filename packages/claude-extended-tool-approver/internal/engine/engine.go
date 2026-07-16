@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -141,6 +142,19 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// expression is Approve iff EVERY leaf independently approves.
 	mostRestrictive := hookio.RuleResult{Decision: hookio.Approve, Reason: "all sub-commands approved", Module: "engine"}
 
+	// Running cwd/path-evaluator threaded across leaves so a relative path after
+	// a `cd` resolves against the cd target, not the original cwd (pg2-opclh).
+	// basePE is the effective evaluator used to re-root after a cd: origin's
+	// PathEval wins when set (container mode), else the engine's evaluator — the
+	// same fallback evaluateRedirections applies for a nil override, so the
+	// running state stays consistent with it.
+	currentCWD := origin.CWD
+	currentPathEval := origin.PathEval
+	basePE := origin.PathEval
+	if basePE == nil {
+		basePE = e.pathEval
+	}
+
 	for _, pc := range parsed {
 		if pc.Executable == "" {
 			// Command-less leaf: no executable, but it may carry redirections or a
@@ -150,7 +164,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			if pc.HasHeredoc {
 				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
 			}
-			redirResult := e.evaluateRedirections(pc.Redirections, origin.PathEval)
+			redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
 			if redirResult.Decision > mostRestrictive.Decision {
 				mostRestrictive = redirResult
 			}
@@ -162,15 +176,16 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
 		}
 
-		// Build synthetic HookInput
+		// Build synthetic HookInput (using the running cwd/path-evaluator so a
+		// leaf after a `cd` resolves relative paths against the cd target).
 		syntheticInput := &hookio.HookInput{
 			SessionID:      origin.SessionID,
-			CWD:            origin.CWD,
+			CWD:            currentCWD,
 			ToolName:       "Bash",
 			ToolInput:      mustBashJSON(pc.Raw),
 			PermissionMode: origin.PermissionMode,
 			HookEventName:  origin.HookEventName,
-			PathEval:       origin.PathEval,
+			PathEval:       currentPathEval,
 		}
 
 		// Evaluate through rule chain
@@ -188,7 +203,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// (Approve < Abstain < Ask < Reject) a plain most-restrictive-wins
 		// comparison correctly lets an unknown redirection path (Abstain) demote
 		// an otherwise-approved command — no special case needed.
-		redirResult := e.evaluateRedirections(pc.Redirections, origin.PathEval)
+		redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
 		if redirResult.Decision > cmdResult.Decision {
 			cmdResult = redirResult
 		}
@@ -205,6 +220,24 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// Track most restrictive
 		if cmdResult.Decision > mostRestrictive.Decision {
 			mostRestrictive = cmdResult
+		}
+
+		// After processing the leaf, advance the running cwd if it is a simple
+		// `cd <dir>` with exactly one non-flag argument, so subsequent leaves
+		// resolve relative paths against the cd target (pg2-opclh). Conservative:
+		// `cd` with zero/multiple args, `cd -`, or `cd ~...` leave the running
+		// cwd unchanged (worst case a relative path stays classified as today).
+		if basePE != nil && pc.Executable == "cd" && len(pc.Args) == 1 &&
+			!strings.HasPrefix(pc.Args[0], "-") && !strings.HasPrefix(pc.Args[0], "~") {
+			dir := pc.Args[0]
+			var newCWD string
+			if filepath.IsAbs(dir) {
+				newCWD = filepath.Clean(dir)
+			} else {
+				newCWD = filepath.Clean(filepath.Join(currentCWD, dir))
+			}
+			currentCWD = newCWD
+			currentPathEval = basePE.WithCWD(newCWD)
 		}
 	}
 

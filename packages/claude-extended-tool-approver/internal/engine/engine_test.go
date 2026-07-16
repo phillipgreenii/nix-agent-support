@@ -409,6 +409,44 @@ func TestEngine_EvaluateExpression_NonDeviceRedirectsStillEvaluated(t *testing.T
 	}
 }
 
+func TestEngine_EvaluateExpression_CdRelativeRedirection(t *testing.T) {
+	// pg2-opclh: a relative redirection target after a `cd` MUST resolve against
+	// the cd target, not the original cwd. The base evaluator's cwd is a
+	// non-writable location (/etc), so a relative `> ./out` is PathUnknown
+	// (Abstain) at origin; after `cd /tmp` (a read-write zone) the same target
+	// resolves under /tmp and the compound approves.
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	pe := patheval.NewWithCWD("/tmp/project", "/etc")
+	e.SetPathEvaluator(pe)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/etc"}
+
+	tests := []struct {
+		name string
+		expr string
+		want hookio.Decision
+	}{
+		// Control / pre-fix isolation: without a cd the relative target resolves
+		// under the non-writable base cwd and demotes to Abstain.
+		{"relative redirect at origin is non-writable", "echo hi > ./out", hookio.Abstain},
+		// Fixed behavior: cd into a read-write zone re-roots the relative target.
+		{"cd into writable zone re-roots relative redirect", "cd /tmp && echo hi > ./out", hookio.Approve},
+		// Relative cd target resolves against the running cwd (origin.CWD=/etc):
+		// /etc/../tmp == /tmp, a read-write zone.
+		{"relative cd target re-roots relative redirect", "cd ../tmp && echo hi > ./out", hookio.Approve},
+		// Control: cd into a non-writable location must NOT approve.
+		{"cd into non-writable location does not approve", "cd /usr && echo hi > ./out", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.EvaluateExpression(tt.expr, nil, origin)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (%s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
 func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
 	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "not relevant"}
 	a2 := &mockRule{name: "rule-b", decision: hookio.Abstain, reason: "also not relevant"}
