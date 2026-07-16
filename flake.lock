@@ -494,16 +494,19 @@
         "nixpkgs": [
           "nixpkgs"
         ],
+        "pyproject-build-systems": "pyproject-build-systems",
+        "pyproject-nix": "pyproject-nix",
         "treefmt-nix": [
           "treefmt-nix"
-        ]
+        ],
+        "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1784053942,
-        "narHash": "sha256-eXM5lcofMBZG0dSLjGYMbAMJr/mswjJf1Squ18mA0bc=",
+        "lastModified": 1784204682,
+        "narHash": "sha256-6NnPoD+at2GIrnzjO8rx8NVfw77HXpX7DtX7wXziUYQ=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "eb313820d90ff595f063bef1affa5249eede0221",
+        "rev": "6ef8fe60e9453b1d4c6cedc3868006cd75581ebb",
         "type": "github"
       },
       "original": {
@@ -526,11 +529,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784063777,
-        "narHash": "sha256-WPIx/OtWqtAp1oyI6QKcO8Fg2kK1+CwAwC4v3sMGsg0=",
+        "lastModified": 1784204748,
+        "narHash": "sha256-SK4FxUWY0RDobYjpV3TfAPU1RuObiOZQi4qetFbhcoY=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "0c7b165b8b4c78b65cc2715112331f11b42d1509",
+        "rev": "f0e7e9c2606a066700809dd9b5e0f5ed41389611",
         "type": "github"
       },
       "original": {
@@ -540,6 +543,35 @@
       }
     },
     "pyproject-build-systems": {
+      "inputs": {
+        "nixpkgs": [
+          "phillipgreenii-nix-base",
+          "nixpkgs"
+        ],
+        "pyproject-nix": [
+          "phillipgreenii-nix-base",
+          "pyproject-nix"
+        ],
+        "uv2nix": [
+          "phillipgreenii-nix-base",
+          "uv2nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1782093830,
+        "narHash": "sha256-6gmEVe69+KlRkZD4PEEV5xAlB9CB0Y9TiuEgQjDrKTQ=",
+        "owner": "pyproject-nix",
+        "repo": "build-system-pkgs",
+        "rev": "430680a19bc85a3bda55f12e4cc1a1aadcf2e478",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "build-system-pkgs",
+        "type": "github"
+      }
+    },
+    "pyproject-build-systems_2": {
       "inputs": {
         "nixpkgs": [
           "serena",
@@ -569,6 +601,27 @@
       }
     },
     "pyproject-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "phillipgreenii-nix-base",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1782905613,
+        "narHash": "sha256-SvXJcAemihifkTn4BGvyE5K1FJX9bl4U8DQ5pqKvD0s=",
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "rev": "7af23cfe91064865ecf2e835da28b45b3c6f49fd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "type": "github"
+      }
+    },
+    "pyproject-nix_2": {
       "inputs": {
         "nixpkgs": [
           "serena",
@@ -618,9 +671,9 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "pyproject-build-systems": "pyproject-build-systems",
-        "pyproject-nix": "pyproject-nix",
-        "uv2nix": "uv2nix"
+        "pyproject-build-systems": "pyproject-build-systems_2",
+        "pyproject-nix": "pyproject-nix_2",
+        "uv2nix": "uv2nix_2"
       },
       "locked": {
         "lastModified": 1784019951,
@@ -851,6 +904,31 @@
       }
     },
     "uv2nix": {
+      "inputs": {
+        "nixpkgs": [
+          "phillipgreenii-nix-base",
+          "nixpkgs"
+        ],
+        "pyproject-nix": [
+          "phillipgreenii-nix-base",
+          "pyproject-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783511944,
+        "narHash": "sha256-Z/Ss9rWw9QYcRK+Qqkmty7PB1pIik5XGbrtit+ad2qs=",
+        "owner": "pyproject-nix",
+        "repo": "uv2nix",
+        "rev": "83995ef5e4ece3c9c704aa645bbff439e15a0ac3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "uv2nix",
+        "type": "github"
+      }
+    },
+    "uv2nix_2": {
       "inputs": {
         "nixpkgs": [
           "serena",
