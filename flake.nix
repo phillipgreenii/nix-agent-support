@@ -652,6 +652,107 @@
                 assert disabled.home.file == { };
                 pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
 
+              # Durable eval test (pg2-sikj3) for the integrate-branch-support enable
+              # DEFAULT: the CLI (the detector the integrate-branch plugin's dispatcher
+              # invokes as a bare PATH command) must ship exactly when the integrate-branch
+              # PLUGIN is enabled, so skill + detector can't drift apart (the "CLI not on
+              # PATH after apply" incident). Mirrors the mock-marketplace approach of
+              # test-claude-marketplaces; reads ONLY the resolved `enable` so cfg.package is
+              # never forced.
+              test-integrate-branch-support-enable-default =
+                let
+                  mockMarketplace = pkgs.runCommand "mock-ib-marketplace" {
+                    passthru = {
+                      marketplaceName = "mock-agent-support-marketplace-local";
+                      plugins = [
+                        {
+                          name = "integrate-branch";
+                          version = "0.1.0+aaaaaaaa";
+                          key = "integrate-branch@mock-agent-support-marketplace-local";
+                          defaultEnabled = true;
+                        }
+                      ];
+                    };
+                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
+
+                  evalEnable =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/integrate-branch-support/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the config surface the module reads/writes; the
+                            # real options live in claude / claude-marketplaces /
+                            # home-manager, not pulled in here.
+                            options = {
+                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude.marketplaces = {
+                                nixProvided = lib.mkOption {
+                                  type = lib.types.listOf lib.types.package;
+                                  default = [ ];
+                                };
+                                enabled = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                overrides = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config.phillipgreenii.programs.integrate-branch-support.enable;
+
+                  # claude on + integrate-branch plugin present (defaultEnabled) => on.
+                  onDefault = evalEnable {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  # plugin explicitly overridden off => off, even with claude on.
+                  overriddenOff = evalEnable {
+                    phillipgreenii.programs.claude = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.overrides."integrate-branch@mock-agent-support-marketplace-local" = false;
+                    };
+                  };
+                  # claude disabled => off, even though plugin metadata is present.
+                  claudeOff = evalEnable {
+                    phillipgreenii.programs.claude = {
+                      enable = false;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  # explicit opt-in still wins upward.
+                  explicitOn = evalEnable {
+                    phillipgreenii.programs.claude.enable = false;
+                    phillipgreenii.programs.integrate-branch-support.enable = true;
+                  };
+                in
+                assert onDefault == true;
+                assert overriddenOff == false;
+                assert claudeOff == false;
+                assert explicitOn == true;
+                pkgs.runCommand "integrate-branch-support-enable-default-ok" { } "touch $out";
+
               # Regression guard for pg2-1ygj: the claude-settings activation must
               # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
               # BEFORE the per-plugin install loop (otherwise the first apply fails

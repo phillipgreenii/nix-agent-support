@@ -2,12 +2,66 @@
 
 **Date**: 2026-07-15
 **Bead**: pg2-sikj3
-**Status**: Proposed (awaiting human sign-off — this doc is the decision artifact, not an implementation)
+**Status**: Decided + implemented (2026-07-16) — see [Decision & Outcome](#decision--outcome-2026-07-16). The Phase-1/Phase-2 recommendation below is SUPERSEDED.
 **Related**: pg2-wwpy9-adjacent incident during the 2026-07-13 canonical-main rollout
 (`docs/superpowers/specs/2026-07-13-canonical-main-worktree-discipline-design.md`, apply bead
 pg2-k7tyn); rules-delivery precedent
 (`docs/superpowers/specs/2026-06-25-agent-rules-delivery-design.md`, beads pg2-44sj / pg2-qewh);
 builder authority `phillipg-nix-repo-base/lib/claude-marketplace.nix` + `docs/claude-marketplaces.md`.
+
+## Decision & Outcome (2026-07-16)
+
+**Decided: NEITHER Phase 1 (plugin `bin/` injection) NOR Phase 2 (plugin-declared rules). Adopted a
+simpler mechanism — "Design B: co-gate the existing PATH delivery" — after a docs + monorepo review
+corrected two premises of the proposal below.**
+
+### Findings that reframed the design
+
+1. **Rules cannot ship in a plugin — Phase 2 is dead.** The official plugin reference
+   (`code.claude.com/docs/en/plugins-reference`) states verbatim: "A `CLAUDE.md` file at the plugin
+   root is not loaded as project context. Plugins contribute context through skills, agents, and
+   hooks rather than CLAUDE.md." There is no manifest field for always-on rules, and skills load
+   on-invoke only. The Tier R integrate-branch rules (R-1..R-9) are structurally NOT skill-convertible
+   without a correctness regression — **R-9** (routing) is self-defeating inside the very skill it
+   routes to, and **R-3**/**R-4** must fire before any skill is invoked and would become
+   trigger-dependent rather than unconditional. So the rules stay always-on in `pgii-agent-rules.md`;
+   there is no "unification" work on the rules axis.
+2. **No plugin-`bin/` precedent; a strong bare-command-on-PATH precedent.** `mkClaudeMarketplace` has
+   no binary-injection machinery; every CLI-backed plugin (`pg-pr`, `claude-extended-tool-approver`)
+   ships skills/hooks invoking a BARE command and delivers the binary separately via `home.packages`,
+   co-gated on `claude.enable`. A `bin/` approach would additionally have to materialize a
+   DEREFERENCED real executable — Claude's marketplace-cache copy SKIPS symlinks pointing outside the
+   plugin dir, so a `/nix/store` symlink would be dropped — and fold the binary store path into the
+   source-only version digest. In THIS workspace the plugin is only ever delivered by the same nix
+   home config that could deliver the binary, so Phase 1's "binary travels with the plugin if
+   distributed independently" advantage is moot.
+
+### Design B (implemented)
+
+The incident's root cause is not "the binary is delivered separately" but that its enable flag was
+SEPARATE from — and defaulted opposite to — the plugin's. Fix: default
+`phillipgreenii.programs.integrate-branch-support.enable` to whether the integrate-branch PLUGIN is
+enabled, mirroring `claude-marketplaces`' own resolution (`override-by-key` → `override-by-name` →
+plugin `defaultEnabled`) over the active nix-provided marketplaces, guarded by `claude.enable`. The
+separate default-false per-machine enable at
+`phillipg-nix-ziprecruiter/machines/phillipg-mbp-02/default.nix` is removed, so the new default
+governs — and is exercised — on the only real machine.
+
+- **Result:** one flag (the integrate-branch plugin's enabled state, itself gated on `claude.enable`)
+  now delivers rules (always-on), skills (plugin), AND the detector binary together — no separate
+  enable, closing the "CLI not on PATH after apply" gap structurally. Verified: `pn workspace build`
+  of `phillipg-mbp-02` places `integrate-branch-support` in the home-manager profile with NO explicit
+  enable.
+- **AC mapping:** AC1 (one flag ⇒ all three) ✅ co-enable; AC2 (no separate `home/programs/<tool>`
+  enable) ✅ default tracks the plugin, explicit enable removed; AC3 (migrated onto the unified
+  mechanism) ✅ in the co-enable sense — the binary is not physically inside the plugin bundle (that
+  is the rejected Design A), but its presence is driven by the single plugin-enable.
+- **Regression guard:** `checks.test-integrate-branch-support-enable-default` (agent-support
+  `flake.nix`) asserts the default resolves correctly across claude-on + plugin-default,
+  per-plugin override-off, claude-off, and explicit opt-in.
+
+Everything from `## Problem` onward is retained for historical context and is **superseded** by this
+section.
 
 ## Problem
 
