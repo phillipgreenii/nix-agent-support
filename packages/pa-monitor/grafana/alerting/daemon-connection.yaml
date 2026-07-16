@@ -8,14 +8,15 @@ groups:
       - uid: pa-monitor-daemon-connection-lost
         title: pa-monitor lost connection to daemon
         condition: C
-        for: 1m # alert only after >1m of inability to reach the daemon
+        for: 5m # alert only after >5m of inability to reach the daemon (was 1m; rides out transient pane/session churn + Prometheus staleness)
+        keep_firing_for: 5m # hold through a brief reconnect; avoids resolve+re-fire flapping
         noDataState: OK # a closed pane / exited process => stale series => no alarm
         execErrState: Error
         labels:
           severity: warning
         annotations:
-          summary: "pa-monitor cannot reach the daemon (>1m)"
-          description: "A pa-monitor component (cmux-bridge or tui) has not reached the daemon for over a minute. Check that the pa-monitor daemon is running (launchctl / pa-monitor status)."
+          summary: "pa-monitor cannot reach the daemon (>5m)"
+          description: "A pa-monitor component (cmux-bridge or tui) has not reached the daemon for over five minutes. Check that the pa-monitor daemon is running (launchctl / pa-monitor status)."
         data:
           - refId: A
             relativeTimeRange:
