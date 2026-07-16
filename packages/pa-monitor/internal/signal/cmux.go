@@ -75,6 +75,16 @@ func (c *CmuxSignaler) run(ctx context.Context, name string, args ...string) ([]
 	if c.RunCmd != nil {
 		return c.RunCmd(ctx, name, args...)
 	}
+	return RunCmux(ctx, name, args...)
+}
+
+// RunCmux is the single cmux-CLI exec seam: it runs the subprocess, returns its
+// stdout, and augments a failure with the captured stderr (enrichCmdErr) so a
+// failing `cmux` surfaces its cause instead of a bare "exit status N". Both the
+// CmuxSignaler delivery path and the cmuxstatus reporter route their default
+// (non-injected) subprocess calls through it, so neither duplicates the exec
+// nor drops the stderr enrichment (pg2-p1q00).
+func RunCmux(ctx context.Context, name string, args ...string) ([]byte, error) {
 	out, err := exec.CommandContext(ctx, name, args...).Output()
 	return out, enrichCmdErr(err)
 }

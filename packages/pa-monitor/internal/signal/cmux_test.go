@@ -11,6 +11,19 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
+// TestRunCmux_EnrichesStderr verifies the shared exec seam (used by both the
+// CmuxSignaler and the cmuxstatus reporter, pg2-p1q00) folds a failing
+// subprocess's stderr into the error instead of a bare "exit status N".
+func TestRunCmux_EnrichesStderr(t *testing.T) {
+	_, err := signal.RunCmux(context.Background(), "sh", "-c", "echo detail-on-stderr 1>&2; exit 3")
+	if err == nil {
+		t.Fatal("expected an error from the failing subprocess")
+	}
+	if !strings.Contains(err.Error(), "detail-on-stderr") {
+		t.Errorf("error %q does not include the captured stderr", err.Error())
+	}
+}
+
 // TestEnrichCmdErr_IncludesStderr verifies that a failed subprocess error is
 // augmented with the command's captured stderr. exec.ExitError.Error() renders
 // only "exit status N" and drops Stderr, so a cmux enumerate failure logged

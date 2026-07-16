@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // State enumerates the aggregate TUI state surfaced to the cmux sidebar.
@@ -108,7 +109,11 @@ func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]
 	if c.runCmd != nil {
 		return c.runCmd(ctx, name, args...)
 	}
-	return exec.CommandContext(ctx, name, args...).Output()
+	// Route the default subprocess call through the shared cmux exec seam so a
+	// failing `cmux` carries its stderr (enrichCmdErr) instead of a bare
+	// "exit status N" — the same enrichment the CmuxSignaler delivery path gets
+	// (pg2-p1q00). Previously this duplicated exec.CommandContext and dropped it.
+	return signal.RunCmux(ctx, name, args...)
 }
 
 func (c *cmuxReporter) log(msg string) {
