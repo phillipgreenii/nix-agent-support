@@ -44,6 +44,37 @@ func TestSafecmds_DynamicWritePath_Abstain(t *testing.T) {
 	}
 }
 
+func TestSafecmds_Pg2_5k6pu_Commands(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		// sw_vers: read-only macOS version query (alwaysSafe)
+		{"sw_vers", hookio.Approve},
+		{"sw_vers -productVersion", hookio.Approve},
+		// xxd: reads file contents — path in a readable zone approves
+		{"xxd /home/user/project/data.bin", hookio.Approve},
+		{"xxd -l 64 /home/user/project/data.bin", hookio.Approve},
+		// xxd on an out-of-zone path defers
+		{"xxd /etc/shadow", hookio.Abstain},
+		// log: show/stream/stats are read-only; erase/config/collect mutate
+		{"log show --last 5m", hookio.Approve},
+		{"log stream --level debug", hookio.Approve},
+		{"log stats", hookio.Approve},
+		{"log erase --all", hookio.Abstain},
+		{"log config --status", hookio.Abstain},
+		{"log collect", hookio.Abstain},
+	}
+	for _, c := range cases {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+		if got := r.Evaluate(input); got.Decision != c.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", c.cmd, got.Decision, got.Reason, c.want)
+		}
+	}
+}
+
 func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)

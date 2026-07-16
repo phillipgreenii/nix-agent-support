@@ -42,6 +42,30 @@ func TestNix_ReadOnly_Approve(t *testing.T) {
 	}
 }
 
+func TestNix_PrefetchAndStatix(t *testing.T) {
+	r := New()
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		// read-only prefetch fetchers (pg2-5k6pu)
+		{"nix-prefetch-url https://example.com/foo.tar.gz", hookio.Approve},
+		{"nix-prefetch-git https://github.com/owner/repo", hookio.Approve},
+		// statix: check/explain are read-only lints; fix mutates
+		{"statix check", hookio.Approve},
+		{"statix check ./flake.nix", hookio.Approve},
+		{"statix explain W20", hookio.Approve},
+		{"statix fix", hookio.Abstain},
+		{"statix", hookio.Abstain},
+	}
+	for _, c := range cases {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+		if got := r.Evaluate(input); got.Decision != c.want {
+			t.Errorf("cmd %q: got %s, want %s", c.cmd, got.Decision, c.want)
+		}
+	}
+}
+
 func TestNix_FlakeApprove(t *testing.T) {
 	approve := []string{
 		"nix flake show",

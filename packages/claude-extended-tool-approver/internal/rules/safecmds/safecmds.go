@@ -19,6 +19,7 @@ var alwaysSafe = map[string]bool{
 	"which": true, "type": true, "command": true, "unset": true, "export": true,
 	"env": true, "printenv": true, "id": true, "whoami": true,
 	"date": true, "uname": true, "hostname": true, "pwd": true, "cd": true,
+	"sw_vers": true,
 	// macOS system tools (read-only inspection)
 	"sfltool": true, "plutil": true, "system_profiler": true, "launchctl": true,
 	"claude-extended-tool-approver": true, "claude-pretool-hook": true,
@@ -38,7 +39,13 @@ var safeReadCmds = map[string]bool{
 	"cat": true, "head": true, "tail": true, "less": true, "more": true,
 	"wc": true, "diff": true,
 	"sort": true, "uniq": true, "awk": true,
-	"jq": true, "tq": true,
+	"jq": true, "tq": true, "xxd": true,
+}
+
+// logReadSubcommands are the macOS unified-logging verbs that only read; the
+// mutating verbs (erase/config/collect) are NOT approved.
+var logReadSubcommands = map[string]bool{
+	"show": true, "stream": true, "stats": true,
 }
 
 var safeWriteCmds = map[string]bool{
@@ -208,6 +215,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 						Module:   r.Name(),
 					}
 				}
+				continue
+			}
+			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		}
+		// log (macOS unified logging): show/stream/stats read; erase/config/
+		// collect mutate — approve only the read verbs, defer the rest.
+		if basename == "log" {
+			sub := ""
+			for _, a := range pc.Args {
+				if !strings.HasPrefix(a, "-") {
+					sub = a
+					break
+				}
+			}
+			if logReadSubcommands[sub] {
 				continue
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}

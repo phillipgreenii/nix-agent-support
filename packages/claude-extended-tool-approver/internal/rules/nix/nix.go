@@ -90,12 +90,34 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if basename == "nix-shell" && r.exprEval != nil {
 			return r.evaluateNixShell(pc.Args, input)
 		}
-		if basename == "nix-instantiate" || basename == "nix-hash" {
+		if basename == "nix-instantiate" || basename == "nix-hash" ||
+			basename == "nix-prefetch-url" || basename == "nix-prefetch-git" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "nix: " + basename + " is read-only",
 				Module:   r.Name(),
 			}
+		}
+		if basename == "statix" {
+			return r.evaluateStatix(pc.Args)
+		}
+	}
+	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// statixReadOnly are the statix subcommands that only lint/report; "fix" mutates
+// files, so it is deliberately excluded (defers to the prompt).
+var statixReadOnly = map[string]bool{
+	"check": true, "explain": true,
+}
+
+func (r *Rule) evaluateStatix(args []string) hookio.RuleResult {
+	sub := firstNonFlag(args)
+	if statixReadOnly[sub] {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "nix: statix " + sub + " is read-only",
+			Module:   r.Name(),
 		}
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
