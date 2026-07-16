@@ -47,3 +47,10 @@ type PR struct {
 	// AutoMergeEnabled is true when GitHub auto-merge is armed on the PR.
 	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
 }
+
+// HasConflict reports whether GitHub signals a merge conflict on this PR, via
+// either the mergeability enum (CONFLICTING) or the merge-state status (DIRTY).
+// UNKNOWN (GitHub still computing) is deliberately NOT a conflict.
+func (pr PR) HasConflict() bool {
+	return pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY"
+}
