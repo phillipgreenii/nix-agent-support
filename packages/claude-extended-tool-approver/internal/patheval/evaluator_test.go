@@ -548,15 +548,14 @@ func TestPathEvaluator_ExtToolApprover_XDGDataHome_ReadWrite(t *testing.T) {
 	}
 }
 
+// The extra-roots tests use synthetic top-level roots that need not exist:
+// resolveRefPath falls back to "/" (always present, on macOS and in the nix
+// build sandbox alike), and a top-level "/ceta-test-*" path is outside every
+// built-in zone. So the extra-root code path is exercised unconditionally —
+// no environment-dependent skip, and the completion gate genuinely validates it.
+
 func TestPathEvaluator_ExtraReadWriteRoots(t *testing.T) {
-	rwRoot := t.TempDir()
-	// The extra roots are checked LAST — only after every built-in zone. Guard
-	// against environments (e.g. the nix build sandbox, where t.TempDir lives
-	// beneath /nix) in which the temp root already falls in a built-in zone, so
-	// the extra-root code path would never be reached.
-	if New("/project").Evaluate(filepath.Join(rwRoot, "probe")) != PathUnknown {
-		t.Skipf("temp root %s falls in a built-in zone; extra-root path not exercised", rwRoot)
-	}
+	rwRoot := "/ceta-test-rw-root"
 	// Env is read at construction, so set it BEFORE building the evaluator.
 	t.Setenv("CETA_EXTRA_READWRITE_ROOTS", rwRoot)
 	pe := New("/project")
@@ -574,10 +573,7 @@ func TestPathEvaluator_ExtraReadWriteRoots(t *testing.T) {
 }
 
 func TestPathEvaluator_ExtraReadOnlyRoots(t *testing.T) {
-	roRoot := t.TempDir()
-	if New("/project").Evaluate(filepath.Join(roRoot, "probe")) != PathUnknown {
-		t.Skipf("temp root %s falls in a built-in zone; extra-root path not exercised", roRoot)
-	}
+	roRoot := "/ceta-test-ro-root"
 	t.Setenv("CETA_EXTRA_READONLY_ROOTS", roRoot)
 	pe := New("/project")
 	path := filepath.Join(roRoot, "sub", "file.txt")
@@ -594,29 +590,18 @@ func TestPathEvaluator_ExtraReadOnlyRoots(t *testing.T) {
 }
 
 func TestPathEvaluator_ExtraRoots_NeitherIsUnknown(t *testing.T) {
-	rwRoot := t.TempDir()
-	roRoot := t.TempDir()
-	neither := t.TempDir()
-	if New("/project").Evaluate(filepath.Join(neither, "probe")) != PathUnknown {
-		t.Skipf("temp root %s falls in a built-in zone; cannot assert PathUnknown", neither)
-	}
-	t.Setenv("CETA_EXTRA_READWRITE_ROOTS", rwRoot)
-	t.Setenv("CETA_EXTRA_READONLY_ROOTS", roRoot)
+	t.Setenv("CETA_EXTRA_READWRITE_ROOTS", "/ceta-test-rw-root")
+	t.Setenv("CETA_EXTRA_READONLY_ROOTS", "/ceta-test-ro-root")
 	pe := New("/project")
-	path := filepath.Join(neither, "sub", "file.txt")
+	path := "/ceta-test-neither-root/sub/file.txt"
 	if got := pe.Evaluate(path); got != PathUnknown {
 		t.Errorf("Evaluate(%s) under no extra root = %v, want PathUnknown", path, got)
 	}
 }
 
 func TestPathEvaluator_ExtraRoots_MultipleColonSeparated(t *testing.T) {
-	rw1 := t.TempDir()
-	rw2 := t.TempDir()
-	for _, r := range []string{rw1, rw2} {
-		if New("/project").Evaluate(filepath.Join(r, "probe")) != PathUnknown {
-			t.Skipf("temp root %s falls in a built-in zone; extra-root path not exercised", r)
-		}
-	}
+	rw1 := "/ceta-test-rw-a"
+	rw2 := "/ceta-test-rw-b"
 	// Colon-separated list with a stray empty element that must be dropped.
 	t.Setenv("CETA_EXTRA_READWRITE_ROOTS", rw1+"::"+rw2)
 	pe := New("/project")
