@@ -574,6 +574,42 @@ nix flake check
 pre-commit run --all-files   # or prek run --all-files
 ```
 
+## Review Adjustments (independent critique — MUST apply)
+
+These verified corrections override/augment the task steps above.
+
+- **[B1 — BLOCKER, do FIRST, before Task 3 & Task 5] The conflict signal is empty on the daemon path.** `refreshPR` gets `pr` from REST `provider.GetPR`, whose field list `prListFields` (`pkg/provider/vcs/github/github.go:118`) OMITS `mergeable`/`mergeStateStatus`. So `pr.HasConflict()` is always `false` on the daemon path (and the REST enumerate fallback), making attention-dampening (Task 3) and priority nudging (Task 5) DEAD in production — while all planned tests (which set `Mergeable`/`HasConflict` directly) pass green. Merge-state is only on `enriched.PR` (`enrichOnePR`), overlaid onto `pr` today ONLY in `buildPRInput` (`sync.go:861-862`) — so dashboard rows work but the emit path does not (violating the §5.2 shared-signal invariant).
+
+  **Fix — add this helper and call it at every emit/attention site BEFORE the payload/attention is built:**
+
+  ```go
+  // overlayMergeState copies GitHub merge-state from the enriched PR onto the
+  // observed PR. The REST GetPR/enumerate paths leave these empty; without this,
+  // pr.HasConflict() is always false on the daemon path and the conflict signal
+  // is dead in production. Idempotent. (pg2-tsgkj B1)
+  func overlayMergeState(pr *api.PR, enriched *vcs.EnrichedPR) {
+      if enriched == nil {
+          return
+      }
+      pr.Mergeable = enriched.PR.Mergeable
+      pr.MergeStateStatus = enriched.PR.MergeStateStatus
+      pr.AutoMergeEnabled = enriched.PR.AutoMergeEnabled
+  }
+  ```
+
+  Call sites (all idempotent; buildPRInput's existing overlay stays):
+  1. `refreshPR` (`internal/sync/refresh.go`) — immediately after the Plan-A-hoisted `enriched := e.enrichOnePR(...)`: `overlayMergeState(pr, enriched)`. This feeds both `applyFetchedPR`'s emit AND the `emitAttention` block.
+  2. Bulk `Sync` loop (`internal/sync/sync.go`) — after the `prEnriched` pluck, before `emitPREvent`: `overlayMergeState(&pr, prEnriched)` (the loop `pr` is a copy — safe to mutate locally).
+  3. `applyFetchedPR` (`internal/sync/sync.go`) — at the top (covers the SyncPR path): `overlayMergeState(pr, enriched)`.
+
+  **Add an emit-path test** (not just direct-payload tests): a conflicting PR whose enriched merge-state is `CONFLICTING`/`DIRTY` → assert the emitted `store.PRPayload.HasConflict == true` (drive `refreshPR`/`applyFetchedPR`, not a hand-built payload).
+
+- **[S4 — Task 3] `emitAttention` test call sites.** After adding `hasConflict`, `emitAttention` is 6-arg. Update `internal/sync/attention_emit_test.go` (~lines 77, 112, 133, 188) again. Caught only by `go test ./internal/sync/`, not `go build`.
+- **[S2 — Task 4] bd priority shape (confirmed).** Verified against live bd: `bd list --json` exposes `priority` as a top-level JSON **number**; `bd update <id> -p <n>` (alias `--priority`, values "0".."4") is the setter. The `bdIssue.Priority int json:"priority"` field and `SetPriority` are correct. Still add a `CLIRunner` round-trip integration assertion (the harness at `pkg/beads/mergerequest_test.go:45-61` drives a real `bd init` workspace) so the JSON contract is regression-guarded, since the unit test bypasses JSON by constructing `bdIssue{Priority:3}` directly.
+- **[S5 — Task 4] Recording runner (no `assertCalled`).** `fakeRunner` (`pkg/beads/mergerequest_test.go:305`) is a no-op that records nothing. Use/extend a recording runner (siblings: `feedbackRecordingRunner`, `recordingRunner`, `attentionRunner`) or the real CLIRunner harness; do not rely on a `fr.assertCalled` that doesn't exist.
+- **[S3 — Task 5] Enumerate ALL `BeadClient` fakes for the new methods** (`GetMergeRequest`, `SetPriority`, `AddLabel`, `RemoveLabel`): same fakes listed in Plan A's Review Adjustments (bridge_test.go ×5, internal/sync ×3, cmd/pg-pr ×2). Note `stubBeads` (`cmd/pg-pr/sync_test.go:46`) ALREADY has `GetMergeRequest` (~line 64) — add only the other three there. **Add `cmd/pg-pr` to Task 5's Files.**
+- **[verified OK]** `bdIssueToMergeRequest` currently DROPS labels (Task 4 correctly adds `MergeRequest.Labels`); `GetMergeRequest` uses `--all`; the `pbase:`/`co-owned` labels live on the MR bead and don't collide with the child draft-review `mine` label or the exact-string `"human"` human-label detection.
+
 ## Self-Review Notes
 
 - Spec coverage: §5.1→T1, §5.2→T2/T3, §5.3→T4/T5, §5.4→T6. Covered.
