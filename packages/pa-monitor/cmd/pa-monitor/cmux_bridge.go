@@ -816,9 +816,11 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 		out.State = cmuxstatus.StateUnknown
 	}
 
-	if state.GetWindowResetsAt() != nil {
+	var windowResetsAt time.Time
+	if ts := state.GetWindowResetsAt(); ts != nil {
+		windowResetsAt = ts.AsTime()
 		out.State = cmuxstatus.StatePaused
-		out.PausedResetAt = state.GetWindowResetsAt().AsTime()
+		out.PausedResetAt = windowResetsAt
 	}
 
 	// Prefer the authoritative five_hour used_percentage over the cost/cap estimate
@@ -835,7 +837,7 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 	if ts := state.GetLimitsCapturedAt(); ts != nil {
 		capturedAt = ts.AsTime()
 	}
-	if frac, label, ok := render.CmuxBlockProgress(state.FiveHourPct, capturedAt, costPct, costOK, now, staleAfter); ok {
+	if frac, label, ok := render.CmuxWindowProgress(windowResetsAt, state.FiveHourPct, capturedAt, costPct, costOK, now, staleAfter); ok {
 		out.HasProgress = true
 		out.Progress = frac
 		out.ProgressLabel = label

@@ -430,17 +430,16 @@ func windowProgress(tree *aggregate.Tree, now time.Time, staleAfter time.Duratio
 	if tree == nil {
 		return 0, "", false
 	}
-	if !tree.WindowResetsAt.IsZero() {
-		return 1.0, "5h block exhausted — waiting for reset", true
-	}
 	// Prefer the authoritative five_hour used_percentage over the cost/cap estimate
 	// (ADR 0021 §5), matching the on-screen BlockRow and the headless cmux-bridge, so
 	// the cmux status agrees with claude.ai. Cost/cap remains the fallback only when
-	// no authoritative reading was ever captured.
+	// no authoritative reading was ever captured. The WindowResetsAt exhaustion latch
+	// and this fallback are unified in render.CmuxWindowProgress, shared with the
+	// cmux-bridge so both surfaces agree (pg2-vux8d).
 	costPct, costOK := 0.0, false
 	if b := tree.ActiveBlock; b != nil && tree.PlanCapUSD > 0 {
 		costPct = 100 * b.CostUSD / tree.PlanCapUSD
 		costOK = true
 	}
-	return render.CmuxBlockProgress(tree.FiveHourPct, tree.LimitsCapturedAt, costPct, costOK, now, staleAfter)
+	return render.CmuxWindowProgress(tree.WindowResetsAt, tree.FiveHourPct, tree.LimitsCapturedAt, costPct, costOK, now, staleAfter)
 }
