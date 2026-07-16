@@ -17,6 +17,9 @@ func TestClaudeTools_ApprovedTools(t *testing.T) {
 		"Agent", "AskQuestion", "AskUserQuestion", "CronCreate", "CronDelete", "CronList",
 		"ReadLints", "SemanticSearch", "Skill", "SwitchMode", "Task",
 		"TaskCreate", "TaskOutput", "TaskUpdate", "TodoWrite", "ToolSearch", "WebSearch",
+		// First-party agent-control / read-only tools (pg2-9cist)
+		"Monitor", "StructuredOutput", "ScheduleWakeup", "TaskStop", "SendMessage",
+		"EnterWorktree", "TaskList", "Workflow", "TaskGet", "ReportFindings",
 	}
 	r := New()
 	for _, tool := range approved {
@@ -24,6 +27,18 @@ func TestClaudeTools_ApprovedTools(t *testing.T) {
 		got := r.Evaluate(input)
 		if got.Decision != hookio.Approve {
 			t.Errorf("tool %q: got %s, want approve", tool, got.Decision)
+		}
+	}
+}
+
+func TestClaudeTools_PlanModeToolsAbstain(t *testing.T) {
+	// Plan-mode transitions must NOT be auto-approved — approving their
+	// PreToolUse would short-circuit the native plan-review gate (pg2-9cist).
+	r := New()
+	for _, tool := range []string{"ExitPlanMode", "EnterPlanMode"} {
+		input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("tool %q: got %s, want abstain", tool, got.Decision)
 		}
 	}
 }
