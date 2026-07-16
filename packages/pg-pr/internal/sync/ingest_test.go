@@ -777,6 +777,44 @@ func TestIngestSkipsExcludedCICheck(t *testing.T) {
 	}
 }
 
+// TestIngest_CoOwnedOwnership verifies that a PR authored by a non-self login
+// but with a self-authored commit (per enriched.CommitAuthors) is classified
+// as "co-owned" via ownership.Classify — not the old authorship-only "team"
+// value. (pg2-aag72 Task A6)
+func TestIngest_CoOwnedOwnership(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+
+	pr := api.PR{Repo: "o/r", Number: 7, Author: "you", HeadSHA: "h", BaseSHA: "b"}
+	enriched := &vcs.EnrichedPR{PR: pr, CommitAuthors: []string{"you", "me"}}
+
+	e, err := New(Deps{
+		Cfg: &config.Config{
+			SelfLogin: "me",
+			Repos:     []config.RepoConfig{{Remote: "o/r", VCS: "github"}},
+		},
+		VCS:      map[string]VCSProvider{"github": newFakeVCS()},
+		Beads:    &noopBeads{},
+		StateDir: t.TempDir(),
+		Store:    db,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := e.ingestFeedbackToStore(ctx, "o/r", pr, enriched); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	got, err := db.GetPR(ctx, "o/r", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got == nil || got.Ownership != "co-owned" {
+		t.Fatalf("ownership = %+v, want co-owned", got)
+	}
+}
+
 func TestSync_RecordsRevisionWithCIAndReview(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)

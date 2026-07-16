@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/feedbackclassify"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
@@ -42,7 +43,10 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		reg = ar.ToClassifyRegistry()
 	}
 	self := e.cfg().SelfLogin
-	mine := e.isSelfAuthored(pr.Author)
+	own := ownership.Classify(ownership.Engagement{
+		Self: self, PRAuthor: pr.Author, CommitAuthors: enriched.CommitAuthors,
+	})
+	mine := own.ActsAsMine()
 
 	rcfg, _ := e.repoConfig(repo) // repo is guaranteed in config here (processFeedback gates on it)
 	ciExcl := cirollup.NewExcluder(rcfg.ExcludedCIChecks)
@@ -56,11 +60,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 	// meaningfully clobbers the first. It is still required here because
 	// ingestFeedbackToStore is also called directly (e.g. the full-chain
 	// integration test) without a prior upsert.
-	ownership := "team"
-	if mine {
-		ownership = "mine"
-	}
-	prID, err := e.deps.Store.UpsertPR(ctx, e.prToStoreRow(repo, pr, ownership))
+	prID, err := e.deps.Store.UpsertPR(ctx, e.prToStoreRow(repo, pr, own.String()))
 	if err != nil {
 		return fmt.Errorf("ingest: upsert pr %s#%d: %w", repo, pr.Number, err)
 	}
