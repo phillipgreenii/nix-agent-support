@@ -370,8 +370,8 @@ command = "/nix/store/abc-pa-monitor-decorator-zr/bin/pa-monitor-decorator-zr"
 timeout_ms = 1500
 
 [[decorator]]
-name = "gc-labels"
-command = "/nix/store/def-pa-monitor-decorator-gc/bin/pa-monitor-decorator-gc"
+name = "scope-labels"
+command = "/nix/store/def-pa-monitor-decorator-scope/bin/pa-monitor-decorator-scope"
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -386,7 +386,7 @@ command = "/nix/store/def-pa-monitor-decorator-gc/bin/pa-monitor-decorator-gc"
 	if cfg.Decorators[0].Name != "zr-labels" || cfg.Decorators[0].TimeoutMS != 1500 {
 		t.Errorf("Decorators[0] = %+v", cfg.Decorators[0])
 	}
-	if cfg.Decorators[1].Name != "gc-labels" || cfg.Decorators[1].TimeoutMS != 0 {
+	if cfg.Decorators[1].Name != "scope-labels" || cfg.Decorators[1].TimeoutMS != 0 {
 		t.Errorf("Decorators[1] = %+v (TimeoutMS 0 means use runner default)", cfg.Decorators[1])
 	}
 }

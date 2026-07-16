@@ -128,8 +128,6 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 	if sv.Env != nil {
 		out.CmuxWorkspaceId = sv.Env["CMUX_WORKSPACE_ID"]
 		out.TmuxSession = sv.Env["TMUX"]
-		out.GcRig = sv.Env["GC_RIG"]
-		out.GcAgent = sv.Env["GC_AGENT"]
 		out.WorkspaceEnv = sv.Env["WORKSPACE"]
 	}
 	// Computed label set (workspace.scope etc.) persisted on the session row —

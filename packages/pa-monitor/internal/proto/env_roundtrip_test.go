@@ -10,9 +10,9 @@ import (
 )
 
 // TestSessionEnvRoundTrip confirms that the known env-key subset
-// (CMUX_WORKSPACE_ID, TMUX, GC_RIG, GC_AGENT, WORKSPACE) survives
-// FromTree → ToTree without loss. Arbitrary other keys must NOT be
-// exposed on the wire — verifies the privacy guard.
+// (CMUX_WORKSPACE_ID, TMUX, WORKSPACE) survives FromTree → ToTree without
+// loss. Arbitrary other keys must NOT be exposed on the wire — verifies the
+// privacy guard.
 func TestSessionEnvRoundTrip(t *testing.T) {
 	in := &aggregate.Tree{
 		Dirs: []*aggregate.Directory{
@@ -25,8 +25,6 @@ func TestSessionEnvRoundTrip(t *testing.T) {
 							Env: map[string]string{
 								"CMUX_WORKSPACE_ID": "ws-7",
 								"TMUX":              "/tmp/tmux-501/default,1,0",
-								"GC_RIG":            "beads",
-								"GC_AGENT":          "polecat",
 								"WORKSPACE":         "ws-1",
 								"AWS_SECRET":        "should-not-leak",
 								"OAUTH_TOKEN":       "still-not-leaking",
@@ -49,12 +47,6 @@ func TestSessionEnvRoundTrip(t *testing.T) {
 	}
 	if got["TMUX"] != "/tmp/tmux-501/default,1,0" {
 		t.Errorf("TMUX lost: %+v", got)
-	}
-	if got["GC_RIG"] != "beads" {
-		t.Errorf("GC_RIG lost: %+v", got)
-	}
-	if got["GC_AGENT"] != "polecat" {
-		t.Errorf("GC_AGENT lost: %+v", got)
 	}
 	if got["WORKSPACE"] != "ws-1" {
 		t.Errorf("WORKSPACE lost: %+v", got)

@@ -70,22 +70,6 @@ func NewDecorator(cfg DecoratorConfig) (*Decorator, error) {
 	return &Decorator{name: cfg.Name, argv: argv, env: mergeDecoratorEnv(cfg.Env), timeoutMS: tm}, nil
 }
 
-// newDecoratorRaw is the unsafe constructor used by tests. It bypasses the
-// /nix/store/ enforcement (and shell-splitting) so a fake single-binary
-// decorator in $TMPDIR can be wired up. Production callers MUST use NewDecorator.
-func newDecoratorRaw(name, cmd string, timeoutMS int) *Decorator {
-	return newDecoratorRawArgv(name, []string{cmd}, nil, timeoutMS)
-}
-
-// newDecoratorRawArgv is newDecoratorRaw with an explicit argv and extra env,
-// for tests that exercise argument-passing and env-forwarding end-to-end.
-func newDecoratorRawArgv(name string, argv []string, env map[string]string, timeoutMS int) *Decorator {
-	if timeoutMS <= 0 {
-		timeoutMS = 2000
-	}
-	return &Decorator{name: name, argv: argv, env: mergeDecoratorEnv(env), timeoutMS: timeoutMS}
-}
-
 // mergeDecoratorEnv builds the child environment: the minimal base env
 // (PA_MONITOR_DECORATE=1, a fixed PATH) with any config-provided entries merged
 // over it (config wins on key collision). The base keys are emitted first in a
@@ -133,8 +117,8 @@ func splitArgs(s string) ([]string, error) {
 	inWord := false
 	for i := 0; i < len(s); {
 		c := s[i]
-		switch {
-		case c == '\'':
+		switch c {
+		case '\'':
 			inWord = true
 			i++
 			for i < len(s) && s[i] != '\'' {
@@ -145,7 +129,7 @@ func splitArgs(s string) ([]string, error) {
 				return nil, fmt.Errorf("unterminated single quote in %q", s)
 			}
 			i++ // consume closing quote
-		case c == '"':
+		case '"':
 			inWord = true
 			i++
 			for i < len(s) && s[i] != '"' {
@@ -164,14 +148,14 @@ func splitArgs(s string) ([]string, error) {
 				return nil, fmt.Errorf("unterminated double quote in %q", s)
 			}
 			i++ // consume closing quote
-		case c == '\\':
+		case '\\':
 			if i+1 >= len(s) {
 				return nil, fmt.Errorf("trailing backslash in %q", s)
 			}
 			inWord = true
 			cur.WriteByte(s[i+1])
 			i += 2
-		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+		case ' ', '\t', '\n', '\r':
 			if inWord {
 				args = append(args, cur.String())
 				cur.Reset()

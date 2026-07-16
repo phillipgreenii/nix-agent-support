@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestRun_EmitsLabelsKey mirrors the decorator-gc scaffold test: pipe a
+// TestRun_EmitsLabelsKey mirrors the standard decorator scaffold test: pipe a
 // sample session JSON through run() and assert the output is well-formed
 // JSON with a top-level "labels" object. Under `go test` no -rule flags and
 // no env rules reach run(), so the labels are empty — that is still a valid

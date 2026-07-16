@@ -718,8 +718,6 @@ type SessionView struct {
 	// env is never wire-exposed. Empty when not present in the env.
 	CmuxWorkspaceId string `protobuf:"bytes,23,opt,name=cmux_workspace_id,json=cmuxWorkspaceId,proto3" json:"cmux_workspace_id,omitempty"`
 	TmuxSession     string `protobuf:"bytes,24,opt,name=tmux_session,json=tmuxSession,proto3" json:"tmux_session,omitempty"`
-	GcRig           string `protobuf:"bytes,25,opt,name=gc_rig,json=gcRig,proto3" json:"gc_rig,omitempty"`
-	GcAgent         string `protobuf:"bytes,26,opt,name=gc_agent,json=gcAgent,proto3" json:"gc_agent,omitempty"`
 	WorkspaceEnv    string `protobuf:"bytes,27,opt,name=workspace_env,json=workspaceEnv,proto3" json:"workspace_env,omitempty"` // value of $WORKSPACE
 	// nudge history (watermarks)
 	// Set when the daemon has fired at least one nudge for this session.
@@ -934,20 +932,6 @@ func (x *SessionView) GetCmuxWorkspaceId() string {
 func (x *SessionView) GetTmuxSession() string {
 	if x != nil {
 		return x.TmuxSession
-	}
-	return ""
-}
-
-func (x *SessionView) GetGcRig() string {
-	if x != nil {
-		return x.GcRig
-	}
-	return ""
-}
-
-func (x *SessionView) GetGcAgent() string {
-	if x != nil {
-		return x.GcAgent
 	}
 	return ""
 }
@@ -2677,7 +2661,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
 	"\x05state\x18\x03 \x01(\tR\x05state\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\"\xcc\t\n" +
+	"\x03url\x18\x04 \x01(\tR\x03url\"\xb8\t\n" +
 	"\vSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -2707,9 +2691,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\bcost_usd\x18\x15 \x01(\x01R\acostUsd\x12%\n" +
 	"\x0eawaiting_input\x18\x16 \x01(\bR\rawaitingInput\x12*\n" +
 	"\x11cmux_workspace_id\x18\x17 \x01(\tR\x0fcmuxWorkspaceId\x12!\n" +
-	"\ftmux_session\x18\x18 \x01(\tR\vtmuxSession\x12\x15\n" +
-	"\x06gc_rig\x18\x19 \x01(\tR\x05gcRig\x12\x19\n" +
-	"\bgc_agent\x18\x1a \x01(\tR\agcAgent\x12#\n" +
+	"\ftmux_session\x18\x18 \x01(\tR\vtmuxSession\x12#\n" +
 	"\rworkspace_env\x18\x1b \x01(\tR\fworkspaceEnv\x12@\n" +
 	"\x0elast_nudged_at\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\flastNudgedAt\x12,\n" +
 	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\x12\x18\n" +
@@ -2717,7 +2699,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x06labels\x18\x1f \x03(\v2&.pa_monitor.v1.SessionView.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x19\x10\x1aJ\x04\b\x1a\x10\x1bR\x06gc_rigR\bgc_agent\"\xe0\x03\n" +
 	"\x05Block\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\n" +

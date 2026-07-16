@@ -27,7 +27,7 @@ func TestLabelsForSession_CachesPerSession(t *testing.T) {
 	calls := 0
 	d := fakeDetector{key: "workspace.scope", fn: func(s labels.Session) string {
 		calls++
-		return "gascity"
+		return "override"
 	}}
 	cap := labels.NewCardinalityCap(10)
 	cache := map[string]labels.Set{}
@@ -39,7 +39,7 @@ func TestLabelsForSession_CachesPerSession(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("detector called %d times, want 1 (cached)", calls)
 	}
-	if cache["s1"]["workspace.scope"] != "gascity" {
+	if cache["s1"]["workspace.scope"] != "override" {
 		t.Errorf("cache miss: %+v", cache["s1"])
 	}
 }
@@ -50,7 +50,7 @@ func TestLabelsForSession_CachesPerSession(t *testing.T) {
 // the same map reference, stale `state` values would survive across
 // ticks. Defends against that.
 func TestLabelsForSession_CacheNotMutatedByCaller(t *testing.T) {
-	d := fakeDetector{key: "workspace.scope", fn: func(s labels.Session) string { return "gascity" }}
+	d := fakeDetector{key: "workspace.scope", fn: func(s labels.Session) string { return "override" }}
 	cap := labels.NewCardinalityCap(10)
 	cache := map[string]labels.Set{}
 
@@ -68,7 +68,7 @@ func TestLabelsForSession_CacheNotMutatedByCaller(t *testing.T) {
 	if _, ok := again["bogus"]; ok {
 		t.Errorf("cache leaked caller's `bogus` key: %+v", again)
 	}
-	if again["workspace.scope"] != "gascity" {
+	if again["workspace.scope"] != "override" {
 		t.Errorf("cache lost legitimate value: %+v", again)
 	}
 }
@@ -162,8 +162,8 @@ func TestLabelsForSession_CachesSuccessfulEmptyDecorator(t *testing.T) {
 }
 
 func TestCanonicalKey_StableOrdering(t *testing.T) {
-	a := labels.Set{"workspace.scope": "gascity", "state": "working"}
-	b := labels.Set{"state": "working", "workspace.scope": "gascity"}
+	a := labels.Set{"workspace.scope": "override", "state": "working"}
+	b := labels.Set{"state": "working", "workspace.scope": "override"}
 	if canonicalKey(a) != canonicalKey(b) {
 		t.Errorf("canonicalKey not stable across map iteration")
 	}

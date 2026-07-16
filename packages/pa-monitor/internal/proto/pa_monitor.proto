@@ -199,8 +199,8 @@ message SessionView {
   // env is never wire-exposed. Empty when not present in the env.
   string cmux_workspace_id = 23;
   string tmux_session = 24;
-  string gc_rig = 25;
-  string gc_agent = 26;
+  reserved 25, 26;
+  reserved "gc_rig", "gc_agent"; // decommissioned (ADR 0030); never reuse
   string workspace_env = 27; // value of $WORKSPACE
 
   // nudge history (watermarks)

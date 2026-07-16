@@ -137,12 +137,6 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 	if v := sv.GetTmuxSession(); v != "" {
 		env["TMUX"] = v
 	}
-	if v := sv.GetGcRig(); v != "" {
-		env["GC_RIG"] = v
-	}
-	if v := sv.GetGcAgent(); v != "" {
-		env["GC_AGENT"] = v
-	}
 	if v := sv.GetWorkspaceEnv(); v != "" {
 		env["WORKSPACE"] = v
 	}

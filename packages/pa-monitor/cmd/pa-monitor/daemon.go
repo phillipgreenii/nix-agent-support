@@ -191,9 +191,8 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		BridgeRegistry:      bridgeRegistry,
 		CmuxAncestor:        cmuxAncestor,
 		Detectors: []labels.Detector{
-			detectors.DefaultScope{}, // sets workspace.scope=personal; Gascity overrides for GC sessions
+			detectors.DefaultScope{}, // sets workspace.scope=personal; decorators may override
 			detectors.Terminal{},
-			detectors.Gascity{},
 			detectors.Repo{},
 			detectors.Project{},
 			detectors.Agent{},

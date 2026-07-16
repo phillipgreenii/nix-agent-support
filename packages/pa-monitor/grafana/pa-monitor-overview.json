@@ -975,7 +975,7 @@
       "id": 20,
       "title": "Sessions by workspace.scope",
       "type": "timeseries",
-      "description": "Every session emits a workspace.scope label — Gas City sessions surface as 'gascity', others as 'personal' (set by the DefaultScope detector).",
+      "description": "Every session emits a workspace.scope label — downstream decorators may override the default (see the DefaultScope detector and pa-monitor-decorator-scope); un-overridden sessions surface as 'personal'.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

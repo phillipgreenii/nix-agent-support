@@ -178,7 +178,7 @@ func TestResolveSignalerReturnsFirstMatch(t *testing.T) {
 	// Uses fakeMultiSocketRun so the new pid-aware Detect (which calls
 	// cachedPanes/ps -A) can be served.
 	panes := map[string]string{
-		"gc": "1 mayor:0.0\n",
+		"alt": "1 mayor:0.0\n",
 	}
 	always := &signal.TmuxSignaler{
 		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
@@ -310,19 +310,19 @@ const psNoTmuxServers = `99999 bash -bash
 const psSampleDefaultOnly = `28346 tmux tmux new-session -d -s main
 `
 
-const psSampleSingleServer = `28346 tmux tmux -u -L gc new-session -d -s mayor
+const psSampleSingleServer = `28346 tmux tmux -u -L alt new-session -d -s mayor
 12345 zsh -zsh
 67890 claude /usr/bin/claude
 `
 
-const psSampleTwoServers = `28346 tmux tmux -u -L gc new-session -d -s mayor
+const psSampleTwoServers = `28346 tmux tmux -u -L alt new-session -d -s mayor
 36990 tmux tmux -u -L work attach
 99999 bash -bash
 `
 
 func TestTmuxEnumerateSingleServer(t *testing.T) {
 	panes := map[string]string{
-		"gc": "100 mayor:0.0\n200 mayor:0.1\n",
+		"alt": "100 mayor:0.0\n200 mayor:0.1\n",
 	}
 	sig := &signal.TmuxSignaler{
 		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
@@ -333,17 +333,17 @@ func TestTmuxEnumerateSingleServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnumeratePanes: %v", err)
 	}
-	if loc, ok := locs[100]; !ok || loc.SocketName != "gc" || loc.PaneID != "mayor:0.0" {
-		t.Errorf("locs[100] = %+v, want {gc, mayor:0.0}", loc)
+	if loc, ok := locs[100]; !ok || loc.SocketName != "alt" || loc.PaneID != "mayor:0.0" {
+		t.Errorf("locs[100] = %+v, want {alt, mayor:0.0}", loc)
 	}
-	if loc, ok := locs[200]; !ok || loc.SocketName != "gc" || loc.PaneID != "mayor:0.1" {
-		t.Errorf("locs[200] = %+v, want {gc, mayor:0.1}", loc)
+	if loc, ok := locs[200]; !ok || loc.SocketName != "alt" || loc.PaneID != "mayor:0.1" {
+		t.Errorf("locs[200] = %+v, want {alt, mayor:0.1}", loc)
 	}
 }
 
 func TestTmuxEnumerateTwoServers(t *testing.T) {
 	panes := map[string]string{
-		"gc":   "100 mayor:0.0\n",
+		"alt":  "100 mayor:0.0\n",
 		"work": "300 dev:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
@@ -355,8 +355,8 @@ func TestTmuxEnumerateTwoServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnumeratePanes: %v", err)
 	}
-	if locs[100].SocketName != "gc" || locs[100].PaneID != "mayor:0.0" {
-		t.Errorf("locs[100] = %+v, want {gc, mayor:0.0}", locs[100])
+	if locs[100].SocketName != "alt" || locs[100].PaneID != "mayor:0.0" {
+		t.Errorf("locs[100] = %+v, want {alt, mayor:0.0}", locs[100])
 	}
 	if locs[300].SocketName != "work" || locs[300].PaneID != "dev:0.0" {
 		t.Errorf("locs[300] = %+v, want {work, dev:0.0}", locs[300])
@@ -365,9 +365,9 @@ func TestTmuxEnumerateTwoServers(t *testing.T) {
 
 func TestTmuxEnumerationSkipsDeadSocket(t *testing.T) {
 	// `work` socket has no entry → fakeMultiSocketRun returns an error.
-	// Enumeration should still surface `gc`.
+	// Enumeration should still surface `alt`.
 	panes := map[string]string{
-		"gc": "100 mayor:0.0\n",
+		"alt": "100 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
 		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes, nil),
@@ -378,8 +378,8 @@ func TestTmuxEnumerationSkipsDeadSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnumeratePanes: %v", err)
 	}
-	if locs[100].SocketName != "gc" {
-		t.Errorf("locs[100] = %+v, want gc despite work failing", locs[100])
+	if locs[100].SocketName != "alt" {
+		t.Errorf("locs[100] = %+v, want alt despite work failing", locs[100])
 	}
 	if _, hasWork := locs[300]; hasWork {
 		t.Errorf("locs[300] present despite work socket failing")
@@ -407,19 +407,19 @@ func TestTmuxEnumerateDefaultSocketWhenNoDashL(t *testing.T) {
 }
 
 func TestTmuxDetectReturnsTrueOnlyWhenPidInPane(t *testing.T) {
-	// agent 1000 -> bash 500 -> shell 100 (pane gc:mayor:0.0)
+	// agent 1000 -> bash 500 -> shell 100 (pane alt:mayor:0.0)
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
 		500:  {"100", "bash"},
 	}
 	panes := map[string]string{
-		"gc": "100 mayor:0.0\n",
+		"alt": "100 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
 		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
 	}
 	if !sig.Detect(1000) {
-		t.Error("Detect(1000) = false, want true (pid in pane gc:mayor:0.0 via ancestor 100)")
+		t.Error("Detect(1000) = false, want true (pid in pane alt:mayor:0.0 via ancestor 100)")
 	}
 }
 
@@ -432,7 +432,7 @@ func TestTmuxDetectReturnsFalseWhenPidNotInAnyPane(t *testing.T) {
 		200:  {"1", "tmux"},
 	}
 	panes := map[string]string{
-		"gc": "999 mayor:0.0\n",
+		"alt": "999 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
 		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
@@ -449,7 +449,7 @@ func TestTmuxSendFindsPaneOnNonDefaultSocket(t *testing.T) {
 		600:  {"300", "bash"},
 	}
 	panes := map[string]string{
-		"gc":   "100 mayor:0.0\n",
+		"alt":  "100 mayor:0.0\n",
 		"work": "300 dev:0.0\n",
 	}
 	var sent []string

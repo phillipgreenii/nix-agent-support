@@ -131,9 +131,6 @@
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
-          pa-monitor-decorator-gc = final.callPackage ./packages/pa-monitor-decorator-gc {
-            inherit (goBuilders) mkGoApp;
-          };
           pa-monitor-decorator-scope = final.callPackage ./packages/pa-monitor-decorator-scope {
             inherit (goBuilders) mkGoApp;
           };
@@ -365,7 +362,6 @@
                 "pg-pr"
                 "pb"
                 "claude-extended-tool-approver"
-                "pa-monitor-decorator-gc"
                 "pa-monitor-decorator-scope"
                 "claude-transcript"
               ];
@@ -1414,7 +1410,6 @@
               pb
               claude-extended-tool-approver
               pa-monitor
-              pa-monitor-decorator-gc
               pa-monitor-decorator-scope
               pg-pr
               integrate-branch-support

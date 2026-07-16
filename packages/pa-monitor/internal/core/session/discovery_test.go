@@ -78,7 +78,7 @@ func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	envByPID := map[int]map[string]string{
-		42: {"GC_RIG": "beads", "CMUX_WORKSPACE_ID": "ws1"},
+		42: {"TMUX": "/tmp/tmux-501/default,1,0", "CMUX_WORKSPACE_ID": "ws1"},
 	}
 	d := &Discoverer{
 		SessionsDir: dir,
@@ -94,8 +94,8 @@ func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d sessions", len(got))
 	}
-	if got[0].Env["GC_RIG"] != "beads" {
-		t.Errorf("env GC_RIG = %q", got[0].Env["GC_RIG"])
+	if got[0].Env["TMUX"] != "/tmp/tmux-501/default,1,0" {
+		t.Errorf("env TMUX = %q", got[0].Env["TMUX"])
 	}
 	if got[0].Env["CMUX_WORKSPACE_ID"] != "ws1" {
 		t.Errorf("env CMUX_WORKSPACE_ID = %q", got[0].Env["CMUX_WORKSPACE_ID"])

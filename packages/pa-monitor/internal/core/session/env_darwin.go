@@ -15,9 +15,8 @@ import (
 //
 // Parsing is best-effort: values containing spaces will be split. Since
 // the labels package only consumes a known set of single-word vars
-// (CMUX_WORKSPACE_ID, TMUX, GC_RIG, GC_AGENT, WORKSPACE), this is fine
-// for the use case. Robust parsing would require libproc + cgo, which we
-// avoid.
+// (CMUX_WORKSPACE_ID, TMUX, WORKSPACE), this is fine for the use case.
+// Robust parsing would require libproc + cgo, which we avoid.
 func readProcessEnv(pid int) (map[string]string, error) {
 	out, err := exec.Command("ps", "-E", "-ww", "-o", "command=", "-p", fmt.Sprintf("%d", pid)).Output()
 	if err != nil {

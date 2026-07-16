@@ -17,6 +17,26 @@ import (
 	"testing"
 )
 
+// newDecoratorRaw is the unsafe constructor used by these tests. It bypasses
+// the /nix/store/ enforcement (and shell-splitting) so a fake single-binary
+// decorator in $TMPDIR can be wired up. Production callers MUST use
+// NewDecorator. Defined here (rather than in decorator.go) so its only
+// caller lives under the same `hostile` build tag — keeping definition and
+// use in the same build unit avoids a false "unused" finding from the
+// default (non-hostile) lint/build, which never sees this file.
+func newDecoratorRaw(name, cmd string, timeoutMS int) *Decorator {
+	return newDecoratorRawArgv(name, []string{cmd}, nil, timeoutMS)
+}
+
+// newDecoratorRawArgv is newDecoratorRaw with an explicit argv and extra env,
+// for tests that exercise argument-passing and env-forwarding end-to-end.
+func newDecoratorRawArgv(name string, argv []string, env map[string]string, timeoutMS int) *Decorator {
+	if timeoutMS <= 0 {
+		timeoutMS = 2000
+	}
+	return &Decorator{name: name, argv: argv, env: mergeDecoratorEnv(env), timeoutMS: timeoutMS}
+}
+
 func TestDecorator_RoundTripJSON(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-decorator")
