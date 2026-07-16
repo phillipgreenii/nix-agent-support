@@ -63,19 +63,34 @@ classifier and route every site through it.
 
 ```go
 // package ownership (new: internal/ownership)
+
+// Ownership is the "can I act on this PR?" axis. It is deliberately a CLOSED
+// 3-value set — NOT the place to encode why a PR is in my set or how urgent it
+// is (that is the separate engagement/tier axis; see below).
 type Ownership string
 
 const (
-	Mine     Ownership = "mine"
-	CoOwned  Ownership = "co-owned"
-	Team     Ownership = "team"
+	Mine    Ownership = "mine"
+	CoOwned Ownership = "co-owned"
+	Team    Ownership = "team"
 )
 
+// Engagement is the set of PR facts the classifier reads. It is the GROWTH
+// POINT: pg2-4dz88 adds engagement signals here (my submitted review, assigned
+// to me, I commented, …) without changing every call site. Today only
+// authorship + commit authors are consumed. CommitAuthors is the per-commit
+// author logins observed this tick; nil/empty (enrichment absent) degrades the
+// result to authorship-only (Mine|Team).
+type Engagement struct {
+	Self          string
+	PRAuthor      string
+	CommitAuthors []string
+	// pg2-4dz88 (future): MyReviewSubmitted, AssignedToMe, ICommented, …
+}
+
 // Classify applies precedence: authored-by-self => Mine; else a self-authored
-// commit => CoOwned; else Team. Empty self => Team (never asserts ownership).
-// commitAuthors is the set of per-commit author logins observed this tick;
-// nil/empty (enrichment absent) degrades to authorship-only (Mine|Team).
-func Classify(self, prAuthor string, commitAuthors []string) Ownership
+// commit => CoOwned; else Team. Empty Self => Team (never asserts ownership).
+func Classify(e Engagement) Ownership
 
 // ActsAsMine reports whether store consumers should treat this like my own PR
 // (dashboard placement, reply-posting, mine-style review, no team attention).
@@ -83,9 +98,16 @@ func Classify(self, prAuthor string, commitAuthors []string) Ownership
 func (o Ownership) ActsAsMine() bool { return o == Mine || o == CoOwned }
 ```
 
+**Two axes, kept separate (design guard for pg2-4dz88):** `Ownership` answers
+"can I act?"; a future **engagement/tier** classification answers "why is this in
+my set and how urgent?" (pg2-4dz88's 4 tiers). They are orthogonal — `co-owned`
+is merely where they currently touch (a strong engagement signal that also flips
+ownership). pg2-4dz88 MUST layer its tier model as a SEPARATE classifier over the
+same `Engagement` facts, NOT by adding values to `Ownership`.
+
 **Degradation (MUST):** when a tick has no enriched commit data for a PR
-(close-detection, some refresh branches), `commitAuthors` is nil and the PR
-classifies `Mine|Team` by authorship only. This is consistent with the
+(close-detection, some refresh branches), `Engagement.CommitAuthors` is nil and
+the PR classifies `Mine|Team` by authorship only. This is consistent with the
 stateless-re-derivation philosophy — the next enriched tick refines it — and it
 never mis-promotes a draft (the promote gate is authorship-only regardless).
 
@@ -255,6 +277,13 @@ func HasConflict(pr api.PR) bool {
   and the attention **bead** both suppress for a conflicting team PR (the bead
   closes via the existing `Need=false → projectAttentionBead` path).
 
+**Scope of the team-side signal (deliberately thin — see §5.5):** the ONLY
+team-side behavior in Spec B is this conflict-dampening of the existing
+attention signal plus the −1 priority nudge (§5.3). It is a single COMPOSABLE
+input, not a new ordering scheme. pg2-4dz88 owns the full team-PR tier/ordering
+model and two-panel split; Spec B MUST NOT introduce team-PR ordering, tiers, or
+panels that pg2-4dz88 would then rework.
+
 ### 5.3 Bead priority (relative ±1, revert on clear)
 
 Merge-request beads are created at bd's default priority. On conflict, nudge the
@@ -299,6 +328,28 @@ existing bead client so it stays idempotent per tick.
   (idempotent).
 - **AC-B6** Unit tests cover AC-B1..B5.
 
+### 5.5 Relationship to pg2-4dz88 (team-PR tiering) and pg2-ynhr
+
+**pg2-4dz88** ("improved organization of team PRs") is the near-future consumer:
+a 4-tier engagement scheme, priority-then-tier ordering, two team panels, and a
+retrieval-set expansion (track any PR I reviewed/assigned/commented, regardless
+of owner/labels). It is DESIGN-FORWARD only here — not implemented this session —
+but this spec is shaped so it extends rather than reworks us:
+
+- Its tier-1/2 engagement signals (I reviewed / assigned / commented) extend the
+  `Engagement` fact struct (§3); its tiers are a SEPARATE classifier over those
+  facts, not new `Ownership` values.
+- Spec B's team-side stays a single composable signal (§5.2) it can fold in.
+- bd: `pg2-4dz88` MUST depend on `pg2-aag72`.
+
+**pg2-ynhr (pg-pr↔pr-pool split) coordination:** the epic's core split is done
+and pg-pr KEEPS the dashboard (FORK2a); the full pg-pr strip (`pg2-ynhr.5`) is
+deferred. One caveat: the epic intends to eventually DROP the attention-**bead**
+projection (keeping dashboard attention). Therefore this spec adds NO new
+attention-bead-specific machinery — co-owned clearing and conflict dampening both
+ride the shared `NeedsAttention` predicate + dashboard, so the durable behavior
+survives the eventual bead-projection removal untouched.
+
 ---
 
 ## 6. Testing strategy
@@ -321,10 +372,15 @@ existing bead client so it stays idempotent per tick.
   early self-authored commit).
 - A dedicated co-owned dashboard panel (chose Mine-panel-badged; revisit if the
   co-owned set grows).
+- **pg2-4dz88** (team-PR tiering / two panels / retrieval-set expansion) — the
+  tracked next effort. Design-forward influence only here (§3 `Engagement`
+  extensibility, §5.5); it gets its own brainstorm → behavior-doc → plan.
 
 ## 8. Sequencing
 
 Spec A lands the ownership foundation; Spec B builds on its `co-owned` state and
 shared conflict/ownership axis. Implement A → B in one branch
 (`pg2-aag72-coowned-ownership`), integrated via the `integrate-branch` skill.
-`pg2-tsgkj` MUST depend on `pg2-aag72` in bd.
+
+bd dependencies: `pg2-tsgkj` depends on `pg2-aag72`; `pg2-4dz88` (future) depends
+on `pg2-aag72`.
