@@ -9,7 +9,7 @@ groups:
         title: pa-monitor lost connection to daemon
         condition: C
         for: 5m # alert only after >5m of inability to reach the daemon (was 1m; rides out transient pane/session churn + Prometheus staleness)
-        keep_firing_for: 5m # hold through a brief reconnect; avoids resolve+re-fire flapping
+        keepFiringFor: 5m # hold through a brief reconnect; avoids resolve+re-fire flapping (file-provisioning key is camelCase, per AlertRuleExport)
         noDataState: OK # a closed pane / exited process => stale series => no alarm
         execErrState: Error
         labels:
