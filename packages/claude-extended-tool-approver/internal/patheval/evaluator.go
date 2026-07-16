@@ -55,6 +55,32 @@ type PathEvaluator struct {
 	sandboxConfig  *SandboxFilesystemConfig
 	mounts         []Mount // non-nil with inContainer=true enables container mode
 	inContainer    bool
+	// extraReadWrite / extraReadOnly are symlink-resolved roots configured via
+	// the CETA_EXTRA_READWRITE_ROOTS / CETA_EXTRA_READONLY_ROOTS env vars
+	// (":"-separated absolute paths). They are checked LAST, after every
+	// built-in zone (see Evaluate).
+	extraReadWrite []string
+	extraReadOnly  []string
+}
+
+// resolveExtraRoots reads a ":"-separated list of absolute paths from the named
+// env var, drops empties, and returns each symlink-resolved (dropping any that
+// resolve to "").
+func resolveExtraRoots(envVar string) []string {
+	raw := os.Getenv(envVar)
+	if raw == "" {
+		return nil
+	}
+	var roots []string
+	for _, p := range strings.Split(raw, ":") {
+		if p == "" {
+			continue
+		}
+		if r := resolveRefPath(p); r != "" {
+			roots = append(roots, r)
+		}
+	}
+	return roots
 }
 
 // evalSymlinksWithFallback resolves symlinks in path. If path doesn't exist,
@@ -137,6 +163,8 @@ func New(projectRoot string) *PathEvaluator {
 		workspaceRoot:  workspaceRoot,
 		gradleHome:     gradleHome,
 		tmpRoot:        tmpRoot,
+		extraReadWrite: resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
+		extraReadOnly:  resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
 	}
 }
 
@@ -175,6 +203,8 @@ func NewWithCWD(projectRoot, cwd string) *PathEvaluator {
 		workspaceRoot:  workspaceRoot,
 		gradleHome:     gradleHome,
 		tmpRoot:        tmpRoot,
+		extraReadWrite: resolveExtraRoots("CETA_EXTRA_READWRITE_ROOTS"),
+		extraReadOnly:  resolveExtraRoots("CETA_EXTRA_READONLY_ROOTS"),
 	}
 }
 
@@ -214,6 +244,8 @@ func (pe *PathEvaluator) WithCWD(cwd string) *PathEvaluator {
 		sandboxConfig:  pe.sandboxConfig,
 		mounts:         pe.mounts,
 		inContainer:    pe.inContainer,
+		extraReadWrite: pe.extraReadWrite,
+		extraReadOnly:  pe.extraReadOnly,
 	}
 }
 
@@ -321,6 +353,24 @@ func (pe *PathEvaluator) Evaluate(path string) PathAccess {
 			return PathReadOnly
 		}
 	}
+	// Extra roots configured via env are checked LAST — built-in zones win.
+	return pe.extraRootAccess(path)
+}
+
+// extraRootAccess classifies path against the env-configured extra roots,
+// checking read-write before read-only. Returns PathUnknown when path is under
+// no extra root. Checked only after every built-in zone (see Evaluate).
+func (pe *PathEvaluator) extraRootAccess(path string) PathAccess {
+	for _, root := range pe.extraReadWrite {
+		if pathContains(root, path) {
+			return PathReadWrite
+		}
+	}
+	for _, root := range pe.extraReadOnly {
+		if pathContains(root, path) {
+			return PathReadOnly
+		}
+	}
 	return PathUnknown
 }
 
@@ -391,7 +441,8 @@ func (pe *PathEvaluator) classifyWithoutEscapeCheck(path string) PathAccess {
 			return PathReadOnly
 		}
 	}
-	return PathUnknown
+	// Extra roots configured via env are checked LAST — built-in zones win.
+	return pe.extraRootAccess(path)
 }
 
 // resolveConfigPaths resolves symlinks in a list of paths, dropping any that
