@@ -1194,11 +1194,10 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	// to keep it authoritative.
 	if pr.State == "closed" || pr.State == "merged" || pr.Merged {
 		merged := pr.Merged || pr.State == "merged"
-		ownership := "team"
-		if e.isSelfAuthored(pr.Author) {
-			ownership = "mine"
-		}
-		row := e.prToStoreRow(repo, *pr, ownership) // state resolves to closed/merged via stateForPR
+		ownershipStr := ownership.Classify(ownership.Engagement{
+			Self: e.cfg().SelfLogin, PRAuthor: pr.Author,
+		}).String()
+		row := e.prToStoreRow(repo, *pr, ownershipStr) // state resolves to closed/merged via stateForPR
 		// emitPRClosed atomically upserts the closed/merged row AND enqueues the
 		// event in one tx (keeping the store authoritative). The emit is
 		// critical: a dropped pr.closed/pr.merged event also drops the bridge
@@ -1267,10 +1266,13 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 // rare — most issues are recorded into summary.Errors and return nil — and
 // fail-fast is the intended shape for the daemon's per-PR refresh.
 func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr *api.PR, enriched *vcs.EnrichedPR, summary *Summary) error {
-	ownership := "team"
-	if e.isSelfAuthored(pr.Author) {
-		ownership = "mine"
+	var commitAuthors []string
+	if enriched != nil {
+		commitAuthors = enriched.CommitAuthors
 	}
+	ownershipStr := ownership.Classify(ownership.Engagement{
+		Self: e.cfg().SelfLogin, PRAuthor: pr.Author, CommitAuthors: commitAuthors,
+	}).String()
 	// Decide opened-vs-updated from existing store state BEFORE emitPREvent
 	// writes the row — its UpsertPR would otherwise make GetPR always find the
 	// row. GetPR is a read, so the decision is consistent with the atomic
@@ -1289,7 +1291,7 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	// emitPREvent atomically writes the authoritative store row AND emits
 	// pr.opened/updated — BEFORE processFeedback (which enqueues
 	// feedback.created) so the bridge projects the PR bead first.
-	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownership); err != nil {
+	if err := e.emitPREvent(ctx, eventType, rcfg.Remote, *pr, ownershipStr); err != nil {
 		return err
 	}
 	// Compute and persist enrichment (kind/languages/size/urgency) for this PR.
@@ -1303,6 +1305,7 @@ func (e *Engine) applyFetchedPR(ctx context.Context, rcfg config.RepoConfig, pr 
 	if err := e.processFeedback(ctx, nil, nil, enriched, rcfg.Remote, *pr, summary); err != nil {
 		return err
 	}
+	// Authorship-only (NOT ownership): never auto-promote a co-owned teammate draft.
 	if e.isSelfAuthored(pr.Author) {
 		if err := e.maybePromoteDraft(ctx, enriched, rcfg.Remote, *pr, summary); err != nil {
 			return err
