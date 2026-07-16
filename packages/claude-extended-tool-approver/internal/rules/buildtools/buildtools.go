@@ -9,7 +9,7 @@ import (
 
 var approvedTools = map[string]bool{
 	"go":     true,
-	"gradle": true, "gradlew": true, "pre-commit": true, "bats": true, "bd": true,
+	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
 	"tilt": true,
 }
 

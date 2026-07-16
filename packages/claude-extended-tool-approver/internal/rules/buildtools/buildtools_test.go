@@ -70,6 +70,27 @@ func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
 	}
 }
 
+func TestBuildtools_Prek_Approve(t *testing.T) {
+	// pg2-o7ev5: prek is the Rust reimplementation of pre-commit and is in active
+	// use here; it must be blanket-approved exactly like pre-commit.
+	r := New()
+	commands := []string{
+		"prek run --all-files",
+		"prek run",
+		"prek run --files x",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
 func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
 	r := New()
 	input := &hookio.HookInput{
