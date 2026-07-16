@@ -1,112 +1,85 @@
 # Behavior docs — the method
 
-This is the behavior-doc set **for the behavior-docs method itself**. The method is
-treated as a tool; this set is its scope, so it lives at `behavior-docs/docs/behavior`.
-It is self-describing — a behavior-doc set that documents how to write and use
-behavior-doc sets, using its own vocabulary. New here? Start with the
-[glossary](glossary.md); the rules are in [invariants](invariants.md).
+This is the behavior docs set **for the behavior-docs method itself** — self-describing, in
+its own vocabulary. New here? Read this on-ramp, then the [glossary](glossary.md); the rules
+are in [invariants](invariants.md).
 
-A **behavior doc** describes how a system _should_ behave — from the user's
-perspective — as user stories, journeys, constraints, goals, and invariants. It is a
-living doc that sits **above** the disposable spec → design → plan → code chain: the
-downstream artifacts are derived from it and thrown away once the code re-converges;
-the behavior doc persists.
+A **behavior doc** describes how a system _should_ behave, from the user's perspective: user
+stories, journeys, actors, interfaces, goals, and invariants. A **behavior docs set** is all
+of that for one **scope**. The behavior docs set is the **living source of truth** for the
+system's intended behavior, and it outlives any one implementation.
 
-## User stories
+## Two inputs, one product — the two-input model
 
-- As a tool author, I want one place that answers "how is this supposed to behave?"
-  so I don't re-derive intent from code or stale specs.
-- As someone changing behavior, I want to state the new intent first and derive the
-  work from it, so the change is anchored to a durable rule rather than a throwaway
-  spec.
-- As a reviewer, I want a stable **invariant** ID to cite from a test or an ADR, so
-  the `invariant → check` link outlives the spec that introduced it.
-- As an operator of many tools, I want a **generic** set I can reuse and a
-  **per-project overlay** for how _my_ deployment uses it, so shared behavior isn't
-  copy-pasted and org specifics don't leak into the shared set.
+A product comes from **two** durable, human-owned inputs — the **two-input model**:
 
-## Journeys
+- **behavior docs** — the _what_: intended behavior; this method's scope (conventionally
+  under `docs/behavior`).
+- **decision docs** — the _how_: rationale-backed realization decisions (architecture,
+  language, framework, tooling, testing, tuning, and governance choices such as who or what
+  may change the docs), conventionally under `docs/decisions`. An **ADR** is the canonical
+  decision doc. Named here, but out of this method's scope.
 
-### Starting a set for a new tool/project
+`product = f(behavior docs, decision docs)`. When a product is wrong, the split says which
+input to fix: wrong _behavior_ → the behavior docs; behavior right but _realization_ wrong →
+the decision docs.
 
-```mermaid
-flowchart TD
-    scope["pick the scope (a tool, or a repo)"] --> place["create SCOPE-ROOT/docs/behavior"]
-    place --> stories["write the user stories + journeys you already know"]
-    stories --> inv["capture the rules as invariants (stable IDs) and goals"]
-    inv --> gaps["record what's undecided as Open questions (don't guess)"]
-    gaps --> live["land only what's agreed; debate stays in the change/review"]
-```
+## The north-star
 
-### Changing intended behavior
+A behavior docs set exists so downstream work — increasingly agent-driven — runs more
+autonomously: a source of truth to resolve uncertainty against, and from which (with the
+decision docs) a _behavior-conformant_ implementation can be regenerated.
 
-```mermaid
-flowchart LR
-    edit["edit the behavior doc first (the new intended state)"] --> derive["derive spec → design → plan"]
-    derive --> code["change code to match; cite the invariant IDs"]
-    code --> conv["code re-converges to the doc"]
-    conv --> toss["throw the spec/design/plan away"]
-    edit --> adr["record an ADR if the decision is consequential"]
-```
+## Scope of this behavior docs set (extent + floor)
 
-### Resolving an open question
+- **Scope** is established by the [user stories and journeys](journeys.md): the **extent**
+  is exactly what they require; the **floor** is how deep the docs go before deferring to
+  downstream.
+- **Extent (in)** — what a behavior docs set is and contains; the rules it follows; how it
+  establishes scope; how it defines its interfaces to other products; the lifecycle
+  journeys.
+- **Extent (out)** — the companion tooling (authoring, bootstrap) is a downstream product;
+  decision docs (tech, tuning, governance, human/agent roles) are a sibling input; downstream
+  spec/design/plan and any concrete file or output layout are downstream.
+- **Floor** — this behavior docs set speaks at "how the behavior-docs method should behave,"
+  never how to build the tooling, nor a fixed file layout (**layout is illustrative** — the
+  invariants govern content, not files).
 
-Decide → update the doc to state the decision → record an ADR if consequential →
-delete the open question. An open question is a placeholder for a gap, not a parking
-lot for debate.
+## IDs
 
-### Layering a per-project overlay
+Each citable element carries a typed, stable ID (`INV-3`): invariants `INV-`, goals `GOAL-`,
+user stories `STORY-`, journeys `JOURNEY-`, interfaces `IF-`, actors `ACTOR-`, open questions
+`OQ-`. Concepts are cited by name. Numbers are stable and never renumbered; gaps are legal.
+Across behavior docs sets, an ID is cited as `<repo-name> · <set-path> · <ID>`.
 
-A deployment that _uses_ a generic tool writes its own set (its scope) that cites the
-generic set's invariant IDs and adds only what is specific to that deployment. It
-**imports by reference**, never by copying, and the generic set never references the
-overlay.
+## What belongs — with examples
 
-## What belongs in a behavior doc — with examples
+Say what a user should be able to do and what must always hold; leave _how_ downstream.
+Illustrative (`GOAL-7`):
 
-Say what the user should be able to do and what must always hold; leave _how_ to the
-downstream artifacts. Illustrative:
+> - **Story** (`STORY-1`) — "As an author, I want one place that answers 'how should this
+>   behave?'"
+> - **Journey** (`JOURNEY-2`) — "To change behavior: edit the docs first; downstream is
+>   re-derived, then discarded."
+> - **Invariant** (`INV-15`) — the behavior docs set is the source of truth; change flows
+>   docs-down.
+> - **Interface** (`IF-1`) — "the docs provide intended behavior at the floor; downstream
+>   must cite the ID it implements."
+> - **Open question** (`OQ-1`) — "What counts as a named concept for `INV-14`? Undecided."
 
-> **User story** — "As an operator, I want to run one command and have all ready
-> work advanced, so I don't babysit the queue."
->
-> **Invariant** — **`INV-EXAMPLE-1`** — A drain **MUST** work every ready item, then
-> exit; idling is the scheduler's job.
->
-> **Open question** — How are workflows grouped in config? Undecided.
+Those are **illustrative examples**, not **golden examples** — a golden example is one
+asserted by a real test. What does _not_ belong, and where it goes instead:
 
-### Counter-examples (these do _not_ belong)
-
-| ❌ Written in a behavior doc                                | ✅ Where it belongs                           |
-| ----------------------------------------------------------- | --------------------------------------------- |
-| "`parseConfig()` in `config.go:42` validates the schema"    | downstream design/code (`file:line`)          |
-| "Today we shell out to X; we'll switch to Y next quarter"   | current-vs-future code framing → nowhere here |
-| "Covered by `TestDrainRunsToEmpty`"                         | the test suite (cite the invariant ID there)  |
-| "Retry 3 times with a 30s backoff"                          | downstream config/constants                   |
-| "the tracker stores the item" (naming a tool where neutral) | the capability map / per-project overlay      |
-
-The rule of thumb: if it would change when the _implementation_ changes but the
-_intended behavior_ stayed the same, it's downstream, not here.
-
-## The rules
-
-The method's invariants (`INV-METHOD-*` / `GOAL-METHOD-*`) — scope convention,
-intended-behavior-only, the invariant-ID convention, living-by-default, ADR-backing,
-and overlay layering — are in [invariants](invariants.md). Cross-set references use
-textual citation (`<repo-name> · <set-path> · <ID>`), never a relative link across
-sets; see the glossary.
-
-## Keeping a set honest (drift)
-
-A behavior doc describes intended behavior; reality can lag. A periodic **conformance
-pass** reconciles each invariant and each open question against what the code
-actually does, and closes questions already decided elsewhere. Because every
-invariant carries a stable ID, the check is mechanizable.
+| ❌ In a behavior doc                            | ✅ Where it belongs                   |
+| ----------------------------------------------- | ------------------------------------- |
+| "`parseConfig()` validates the schema"          | downstream design/code                |
+| "retry 3× with a 30s backoff"                   | decision docs (the two-input model)   |
+| "who or what may approve a change" (governance) | decision docs                         |
+| a tool named below the scope's floor            | generalize it (the substitution test) |
+| "we used to shell out to X; next quarter Y"     | nowhere — intended behavior only      |
 
 ## Documents
 
-- **[README](README.md)** — this on-ramp: what a behavior doc is, journeys, examples.
-- **[glossary](glossary.md)** — the method's vocabulary.
-- **[invariants](invariants.md)** — the `INV-METHOD-*` / `GOAL-METHOD-*` rules.
-
-_The method currently has no open questions._
+- **[README](README.md)** · **[glossary](glossary.md)** · **[actors](actors.md)** ·
+  **[interfaces](interfaces.md)** · **[invariants](invariants.md)** ·
+  **[journeys](journeys.md)**
