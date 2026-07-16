@@ -286,18 +286,19 @@ panels that pg2-4dz88 would then rework.
 
 ### 5.3 Bead priority (relative ±1, revert on clear)
 
-Merge-request beads are created at bd's default priority. On conflict, nudge the
-merge-request bead's priority by one level, preserving the manual baseline:
+Merge-request beads are created at bd's default priority (P2). bd priority is an
+integer **0–4** (P0 highest … P4 lowest). On conflict, nudge the merge-request
+bead's priority by one level, preserving the manual baseline:
 
-- `mine` / `co-owned` conflicting ⇒ **raise one level** (e.g. P2→P1).
-- `team` conflicting ⇒ **lower one level** (e.g. P2→P3).
+- `mine` / `co-owned` conflicting ⇒ **raise one level** (decrement, e.g. P2→P1).
+- `team` conflicting ⇒ **lower one level** (increment, e.g. P2→P3).
 - conflict cleared ⇒ **restore the baseline**.
 
 **Statelessness / idempotency (MUST):** store the pre-adjustment priority in a
 new merge-request metadata field `priority_baseline` the first tick a conflict is
 seen; each subsequent conflicting tick is a no-op (baseline already set, priority
 already adjusted). On clear, restore `priority_baseline` and delete the field.
-Clamp at P0 (can't raise above) and P3 (can't lower below).
+Clamp at P0 (can't raise above) and P4 (can't lower below).
 
 **New beads-client surface:**
 
@@ -320,7 +321,7 @@ existing bead client so it stays idempotent per tick.
   (baseline stored), clamped at P0.
 - **AC-B3** Conflicting `team` PR: `TeamRow.HasConflicts` true; `NeedsAttention`
   forced false; attention bead closed; merge-request bead priority lowered one
-  level (baseline stored), clamped at P3.
+  level (baseline stored), clamped at P4.
 - **AC-B4** Conflict cleared ⇒ priority restored to baseline, `priority_baseline`
   removed, `HasConflicts`/`NeedsConflictResolution` false, team `NeedsAttention`
   re-derives normally.
