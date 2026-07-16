@@ -42,7 +42,7 @@ var changesCmd = &cobra.Command{
 updated, or closed since the given timestamp, plus any per-repo sync errors
 recorded in the state file.
 
-Used by integrations (gascity polling, the pg-pr skill) to drive
+Used by integrations (the pg-pr skill and other polling agents) to drive
 incremental updates without re-scanning the whole bd workspace.
 
 When pg-pr is configured with multiple repos (potentially across multiple

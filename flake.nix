@@ -117,7 +117,7 @@
           };
           pr-pool = final.callPackage ./packages/pr-pool {
             inherit (goBuilders) mkGoApp;
-            # No top-level bd/beads overlay attr — source it like gascity (flake.nix:181).
+            # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
             bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
           };
           pb = final.callPackage ./packages/pb {
@@ -199,48 +199,6 @@
             };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
-          # Single source of truth for the gas city package across the
-          # workspace. ziprecruiter consumes this via overlays.default and no
-          # longer defines its own pkgs/gascity.
-          #
-          # dolt is threaded from final.unstable so consumers that pin
-          # unstable.dolt get that version (ziprecruiter pins the official dolt
-          # 2.1.1 release); standalone agent-support resolves final.unstable
-          # from the systemOutputs overlay below (nixpkgs-unstable).
-          #
-          # beads (bd) is bundled into the gc wrapper because the supervisor
-          # runs under launchd with a minimal PATH and otherwise can't find bd.
-          # Route it through final.llm-agentsPkgs.beads so consumers pin it
-          # (ziprecruiter pins beads v1.0.4 there); fall back to the llm-agents
-          # input for standalone agent-support builds where that attr is absent.
-          gascity = final.callPackage ./packages/gascity {
-            inherit (final.unstable) dolt;
-            beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
-          };
-          gc-bd-import-breaker =
-            let
-              result = import ./packages/gc-dolt-maintenance {
-                pkgs = final;
-                inherit bashBuilders;
-                inherit (final) gascity;
-              };
-            in
-            final.symlinkJoin {
-              name = "gc-bd-import-breaker-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.gc-bd-import-breaker.packages}";
-              paths = result.gc-bd-import-breaker.packages;
-            };
-          gc-dolt-maintenance =
-            let
-              result = import ./packages/gc-dolt-maintenance {
-                pkgs = final;
-                inherit bashBuilders;
-                inherit (final) gascity;
-              };
-            in
-            final.symlinkJoin {
-              name = "gc-dolt-maintenance-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.gc-dolt-maintenance.packages}";
-              paths = result.gc-dolt-maintenance.packages;
-            };
         };
 
     in
@@ -277,10 +235,9 @@
               gomod2nix.overlays.default
               phillipgreenii-nix-overlay.overlays.default
               # Provide `unstable` for STANDALONE agent-support builds so the
-              # exported overlay's `final.unstable.dolt` (used by gascity)
-              # resolves here too. Deliberately NOT part of overlays.default,
-              # so it never clobbers a consumer's own `unstable` — e.g.
-              # ziprecruiter extends unstable.dolt to the official 2.1.1 release.
+              # exported overlay's `final.unstable` resolves here too.
+              # Deliberately NOT part of overlays.default, so it never
+              # clobbers a consumer's own `unstable` overlay.
               (_final: _prev: {
                 unstable = import nixpkgs-unstable {
                   inherit system;
@@ -1426,11 +1383,6 @@
                   touch $out
                 '';
             }
-            // (import ./packages/gc-dolt-maintenance {
-              inherit pkgs;
-              bashBuilders = pkgs._agentSupportBashBuilders;
-              inherit (pkgs) gascity;
-            }).checks
             // (import ./packages/integrate-branch-support {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
@@ -1465,9 +1417,6 @@
               pa-monitor-decorator-gc
               pa-monitor-decorator-scope
               pg-pr
-              gc-bd-import-breaker
-              gc-dolt-maintenance
-              gascity
               integrate-branch-support
               ;
             # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix

@@ -13,7 +13,7 @@ let
   # and the activation health check. The user-scope option API and on-PATH
   # package stay in the parallel HM module (home/programs/ollama); this module
   # reads that module's options across config.home-manager.users.<u> (same
-  # pattern as pa-monitor / ccpool / gc-dolt-maintenance).
+  # pattern as pa-monitor / ccpool).
   hmUsers = config.home-manager.users or { };
 
   # Per-user ollama configs that opted in. The LaunchAgent runs once under the
