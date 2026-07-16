@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
@@ -68,7 +69,7 @@ func (p *Poster) Reconcile(ctx context.Context) (int, error) {
 		}
 		// Auto-reply on PRs I act on (mine + co-owned). Team-owned PRs are
 		// monitored but replies are not auto-posted (M2: ownership gate).
-		if pr.Ownership == "team" {
+		if !ownership.Ownership(pr.Ownership).ActsAsMine() {
 			p.log.DebugContext(ctx, "replyposter: skip team-owned pr", "pr_id", fb.PRID, "feedback_id", fb.ID, "ownership", pr.Ownership)
 			continue
 		}
