@@ -14,6 +14,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	"github.com/phillipgreenii/ccpool/internal/launch"
+	"github.com/phillipgreenii/ccpool/internal/mcpconsent"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
@@ -270,6 +271,13 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	}
 	if err := s.d.Trust.EnsureTrusted(cwd); err != nil {
 		return Handle{}, fmt.Errorf("pre-trust %q: %w", cwd, err)
+	}
+	// Pre-record MCP consent so an automated launch does not stall on the
+	// interactive "New MCP server found" prompt for any unclassified server in
+	// the worktree's .mcp.json (pg2-80ji). No-op when the worktree has no
+	// .mcp.json. Same pre-launch window as trust, so no concurrent Claude writer.
+	if err := mcpconsent.PreDisableUnclassified(cwd); err != nil {
+		return Handle{}, fmt.Errorf("pre-disable unclassified MCP servers for %q: %w", cwd, err)
 	}
 
 	if exists {
