@@ -216,12 +216,12 @@ func TestBridgeChannelDeliverResultInvokesCallback(t *testing.T) {
 
 	var mu sync.Mutex
 	var (
-		gotID, gotErr string
-		gotOK, called bool
+		gotID, gotErr, gotReason string
+		gotOK, gotTimed, called  bool
 	)
-	srv.onDeliverResult = func(id string, ok bool, errStr string) {
+	srv.onDeliverResult = func(id string, ok bool, errStr, reason string, timedOut bool) {
 		mu.Lock()
-		gotID, gotOK, gotErr, called = id, ok, errStr, true
+		gotID, gotOK, gotErr, gotReason, gotTimed, called = id, ok, errStr, reason, timedOut, true
 		mu.Unlock()
 	}
 
@@ -231,9 +231,11 @@ func TestBridgeChannelDeliverResultInvokesCallback(t *testing.T) {
 	go func() { _ = srv.BridgeChannel(fake) }()
 
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Result{Result: &pb.DeliverResult{
-		Id:    "cmd-9",
-		Ok:    false,
-		Error: "boom",
+		Id:       "cmd-9",
+		Ok:       false,
+		Error:    "boom",
+		Reason:   "send_key",
+		TimedOut: true,
 	}}}
 
 	if !waitFor(t, 2*time.Second, func() bool {
@@ -245,8 +247,8 @@ func TestBridgeChannelDeliverResultInvokesCallback(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if gotID != "cmd-9" || gotOK != false || gotErr != "boom" {
-		t.Fatalf("onDeliverResult got (%q,%v,%q), want (cmd-9,false,boom)", gotID, gotOK, gotErr)
+	if gotID != "cmd-9" || gotOK != false || gotErr != "boom" || gotReason != "send_key" || !gotTimed {
+		t.Fatalf("onDeliverResult got (%q,%v,%q,%q,%v), want (cmd-9,false,boom,send_key,true)", gotID, gotOK, gotErr, gotReason, gotTimed)
 	}
 }
 

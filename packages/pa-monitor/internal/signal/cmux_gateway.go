@@ -70,6 +70,21 @@ type CmuxError struct {
 func (e *CmuxError) Error() string { return e.Underlying.Error() }
 func (e *CmuxError) Unwrap() error { return e.Underlying }
 
+// WireCmuxError reconstructs a cmux failure that crossed the cmux-bridge gRPC
+// boundary carrying its TYPED classification (DeliverResult.reason/timed_out,
+// pg2-p1q00). The bridge holds the real *CmuxError and classifies it there;
+// the daemon rebuilds this from the wire fields so ClassifyCmuxFailure reads
+// Reason/TimedOut directly instead of re-parsing the transported text. Its
+// Error() returns the transported message unchanged, so log/telemetry error
+// strings are byte-identical to the pre-typed path.
+type WireCmuxError struct {
+	Reason   CmuxFailureReason
+	TimedOut bool
+	Msg      string
+}
+
+func (e *WireCmuxError) Error() string { return e.Msg }
+
 // NoCmuxSurfaceError is returned by CmuxSignaler.Send when no cmux surface hosts
 // the target pid (or any ancestor). It is a logical delivery failure, not a
 // subprocess failure, so it never carries a timeout.
@@ -121,6 +136,13 @@ func newCmuxError(ctx context.Context, cmd CmuxCommand, err error) *CmuxError {
 func ClassifyCmuxFailure(err error) (CmuxFailureReason, bool) {
 	if err == nil {
 		return ReasonUnknown, false
+	}
+	// A failure reconstructed from the cmux-bridge wire (DeliverResult.reason/
+	// timed_out) already carries the bridge's typed classification — use it
+	// directly (pg2-p1q00).
+	var we *WireCmuxError
+	if errors.As(err, &we) {
+		return we.Reason, we.TimedOut
 	}
 	var ns *NoCmuxSurfaceError
 	if errors.As(err, &ns) {

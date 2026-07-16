@@ -747,19 +747,29 @@ loop:
 // cancelled (teardown) so it never blocks on a drained sender.
 func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Deliver, outbound chan<- *pb.BridgeMsg, log *bridgeLogger) {
 	err := cmuxSig.Send(int(d.GetTargetPid()), d.GetText())
-	errStr := ""
+	errStr, reason := "", ""
+	timedOut := false
 	if err != nil {
 		errStr = err.Error()
+		// Classify the failure HERE, where the typed *CmuxError is still in hand,
+		// and carry the result across the gRPC boundary (DeliverResult.reason/
+		// timed_out) so the daemon need not re-parse the error text (pg2-p1q00).
+		r, t := signal.ClassifyCmuxFailure(err)
+		reason, timedOut = string(r), t
 		log.Detail("bridge.deliver_failed", map[string]string{
 			"id":         d.GetId(),
 			"target_pid": fmt.Sprintf("%d", d.GetTargetPid()),
 			"error":      errStr,
+			"reason":     reason,
+			"timed_out":  fmt.Sprintf("%t", timedOut),
 		})
 	}
 	res := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Result{Result: &pb.DeliverResult{
-		Id:    d.GetId(),
-		Ok:    err == nil,
-		Error: errStr,
+		Id:       d.GetId(),
+		Ok:       err == nil,
+		Error:    errStr,
+		Reason:   reason,
+		TimedOut: timedOut,
 	}}}
 	select {
 	case outbound <- res:

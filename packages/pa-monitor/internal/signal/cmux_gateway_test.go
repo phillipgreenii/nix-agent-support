@@ -137,6 +137,25 @@ func TestClassifyCmuxFailure_StringFallback(t *testing.T) {
 }
 
 // TestClassifyCmuxFailure_Nil verifies a nil error classifies as unknown.
+func TestClassifyCmuxFailure_WireError(t *testing.T) {
+	// A WireCmuxError carries the bridge's TYPED classification across the gRPC
+	// boundary (pg2-p1q00); ClassifyCmuxFailure must read its fields directly
+	// rather than re-parsing the transported message text.
+	we := &signal.WireCmuxError{Reason: signal.ReasonSendKey, TimedOut: true, Msg: "delivery failed: whatever text"}
+	if we.Error() != "delivery failed: whatever text" {
+		t.Errorf("Error() = %q, want the transported message", we.Error())
+	}
+	reason, timed := signal.ClassifyCmuxFailure(we)
+	if reason != signal.ReasonSendKey || !timed {
+		t.Errorf("ClassifyCmuxFailure(WireCmuxError) = (%v, %v), want (send_key, true)", reason, timed)
+	}
+	// Wrapped is still recognized.
+	reason, timed = signal.ClassifyCmuxFailure(fmt.Errorf("wrap: %w", we))
+	if reason != signal.ReasonSendKey || !timed {
+		t.Errorf("wrapped WireCmuxError = (%v, %v), want (send_key, true)", reason, timed)
+	}
+}
+
 func TestClassifyCmuxFailure_Nil(t *testing.T) {
 	if r, timed := signal.ClassifyCmuxFailure(nil); r != signal.ReasonUnknown || timed {
 		t.Errorf("ClassifyCmuxFailure(nil) = (%q, %v), want (unknown, false)", r, timed)

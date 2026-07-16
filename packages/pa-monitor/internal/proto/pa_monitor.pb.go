@@ -2126,10 +2126,17 @@ func (x *Deliver) GetText() string {
 
 // DeliverResult reports back the outcome of a Deliver request.
 type DeliverResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ok    bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	Error string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	// reason/timed_out carry the cmux-bridge's TYPED failure classification across
+	// the gRPC boundary (pg2-p1q00): the bridge holds the *CmuxError, so it can
+	// classify via the type switch rather than the daemon re-parsing `error` text.
+	// Additive + backward-compatible: an empty reason means "not classified"
+	// (old bridge), and the daemon falls back to substring matching on `error`.
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	TimedOut      bool   `protobuf:"varint,5,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2183,6 +2190,20 @@ func (x *DeliverResult) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *DeliverResult) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *DeliverResult) GetTimedOut() bool {
+	if x != nil {
+		return x.TimedOut
+	}
+	return false
 }
 
 type ApiError struct {
@@ -2780,11 +2801,13 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
 	"target_pid\x18\x02 \x01(\x05R\ttargetPid\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"E\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"z\n" +
 	"\rDeliverResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xc7\x01\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1b\n" +
+	"\ttimed_out\x18\x05 \x01(\bR\btimedOut\"\xc7\x01\n" +
 	"\bApiError\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12*\n" +

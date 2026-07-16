@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // errDeliverTimeout is returned by bridgeDeliverer.Deliver when no
@@ -23,6 +24,11 @@ var errDeliverTimeout = errors.New("delivery timed out waiting for bridge ack")
 type deliverOutcome struct {
 	ok  bool
 	err string
+	// reason/timedOut carry the cmux-bridge's TYPED failure classification from
+	// DeliverResult (pg2-p1q00). An empty reason means "not classified" (old
+	// bridge / non-delivery failpath) and the error is left to text fallback.
+	reason   string
+	timedOut bool
 }
 
 // pendingDelivery is what tracker keeps per in-flight id: which cmux server
@@ -77,7 +83,7 @@ func (t *tracker) add(id string, serverPID int) <-chan deliverOutcome {
 // not (or no longer) pending — e.g. it already timed out, was cancelled, or
 // failServer already cleared it — so a late or duplicate resolve can never
 // double-send or send on a channel nobody holds anymore.
-func (t *tracker) resolve(id string, ok bool, errStr string) {
+func (t *tracker) resolve(id string, ok bool, errStr, reason string, timedOut bool) {
 	t.mu.Lock()
 	p, found := t.pending[id]
 	if found {
@@ -87,7 +93,7 @@ func (t *tracker) resolve(id string, ok bool, errStr string) {
 	if !found {
 		return
 	}
-	p.ch <- deliverOutcome{ok: ok, err: errStr}
+	p.ch <- deliverOutcome{ok: ok, err: errStr, reason: reason, timedOut: timedOut}
 }
 
 // cancel removes a pending id without sending an outcome. Used by
@@ -170,7 +176,17 @@ func (d *bridgeDeliverer) Deliver(ctx context.Context, targetPID int, text strin
 		if o.err == "" {
 			return errors.New("delivery failed")
 		}
-		return fmt.Errorf("delivery failed: %s", o.err)
+		msg := fmt.Sprintf("delivery failed: %s", o.err)
+		// When the bridge classified the failure typed (pg2-p1q00), rebuild a
+		// typed error carrying reason/timed_out so downstream classification
+		// (signal.ClassifyCmuxFailure) reads the fields instead of re-parsing the
+		// text. Error() stays byte-identical to the old fmt.Errorf message, so
+		// the nudge.send_failed log's "error" field is unchanged. Empty reason
+		// (old bridge) falls back to the text path.
+		if o.reason != "" {
+			return &signal.WireCmuxError{Reason: signal.CmuxFailureReason(o.reason), TimedOut: o.timedOut, Msg: msg}
+		}
+		return errors.New(msg)
 	case <-ctx.Done():
 		d.tr.cancel(id)
 		return ctx.Err()

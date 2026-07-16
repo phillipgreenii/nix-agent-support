@@ -76,7 +76,7 @@ func TestNudgerWiring_CmuxTargetRoutesToBridgeNotSignaler(t *testing.T) {
 		// Ack immediately, exactly as the BridgeChannel handler's
 		// onDeliverResult hook (wired to tr.resolve in RunWith) does when a
 		// real bridge reports a DeliverResult.
-		go tr.resolve(m.GetDeliver().GetId(), true, "")
+		go tr.resolve(m.GetDeliver().GetId(), true, "", "", false)
 		return nil
 	})
 

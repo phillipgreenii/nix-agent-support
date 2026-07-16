@@ -78,7 +78,7 @@ type server struct {
 	// when a cmux-bridge reports the outcome of a Deliver (DeliverResult). A
 	// later task wires this to the delivery tracker; it defaults nil so the
 	// handler is a no-op for results until then.
-	onDeliverResult func(id string, ok bool, errStr string)
+	onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool)
 	// onStreamClosed, when non-nil, is invoked by the BridgeChannel handler
 	// after a registered stream is deregistered on teardown, keyed by the
 	// stream's cmux server PID. A later task wires this to fail any in-flight
@@ -466,7 +466,7 @@ func (s *server) buildState() *pb.DaemonState {
 // handler's inbound hooks into the delivery tracker (see delivery.go); both
 // are nil-safe (BridgeChannel checks before calling), so callers that don't
 // wire the delivery path may pass nil for either.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr string), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
 	gs := grpc.NewServer()
 	srv := newServer(state)
 	srv.version = version

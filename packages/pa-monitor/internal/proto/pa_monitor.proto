@@ -355,6 +355,13 @@ message DeliverResult {
   string id = 1;
   bool ok = 2;
   string error = 3;
+  // reason/timed_out carry the cmux-bridge's TYPED failure classification across
+  // the gRPC boundary (pg2-p1q00): the bridge holds the *CmuxError, so it can
+  // classify via the type switch rather than the daemon re-parsing `error` text.
+  // Additive + backward-compatible: an empty reason means "not classified"
+  // (old bridge), and the daemon falls back to substring matching on `error`.
+  string reason = 4;
+  bool timed_out = 5;
 }
 
 // --- ApiError / PendingNudge --- //

@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // --- tracker ---
@@ -18,7 +19,7 @@ func TestTracker_AddResolveDeliversOutcome(t *testing.T) {
 	tr := newTracker()
 	ch := tr.add("id-1", 100)
 
-	tr.resolve("id-1", true, "")
+	tr.resolve("id-1", true, "", "", false)
 
 	select {
 	case o := <-ch:
@@ -37,7 +38,7 @@ func TestTracker_ResolveWithError(t *testing.T) {
 	tr := newTracker()
 	ch := tr.add("id-1", 100)
 
-	tr.resolve("id-1", false, "boom")
+	tr.resolve("id-1", false, "boom", "", false)
 
 	o := <-ch
 	if o.ok {
@@ -52,7 +53,7 @@ func TestTracker_ResolveUnknownID_NoPanic(t *testing.T) {
 	tr := newTracker()
 	// Resolving an id that was never added (or already resolved/cancelled)
 	// must be a safe no-op, not a panic or a send on a closed channel.
-	tr.resolve("nonexistent", true, "")
+	tr.resolve("nonexistent", true, "", "", false)
 }
 
 func TestTracker_FailServer_OnlyThatServer(t *testing.T) {
@@ -79,7 +80,7 @@ func TestTracker_FailServer_OnlyThatServer(t *testing.T) {
 	}
 
 	// id-b's server can still be resolved normally afterwards.
-	tr.resolve("id-b", true, "")
+	tr.resolve("id-b", true, "", "", false)
 	o := <-chB
 	if !o.ok {
 		t.Fatalf("id-b outcome.ok = false, want true")
@@ -92,7 +93,7 @@ func TestTracker_Cancel_RemovesPendingWithoutSend(t *testing.T) {
 	tr.cancel("id-1")
 
 	// A later resolve for the same id must be a no-op (already cancelled).
-	tr.resolve("id-1", true, "")
+	tr.resolve("id-1", true, "", "", false)
 
 	select {
 	case <-ch:
@@ -111,7 +112,7 @@ func TestTracker_ConcurrentAddResolve(t *testing.T) {
 			defer wg.Done()
 			id := tr.nextID()
 			ch := tr.add(id, i%3)
-			go tr.resolve(id, true, "")
+			go tr.resolve(id, true, "", "", false)
 			<-ch
 		}(i)
 	}
@@ -143,7 +144,7 @@ func TestBridgeDeliverer_SuccessRoundTrip(t *testing.T) {
 		recorded = m.GetDeliver()
 		mu.Unlock()
 		id := m.GetDeliver().GetId()
-		go tr.resolve(id, true, "")
+		go tr.resolve(id, true, "", "", false)
 		return nil
 	})
 
@@ -162,6 +163,68 @@ func TestBridgeDeliverer_SuccessRoundTrip(t *testing.T) {
 	}
 	if recorded.GetText() != "hello there" {
 		t.Errorf("recorded Text = %q, want %q", recorded.GetText(), "hello there")
+	}
+}
+
+// TestBridgeDeliverer_TypedFailureReconstructed verifies the wire-typed cmux
+// failure path (pg2-p1q00): when the bridge resolves with a reason + timed_out,
+// Deliver returns a *signal.WireCmuxError carrying them, its Error() preserves
+// the transported message, and ClassifyCmuxFailure reads the typed fields.
+func TestBridgeDeliverer_TypedFailureReconstructed(t *testing.T) {
+	reg := bridge.NewRegistry(time.Minute)
+	const serverPID = 4242
+	tr := newTracker()
+	d := &bridgeDeliverer{
+		reg:      reg,
+		ancestor: func(pid int) (int, bool) { return serverPID, true },
+		tr:       tr,
+		timeout:  time.Second,
+	}
+	reg.AttachStream(serverPID, 99, func(m *pb.DaemonMsg) error {
+		id := m.GetDeliver().GetId()
+		go tr.resolve(id, false, "cmux send-key: signal: killed", string(signal.ReasonSendKey), true)
+		return nil
+	})
+
+	err := d.Deliver(context.Background(), 555, "hi")
+	if err == nil {
+		t.Fatal("expected a delivery error")
+	}
+	var we *signal.WireCmuxError
+	if !errors.As(err, &we) {
+		t.Fatalf("error is not *signal.WireCmuxError: %v (%T)", err, err)
+	}
+	if we.Error() != "delivery failed: cmux send-key: signal: killed" {
+		t.Errorf("Error() = %q, want the transported delivery-failed message", we.Error())
+	}
+	if r, tmo := signal.ClassifyCmuxFailure(err); r != signal.ReasonSendKey || !tmo {
+		t.Errorf("ClassifyCmuxFailure = (%v, %v), want (send_key, true)", r, tmo)
+	}
+}
+
+// TestBridgeDeliverer_UnclassifiedFailureIsTextError verifies backward-compat:
+// an empty reason (old bridge) yields a plain text error, not a WireCmuxError.
+func TestBridgeDeliverer_UnclassifiedFailureIsTextError(t *testing.T) {
+	reg := bridge.NewRegistry(time.Minute)
+	const serverPID = 4242
+	tr := newTracker()
+	d := &bridgeDeliverer{
+		reg:      reg,
+		ancestor: func(pid int) (int, bool) { return serverPID, true },
+		tr:       tr,
+		timeout:  time.Second,
+	}
+	reg.AttachStream(serverPID, 99, func(m *pb.DaemonMsg) error {
+		go tr.resolve(m.GetDeliver().GetId(), false, "boom", "", false)
+		return nil
+	})
+	err := d.Deliver(context.Background(), 555, "hi")
+	var we *signal.WireCmuxError
+	if errors.As(err, &we) {
+		t.Fatalf("unclassified failure should NOT be a WireCmuxError, got %v", err)
+	}
+	if err == nil || err.Error() != "delivery failed: boom" {
+		t.Errorf("Error() = %v, want 'delivery failed: boom'", err)
 	}
 }
 

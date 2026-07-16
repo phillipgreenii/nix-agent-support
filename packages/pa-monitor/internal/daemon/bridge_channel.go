@@ -168,7 +168,7 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 			case *pb.BridgeMsg_Result:
 				if s.onDeliverResult != nil {
 					res := k.Result
-					s.onDeliverResult(res.GetId(), res.GetOk(), res.GetError())
+					s.onDeliverResult(res.GetId(), res.GetOk(), res.GetError(), res.GetReason(), res.GetTimedOut())
 				}
 			}
 		}
