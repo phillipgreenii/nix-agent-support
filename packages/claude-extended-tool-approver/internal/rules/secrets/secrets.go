@@ -1,0 +1,144 @@
+// Package secrets prompts (Ask) before any tool call touches a well-known
+// credential/secret file, so such reads/writes are never silently
+// auto-approved by a later rule — e.g. the safe-commands rule approving
+// `cat <readable-path>` where the path is ~/.claude/.credentials (pg2-to8pe).
+package secrets
+
+import (
+	"path/filepath"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
+)
+
+// maxShellUnwrap bounds how deep the rule follows nested `sh -c '<inner>'`
+// wrappers when scanning a Bash command for secret paths.
+const maxShellUnwrap = 3
+
+// writeTools are the file tools whose access is a write (deny-listing is
+// checked against denyWrite rather than denyRead).
+var writeTools = map[string]bool{
+	"Write": true, "Edit": true, "MultiEdit": true, "Delete": true,
+}
+
+// Rule flags tool calls that reference a well-known credential/secret path.
+//
+// It is registered EARLY in the chain — after the consumer `configrules` (so an
+// explicit consumer decision still wins) but before the generic path/command
+// approvers `path-safety` and `safe-commands`. The engine's per-leaf evaluation
+// is first-match-wins, so this ordering is what lets the rule override a
+// downstream Approve.
+//
+// Decision policy: for a secret path that the user has ALSO deny-listed
+// (sandbox.filesystem.denyRead/denyWrite) the rule returns Reject — preserving
+// the hard block that path-safety would otherwise give (path-safety runs after
+// this rule, so this rule must honor the deny-list itself rather than let its
+// Ask silently downgrade the block). For a secret path that is not deny-listed
+// it returns Ask: the goal is to replace a silent auto-approval with a human
+// prompt, not to hard-block a legitimate read.
+type Rule struct {
+	pe *patheval.PathEvaluator
+}
+
+func New(pe *patheval.PathEvaluator) *Rule { return &Rule{pe: pe} }
+
+func (r *Rule) Name() string { return "secrets" }
+
+func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+	switch input.ToolName {
+	case "Read", "Write", "Edit", "MultiEdit", "Delete":
+		if path, err := input.FilePath(); err == nil && secretpath.IsSecret(path) {
+			return r.decide(path, writeTools[input.ToolName])
+		}
+	case "Glob", "Grep":
+		if path, err := input.SearchPath(); err == nil && secretpath.IsSecret(path) {
+			return r.decide(path, false)
+		}
+	case "Bash":
+		if cmd, err := input.BashCommand(); err == nil {
+			if path, ok := firstSecretRef(cmd, maxShellUnwrap); ok {
+				// Bash read/write intent is ambiguous per-argument; treat as a
+				// read for deny-list purposes (the bead is about reads).
+				return r.decide(path, false)
+			}
+		}
+	}
+	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// decide returns Reject when path is a secret the user has deny-listed for the
+// relevant access, otherwise Ask.
+func (r *Rule) decide(path string, isWrite bool) hookio.RuleResult {
+	if r.pe != nil {
+		denied := r.pe.IsDenyRead(path)
+		if isWrite {
+			denied = r.pe.IsDenyWrite(path)
+		}
+		if denied {
+			return hookio.RuleResult{
+				Decision: hookio.Reject,
+				Reason:   "credential/secret path is deny-listed: " + path,
+				Module:   r.Name(),
+			}
+		}
+	}
+	return hookio.RuleResult{
+		Decision: hookio.Ask,
+		Reason:   "references credential/secret path " + path + " — prompting instead of auto-approving",
+		Module:   r.Name(),
+	}
+}
+
+// firstSecretRef returns the first secret path referenced by the command —
+// whether as an argument or an I/O redirection target (e.g. `cat < secrets/x`).
+// It also descends one `sh`/`bash -c '<inner>'` level at a time (up to depth)
+// so the check cannot be trivially bypassed by wrapping the read in a shell
+// string.
+func firstSecretRef(cmd string, depth int) (string, bool) {
+	for _, pc := range cmdparse.Parse(cmd) {
+		if depth > 0 {
+			if inner, ok := shellDashC(pc); ok {
+				if path, found := firstSecretRef(inner, depth-1); found {
+					return path, true
+				}
+				continue
+			}
+		}
+		for _, arg := range pc.Args {
+			if isFlag(arg) {
+				continue
+			}
+			if secretpath.IsSecret(arg) {
+				return arg, true
+			}
+		}
+		for _, redir := range pc.Redirections {
+			if secretpath.IsSecret(redir.Path) {
+				return redir.Path, true
+			}
+		}
+	}
+	return "", false
+}
+
+// shellDashC returns the inner command string of a `sh -c '<inner>'` /
+// `bash -c '<inner>'` (or zsh/dash) invocation.
+func shellDashC(pc cmdparse.ParsedCommand) (string, bool) {
+	switch filepath.Base(pc.Executable) {
+	case "sh", "bash", "zsh", "dash":
+	default:
+		return "", false
+	}
+	for i, a := range pc.Args {
+		if a == "-c" && i+1 < len(pc.Args) {
+			return pc.Args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func isFlag(arg string) bool {
+	return len(arg) > 0 && arg[0] == '-'
+}

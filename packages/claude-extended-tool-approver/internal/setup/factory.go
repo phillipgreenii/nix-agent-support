@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
 )
@@ -44,6 +45,11 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 
 	eng.RegisterRules(
 		configrules.New(),
+		// secrets runs early (after consumer configrules, before the generic
+		// path/command approvers) so a credential/secret-path reference is
+		// prompted (Ask) instead of being silently approved by pathsafety or
+		// safe-commands (pg2-to8pe). first-match-wins makes ordering the override.
+		secrets.New(pe),
 		envvars.New(),
 		assume.New(),
 		new(webfetch.Rule),

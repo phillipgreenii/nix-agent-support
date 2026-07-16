@@ -89,18 +89,19 @@ sqlite3 "$DB" -header -column \
 
 Rules are evaluated in order; first non-ABSTAIN wins:
 
-1. **envvars** -- dangerous environment variables
-2. **webfetch** -- WebFetch to allowed hosts
-3. **claudetools** -- AskQuestion, Glob, Grep, etc.
-4. **pathsafety** -- file operations with path-based policies
-5. **mcp** -- MCP tool allowlist
-6. **git** -- git subcommands
-7. **gh** -- GitHub CLI
-8. **monorepo** -- monorepo bin commands
-9. **safecmds** -- safe commands with path checks
-10. **curl** -- read-only curl to allowed domains
-11. **kubectl** -- Kubernetes operations
-12. **buildtools** -- gradle, pre-commit, bats, etc.
+1. **secrets** -- prompts (ASK) before any tool touches a well-known credential/secret path (`.credentials`, `auth.json`, `secrets/**`, `.ssh/**`, `.env`, `*token*.json`) so such reads are never silently approved
+2. **envvars** -- dangerous environment variables
+3. **webfetch** -- WebFetch to allowed hosts
+4. **claudetools** -- AskQuestion, Glob, Grep, etc.
+5. **pathsafety** -- file operations with path-based policies
+6. **mcp** -- MCP tool allowlist
+7. **git** -- git subcommands
+8. **gh** -- GitHub CLI
+9. **monorepo** -- monorepo bin commands
+10. **safecmds** -- safe commands with path checks
+11. **curl** -- read-only curl to allowed domains
+12. **kubectl** -- Kubernetes operations
+13. **buildtools** -- gradle, pre-commit, bats, etc.
 
 ## Dependencies
 

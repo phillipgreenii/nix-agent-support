@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
 )
@@ -32,6 +33,7 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 	dockerRule := docker.New(eng, pe)
 
 	eng.RegisterRules(
+		secrets.New(pe),
 		envvars.New(),
 		assume.New(),
 		webfetch.New(),
@@ -190,6 +192,48 @@ func TestIntegration_RegressionSuite(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIntegration_SecretPathsPrompt proves that reads of well-known
+// credential/secret paths are prompted (Ask) through the real EvaluateHook
+// decision path — i.e. the secrets rule overrides safe-commands' / path-safety's
+// would-be Approve — while a non-secret read in the same zone still Approves
+// (no over-blocking). Regression for pg2-to8pe.
+func TestIntegration_SecretPathsPrompt(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	tests := []struct {
+		name      string
+		tool      string
+		toolInput json.RawMessage
+		want      hookio.Decision
+	}{
+		{"cat claude credentials", "Bash", makeBashJSON("cat /Users/testuser/.claude/.credentials"), hookio.Ask},
+		{"cat auth.json", "Bash", makeBashJSON("cat /Users/testuser/.claude/auth.json"), hookio.Ask},
+		{"cat dotenv in project", "Bash", makeBashJSON("cat /Users/testuser/workspace/my-project/.env"), hookio.Ask},
+		{"grep ssh config", "Bash", makeBashJSON("grep Host /Users/testuser/.ssh/config"), hookio.Ask},
+		{"stdin redirect from secret", "Bash", makeBashJSON("cat < /Users/testuser/.ssh/id_rsa"), hookio.Ask},
+		{"Read credentials", "Read", makeFileJSON("/Users/testuser/.claude/.credentials"), hookio.Ask},
+		// A non-secret read in the same readable zone must still Approve.
+		{"cat a normal project file", "Bash", makeBashJSON("cat /Users/testuser/workspace/my-project/README.md"), hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: tt.tool, CWD: cwd, ToolInput: tt.toolInput}
+			got := eng.EvaluateHook(input)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v (%s: %s), want %v", got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+func makeFileJSON(path string) json.RawMessage {
+	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
+	return b
 }
 
 func makeBashJSON(cmd string) json.RawMessage {
