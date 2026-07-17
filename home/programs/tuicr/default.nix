@@ -41,6 +41,8 @@ let
 in
 {
   options.phillipgreenii.programs.tuicr = {
+    enable = lib.mkEnableOption "tuicr code-review TUI";
+
     theme.enable = lib.mkEnableOption "Stylix-aligned tuicr theme" // {
       default = true;
     };
@@ -60,20 +62,26 @@ in
     };
   };
 
-  config = lib.mkMerge [
-    { home.packages = [ pkgs.llm-agentsPkgs.tuicr ]; }
+  # Gated on cfg.enable (Plan 5): tuicr is a (H) capability leaf, not an
+  # unconditional aggregate install. Without this gate importing homeModules.default
+  # leaked tuicr onto every account (incl. non-human agents) — the exact class of
+  # unconditional-aggregate install plan §4 calls to prune.
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      { home.packages = [ pkgs.llm-agentsPkgs.tuicr ]; }
 
-    # Stylix theme: write the generated theme file and point tuicr at it.
-    (lib.mkIf (cfg.theme.enable && stylixOn) {
-      phillipgreenii.programs.tuicr.settings.theme = lib.mkDefault "stylix";
-      xdg.configFile."tuicr/themes/stylix.toml".source =
-        tomlFormat.generate "tuicr-stylix-theme.toml" themeTokens;
-    })
+      # Stylix theme: write the generated theme file and point tuicr at it.
+      (lib.mkIf (cfg.theme.enable && stylixOn) {
+        phillipgreenii.programs.tuicr.settings.theme = lib.mkDefault "stylix";
+        xdg.configFile."tuicr/themes/stylix.toml".source =
+          tomlFormat.generate "tuicr-stylix-theme.toml" themeTokens;
+      })
 
-    # Render config.toml only when there is something to write, so we never
-    # clobber a hand-managed config with an empty file.
-    (lib.mkIf (cfg.settings != { }) {
-      xdg.configFile."tuicr/config.toml".source = tomlFormat.generate "tuicr-config.toml" cfg.settings;
-    })
-  ];
+      # Render config.toml only when there is something to write, so we never
+      # clobber a hand-managed config with an empty file.
+      (lib.mkIf (cfg.settings != { }) {
+        xdg.configFile."tuicr/config.toml".source = tomlFormat.generate "tuicr-config.toml" cfg.settings;
+      })
+    ]
+  );
 }
