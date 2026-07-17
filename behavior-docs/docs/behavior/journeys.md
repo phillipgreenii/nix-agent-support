@@ -87,3 +87,9 @@ Each open question states the gap, its owner, a resolution path, and where it bl
 - **`OQ-5` — Behavior/decision seam.** How to classify observable-behavior-essential "how"
   (durability, backoff-growth). _Owner_: author. _Path_: refine the substitution test with
   an observability framing on real cases. _Blocks_: clean placement at the seam.
+- **`OQ-6` — Enforcing docs-first, and onboarding.** Companion tooling that directs
+  contributors to start from the behavior docs, keeps their downstream work tied back to the
+  cited IDs (`INV-3`, `GOAL-16`), and helps maintain the docs. The **conformance/drift pass**
+  partially realizes this by checking a set against the method, but the direct-to-source
+  onboarding and the tie-back enforcement are undefined. _Owner_: author. _Path_: co-develop
+  with the companion tooling. _Blocks_: automated docs-first enforcement.
