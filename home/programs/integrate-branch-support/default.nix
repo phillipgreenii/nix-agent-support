@@ -20,8 +20,8 @@ let
   # recursion that module documents. The `claudeEnable &&` guard matters: `nixProvided`
   # carries plugin metadata even on hosts where Claude is disabled, so without it the
   # CLI could install where the plugin never registers.
-  claudeEnable = config.phillipgreenii.programs.claude.enable;
-  mcfg = config.phillipgreenii.programs.claude.marketplaces;
+  claudeEnable = config.phillipgreenii.programs.claude-code.enable;
+  mcfg = config.phillipgreenii.programs.claude-code.marketplaces;
   activeMarketplaces = lib.filter (m: mcfg.enabled.${m.marketplaceName} or true) mcfg.nixProvided;
   pluginEnabled =
     name:
@@ -37,7 +37,7 @@ in
     enable = lib.mkOption {
       type = lib.types.bool;
       default = claudeEnable && pluginEnabled "integrate-branch";
-      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude.enable && <integrate-branch plugin enabled>";
+      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable && <integrate-branch plugin enabled>";
       example = true;
       description = ''
         Install the integrate-branch-support CLI (the detector the integrate-branch
