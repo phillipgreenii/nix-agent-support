@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,11 +41,13 @@ type CreateMergeRequestInput struct {
 
 // MergeRequest is a parsed view of a merge-request bead returned by bd.
 type MergeRequest struct {
-	ID     string             `json:"id"`
-	Title  string             `json:"title"`
-	Status string             `json:"status"`
-	Type   string             `json:"issue_type"`
-	Fields MergeRequestFields `json:"-"`
+	ID       string             `json:"id"`
+	Title    string             `json:"title"`
+	Status   string             `json:"status"`
+	Type     string             `json:"issue_type"`
+	Fields   MergeRequestFields `json:"-"`
+	Priority int                `json:"-"`
+	Labels   []string           `json:"-"`
 }
 
 // bdIssue is the bd CLI's JSON shape (subset we care about). Metadata
@@ -55,6 +58,7 @@ type bdIssue struct {
 	Title        string         `json:"title"`
 	Status       string         `json:"status"`
 	Type         string         `json:"issue_type"`
+	Priority     int            `json:"priority"`
 	Labels       []string       `json:"labels,omitempty"`
 	Metadata     map[string]any `json:"metadata"`
 	Dependencies []bdDependency `json:"dependencies,omitempty"`
@@ -274,6 +278,23 @@ func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned 
 	return err
 }
 
+// SetPriority sets the bead's priority (0=highest … 4=lowest). Used by the
+// conflict-urgency reconciler (pg2-tsgkj). Out-of-range values are clamped
+// into [0,4] rather than rejected.
+func (c *Client) SetPriority(ctx context.Context, id string, p int) error {
+	if id == "" {
+		return errors.New("merge-request: id required")
+	}
+	if p < 0 {
+		p = 0
+	}
+	if p > 4 {
+		p = 4
+	}
+	_, err := c.Runner.Run(ctx, "update", id, "-p", strconv.Itoa(p))
+	return err
+}
+
 // findByRepoPR finds a merge-request bead by repo + pr_number metadata.
 // Returns nil if not found. Includes closed beads.
 func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeRequest, error) {
@@ -409,11 +430,13 @@ func bdIssueToMergeRequest(iss bdIssue) MergeRequest {
 		}
 	}
 	return MergeRequest{
-		ID:     iss.ID,
-		Title:  iss.Title,
-		Status: iss.Status,
-		Type:   iss.Type,
-		Fields: f,
+		ID:       iss.ID,
+		Title:    iss.Title,
+		Status:   iss.Status,
+		Type:     iss.Type,
+		Fields:   f,
+		Priority: iss.Priority,
+		Labels:   iss.Labels,
 	}
 }
 

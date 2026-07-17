@@ -442,6 +442,149 @@ func TestSetMergeRequestCoOwned_Validates(t *testing.T) {
 	}
 }
 
+// TestSetPriority asserts SetPriority sends `update <id> -p <n>` to bd.
+// Reuses coOwnedRunner (a generic calls-recorder already defined above) per
+// controller guidance rather than inventing a new recorder or an assertCalled
+// method on fakeRunner.
+func TestSetPriority(t *testing.T) {
+	r := &coOwnedRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.SetPriority(context.Background(), "mr-1", 1); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+	got := r.lastCall()
+	want := []string{"update", "mr-1", "-p", "1"}
+	if len(got) != len(want) {
+		t.Fatalf("call = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSetPriority_Validates asserts an empty id is rejected before bd is
+// invoked.
+func TestSetPriority_Validates(t *testing.T) {
+	r := &coOwnedRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.SetPriority(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected validation error on empty id")
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("expected no bd calls on validation failure, got %v", r.calls)
+	}
+}
+
+// TestSetPriority_ClampsRange asserts out-of-range priorities are clamped to
+// [0,4] rather than passed through or rejected.
+func TestSetPriority_ClampsRange(t *testing.T) {
+	t.Run("negative clamps to 0", func(t *testing.T) {
+		r := &coOwnedRunner{}
+		c := NewClientWithRunner(r)
+		if err := c.SetPriority(context.Background(), "mr-1", -5); err != nil {
+			t.Fatalf("SetPriority: %v", err)
+		}
+		got := r.lastCall()
+		want := []string{"update", "mr-1", "-p", "0"}
+		if len(got) != len(want) {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("call = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("above 4 clamps to 4", func(t *testing.T) {
+		r := &coOwnedRunner{}
+		c := NewClientWithRunner(r)
+		if err := c.SetPriority(context.Background(), "mr-1", 9); err != nil {
+			t.Fatalf("SetPriority: %v", err)
+		}
+		got := r.lastCall()
+		want := []string{"update", "mr-1", "-p", "4"}
+		if len(got) != len(want) {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("call = %v, want %v", got, want)
+			}
+		}
+	})
+}
+
+// TestBdIssueToMergeRequest_ParsesPriorityAndLabels pins the fix for
+// bdIssueToMergeRequest previously dropping labels entirely and not
+// surfacing priority at all.
+func TestBdIssueToMergeRequest_ParsesPriorityAndLabels(t *testing.T) {
+	iss := bdIssue{
+		ID: "bd-2", Priority: 3, Labels: []string{"co-owned", "pbase:2"},
+		Metadata: map[string]any{"repo": "o/r", "pr_number": float64(5)},
+	}
+	mr := bdIssueToMergeRequest(iss)
+	if mr.Priority != 3 {
+		t.Errorf("Priority = %d, want 3", mr.Priority)
+	}
+	if len(mr.Labels) != 2 {
+		t.Errorf("Labels = %v, want 2", mr.Labels)
+	}
+	if mr.Labels[0] != "co-owned" || mr.Labels[1] != "pbase:2" {
+		t.Errorf("Labels = %v, want [co-owned pbase:2]", mr.Labels)
+	}
+}
+
+// TestSetPriority_RoundTripsThroughRealBD guards the json:"priority" contract
+// against a real bd workspace: it creates a bead, sets its priority via
+// SetPriority (which shells out to `bd update -p`), then reads it back via
+// both GetMergeRequest and ListMergeRequests to confirm Priority survives the
+// bd list --json round trip (a regression the unit tests above — which
+// construct bdIssue directly and never touch JSON — cannot catch).
+func TestSetPriority_RoundTripsThroughRealBD(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newBDWorkspace(t)
+
+	id, _, err := c.EnsureMergeRequest(ctx, "", MergeRequestFields{Repo: "foo/bar", PRNumber: 42})
+	if err != nil {
+		t.Fatalf("EnsureMergeRequest: %v", err)
+	}
+
+	if err := c.SetPriority(ctx, id, 1); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+
+	got, err := c.GetMergeRequest(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMergeRequest: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("bead %s not found after SetPriority", id)
+	}
+	if got.Priority != 1 {
+		t.Fatalf("GetMergeRequest Priority = %d, want 1", got.Priority)
+	}
+
+	all, err := c.ListMergeRequests(ctx, false)
+	if err != nil {
+		t.Fatalf("ListMergeRequests: %v", err)
+	}
+	var found *MergeRequest
+	for i := range all {
+		if all[i].ID == id {
+			found = &all[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("bead %s not found in ListMergeRequests", id)
+	}
+	if found.Priority != 1 {
+		t.Fatalf("ListMergeRequests Priority = %d, want 1", found.Priority)
+	}
+}
+
 // TestNewClientForRepo_HitsRepoWorkspace creates two real bd workspaces in
 // distinct temp dirs and verifies that NewClientForRepo(dirA) writes to
 // workspace A only — beads created on the A-scoped client are not visible
