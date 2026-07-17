@@ -27,13 +27,11 @@
         name = "ccusage";
         features = [ "ccusage" ];
       }
-      # perles is a human-only TUI for beads.
+      # perles is a human-only TUI for beads. (gc-dolt-maintenance was removed from
+      # this repo on main; the beads leaf no longer references it.)
       {
         name = "beads";
-        features = [
-          "beads"
-          "gc-dolt-maintenance"
-        ];
+        features = [ "beads" ];
         humanFeatures = [ "perles" ];
       }
       {
