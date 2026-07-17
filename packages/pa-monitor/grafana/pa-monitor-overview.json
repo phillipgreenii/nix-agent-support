@@ -1246,6 +1246,322 @@
           }
         }
       }
+    },
+    {
+      "id": 200,
+      "title": "Poll performance",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 87,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 201,
+      "title": "Poll tick duration (p95)",
+      "type": "timeseries",
+      "description": "p95 duration of a full poll tick, in milliseconds. Account-global metric (no per-session workspace_scope/plan_tier labels) — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pa_monitor_poll_tick_duration_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 202,
+      "title": "Poll phase duration (p95, by phase)",
+      "type": "timeseries",
+      "description": "p95 duration per poll phase, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,phase) (rate(pa_monitor_poll_phase_duration_bucket[5m])))",
+          "legendFormat": "{{phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 203,
+      "title": "Transcript scan duration (p95, by mode)",
+      "type": "timeseries",
+      "description": "p95 duration of transcript scans per mode, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 88,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,mode) (rate(pa_monitor_transcript_scan_duration_bucket[5m])))",
+          "legendFormat": "{{mode}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 204,
+      "title": "Transcript scan throughput",
+      "type": "timeseries",
+      "description": "Files and bytes scanned per second. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 95,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "rate(pa_monitor_transcript_scan_files_total[5m])",
+          "legendFormat": "files/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pa_monitor_transcript_scan_bytes_total[5m])",
+          "legendFormat": "bytes/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 205,
+      "title": "Subprocess duration (p95, by kind)",
+      "type": "timeseries",
+      "description": "p95 subprocess duration per kind, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 95,
+        "w": 6,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,kind) (rate(pa_monitor_subprocess_duration_bucket[5m])))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 206,
+      "title": "Subprocess spawns (rate, by kind)",
+      "type": "timeseries",
+      "description": "Subprocess spawn rate per kind. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 95,
+        "w": 6,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "rate(pa_monitor_subprocess_spawns_total[5m])",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 210,
+      "title": "gRPC (server)",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 102,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 211,
+      "title": "gRPC server call duration (p95, seconds)",
+      "type": "timeseries",
+      "description": "p95 gRPC server call duration in SECONDS (distinct from the millisecond pa_monitor panels above) — emitted by otelgrpc v0.69.0 under the new semconv as rpc.server.call.duration. Account-global metric — not filtered by $scope/$plan_tier. CAVEAT: the exact Prometheus metric suffix (_seconds) depends on the collector's OTLP-to-Prometheus unit-suffixing configuration; there is no collector config in this repo to verify against, so confirm the series name against the live stack before trusting this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 103,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,rpc_method) (rate(rpc_server_call_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{rpc_method}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 212,
+      "title": "gRPC calls by status code (rate)",
+      "type": "timeseries",
+      "description": "gRPC server call rate by response status code. Account-global metric — not filtered by $scope/$plan_tier. Same Prometheus metric-suffix caveat as the duration panel above.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 103,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (rpc_response_status_code) (rate(rpc_server_call_duration_seconds_count[5m]))",
+          "legendFormat": "{{rpc_response_status_code}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "title": "Export health",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 110,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 221,
+      "title": "OTel export duration (p95, by signal)",
+      "type": "timeseries",
+      "description": "p95 OTLP export duration per signal (traces/metrics/logs), in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 111,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,signal) (rate(pa_monitor_otel_export_duration_bucket[5m])))",
+          "legendFormat": "{{signal}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 222,
+      "title": "OTel export attempts (rate, by outcome)",
+      "type": "timeseries",
+      "description": "OTLP export attempt rate by outcome (e.g. success/failure). Account-global metric — not filtered by $scope/$plan_tier. These surface INTERMITTENT export failures — a total outage shows as a scrape gap plus the stderr UNHEALTHY line, not a nonzero failure rate here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 111,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(pa_monitor_otel_export_attempts_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 223,
+      "title": "Export health notes",
+      "type": "text",
+      "gridPos": {
+        "x": 16,
+        "y": 111,
+        "w": 8,
+        "h": 7
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Reading export health**\n\nThe panels in this row surface *intermittent* OTLP export failures (e.g. occasional collector hiccups) via `pa_monitor_otel_export_attempts_total{outcome=\"failure\"}` and the export-duration histogram.\n\nA **total** export outage does NOT show up as a rising failure rate here — instead it appears as:\n\n- a scrape gap in these panels (no new samples land), and\n- the `UNHEALTHY` line the daemon writes to stderr.\n\nCheck both signals together."
+      }
     }
   ]
 }
