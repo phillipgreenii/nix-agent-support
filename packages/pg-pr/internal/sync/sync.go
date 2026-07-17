@@ -885,9 +885,7 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 		in.CIRuns = enriched.CIRuns
 		// enriched.PR carries GraphQL-only merge-state the REST-built `pr` lacks
 		// on the daemon refresh path; overlay so MineRow reminder fields populate. (pg2-dwfld)
-		in.PR.Mergeable = enriched.PR.Mergeable
-		in.PR.MergeStateStatus = enriched.PR.MergeStateStatus
-		in.PR.AutoMergeEnabled = enriched.PR.AutoMergeEnabled
+		overlayMergeState(&in.PR, enriched)
 	} else {
 		if vp, err := e.providerFor(rcfg); err == nil {
 			if rl, ok := vp.(ReviewLister); ok {
