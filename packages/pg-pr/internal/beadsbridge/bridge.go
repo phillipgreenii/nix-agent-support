@@ -236,9 +236,8 @@ func (h *Handler) reconcilePriority(ctx context.Context, mrID, ownershipStr stri
 	case hasConflict && !hasBaseline:
 		// First conflicting tick: stash current priority, then nudge.
 		desired := nudged(mr.Priority, ownershipStr)
-		if desired == mr.Priority {
-			// Already clamped at the boundary: still stash so a later clear is a no-op-safe restore.
-		}
+		// Stash unconditionally — even when the priority is already clamped at the
+		// boundary (desired == mr.Priority) — so a later clear is a no-op-safe restore.
 		if err := h.client.AddLabel(ctx, mrID, pbaseLabelPrefix+strconv.Itoa(mr.Priority)); err != nil {
 			return err
 		}

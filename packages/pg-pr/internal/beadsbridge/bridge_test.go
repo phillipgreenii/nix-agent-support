@@ -730,7 +730,8 @@ func TestHandle_ConflictClearedRestoresBaseline(t *testing.T) {
 
 // TestHandle_ConflictIdempotentNoDoubleNudge asserts a repeated conflicting
 // tick (baseline already stashed) is a no-op — it must NOT call SetPriority
-// again (that would double-nudge past the intended single-step adjustment).
+// again (that would double-nudge past the intended single-step adjustment),
+// and must NOT re-add or remove the pbase baseline label.
 func TestHandle_ConflictIdempotentNoDoubleNudge(t *testing.T) {
 	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 1, Labels: []string{"pbase:2"}}}
 	h := New(c)
@@ -740,6 +741,12 @@ func TestHandle_ConflictIdempotentNoDoubleNudge(t *testing.T) {
 	}
 	if len(c.setPriorityCalls) != 0 {
 		t.Fatalf("expected no SetPriority call (already adjusted this conflict episode), got %v", c.setPriorityCalls)
+	}
+	if len(c.addLabelCalls) != 0 {
+		t.Fatalf("expected no AddLabel call (baseline already stashed), got %v", c.addLabelCalls)
+	}
+	if len(c.removeLabelCalls) != 0 {
+		t.Fatalf("expected no RemoveLabel call (conflict still present), got %v", c.removeLabelCalls)
 	}
 }
 
