@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -139,6 +141,27 @@ func (h *exportHealth) record(err error, out io.Writer) {
 	}
 }
 
+// recordExport is the shared instrumentation Strategy for both export
+// decorators (pg2-sewtz): it times one OTLP export call and records the
+// outcome to the two back-patched instruments (Task 1's exportDur /
+// exportAttempts). It is a deliberate no-op whenever EITHER instrument is
+// nil — the state before New's back-patch assigns them (or when OTel
+// instrumentation of itself is otherwise disabled) — so callers never need
+// to guard the call site.
+func recordExport(dur metric.Float64Histogram, attempts metric.Int64Counter, signal string, d time.Duration, err error) {
+	if dur == nil || attempts == nil {
+		return
+	}
+	outcome := "success"
+	if err != nil {
+		outcome = "failure"
+	}
+	dur.Record(context.Background(), durMS(d),
+		metric.WithAttributes(attribute.String("signal", signal)))
+	attempts.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("signal", signal), attribute.String("outcome", outcome)))
+}
+
 // healthMetricExporter decorates a metric Exporter (Decorator pattern), feeding
 // each export result to the shared exportHealth tracker and SWALLOWING the
 // underlying error.
@@ -154,12 +177,16 @@ func (h *exportHealth) record(err error, out io.Writer) {
 // exporter unchanged.
 type healthMetricExporter struct {
 	sdkmetric.Exporter
-	health *exportHealth
-	out    io.Writer
+	health   *exportHealth
+	out      io.Writer
+	dur      metric.Float64Histogram // nil until back-patched by New (pg2-sewtz)
+	attempts metric.Int64Counter     // nil until back-patched by New (pg2-sewtz)
 }
 
 func (e *healthMetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+	start := time.Now()
 	err := e.Exporter.Export(ctx, rm)
+	recordExport(e.dur, e.attempts, "metric", time.Since(start), err)
 	e.health.record(err, e.out)
 	return nil
 }
@@ -170,12 +197,16 @@ func (e *healthMetricExporter) Export(ctx context.Context, rm *metricdata.Resour
 // together and the "consecutive failures" count reflects overall export health.
 type healthLogExporter struct {
 	sdklog.Exporter
-	health *exportHealth
-	out    io.Writer
+	health   *exportHealth
+	out      io.Writer
+	dur      metric.Float64Histogram // nil until back-patched by New (pg2-sewtz)
+	attempts metric.Int64Counter     // nil until back-patched by New (pg2-sewtz)
 }
 
 func (e *healthLogExporter) Export(ctx context.Context, records []sdklog.Record) error {
+	start := time.Now()
 	err := e.Exporter.Export(ctx, records)
+	recordExport(e.dur, e.attempts, "log", time.Since(start), err)
 	e.health.record(err, e.out)
 	return nil
 }

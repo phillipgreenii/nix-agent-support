@@ -201,10 +201,13 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Named (not inline) so the instruments can be back-patched below, after
+	// registerMetrics creates them: at THIS point in construction the Emitter
+	// (and its exportDur/exportAttempts fields) does not exist yet, so the
+	// decorator cannot be handed the instruments up front (pg2-sewtz).
+	metricDec := &healthMetricExporter{Exporter: metricExp, health: health, out: os.Stderr}
 	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
-			&healthMetricExporter{Exporter: metricExp, health: health, out: os.Stderr},
-		)),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricDec)),
 		sdkmetric.WithResource(res),
 		sdkmetric.WithView(sdkmetric.NewView(
 			sdkmetric.Instrument{Name: "pa_monitor.transcript.scan.duration"},
@@ -219,10 +222,9 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		_ = mp.Shutdown(ctx)
 		return nil, err
 	}
+	logDec := &healthLogExporter{Exporter: logExp, health: health, out: os.Stderr}
 	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(
-			&healthLogExporter{Exporter: logExp, health: health, out: os.Stderr},
-		)),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logDec)),
 		sdklog.WithResource(res),
 	)
 
@@ -237,6 +239,12 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		_ = lp.Shutdown(ctx)
 		return nil, err
 	}
+	// Back-patch (pg2-sewtz): registerMetrics has now created
+	// e.exportDur/e.exportAttempts, so wire them into both decorators. Both
+	// signals share the same pair of instruments, distinguished by the
+	// signal="metric"/"log" attribute recordExport attaches.
+	metricDec.dur, metricDec.attempts = e.exportDur, e.exportAttempts
+	logDec.dur, logDec.attempts = e.exportDur, e.exportAttempts
 	return e, nil
 }
 
