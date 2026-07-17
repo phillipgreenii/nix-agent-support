@@ -7,6 +7,7 @@ import (
 
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // capturingLogger is a minimal in-memory otellog.Logger that records every
@@ -367,4 +368,85 @@ func TestNewRegistersInstrumentsAndMeterProvider(t *testing.T) {
 	e.RecordScan("incremental", time.Millisecond, 512)
 	e.RecordSubprocess("terminal_host", 3*time.Millisecond)
 	e.RecordTickDuration(10 * time.Millisecond)
+}
+
+// TestRecordScan_CacheHitSkipsWorkloadCounters is the value-assertion proof of
+// RecordScan's mode-gated workload accounting (emitter.go): the duration
+// histogram records for EVERY scan (carrying the `mode` attr), but the
+// files_total / bytes_total workload counters are incremented ONLY for real
+// scans — a "cache_hit" records its duration yet MUST leave the workload
+// counters untouched. Uses newTestEmitter's ManualReader so instrument values /
+// attributes are asserted directly rather than merely proving no panic.
+func TestRecordScan_CacheHitSkipsWorkloadCounters(t *testing.T) {
+	e, reader := newTestEmitter(t)
+
+	e.RecordScan("cache_hit", 2*time.Millisecond, 100)
+	e.RecordScan("incremental", 3*time.Millisecond, 100)
+
+	// scan.duration: one histogram data point per mode; BOTH scans recorded.
+	m, ok := collectMetric(t, reader, "pa_monitor.transcript.scan.duration")
+	if !ok {
+		t.Fatal("pa_monitor.transcript.scan.duration not emitted")
+	}
+	h, ok := m.Data.(metricdata.Histogram[float64])
+	if !ok {
+		t.Fatalf("scan.duration is %T, want metricdata.Histogram[float64]", m.Data)
+	}
+	durCounts := map[string]uint64{}
+	for _, dp := range h.DataPoints {
+		mode, present := dp.Attributes.Value("mode")
+		if !present {
+			t.Errorf("scan.duration data point missing `mode` attribute: %+v", dp)
+			continue
+		}
+		if _, sid := dp.Attributes.Value("session_id"); sid {
+			t.Error("scan.duration carries a session_id label; must not")
+		}
+		durCounts[mode.AsString()] += dp.Count
+	}
+	if durCounts["cache_hit"] != 1 {
+		t.Errorf("scan.duration cache_hit count = %d, want 1 (duration recorded even for cache hits)", durCounts["cache_hit"])
+	}
+	if durCounts["incremental"] != 1 {
+		t.Errorf("scan.duration incremental count = %d, want 1", durCounts["incremental"])
+	}
+
+	// scan.files_total: a SINGLE series for mode=incremental (value 1). The
+	// cache_hit scan must NOT create a data point at all.
+	fm, ok := collectMetric(t, reader, "pa_monitor.transcript.scan.files_total")
+	if !ok {
+		t.Fatal("pa_monitor.transcript.scan.files_total not emitted")
+	}
+	fs, ok := fm.Data.(metricdata.Sum[int64])
+	if !ok {
+		t.Fatalf("files_total is %T, want metricdata.Sum[int64]", fm.Data)
+	}
+	if len(fs.DataPoints) != 1 {
+		t.Fatalf("files_total data points = %d, want 1 (cache_hit must NOT increment a series)", len(fs.DataPoints))
+	}
+	if mode, _ := fs.DataPoints[0].Attributes.Value("mode"); mode.AsString() != "incremental" {
+		t.Errorf("files_total mode = %q, want incremental (cache_hit must be skipped)", mode.AsString())
+	}
+	if fs.DataPoints[0].Value != 1 {
+		t.Errorf("files_total = %d, want 1 (one non-cache_hit scan)", fs.DataPoints[0].Value)
+	}
+
+	// scan.bytes_total: += 100 for the incremental scan only; no cache_hit series.
+	bm, ok := collectMetric(t, reader, "pa_monitor.transcript.scan.bytes_total")
+	if !ok {
+		t.Fatal("pa_monitor.transcript.scan.bytes_total not emitted")
+	}
+	bs, ok := bm.Data.(metricdata.Sum[int64])
+	if !ok {
+		t.Fatalf("bytes_total is %T, want metricdata.Sum[int64]", bm.Data)
+	}
+	if len(bs.DataPoints) != 1 {
+		t.Fatalf("bytes_total data points = %d, want 1 (cache_hit must NOT increment a series)", len(bs.DataPoints))
+	}
+	if mode, _ := bs.DataPoints[0].Attributes.Value("mode"); mode.AsString() != "incremental" {
+		t.Errorf("bytes_total mode = %q, want incremental (cache_hit must be skipped)", mode.AsString())
+	}
+	if bs.DataPoints[0].Value != 100 {
+		t.Errorf("bytes_total = %d, want 100 (bytes from the incremental scan only)", bs.DataPoints[0].Value)
+	}
 }
