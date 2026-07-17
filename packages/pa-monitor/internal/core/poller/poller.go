@@ -21,6 +21,15 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
+// PhaseRecorder receives per-tick phase/scan/subprocess timings. *otel.Emitter
+// satisfies it; nil disables recording. Defined here (not imported from otel) so
+// internal/core/poller has no dependency on internal/otel.
+type PhaseRecorder interface {
+	RecordPhase(phase string, d time.Duration)
+	RecordScan(mode string, d time.Duration, bytes int64)
+	RecordSubprocess(kind string, d time.Duration)
+}
+
 // stalePauseGrace bounds how far past the rate-limit reset the TUI will still
 // treat a session as paused. Beyond this, the session was likely abandoned
 // during the window; auto-resume should not fire to every such session on
@@ -95,6 +104,12 @@ type Poller struct {
 	ActiveBlockID int64
 	ActiveWeekID  int64
 
+	// Rec, when non-nil, receives per-tick phase/scan/subprocess timings
+	// (pg2-sewtz OTel instrumentation). Wired by the daemon via
+	// SetPhaseRecorder; nil (e.g. the TUI's read-only poller, or most tests)
+	// disables recording.
+	Rec PhaseRecorder
+
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
@@ -115,10 +130,30 @@ func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
 // pipeline here so Snapshot persists each session's computed labels (pg2-4xbrm).
 func (p *Poller) SetLabeler(fn func(sv *aggregate.SessionView) map[string]string) { p.Labeler = fn }
 
+// SetPhaseRecorder wires a PhaseRecorder. Takes any so the daemon can call it
+// through an anonymous interface without importing this package.
+func (p *Poller) SetPhaseRecorder(r any) {
+	if pr, ok := r.(PhaseRecorder); ok {
+		p.Rec = pr
+	}
+}
+
+// phase records a once-per-tick phase duration when a Rec is wired, keeping
+// call sites terse (`defer p.phase("name", time.Now())` is NOT used here since
+// that would capture time.Now() eagerly; call sites instead do
+// `t0 := time.Now(); ...; p.phase("name", t0)`).
+func (p *Poller) phase(name string, start time.Time) {
+	if p.Rec != nil {
+		p.Rec.RecordPhase(name, time.Since(start))
+	}
+}
+
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
+	discoverStart := time.Now()
 	disc := &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive}
 	sessions, err := disc.Discover()
+	p.phase("discover", discoverStart)
 	if err != nil {
 		return nil, false, err
 	}
@@ -142,7 +177,11 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		if ok {
 			s.TranscriptMTime = mtime
 		}
+		gitBranchStart := time.Now()
 		s.Branch = session.GitBranch(s.Cwd)
+		if p.Rec != nil {
+			p.Rec.RecordSubprocess("git_branch", time.Since(gitBranchStart))
+		}
 
 		// Transcript cache: reuse the parsed Snapshot untouched while the file is
 		// unchanged (same path+mtime). Otherwise fold only the newly-appended
@@ -155,14 +194,26 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		if hit && path != "" && cached.path == path && cached.mtime.Equal(mtime) {
 			snap = cached.snap
 			shells = cached.subshellCount
+			if p.Rec != nil {
+				p.Rec.RecordScan("cache_hit", 0, 0)
+			}
 		} else {
 			var prevAcc *transcript.Accumulator
 			if hit && cached.path == path {
 				prevAcc = cached.acc
 			}
 			var acc *transcript.Accumulator
-			snap, acc, _, _ = transcript.ScanIncremental(path, prevAcc)
+			var stats transcript.ScanStats
+			scanStart := time.Now()
+			snap, acc, stats, _ = transcript.ScanIncremental(path, prevAcc)
+			if p.Rec != nil {
+				p.Rec.RecordScan(string(stats.Mode), time.Since(scanStart), stats.BytesFolded)
+			}
+			subshellStart := time.Now()
 			shells, _ = subshellCounter.Count(s.PID)
+			if p.Rec != nil {
+				p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
+			}
 			if path != "" {
 				p.transcriptCache[s.SessionID] = cachedTranscript{
 					path: path, mtime: mtime, snap: snap, subshellCount: shells, acc: acc,
@@ -186,7 +237,11 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		if host, hit := p.terminalHostCache[s.PID]; hit && host != "unknown" {
 			s.TerminalHost = host
 		} else {
+			terminalHostStart := time.Now()
 			s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
+			if p.Rec != nil {
+				p.Rec.RecordSubprocess("terminal_host", time.Since(terminalHostStart))
+			}
 			p.terminalHostCache[s.PID] = s.TerminalHost
 		}
 		if s.TerminalHost == "cmux" {
@@ -326,7 +381,12 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			}
 		}
 		for cwd, branch := range winningBranch {
-			if info, err := p.PRLookupFn(ctx, cwd, branch); err == nil {
+			prLookupStart := time.Now()
+			info, err := p.PRLookupFn(ctx, cwd, branch)
+			if p.Rec != nil {
+				p.Rec.RecordSubprocess("pr_lookup", time.Since(prLookupStart))
+			}
+			if err == nil {
 				prByDir[cwd] = info
 			}
 		}
@@ -353,15 +413,20 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	var costProbed bool
 	var costProbeErr error
 	if p.Pricer != nil {
+		pricerStart := time.Now()
 		block, _ = p.Pricer.ActiveBlock(ctx)
 		costProbed, costProbeErr = p.Pricer.Probed()
+		p.phase("pricer", pricerStart)
 	}
 
+	aggregateBuildStart := time.Now()
 	tree := aggregate.Build(sessions, enriched, prByDir, block, p.BlockCapUSD)
+	p.phase("aggregate_build", aggregateBuildStart)
 	tree.CostProbed = costProbed
 	tree.CostProbeErr = costProbeErr
 
 	if p.WriteService != nil {
+		dbWriteSessionsStart := time.Now()
 		nowUTC := now.UTC()
 		for _, sv := range tree.Sessions() {
 			var svLabels map[string]string
@@ -427,6 +492,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				}
 			}
 		}
+		p.phase("db_write_sessions", dbWriteSessionsStart)
 	}
 
 	return tree, anyKeepAwake, nil

@@ -460,6 +460,20 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		})
 	}
 
+	// Wire the poller's phase/scan/subprocess recorder to the emitter (pg2-sewtz
+	// OTel instrumentation). Deliberately done through an anonymous interface
+	// (not poller.PhaseRecorder) so this package does not import internal/core/poller
+	// — Go interface satisfaction for the *poller.Poller assertion would force
+	// that import. Guarded by opts.Emitter != nil per the typed-nil-interface
+	// rule: a nil *otel.Emitter boxed into PhaseRecorder would be a non-nil
+	// interface wrapping a nil pointer, which the poller's `p.Rec != nil` checks
+	// would then treat as present.
+	if opts.Emitter != nil {
+		if s, ok := opts.Poller.(interface{ SetPhaseRecorder(any) }); ok {
+			s.SetPhaseRecorder(opts.Emitter)
+		}
+	}
+
 	// configReloader (bead pg2-r1f1j.8): when enabled, re-reads the config file
 	// each tick and swaps in a freshly-rebuilt decorator pipeline whenever the
 	// file changes — so a decorator written by `pn workspace apply` after the
@@ -480,338 +494,367 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// across ticks (declared outside the loop) like previousErrors above.
 	var blockLimitHit, weekLimitHit limitHitLatch
 
+	// phase records a once-per-tick lifecycle phase duration. opts.Emitter's
+	// RecordPhase is nil-safe, so this is always callable regardless of
+	// whether an Emitter was configured.
+	phase := func(name string, start time.Time) { opts.Emitter.RecordPhase(name, time.Since(start)) }
+
 	tickCount := 0
+	// runTick is the whole per-tick body, extracted into a closure (rather than
+	// left inline in the `case <-t.C:` arm) so RecordTickDuration can be recorded
+	// via a single defer that covers EVERY exit path — including the early
+	// no-poller and snapshot-error returns below, which previously `continue`d
+	// the select loop directly. Converting those two `continue`s to `return`
+	// preserves identical control flow (both only ever skipped the rest of one
+	// tick), now inside the closure. All other `continue` statements deeper in
+	// this function belong to their own nested `for` loops and are unaffected.
+	runTick := func() {
+		tickStart := time.Now()
+		defer func() { opts.Emitter.RecordTickDuration(time.Since(tickStart)) }()
+
+		tickCount++
+		// Pick up a changed decorator config without a restart (pg2-r1f1j.8).
+		// Runs in this (the tick) goroutine, so swapping `decorators` and
+		// clearing `labelCache` is race-free — both are owned here.
+		if reloader != nil {
+			if newDecs, ok := reloader.reloadIfChanged(); ok {
+				decorators = newDecs
+				clear(labelCache)
+				fmt.Fprintf(os.Stderr, "daemon: decorator config reloaded (%d decorator(s))\n", len(newDecs))
+			}
+		}
+		if opts.Poller == nil {
+			// no poller — still advance the (toggle-driven) caffeinate
+			// tick to honour RPC-driven on/off requests
+			if opts.Caffeinate != nil {
+				// re-read user toggle from shared state in case Caffeinate RPC changed it
+				opts.Caffeinate.SetToggle(state.isCaffeinateOn())
+				opts.Caffeinate.Tick(false)
+			}
+			return
+		}
+		tree, _, err := opts.Poller.Snapshot(ctx)
+		if err != nil {
+			return
+		}
+		// Sample the authoritative status-line rate_limits (ADR 0021 §1, refined
+		// by ADR 0029). The reading is account-global — the current window's PEAK
+		// used_percentage across all sibling files, ignoring session_id (not the
+		// literal newest record, which can be a lagging session's stale snapshot).
+		// A nil source or a nil/err reading leaves the tree's rate_limits at
+		// whatever the poller set — never clobbered with 0.
+		limitsStart := time.Now()
+		if opts.Limits != nil {
+			if lr, lerr := opts.Limits.Current(ctx); lerr == nil {
+				applyLimits(tree, lr)
+			}
+		}
+		phase("limits", limitsStart)
+
+		weeklyStart := time.Now()
+		fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
+		if fetchWeek {
+			if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
+				tree.ActiveWeek = w
+			}
+		}
+		phase("weekly", weeklyStart)
+
+		// Persist the active block and week to the DB, then propagate
+		// their surrogate ids to the poller so contribution upserts in the
+		// next Snapshot have valid parent ids.
+		dbWriteBlockStart := time.Now()
+		if opts.WriteService != nil {
+			if tree.ActiveBlock != nil {
+				nowUTC := time.Now().UTC()
+				// Persist the block WITH the current rate_limits reading so the
+				// store->tree (GetState) path reflects it (ADR 0021 §6).
+				b := blockToStoreBlockWithLimits(tree.ActiveBlock, opts.Account.BlockCap(), nowUTC, tree)
+				if blockID, err := opts.WriteService.UpsertBlock(ctx, b); err == nil {
+					if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
+						setter.SetActiveBlockID(blockID)
+					}
+				}
+			}
+			if tree.ActiveWeek != nil {
+				nowUTC := time.Now().UTC()
+				w := weekToStoreWeek(tree.ActiveWeek, opts.Account.WeekCap(), nowUTC)
+				if weekID, err := opts.WriteService.UpsertWeek(ctx, w); err == nil {
+					if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
+						setter.SetActiveWeekID(weekID)
+					}
+				}
+			}
+		}
+		phase("db_write_block", dbWriteBlockStart)
+
+		if opts.BlockTracker != nil {
+			opts.BlockTracker.Update(tree.ActiveBlock)
+		}
+		if opts.WeekTracker != nil {
+			opts.WeekTracker.Update(tree.ActiveWeek)
+		}
+		// ADR 0024 D2: keep awake when any session is Working OR Blocked on a
+		// machine-recoverable blocker (usage_limit — auto-resume fires at
+		// reset — or a retryable error). session.KeepAwake collapses the
+		// per-session predicate; iterate sessions since the Directory counts
+		// don't carry the blocker/retryable breakdown needed here.
+		anyWorking := false
+		for _, sv := range tree.Sessions() {
+			if sv.Session == nil {
+				continue
+			}
+			if session.KeepAwake(sv.Status, sv.Blocker, sv.LastErrorRetryable) {
+				anyWorking = true
+				break
+			}
+		}
+		// D5: a terminal nudgeable error with zero recorded nudge attempts
+		// keeps the Mac awake until the first attempt. Computed INLINE here
+		// from tree + watermark store (NOT the nudger's pending-store —
+		// that reconciles later in this same tick, at n.Reconcile below, so
+		// its grace/pending state is empty during the 0–30s disrupt grace).
+		// Reading LastError directly makes the predicate true at T+0, before
+		// idle-sleep could fire during the grace.
+		state.mu.RLock()
+		wmCaffeinate := state.watermarks
+		state.mu.RUnlock()
+		anyUnattemptedNudgeableDisrupt := false
+		if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
+			// Uses the FULL opts.NudgerSignalers (NOT the cmux-stripped
+			// delivery slice): D5 only calls ResolveSignaler→Detect, never
+			// Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
+			// hold the Mac awake without the daemon ever exec'ing cmux
+			// (ADR 0022). Do not swap this for the delivery slice.
+			anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
+		}
+		keepAwake := anyWorking || anyUnattemptedNudgeableDisrupt
+		if opts.Caffeinate != nil {
+			toggleOn := state.isCaffeinateOn()
+			opts.Caffeinate.SetToggle(toggleOn)
+			prevState := opts.Caffeinate.State()
+			opts.Caffeinate.Tick(keepAwake)
+			newState := opts.Caffeinate.State()
+			// active is true when the subprocess is running OR when the
+			// user toggle is on but the manager is waiting for agents to
+			// start before spawning (StateOff + toggle=true). Without the
+			// toggleOn guard, a tick with keepAwake=false would reset
+			// caffeinateActive to false immediately after the user flips
+			// the toggle on, causing the TUI indicator to revert.
+			active := newState != caffeinate.StateOff || toggleOn
+			cause := ""
+			if active {
+				if toggleOn {
+					cause = "manual"
+				}
+				if keepAwake {
+					cause = "agents_active"
+				}
+			}
+			// Store BOTH indicators: the legacy collapsed `active` flag plus
+			// the richer PROCESS state (newState) and its grace countdown.
+			// The MODE (toggleOn) is already on caffeinateOn. Reading the
+			// manager's real state here revives the long-dead grace display.
+			graceRemaining := opts.Caffeinate.GraceRemaining()
+			state.setCaffeinateState(active, cause, newState, graceRemaining)
+			opts.Emitter.RecordCaffeinateActive(active, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
+			if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
+				opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
+			}
+			if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !keepAwake {
+				opts.Emitter.RecordCaffeinateGraceExpired(nil)
+			}
+		}
+		// Push the auto-resume intent each tick so its observable gauge
+		// tracks the daemon's actual setting (mirrors caffeinate). Reads
+		// from the WatermarkStore which is the source of truth for the
+		// nudger's auto-resume flag.
+		state.mu.RLock()
+		wmForGauge := state.watermarks
+		state.mu.RUnlock()
+		if wmForGauge != nil {
+			opts.Emitter.RecordAutoResumeEnabled(wmForGauge.AutoResumeEnabled(), map[string]string{
+				"plan_tier": opts.PlanTier,
+			})
+		}
+		// Deferral visibility (ADR 0024 D5): publish how many sessions have
+		// auto-resume deliberately WAITING on a window (window_pending) as a
+		// GAUGE, so the operator can distinguish "auto-resume is waiting" from
+		// "broken". Carry-forward-zero in the emitter drops the cause to 0 when
+		// the window clears (mirrors sessions.count).
+		autoResumeOn := wmForGauge != nil && wmForGauge.AutoResumeEnabled()
+		opts.Emitter.RecordNudgeDeferred(deferredNudgeCounts(tree, autoResumeOn, time.Now()))
+		if tree.ActiveBlock != nil {
+			opts.Emitter.RecordBlockCost(tree.ActiveBlock.CostUSD, map[string]string{
+				"plan_tier": opts.PlanTier,
+				"block.id":  tree.ActiveBlock.ID,
+			})
+		}
+		if tree.ActiveWeek != nil {
+			weekID := ""
+			if opts.WeekTracker != nil {
+				weekID = opts.WeekTracker.ID()
+			}
+			opts.Emitter.RecordWeekCost(tree.ActiveWeek.TotalCost, map[string]string{
+				"plan_tier": opts.PlanTier,
+				"week.id":   weekID,
+			})
+		}
+		// Authoritative status-line rate_limits usage gauges (ADR 0021 §5).
+		// ACCOUNT-GLOBAL: only plan_tier — no session_id, no block/week id. The
+		// *.cost.usd gauges above keep emitting native cost, unchanged; these are
+		// the honest percentage/reset signals. Unknown windows (nil pct / zero
+		// reset) are not observed at all (handled inside the emitter).
+		acctAttrs := map[string]string{"plan_tier": opts.PlanTier}
+		opts.Emitter.RecordBlockUsage(tree.FiveHourPct, tree.FiveHourResetsAt, acctAttrs)
+		opts.Emitter.RecordWeekUsage(tree.SevenDayPct, tree.SevenDayResetsAt, acctAttrs)
+
+		// Account-level limit-hit from the AUTHORITATIVE signal (ADR 0024 D3),
+		// latched once-per-window (R7). FiveHourPct is populated by applyLimits
+		// above; the trigger also fires on any terminal per-session usage_limit.
+		// The retired ccusage CostUSD>=capUSD trigger no longer fires this.
+		if blockLimitHit.observe(blockLimitTrigger(tree), tree.FiveHourResetsAt) {
+			blockID := ""
+			if opts.BlockTracker != nil {
+				blockID = opts.BlockTracker.ID()
+			}
+			opts.Emitter.RecordBlockLimitHit(map[string]string{
+				"plan_tier": opts.PlanTier,
+				"block.id":  blockID,
+			})
+		}
+		// Weekly counterpart (R11): SevenDayPct is nil-guarded inside
+		// weekLimitTrigger, so a nil reading never fires and never panics.
+		if weekLimitHit.observe(weekLimitTrigger(tree), tree.SevenDayResetsAt) {
+			weekID := ""
+			if opts.WeekTracker != nil {
+				weekID = opts.WeekTracker.ID()
+			}
+			opts.Emitter.RecordWeekLimitHit(map[string]string{
+				"plan_tier": opts.PlanTier,
+				"week.id":   weekID,
+				"source":    "computed",
+			})
+		}
+		updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
+		updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
+		// Drop stale label cache entries for sessions that vanished.
+		pruneLabelCache(labelCache, tree)
+
+		// Emit api_error.observed for each newly-seen error, and
+		// snapshot sessions.errored gauge per kind.
+		emitErrorMetrics(opts.Emitter, tree, previousErrors)
+
+		// Baseline liveness heartbeat (bead pg2-r1f1j.6): a modest
+		// daemon.heartbeat every heartbeatEvery ticks (~heartbeatInterval)
+		// guarantees the OTel log stream stays alive even when no discrete
+		// event fires, so a healthy-but-quiet daemon isn't NO DATA on Loki.
+		// autoResumeOn is computed earlier in this tick from the WatermarkStore.
+		if shouldHeartbeat(tickCount, heartbeatEvery) {
+			opts.Emitter.LogEvent("daemon.heartbeat", heartbeatAttrs(tree, opts.PlanTier, autoResumeOn))
+		}
+
+		// Run nudger tick after tree is built and before publishing to clients.
+		state.mu.RLock()
+		n := state.nudger
+		wm := state.watermarks
+		state.mu.RUnlock()
+		nudgeStart := time.Now()
+		if n != nil {
+			msg := opts.AutoResumeMessage
+			if msg == "" {
+				msg = "continue"
+			}
+			tctx := nudger.TickContext{
+				Now:               time.Now(),
+				Tree:              tree,
+				AutoResumeEnabled: wm.AutoResumeEnabled(),
+				AutoResumeMessage: msg,
+				AutoResumeDelay:   opts.AutoResumeDelay,
+				DisruptGrace:      opts.DisruptGrace,
+				EscalationAfter:   opts.EscalationAfter,
+				Watermarks:        wm,
+				// Producer-side no-surface gate (bead pg2-gjekd): reap
+				// surfaceless "ghost" sessions from the candidate set so they
+				// are never enqueued. Uses the FULL opts.NudgerSignalers
+				// (Detect-only, never Send) — the same predicate the D5
+				// keep-awake disjunct uses (hasUnattemptedNudgeableDisrupt),
+				// so a cmux-hosted target resolves without the daemon exec'ing
+				// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
+				// dispatcher-side suppress-and-drop backstop.
+				HasSurface: func(pid int) bool {
+					return signal.ResolveSignaler(opts.NudgerSignalers, pid) != nil
+				},
+			}
+			n.Reconcile(tctx)
+			// Annotate sessions BEFORE dispatch so clients see what's queued.
+			// Pending-nudge sources surface as PendingNudge.Sources; nudge
+			// history (LastNudgedAt + LastNudgeSources) is sourced from the
+			// watermark store and surfaces for every session that has ever
+			// received a nudge — independent of whether anything is currently
+			// pending.
+			for _, dir := range tree.Dirs {
+				for _, sv := range dir.Sessions {
+					sid := sv.SessionID
+					if n.PendingFor(sid) {
+						sources := n.SourcesFor(sid)
+						strs := make([]string, 0, len(sources))
+						for _, s := range sources {
+							strs = append(strs, string(s))
+						}
+						sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
+					}
+					wmSession := wm.SessionWatermark(sid)
+					if !wmSession.LastNudgedAt.IsZero() {
+						sv.LastNudgedAt = wmSession.LastNudgedAt
+						sv.LastNudgeSources = wmSession.LastNudgeSources
+					}
+				}
+			}
+			n.Dispatch(ctx, tctx)
+			wm.SaveIntents(n.SnapshotStore())
+
+			// Escalation flip: surface LastErrorRetryable=false on terminal
+			// errors for sessions whose watermark marks DisruptEscalated.
+			// Also persist the flip to the DB so it survives a restart.
+			for _, dir := range tree.Dirs {
+				for _, sv := range dir.Sessions {
+					if sv.LastError == nil || !sv.LastError.IsTerminal {
+						continue
+					}
+					swm := wm.SessionWatermark(sv.SessionID)
+					if !swm.DisruptEscalated {
+						continue
+					}
+					// The retryable verdict now lives on the view, not the
+					// shared record — flip it in place (no record copy needed).
+					sv.LastErrorRetryable = false
+					// Persist the flip so the DB-materialised path sees it.
+					if opts.WriteService != nil {
+						_ = opts.WriteService.MarkSessionEscalated(ctx, sv.SessionID)
+					}
+				}
+			}
+		}
+		phase("nudge", nudgeStart)
+
+		if opts.TreeObserver != nil {
+			opts.TreeObserver(tree)
+		}
+
+		// Refresh the cached snapshot on THIS (tick) goroutine so gRPC
+		// handlers (buildState) serve it without a synchronous SQLite read on
+		// their own goroutine — keeping the BridgeChannel writer's snapshot
+		// cadence independent of DB latency. See sharedState.refreshSnapshot.
+		state.refreshSnapshot()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			tickCount++
-			// Pick up a changed decorator config without a restart (pg2-r1f1j.8).
-			// Runs in this (the tick) goroutine, so swapping `decorators` and
-			// clearing `labelCache` is race-free — both are owned here.
-			if reloader != nil {
-				if newDecs, ok := reloader.reloadIfChanged(); ok {
-					decorators = newDecs
-					clear(labelCache)
-					fmt.Fprintf(os.Stderr, "daemon: decorator config reloaded (%d decorator(s))\n", len(newDecs))
-				}
-			}
-			if opts.Poller == nil {
-				// no poller — still advance the (toggle-driven) caffeinate
-				// tick to honour RPC-driven on/off requests
-				if opts.Caffeinate != nil {
-					// re-read user toggle from shared state in case Caffeinate RPC changed it
-					opts.Caffeinate.SetToggle(state.isCaffeinateOn())
-					opts.Caffeinate.Tick(false)
-				}
-				continue
-			}
-			tree, _, err := opts.Poller.Snapshot(ctx)
-			if err != nil {
-				continue
-			}
-			// Sample the authoritative status-line rate_limits (ADR 0021 §1, refined
-			// by ADR 0029). The reading is account-global — the current window's PEAK
-			// used_percentage across all sibling files, ignoring session_id (not the
-			// literal newest record, which can be a lagging session's stale snapshot).
-			// A nil source or a nil/err reading leaves the tree's rate_limits at
-			// whatever the poller set — never clobbered with 0.
-			if opts.Limits != nil {
-				if lr, lerr := opts.Limits.Current(ctx); lerr == nil {
-					applyLimits(tree, lr)
-				}
-			}
-			fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
-			if fetchWeek {
-				if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
-					tree.ActiveWeek = w
-				}
-			}
-
-			// Persist the active block and week to the DB, then propagate
-			// their surrogate ids to the poller so contribution upserts in the
-			// next Snapshot have valid parent ids.
-			if opts.WriteService != nil {
-				if tree.ActiveBlock != nil {
-					nowUTC := time.Now().UTC()
-					// Persist the block WITH the current rate_limits reading so the
-					// store->tree (GetState) path reflects it (ADR 0021 §6).
-					b := blockToStoreBlockWithLimits(tree.ActiveBlock, opts.Account.BlockCap(), nowUTC, tree)
-					if blockID, err := opts.WriteService.UpsertBlock(ctx, b); err == nil {
-						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
-							setter.SetActiveBlockID(blockID)
-						}
-					}
-				}
-				if tree.ActiveWeek != nil {
-					nowUTC := time.Now().UTC()
-					w := weekToStoreWeek(tree.ActiveWeek, opts.Account.WeekCap(), nowUTC)
-					if weekID, err := opts.WriteService.UpsertWeek(ctx, w); err == nil {
-						if setter, ok := opts.Poller.(BlockWeekIDSetter); ok {
-							setter.SetActiveWeekID(weekID)
-						}
-					}
-				}
-			}
-
-			if opts.BlockTracker != nil {
-				opts.BlockTracker.Update(tree.ActiveBlock)
-			}
-			if opts.WeekTracker != nil {
-				opts.WeekTracker.Update(tree.ActiveWeek)
-			}
-			// ADR 0024 D2: keep awake when any session is Working OR Blocked on a
-			// machine-recoverable blocker (usage_limit — auto-resume fires at
-			// reset — or a retryable error). session.KeepAwake collapses the
-			// per-session predicate; iterate sessions since the Directory counts
-			// don't carry the blocker/retryable breakdown needed here.
-			anyWorking := false
-			for _, sv := range tree.Sessions() {
-				if sv.Session == nil {
-					continue
-				}
-				if session.KeepAwake(sv.Status, sv.Blocker, sv.LastErrorRetryable) {
-					anyWorking = true
-					break
-				}
-			}
-			// D5: a terminal nudgeable error with zero recorded nudge attempts
-			// keeps the Mac awake until the first attempt. Computed INLINE here
-			// from tree + watermark store (NOT the nudger's pending-store —
-			// that reconciles later in this same tick, at n.Reconcile below, so
-			// its grace/pending state is empty during the 0–30s disrupt grace).
-			// Reading LastError directly makes the predicate true at T+0, before
-			// idle-sleep could fire during the grace.
-			state.mu.RLock()
-			wmCaffeinate := state.watermarks
-			state.mu.RUnlock()
-			anyUnattemptedNudgeableDisrupt := false
-			if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
-				// Uses the FULL opts.NudgerSignalers (NOT the cmux-stripped
-				// delivery slice): D5 only calls ResolveSignaler→Detect, never
-				// Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
-				// hold the Mac awake without the daemon ever exec'ing cmux
-				// (ADR 0022). Do not swap this for the delivery slice.
-				anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
-			}
-			keepAwake := anyWorking || anyUnattemptedNudgeableDisrupt
-			if opts.Caffeinate != nil {
-				toggleOn := state.isCaffeinateOn()
-				opts.Caffeinate.SetToggle(toggleOn)
-				prevState := opts.Caffeinate.State()
-				opts.Caffeinate.Tick(keepAwake)
-				newState := opts.Caffeinate.State()
-				// active is true when the subprocess is running OR when the
-				// user toggle is on but the manager is waiting for agents to
-				// start before spawning (StateOff + toggle=true). Without the
-				// toggleOn guard, a tick with keepAwake=false would reset
-				// caffeinateActive to false immediately after the user flips
-				// the toggle on, causing the TUI indicator to revert.
-				active := newState != caffeinate.StateOff || toggleOn
-				cause := ""
-				if active {
-					if toggleOn {
-						cause = "manual"
-					}
-					if keepAwake {
-						cause = "agents_active"
-					}
-				}
-				// Store BOTH indicators: the legacy collapsed `active` flag plus
-				// the richer PROCESS state (newState) and its grace countdown.
-				// The MODE (toggleOn) is already on caffeinateOn. Reading the
-				// manager's real state here revives the long-dead grace display.
-				graceRemaining := opts.Caffeinate.GraceRemaining()
-				state.setCaffeinateState(active, cause, newState, graceRemaining)
-				opts.Emitter.RecordCaffeinateActive(active, caffeinateProcessLabel(newState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
-				if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
-					opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
-				}
-				if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !keepAwake {
-					opts.Emitter.RecordCaffeinateGraceExpired(nil)
-				}
-			}
-			// Push the auto-resume intent each tick so its observable gauge
-			// tracks the daemon's actual setting (mirrors caffeinate). Reads
-			// from the WatermarkStore which is the source of truth for the
-			// nudger's auto-resume flag.
-			state.mu.RLock()
-			wmForGauge := state.watermarks
-			state.mu.RUnlock()
-			if wmForGauge != nil {
-				opts.Emitter.RecordAutoResumeEnabled(wmForGauge.AutoResumeEnabled(), map[string]string{
-					"plan_tier": opts.PlanTier,
-				})
-			}
-			// Deferral visibility (ADR 0024 D5): publish how many sessions have
-			// auto-resume deliberately WAITING on a window (window_pending) as a
-			// GAUGE, so the operator can distinguish "auto-resume is waiting" from
-			// "broken". Carry-forward-zero in the emitter drops the cause to 0 when
-			// the window clears (mirrors sessions.count).
-			autoResumeOn := wmForGauge != nil && wmForGauge.AutoResumeEnabled()
-			opts.Emitter.RecordNudgeDeferred(deferredNudgeCounts(tree, autoResumeOn, time.Now()))
-			if tree.ActiveBlock != nil {
-				opts.Emitter.RecordBlockCost(tree.ActiveBlock.CostUSD, map[string]string{
-					"plan_tier": opts.PlanTier,
-					"block.id":  tree.ActiveBlock.ID,
-				})
-			}
-			if tree.ActiveWeek != nil {
-				weekID := ""
-				if opts.WeekTracker != nil {
-					weekID = opts.WeekTracker.ID()
-				}
-				opts.Emitter.RecordWeekCost(tree.ActiveWeek.TotalCost, map[string]string{
-					"plan_tier": opts.PlanTier,
-					"week.id":   weekID,
-				})
-			}
-			// Authoritative status-line rate_limits usage gauges (ADR 0021 §5).
-			// ACCOUNT-GLOBAL: only plan_tier — no session_id, no block/week id. The
-			// *.cost.usd gauges above keep emitting native cost, unchanged; these are
-			// the honest percentage/reset signals. Unknown windows (nil pct / zero
-			// reset) are not observed at all (handled inside the emitter).
-			acctAttrs := map[string]string{"plan_tier": opts.PlanTier}
-			opts.Emitter.RecordBlockUsage(tree.FiveHourPct, tree.FiveHourResetsAt, acctAttrs)
-			opts.Emitter.RecordWeekUsage(tree.SevenDayPct, tree.SevenDayResetsAt, acctAttrs)
-
-			// Account-level limit-hit from the AUTHORITATIVE signal (ADR 0024 D3),
-			// latched once-per-window (R7). FiveHourPct is populated by applyLimits
-			// above; the trigger also fires on any terminal per-session usage_limit.
-			// The retired ccusage CostUSD>=capUSD trigger no longer fires this.
-			if blockLimitHit.observe(blockLimitTrigger(tree), tree.FiveHourResetsAt) {
-				blockID := ""
-				if opts.BlockTracker != nil {
-					blockID = opts.BlockTracker.ID()
-				}
-				opts.Emitter.RecordBlockLimitHit(map[string]string{
-					"plan_tier": opts.PlanTier,
-					"block.id":  blockID,
-				})
-			}
-			// Weekly counterpart (R11): SevenDayPct is nil-guarded inside
-			// weekLimitTrigger, so a nil reading never fires and never panics.
-			if weekLimitHit.observe(weekLimitTrigger(tree), tree.SevenDayResetsAt) {
-				weekID := ""
-				if opts.WeekTracker != nil {
-					weekID = opts.WeekTracker.ID()
-				}
-				opts.Emitter.RecordWeekLimitHit(map[string]string{
-					"plan_tier": opts.PlanTier,
-					"week.id":   weekID,
-					"source":    "computed",
-				})
-			}
-			updateGauges(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
-			updateSessionInfo(opts.Emitter, tree, opts.PlanTier, opts.Detectors, decorators, labelCap, labelCache)
-			// Drop stale label cache entries for sessions that vanished.
-			pruneLabelCache(labelCache, tree)
-
-			// Emit api_error.observed for each newly-seen error, and
-			// snapshot sessions.errored gauge per kind.
-			emitErrorMetrics(opts.Emitter, tree, previousErrors)
-
-			// Baseline liveness heartbeat (bead pg2-r1f1j.6): a modest
-			// daemon.heartbeat every heartbeatEvery ticks (~heartbeatInterval)
-			// guarantees the OTel log stream stays alive even when no discrete
-			// event fires, so a healthy-but-quiet daemon isn't NO DATA on Loki.
-			// autoResumeOn is computed earlier in this tick from the WatermarkStore.
-			if shouldHeartbeat(tickCount, heartbeatEvery) {
-				opts.Emitter.LogEvent("daemon.heartbeat", heartbeatAttrs(tree, opts.PlanTier, autoResumeOn))
-			}
-
-			// Run nudger tick after tree is built and before publishing to clients.
-			state.mu.RLock()
-			n := state.nudger
-			wm := state.watermarks
-			state.mu.RUnlock()
-			if n != nil {
-				msg := opts.AutoResumeMessage
-				if msg == "" {
-					msg = "continue"
-				}
-				tctx := nudger.TickContext{
-					Now:               time.Now(),
-					Tree:              tree,
-					AutoResumeEnabled: wm.AutoResumeEnabled(),
-					AutoResumeMessage: msg,
-					AutoResumeDelay:   opts.AutoResumeDelay,
-					DisruptGrace:      opts.DisruptGrace,
-					EscalationAfter:   opts.EscalationAfter,
-					Watermarks:        wm,
-					// Producer-side no-surface gate (bead pg2-gjekd): reap
-					// surfaceless "ghost" sessions from the candidate set so they
-					// are never enqueued. Uses the FULL opts.NudgerSignalers
-					// (Detect-only, never Send) — the same predicate the D5
-					// keep-awake disjunct uses (hasUnattemptedNudgeableDisrupt),
-					// so a cmux-hosted target resolves without the daemon exec'ing
-					// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
-					// dispatcher-side suppress-and-drop backstop.
-					HasSurface: func(pid int) bool {
-						return signal.ResolveSignaler(opts.NudgerSignalers, pid) != nil
-					},
-				}
-				n.Reconcile(tctx)
-				// Annotate sessions BEFORE dispatch so clients see what's queued.
-				// Pending-nudge sources surface as PendingNudge.Sources; nudge
-				// history (LastNudgedAt + LastNudgeSources) is sourced from the
-				// watermark store and surfaces for every session that has ever
-				// received a nudge — independent of whether anything is currently
-				// pending.
-				for _, dir := range tree.Dirs {
-					for _, sv := range dir.Sessions {
-						sid := sv.SessionID
-						if n.PendingFor(sid) {
-							sources := n.SourcesFor(sid)
-							strs := make([]string, 0, len(sources))
-							for _, s := range sources {
-								strs = append(strs, string(s))
-							}
-							sv.PendingNudge = &aggregate.PendingNudge{Sources: strs}
-						}
-						wmSession := wm.SessionWatermark(sid)
-						if !wmSession.LastNudgedAt.IsZero() {
-							sv.LastNudgedAt = wmSession.LastNudgedAt
-							sv.LastNudgeSources = wmSession.LastNudgeSources
-						}
-					}
-				}
-				n.Dispatch(ctx, tctx)
-				wm.SaveIntents(n.SnapshotStore())
-
-				// Escalation flip: surface LastErrorRetryable=false on terminal
-				// errors for sessions whose watermark marks DisruptEscalated.
-				// Also persist the flip to the DB so it survives a restart.
-				for _, dir := range tree.Dirs {
-					for _, sv := range dir.Sessions {
-						if sv.LastError == nil || !sv.LastError.IsTerminal {
-							continue
-						}
-						swm := wm.SessionWatermark(sv.SessionID)
-						if !swm.DisruptEscalated {
-							continue
-						}
-						// The retryable verdict now lives on the view, not the
-						// shared record — flip it in place (no record copy needed).
-						sv.LastErrorRetryable = false
-						// Persist the flip so the DB-materialised path sees it.
-						if opts.WriteService != nil {
-							_ = opts.WriteService.MarkSessionEscalated(ctx, sv.SessionID)
-						}
-					}
-				}
-			}
-
-			if opts.TreeObserver != nil {
-				opts.TreeObserver(tree)
-			}
-
-			// Refresh the cached snapshot on THIS (tick) goroutine so gRPC
-			// handlers (buildState) serve it without a synchronous SQLite read on
-			// their own goroutine — keeping the BridgeChannel writer's snapshot
-			// cadence independent of DB latency. See sharedState.refreshSnapshot.
-			state.refreshSnapshot()
+			runTick()
 		}
 	}
 }

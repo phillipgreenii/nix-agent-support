@@ -122,6 +122,69 @@ func TestSnapshotProducesTree(t *testing.T) {
 	}
 }
 
+// fakeRec is a PhaseRecorder test double that just counts calls per label,
+// proving Snapshot wires timing calls through Poller.Rec without asserting on
+// actual durations (which are real wall-clock and therefore non-deterministic).
+type fakeRec struct {
+	phases map[string]int
+	scans  map[string]int
+	spawns map[string]int
+}
+
+func newFakeRec() *fakeRec {
+	return &fakeRec{phases: map[string]int{}, scans: map[string]int{}, spawns: map[string]int{}}
+}
+
+func (f *fakeRec) RecordPhase(p string, _ time.Duration)         { f.phases[p]++ }
+func (f *fakeRec) RecordScan(m string, _ time.Duration, _ int64) { f.scans[m]++ }
+func (f *fakeRec) RecordSubprocess(k string, _ time.Duration)    { f.spawns[k]++ }
+
+// newTestPoller builds a Poller over the shared fixture SessionsDir/ClaudeHome
+// (>=1 discoverable session with a resolvable transcript), matching the
+// fixture idiom used by TestSnapshotProducesTree above.
+func newTestPoller(t *testing.T) *Poller {
+	t.Helper()
+	return &Poller{
+		SessionsDir: "../../../tests/fixtures/sessions",
+		ClaudeHome:  "../../../tests/fixtures/claude-home",
+		PidAlive:    func(int) bool { return true },
+		Now:         func() time.Time { return time.Now() },
+		Pricer:      &fakeCostPricer{},
+	}
+}
+
+func TestSnapshotRecordsPhases(t *testing.T) {
+	rec := newFakeRec()
+	p := newTestPoller(t)
+	p.Rec = rec
+	_, _, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.phases["discover"] == 0 {
+		t.Error("discover phase not recorded")
+	}
+	if rec.phases["aggregate_build"] == 0 {
+		t.Error("aggregate_build phase not recorded")
+	}
+	if rec.phases["pricer"] == 0 {
+		t.Error("pricer phase not recorded")
+	}
+	// newTestPoller wires no WriteService, so db_write_sessions is correctly
+	// skipped (guarded by `if p.WriteService != nil`); not asserted here.
+	// The fixture session's transcript is new to this Poller instance, so the
+	// first Snapshot must take the scan cache-MISS branch.
+	if rec.scans["full"] == 0 && rec.scans["incremental"] == 0 {
+		t.Error("scan not recorded on cache-miss branch")
+	}
+	if rec.spawns["git_branch"] == 0 {
+		t.Error("git_branch subprocess not recorded")
+	}
+	if rec.spawns["subshell"] == 0 {
+		t.Error("subshell subprocess not recorded")
+	}
+}
+
 func TestSnapshotEnrichmentFields(t *testing.T) {
 	p := &Poller{
 		SessionsDir: "../../../tests/fixtures/sessions",
