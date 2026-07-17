@@ -1236,7 +1236,19 @@ func (e *Engine) SyncPR(ctx context.Context, repo string, number int) (*Summary,
 	// same way it always did. The PR bead is no longer created inline here —
 	// applyFetchedPR emits pr.opened/updated and the beadsbridge projects the
 	// bead at the flushOutbox below.
-	if err = e.applyFetchedPR(ctx, rcfg, pr, nil, summary); err != nil {
+	//
+	// Enrich BEFORE applyFetchedPR so the CLI single-sync path sees the same
+	// GraphQL merge-state + commit-author signal the daemon refreshPR path does
+	// (mirrors refresh.go's enrich-before-apply step; SyncPR intentionally omits
+	// refreshPR's pre-apply overlay + attention emit, which it has no need for).
+	// Without this, enriched==nil made overlayMergeState a
+	// no-op — PRPayload.HasConflict was always false, flapping a daemon-stashed
+	// conflict priority in the bridge (reconcilePriority's clear branch) — and
+	// CommitAuthors was nil, degrading a co-owned PR to team. applyFetchedPR
+	// re-applies overlayMergeState idempotently, so the overlaid merge-state is
+	// in *pr before emitPREvent. (pg2-ic3nh)
+	enriched := e.enrichOnePR(ctx, rcfg, *pr)
+	if err = e.applyFetchedPR(ctx, rcfg, pr, enriched, summary); err != nil {
 		summary.Errors = append(summary.Errors, SummaryError{Repo: repo, Message: err.Error()})
 	} else {
 		// One-shot store-backed reply reconcile (the shared apply path no
