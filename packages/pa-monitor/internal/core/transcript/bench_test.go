@@ -55,14 +55,14 @@ func BenchmarkIncrementalUnchanged(b *testing.B) {
 			if err := writeTestFile(path, genTranscript(n)); err != nil {
 				b.Fatal(err)
 			}
-			_, acc, err := ScanIncremental(path, nil) // warm to n lines
+			_, acc, _, err := ScanIncremental(path, nil) // warm to n lines
 			if err != nil {
 				b.Fatal(err)
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
-				if _, acc, err = ScanIncremental(path, acc); err != nil {
+				if _, acc, _, err = ScanIncremental(path, acc); err != nil {
 					b.Fatal(err)
 				}
 			}

@@ -105,7 +105,7 @@ func foldPartition(t *testing.T, lines []string, cuts []int) Snapshot {
 			t.Fatalf("bad cut %d < %d", end, start)
 		}
 		appendAll(t, path, joinLines(lines[start:end]))
-		snap, next, err := ScanIncremental(path, acc)
+		snap, next, _, err := ScanIncremental(path, acc)
 		if err != nil {
 			t.Fatalf("ScanIncremental: %v", err)
 		}
@@ -170,7 +170,7 @@ func TestScanIncremental_FromNil_MatchesScanAndOracles(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Scan: %v", err)
 			}
-			got, acc, err := ScanIncremental(path, nil)
+			got, acc, _, err := ScanIncremental(path, nil)
 			if err != nil {
 				t.Fatalf("ScanIncremental: %v", err)
 			}
@@ -222,7 +222,7 @@ func TestScanIncremental_MidLinePartialRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got1, acc, err := ScanIncremental(path, nil)
+	got1, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestScanIncremental_MidLinePartialRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got2, _, err := ScanIncremental(path, acc)
+	got2, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestScanIncremental_LongLineWithinCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	got, _, err := ScanIncremental(path, nil)
+	got, _, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatalf("ScanIncremental: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestScanIncremental_TruncationResetsToFull(t *testing.T) {
 	lines := incFixtures["basic"]
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	writeAll(t, path, joinLines(lines))
-	_, acc, err := ScanIncremental(path, nil)
+	_, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestScanIncremental_TruncationResetsToFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := ScanIncremental(path, acc)
+	got, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestScanIncremental_InPlaceRewriteSameSize(t *testing.T) {
 	a := incFixtures["basic"]
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	writeAll(t, path, joinLines(a))
-	_, acc, err := ScanIncremental(path, nil)
+	_, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestScanIncremental_InPlaceRewriteSameSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := ScanIncremental(path, acc)
+	got, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestScanIncremental_RotationNewInode(t *testing.T) {
 	a := incFixtures["basic"]
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	writeAll(t, path, joinLines(a))
-	_, acc, err := ScanIncremental(path, nil)
+	_, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestScanIncremental_RotationNewInode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := ScanIncremental(path, acc)
+	got, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestScanIncremental_RotationNewInode(t *testing.T) {
 // missing-file contract), then folding works once the file appears.
 func TestScanIncremental_MissingThenAppears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "later.jsonl")
-	got, acc, err := ScanIncremental(path, nil)
+	got, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestScanIncremental_MissingThenAppears(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got2, _, err := ScanIncremental(path, acc)
+	got2, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestScanIncremental_MissingThenAppears(t *testing.T) {
 func TestScanIncremental_EmptyThenGrows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	writeAll(t, path, "")
-	got, acc, err := ScanIncremental(path, nil)
+	got, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,11 +398,50 @@ func TestScanIncremental_EmptyThenGrows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got2, _, err := ScanIncremental(path, acc)
+	got2, _, _, err := ScanIncremental(path, acc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapEqual(t, got2, want)
+}
+
+// ScanIncremental must report the bytes folded this call and whether the fold
+// was a fresh full parse or an incremental append.
+func TestScanIncrementalReportsModeAndBytes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	line := `{"type":"user","message":{"role":"user","content":"hi"}}` + "\n"
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, acc, stats, err := ScanIncremental(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Mode != ScanModeFull {
+		t.Fatalf("first scan mode=%q want full", stats.Mode)
+	}
+	if stats.BytesFolded != int64(len(line)) {
+		t.Fatalf("bytes=%d want %d", stats.BytesFolded, len(line))
+	}
+
+	// append one more line, incremental fold
+	line2 := `{"type":"assistant","message":{"role":"assistant","content":"yo"}}` + "\n"
+	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = f.WriteString(line2)
+	_ = f.Close()
+
+	_, _, stats2, err := ScanIncremental(p, acc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats2.Mode != ScanModeIncremental {
+		t.Fatalf("second scan mode=%q want incremental", stats2.Mode)
+	}
+	if stats2.BytesFolded != int64(len(line2)) {
+		t.Fatalf("bytes=%d want %d", stats2.BytesFolded, len(line2))
+	}
 }
 
 // finalize must not alias the accumulator's live maps: a Snapshot returned by an
@@ -412,7 +451,7 @@ func TestScanIncremental_NoSnapshotAliasing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	// First two lines (opens Task tu_1 -> SubagentCount 1, modelTokens set).
 	appendAll(t, path, joinLines(lines[:2]))
-	snap1, acc, err := ScanIncremental(path, nil)
+	snap1, acc, _, err := ScanIncremental(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +462,7 @@ func TestScanIncremental_NoSnapshotAliasing(t *testing.T) {
 	}
 	// Append remaining lines (closes tu_1, adds more tokens).
 	appendAll(t, path, joinLines(lines[2:]))
-	if _, _, err := ScanIncremental(path, acc); err != nil {
+	if _, _, _, err := ScanIncremental(path, acc); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(snap1, snap1Copy) {

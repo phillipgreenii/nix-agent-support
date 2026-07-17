@@ -161,7 +161,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 				prevAcc = cached.acc
 			}
 			var acc *transcript.Accumulator
-			snap, acc, _ = transcript.ScanIncremental(path, prevAcc)
+			snap, acc, _, _ = transcript.ScanIncremental(path, prevAcc)
 			shells, _ = subshellCounter.Count(s.PID)
 			if path != "" {
 				p.transcriptCache[s.SessionID] = cachedTranscript{

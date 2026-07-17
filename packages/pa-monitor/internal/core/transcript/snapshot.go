@@ -331,34 +331,53 @@ func newAccumulator() *Accumulator {
 	return &Accumulator{st: newScanState()}
 }
 
+// ScanMode reports whether a ScanIncremental call performed a fresh full parse
+// or folded only newly-appended bytes.
+type ScanMode string
+
+const (
+	ScanModeFull        ScanMode = "full"
+	ScanModeIncremental ScanMode = "incremental"
+)
+
+// ScanStats reports the workload performed by a single ScanIncremental call:
+// how many bytes were folded and whether the fold was a fresh full parse or an
+// incremental append.
+type ScanStats struct {
+	BytesFolded int64
+	Mode        ScanMode
+}
+
 // Scan reads path once and returns all enrichment data. It replaces calling
 // FirstPrompt, LatestContext, OpenSubagents, IsAwaitingInput, and RateLimitPause
 // individually, and is exactly a cold ScanIncremental. Returns a zero Snapshot
 // (no error) when path is empty or missing.
 func Scan(path string) (Snapshot, error) {
-	snap, _, err := ScanIncremental(path, nil)
+	snap, _, _, err := ScanIncremental(path, nil)
 	return snap, err
 }
 
 // ScanIncremental folds only the bytes appended to path since prev and returns
-// the resulting Snapshot plus an updated accumulator to pass on the next call.
-// It starts fresh (equivalent to a cold Scan) when prev is nil, the file was
-// replaced (different inode), truncated below the cached offset, or rewritten in
-// place (the byte before the cached offset is no longer a newline). A missing
-// file yields a zero Snapshot, a fresh accumulator, and no error (matching Scan).
-func ScanIncremental(path string, prev *Accumulator) (Snapshot, *Accumulator, error) {
+// the resulting Snapshot, an updated accumulator to pass on the next call, and
+// ScanStats describing the bytes folded and whether the fold was full or
+// incremental. It starts fresh (equivalent to a cold Scan) when prev is nil, the
+// file was replaced (different inode), truncated below the cached offset, or
+// rewritten in place (the byte before the cached offset is no longer a
+// newline). A missing file yields a zero Snapshot, a fresh accumulator, a full
+// ScanStats, and no error (matching Scan).
+func ScanIncremental(path string, prev *Accumulator) (Snapshot, *Accumulator, ScanStats, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Snapshot{}, newAccumulator(), nil
+			return Snapshot{}, newAccumulator(), ScanStats{Mode: ScanModeFull}, nil
 		}
-		return Snapshot{}, nil, err
+		return Snapshot{}, nil, ScanStats{}, err
 	}
 	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
-		return Snapshot{}, nil, err
+		return Snapshot{}, nil, ScanStats{}, err
 	}
 
 	acc := prev
@@ -378,16 +397,20 @@ func ScanIncremental(path string, prev *Accumulator) (Snapshot, *Accumulator, er
 	}
 
 	if _, err := f.Seek(acc.offset, io.SeekStart); err != nil {
-		return Snapshot{}, nil, err
+		return Snapshot{}, nil, ScanStats{}, err
 	}
 	n, err := acc.st.foldReader(f)
 	if err != nil {
-		return Snapshot{}, nil, err
+		return Snapshot{}, nil, ScanStats{}, err
 	}
 	acc.offset += n
 	acc.info = info
 	acc.ready = true
-	return acc.st.finalize(), acc, nil
+	mode := ScanModeIncremental
+	if fresh {
+		mode = ScanModeFull
+	}
+	return acc.st.finalize(), acc, ScanStats{BytesFolded: n, Mode: mode}, nil
 }
 
 // newlineAt reports whether the byte at pos is '\n', without disturbing f's
