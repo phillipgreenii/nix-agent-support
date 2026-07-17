@@ -32,23 +32,34 @@ stable and grouped topically; gaps and out-of-sequence numbers are legal.
 
 - **`INV-15`** — The behavior docs set is the **source of truth** for intended behavior.
   Change flows **docs-down**: edit the docs first; the implementation re-converges to them,
-  never the reverse.
+  never the reverse. A **realization gap** — intended behavior the implementation has not yet
+  built — is therefore normal, not a defect in the docs; it is tracked against the cited IDs,
+  never annotated inline (the docs stay living, `INV-4`).
 - **`INV-3`** — Every invariant, goal, user story, journey, interface, and actor MUST carry
-  a **typed, stable ID** (`INV-`, `GOAL-`, `STORY-`, `JOURNEY-`, `IF-`, `ACTOR-`; open
+  a **typed, stable ID** (`INV-`, `GOAL-`, `STORY-`, `JOURNEY-`, `INTF-`, `ACTOR-`; open
   questions use `OQ-`). Downstream artifacts MUST cite the ID they implement or verify;
-  across behavior docs sets an ID is cited as `<repo-name> · <set-path> · <ID>`.
+  across behavior docs sets an ID is cited as `<repo-name> · <set-path> · <ID>`. A set that
+  **cites another set** SHOULD namespace its own IDs by topic (`INV-DISP-1`, `INTF-SOURCE`)
+  so a bare ID it cites never collides with one of its own; the **root** set — this one,
+  which cites no other — keeps bare numeric IDs.
 - **`INV-4`** — Every behavior doc is **living**: no per-doc status header, and unresolved
   debate is not baked in — what is written is the current intended behavior.
 
 ## Interfaces & consistency
 
-- **`INV-8`** — A cross-product interaction MUST be defined as an **explicit interface** —
-  its structure and shape stated — with no implicit interpretation. Each interacting product
-  defines the interface on its own side (what it sends **out** and takes **in**); this
-  duplication is deliberate.
-- **`INV-18`** — A behavior docs set MUST be **inter-consistent**: its outgoing interface to
-  another product MUST match that product's incoming interface, and vice versa. The
-  deliberate duplication in `INV-8` exists so this agreement can be cross-checked.
+- **`INV-8`** — A cross-product interaction MUST be defined as an **explicit interface** — its
+  field-shape and what-must-hold stated — with no implicit interpretation. Between two **peers**
+  (each keeping its own set) each product defines the interface on its own side (what it sends
+  **out** and takes **in**), and this duplication is deliberate. Where one side is an
+  **implementer** of the other's contract, that side **cites** the owner's interface and states
+  only its own obligations, rather than restating the contract.
+- **`INV-18`** — A behavior docs set MUST be **inter-consistent** at every interface; how
+  agreement is reconciled follows the **counterparty**'s kind. With a **peer** (both sides keep a
+  set), the outgoing interface MUST match the peer's incoming interface and vice versa,
+  cross-checked against the deliberate duplication of `INV-8`. With an **implementer** — a set or a
+  pluggable implementation that realizes the contract, and which often keeps **no** set of its own
+  — agreement is reconciled by a **conformance suite** the implementer runs, not by a verbatim peer
+  cross-check.
 - **`INV-12`** — A behavior docs set MUST be **self-consistent**: its parts MUST NOT
   contradict. Behavior docs are intentionally not DRY, so restatements exist to be compared;
   a surfaced contradiction is a defect a human resolves.
@@ -56,6 +67,11 @@ stable and grouped topically; gaps and out-of-sequence numbers are legal.
   glossary definition, so its uses can be compared to surface inconsistency; a definition
   alone does not satisfy it. _(Exactly what counts as a named concept is an open question,
   `OQ-1`.)_
+- **`INV-19`** — A set **MAY** declare a **precedence** ordering over its own invariants so a
+  genuine conflict between two of them resolves the same way every time, and a reader can trust
+  which rule wins (`STORY-7`). A newly-surfaced precedence conflict MUST be recorded as an open
+  question and settled by a decision doc (`JOURNEY-3`) — never chosen ad hoc by an agent — and a
+  downstream set **MAY** cite an owning set's ordering rather than restate it.
 
 ## Goals
 

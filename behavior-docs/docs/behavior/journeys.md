@@ -23,8 +23,9 @@ so every behavior docs set includes them.
 - **`STORY-8`** — As an **author**, I want a clear rule for what is at fault when a product
   misbehaves, so I know whether to fix the behavior docs or the decision docs.
 - **`STORY-9`** — As an **author** whose system interacts with another product, I want each
-  side's interface defined and cross-checked for agreement (inter-consistency), so
-  integrations don't silently drift.
+  interface defined and **reconciled** for agreement (inter-consistency) — cross-checked with a
+  peer, or verified by a conformance suite where the other side merely implements my contract —
+  so integrations don't silently drift.
 
 **Implementer**
 
@@ -35,7 +36,8 @@ so every behavior docs set includes them.
 - **`STORY-6`** — As an **implementer** re-platforming, I want to regenerate a
   behavior-conformant implementation from the behavior docs + decision docs.
 - **`STORY-7`** — As an **implementer**, I want the behavior docs to be self-consistent and
-  cross-checkable, so I can trust what I read.
+  cross-checkable — and, where two rules genuinely tension, resolved by a declared **precedence**
+  — so I can trust which rule wins when I read them.
 
 ## Journeys
 
@@ -57,7 +59,9 @@ flowchart TD
 
 Edit the behavior docs first to state the new intended state. Downstream (spec → design →
 plan) is re-derived from the change and thrown away on re-convergence. Record a decision doc
-(ADR) if the change is consequential.
+(ADR) if the change is consequential. Until the implementation catches up, the difference is a
+normal **realization gap** (`INV-15`) tracked against the changed IDs — not a status header on
+the doc (`INV-4`).
 
 ### `JOURNEY-3` — Resolving an open question
 

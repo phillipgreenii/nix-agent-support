@@ -16,9 +16,11 @@ A product comes from **two** durable, human-owned inputs — the **two-input mod
 - **behavior docs** — the _what_: intended behavior; this method's scope (conventionally
   under `docs/behavior`).
 - **decision docs** — the _how_: rationale-backed realization decisions (architecture,
-  language, framework, tooling, testing, tuning, and governance choices such as who or what
-  may change the docs), conventionally under `docs/decisions`. An **ADR** is the canonical
-  decision doc. Named here, but out of this method's scope.
+  language, framework, tooling, testing, tuning, and **governance authority** — who or what may
+  approve or change the docs), conventionally under `docs/decisions`. An **ADR** is the canonical
+  decision doc. (A system's own **behavioral** governance — an identity, permission posture, or
+  non-defeatable guardrail it treats as intended behavior — stays in its behavior docs; see
+  [actors](actors.md).) Named here, but out of this method's scope.
 
 `product = f(behavior docs, decision docs)`. When a product is wrong, the split says which
 input to fix: wrong _behavior_ → the behavior docs; behavior right but _realization_ wrong →
@@ -39,8 +41,8 @@ decision docs) a _behavior-conformant_ implementation can be regenerated.
   establishes scope; how it defines its interfaces to other products; the lifecycle
   journeys.
 - **Extent (out)** — the companion tooling (authoring, bootstrap) is a downstream product;
-  decision docs (tech, tuning, governance, human/agent roles) are a sibling input; downstream
-  spec/design/plan and any concrete file or output layout are downstream.
+  decision docs (tech, tuning, governance authority, human/agent roles) are a sibling input;
+  downstream spec/design/plan and any concrete file or output layout are downstream.
 - **Floor** — this behavior docs set speaks at "how the behavior-docs method should behave,"
   never how to build the tooling, nor a fixed file layout (**layout is illustrative** — the
   invariants govern content, not files).
@@ -48,9 +50,12 @@ decision docs) a _behavior-conformant_ implementation can be regenerated.
 ## IDs
 
 Each citable element carries a typed, stable ID (`INV-3`): invariants `INV-`, goals `GOAL-`,
-user stories `STORY-`, journeys `JOURNEY-`, interfaces `IF-`, actors `ACTOR-`, open questions
+user stories `STORY-`, journeys `JOURNEY-`, interfaces `INTF-`, actors `ACTOR-`, open questions
 `OQ-`. Concepts are cited by name. Numbers are stable and never renumbered; gaps are legal.
-Across behavior docs sets, an ID is cited as `<repo-name> · <set-path> · <ID>`.
+Across behavior docs sets, an ID is cited as `<repo-name> · <set-path> · <ID>`. A set that cites
+another set SHOULD namespace its own IDs by topic (`INV-DISP-1`, `INTF-SOURCE`) so a cited ID
+never collides with one of its own; this **root** method, citing no other set, keeps bare numeric
+IDs.
 
 ## What belongs — with examples
 
@@ -63,20 +68,20 @@ Illustrative (`GOAL-7`):
 >   re-derived, then discarded."
 > - **Invariant** (`INV-15`) — the behavior docs set is the source of truth; change flows
 >   docs-down.
-> - **Interface** (`IF-1`) — "the docs provide intended behavior at the floor; downstream
+> - **Interface** (`INTF-1`) — "the docs provide intended behavior at the floor; downstream
 >   must cite the ID it implements."
 > - **Open question** (`OQ-1`) — "What counts as a named concept for `INV-14`? Undecided."
 
 Those are **illustrative examples**, not **golden examples** — a golden example is one
 asserted by a real test. What does _not_ belong, and where it goes instead:
 
-| ❌ In a behavior doc                            | ✅ Where it belongs                   |
-| ----------------------------------------------- | ------------------------------------- |
-| "`parseConfig()` validates the schema"          | downstream design/code                |
-| "retry 3× with a 30s backoff"                   | decision docs (the two-input model)   |
-| "who or what may approve a change" (governance) | decision docs                         |
-| a tool named below the scope's floor            | generalize it (the substitution test) |
-| "we used to shell out to X; next quarter Y"     | nowhere — intended behavior only      |
+| ❌ In a behavior doc                           | ✅ Where it belongs                   |
+| ---------------------------------------------- | ------------------------------------- |
+| "`parseConfig()` validates the schema"         | downstream design/code                |
+| "retry 3× with a 30s backoff"                  | decision docs (the two-input model)   |
+| "who or what may approve a change" (authority) | decision docs                         |
+| a tool named below the scope's floor           | generalize it (the substitution test) |
+| "we used to shell out to X; next quarter Y"    | nowhere — intended behavior only      |
 
 ## Documents
 

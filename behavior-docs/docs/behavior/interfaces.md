@@ -1,11 +1,36 @@
 # Interfaces — the behavior-docs method
 
-An **interface** is a boundary described by what crosses it and what must hold, so the
-parties on each side can be confirmed to agree. The _how_ is downstream. A behavior docs
-set MUST define all of its interfaces (`INV-13`), and every cross-product interaction MUST
-be an explicit interface — no implicit interpretation (`INV-8`).
+An **interface** is a boundary described by **what crosses it** (its field-shape) and **what must
+hold**, so the parties on each side can be confirmed to agree. The _how_ is downstream. A behavior
+docs set MUST define all of its interfaces (`INV-13`), and every cross-product interaction MUST be
+an explicit interface — no implicit interpretation (`INV-8`).
 
-## `IF-1` — Behavior docs → downstream
+## Describing an interface
+
+State three things, never how it is implemented:
+
+- **What crosses** — the fields (a field-shape), each with a **checkable** shape. The method fixes
+  no wire format or schema language; _checkable_ means an implementer can assert against it. Which
+  concrete schema realizes that (a JSON Schema, a type, …) is downstream, not a method requirement.
+- **What must hold** — the obligations and guarantees on each side.
+- **How agreement is confirmed** — set by the **counterparty**'s kind (below).
+
+Initiation and timing (who calls first, inline vs. deferred) need **not** be a classification axis;
+a sequence diagram — or a one-word initiator note — carries them.
+
+### Counterparty kinds → how agreement is reconciled
+
+- **Peer** — an independent product that keeps its **own** behavior docs set. Each side defines the
+  interface on its own side (`INV-8`) and the two are **cross-checked** outgoing-to-incoming
+  (`INV-18`).
+- **Implementer** — a set or a pluggable implementation that **realizes** the contract, and which
+  often keeps **no** set of its own. It **cites** the owner's interface, states only its own
+  obligations, and reconciles agreement with a **conformance suite** rather than a peer cross-check
+  (`INV-18`).
+- **Actor** — a human or agent that drives the system through the interface. The interface
+  definition itself is the agreement; there is no second set to cross-check.
+
+## `INTF-1` — Behavior docs → downstream
 
 The behavior docs set is the sole authority downstream artifacts derive from.
 
@@ -17,7 +42,7 @@ The behavior docs set is the sole authority downstream artifacts derive from.
 - **Deliberately open** — the _structure_ of downstream artifacts is unspecified by this
   method; no file layout, document set, or format is prescribed, and none may be inferred.
 
-_The behavior-docs system interacts with no peer product, so it defines no incoming
-cross-product interface. A behavior docs set whose system does (e.g. a tool that talks to a
-code host) defines its outgoing and incoming interfaces per `INV-8`, cross-checked against
-the peer per `INV-18`._
+_The behavior-docs system has no peer product and no implementer of its own contract, so `INTF-1`
+needs no incoming side. A behavior docs set whose system integrates with others defines each
+interface per the counterparty's kind above — peer (cross-checked, `INV-18`), implementer
+(reconciled by a conformance suite, `INV-18`), or actor._
