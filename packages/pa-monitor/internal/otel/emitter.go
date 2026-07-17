@@ -94,6 +94,17 @@ type Emitter struct {
 	apiErrorObserved     metric.Int64Counter
 	signalerBinMissing   metric.Int64Counter
 
+	// Instrumentation histograms/counters (pg2-sewtz). Nil when SDK uninitialised.
+	pollTickDuration  metric.Float64Histogram
+	pollPhaseDuration metric.Float64Histogram
+	scanDuration      metric.Float64Histogram
+	scanFiles         metric.Int64Counter
+	scanBytes         metric.Int64Counter
+	subprocessDur     metric.Float64Histogram
+	subprocessSpawns  metric.Int64Counter
+	exportDur         metric.Float64Histogram
+	exportAttempts    metric.Int64Counter
+
 	mu                 sync.Mutex
 	sessionsObs        []stateObs
 	sessionsErroredObs map[ErroredKey]int64 // (kind,is_terminal) -> count; replaced per tick
@@ -195,6 +206,12 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 			&healthMetricExporter{Exporter: metricExp, health: health, out: os.Stderr},
 		)),
 		sdkmetric.WithResource(res),
+		sdkmetric.WithView(sdkmetric.NewView(
+			sdkmetric.Instrument{Name: "pa_monitor.transcript.scan.duration"},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250},
+			}},
+		)),
 	)
 
 	logExp, err := otlploggrpc.New(ctx)
@@ -344,6 +361,39 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 	if e.signalerBinMissing, err = meter.Int64Counter("pa_monitor.signaler.binary_missing_total"); err != nil {
+		return err
+	}
+
+	if e.pollTickDuration, err = meter.Float64Histogram("pa_monitor.poll.tick.duration",
+		metric.WithUnit("ms"), metric.WithDescription("total poll-tick duration")); err != nil {
+		return err
+	}
+	if e.pollPhaseDuration, err = meter.Float64Histogram("pa_monitor.poll.phase.duration",
+		metric.WithUnit("ms"), metric.WithDescription("per-phase poll duration")); err != nil {
+		return err
+	}
+	if e.scanDuration, err = meter.Float64Histogram("pa_monitor.transcript.scan.duration",
+		metric.WithUnit("ms"), metric.WithDescription("per-file transcript scan duration")); err != nil {
+		return err
+	}
+	if e.scanFiles, err = meter.Int64Counter("pa_monitor.transcript.scan.files_total"); err != nil {
+		return err
+	}
+	if e.scanBytes, err = meter.Int64Counter("pa_monitor.transcript.scan.bytes_total"); err != nil {
+		return err
+	}
+	if e.subprocessDur, err = meter.Float64Histogram("pa_monitor.subprocess.duration",
+		metric.WithUnit("ms"), metric.WithDescription("subprocess spawn duration")); err != nil {
+		return err
+	}
+	if e.subprocessSpawns, err = meter.Int64Counter("pa_monitor.subprocess.spawns_total"); err != nil {
+		return err
+	}
+	if e.exportDur, err = meter.Float64Histogram("pa_monitor.otel.export.duration",
+		metric.WithUnit("ms"), metric.WithDescription("OTLP export call duration")); err != nil {
+		return err
+	}
+	if e.exportAttempts, err = meter.Int64Counter("pa_monitor.otel.export.attempts_total"); err != nil {
 		return err
 	}
 
@@ -956,4 +1006,56 @@ func attrsToKV(m map[string]string) []attribute.KeyValue {
 		out = append(out, attribute.String(k, v))
 	}
 	return out
+}
+
+// MeterProvider exposes the SDK meter provider so callers (e.g. the gRPC stats
+// handler) can attach instrumentation to the same provider. nil-safe → nil.
+func (e *Emitter) MeterProvider() *sdkmetric.MeterProvider {
+	if e == nil {
+		return nil
+	}
+	return e.metricsProvider
+}
+
+func durMS(d time.Duration) float64 { return float64(d.Microseconds()) / 1000.0 }
+
+// RecordTickDuration records the total poll-tick duration. nil-safe.
+func (e *Emitter) RecordTickDuration(d time.Duration) {
+	if e == nil || e.pollTickDuration == nil {
+		return
+	}
+	e.pollTickDuration.Record(context.Background(), durMS(d))
+}
+
+// RecordPhase records one once-per-tick phase duration under a `phase` attr. nil-safe.
+func (e *Emitter) RecordPhase(phase string, d time.Duration) {
+	if e == nil || e.pollPhaseDuration == nil {
+		return
+	}
+	e.pollPhaseDuration.Record(context.Background(), durMS(d),
+		metric.WithAttributes(attribute.String("phase", phase)))
+}
+
+// RecordScan records one transcript scan: duration under `mode`, and (for real
+// scans, not cache hits) the files_total + bytes_total workload counters. nil-safe.
+func (e *Emitter) RecordScan(mode string, d time.Duration, bytes int64) {
+	if e == nil || e.scanDuration == nil {
+		return
+	}
+	attrs := metric.WithAttributes(attribute.String("mode", mode))
+	e.scanDuration.Record(context.Background(), durMS(d), attrs)
+	if mode != "cache_hit" {
+		e.scanFiles.Add(context.Background(), 1, attrs)
+		e.scanBytes.Add(context.Background(), bytes, attrs)
+	}
+}
+
+// RecordSubprocess records one subprocess spawn duration + count under `kind`. nil-safe.
+func (e *Emitter) RecordSubprocess(kind string, d time.Duration) {
+	if e == nil || e.subprocessDur == nil {
+		return
+	}
+	attrs := metric.WithAttributes(attribute.String("kind", kind))
+	e.subprocessDur.Record(context.Background(), durMS(d), attrs)
+	e.subprocessSpawns.Add(context.Background(), 1, attrs)
 }

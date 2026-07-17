@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"testing"
+	"time"
 
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
@@ -337,4 +338,33 @@ func TestEmitter_RecordSessionInfo_Replaces(t *testing.T) {
 	if e.sessionInfoObs[0].sessionID != "a" {
 		t.Errorf("remaining row = %q, want a", e.sessionInfoObs[0].sessionID)
 	}
+}
+
+func TestRecordersAreNilSafe(t *testing.T) {
+	var e *Emitter // nil
+	// must not panic
+	e.RecordTickDuration(time.Second)
+	e.RecordPhase("discover", time.Millisecond)
+	e.RecordScan("full", time.Millisecond, 1024)
+	e.RecordSubprocess("git_branch", time.Millisecond)
+	if e.MeterProvider() != nil {
+		t.Fatal("nil emitter MeterProvider must be nil")
+	}
+}
+
+func TestNewRegistersInstrumentsAndMeterProvider(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+	e, err := New(context.Background(), Options{ServiceName: "pa-monitor"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = e.Shutdown(context.Background()) }()
+	if e.MeterProvider() == nil {
+		t.Fatal("MeterProvider must be non-nil when enabled")
+	}
+	// recorders must not panic against a live emitter
+	e.RecordPhase("discover", 2*time.Millisecond)
+	e.RecordScan("incremental", time.Millisecond, 512)
+	e.RecordSubprocess("terminal_host", 3*time.Millisecond)
+	e.RecordTickDuration(10 * time.Millisecond)
 }
