@@ -33,6 +33,10 @@ type cachedTranscript struct {
 	mtime         time.Time
 	snap          transcript.Snapshot
 	subshellCount int
+	// acc carries the incremental scan state (folded scanState + byte offset +
+	// file identity) so the next poll folds only newly-appended lines instead of
+	// re-parsing the whole transcript. nil until the first parse.
+	acc *transcript.Accumulator
 }
 
 type Poller struct {
@@ -140,19 +144,28 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 		s.Branch = session.GitBranch(s.Cwd)
 
-		// Transcript cache: re-read only when path or mtime changed.
+		// Transcript cache: reuse the parsed Snapshot untouched while the file is
+		// unchanged (same path+mtime). Otherwise fold only the newly-appended
+		// bytes via the cached accumulator — ScanIncremental re-parses from
+		// scratch on rotation/truncation/in-place-rewrite, so this stays correct
+		// while turning per-poll work from O(whole transcript) into O(appended).
+		cached, hit := p.transcriptCache[s.SessionID]
 		var snap transcript.Snapshot
 		var shells int
-		if cached, hit := p.transcriptCache[s.SessionID]; hit &&
-			path != "" && cached.path == path && cached.mtime.Equal(mtime) {
+		if hit && path != "" && cached.path == path && cached.mtime.Equal(mtime) {
 			snap = cached.snap
 			shells = cached.subshellCount
 		} else {
-			snap, _ = transcript.Scan(path)
+			var prevAcc *transcript.Accumulator
+			if hit && cached.path == path {
+				prevAcc = cached.acc
+			}
+			var acc *transcript.Accumulator
+			snap, acc, _ = transcript.ScanIncremental(path, prevAcc)
 			shells, _ = subshellCounter.Count(s.PID)
 			if path != "" {
 				p.transcriptCache[s.SessionID] = cachedTranscript{
-					path: path, mtime: mtime, snap: snap, subshellCount: shells,
+					path: path, mtime: mtime, snap: snap, subshellCount: shells, acc: acc,
 				}
 			}
 		}
