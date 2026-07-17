@@ -1,115 +1,132 @@
-# pr-pool — invariants (the orchestrator's contract)
+# Invariants — pr-pool
 
-These are the rules **pr-pool guarantees as an orchestrator**. pr-pool does not
-control what a role _does_ once dispatched (a role could still do the wrong thing);
-these bound only pr-pool's own behavior and the **contracts** it holds with its
-agent-runner and its query sources. The ID convention and the invariant / goal /
-concept distinction are defined in the behavior-docs method
+The rules pr-pool's **core** follows. These bound the core's own behavior and the **common manager
+contract** it holds with its participants; they do **not** govern what a handler _does_ once
+dispatched. See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md), and
+[journeys](journeys.md). IDs are **topical and stable**; numbering gaps are legal, and each rule
+uses RFC 2119 language (`MUST` / `SHOULD` / `MAY`). The ID convention and the invariant / goal /
+concept distinction come from the behavior-docs method
 (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).
 
-## Orchestration
+## Dispatch (the event model)
 
-- **`INV-OP-1`** — A drain works every ready item, then **exits**; it does not idle
-  **waiting for new work** (a usage-limit pause per `INV-CONT-3` is not idling in this
-  sense). Idling between runs is the scheduler's job.
-- **`INV-OP-2`** — **Queries and roles MUST be definable via configuration.** Adding
-  a query, a role, or an interfacing tool **MUST NOT** require changing pr-pool
-  (`GOAL-SIMPLE-1`).
-- **`INV-OP-3`** — pr-pool **MUST** apply its own contract to every unit it
-  dispatches: isolation (`INV-SEC-1`), budget (`INV-BUDGET-1`), single-owner
-  (`INV-CLAIM-1`).
+An event's path from a source to a handler is a match-then-route decision:
 
-## Contracts with extensions
+```mermaid
+flowchart TD
+    emit["a source emits a typed event"] --> dedup{"seen this id within ttl?"}
+    dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
+    dedup -->|no| match{"a binding matches the event's fields? (type + declared fields)"}
+    match -->|no binding matches type| err["error → logs + metrics; error to caller on ingest (INV-DISP-3)"]
+    match -->|matched| route["route to a bound handler as a handler session (INTF-HANDLER)"]
+    route --> cap{"handler at capacity?"}
+    cap -->|no| disp["dispatch — exactly one handler session (INV-CONC-1)"]
+    cap -->|yes| hold["hold within ttl; re-offer or offer elsewhere"]
+```
 
-- **`INV-RUN-1`** (agent-runner) — pr-pool runs every role through an **agent-runner**
-  that **MUST** provide process isolation for untrusted content (`INV-SEC-1`),
-  least-privilege tools scoped to the role, budget enforcement, an externally
-  monitorable session (`INV-OBS-1`), and a terminal outcome pr-pool can classify by
-  failure class (`INV-FAIL-1`). pr-pool names **no** specific runner; see
-  [`contracts.md`](contracts.md).
-- **`INV-QSRC-1`** (query-source) — a **query source** is **read-only for discovery**
-  (running a query never mutates the work), while also holding **durable claim/lease
-  state** that pr-pool writes on claim/release so exclusivity can survive across drains
-  (`INV-CLAIM-1`). It returns the items to consider. pr-pool names **no** specific
-  source; see [`contracts.md`](contracts.md).
+- **`INV-DISP-1`** — Sources **emit typed events**; handlers **bind** to events via a **binding**
+  that **matches over event fields**. `type` is matched **by default**; a binding **MAY** also match
+  on **other fields the source declares** as matchable (including a **declared path into `payload`**,
+  which thereby stops being opaque _for matching_). A matched field that is **absent** on an event
+  **does not match** — a non-match, **not** an error. The core routes a matched event to a bound
+  handler, and a handler responds to **any** of its bound events.
+- **`INV-DISP-2`** — The core reaches every source and handler **only through a manager interface**
+  (`INTF-SOURCE` / `INTF-HANDLER`); their implementations are opaque to it. Nothing specific to a
+  source, handler, or deployment lives in the core.
+- **`INV-DISP-3`** — An event whose `type` **no configured binding matches** is an **error**: the
+  core records it to logs and metrics **and returns an error to the caller** on the push/ingest
+  path. It is **not** silently dropped. (An _absent declared field_ is a non-match, not this error;
+  this error is specifically "no binding for the `type`.")
 
-## Budget
+## Delivery
 
-- **`INV-BUDGET-1`** — Work runs under a **budget** (wall-clock, optionally
-  tokens/cost; per-run and/or per-role). Approaching it triggers an orderly
-  wind-down (save progress); exceeding it stops the work safely. On mid-work
-  exhaustion the dispatch is **sidelined** (`INV-CONT-2`) — progress saved, claim
-  released, re-offered on a later drain — and never lost (`INV-CONT-1`). (This is
-  distinct from a provider usage-limit **pause**, `INV-CONT-3`, which holds the same
-  session and resumes it next window.)
+- **`INV-EVT-1`** — Event delivery is **best-effort**. An event is **dropped** under exactly three
+  conditions: it is **delivered** to a handler, its **`ttl` expires**, or the **core stops**.
+  Delivery is **not guaranteed to survive a restart**. _(The core MAY harden restart survival; that
+  is a decision-doc concern and never strengthens this best-effort guarantee.)_
+- **`INV-EVT-2`** — A handler **MUST tolerate duplicate events** (be idempotent); a source **MAY**
+  emit the same event more than once. A **pull** source re-derives on its next **query trigger**, so
+  a dropped event reappears; a **push-only** source cannot re-derive, so its dropped events are
+  **lost** (its caveat).
+- **`INV-EVT-3`** — The core **de-duplicates within `ttl` by event `id`**, so a source never needs
+  to track whether it already emitted an event.
 
-## Continuity (what pr-pool guarantees about work it is coordinating)
+## Interfaces
 
-- **`INV-CONT-1`** — **Work pr-pool is coordinating is never silently dropped.** On
-  failure it does bounded retries (`INV-FAIL-1`); if it still can't proceed it **hands
-  the item back** — releases the claim, records the failure — rather than losing it.
-  _How_ a deployment then surfaces that hand-back to a human is the deployment's
-  concern.
-- **`INV-CONT-2`** — **A stuck dispatch does not stop the drain.** pr-pool
-  **sidelines** it (removes it from this run's ready set and releases its claim) and
-  continues other items. Durable **parking** — recording the situation and keeping the
-  item off _future_ ready sets — is a deployment concern realized through the query
-  source, not something pr-pool does itself.
-- **`INV-CONT-3`** — **Usage limits pause, they don't fail.** On a provider usage
-  limit the affected work pauses until the next window, then resumes.
-- **`GOAL-CONT-4`** — Continuous operation is expected; pr-pool may run indefinitely,
-  idling only when a usage limit is active or nothing is ready.
+- **`INV-INTF-1`** — Every participant interaction follows the **common manager contract**
+  ([interfaces](interfaces.md)): schema-versioned JSON over stdin/stdout, a per-call **tracking id**,
+  a reply that is **inline or deferred** (a deferred reply is reconciled later over the participant's
+  **callback**, keyed by the tracking id), a single-`command` **callback**, and coarse exit codes
+  (`0` ok / `1` error / `2` busy) with the rich outcome in the JSON. The core **accepts messages
+  only after a participant is `started` and before it is `stopping`** (the lifecycle is owned by
+  `INV-LIFE-1`).
+- **`INV-INTF-2`** — Every interface is accompanied by a **conformance suite** (positive and
+  negative checks against its JSON Schema) so an implementation can verify it adheres **before** the
+  core is trusted to route through it. Because a counterparty here is an **implementer** — a
+  pluggable implementation, or a downstream set (e.g. zr's `pr-pool-components`) that realizes these
+  interfaces — this suite, not a peer cross-check, is how agreement is confirmed (method `INV-18`,
+  implementer form).
 
-## Failure handling
+## Concurrency, capacity & failure
 
-- **`INV-FAIL-1`** — **The response depends on the failure _class_:**
-  - _usage limit_ (rolling window) → pause + auto-resume next window (`INV-CONT-3`);
-  - _transient_ (network, rate blip, flaky) → bounded automatic retry;
-  - _non-retryable_ (authentication/permission failure, invalid request) → **stop;
-    hand the item back** (`INV-CONT-1`). Retrying burns budget and never recovers.
+```mermaid
+sequenceDiagram
+    participant Core as core
+    participant A as handler session A
+    participant B as handler session B
+    Note over Core,B: competing consumers — one event to exactly one session
+    Core->>A: dispatch event E1 (id hs-A)
+    Core->>B: dispatch event E2 (id hs-B)
+    B-->>Core: deferred; later session-status failed { class: resource-limit }
+    Note over Core: not a defect — re-offer once the ceiling lifts, within E2's ttl
+    Core->>A: re-offer E2 when A has capacity (still within ttl)
+    A-->>Core: session-status completed
+```
 
-## Concurrency
+- **`INV-CONC-1`** — The core dispatches **concurrently**, delivering each event to **exactly one**
+  handler session (**competing consumers**), bounded by each handler's **capacity**. Concurrency is
+  **not assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a
+  shutdown or time-of-day event) so its events never run in parallel.
+- **`INV-FAIL-1`** — A handler-session failure carries a coarse **failure class** — `retryable`,
+  `resource-limit`, `unavailable`, or `critical`. The core's re-offer decision **follows the class**
+  and happens **only within the event's `ttl`**: `retryable` and `resource-limit` MAY be re-offered
+  (the latter once the ceiling lifts), `unavailable` MAY be offered to another session, and
+  `critical` is **never** retried — a human is needed.
 
-- **`INV-CLAIM-1`** — pr-pool **MUST NOT** dispatch the same discovered **item** (a
-  query result) to more than one role/session at once; each in-flight item has
-  exactly **one** owning session for its run, under a **role-derived identity** (never
-  a shared default). Where exclusivity must survive across drains, the durable claim
-  state is supplied by the query source (`INV-QSRC-1`). _(pr-pool reasons about
-  "items," never about PRs or tracking objects — those are deployment concepts.)_
+## Workflow
 
-## Safety (untrusted content)
+- **`INV-WORKFLOW-1`** — A **workflow** is a declared flow tying **event sources → event types →
+  event handlers** through their **bindings**. The core **MUST** be able to **validate the wiring**
+  — no orphan event types, no unhandled source output, no disconnected handlers, and loop detection
+  — and **report** on it. Declaring or altering a workflow is **configuration**: it **MUST NOT**
+  require changing the core (`GOAL-MIN-1`). _(Whether validation runs pre-runtime and exactly how a
+  serialize mark is expressed are open questions, `OQ-WORKFLOW` and `OQ-CONC-MARK`.)_
 
-- **`INV-SEC-1`** — When a role processes untrusted content (e.g. externally-authored
-  code checked out into a scratch workspace), pr-pool **MUST** run it isolated, with
-  tools **least-privilege for the role** and **no inheritance of ambient
-  credentials/secrets** — so untrusted content cannot exfiltrate secrets or act under
-  the operator's identity. Realized by the agent-runner (`INV-RUN-1`).
-- **`INV-SEC-2`** — _retired._ Was "bot attribution"; that rule is a workflow concern
-  and moved to the deployment overlay (see ADR 0026). The ID is kept as a tombstone so
-  the gap between `INV-SEC-1` and `INV-SEC-3` isn't read as an accidental omission.
-- **`INV-SEC-3`** — **Guardrails are not defeatable by config.** Isolation and
-  permission-scoping (the rules above) **MUST NOT** be weakened by editing a role's
-  prompt or config.
+## Observability & lifecycle
 
-## Observability
-
-- **`INV-OBS-1`** — pr-pool **MUST** be monitorable from outside itself. At minimum:
-  queue depth, per-role session activity, budget consumption, usage-limit backoff
-  state, and sidelined-item count (`INV-CONT-2`). _(Emission mechanism is
-  downstream.)_
+- **`INV-OBS-1`** — The core exposes a declared **metric catalog** (each metric's `name`, `kind`,
+  `unit`, labels); a **monitoring sink** pulls or pushes a declared subset (`INTF-MON`). The core is
+  unaware of any concrete monitoring backend, and an **observer** reads the sink, never the core.
+- **`INV-LIFE-1`** — The core runs as a **socket service** in both modes — a long-running **daemon**
+  (`run`) and a one-off **run-until-idle** (dispatch everything deliverable, await outstanding
+  deferred work up to `ttl`, then exit). Both keep the socket available so push sources can reach it.
+  The core signals each registered participant through the lifecycle
+  `starting → started → stopping → stopped`, plus a **best-effort `crashing`** signal on sudden
+  shutdown; because `crashing` is best-effort (it MAY be lost), **no correctness rule may depend on
+  it**.
 
 ## Precedence
 
-- **`INV-PREC-1`** — When two of pr-pool's rules conflict, the ordering is
-  **safety/isolation > never-drop-work (continuity) > efficiency**. A
-  newly-discovered conflict **MUST** be logged as an open question and resolved by an
-  ADR, not by an agent choosing arbitrarily.
+- **`INV-PREC-1`** — When two invariants **conflict**, the ordering is
+  **safety/isolation > continuity (never drop work) > efficiency**. A newly-discovered conflict
+  **MUST** be recorded as an **open question** and resolved by a **decision** (an ADR), **not**
+  chosen ad hoc by an agent. This is pr-pool's **precedence** ordering under the method's optional
+  precedence mechanism (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-19`).
+  _(Downstream deployments — e.g. zr's `pr-pool-components` set — cite this ordering rather than
+  restate it.)_
 
-## Keep it minimal
+## Goal
 
-- **`GOAL-SIMPLE-1`** — pr-pool does exactly one thing: **orchestrate** (run queries,
-  dispatch the matching role per result, run to empty). _How_ work happens — the
-  queries, roles, prompts, tools — is **configuration and extensions**, not baked in.
-  Over time, less implementation detail should live in pr-pool, not more.
-- **`GOAL-SIMPLE-2`** — Organization/repo-specific behavior, workflows, and tool
-  choices live in that deployment's own repository, never in pr-pool.
+- **`GOAL-MIN-1`** — Keep the core **minimal**: anything specific to a source, handler, monitor,
+  workflow, or deployment belongs **behind an interface** (realized in zr's `pr-pool-components`),
+  **never** in the core. Over time, **less** implementation detail should live in the core, not more.

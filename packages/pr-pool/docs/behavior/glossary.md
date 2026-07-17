@@ -1,47 +1,62 @@
 # Glossary — pr-pool
 
-Vocabulary for pr-pool's behavior as an **orchestrator**. Everything here is about
-discovering items and dispatching roles safely — nothing about _what the work is_.
-Domain terms (PR, review, merge, backlog, gate, triage, escalation, …) are
-**workflow** and belong to the deployment's own set, not here.
+Vocabulary for pr-pool's core. Concrete implementations (ccpool, beads, prometheus, …) define
+their own terms in `zr pr-pool-components`.
 
-Terms of the behavior-docs **method** (behavior doc, invariant, goal, generic set,
-per-project overlay) are defined in
-`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` and not restated.
+## Core
 
-- **Orchestrator (`pr-pool`)** — the tool these docs describe: it runs queries,
-  dispatches the matching role per result, and runs to empty. Deliberately minimal.
-- **Query** — a configured discovery request pr-pool runs against a query source to
-  find items to consider. What a query looks for is configuration, not pr-pool's
-  concern.
-- **Query source** — whatever answers a query with items and holds durable claim
-  state. Interacts with pr-pool only through the query-source **contract**
-  (`INV-QSRC-1`); pr-pool names no specific source. _(A work tracker is one possible
-  query source — an illustrative example, not a dependency on any particular tool.)_
-- **Item** — one result a query returns. **Opaque to pr-pool**: it may _mean_ a pull
-  request, an alert, a backlog entry, or a policy hit — pr-pool neither knows nor
-  cares. The meaning is the workflow's.
-- **Role** — a configured worker type pr-pool dispatches to handle items a query
-  returns (prompt + which query feeds it + caps). Defined entirely in configuration.
-- **Agent-runner** — the extension that actually runs a role's session; interacts
-  with pr-pool through the agent-runner **contract** (`INV-RUN-1`). pr-pool names no
-  specific runner.
-- **Agent / session** — one running instance of a role's work under the agent-runner.
-  Externally identifiable and monitorable; isolated; bounded by a per-role cap and the
-  budget.
-- **Drain** — one pass: run the queries, dispatch roles over the results, work to
-  empty, then exit.
-- **Scheduler** — whatever re-invokes the drain for continuous operation; idles
-  between runs when nothing is ready.
-- **Claim** — pr-pool taking ownership of an item before dispatching it, under a
-  **role-derived identity** (never a shared default), so the same item is never worked
-  by two sessions at once (`INV-CLAIM-1`).
-- **Sideline** — pr-pool removing a stuck item from the current run's ready set and
-  releasing its claim, so the drain continues (`INV-CONT-2`). Distinct from durable
-  **parking** (a workflow concern built on the query source).
-- **Budget** — the bound on a run (wall-clock, optionally tokens/cost; per-run and/or
-  per-role). Approaching it winds work down; exceeding it stops it safely.
-- **Contract** — the behavior pr-pool _requires of_ and _guarantees to_ an extension
-  (agent-runner, query-source). The one place pr-pool's boundary with the outside
-  world is defined; see [`contracts.md`](contracts.md). Which tool fills a contract is
-  the deployment's to record, not pr-pool's.
+- **Core** — pr-pool itself: routes events to bound event handlers; runs as a socket service.
+- **Registry** — the core's roster of participants that have registered with it. A participant
+  registers to receive lifecycle signals and to make its callback reachable, and deregisters on exit.
+
+## Events and matching
+
+- **Event** — a typed, self-contained fact a source emits and the core routes. Carries an `id`, a
+  `type`, a `ttl`, an optional `correlationId`, and an opaque `payload`.
+- **Event type** — the primary field a binding matches on.
+- **Binding** — the rule associating an event handler with the events it handles: a **match** over
+  event fields. `type` is the default field; a binding MAY match on other declared fields. A matched
+  field that is absent on an event simply does not match (it is not an error).
+- **Query trigger** — what fires a pull event source's query: **periodic** (a tick, itself an event)
+  or **threshold** ("enough events").
+- **TTL** — how long the core may hold or redeliver an event before dropping it.
+- **Correlation id** — an optional grouping key on events, used to correlate several events for
+  aggregation.
+- **Tracking id** — the id the core assigns to a call so a deferred reply or later callback can be
+  matched back to it. Per-call, and distinct from a correlation id (which is per-event-group).
+
+## Participants (the system actors)
+
+- **Event source** — emits typed events; **pull** (the core queries it on a query trigger) or **push**
+  (it calls the core's ingest callback). A push-only source still registers.
+- **Event handler** — responds to an event it is bound to: it runs, reports status, and may be
+  capacity-limited. Its concrete kinds (a "role" such as feedback/worker/review) are named in zr.
+- **Handler session** — one run of an event handler against one event, tracked by its tracking id.
+- **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.
+- **Storage** — an optional key/value scratch a participant provides for core state; never backs
+  delivery.
+- **Callback** — a command the core hands a participant so the participant can push back to the core.
+
+## Outcomes
+
+- **Failure class** — the coarse category a handler failure carries.
+- **retryable** — a transient condition; the same event MAY be re-offered within its TTL and may then
+  succeed.
+- **resource-limit** — a capacity or quota ceiling was reached (e.g. a usage window); not a defect,
+  and the handler will be able again once the ceiling lifts.
+- **unavailable** — the handler cannot accept work right now (down, starting, or at capacity); an
+  availability problem rather than a hit ceiling.
+- **critical** — an error that MUST NOT be retried; a human must investigate.
+
+## Workflow and observability
+
+- **Workflow** — a declared flow connecting event sources, event types, and event handlers through
+  their bindings, so the wiring can be validated (no orphan event types, no unhandled source output,
+  no disconnected handlers, loop detection) and reported on.
+- **Metric catalog** — the set of metrics the core declares (name, kind, unit, labels) and exposes to
+  monitoring sinks.
+
+## Human actors
+
+- **Operator** — configures, runs, and inspects the core via the CLI.
+- **Observer** — consumes the core's monitoring output.
