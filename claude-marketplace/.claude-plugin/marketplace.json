@@ -48,6 +48,11 @@
       "name": "integrate-branch",
       "source": "./integrate-branch",
       "description": "Integrate the current branch by the repo's method (ff-merge / PR / custom)"
+    },
+    {
+      "name": "behavior-docs-conformance",
+      "source": "./behavior-docs-conformance",
+      "description": "Claude skill: review or mechanically fix a behavior-docs set against the behavior-docs method (the conformance / drift pass)."
     }
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "name": "behavior-docs-conformance",
+  "description": "Claude skill: review — or mechanically fix — a behavior-docs set against the behavior-docs method's invariant rules (the conformance / drift pass).",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
