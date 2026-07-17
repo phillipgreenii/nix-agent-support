@@ -32,6 +32,18 @@ type NativePricer struct {
 	mu      sync.Mutex
 	probed  bool
 	lastErr error
+
+	// recCache memoizes each transcript's parsed records keyed by path, reused
+	// while the file's mtime is unchanged so an unchanged file is never
+	// re-opened or re-parsed. Confined to the ActiveBlock caller (the poll-tick
+	// goroutine), like the poller's transcriptCache.
+	recCache map[string]recEntry
+}
+
+// recEntry is one cached file's parsed records and the mtime they were read at.
+type recEntry struct {
+	mtime   time.Time
+	records []Record
 }
 
 // ActiveBlock scans transcripts and returns the current active 5h block priced
@@ -44,7 +56,7 @@ func (p *NativePricer) ActiveBlock(_ context.Context) (*Block, error) {
 	if p.Now != nil {
 		now = p.Now
 	}
-	records, err := scanRecords(p.ClaudeHome)
+	records, err := p.scanRecordsCached()
 	p.mu.Lock()
 	p.probed = true
 	p.lastErr = err
@@ -76,6 +88,76 @@ type scanEvent struct {
 			OutputTokens             int `json:"output_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
+}
+
+// scanRecordsCached returns the same record set as scanRecords but reuses the
+// parsed records of any transcript whose (path, mtime) are unchanged since the
+// last call, so an unchanged file is never re-opened or re-parsed. Records are
+// cached only on a clean parse — a file that errored is retried next call so its
+// error keeps surfacing (matching scanRecords). Entries for files no longer
+// present are pruned. The record set fed to ActiveBlock is byte-for-byte the
+// same as scanRecords would produce, so the priced block is identical; only the
+// I/O + JSON cost of unchanged files is avoided (bead pg2-l4ssm).
+func (p *NativePricer) scanRecordsCached() ([]Record, error) {
+	root := filepath.Join(p.ClaudeHome, "projects")
+	if p.recCache == nil {
+		p.recCache = map[string]recEntry{}
+	}
+	seen := make(map[string]struct{})
+	var records []Record
+	var firstErr error
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			return nil
+		}
+		if d.IsDir() || !session.IsTranscriptFile(d.Name()) {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			if firstErr == nil {
+				firstErr = ierr
+			}
+			return nil
+		}
+		mt := info.ModTime()
+		seen[path] = struct{}{}
+		if ent, ok := p.recCache[path]; ok && ent.mtime.Equal(mt) {
+			records = append(records, ent.records...)
+			return nil
+		}
+		recs, rerr := scanFile(path)
+		if rerr != nil {
+			if firstErr == nil {
+				firstErr = rerr
+			}
+			// Do not cache a failed/partial read — retry (and re-surface the
+			// error) next call, matching the uncached scanRecords.
+			records = append(records, recs...)
+			return nil
+		}
+		p.recCache[path] = recEntry{mtime: mt, records: recs}
+		records = append(records, recs...)
+		return nil
+	})
+	if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	// Prune cache entries for files that vanished, so the cache tracks the
+	// live corpus rather than growing without bound.
+	for path := range p.recCache {
+		if _, ok := seen[path]; !ok {
+			delete(p.recCache, path)
+		}
+	}
+	return records, firstErr
 }
 
 // scanRecords walks claudeHome/projects/**/*.jsonl (transcript files only) and

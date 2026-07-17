@@ -59,7 +59,7 @@ func (p *NativePricer) CurrentWeekly(_ context.Context) (*WeeklyEntry, error) {
 	if p.Now != nil {
 		now = p.Now
 	}
-	records, err := scanRecords(p.ClaudeHome)
+	records, err := p.scanRecordsCached()
 	p.mu.Lock()
 	p.probed = true
 	// Set unconditionally so a successful scan clears a prior error, matching
