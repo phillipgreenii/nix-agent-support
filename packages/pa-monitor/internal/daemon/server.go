@@ -12,6 +12,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
@@ -465,9 +469,26 @@ func (s *server) buildState() *pb.DaemonState {
 // "cmux" label. onDeliverResult/onStreamClosed are the BridgeChannel
 // handler's inbound hooks into the delivery tracker (see delivery.go); both
 // are nil-safe (BridgeChannel checks before calling), so callers that don't
-// wire the delivery path may pass nil for either.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool), onStreamClosed func(serverPID int)) (*grpc.Server, func()) {
-	gs := grpc.NewServer()
+// wire the delivery path may pass nil for either. mp is the emitter's
+// *sdkmetric.MeterProvider (see internal/otel.Emitter.MeterProvider, nil-safe);
+// when non-nil, an otelgrpc stats handler is installed so gRPC server RPCs
+// emit the rpc.server.call.duration histogram on the same provider as the
+// rest of pa-monitor's OTel metrics. When nil (OTEL disabled), no handler is
+// installed — otelgrpc.NewServerHandler(otelgrpc.WithMeterProvider(nil)) would
+// nil-deref internally, so the install is strictly conditional.
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool), onStreamClosed func(serverPID int), mp *sdkmetric.MeterProvider) (*grpc.Server, func()) {
+	var gsOpts []grpc.ServerOption
+	if mp != nil {
+		gsOpts = append(gsOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithMeterProvider(mp),
+			// The global tracer is already a no-op in this codebase (no
+			// tracer provider is wired anywhere); pass one explicitly here
+			// too so otelgrpc never falls back to whatever the process-wide
+			// global trace API happens to have registered.
+			otelgrpc.WithTracerProvider(tracenoop.NewTracerProvider()),
+		)))
+	}
+	gs := grpc.NewServer(gsOpts...)
 	srv := newServer(state)
 	srv.version = version
 	srv.planTier = planTier

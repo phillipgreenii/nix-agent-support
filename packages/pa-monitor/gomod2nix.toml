@@ -125,6 +125,10 @@ schema = 3
     version = 'v1.2.1'
     hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
 
+  [mod.'go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc']
+    version = 'v0.69.0'
+    hash = 'sha256-37oe5RsiBWxaOs7lZXJWEUN4P49jkr2ej+64FQ4ybT8='
+
   [mod.'go.opentelemetry.io/otel']
     version = 'v1.44.0'
     hash = 'sha256-XTGV9RjOIKyWrrgXJ32IA59lovxXqSeRrpcpC1FAFZA='

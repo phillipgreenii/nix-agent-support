@@ -327,7 +327,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, snapshotInterval, tr.resolve, tr.failServer)
+	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, snapshotInterval, tr.resolve, tr.failServer, opts.Emitter.MeterProvider())
 	defer stop()
 
 	// Reap bridge members whose process has died, against the same registry

@@ -10,6 +10,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -187,6 +190,109 @@ func dialUnix(t *testing.T, sockPath string) *grpc.ClientConn {
 		t.Fatal(err)
 	}
 	return conn
+}
+
+// dialTCP is dialUnix's TCP counterpart, used by the otelgrpc stats-handler
+// tests below (they need a listener address, not a unix socket path).
+func dialTCP(t *testing.T, addr string) *grpc.ClientConn {
+	t.Helper()
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+// TestServeNilMeterProviderStarts is the nil-path guard: when OTEL is
+// disabled, opts.Emitter.MeterProvider() (see internal/otel.Emitter,
+// Task 1) returns nil, and serve() must NOT install an otelgrpc stats
+// handler in that case — otelgrpc.NewServerHandler(otelgrpc.WithMeterProvider(nil))
+// nil-derefs internally, so this pins that the conditional install guards
+// against exactly that. The server must still start and answer a trivial
+// RPC without panicking.
+func TestServeNilMeterProviderStarts(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := newSharedState()
+	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil, nil, nil)
+	defer stop()
+
+	conn := dialTCP(t, lis.Addr().String())
+	defer func() { _ = conn.Close() }()
+
+	client := pb.NewPaMonitorClient(conn)
+	if _, err := client.Ping(context.Background(), &pb.PingRequest{}); err != nil {
+		t.Fatalf("Ping with nil MeterProvider: %v", err)
+	}
+}
+
+// TestServeWithMeterProviderRecordsRPCDuration pins the ACTUAL otelgrpc
+// integration contract: when serve() is given a real *sdkmetric.MeterProvider,
+// a driven RPC must produce a recorded rpc.server.call.duration histogram
+// data point (the metric name/unit emitted by the resolved otelgrpc version —
+// see internal/otel package docs / task-2 report for how this was
+// determined from the resolved package source; semconv v1.41.0 "new" mode is
+// the otelgrpc default absent OTEL_SEMCONV_STABILITY_OPT_IN). A ManualReader
+// lets us inspect the recorded datapoint without a live collector.
+func TestServeWithMeterProviderRecordsRPCDuration(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+
+	st := newSharedState()
+	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil, nil, mp)
+	defer stop()
+
+	conn := dialTCP(t, lis.Addr().String())
+	defer func() { _ = conn.Close() }()
+
+	client := pb.NewPaMonitorClient(conn)
+	if _, err := client.Ping(context.Background(), &pb.PingRequest{}); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	dp, ok := findServerCallDurationDataPoint(&rm)
+	if !ok {
+		t.Fatalf("rpc.server.call.duration histogram not found in collected metrics: %+v", rm.ScopeMetrics)
+	}
+	if dp.Count < 1 {
+		t.Errorf("rpc.server.call.duration data point Count = %d, want >= 1", dp.Count)
+	}
+	status, present := dp.Attributes.Value("rpc.response.status_code")
+	if !present {
+		t.Errorf("rpc.server.call.duration data point missing rpc.response.status_code attribute: %+v", dp.Attributes)
+	} else if status.AsString() != "OK" {
+		t.Errorf("rpc.response.status_code = %q, want %q", status.AsString(), "OK")
+	}
+}
+
+// findServerCallDurationDataPoint locates the otelgrpc server-side duration
+// histogram ("rpc.server.call.duration" — see stats_handler.go's default
+// "new" semconv mode in the resolved otelgrpc v0.69.0) and returns its first
+// data point.
+func findServerCallDurationDataPoint(rm *metricdata.ResourceMetrics) (metricdata.HistogramDataPoint[float64], bool) {
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "rpc.server.call.duration" {
+				continue
+			}
+			h, ok := m.Data.(metricdata.Histogram[float64])
+			if !ok || len(h.DataPoints) == 0 {
+				continue
+			}
+			return h.DataPoints[0], true
+		}
+	}
+	return metricdata.HistogramDataPoint[float64]{}, false
 }
 
 // noopSignaler is a Signaler that does nothing. Satisfies signal.Signaler.
