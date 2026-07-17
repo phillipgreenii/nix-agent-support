@@ -517,6 +517,48 @@ func TestSetPriority_ClampsRange(t *testing.T) {
 	})
 }
 
+// TestAddLabel asserts AddLabel sends `update <id> --add-label <label>` to bd.
+// Used by the conflict->priority reconciler (pg2-tsgkj) to stash the baseline
+// priority in a `pbase:<n>` label.
+func TestAddLabel(t *testing.T) {
+	r := &coOwnedRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.AddLabel(context.Background(), "mr-1", "pbase:2"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+	got := r.lastCall()
+	want := []string{"update", "mr-1", "--add-label", "pbase:2"}
+	if len(got) != len(want) {
+		t.Fatalf("call = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestRemoveLabel asserts RemoveLabel sends `update <id> --remove-label
+// <label>` to bd. Used by the conflict->priority reconciler (pg2-tsgkj) to
+// drop the `pbase:<n>` marker once the baseline priority is restored.
+func TestRemoveLabel(t *testing.T) {
+	r := &coOwnedRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.RemoveLabel(context.Background(), "mr-1", "pbase:2"); err != nil {
+		t.Fatalf("RemoveLabel: %v", err)
+	}
+	got := r.lastCall()
+	want := []string{"update", "mr-1", "--remove-label", "pbase:2"}
+	if len(got) != len(want) {
+		t.Fatalf("call = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("call = %v, want %v", got, want)
+		}
+	}
+}
+
 // TestBdIssueToMergeRequest_ParsesPriorityAndLabels pins the fix for
 // bdIssueToMergeRequest previously dropping labels entirely and not
 // surfacing priority at all.

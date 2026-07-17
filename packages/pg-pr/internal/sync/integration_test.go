@@ -88,6 +88,13 @@ func (f *fullChainBeadClient) CloseAttentionBead(context.Context, string, string
 
 func (f *fullChainBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
+func (f *fullChainBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *fullChainBeadClient) SetPriority(context.Context, string, int) error    { return nil }
+func (f *fullChainBeadClient) AddLabel(context.Context, string, string) error    { return nil }
+func (f *fullChainBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
+
 // compile-time check: fullChainBeadClient satisfies the bridge interface.
 var _ beadsbridge.BeadClient = (*fullChainBeadClient)(nil)
 

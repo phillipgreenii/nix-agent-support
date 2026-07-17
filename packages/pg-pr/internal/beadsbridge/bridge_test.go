@@ -80,6 +80,13 @@ func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error 
 
 func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
+func (noopBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (noopBeadClient) SetPriority(context.Context, string, int) error    { return nil }
+func (noopBeadClient) AddLabel(context.Context, string, string) error    { return nil }
+func (noopBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
+
 // errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
 // as "no open cycle" — that's the duplicate-cycle bug).
@@ -630,5 +637,125 @@ func TestPRMergedCascadeClosesDraftReviewChild(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected draft-review child to be closed by cascade, closed: %v", closedChildren)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// reconcilePriority: conflict->priority nudge/revert (pg2-tsgkj)
+// ---------------------------------------------------------------------------
+
+// setPriorityCall records one SetPriority(id, p) invocation.
+type setPriorityCall struct {
+	id string
+	p  int
+}
+
+// labelCall records one AddLabel/RemoveLabel(id, label) invocation.
+type labelCall struct {
+	id    string
+	label string
+}
+
+// reconcileFakeClient is a functional BeadClient fake for reconcilePriority
+// tests: EnsureMergeRequest always resolves to "mr-1" and GetMergeRequest
+// returns the configurable canned mr; SetPriority/AddLabel/RemoveLabel record
+// their calls instead of no-opping.
+type reconcileFakeClient struct {
+	noopBeadClient
+	mr *beads.MergeRequest
+
+	setPriorityCalls []setPriorityCall
+	addLabelCalls    []labelCall
+	removeLabelCalls []labelCall
+}
+
+func (c *reconcileFakeClient) EnsureMergeRequest(context.Context, string, beads.MergeRequestFields) (string, bool, error) {
+	return "mr-1", false, nil
+}
+
+func (c *reconcileFakeClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return c.mr, nil
+}
+
+func (c *reconcileFakeClient) SetPriority(_ context.Context, id string, p int) error {
+	c.setPriorityCalls = append(c.setPriorityCalls, setPriorityCall{id, p})
+	return nil
+}
+
+func (c *reconcileFakeClient) AddLabel(_ context.Context, id, label string) error {
+	c.addLabelCalls = append(c.addLabelCalls, labelCall{id, label})
+	return nil
+}
+
+func (c *reconcileFakeClient) RemoveLabel(_ context.Context, id, label string) error {
+	c.removeLabelCalls = append(c.removeLabelCalls, labelCall{id, label})
+	return nil
+}
+
+// TestHandle_ConflictRaisesMinePriorityAndStashesBaseline asserts the first
+// conflicting tick on a "mine" PR raises priority (numerically lower, toward
+// 0) and stashes the pre-adjustment priority in a pbase: label.
+func TestHandle_ConflictRaisesMinePriorityAndStashesBaseline(t *testing.T) {
+	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 2, Labels: nil}}
+	h := New(c)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 1}) {
+		t.Fatalf("expected SetPriority(mr-1, 1), got %v", c.setPriorityCalls)
+	}
+	if len(c.addLabelCalls) != 1 || c.addLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
+		t.Fatalf("expected AddLabel(mr-1, pbase:2), got %v", c.addLabelCalls)
+	}
+}
+
+// TestHandle_ConflictClearedRestoresBaseline asserts a clear (HasConflict
+// false) with a stashed baseline restores the exact pre-adjustment priority
+// and removes the pbase: marker.
+func TestHandle_ConflictClearedRestoresBaseline(t *testing.T) {
+	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 1, Labels: []string{"pbase:2"}}}
+	h := New(c)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: false})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 2}) {
+		t.Fatalf("expected SetPriority(mr-1, 2), got %v", c.setPriorityCalls)
+	}
+	if len(c.removeLabelCalls) != 1 || c.removeLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
+		t.Fatalf("expected RemoveLabel(mr-1, pbase:2), got %v", c.removeLabelCalls)
+	}
+}
+
+// TestHandle_ConflictIdempotentNoDoubleNudge asserts a repeated conflicting
+// tick (baseline already stashed) is a no-op — it must NOT call SetPriority
+// again (that would double-nudge past the intended single-step adjustment).
+func TestHandle_ConflictIdempotentNoDoubleNudge(t *testing.T) {
+	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 1, Labels: []string{"pbase:2"}}}
+	h := New(c)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "mine", HasConflict: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(c.setPriorityCalls) != 0 {
+		t.Fatalf("expected no SetPriority call (already adjusted this conflict episode), got %v", c.setPriorityCalls)
+	}
+}
+
+// TestHandle_TeamConflictLowersPriority asserts a team PR's first conflicting
+// tick lowers priority (numerically higher, toward 4) rather than raising it.
+func TestHandle_TeamConflictLowersPriority(t *testing.T) {
+	c := &reconcileFakeClient{mr: &beads.MergeRequest{ID: "mr-1", Priority: 2, Labels: nil}}
+	h := New(c)
+	payload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: "team", HasConflict: true})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(c.setPriorityCalls) != 1 || c.setPriorityCalls[0] != (setPriorityCall{"mr-1", 3}) {
+		t.Fatalf("expected SetPriority(mr-1, 3), got %v", c.setPriorityCalls)
+	}
+	if len(c.addLabelCalls) != 1 || c.addLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
+		t.Fatalf("expected AddLabel(mr-1, pbase:2), got %v", c.addLabelCalls)
 	}
 }

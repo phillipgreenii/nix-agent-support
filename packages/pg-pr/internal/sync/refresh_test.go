@@ -344,6 +344,13 @@ func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) er
 
 func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
+func (f *outboxFakeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *outboxFakeBeads) SetPriority(context.Context, string, int) error    { return nil }
+func (f *outboxFakeBeads) AddLabel(context.Context, string, string) error    { return nil }
+func (f *outboxFakeBeads) RemoveLabel(context.Context, string, string) error { return nil }
+
 // compile-time check: the same fake serves the bridge interface too.
 var _ beadsbridge.BeadClient = (*outboxFakeBeads)(nil)
 

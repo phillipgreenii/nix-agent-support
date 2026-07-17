@@ -24,6 +24,7 @@ type PRPayload struct {
 	URL          string `json:"url,omitempty"`
 	Draft        bool   `json:"draft,omitempty"`
 	LastSyncedAt string `json:"last_synced_at,omitempty"`
+	HasConflict  bool   `json:"has_conflict,omitempty"`
 }
 
 // AttentionPayload is the JSON body of pr.attention events (pg2-4c5i.13). It

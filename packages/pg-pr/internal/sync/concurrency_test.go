@@ -122,6 +122,13 @@ func (c *concurrentBeadClient) CloseAttentionBead(context.Context, string, strin
 
 func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
+func (c *concurrentBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (c *concurrentBeadClient) SetPriority(context.Context, string, int) error    { return nil }
+func (c *concurrentBeadClient) AddLabel(context.Context, string, string) error    { return nil }
+func (c *concurrentBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
+
 // compile-time check.
 var _ beadsbridge.BeadClient = (*concurrentBeadClient)(nil)
 

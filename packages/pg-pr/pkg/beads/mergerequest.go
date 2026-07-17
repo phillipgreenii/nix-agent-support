@@ -295,6 +295,24 @@ func (c *Client) SetPriority(ctx context.Context, id string, p int) error {
 	return err
 }
 
+// AddLabel adds a label to a bead. Thin wrapper over `bd update --add-label`;
+// idempotent (bd is a no-op when the label is already present). Used by the
+// conflict-urgency reconciler (pg2-tsgkj) to stash the pre-adjustment priority
+// in a `pbase:<n>` label.
+func (c *Client) AddLabel(ctx context.Context, id, label string) error {
+	_, err := c.Runner.Run(ctx, "update", id, "--add-label", label)
+	return err
+}
+
+// RemoveLabel removes a label from a bead. Thin wrapper over
+// `bd update --remove-label`; idempotent (bd is a no-op when the label is
+// absent). Used by the conflict-urgency reconciler (pg2-tsgkj) to drop the
+// `pbase:<n>` marker once the baseline priority is restored.
+func (c *Client) RemoveLabel(ctx context.Context, id, label string) error {
+	_, err := c.Runner.Run(ctx, "update", id, "--remove-label", label)
+	return err
+}
+
 // findByRepoPR finds a merge-request bead by repo + pr_number metadata.
 // Returns nil if not found. Includes closed beads.
 func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeRequest, error) {

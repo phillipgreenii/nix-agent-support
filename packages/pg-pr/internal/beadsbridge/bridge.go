@@ -9,7 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -29,6 +32,10 @@ type BeadClient interface {
 	EnsureDraftReviewMineLabel(ctx context.Context, prBeadID string) error
 	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
 	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
+	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
+	SetPriority(ctx context.Context, id string, p int) error
+	AddLabel(ctx context.Context, id, label string) error
+	RemoveLabel(ctx context.Context, id, label string) error
 }
 
 // Handler is the beads event handler.
@@ -90,6 +97,9 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		// Keep the co-owned visibility label in sync with the current
 		// ownership verdict — added when co-owned, removed otherwise.
 		if err := h.client.SetMergeRequestCoOwned(ctx, mrID, p.Ownership == "co-owned"); err != nil {
+			return err
+		}
+		if err := h.reconcilePriority(ctx, mrID, p.Ownership, p.HasConflict); err != nil {
 			return err
 		}
 		// Emit the review work item. My PRs and co-owned PRs are reviewed even
@@ -203,6 +213,79 @@ func (h *Handler) cascadeClose(ctx context.Context, p store.PRPayload) error {
 		_ = h.client.CloseProcessingCycle(ctx, child, reason)
 	}
 	return h.client.CloseMergeRequest(ctx, mr.ID, reason)
+}
+
+const pbaseLabelPrefix = "pbase:"
+
+// reconcilePriority nudges the merge-request bead's priority on conflict and
+// reverts it when the conflict clears, statelessly. The pre-adjustment priority
+// is stashed in a `pbase:<n>` label so a repeated conflicting tick is a no-op
+// and a clear restores the exact baseline. mine/co-owned raise (−1, clamp 0);
+// team lowers (+1, clamp 4). (pg2-tsgkj)
+func (h *Handler) reconcilePriority(ctx context.Context, mrID, ownershipStr string, hasConflict bool) error {
+	mr, err := h.client.GetMergeRequest(ctx, mrID)
+	if err != nil {
+		return err
+	}
+	if mr == nil {
+		return nil
+	}
+	baseline, hasBaseline := parsePbase(mr.Labels)
+
+	switch {
+	case hasConflict && !hasBaseline:
+		// First conflicting tick: stash current priority, then nudge.
+		desired := nudged(mr.Priority, ownershipStr)
+		if desired == mr.Priority {
+			// Already clamped at the boundary: still stash so a later clear is a no-op-safe restore.
+		}
+		if err := h.client.AddLabel(ctx, mrID, pbaseLabelPrefix+strconv.Itoa(mr.Priority)); err != nil {
+			return err
+		}
+		if desired != mr.Priority {
+			return h.client.SetPriority(ctx, mrID, desired)
+		}
+		return nil
+	case hasConflict && hasBaseline:
+		return nil // already adjusted this conflict episode — idempotent no-op
+	case !hasConflict && hasBaseline:
+		// Conflict cleared: restore baseline, drop the marker.
+		if mr.Priority != baseline {
+			if err := h.client.SetPriority(ctx, mrID, baseline); err != nil {
+				return err
+			}
+		}
+		return h.client.RemoveLabel(ctx, mrID, pbaseLabelPrefix+strconv.Itoa(baseline))
+	default:
+		return nil // no conflict, no baseline — nothing to do
+	}
+}
+
+// nudged returns the conflict-adjusted priority: mine/co-owned raise (toward 0),
+// team lower (toward 4). Clamped to [0,4].
+func nudged(p int, ownershipStr string) int {
+	if ownership.Ownership(ownershipStr).ActsAsMine() {
+		if p > 0 {
+			return p - 1
+		}
+		return 0
+	}
+	if p < 4 {
+		return p + 1
+	}
+	return 4
+}
+
+// parsePbase extracts the stashed baseline priority from a `pbase:<n>` label.
+func parsePbase(labels []string) (int, bool) {
+	for _, l := range labels {
+		if strings.HasPrefix(l, pbaseLabelPrefix) {
+			if n, err := strconv.Atoi(strings.TrimPrefix(l, pbaseLabelPrefix)); err == nil {
+				return n, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // compile-time check: *beads.Client must satisfy BeadClient.

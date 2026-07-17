@@ -44,7 +44,7 @@ func (e *Engine) prPayload(repo string, pr api.PR, ownership string) store.PRPay
 	return store.PRPayload{
 		Repo: repo, Number: pr.Number, Title: pr.Title, Ownership: ownership,
 		Merged: pr.Merged, State: stateForPR(pr), Branch: pr.Branch, Base: pr.Base,
-		Author: pr.Author, URL: pr.URL, Draft: pr.Draft,
+		Author: pr.Author, URL: pr.URL, Draft: pr.Draft, HasConflict: pr.HasConflict(),
 		LastSyncedAt: e.deps.Now().UTC().Format(time.RFC3339),
 	}
 }
