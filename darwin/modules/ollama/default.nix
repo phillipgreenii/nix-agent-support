@@ -40,9 +40,12 @@ let
   primaryUser = config.system.primaryUser or null;
 in
 {
-  # LaunchAgent registration via the canonical helper (ADR 0049). The wrapper
-  # lands at /nix/var/nix/profiles/system/sw/bin/ollama (stable path, GC-rooted
-  # via the system profile); the helper embeds PG_LAUNCHD_WRAPPER = wrapper.outPath
+  # LaunchAgent registration via the canonical helper (ADR 0049, amended by
+  # 0051). The wrapper lands at
+  # /nix/var/nix/profiles/system/sw/libexec/pg-launchd/ollama (stable path,
+  # off the user PATH, GC-rooted via the system profile — so this daemon
+  # wrapper no longer shadows the real `ollama` CLI); the helper embeds
+  # PG_LAUNCHD_WRAPPER = wrapper.outPath
   # so plist-hash compares trigger nix-darwin to bootout+bootstrap whenever the
   # ollama package (and thus the wrapper) changes.
   #

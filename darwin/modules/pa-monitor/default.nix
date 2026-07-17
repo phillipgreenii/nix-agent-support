@@ -90,9 +90,10 @@ in
       );
     })
 
-    # LaunchAgent registration via the canonical helper (ADR 0049). The
-    # wrapper lands at /nix/var/nix/profiles/system/sw/bin/pa-monitor-daemon
-    # (stable path, GC-rooted via the system profile), and the helper
+    # LaunchAgent registration via the canonical helper (ADR 0049, amended
+    # by 0051). The wrapper lands at
+    # /nix/var/nix/profiles/system/sw/libexec/pg-launchd/pa-monitor-daemon
+    # (stable path, off the user PATH, GC-rooted via the system profile), and the helper
     # automatically embeds PG_LAUNCHD_WRAPPER = wrapper.outPath so plist
     # hash compares trigger nix-darwin to bootout+bootstrap whenever
     # pa-monitor (and thus the wrapper) changes.
