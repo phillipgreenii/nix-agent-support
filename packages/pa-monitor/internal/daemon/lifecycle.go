@@ -551,14 +551,18 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		}
 		phase("limits", limitsStart)
 
-		weeklyStart := time.Now()
 		fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
 		if fetchWeek {
+			// Record the weekly phase only on ticks that actually fetch, so the
+			// histogram reflects real fetch cost instead of being diluted by the
+			// ~0ms no-op ticks (WeeklyEvery gates the fetch). Mirrors how the
+			// poller guards its pricer / db_write_sessions phase recording.
+			weeklyStart := time.Now()
 			if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
 				tree.ActiveWeek = w
 			}
+			phase("weekly", weeklyStart)
 		}
-		phase("weekly", weeklyStart)
 
 		// Persist the active block and week to the DB, then propagate
 		// their surrogate ids to the poller so contribution upserts in the
