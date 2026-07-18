@@ -1438,7 +1438,7 @@
       "id": 211,
       "title": "gRPC server call duration (p95, seconds)",
       "type": "timeseries",
-      "description": "p95 gRPC server call duration in SECONDS (distinct from the millisecond pa_monitor panels above) — emitted by otelgrpc v0.69.0 under the new semconv as rpc.server.call.duration. Account-global metric — not filtered by $scope/$plan_tier. CAVEAT: the exact Prometheus metric suffix (_seconds) depends on the collector's OTLP-to-Prometheus unit-suffixing configuration; there is no collector config in this repo to verify against, so confirm the series name against the live stack before trusting this panel.",
+      "description": "p95 gRPC server call duration in SECONDS (distinct from the millisecond pa_monitor panels above) — emitted by otelgrpc v0.69.0 under the new semconv as rpc.server.call.duration. Account-global metric — not filtered by $scope/$plan_tier. Values are in seconds; the collector does NOT append a unit suffix, so the Prometheus series is rpc_server_call_duration (verified live against the otelcol→Prometheus stack, pg2-k1zcd).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1451,7 +1451,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le,rpc_method) (rate(rpc_server_call_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le,rpc_method) (rate(rpc_server_call_duration_bucket[5m])))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -1466,7 +1466,7 @@
       "id": 212,
       "title": "gRPC calls by status code (rate)",
       "type": "timeseries",
-      "description": "gRPC server call rate by response status code. Account-global metric — not filtered by $scope/$plan_tier. Same Prometheus metric-suffix caveat as the duration panel above.",
+      "description": "gRPC server call rate by response status code. Account-global metric — not filtered by $scope/$plan_tier. Series rpc_server_call_duration (no unit suffix; verified live, pg2-k1zcd).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1479,7 +1479,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (rpc_response_status_code) (rate(rpc_server_call_duration_seconds_count[5m]))",
+          "expr": "sum by (rpc_response_status_code) (rate(rpc_server_call_duration_count[5m]))",
           "legendFormat": "{{rpc_response_status_code}}",
           "refId": "A"
         }
