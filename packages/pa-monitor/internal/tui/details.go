@@ -38,7 +38,7 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 		statusStr += "/" + sv.Blocker.String()
 	}
 	fmt.Fprintf(&sb, "Status:    %s\n", wrap.Line(statusStr, valBudget))
-	// workspace.scope (personal / gascity / ziprecruiter), from the persisted
+	// workspace.scope (personal / ziprecruiter), from the persisted
 	// label set. Shown only when present so an unlabeled session has no empty
 	// row (pg2-4xbrm).
 	if scope := sv.Labels["workspace.scope"]; scope != "" {
