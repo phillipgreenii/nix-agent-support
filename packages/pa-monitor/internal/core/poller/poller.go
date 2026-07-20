@@ -8,7 +8,6 @@ import (
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
-	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
@@ -109,9 +108,11 @@ type Poller struct {
 	// Still synchronous on the tick goroutine in Phase 2.
 	Providers *provider.Cache
 
-	burnShort       map[string]*burnrate.Buffer
-	burnLong        map[string]*burnrate.Buffer
-	prevTotalTokens map[string]int
+	// burn is the tick-side burn-rate sampler (Δtokens ring buffers +
+	// prevTotalTokens). Its windows are seeded from BurnWindowShort/Long on first
+	// use. Tick-owned per C5 (burn-rate is a stateful sample over published token
+	// counts).
+	burn burnSampler
 
 	// producer owns the Monitor + provider Cache and assembles the immutable
 	// DerivedState the emit tick reads (Phase 3). Lazily built from p.Monitor /
@@ -161,23 +162,36 @@ func (p *Poller) ensureProducer() *Producer {
 // attach per-session contributions to the correct block row.
 func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
 
-// MonitorLimits returns the Monitor's account-global rate_limits projection (nil
-// when no Monitor, e.g. a bare test poller). The daemon lifecycle reads limits
-// from here so the whole-corpus walk happens once, in the Monitor.
+// MonitorLimits returns the account-global rate_limits projection from the last
+// PUBLISHED DerivedState (C5). The daemon lifecycle reads limits from here; the
+// read is an atomic Load of producer-owned state, so the emit tick never touches
+// the Monitor (which the producer owns off-tick in Phase 4). Nil before the first
+// publish (e.g. a bare test poller that never Snapshotted).
 func (p *Poller) MonitorLimits() *limits.Limits {
-	if p.Monitor == nil {
+	if p.producer == nil {
 		return nil
 	}
-	return p.Monitor.Limits()
+	ds := p.producer.Load()
+	if ds == nil {
+		return nil
+	}
+	return ds.Limits
 }
 
-// MonitorWeekly returns the Monitor's current-week cost at now (nil when no
-// Monitor). The daemon lifecycle reads weekly from here.
+// MonitorWeekly returns the current-week cost from the last PUBLISHED
+// DerivedState (C5). The `now` argument is retained for signature stability (the
+// weekly value is priced at the producer's GeneratedAt); the WeeklyEvery
+// DB-upsert cadence gate stays on the tick (lifecycle.go). Nil before the first
+// publish.
 func (p *Poller) MonitorWeekly(now time.Time) *usage.WeeklyEntry {
-	if p.Monitor == nil {
+	if p.producer == nil {
 		return nil
 	}
-	return p.Monitor.Weekly(now)
+	ds := p.producer.Load()
+	if ds == nil {
+		return nil
+	}
+	return ds.Weekly
 }
 
 // SetActiveWeekID implements daemon.BlockWeekIDSetter.
@@ -257,12 +271,9 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time) (*aggregate.Tree, bool, error) {
 	sessions := ds.Sessions
 
-	// Lazy-init stateful maps.
-	if p.burnShort == nil {
-		p.burnShort = make(map[string]*burnrate.Buffer)
-		p.burnLong = make(map[string]*burnrate.Buffer)
-		p.prevTotalTokens = make(map[string]int)
-	}
+	// Seed the burn-sampler windows from config (idempotent).
+	p.burn.winShort = p.BurnWindowShort
+	p.burn.winLong = p.BurnWindowLong
 
 	enriched := map[string]aggregate.SessionEnrichment{}
 	anyKeepAwake := false
@@ -283,25 +294,8 @@ func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time)
 		sc := *s
 		built = append(built, &sc)
 
-		// Burn rate: add delta (tokens generated since last poll) to ring buffers.
-		prev := p.prevTotalTokens[sc.SessionID]
-		delta := max(snap.TotalTokens-prev, 0)
-		p.prevTotalTokens[sc.SessionID] = snap.TotalTokens
-
-		winShort := p.BurnWindowShort
-		if winShort == 0 {
-			winShort = 60 * time.Second
-		}
-		winLong := p.BurnWindowLong
-		if winLong == 0 {
-			winLong = 300 * time.Second
-		}
-		if _, ok := p.burnShort[sc.SessionID]; !ok {
-			p.burnShort[sc.SessionID] = burnrate.New(winShort)
-			p.burnLong[sc.SessionID] = burnrate.New(winLong)
-		}
-		p.burnShort[sc.SessionID].Add(now, delta)
-		p.burnLong[sc.SessionID].Add(now, delta)
+		// Burn rate: add the Δ since last poll to the tick-owned ring buffers.
+		burnShort, burnLong := p.burn.sample(sc.SessionID, now, snap.TotalTokens)
 
 		// Drop a rate-limit reset that's already in the past beyond a small
 		// grace window. The session was paused but never resumed (likely
@@ -370,8 +364,8 @@ func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time)
 			SubshellCount:      shells,
 			AwaitingInput:      snap.AwaitingInput,
 			RateLimitResetsAt:  rlReset,
-			BurnRateShort:      p.burnShort[sc.SessionID].Rate(now),
-			BurnRateLong:       p.burnLong[sc.SessionID].Rate(now),
+			BurnRateShort:      burnShort,
+			BurnRateLong:       burnLong,
 			LastError:          snap.LastError,
 			LastErrorRetryable: snap.LastErrorRetryable,
 		}
@@ -383,13 +377,7 @@ func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time)
 	for _, s := range sessions {
 		activeIDs[s.SessionID] = true
 	}
-	for id := range p.burnShort {
-		if !activeIDs[id] {
-			delete(p.burnShort, id)
-			delete(p.burnLong, id)
-			delete(p.prevTotalTokens, id)
-		}
-	}
+	p.burn.prune(activeIDs)
 
 	// PR lookups were resolved by the producer; read them back.
 	prByDir := ds.PRByDir
