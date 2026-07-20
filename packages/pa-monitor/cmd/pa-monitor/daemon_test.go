@@ -74,11 +74,7 @@ func TestBuildRunOptions_WiringNotNil(t *testing.T) {
 	if opts.SessionsDir == "" {
 		t.Error("opts.SessionsDir is empty — the hourly GC sweeper goroutine cannot reconcile session .json files with the DB")
 	}
-	// pg2-5sxkb: the production poller must delegate its corpus reads (incl. the
-	// folded pricing/limits projections) to the corpus Monitor. If buildPoller
-	// drops the Monitor wiring or the UseCorpusMonitor flag, block/weekly/limits
-	// would silently fall back to the (to-be-removed) inline whole-corpus walks.
-	if pm, ok := opts.Poller.(interface{ UsesCorpusMonitor() bool }); !ok || !pm.UsesCorpusMonitor() {
-		t.Error("opts.Poller does not delegate to the corpus Monitor — the folded pricing/limits path is not wired")
-	}
+	// The corpus Monitor is now mandatory: Snapshot requires it, so a buildPoller
+	// that dropped the wiring would crash on the first tick (exercised by the
+	// daemon tick integration tests). No separate flag guard is needed post-pg2-66h9g.
 }

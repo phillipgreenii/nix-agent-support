@@ -155,6 +155,46 @@ func TestScan_PrunesVanishedPricingAndStatus(t *testing.T) {
 	}
 }
 
+// TestScan_PricingWindowDropsAncient proves the documented windowing bound: a
+// transcript whose mtime is older than the pricing window (max(sinceMonday, 12h))
+// is NEVER opened for pricing — only the in-window file is folded — while the
+// active block still reflects the recent record. (Ported from the removed
+// corpus_pricing_equivalence_test.go windowing test, now Monitor-only.)
+func TestScan_PricingWindowDropsAncient(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC) // Wed; window ~60h (this week)
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	home := filepath.Join(root, "claude-home")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Ancient file: mtime + record before this Monday (outside the window).
+	ancient := now.Add(-4 * 24 * time.Hour)
+	writeTranscript(t, projectDir(t, home, "/w/old"), "old.jsonl", ancient,
+		assistantLineTS("m", 9999, 9999, ancient))
+	// Recent in-window file.
+	writeTranscript(t, projectDir(t, home, "/w/new"), "new.jsonl", now,
+		assistantLineTS("m", 100, 50, now.Add(-1*time.Hour)))
+
+	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
+	if _, err := m.Scan(now); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.PricingFilesLastScan(); got != 1 {
+		t.Errorf("PricingFilesLastScan = %d, want 1 (ancient out-of-window file must NOT be opened)", got)
+	}
+	block := m.Block(now)
+	if block == nil {
+		t.Fatalf("Block = nil, want the recent record's active block")
+	}
+	// Recent-only cost: input 100, output 50 at Default 5/25 per Mtok.
+	want := 100.0/1e6*5 + 50.0/1e6*25
+	if diff := block.CostUSD - want; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("Block.CostUSD = %v, want %v (recent only; ancient excluded)", block.CostUSD, want)
+	}
+}
+
 // TestScan_CostProbeErrOnCorruptTranscript proves a transcript scan failure (an
 // oversized line) threads through to Monitor.CostProbed — so the TUI's
 // "5h unavailable — cost scan failed" signal survives the fold (SHOULD-FIX 4).

@@ -1,9 +1,6 @@
 package usage
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 // MondayAnchor returns the 00:00 UTC of the Monday on or before t. ccusage
 // anchors weekly buckets on Monday; the store/proto paths parse the Period as a
@@ -51,23 +48,4 @@ func CurrentWeekly(records []Record, prices PriceTable, now time.Time) *WeeklyEn
 		Period:    start.Format("2006-01-02"),
 		TotalCost: cost,
 	}
-}
-
-// CurrentWeekly scans transcripts and returns the native current-week entry,
-// mirroring the retired ccusage Provider.CurrentWeekly. Best-effort like
-// ActiveBlock: a scan error is recorded via Probed but does not blank the entry.
-func (p *NativePricer) CurrentWeekly(_ context.Context) (*WeeklyEntry, error) {
-	now := time.Now
-	if p.Now != nil {
-		now = p.Now
-	}
-	records, err := p.scanRecordsCached()
-	p.mu.Lock()
-	p.probed = true
-	// Set unconditionally so a successful scan clears a prior error, matching
-	// ActiveBlock — Probed() shares lastErr, and a stale error would otherwise
-	// stick until the next ActiveBlock call.
-	p.lastErr = err
-	p.mu.Unlock()
-	return CurrentWeekly(records, p.Prices, now()), nil
 }

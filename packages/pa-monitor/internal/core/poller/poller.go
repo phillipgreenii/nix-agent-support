@@ -123,14 +123,6 @@ type subshellCacheEntry struct {
 // attach per-session contributions to the correct block row.
 func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
 
-// UsesCorpusMonitor reports whether this poller reads its corpus projections from
-// a Monitor. Always true in production (buildPoller wires one). The daemon
-// lifecycle reads this to route its limits/weekly reads to the Monitor rather than
-// the opts.Limits/opts.WeeklyFn fallback (which now serves only non-Monitor test
-// pollers). The UseCorpusMonitor flag + the inline poller path were removed in
-// pg2-66h9g; the Monitor is mandatory for Snapshot.
-func (p *Poller) UsesCorpusMonitor() bool { return p.Monitor != nil }
-
 // MonitorLimits returns the Monitor's account-global rate_limits projection (nil
 // when no Monitor, e.g. a bare test poller). The daemon lifecycle reads limits
 // from here so the whole-corpus walk happens once, in the Monitor.

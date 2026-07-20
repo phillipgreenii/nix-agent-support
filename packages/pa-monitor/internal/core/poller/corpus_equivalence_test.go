@@ -31,11 +31,6 @@ func eqAssistant(model string, in, out int) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[]}}`, model, in, out)
 }
 
-func eqAssistantTS(model string, in, out int, ts time.Time) string {
-	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"role":"assistant","model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[]}}`,
-		ts.Format(time.RFC3339Nano), model, in, out)
-}
-
 func eqTitle(title string) string {
 	return `{"type":"custom-title","customTitle":"` + title + `"}`
 }
