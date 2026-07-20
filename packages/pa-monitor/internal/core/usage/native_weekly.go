@@ -5,10 +5,12 @@ import (
 	"time"
 )
 
-// mondayAnchor returns the 00:00 UTC of the Monday on or before t. ccusage
+// MondayAnchor returns the 00:00 UTC of the Monday on or before t. ccusage
 // anchors weekly buckets on Monday; the store/proto paths parse the Period as a
-// UTC "YYYY-MM-DD", so anchoring in UTC keeps the round-trip consistent.
-func mondayAnchor(t time.Time) time.Time {
+// UTC "YYYY-MM-DD", so anchoring in UTC keeps the round-trip consistent. Exported
+// so the corpus Monitor derives its pricing walk window (current week + block
+// margin) from the same anchor (pg2-5sxkb).
+func MondayAnchor(t time.Time) time.Time {
 	u := t.UTC()
 	// time.Weekday: Sunday=0..Saturday=6; days since Monday:
 	offset := (int(u.Weekday()) + 6) % 7
@@ -20,7 +22,7 @@ func mondayAnchor(t time.Time) time.Time {
 // per model, returning the current week's entry (ADR 0021 §3). Returns nil when
 // no records fall in the current week (ccusage weekly produces no current row).
 func CurrentWeekly(records []Record, prices PriceTable, now time.Time) *WeeklyEntry {
-	start := mondayAnchor(now)
+	start := MondayAnchor(now)
 	end := start.AddDate(0, 0, 7)
 	byModel := map[string]ModelTokens{}
 	any := false
