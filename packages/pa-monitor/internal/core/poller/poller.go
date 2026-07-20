@@ -112,6 +112,48 @@ type Poller struct {
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
+
+	// producer owns the Monitor + provider Cache and assembles the immutable
+	// DerivedState the emit tick reads (Phase 3). Lazily built from p.Monitor /
+	// p.Providers on first Snapshot; SynchronousMode=true keeps Scan on the tick
+	// until Phase 4 introduces the producer goroutine.
+	producer *Producer
+}
+
+// Producer returns the poller's Producer, building it lazily from p.Monitor /
+// p.Providers (defaulting both for a bare/test poller). Exposed so the daemon
+// can drive the producer goroutine (Phase 4) and tests can exercise the
+// assemble/publish/Load seam directly.
+func (p *Poller) Producer() *Producer { return p.ensureProducer() }
+
+// ensureProducer lazily constructs the Producer, defaulting the Monitor +
+// provider Cache exactly as the pre-Phase-3 Snapshot did for a bare/test poller.
+func (p *Poller) ensureProducer() *Producer {
+	if p.producer != nil {
+		return p.producer
+	}
+	if p.Monitor == nil {
+		m := corpus.New(p.ClaudeHome, &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive})
+		m.Register(corpus.NewSessionSnapshotObserver())
+		m.Register(corpus.NewSubagentErrorObserver())
+		m.Register(corpus.NewUsagePricingObserver(usage.PriceTable{}))
+		m.Register(corpus.NewLimitsObserver())
+		m.SetPhaseRecorder(p.Rec)
+		p.Monitor = m
+	}
+	if p.Providers == nil {
+		p.Providers = provider.New(p.Now)
+		p.Providers.SetRecorder(p.Rec)
+	}
+	p.producer = &Producer{
+		Monitor:         p.Monitor,
+		Providers:       p.Providers,
+		Now:             p.Now,
+		Signalers:       p.Signalers,
+		BridgeRegistry:  p.BridgeRegistry,
+		SynchronousMode: true,
+	}
+	return p.producer
 }
 
 // SetActiveBlockID implements daemon.BlockWeekIDSetter. Called by the daemon
@@ -172,27 +214,48 @@ func (p *Poller) phase(name string, start time.Time) {
 	}
 }
 
+// Snapshot builds the per-tick aggregate.Tree. It obtains one immutable
+// DerivedState from the Producer — assembled + published inline in
+// SynchronousMode (Scan on the tick), or Loaded from the last producer publish
+// otherwise (Phase 4) — then builds the tree from it (buildTree). The producer /
+// tick split is field-owned per C5: Monitor + providers are producer-side; the
+// burn-rate maps + prevTotalTokens are tick-side.
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
-	// The Monitor owns discovery + resolution + transcript/subagent tailing + the
-	// UsagePricing/Limits folds; it records the "discover" phase around its own
-	// Discover() call. The inline path was removed in pg2-66h9g, so a Monitor is
-	// required. Production wires one explicitly (buildPoller); a poller without one
-	// (tests, read-only pollers) gets a default Monitor over its own
-	// SessionsDir/ClaudeHome with the standard observer set.
-	if p.Monitor == nil {
-		m := corpus.New(p.ClaudeHome, &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive})
-		m.Register(corpus.NewSessionSnapshotObserver())
-		m.Register(corpus.NewSubagentErrorObserver())
-		m.Register(corpus.NewUsagePricingObserver(usage.PriceTable{}))
-		m.Register(corpus.NewLimitsObserver())
-		m.SetPhaseRecorder(p.Rec)
-		p.Monitor = m
+	prod := p.ensureProducer()
+
+	var ds *DerivedState
+	if prod.SynchronousMode {
+		var err error
+		ds, err = prod.Assemble(ctx, now)
+		if err != nil {
+			return nil, false, err
+		}
+		prod.Publish(ds)
+	} else {
+		ds = prod.Load()
+		if ds == nil {
+			// Producer goroutine has not published yet — bootstrap one batch so
+			// the first tick is not empty.
+			var err error
+			ds, err = prod.Assemble(ctx, now)
+			if err != nil {
+				return nil, false, err
+			}
+			prod.Publish(ds)
+		}
 	}
-	sessions, err := p.Monitor.Scan(now)
-	if err != nil {
-		return nil, false, err
-	}
+
+	return p.buildTree(ctx, ds, now)
+}
+
+// buildTree is the emit-tick reader: it Loads no state itself but takes an
+// already-assembled DerivedState and derives the tree — burn-rate sampling
+// (tick-stateful), Status/Blocker/LongIdle derivation, aggregate.Build, and the
+// DB upserts. It NEVER touches the Monitor or the providers, and never mutates
+// the published DerivedState (it derives Status into tick-owned session copies).
+func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time) (*aggregate.Tree, bool, error) {
+	sessions := ds.Sessions
 
 	// Lazy-init stateful maps.
 	if p.burnShort == nil {
@@ -200,40 +263,30 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnLong = make(map[string]*burnrate.Buffer)
 		p.prevTotalTokens = make(map[string]int)
 	}
-	// Provider cache (git-branch/subshell/terminal-host/PR). Lazily defaulted so a
-	// bare/test poller works; production wires one in buildPoller. BeginScan resets
-	// the per-scan PR live-key set before the per-session loop's PR calls.
-	if p.Providers == nil {
-		p.Providers = provider.New(p.Now)
-		p.Providers.SetRecorder(p.Rec)
-	}
-	p.Providers.BeginScan()
 
 	enriched := map[string]aggregate.SessionEnrichment{}
 	anyKeepAwake := false
 
+	// built holds tick-owned copies of the producer's sessions; Status/Blocker/
+	// LongIdle are derived onto the copies so the published DerivedState stays
+	// immutable (load-bearing once the producer runs off the tick, Phase 4).
+	built := make([]*session.Session, 0, len(sessions))
+
 	for _, s := range sessions {
-		// Resolution + the transcript fold were done by Monitor.Scan (which also
-		// set s.TranscriptMTime). Read the projections; the point-in-time PULL
-		// lookups (subshell, git-branch, terminal-host) come from the provider
-		// cache, which records their subprocess metrics from their new home (on
-		// miss) and caches so they do not fire every tick.
-		path, mtime, _ := p.Monitor.ResolvedPath(s.SessionID)
-		snap, _ := p.Monitor.SessionSnapshot(s.SessionID)
-		shells := p.Providers.Subshell(s.SessionID, s.PID, path, mtime)
-		s.Branch = p.Providers.GitBranch(s.Cwd)
-		// Terminal host: the provider returns the bare host name (WhilePIDAlive,
-		// re-probing "unknown"); the in-memory cmux/bridge refinement stays here so
-		// users still see live "cmux (bridge disconnected)" transitions.
-		s.TerminalHost = p.Providers.TerminalHost(s.SessionID, s.PID)
-		if s.TerminalHost == "cmux" {
-			s.TerminalHost = refineCmuxTerminalHost(p.Signalers, p.BridgeRegistry, s.PID)
-		}
+		proj := ds.Projections[s.SessionID]
+		path := proj.ResolvedPath
+		// snap is a local value copy of the projection's Snapshot — the resurfacing
+		// below mutates it without touching the published DerivedState.
+		snap := proj.Snapshot
+		shells := proj.Subshells
+
+		sc := *s
+		built = append(built, &sc)
 
 		// Burn rate: add delta (tokens generated since last poll) to ring buffers.
-		prev := p.prevTotalTokens[s.SessionID]
+		prev := p.prevTotalTokens[sc.SessionID]
 		delta := max(snap.TotalTokens-prev, 0)
-		p.prevTotalTokens[s.SessionID] = snap.TotalTokens
+		p.prevTotalTokens[sc.SessionID] = snap.TotalTokens
 
 		winShort := p.BurnWindowShort
 		if winShort == 0 {
@@ -243,12 +296,12 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		if winLong == 0 {
 			winLong = 300 * time.Second
 		}
-		if _, ok := p.burnShort[s.SessionID]; !ok {
-			p.burnShort[s.SessionID] = burnrate.New(winShort)
-			p.burnLong[s.SessionID] = burnrate.New(winLong)
+		if _, ok := p.burnShort[sc.SessionID]; !ok {
+			p.burnShort[sc.SessionID] = burnrate.New(winShort)
+			p.burnLong[sc.SessionID] = burnrate.New(winLong)
 		}
-		p.burnShort[s.SessionID].Add(now, delta)
-		p.burnLong[s.SessionID].Add(now, delta)
+		p.burnShort[sc.SessionID].Add(now, delta)
+		p.burnLong[sc.SessionID].Add(now, delta)
 
 		// Drop a rate-limit reset that's already in the past beyond a small
 		// grace window. The session was paused but never resumed (likely
@@ -260,14 +313,13 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 
 		// Subagent disrupt surfacing: a stream-idle-timeout (or any disrupt)
-		// inside a subagent lands only in subagents/agent-*.jsonl, which Scan
-		// does not read. When the main session has no terminal error of its
-		// own, surface the most recent terminal subagent error (tagged
-		// FromSubagent) so it shows in the TUI. Scanned outside the transcript
-		// cache because subagent files change independently of the main one.
+		// inside a subagent lands only in subagents/agent-*.jsonl. When the main
+		// session has no terminal error of its own, surface the most recent
+		// terminal subagent error (tagged FromSubagent) so it shows in the TUI.
+		// The producer captured it as proj.SubagentError.
 		if path != "" &&
 			(snap.LastError == nil || !snap.LastError.IsTerminal) {
-			if subErr, ok := p.Monitor.SubagentError(s.SessionID); ok && subErr != nil {
+			if subErr := proj.SubagentError; subErr != nil {
 				e := *subErr
 				snap.LastError = &e
 				// LastError was replaced by a subagent error; re-derive the
@@ -284,32 +336,32 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		// appropriate blocker (deriveStatusBlocker). Subagent mtime is load-
 		// bearing ONLY for the "waiting"-freshness cross-check and the LongIdle
 		// age refinement.
-		if !s.PidAlive {
+		if !sc.PidAlive {
 			// Dead pid: never Working (a dead process is not actively working)
 			// and never Blocked (it is gone, not waiting). Idle, refined by age.
-			s.Status = session.Idle
-			s.Blocker = session.NoBlocker
-			s.LongIdle = session.IsLongIdle(now, s.TranscriptMTime, p.IdleThreshold)
+			sc.Status = session.Idle
+			sc.Blocker = session.NoBlocker
+			sc.LongIdle = session.IsLongIdle(now, sc.TranscriptMTime, p.IdleThreshold)
 		} else {
-			lastActivity := p.Monitor.MaxActivity(s.SessionID)
+			lastActivity := proj.MaxActivity
 			reg := claudetranscript.RegistrySession{
-				Status:          s.RegistryStatus,
-				WaitingFor:      s.WaitingFor,
-				StatusUpdatedAt: s.StatusUpdatedAt,
+				Status:          sc.RegistryStatus,
+				WaitingFor:      sc.WaitingFor,
+				StatusUpdatedAt: sc.StatusUpdatedAt,
 			}
 			verdict := claudetranscript.ClassifyActivity(reg, snap.AwaitingInput, lastActivity, p.waitingFreshWindow())
-			s.Status, s.Blocker = deriveStatusBlocker(verdict.Activity, snap.LastError, rlReset)
+			sc.Status, sc.Blocker = deriveStatusBlocker(verdict.Activity, snap.LastError, rlReset)
 			// Dormant → idle age refinement (ADR 0024). Only an Idle session can
 			// be long-idle; Working/Blocked are never age-demoted (busy is
 			// trusted; a blocker is a real, current condition).
-			s.LongIdle = s.Status == session.Idle &&
+			sc.LongIdle = sc.Status == session.Idle &&
 				session.IsLongIdle(now, lastActivity, p.IdleThreshold)
 		}
-		if session.KeepAwake(s.Status, s.Blocker, snap.LastErrorRetryable) {
+		if session.KeepAwake(sc.Status, sc.Blocker, snap.LastErrorRetryable) {
 			anyKeepAwake = true
 		}
 
-		enriched[s.SessionID] = aggregate.SessionEnrichment{
+		enriched[sc.SessionID] = aggregate.SessionEnrichment{
 			ContextTokens:      snap.ContextTokens,
 			SessionTokens:      snap.TotalTokens,
 			Model:              snap.Model,
@@ -318,15 +370,15 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			SubshellCount:      shells,
 			AwaitingInput:      snap.AwaitingInput,
 			RateLimitResetsAt:  rlReset,
-			BurnRateShort:      p.burnShort[s.SessionID].Rate(now),
-			BurnRateLong:       p.burnLong[s.SessionID].Rate(now),
+			BurnRateShort:      p.burnShort[sc.SessionID].Rate(now),
+			BurnRateLong:       p.burnLong[sc.SessionID].Rate(now),
 			LastError:          snap.LastError,
 			LastErrorRetryable: snap.LastErrorRetryable,
 		}
 	}
 
 	// Prune stale burn buffers for sessions no longer alive. Provider-cache
-	// per-session/per-cwd eviction is handled by Providers.Reconcile below.
+	// eviction is the producer's Reconcile (in Assemble).
 	activeIDs := make(map[string]bool, len(sessions))
 	for _, s := range sessions {
 		activeIDs[s.SessionID] = true
@@ -339,61 +391,36 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 
-	// Look up PRs once per directory using the same first-non-empty-branch logic
-	// as aggregate.Build, ensuring the PR matches the displayed branch. The
-	// provider (backed by the bounded PRCache) records the pr_lookup metric on a
-	// real gh spawn and tracks the live (cwd,branch) keys for prune.
-	prByDir := map[string]*session.PRInfo{}
-	winningBranch := map[string]string{}
-	for _, s := range sessions {
-		if s.Branch == "" {
-			continue
-		}
-		if _, already := winningBranch[s.Cwd]; !already {
-			winningBranch[s.Cwd] = s.Branch
-		}
-	}
-	for cwd, branch := range winningBranch {
-		if info, err := p.Providers.PR(ctx, cwd, branch); err == nil {
-			prByDir[cwd] = info
-		}
-	}
-
-	// Evict provider-cache nodes for vanished sessions/cwds and prune vanished PR
-	// keys — once per tick, after the per-session loop + PR calls.
-	p.Providers.Reconcile(sessions)
+	// PR lookups were resolved by the producer; read them back.
+	prByDir := ds.PRByDir
 
 	// PID clamp: if a PID is alive and this session has the freshest transcript
 	// for that PID, clear the LongIdle age refinement (formerly the Dormant →
 	// Idle clamp; ADR 0024 preserves it as idle-age). Sessions superseded by
-	// /resume keep their LongIdle flag.
+	// /resume keep their LongIdle flag. Operates over the tick-owned copies.
 	pidActiveSID := make(map[int]string)
-	for _, s := range sessions {
+	for _, s := range built {
 		cur, ok := pidActiveSID[s.PID]
-		if !ok || s.TranscriptMTime.After(sessionMtime(sessions, cur)) {
+		if !ok || s.TranscriptMTime.After(sessionMtime(built, cur)) {
 			pidActiveSID[s.PID] = s.SessionID
 		}
 	}
-	for _, s := range sessions {
+	for _, s := range built {
 		if s.LongIdle && s.PidAlive && pidActiveSID[s.PID] == s.SessionID {
 			s.LongIdle = false
 		}
 	}
 
-	var block *usage.Block
-	var costProbed bool
-	var costProbeErr error
-	// The Monitor's UsagePricing observer already folded the in-window records
-	// during Scan; Block/CostProbed are a cheap projection read priced at the same
-	// `now`. The "pricer" phase timer stays (metric parity) — it now measures the
-	// projection read, not the whole-corpus WalkDir.
+	// The producer's UsagePricing observer already folded the in-window records;
+	// Block/CostProbed are read back from the DerivedState. The "pricer" phase
+	// timer stays (metric parity) — Phase-3 step 6 re-homes it to the producer.
 	pricerStart := time.Now()
-	block = p.Monitor.Block(now)
-	costProbed, costProbeErr = p.Monitor.CostProbed()
+	block := ds.Block
+	costProbed, costProbeErr := ds.CostProbed, ds.CostProbeErr
 	p.phase("pricer", pricerStart)
 
 	aggregateBuildStart := time.Now()
-	tree := aggregate.Build(sessions, enriched, prByDir, block, p.BlockCapUSD)
+	tree := aggregate.Build(built, enriched, prByDir, block, p.BlockCapUSD)
 	p.phase("aggregate_build", aggregateBuildStart)
 	tree.CostProbed = costProbed
 	tree.CostProbeErr = costProbeErr
