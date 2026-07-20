@@ -10,14 +10,27 @@ import (
 // Walks parent directories to find the repo root, and handles git worktrees
 // (.git file with gitdir: pointer). Returns "" when not in a git repo.
 func GitBranch(dir string) string {
+	headPath, ok := ResolveHeadPath(dir)
+	if !ok {
+		return ""
+	}
+	return ReadHead(headPath)
+}
+
+// ResolveHeadPath walks up from dir to the first ancestor directory that is a
+// git repo (or worktree), returning that repo's HEAD file path. Returns
+// ("", false) when dir is not inside any git repo. This is the FULL parent walk
+// (not the one-level resolveHeadPath); the provider caches on the resolved HEAD
+// path's mtime.
+func ResolveHeadPath(dir string) (string, bool) {
 	for d := dir; ; {
 		headPath, ok := resolveHeadPath(d)
 		if ok {
-			return readHead(headPath)
+			return headPath, true
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
-			return ""
+			return "", false
 		}
 		d = parent
 	}
@@ -48,7 +61,9 @@ func resolveHeadPath(dir string) (string, bool) {
 	return filepath.Join(ref, "HEAD"), true
 }
 
-func readHead(headPath string) string {
+// ReadHead reads a git HEAD file and returns the branch name (for a symbolic
+// ref) or a 7-char short SHA (for a detached HEAD). Returns "" when unreadable.
+func ReadHead(headPath string) string {
 	data, err := os.ReadFile(headPath)
 	if err != nil {
 		return ""
