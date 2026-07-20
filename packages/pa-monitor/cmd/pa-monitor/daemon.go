@@ -372,6 +372,16 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 	})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())
+	// Phase 1b (pg2-5sxkb): fold pricing + limits into the Monitor's single pass.
+	// UsagePricing produces the active block + weekly from the decoded transcript
+	// records (replacing the pricer's whole-corpus WalkDir); Limits produces the
+	// account-global rate_limits window-peak from the status siblings (replacing
+	// SiblingLimitsSource's walk). Poller.Snapshot reads the block, and the daemon
+	// tick reads limits/weekly, from these projections when UseCorpusMonitor is set;
+	// opts.Limits / opts.WeeklyFn below stay wired only as the equivalence oracle
+	// until the post-soak flag removal.
+	mon.Register(corpus.NewUsagePricingObserver(acct.PriceTable()))
+	mon.Register(corpus.NewLimitsObserver())
 	p.Monitor = mon
 	p.UseCorpusMonitor = true
 
