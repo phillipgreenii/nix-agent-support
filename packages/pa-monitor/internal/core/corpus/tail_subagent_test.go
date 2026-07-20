@@ -59,7 +59,7 @@ func TestSubagentTail_MatchesLastSubagentError(t *testing.T) {
 func TestSubagentTail_ContextLimitPreserved(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		apiErrorLine("invalid_request", "API Error: prompt is too long: 250000 tokens > 200000 maximum", "2026-07-20T10:00:00Z"))
@@ -74,7 +74,7 @@ func TestSubagentTail_ContextLimitPreserved(t *testing.T) {
 func TestSubagentTail_SurfacesLatestTerminal(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		apiErrorLine("server_error", "old", "2026-07-20T09:00:00Z"))
@@ -91,7 +91,7 @@ func TestSubagentTail_SurfacesLatestTerminal(t *testing.T) {
 func TestSubagentTail_RecoveryClearsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		apiErrorLine("server_error", "err", "2026-07-20T10:00:00Z"),
@@ -107,7 +107,7 @@ func TestSubagentTail_RecoveryClearsTerminal(t *testing.T) {
 func TestSubagentTail_SameMtimeAppendReRead(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	agent := writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		userTsLine("2026-07-20T09:00:00Z")) // no error yet
@@ -129,7 +129,7 @@ func TestSubagentTail_SameMtimeAppendReRead(t *testing.T) {
 func TestSubagentTail_UnchangedFileNotReRead(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		apiErrorLine("server_error", "boom", "2026-07-20T10:00:00Z"))
@@ -149,7 +149,7 @@ func TestSubagentTail_UnchangedFileNotReRead(t *testing.T) {
 func TestSubagentTail_MissingSubdirGraceful(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl") // no subagents dir created
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	st := newSubagentTail()
 	got, maxMtime := st.fold("sid", main)
 	if got != nil || !maxMtime.IsZero() {
@@ -165,7 +165,7 @@ func TestSubagentTail_MissingSubdirGraceful(t *testing.T) {
 func TestSubagentTail_MaxActivity(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(5000, 0), userTsLine("2026-07-20T09:00:00Z"))
 	writeTranscript(t, sub, "agent-2.jsonl", time.Unix(9000, 0), userTsLine("2026-07-20T09:00:00Z"))
@@ -180,7 +180,7 @@ func TestSubagentTail_MaxActivity(t *testing.T) {
 func TestSubagentTail_PruneByActiveIDs(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")
-	os.WriteFile(main, []byte("\n"), 0o600)
+	_ = os.WriteFile(main, []byte("\n"), 0o600)
 	sub := subagentsDirFor(t, main)
 	writeTranscript(t, sub, "agent-1.jsonl", time.Unix(1000, 0),
 		apiErrorLine("server_error", "boom", "2026-07-20T10:00:00Z"))

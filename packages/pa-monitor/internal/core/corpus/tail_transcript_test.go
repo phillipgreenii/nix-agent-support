@@ -56,7 +56,7 @@ func TestTranscriptTail_IncrementalEqualsCold(t *testing.T) {
 
 	warm := newTranscriptTail()
 	rec := newFakeRecorder()
-	warm.fold(path, time.Unix(1000, 0), rec) // full
+	_, _, _ = warm.fold(path, time.Unix(1000, 0), rec) // full
 	appendLines(t, path, time.Unix(2000, 0), assistantLine("claude-x", 200, 30))
 	gotIncremental, incRecs, _ := warm.fold(path, time.Unix(2000, 0), rec) // incremental
 
@@ -109,10 +109,10 @@ func TestTranscriptTail_RecordScanModes(t *testing.T) {
 	tt := newTranscriptTail()
 	rec := newFakeRecorder()
 
-	tt.fold(path, time.Unix(1000, 0), rec) // full
-	tt.fold(path, time.Unix(1000, 0), rec) // cache_hit
+	_, _, _ = tt.fold(path, time.Unix(1000, 0), rec) // full
+	_, _, _ = tt.fold(path, time.Unix(1000, 0), rec) // cache_hit
 	appendLines(t, path, time.Unix(2000, 0), assistantLine("claude-x", 10, 5))
-	tt.fold(path, time.Unix(2000, 0), rec) // incremental
+	_, _, _ = tt.fold(path, time.Unix(2000, 0), rec) // incremental
 
 	if rec.scans["full"] != 1 || rec.scans["cache_hit"] != 1 || rec.scans["incremental"] != 1 {
 		t.Fatalf("RecordScan modes = %v, want full=1 cache_hit=1 incremental=1", rec.scans)
@@ -145,8 +145,8 @@ func TestTranscriptTail_PruneByPath(t *testing.T) {
 	pathB := writeTranscript(t, dir, "b.jsonl", time.Unix(1000, 0), assistantLine("m", 3, 4))
 	tt := newTranscriptTail()
 	rec := newFakeRecorder()
-	tt.fold(pathA, time.Unix(1000, 0), rec)
-	tt.fold(pathB, time.Unix(1000, 0), rec)
+	_, _, _ = tt.fold(pathA, time.Unix(1000, 0), rec)
+	_, _, _ = tt.fold(pathB, time.Unix(1000, 0), rec)
 	if len(tt.cache) != 2 {
 		t.Fatalf("cache has %d entries, want 2", len(tt.cache))
 	}
