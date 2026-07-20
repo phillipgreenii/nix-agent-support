@@ -685,11 +685,11 @@
                           { lib, ... }:
                           {
                             # Stubs for the config surface the module reads/writes; the
-                            # real options live in claude / claude-marketplaces /
+                            # real options live in claude-code / claude-marketplaces /
                             # home-manager, not pulled in here.
                             options = {
-                              phillipgreenii.programs.claude.enable = lib.mkEnableOption "claude (stub)";
-                              phillipgreenii.programs.claude.marketplaces = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.marketplaces = {
                                 nixProvided = lib.mkOption {
                                   type = lib.types.listOf lib.types.package;
                                   default = [ ];
@@ -721,14 +721,14 @@
 
                   # claude on + integrate-branch plugin present (defaultEnabled) => on.
                   onDefault = evalEnable {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = true;
                       marketplaces.nixProvided = [ mockMarketplace ];
                     };
                   };
                   # plugin explicitly overridden off => off, even with claude on.
                   overriddenOff = evalEnable {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = true;
                       marketplaces.nixProvided = [ mockMarketplace ];
                       marketplaces.overrides."integrate-branch@mock-agent-support-marketplace-local" = false;
@@ -736,14 +736,14 @@
                   };
                   # claude disabled => off, even though plugin metadata is present.
                   claudeOff = evalEnable {
-                    phillipgreenii.programs.claude = {
+                    phillipgreenii.programs.claude-code = {
                       enable = false;
                       marketplaces.nixProvided = [ mockMarketplace ];
                     };
                   };
                   # explicit opt-in still wins upward.
                   explicitOn = evalEnable {
-                    phillipgreenii.programs.claude.enable = false;
+                    phillipgreenii.programs.claude-code.enable = false;
                     phillipgreenii.programs.integrate-branch-support.enable = true;
                   };
                 in
