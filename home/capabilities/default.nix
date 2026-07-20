@@ -59,6 +59,12 @@
           "pb"
         ];
       }
+      # tuicr — (H) code-review TUI (Plan 5 §5 catalog). Human-only, so its
+      # feature flag is set only for human accounts.
+      {
+        name = "tuicr";
+        humanFeatures = [ "tuicr" ];
+      }
       # Multi-agent orchestration/fleet management.
       {
         name = "claude-fleet";
