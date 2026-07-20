@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
 
 // scanModeCacheHit is the RecordScan mode emitted when a transcript is unchanged
@@ -11,20 +12,23 @@ import (
 const scanModeCacheHit = "cache_hit"
 
 type tcacheEntry struct {
-	path  string
-	mtime time.Time
-	snap  transcript.Snapshot
+	mtime   time.Time
+	snap    transcript.Snapshot
+	records []usage.Record
 }
 
-// transcriptTail owns per-session incremental scan state for resolved
-// transcripts. It reuses transcript.ScanIncremental/Accumulator so the
-// incremental and cold paths cannot diverge, caches the parsed Snapshot while
-// (path,mtime) is unchanged (cache_hit), and emits RecordScan with the same
-// full/incremental/cache_hit modes poller.Snapshot does today.
+// transcriptTail owns per-FILE incremental scan state for resolved transcripts,
+// keyed by PATH (not session id) so a file that several sessions resolve to — or
+// that is tailed for pricing without any active session — is read exactly once.
+// It reuses transcript.ScanIncremental/Accumulator so the incremental and cold
+// paths cannot diverge, caches the parsed Snapshot AND the file's timestamped
+// pricing records while (path,mtime) is unchanged (cache_hit), and emits
+// RecordScan with the same full/incremental/cache_hit modes poller.Snapshot does
+// today.
 type transcriptTail struct {
-	accs  map[string]*transcript.Accumulator
-	cache map[string]tcacheEntry
-	scans int // cumulative ScanIncremental calls (Monitor resets per Scan for the perf guard)
+	accs  map[string]*transcript.Accumulator // keyed by path
+	cache map[string]tcacheEntry             // keyed by path
+	scans int                                // cumulative ScanIncremental calls (Monitor resets per Scan for the perf guard)
 }
 
 func newTranscriptTail() *transcriptTail {
@@ -34,41 +38,44 @@ func newTranscriptTail() *transcriptTail {
 	}
 }
 
-// fold reads sessionID's resolved transcript at path (mtime from resolution) and
-// returns its Snapshot, recording the scan metric via rec (nil-safe). A cache
-// hit (unchanged path+mtime) reuses the parsed Snapshot with no re-parse. An
-// empty path yields a zero Snapshot and records a "full" scan (parity with
-// poller.go:208-210, which calls ScanIncremental("") in the miss branch).
-func (tt *transcriptTail) fold(sessionID, path string, mtime time.Time, rec Recorder) transcript.Snapshot {
+// fold reads the transcript at path (mtime from resolution) and returns its
+// Snapshot, its timestamped pricing records (one usage.Record per non-error,
+// modeled, non-zero-usage assistant line), and any scan error, recording the scan
+// metric via rec (nil-safe). A cache hit (unchanged path+mtime) reuses the parsed
+// Snapshot AND records with no re-parse — records MUST be returned on cache-hit
+// too, else a caller that replaces its per-path record set each tick would wipe
+// it on the (dominant) unchanged-file tick. An empty path yields a zero Snapshot,
+// nil records, and records a "full" scan (parity with poller.go:208-210, which
+// calls ScanIncremental("") in the miss branch).
+func (tt *transcriptTail) fold(path string, mtime time.Time, rec Recorder) (transcript.Snapshot, []usage.Record, error) {
 	if path == "" {
 		recordScan(rec, string(transcript.ScanModeFull), 0, 0)
-		return transcript.Snapshot{}
+		return transcript.Snapshot{}, nil, nil
 	}
-	if c, ok := tt.cache[sessionID]; ok && c.path == path && c.mtime.Equal(mtime) {
+	if c, ok := tt.cache[path]; ok && c.mtime.Equal(mtime) {
 		recordScan(rec, scanModeCacheHit, 0, 0)
-		return c.snap
+		return c.snap, c.records, nil
 	}
-	// prevAcc only when the resolved path is unchanged (matches poller.go:200-206:
-	// a rotated/renamed transcript re-parses from scratch).
-	var prevAcc *transcript.Accumulator
-	if c, ok := tt.cache[sessionID]; ok && c.path == path {
-		prevAcc = tt.accs[sessionID]
-	}
+	// prevAcc when we have prior state for this exact path (incremental tail); a
+	// new path starts fresh, matching poller.go:200-206 (a rotated/renamed
+	// transcript re-parses from scratch).
+	prevAcc := tt.accs[path]
 	start := time.Now()
-	snap, acc, stats, _ := transcript.ScanIncremental(path, prevAcc)
+	snap, acc, stats, err := transcript.ScanIncremental(path, prevAcc)
 	tt.scans++
 	recordScan(rec, string(stats.Mode), time.Since(start), stats.BytesFolded)
-	tt.accs[sessionID] = acc
-	tt.cache[sessionID] = tcacheEntry{path: path, mtime: mtime, snap: snap}
-	return snap
+	records := acc.Records()
+	tt.accs[path] = acc
+	tt.cache[path] = tcacheEntry{mtime: mtime, snap: snap, records: records}
+	return snap, records, err
 }
 
-// prune drops per-session scan state for sessions absent from activeIDs.
-func (tt *transcriptTail) prune(activeIDs map[string]bool) {
-	for id := range tt.cache {
-		if !activeIDs[id] {
-			delete(tt.cache, id)
-			delete(tt.accs, id)
+// prune drops per-path scan state for paths absent from activePaths.
+func (tt *transcriptTail) prune(activePaths map[string]bool) {
+	for p := range tt.cache {
+		if !activePaths[p] {
+			delete(tt.cache, p)
+			delete(tt.accs, p)
 		}
 	}
 }

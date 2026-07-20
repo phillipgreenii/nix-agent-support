@@ -89,6 +89,7 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 
 	activeIDs := make(map[string]bool, len(sessions))
 	activeDirs := make(map[string]bool, len(sessions))
+	activePaths := make(map[string]bool, len(sessions))
 	newTopo := make(map[string]sessionTopology, len(sessions))
 
 	for _, s := range sessions {
@@ -99,8 +100,11 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 		if ok {
 			s.TranscriptMTime = mtime
 		}
+		if path != "" {
+			activePaths[path] = true
+		}
 
-		snap := m.tt.fold(s.SessionID, path, mtime, m.rec)
+		snap, _, _ := m.tt.fold(path, mtime, m.rec)
 		if m.sessionObs != nil && m.sessionObs.Criteria().matches(Transcript, mtime, true, now) {
 			m.sessionObs.set(s.SessionID, snap)
 		}
@@ -117,7 +121,7 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 
 	// Prune ALL Monitor-owned state to the active set every Scan — else these
 	// maps grow for the daemon's lifetime, the exact defect this epic fixes (S2).
-	m.tt.prune(activeIDs)
+	m.tt.prune(activePaths)
 	m.st.prune(activeIDs)
 	m.titles.prune(activeDirs)
 	for _, o := range m.observers {

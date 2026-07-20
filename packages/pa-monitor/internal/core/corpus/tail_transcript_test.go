@@ -56,18 +56,24 @@ func TestTranscriptTail_IncrementalEqualsCold(t *testing.T) {
 
 	warm := newTranscriptTail()
 	rec := newFakeRecorder()
-	_ = warm.fold("s", path, time.Unix(1000, 0), rec) // full
+	warm.fold(path, time.Unix(1000, 0), rec) // full
 	appendLines(t, path, time.Unix(2000, 0), assistantLine("claude-x", 200, 30))
-	gotIncremental := warm.fold("s", path, time.Unix(2000, 0), rec) // incremental
+	gotIncremental, incRecs, _ := warm.fold(path, time.Unix(2000, 0), rec) // incremental
 
 	cold := newTranscriptTail()
-	gotCold := cold.fold("s", path, time.Unix(2000, 0), newFakeRecorder()) // full parse of whole file
+	gotCold, coldRecs, _ := cold.fold(path, time.Unix(2000, 0), newFakeRecorder()) // full parse of whole file
 
 	if !reflect.DeepEqual(gotIncremental, gotCold) {
 		t.Fatalf("incremental != cold:\n inc=%+v\ncold=%+v", gotIncremental, gotCold)
 	}
+	if !reflect.DeepEqual(incRecs, coldRecs) {
+		t.Fatalf("incremental records != cold records:\n inc=%+v\ncold=%+v", incRecs, coldRecs)
+	}
 	if gotCold.TotalTokens != 80 || gotCold.Model != "claude-x" || gotCold.FirstPrompt != "hello" {
 		t.Fatalf("unexpected snapshot: %+v", gotCold)
+	}
+	if len(coldRecs) != 2 {
+		t.Fatalf("cold records len = %d, want 2 (two assistant usage lines)", len(coldRecs))
 	}
 }
 
@@ -77,12 +83,20 @@ func TestTranscriptTail_CacheHitOnUnchanged(t *testing.T) {
 	tt := newTranscriptTail()
 	rec := newFakeRecorder()
 
-	snap1 := tt.fold("s", path, time.Unix(1000, 0), rec)
+	snap1, recs1, _ := tt.fold(path, time.Unix(1000, 0), rec)
 	scansAfterFirst := tt.scans
-	snap2 := tt.fold("s", path, time.Unix(1000, 0), rec) // same path+mtime -> cache hit
+	snap2, recs2, _ := tt.fold(path, time.Unix(1000, 0), rec) // same path+mtime -> cache hit
 
 	if !reflect.DeepEqual(snap1, snap2) {
 		t.Fatalf("cache-hit snapshot differs: %+v vs %+v", snap1, snap2)
+	}
+	// SHIP-BLOCKER guard: records MUST survive a cache-hit tick (else the dominant
+	// unchanged-file tick returns nil and setRecords wipes the pricing corpus).
+	if !reflect.DeepEqual(recs1, recs2) {
+		t.Fatalf("cache-hit records differ: %+v vs %+v (records must be cached)", recs1, recs2)
+	}
+	if len(recs2) != 1 {
+		t.Fatalf("cache-hit records len = %d, want 1", len(recs2))
 	}
 	if tt.scans != scansAfterFirst {
 		t.Fatalf("ScanIncremental re-invoked on cache hit: scans %d -> %d", scansAfterFirst, tt.scans)
@@ -95,10 +109,10 @@ func TestTranscriptTail_RecordScanModes(t *testing.T) {
 	tt := newTranscriptTail()
 	rec := newFakeRecorder()
 
-	tt.fold("s", path, time.Unix(1000, 0), rec) // full
-	tt.fold("s", path, time.Unix(1000, 0), rec) // cache_hit
+	tt.fold(path, time.Unix(1000, 0), rec) // full
+	tt.fold(path, time.Unix(1000, 0), rec) // cache_hit
 	appendLines(t, path, time.Unix(2000, 0), assistantLine("claude-x", 10, 5))
-	tt.fold("s", path, time.Unix(2000, 0), rec) // incremental
+	tt.fold(path, time.Unix(2000, 0), rec) // incremental
 
 	if rec.scans["full"] != 1 || rec.scans["cache_hit"] != 1 || rec.scans["incremental"] != 1 {
 		t.Fatalf("RecordScan modes = %v, want full=1 cache_hit=1 incremental=1", rec.scans)
@@ -108,12 +122,40 @@ func TestTranscriptTail_RecordScanModes(t *testing.T) {
 func TestTranscriptTail_EmptyPathRecordsFull(t *testing.T) {
 	tt := newTranscriptTail()
 	rec := newFakeRecorder()
-	snap := tt.fold("s", "", time.Time{}, rec)
+	snap, recs, err := tt.fold("", time.Time{}, rec)
+	if err != nil {
+		t.Fatalf("empty-path fold err = %v, want nil", err)
+	}
 	if !reflect.DeepEqual(snap, transcript.Snapshot{}) {
 		t.Fatalf("empty-path fold returned non-zero snapshot: %+v", snap)
 	}
+	if recs != nil {
+		t.Fatalf("empty-path fold records = %+v, want nil", recs)
+	}
 	if rec.scans["full"] != 1 {
 		t.Fatalf("empty-path fold RecordScan = %v, want full=1 (parity with poller.go:208-210)", rec.scans)
+	}
+}
+
+// TestTranscriptTail_PruneByPath proves the tail is keyed by path and prune drops
+// entries whose path is absent from the active set.
+func TestTranscriptTail_PruneByPath(t *testing.T) {
+	dir := t.TempDir()
+	pathA := writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), assistantLine("m", 1, 2))
+	pathB := writeTranscript(t, dir, "b.jsonl", time.Unix(1000, 0), assistantLine("m", 3, 4))
+	tt := newTranscriptTail()
+	rec := newFakeRecorder()
+	tt.fold(pathA, time.Unix(1000, 0), rec)
+	tt.fold(pathB, time.Unix(1000, 0), rec)
+	if len(tt.cache) != 2 {
+		t.Fatalf("cache has %d entries, want 2", len(tt.cache))
+	}
+	tt.prune(map[string]bool{pathA: true}) // only A active
+	if len(tt.cache) != 1 {
+		t.Fatalf("after prune cache has %d entries, want 1 (B dropped)", len(tt.cache))
+	}
+	if _, ok := tt.cache[pathA]; !ok {
+		t.Fatalf("prune dropped the active path A")
 	}
 }
 
@@ -121,7 +163,7 @@ func TestSessionSnapshotObserver_SetGetPrune(t *testing.T) {
 	o := NewSessionSnapshotObserver()
 	dir := t.TempDir()
 	path := writeTranscript(t, dir, "s.jsonl", time.Unix(1000, 0), assistantLine("claude-x", 100, 50))
-	snap := newTranscriptTail().fold("s", path, time.Unix(1000, 0), newFakeRecorder())
+	snap, _, _ := newTranscriptTail().fold(path, time.Unix(1000, 0), newFakeRecorder())
 	o.set("s", snap)
 
 	got, ok := o.Snapshot("s")
