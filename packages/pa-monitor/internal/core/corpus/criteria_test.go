@@ -53,6 +53,21 @@ func TestCriteriaMatches(t *testing.T) {
 			crit:  Criteria{Classes: []FileClass{Transcript}, ActiveOnly: true},
 			class: Transcript, mtime: recent, isActive: true, want: true,
 		},
+		{
+			name:  "StatusSibling class matches a StatusSibling criteria",
+			crit:  Criteria{Classes: []FileClass{StatusSibling}},
+			class: StatusSibling, mtime: old, isActive: false, want: true,
+		},
+		{
+			name:  "StatusSibling criteria rejects a Transcript file",
+			crit:  Criteria{Classes: []FileClass{StatusSibling}},
+			class: Transcript, mtime: recent, isActive: true, want: false,
+		},
+		{
+			name:  "Window-only (no ActiveOnly) matches an inactive in-window file (pricing gate)",
+			crit:  Criteria{Classes: []FileClass{Transcript}, Window: 5 * time.Minute},
+			class: Transcript, mtime: recent, isActive: false, want: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
