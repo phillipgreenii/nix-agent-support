@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
+	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon"
@@ -178,6 +179,19 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		}
 	}
 
+	// Provider cache: the shared owner of point-in-time PULL lookups (git-branch,
+	// subshell, terminal-host, env, repo-label, PR). Created at the composition
+	// root so BOTH the poller (buildPoller wires its prCache-backed PR + the
+	// Discoverer's env) and the label pipeline's Repo detector share one cache and
+	// one eviction lifecycle. The terminal-host + repo-label fetch boundaries are
+	// wired here; the PR + env boundaries are wired in buildPoller.
+	providerCache := provider.New(time.Now)
+	providerCache.PidAlive = session.DefaultPidAlive
+	providerCache.FetchTerminalHost = func(pid int) string {
+		return signallayer.DetectHost(signallayer.DefaultSignalers(), pid)
+	}
+	providerCache.FetchRepoLabel = detectors.RepoLabelFor
+
 	opts := daemon.RunOptions{
 		Paths:               paths,
 		Emitter:             emitter,
@@ -193,7 +207,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		Detectors: []labels.Detector{
 			detectors.DefaultScope{}, // sets workspace.scope=personal; decorators may override
 			detectors.Terminal{},
-			detectors.Repo{},
+			detectors.Repo{Cache: providerCache}, // per-cwd LongLived repo-label cache
 			detectors.Project{},
 			detectors.Agent{},
 		},
@@ -214,7 +228,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	}
 
 	if !disablePoller {
-		p, blockTr, weekTr := buildPoller(ctx, cfg, acct)
+		p, blockTr, weekTr := buildPoller(ctx, cfg, acct, providerCache)
 		p.BridgeRegistry = bridgeRegistry
 
 		// Open the SQLite database and wire WriteService into the poller so
@@ -331,12 +345,24 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 // background goroutine or ctx lifetime is involved. Building it here — the
 // composition root — is where the concrete adapter is named; the poller and
 // daemon see only the CostPricer port.
-func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker) {
+func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cache *provider.Cache) (*poller.Poller, *block.Tracker, *week.Tracker) {
 	home, _ := os.UserHomeDir()
 	claudeHome := filepath.Join(home, ".claude")
 
+	// Bound the file-backed PR cache (15m found-TTL) and time the gh spawn inside
+	// LookupFn so the pr_lookup subprocess metric fires ONLY on a real fetch
+	// (miss/expiry), not on a cache hit — the single-cache, no-double-caching PR
+	// path. The provider records the live (cwd,branch) keys + drives Prune.
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
-	signalers := signallayer.DefaultSignalers()
+	prCache.FoundTTL = 15 * time.Minute
+	prCache.LookupFn = func(ctx context.Context, cwd, branch string) (session.PRInfo, bool, error) {
+		start := time.Now()
+		info, found, err := session.LookupPR(ctx, cwd, branch)
+		cache.Record("pr_lookup", time.Since(start))
+		return info, found, err
+	}
+	cache.PRBackend = prCache.Get
+	cache.PRPrune = prCache.Prune
 
 	p := &poller.Poller{
 		SessionsDir:        session.DefaultSessionsDir(),
@@ -350,8 +376,8 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 		BurnWindowShort:    cfg.BurnWindowShort,
 		BurnWindowLong:     cfg.BurnWindowLong,
 		Now:                time.Now,
-		PRLookupFn:         prCache.Get,
-		Signalers:          signalers,
+		Signalers:          signallayer.DefaultSignalers(),
+		Providers:          cache,
 	}
 
 	// Corpus Monitor: the single owner of the corpus read — discovery, resolution,
@@ -361,10 +387,14 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 	// inline poller path, the pricer's whole-corpus WalkDir, and the
 	// SiblingLimitsSource walk were removed in pg2-66h9g — the Monitor is the only
 	// corpus reader. Synchronous on the tick goroutine (no new concurrency); the
-	// metric recorder is threaded via p.SetPhaseRecorder, which fans out to it.
+	// metric recorder is threaded via p.SetPhaseRecorder, which fans out to it and
+	// the provider cache. The Discoverer reads process env through the provider
+	// cache (session-id keyed, WhilePIDAlive), so `ps -E` runs once per session,
+	// not once per tick.
 	mon := corpus.New(claudeHome, &session.Discoverer{
 		SessionsDir: session.DefaultSessionsDir(),
 		PidAlive:    session.DefaultPidAlive,
+		ReadEnv:     cache.Env,
 	})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())

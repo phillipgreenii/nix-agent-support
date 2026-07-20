@@ -80,10 +80,12 @@ func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
 	envByPID := map[int]map[string]string{
 		42: {"TMUX": "/tmp/tmux-501/default,1,0", "CMUX_WORKSPACE_ID": "ws1"},
 	}
+	var gotSID string
 	d := &Discoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
-		ReadEnv: func(pid int) (map[string]string, error) {
+		ReadEnv: func(sessionID string, pid int) (map[string]string, error) {
+			gotSID = sessionID
 			return envByPID[pid], nil
 		},
 	}
@@ -93,6 +95,9 @@ func TestDiscover_PopulatesEnvViaInjectedReader(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d sessions", len(got))
+	}
+	if gotSID != got[0].SessionID {
+		t.Errorf("ReadEnv sessionID = %q, want %q (session-id must be threaded)", gotSID, got[0].SessionID)
 	}
 	if got[0].Env["TMUX"] != "/tmp/tmux-501/default,1,0" {
 		t.Errorf("env TMUX = %q", got[0].Env["TMUX"])
@@ -110,7 +115,7 @@ func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
 	d := &Discoverer{
 		SessionsDir: dir,
 		PidAlive:    func(int) bool { return true },
-		ReadEnv: func(pid int) (map[string]string, error) {
+		ReadEnv: func(_ string, _ int) (map[string]string, error) {
 			return nil, os.ErrPermission
 		},
 	}

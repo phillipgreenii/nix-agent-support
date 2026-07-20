@@ -155,8 +155,9 @@ func newMonitorPoller(sessionsDir, home string, pidAlive func(int) bool, now tim
 // TestSnapshot_CorpusMonitor_MetricParity verifies the pg2-sewtz metric contract
 // is preserved after delegation: the Monitor tail emits transcript.scan
 // full/cache_hit modes and the "discover" phase (re-homed from the poller),
-// while the poller still emits the subprocess metrics (git_branch). The recorder
-// is wired once via p.SetPhaseRecorder, which fans out to the Monitor.
+// while the provider cache emits the subprocess metrics (git_branch) from their
+// new home. The recorder is wired once via p.SetPhaseRecorder, which fans out to
+// the Monitor and (on lazy-default) the provider cache.
 func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
 	sessionsDir, home, pidAlive := buildEquivalenceCorpus(t)
 	now := time.Unix(1_776_000_300, 0)

@@ -12,7 +12,7 @@ import (
 )
 
 // stubEnv keeps Discoverer hermetic (no ps -E subprocess per session).
-func stubEnv(int) (map[string]string, error) { return map[string]string{}, nil }
+func stubEnv(string, int) (map[string]string, error) { return map[string]string{}, nil }
 
 func writeSessionRecord(t *testing.T, sessionsDir string, pid int, sessID, cwd, name string) {
 	t.Helper()

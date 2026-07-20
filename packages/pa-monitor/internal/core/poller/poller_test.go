@@ -3,7 +3,6 @@ package poller
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -235,78 +235,76 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 	}
 }
 
-func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.terminalHostCache) == 0 {
-		t.Error("terminalHostCache should be populated after Snapshot")
-	}
-}
-
-func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	firstCache := maps.Clone(p.terminalHostCache)
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for pid, host := range firstCache {
-		if got := p.terminalHostCache[pid]; got != host {
-			t.Errorf("terminalHostCache[%d]: first=%q second=%q (changed unexpectedly)", pid, host, got)
-		}
-	}
-}
+// Terminal-host caching now lives in the provider cache; its behavior (cache,
+// re-probe unknown, PID-reuse safety) is covered by
+// internal/core/provider/terminalhost_test.go. The poller-level terminalHostCache
+// tests were removed with the field.
 
 func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	type call struct{ cwd, branch string }
 	var calls []call
 
+	cache := provider.New(nil)
+	// Give every session a non-empty branch so PR is actually attempted, and
+	// count PR backend calls per (cwd,branch).
+	cache.FetchGitBranch = func(cwd string) (string, string, bool) { return "feat/x", "", true }
+	cache.PRBackend = func(_ context.Context, cwd, branch string) (*session.PRInfo, error) {
+		calls = append(calls, call{cwd, branch})
+		return nil, nil
+	}
 	p := &Poller{
 		SessionsDir: "../../../tests/fixtures/sessions",
 		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
-		PRLookupFn: func(_ context.Context, cwd, branch string) (*session.PRInfo, error) {
-			calls = append(calls, call{cwd, branch})
-			return nil, nil
-		},
+		Providers:   cache,
 	}
 	_, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// PRLookupFn must not be called for sessions with empty branch.
+	// PR must not be attempted for an empty branch (none here, all "feat/x").
 	for _, c := range calls {
 		if c.branch == "" {
-			t.Errorf("PRLookupFn called with empty branch for cwd=%q", c.cwd)
+			t.Errorf("PR attempted with empty branch for cwd=%q", c.cwd)
 		}
 	}
-	// Must be called at most once per cwd.
+	// Must be attempted at most once per cwd.
 	cwdCount := map[string]int{}
 	for _, c := range calls {
 		cwdCount[c.cwd]++
 	}
 	for cwd, count := range cwdCount {
 		if count > 1 {
-			t.Errorf("PRLookupFn called %d times for cwd=%q, want at most 1", count, cwd)
+			t.Errorf("PR attempted %d times for cwd=%q, want at most 1", count, cwd)
 		}
+	}
+}
+
+// TestSnapshotBranchEqualsSessionGitBranch is the layer-3 equivalence gate: a
+// session whose cwd is a real subdirectory of a temp git repo must resolve to the
+// same branch the pre-provider path (session.GitBranch) produced. This exercises
+// the REAL resolver (catching the subdirectory-walk regression the /tmp fixtures
+// cannot).
+func TestSnapshotBranchEqualsSessionGitBranch(t *testing.T) {
+	repo := t.TempDir()
+	gitDir := filepath.Join(repo, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/feat/deep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "pkg", "inner")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := provider.New(nil)
+	got := cache.GitBranch(sub)
+	want := session.GitBranch(sub)
+	if got != want || got != "feat/deep" {
+		t.Fatalf("provider GitBranch(%q)=%q; session.GitBranch=%q; want feat/deep", sub, got, want)
 	}
 }
 

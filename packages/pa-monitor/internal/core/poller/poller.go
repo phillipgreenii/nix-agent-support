@@ -11,8 +11,8 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
+	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
@@ -54,7 +54,6 @@ type Poller struct {
 	BurnWindowShort    time.Duration
 	BurnWindowLong     time.Duration
 	Now                func() time.Time
-	PRLookupFn         func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
 	Signalers          []signal.Signaler
 	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
 	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
@@ -101,21 +100,18 @@ type Poller struct {
 	// path was removed in pg2-66h9g. Still synchronous on the tick goroutine.
 	Monitor *corpus.Monitor
 
+	// Providers is the nested cache of point-in-time PULL lookups (git-branch,
+	// subshell, terminal-host, env, repo-label, PR). Snapshot reads branch /
+	// terminal-host / subshell / PR from it; env is injected into the Discoverer's
+	// ReadEnv and repo-label into the label detector at the composition root. It
+	// records the git_branch/subshell/terminal_host/pr_lookup subprocess metrics
+	// from their new home (on miss). Lazily defaulted when nil (bare/test poller).
+	// Still synchronous on the tick goroutine in Phase 2.
+	Providers *provider.Cache
+
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
-
-	terminalHostCache map[int]string
-	// subshellCache backs the poller-side subshell count. Subshell counting stays
-	// a poller/provider concern (Phase 2), so it keeps its own (path,mtime)-keyed
-	// cache — without it, each tick would recount subshells (a pgrep spawn).
-	subshellCache map[string]subshellCacheEntry
-}
-
-type subshellCacheEntry struct {
-	path  string
-	mtime time.Time
-	count int
 }
 
 // SetActiveBlockID implements daemon.BlockWeekIDSetter. Called by the daemon
@@ -161,6 +157,9 @@ func (p *Poller) SetPhaseRecorder(r any) {
 	if p.Monitor != nil {
 		p.Monitor.SetPhaseRecorder(r)
 	}
+	if p.Providers != nil {
+		p.Providers.SetRecorder(r)
+	}
 }
 
 // phase records a once-per-tick phase duration when a Rec is wired, keeping
@@ -195,58 +194,38 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		return nil, false, err
 	}
 
-	subshellCounter := &subshell.Counter{}
-
 	// Lazy-init stateful maps.
 	if p.burnShort == nil {
 		p.burnShort = make(map[string]*burnrate.Buffer)
 		p.burnLong = make(map[string]*burnrate.Buffer)
 		p.prevTotalTokens = make(map[string]int)
-		p.terminalHostCache = make(map[int]string)
-		p.subshellCache = make(map[string]subshellCacheEntry)
 	}
+	// Provider cache (git-branch/subshell/terminal-host/PR). Lazily defaulted so a
+	// bare/test poller works; production wires one in buildPoller. BeginScan resets
+	// the per-scan PR live-key set before the per-session loop's PR calls.
+	if p.Providers == nil {
+		p.Providers = provider.New(p.Now)
+		p.Providers.SetRecorder(p.Rec)
+	}
+	p.Providers.BeginScan()
 
 	enriched := map[string]aggregate.SessionEnrichment{}
 	anyKeepAwake := false
 
 	for _, s := range sessions {
 		// Resolution + the transcript fold were done by Monitor.Scan (which also
-		// set s.TranscriptMTime). Read the projections; subshell counting stays here
-		// with its own (path,mtime) cache (Phase-2 provider).
+		// set s.TranscriptMTime). Read the projections; the point-in-time PULL
+		// lookups (subshell, git-branch, terminal-host) come from the provider
+		// cache, which records their subprocess metrics from their new home (on
+		// miss) and caches so they do not fire every tick.
 		path, mtime, _ := p.Monitor.ResolvedPath(s.SessionID)
 		snap, _ := p.Monitor.SessionSnapshot(s.SessionID)
-		shells := p.countSubshellCached(subshellCounter, s.SessionID, s.PID, path, mtime)
-		// git branch provider (stays in the poller; Phase 2). Independent of the
-		// transcript read, so its position relative to acquisition is immaterial.
-		gitBranchStart := time.Now()
-		s.Branch = session.GitBranch(s.Cwd)
-		if p.Rec != nil {
-			p.Rec.RecordSubprocess("git_branch", time.Since(gitBranchStart))
-		}
-
-		// TerminalHost cache: detect once per PID lifetime. The cached value
-		// is the bare signaler.Name() ("tmux", "cmux", "ghostty", "unknown");
-		// the cmux subcase is then refined every poll against BridgeRegistry
-		// (cheap, in-memory) so users see live "cmux (bridge disconnected)"
-		// transitions without having to wait for the session PID to recycle.
-		//
-		// Special case: cached "unknown" results are re-probed each tick.
-		// Detection can transiently fail (e.g. tmux pane created between
-		// `ps` and `list-panes`, or the tmux server briefly absent), and
-		// caching "unknown" for the PID lifetime locks in that wrong answer.
-		// Re-probing is cheap: the signaler-level cache (tmuxCacheTTL=2s,
-		// CmuxSignaler.surfaceCacheTTL similar) absorbs the cost across
-		// sessions in a single tick.
-		if host, hit := p.terminalHostCache[s.PID]; hit && host != "unknown" {
-			s.TerminalHost = host
-		} else {
-			terminalHostStart := time.Now()
-			s.TerminalHost = detectTerminalHost(p.Signalers, s.PID)
-			if p.Rec != nil {
-				p.Rec.RecordSubprocess("terminal_host", time.Since(terminalHostStart))
-			}
-			p.terminalHostCache[s.PID] = s.TerminalHost
-		}
+		shells := p.Providers.Subshell(s.SessionID, s.PID, path, mtime)
+		s.Branch = p.Providers.GitBranch(s.Cwd)
+		// Terminal host: the provider returns the bare host name (WhilePIDAlive,
+		// re-probing "unknown"); the in-memory cmux/bridge refinement stays here so
+		// users still see live "cmux (bridge disconnected)" transitions.
+		s.TerminalHost = p.Providers.TerminalHost(s.SessionID, s.PID)
 		if s.TerminalHost == "cmux" {
 			s.TerminalHost = refineCmuxTerminalHost(p.Signalers, p.BridgeRegistry, s.PID)
 		}
@@ -346,7 +325,8 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 	}
 
-	// Prune stale burn buffers for sessions no longer alive.
+	// Prune stale burn buffers for sessions no longer alive. Provider-cache
+	// per-session/per-cwd eviction is handled by Providers.Reconcile below.
 	activeIDs := make(map[string]bool, len(sessions))
 	for _, s := range sessions {
 		activeIDs[s.SessionID] = true
@@ -356,44 +336,32 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			delete(p.burnShort, id)
 			delete(p.burnLong, id)
 			delete(p.prevTotalTokens, id)
-			delete(p.subshellCache, id)
-		}
-	}
-	// Prune terminalHostCache by PID (different key space from session ID).
-	activePIDs := make(map[int]bool, len(sessions))
-	for _, s := range sessions {
-		activePIDs[s.PID] = true
-	}
-	for pid := range p.terminalHostCache {
-		if !activePIDs[pid] {
-			delete(p.terminalHostCache, pid)
 		}
 	}
 
-	// Look up PRs once per directory using the same first-non-empty-branch
-	// logic as aggregate.Build, ensuring the PR matches the displayed branch.
+	// Look up PRs once per directory using the same first-non-empty-branch logic
+	// as aggregate.Build, ensuring the PR matches the displayed branch. The
+	// provider (backed by the bounded PRCache) records the pr_lookup metric on a
+	// real gh spawn and tracks the live (cwd,branch) keys for prune.
 	prByDir := map[string]*session.PRInfo{}
-	if p.PRLookupFn != nil {
-		winningBranch := map[string]string{}
-		for _, s := range sessions {
-			if s.Branch == "" {
-				continue
-			}
-			if _, already := winningBranch[s.Cwd]; !already {
-				winningBranch[s.Cwd] = s.Branch
-			}
+	winningBranch := map[string]string{}
+	for _, s := range sessions {
+		if s.Branch == "" {
+			continue
 		}
-		for cwd, branch := range winningBranch {
-			prLookupStart := time.Now()
-			info, err := p.PRLookupFn(ctx, cwd, branch)
-			if p.Rec != nil {
-				p.Rec.RecordSubprocess("pr_lookup", time.Since(prLookupStart))
-			}
-			if err == nil {
-				prByDir[cwd] = info
-			}
+		if _, already := winningBranch[s.Cwd]; !already {
+			winningBranch[s.Cwd] = s.Branch
 		}
 	}
+	for cwd, branch := range winningBranch {
+		if info, err := p.Providers.PR(ctx, cwd, branch); err == nil {
+			prByDir[cwd] = info
+		}
+	}
+
+	// Evict provider-cache nodes for vanished sessions/cwds and prune vanished PR
+	// keys — once per tick, after the per-session loop + PR calls.
+	p.Providers.Reconcile(sessions)
 
 	// PID clamp: if a PID is alive and this session has the freshest transcript
 	// for that PID, clear the LongIdle age refinement (formerly the Dormant →
@@ -547,27 +515,6 @@ func deriveStatusBlocker(act claudetranscript.Activity, lastErr *transcript.Erro
 	}
 }
 
-// countSubshellCached returns the subshell count for a session when delegating
-// to the Monitor, reusing a cached value while the resolved transcript
-// (path,mtime) is unchanged — mirroring the inline transcript cache's subshell
-// reuse, so moving the corpus read into the Monitor does NOT turn subshell
-// counting into a per-tick pgrep storm. Subshell stays a poller/provider concern
-// (Phase 2), outside the Monitor.
-func (p *Poller) countSubshellCached(counter *subshell.Counter, sessionID string, pid int, path string, mtime time.Time) int {
-	if e, ok := p.subshellCache[sessionID]; ok && e.path == path && e.mtime.Equal(mtime) {
-		return e.count
-	}
-	subshellStart := time.Now()
-	n, _ := counter.Count(pid)
-	if p.Rec != nil {
-		p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
-	}
-	if path != "" {
-		p.subshellCache[sessionID] = subshellCacheEntry{path: path, mtime: mtime, count: n}
-	}
-	return n
-}
-
 // waitingFreshWindow returns the configured WaitingFreshWindow, falling back
 // to 2*WorkingThreshold (or 60s when neither is set).
 func (p *Poller) waitingFreshWindow() time.Duration {
@@ -589,17 +536,6 @@ func sessionMtime(sessions []*session.Session, id string) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-// detectTerminalHost returns the Name() of the first Signaler whose Detect returns true,
-// or "unknown" if none match.
-func detectTerminalHost(signalers []signal.Signaler, pid int) string {
-	for _, s := range signalers {
-		if s.Detect(pid) {
-			return s.Name()
-		}
-	}
-	return "unknown"
 }
 
 // pidPtrIfAlive returns a pointer to pid when the session's PID is alive,
