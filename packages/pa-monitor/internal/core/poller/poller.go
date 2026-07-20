@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
@@ -110,12 +111,32 @@ type Poller struct {
 	// disables recording.
 	Rec PhaseRecorder
 
+	// Monitor, when set together with UseCorpusMonitor, owns the corpus read
+	// (discovery, resolution, transcript + subagent tailing). Snapshot then reads
+	// projections from it instead of the inline ResolveTranscript /
+	// ScanIncremental / LastSubagentError / maxActivity path. Still synchronous on
+	// the tick goroutine (pg2-uojfm phase 1a; no new concurrency).
+	Monitor          *corpus.Monitor
+	UseCorpusMonitor bool
+
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
 
 	terminalHostCache map[int]string
 	transcriptCache   map[string]cachedTranscript
+	// subshellCache backs the poller-side subshell count when delegating to the
+	// Monitor. Subshell counting stays a poller/provider concern (Phase 2), so it
+	// keeps its own (path,mtime)-keyed cache instead of riding the transcript
+	// cache that moved into the Monitor — without it, delegation would recount
+	// subshells (a pgrep spawn) every tick.
+	subshellCache map[string]subshellCacheEntry
+}
+
+type subshellCacheEntry struct {
+	path  string
+	mtime time.Time
+	count int
 }
 
 // SetActiveBlockID implements daemon.BlockWeekIDSetter. Called by the daemon
@@ -150,10 +171,18 @@ func (p *Poller) phase(name string, start time.Time) {
 
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
-	discoverStart := time.Now()
-	disc := &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive}
-	sessions, err := disc.Discover()
-	p.phase("discover", discoverStart)
+	var sessions []*session.Session
+	var err error
+	if p.UseCorpusMonitor {
+		// The Monitor owns discovery + resolution + tailing; it records the
+		// "discover" phase around its own Discover() call.
+		sessions, err = p.Monitor.Scan(now)
+	} else {
+		discoverStart := time.Now()
+		disc := &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive}
+		sessions, err = disc.Discover()
+		p.phase("discover", discoverStart)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -167,58 +196,73 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.prevTotalTokens = make(map[string]int)
 		p.transcriptCache = make(map[string]cachedTranscript)
 		p.terminalHostCache = make(map[int]string)
+		p.subshellCache = make(map[string]subshellCacheEntry)
 	}
 
 	enriched := map[string]aggregate.SessionEnrichment{}
 	anyKeepAwake := false
 
 	for _, s := range sessions {
-		path, mtime, ok := session.ResolveTranscript(p.ClaudeHome, s)
-		if ok {
-			s.TranscriptMTime = mtime
+		var path string
+		var mtime time.Time
+		var snap transcript.Snapshot
+		var shells int
+		if p.UseCorpusMonitor {
+			// Resolution + the transcript fold were done by Monitor.Scan (which
+			// also set s.TranscriptMTime). Read the projections; subshell counting
+			// stays here with its own (path,mtime) cache (Phase-2 provider).
+			path, mtime, _ = p.Monitor.ResolvedPath(s.SessionID)
+			snap, _ = p.Monitor.SessionSnapshot(s.SessionID)
+			shells = p.countSubshellCached(subshellCounter, s.SessionID, s.PID, path, mtime)
+		} else {
+			var ok bool
+			path, mtime, ok = session.ResolveTranscript(p.ClaudeHome, s)
+			if ok {
+				s.TranscriptMTime = mtime
+			}
+			// Transcript cache: reuse the parsed Snapshot untouched while the file
+			// is unchanged (same path+mtime). Otherwise fold only the
+			// newly-appended bytes via the cached accumulator — ScanIncremental
+			// re-parses from scratch on rotation/truncation/in-place-rewrite, so
+			// this stays correct while turning per-poll work from O(whole
+			// transcript) into O(appended).
+			cached, hit := p.transcriptCache[s.SessionID]
+			if hit && path != "" && cached.path == path && cached.mtime.Equal(mtime) {
+				snap = cached.snap
+				shells = cached.subshellCount
+				if p.Rec != nil {
+					p.Rec.RecordScan("cache_hit", 0, 0)
+				}
+			} else {
+				var prevAcc *transcript.Accumulator
+				if hit && cached.path == path {
+					prevAcc = cached.acc
+				}
+				var acc *transcript.Accumulator
+				var stats transcript.ScanStats
+				scanStart := time.Now()
+				snap, acc, stats, _ = transcript.ScanIncremental(path, prevAcc)
+				if p.Rec != nil {
+					p.Rec.RecordScan(string(stats.Mode), time.Since(scanStart), stats.BytesFolded)
+				}
+				subshellStart := time.Now()
+				shells, _ = subshellCounter.Count(s.PID)
+				if p.Rec != nil {
+					p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
+				}
+				if path != "" {
+					p.transcriptCache[s.SessionID] = cachedTranscript{
+						path: path, mtime: mtime, snap: snap, subshellCount: shells, acc: acc,
+					}
+				}
+			}
 		}
+		// git branch provider (stays in the poller; Phase 2). Independent of the
+		// transcript read, so its position relative to acquisition is immaterial.
 		gitBranchStart := time.Now()
 		s.Branch = session.GitBranch(s.Cwd)
 		if p.Rec != nil {
 			p.Rec.RecordSubprocess("git_branch", time.Since(gitBranchStart))
-		}
-
-		// Transcript cache: reuse the parsed Snapshot untouched while the file is
-		// unchanged (same path+mtime). Otherwise fold only the newly-appended
-		// bytes via the cached accumulator — ScanIncremental re-parses from
-		// scratch on rotation/truncation/in-place-rewrite, so this stays correct
-		// while turning per-poll work from O(whole transcript) into O(appended).
-		cached, hit := p.transcriptCache[s.SessionID]
-		var snap transcript.Snapshot
-		var shells int
-		if hit && path != "" && cached.path == path && cached.mtime.Equal(mtime) {
-			snap = cached.snap
-			shells = cached.subshellCount
-			if p.Rec != nil {
-				p.Rec.RecordScan("cache_hit", 0, 0)
-			}
-		} else {
-			var prevAcc *transcript.Accumulator
-			if hit && cached.path == path {
-				prevAcc = cached.acc
-			}
-			var acc *transcript.Accumulator
-			var stats transcript.ScanStats
-			scanStart := time.Now()
-			snap, acc, stats, _ = transcript.ScanIncremental(path, prevAcc)
-			if p.Rec != nil {
-				p.Rec.RecordScan(string(stats.Mode), time.Since(scanStart), stats.BytesFolded)
-			}
-			subshellStart := time.Now()
-			shells, _ = subshellCounter.Count(s.PID)
-			if p.Rec != nil {
-				p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
-			}
-			if path != "" {
-				p.transcriptCache[s.SessionID] = cachedTranscript{
-					path: path, mtime: mtime, snap: snap, subshellCount: shells, acc: acc,
-				}
-			}
 		}
 
 		// TerminalHost cache: detect once per PID lifetime. The cached value
@@ -285,7 +329,13 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		// cache because subagent files change independently of the main one.
 		if path != "" &&
 			(snap.LastError == nil || !snap.LastError.IsTerminal) {
-			if subErr, ok := transcript.LastSubagentError(path); ok {
+			if p.UseCorpusMonitor {
+				if subErr, ok := p.Monitor.SubagentError(s.SessionID); ok && subErr != nil {
+					e := *subErr
+					snap.LastError = &e
+					snap.LastErrorRetryable = transcript.Retryable(snap.LastError)
+				}
+			} else if subErr, ok := transcript.LastSubagentError(path); ok {
 				e := subErr
 				snap.LastError = &e
 				// LastError was replaced by a subagent error; re-derive the
@@ -309,7 +359,12 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			s.Blocker = session.NoBlocker
 			s.LongIdle = session.IsLongIdle(now, s.TranscriptMTime, p.IdleThreshold)
 		} else {
-			lastActivity := maxActivity(s.TranscriptMTime, path)
+			var lastActivity time.Time
+			if p.UseCorpusMonitor {
+				lastActivity = p.Monitor.MaxActivity(s.SessionID)
+			} else {
+				lastActivity = maxActivity(s.TranscriptMTime, path)
+			}
 			reg := claudetranscript.RegistrySession{
 				Status:          s.RegistryStatus,
 				WaitingFor:      s.WaitingFor,
@@ -354,6 +409,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			delete(p.burnLong, id)
 			delete(p.prevTotalTokens, id)
 			delete(p.transcriptCache, id)
+			delete(p.subshellCache, id)
 		}
 	}
 	// Prune terminalHostCache by PID (different key space from session ID).
@@ -540,6 +596,27 @@ func deriveStatusBlocker(act claudetranscript.Activity, lastErr *transcript.Erro
 	default:
 		return session.Idle, session.NoBlocker
 	}
+}
+
+// countSubshellCached returns the subshell count for a session when delegating
+// to the Monitor, reusing a cached value while the resolved transcript
+// (path,mtime) is unchanged — mirroring the inline transcript cache's subshell
+// reuse, so moving the corpus read into the Monitor does NOT turn subshell
+// counting into a per-tick pgrep storm. Subshell stays a poller/provider concern
+// (Phase 2), outside the Monitor.
+func (p *Poller) countSubshellCached(counter *subshell.Counter, sessionID string, pid int, path string, mtime time.Time) int {
+	if e, ok := p.subshellCache[sessionID]; ok && e.path == path && e.mtime.Equal(mtime) {
+		return e.count
+	}
+	subshellStart := time.Now()
+	n, _ := counter.Count(pid)
+	if p.Rec != nil {
+		p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
+	}
+	if path != "" {
+		p.subshellCache[sessionID] = subshellCacheEntry{path: path, mtime: mtime, count: n}
+	}
+	return n
 }
 
 // waitingFreshWindow returns the configured WaitingFreshWindow, falling back
