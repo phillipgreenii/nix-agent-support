@@ -19,7 +19,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/core/week"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon"
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
@@ -215,7 +214,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	}
 
 	if !disablePoller {
-		p, blockTr, weekTr, weeklyFn := buildPoller(ctx, cfg, acct)
+		p, blockTr, weekTr := buildPoller(ctx, cfg, acct)
 		p.BridgeRegistry = bridgeRegistry
 
 		// Open the SQLite database and wire WriteService into the poller so
@@ -277,13 +276,15 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.Poller = p
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr
-		opts.WeeklyFn = weeklyFn
 		opts.SessionsDir = p.SessionsDir
-		opts.WeeklyEvery = 12 // ~1 minute at 5s tick — the weekly scan reads all transcripts
-		// Wire the authoritative status-line rate_limits source (ADR 0021 §1/§3):
-		// the sibling-file reader over ~/.claude/projects/**/*.status.jsonl. This
-		// replaces the nil port Phase 2 wired; the daemon now samples it each tick.
-		opts.Limits = &daemon.SiblingLimitsSource{ClaudeHome: p.ClaudeHome}
+		// WeeklyEvery gates how often the daemon reads the (folded) weekly cost
+		// projection + upserts it: ~1/12 ticks (~1 minute at 5s), preserving the
+		// pre-fold cadence. The value itself comes from the corpus Monitor's
+		// UsagePricing observer; opts.WeeklyFn / opts.Limits are no longer wired in
+		// production (removed with the inline path in pg2-66h9g — limits + weekly are
+		// read from the Monitor). They remain on RunOptions only as the fallback for
+		// non-Monitor test pollers.
+		opts.WeeklyEvery = 12
 
 		// Without NudgerSignalers being non-empty, lifecycle.go skips
 		// constructing the WatermarkStore — which makes SetAutoResume,
@@ -330,15 +331,9 @@ func buildDecorators(cfgs []config.DecoratorConfig) []*labels.Decorator {
 // background goroutine or ctx lifetime is involved. Building it here — the
 // composition root — is where the concrete adapter is named; the poller and
 // daemon see only the CostPricer port.
-func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker, func(context.Context) (*usage.WeeklyEntry, error)) {
+func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*poller.Poller, *block.Tracker, *week.Tracker) {
 	home, _ := os.UserHomeDir()
 	claudeHome := filepath.Join(home, ".claude")
-
-	pricer := &usage.NativePricer{
-		ClaudeHome: claudeHome,
-		Prices:     acct.PriceTable(),
-		Now:        time.Now,
-	}
 
 	prCache := session.NewPRCache(session.DefaultPRCachePath())
 	signalers := signallayer.DefaultSignalers()
@@ -355,40 +350,30 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 		BurnWindowShort:    cfg.BurnWindowShort,
 		BurnWindowLong:     cfg.BurnWindowLong,
 		Now:                time.Now,
-		Pricer:             pricer,
 		PRLookupFn:         prCache.Get,
 		Signalers:          signalers,
 	}
 
-	// Corpus Monitor (pg2-uojfm phase 1a): the single owner of transcript
-	// discovery, resolution, and transcript+subagent tailing. Poller.Snapshot
-	// delegates its per-session corpus reads to it, eliminating the dead
-	// ResolveTranscript title-probe and the per-tick uncached subagent scans. It
-	// runs synchronously on the tick goroutine (no new concurrency); the metric
-	// recorder is threaded via p.SetPhaseRecorder, which fans out to the Monitor.
+	// Corpus Monitor: the single owner of the corpus read — discovery, resolution,
+	// transcript + subagent tailing, AND the UsagePricing (block + weekly) + Limits
+	// (rate_limits) folds. Poller.Snapshot reads the block + all per-session
+	// projections from it, and the daemon tick reads limits/weekly from it. The old
+	// inline poller path, the pricer's whole-corpus WalkDir, and the
+	// SiblingLimitsSource walk were removed in pg2-66h9g — the Monitor is the only
+	// corpus reader. Synchronous on the tick goroutine (no new concurrency); the
+	// metric recorder is threaded via p.SetPhaseRecorder, which fans out to it.
 	mon := corpus.New(claudeHome, &session.Discoverer{
 		SessionsDir: session.DefaultSessionsDir(),
 		PidAlive:    session.DefaultPidAlive,
 	})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())
-	// Phase 1b (pg2-5sxkb): fold pricing + limits into the Monitor's single pass.
-	// UsagePricing produces the active block + weekly from the decoded transcript
-	// records (replacing the pricer's whole-corpus WalkDir); Limits produces the
-	// account-global rate_limits window-peak from the status siblings (replacing
-	// SiblingLimitsSource's walk). Poller.Snapshot reads the block, and the daemon
-	// tick reads limits/weekly, from these projections when UseCorpusMonitor is set;
-	// opts.Limits / opts.WeeklyFn below stay wired only as the equivalence oracle
-	// until the post-soak flag removal.
 	mon.Register(corpus.NewUsagePricingObserver(acct.PriceTable()))
 	mon.Register(corpus.NewLimitsObserver())
 	p.Monitor = mon
-	p.UseCorpusMonitor = true
 
 	blockTr := block.NewTracker()
 	weekTr := week.NewTracker()
 
-	weeklyFn := pricer.CurrentWeekly
-
-	return p, blockTr, weekTr, weeklyFn
+	return p, blockTr, weekTr
 }

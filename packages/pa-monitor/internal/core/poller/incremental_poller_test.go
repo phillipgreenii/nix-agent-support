@@ -68,7 +68,7 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 	sessionsDir, claudeHome, cwd, tpath := makeSessionFixture(t, 99010, "inc-sess", initial)
 	now := func() time.Time { return time.Date(2026, 4, 23, 10, 1, 0, 0, time.UTC) }
 
-	warm := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now, Pricer: &fakeCostPricer{}}
+	warm := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
 
 	t1, _, err := warm.Snapshot(context.Background())
 	if err != nil {
@@ -102,7 +102,7 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 	}
 	got := findSession(t, t2, cwd)
 
-	cold := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now, Pricer: &fakeCostPricer{}}
+	cold := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
 	t3, _, err := cold.Snapshot(context.Background()) // cold full parse
 	if err != nil {
 		t.Fatal(err)

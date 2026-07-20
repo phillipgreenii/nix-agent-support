@@ -31,6 +31,43 @@ func subagentsDirFor(t *testing.T, mainPath string) string {
 	return sub
 }
 
+// TestSubagentTail_MaxActivityIgnoresStatusSibling is the ADR 0021 §2 guard
+// (ported from the removed poller maxActivity test in pg2-66h9g): a status sibling
+// in the subagents dir under a non-agent name must NOT count toward maxActivity —
+// only agent-*.jsonl files do, so a freshly-rendered status file cannot inflate
+// the freshness/age computation.
+func TestSubagentTail_MaxActivityIgnoresStatusSibling(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "sess-1.jsonl")
+	if err := os.WriteFile(mainPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := subagentsDirFor(t, mainPath)
+
+	agentPath := filepath.Join(sub, "agent-1.jsonl")
+	if err := os.WriteFile(agentPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Unix(1000, 0)
+	if err := os.Chtimes(agentPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	// A status sibling (non-agent name), NEWER than the agent file.
+	statusPath := filepath.Join(sub, "sess-1.status.jsonl")
+	if err := os.WriteFile(statusPath, []byte(`{"ts":1}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	newer := time.Unix(9999, 0)
+	if err := os.Chtimes(statusPath, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+
+	_, maxMtime := newSubagentTail().fold("sess-1", mainPath)
+	if !maxMtime.Equal(old) {
+		t.Errorf("maxMtime = %v, want the agent file's mtime %v (status sibling must be ignored)", maxMtime, old)
+	}
+}
+
 func TestSubagentTail_MatchesLastSubagentError(t *testing.T) {
 	dir := t.TempDir()
 	main := filepath.Join(dir, "sid.jsonl")

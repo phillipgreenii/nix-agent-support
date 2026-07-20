@@ -3,9 +3,6 @@ package poller
 import (
 	"context"
 	"database/sql"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
@@ -39,17 +36,6 @@ type PhaseRecorder interface {
 // and small enough that abandoned sessions are quickly cleared.
 const stalePauseGrace = 5 * time.Minute
 
-type cachedTranscript struct {
-	path          string
-	mtime         time.Time
-	snap          transcript.Snapshot
-	subshellCount int
-	// acc carries the incremental scan state (folded scanState + byte offset +
-	// file identity) so the next poll folds only newly-appended lines instead of
-	// re-parsing the whole transcript. nil until the first parse.
-	acc *transcript.Accumulator
-}
-
 type Poller struct {
 	SessionsDir string
 	ClaudeHome  string
@@ -68,13 +54,8 @@ type Poller struct {
 	BurnWindowShort    time.Duration
 	BurnWindowLong     time.Duration
 	Now                func() time.Time
-	// Pricer is the CostPricer port supplying the active 5h block cost and its
-	// probe state. Nil disables cost folding (the block is simply absent). The
-	// native adapter (usage.NativePricer) is its production implementation;
-	// tests inject a fake.
-	Pricer     CostPricer
-	PRLookupFn func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
-	Signalers  []signal.Signaler
+	PRLookupFn         func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
+	Signalers          []signal.Signaler
 	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
 	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
 	// whether a cmux-bridge has registered for the session's cmux server PID.
@@ -112,25 +93,22 @@ type Poller struct {
 	// disables recording.
 	Rec PhaseRecorder
 
-	// Monitor, when set together with UseCorpusMonitor, owns the corpus read
-	// (discovery, resolution, transcript + subagent tailing). Snapshot then reads
-	// projections from it instead of the inline ResolveTranscript /
-	// ScanIncremental / LastSubagentError / maxActivity path. Still synchronous on
-	// the tick goroutine (pg2-uojfm phase 1a; no new concurrency).
-	Monitor          *corpus.Monitor
-	UseCorpusMonitor bool
+	// Monitor is the single owner of the corpus read (discovery, resolution,
+	// transcript + subagent tailing, and the UsagePricing + Limits folds).
+	// Snapshot reads all corpus projections from it (block, resolution, snapshot,
+	// subagent error, maxActivity). It is REQUIRED — the old inline
+	// ResolveTranscript / ScanIncremental / LastSubagentError / maxActivity / pricer
+	// path was removed in pg2-66h9g. Still synchronous on the tick goroutine.
+	Monitor *corpus.Monitor
 
 	burnShort       map[string]*burnrate.Buffer
 	burnLong        map[string]*burnrate.Buffer
 	prevTotalTokens map[string]int
 
 	terminalHostCache map[int]string
-	transcriptCache   map[string]cachedTranscript
-	// subshellCache backs the poller-side subshell count when delegating to the
-	// Monitor. Subshell counting stays a poller/provider concern (Phase 2), so it
-	// keeps its own (path,mtime)-keyed cache instead of riding the transcript
-	// cache that moved into the Monitor — without it, delegation would recount
-	// subshells (a pgrep spawn) every tick.
+	// subshellCache backs the poller-side subshell count. Subshell counting stays
+	// a poller/provider concern (Phase 2), so it keeps its own (path,mtime)-keyed
+	// cache — without it, each tick would recount subshells (a pgrep spawn).
 	subshellCache map[string]subshellCacheEntry
 }
 
@@ -145,25 +123,28 @@ type subshellCacheEntry struct {
 // attach per-session contributions to the correct block row.
 func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
 
-// UsesCorpusMonitor reports whether Snapshot reads its corpus projections (block,
-// resolution, snapshot, subagent error) from the Monitor rather than the inline
-// path. The daemon lifecycle reads this to route its limits/weekly reads to the
-// Monitor too (so the whole-corpus walk happens once, in the Monitor).
-func (p *Poller) UsesCorpusMonitor() bool { return p.UseCorpusMonitor && p.Monitor != nil }
+// UsesCorpusMonitor reports whether this poller reads its corpus projections from
+// a Monitor. Always true in production (buildPoller wires one). The daemon
+// lifecycle reads this to route its limits/weekly reads to the Monitor rather than
+// the opts.Limits/opts.WeeklyFn fallback (which now serves only non-Monitor test
+// pollers). The UseCorpusMonitor flag + the inline poller path were removed in
+// pg2-66h9g; the Monitor is mandatory for Snapshot.
+func (p *Poller) UsesCorpusMonitor() bool { return p.Monitor != nil }
 
-// MonitorLimits returns the Monitor's account-global rate_limits projection, or
-// nil when not delegating (the lifecycle then falls back to opts.Limits).
+// MonitorLimits returns the Monitor's account-global rate_limits projection (nil
+// when no Monitor, e.g. a bare test poller). The daemon lifecycle reads limits
+// from here so the whole-corpus walk happens once, in the Monitor.
 func (p *Poller) MonitorLimits() *limits.Limits {
-	if !p.UsesCorpusMonitor() {
+	if p.Monitor == nil {
 		return nil
 	}
 	return p.Monitor.Limits()
 }
 
-// MonitorWeekly returns the Monitor's current-week cost at now, or nil when not
-// delegating (the lifecycle then falls back to opts.WeeklyFn).
+// MonitorWeekly returns the Monitor's current-week cost at now (nil when no
+// Monitor). The daemon lifecycle reads weekly from here.
 func (p *Poller) MonitorWeekly(now time.Time) *usage.WeeklyEntry {
-	if !p.UsesCorpusMonitor() {
+	if p.Monitor == nil {
 		return nil
 	}
 	return p.Monitor.Weekly(now)
@@ -202,18 +183,22 @@ func (p *Poller) phase(name string, start time.Time) {
 
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
-	var sessions []*session.Session
-	var err error
-	if p.UseCorpusMonitor {
-		// The Monitor owns discovery + resolution + tailing; it records the
-		// "discover" phase around its own Discover() call.
-		sessions, err = p.Monitor.Scan(now)
-	} else {
-		discoverStart := time.Now()
-		disc := &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive}
-		sessions, err = disc.Discover()
-		p.phase("discover", discoverStart)
+	// The Monitor owns discovery + resolution + transcript/subagent tailing + the
+	// UsagePricing/Limits folds; it records the "discover" phase around its own
+	// Discover() call. The inline path was removed in pg2-66h9g, so a Monitor is
+	// required. Production wires one explicitly (buildPoller); a poller without one
+	// (tests, read-only pollers) gets a default Monitor over its own
+	// SessionsDir/ClaudeHome with the standard observer set.
+	if p.Monitor == nil {
+		m := corpus.New(p.ClaudeHome, &session.Discoverer{SessionsDir: p.SessionsDir, PidAlive: p.PidAlive})
+		m.Register(corpus.NewSessionSnapshotObserver())
+		m.Register(corpus.NewSubagentErrorObserver())
+		m.Register(corpus.NewUsagePricingObserver(usage.PriceTable{}))
+		m.Register(corpus.NewLimitsObserver())
+		m.SetPhaseRecorder(p.Rec)
+		p.Monitor = m
 	}
+	sessions, err := p.Monitor.Scan(now)
 	if err != nil {
 		return nil, false, err
 	}
@@ -225,7 +210,6 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		p.burnShort = make(map[string]*burnrate.Buffer)
 		p.burnLong = make(map[string]*burnrate.Buffer)
 		p.prevTotalTokens = make(map[string]int)
-		p.transcriptCache = make(map[string]cachedTranscript)
 		p.terminalHostCache = make(map[int]string)
 		p.subshellCache = make(map[string]subshellCacheEntry)
 	}
@@ -234,60 +218,12 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	anyKeepAwake := false
 
 	for _, s := range sessions {
-		var path string
-		var mtime time.Time
-		var snap transcript.Snapshot
-		var shells int
-		if p.UseCorpusMonitor {
-			// Resolution + the transcript fold were done by Monitor.Scan (which
-			// also set s.TranscriptMTime). Read the projections; subshell counting
-			// stays here with its own (path,mtime) cache (Phase-2 provider).
-			path, mtime, _ = p.Monitor.ResolvedPath(s.SessionID)
-			snap, _ = p.Monitor.SessionSnapshot(s.SessionID)
-			shells = p.countSubshellCached(subshellCounter, s.SessionID, s.PID, path, mtime)
-		} else {
-			var ok bool
-			path, mtime, ok = session.ResolveTranscript(p.ClaudeHome, s)
-			if ok {
-				s.TranscriptMTime = mtime
-			}
-			// Transcript cache: reuse the parsed Snapshot untouched while the file
-			// is unchanged (same path+mtime). Otherwise fold only the
-			// newly-appended bytes via the cached accumulator — ScanIncremental
-			// re-parses from scratch on rotation/truncation/in-place-rewrite, so
-			// this stays correct while turning per-poll work from O(whole
-			// transcript) into O(appended).
-			cached, hit := p.transcriptCache[s.SessionID]
-			if hit && path != "" && cached.path == path && cached.mtime.Equal(mtime) {
-				snap = cached.snap
-				shells = cached.subshellCount
-				if p.Rec != nil {
-					p.Rec.RecordScan("cache_hit", 0, 0)
-				}
-			} else {
-				var prevAcc *transcript.Accumulator
-				if hit && cached.path == path {
-					prevAcc = cached.acc
-				}
-				var acc *transcript.Accumulator
-				var stats transcript.ScanStats
-				scanStart := time.Now()
-				snap, acc, stats, _ = transcript.ScanIncremental(path, prevAcc)
-				if p.Rec != nil {
-					p.Rec.RecordScan(string(stats.Mode), time.Since(scanStart), stats.BytesFolded)
-				}
-				subshellStart := time.Now()
-				shells, _ = subshellCounter.Count(s.PID)
-				if p.Rec != nil {
-					p.Rec.RecordSubprocess("subshell", time.Since(subshellStart))
-				}
-				if path != "" {
-					p.transcriptCache[s.SessionID] = cachedTranscript{
-						path: path, mtime: mtime, snap: snap, subshellCount: shells, acc: acc,
-					}
-				}
-			}
-		}
+		// Resolution + the transcript fold were done by Monitor.Scan (which also
+		// set s.TranscriptMTime). Read the projections; subshell counting stays here
+		// with its own (path,mtime) cache (Phase-2 provider).
+		path, mtime, _ := p.Monitor.ResolvedPath(s.SessionID)
+		snap, _ := p.Monitor.SessionSnapshot(s.SessionID)
+		shells := p.countSubshellCached(subshellCounter, s.SessionID, s.PID, path, mtime)
 		// git branch provider (stays in the poller; Phase 2). Independent of the
 		// transcript read, so its position relative to acquisition is immaterial.
 		gitBranchStart := time.Now()
@@ -360,14 +296,8 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		// cache because subagent files change independently of the main one.
 		if path != "" &&
 			(snap.LastError == nil || !snap.LastError.IsTerminal) {
-			if p.UseCorpusMonitor {
-				if subErr, ok := p.Monitor.SubagentError(s.SessionID); ok && subErr != nil {
-					e := *subErr
-					snap.LastError = &e
-					snap.LastErrorRetryable = transcript.Retryable(snap.LastError)
-				}
-			} else if subErr, ok := transcript.LastSubagentError(path); ok {
-				e := subErr
+			if subErr, ok := p.Monitor.SubagentError(s.SessionID); ok && subErr != nil {
+				e := *subErr
 				snap.LastError = &e
 				// LastError was replaced by a subagent error; re-derive the
 				// auto-resume verdict from the (possibly different) record.
@@ -390,12 +320,7 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			s.Blocker = session.NoBlocker
 			s.LongIdle = session.IsLongIdle(now, s.TranscriptMTime, p.IdleThreshold)
 		} else {
-			var lastActivity time.Time
-			if p.UseCorpusMonitor {
-				lastActivity = p.Monitor.MaxActivity(s.SessionID)
-			} else {
-				lastActivity = maxActivity(s.TranscriptMTime, path)
-			}
+			lastActivity := p.Monitor.MaxActivity(s.SessionID)
 			reg := claudetranscript.RegistrySession{
 				Status:          s.RegistryStatus,
 				WaitingFor:      s.WaitingFor,
@@ -439,7 +364,6 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 			delete(p.burnShort, id)
 			delete(p.burnLong, id)
 			delete(p.prevTotalTokens, id)
-			delete(p.transcriptCache, id)
 			delete(p.subshellCache, id)
 		}
 	}
@@ -499,21 +423,14 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	var block *usage.Block
 	var costProbed bool
 	var costProbeErr error
-	if p.UseCorpusMonitor && p.Monitor != nil {
-		// The Monitor's UsagePricing observer already folded the in-window records
-		// during Scan; Block/CostProbed are a cheap projection read priced at the
-		// same `now`. The "pricer" phase timer stays (metric parity) — it now
-		// measures the projection read, not the whole-corpus WalkDir.
-		pricerStart := time.Now()
-		block = p.Monitor.Block(now)
-		costProbed, costProbeErr = p.Monitor.CostProbed()
-		p.phase("pricer", pricerStart)
-	} else if p.Pricer != nil {
-		pricerStart := time.Now()
-		block, _ = p.Pricer.ActiveBlock(ctx)
-		costProbed, costProbeErr = p.Pricer.Probed()
-		p.phase("pricer", pricerStart)
-	}
+	// The Monitor's UsagePricing observer already folded the in-window records
+	// during Scan; Block/CostProbed are a cheap projection read priced at the same
+	// `now`. The "pricer" phase timer stays (metric parity) — it now measures the
+	// projection read, not the whole-corpus WalkDir.
+	pricerStart := time.Now()
+	block = p.Monitor.Block(now)
+	costProbed, costProbeErr = p.Monitor.CostProbed()
+	p.phase("pricer", pricerStart)
 
 	aggregateBuildStart := time.Now()
 	tree := aggregate.Build(sessions, enriched, prByDir, block, p.BlockCapUSD)
@@ -669,42 +586,6 @@ func (p *Poller) waitingFreshWindow() time.Duration {
 		return 2 * p.WorkingThreshold
 	}
 	return 60 * time.Second
-}
-
-// maxActivity returns the latest of the main transcript's mtime and the max
-// mtime over <sessionid>/subagents/agent-*.jsonl. The subagents directory is
-// derived from the resolved main transcript path exactly as
-// claude-transcript.LastSubagentError does ("<dir>/<sid>.jsonl" ->
-// "<dir>/<sid>/subagents"); for a resumed/forked session whose resolved
-// transcript basename differs from the spawning session id, that directory
-// won't exist and only the main mtime is used. This feeds ONLY the
-// "waiting"-freshness check and the display/age bucket — it is intentionally
-// NOT load-bearing for the busy keep-awake (busy is trusted, never demoted).
-func maxActivity(mainMTime time.Time, mainPath string) time.Time {
-	best := mainMTime
-	if mainPath == "" {
-		return best
-	}
-	subDir := strings.TrimSuffix(mainPath, ".jsonl") + "/subagents"
-	entries, err := os.ReadDir(subDir)
-	if err != nil {
-		return best
-	}
-	for _, e := range entries {
-		if e.IsDir() ||
-			!strings.HasPrefix(e.Name(), "agent-") ||
-			filepath.Ext(e.Name()) != ".jsonl" {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(best) {
-			best = info.ModTime()
-		}
-	}
-	return best
 }
 
 // sessionMtime returns the TranscriptMTime of the session with the given ID,

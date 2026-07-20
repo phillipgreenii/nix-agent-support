@@ -57,7 +57,6 @@ func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
-		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
@@ -85,7 +84,6 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
-		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
@@ -112,7 +110,6 @@ func TestSnapshotProducesTree(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.Pricer = &fakeCostPricer{}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +146,6 @@ func newTestPoller(t *testing.T) *Poller {
 		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
-		Pricer:      &fakeCostPricer{},
 	}
 }
 
@@ -192,7 +188,6 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.Pricer = &fakeCostPricer{}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -247,30 +242,12 @@ func TestSnapshotPopulatesTerminalHostCache(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.terminalHostCache) == 0 {
 		t.Error("terminalHostCache should be populated after Snapshot")
-	}
-}
-
-func TestSnapshotPopulatesTranscriptCache(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
-	p.Pricer = &fakeCostPricer{}
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.transcriptCache) == 0 {
-		t.Error("transcriptCache should be populated after Snapshot")
 	}
 }
 
@@ -281,7 +258,6 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	p.Pricer = &fakeCostPricer{}
 
 	if _, _, err := p.Snapshot(context.Background()); err != nil {
 		t.Fatal(err)
@@ -298,33 +274,6 @@ func TestSnapshotTerminalHostCacheRetainsAcrossPolls(t *testing.T) {
 	}
 }
 
-func TestSnapshotTranscriptCacheRetainsAcrossPolls(t *testing.T) {
-	p := &Poller{
-		SessionsDir: "../../../tests/fixtures/sessions",
-		ClaudeHome:  "../../../tests/fixtures/claude-home",
-		PidAlive:    func(int) bool { return true },
-		Now:         func() time.Time { return time.Now() },
-	}
-	p.Pricer = &fakeCostPricer{}
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	firstCache := make(map[string]string, len(p.transcriptCache))
-	for id, entry := range p.transcriptCache {
-		firstCache[id] = entry.path
-	}
-
-	if _, _, err := p.Snapshot(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for id, path := range firstCache {
-		if got := p.transcriptCache[id].path; got != path {
-			t.Errorf("transcriptCache[%s].path: first=%q second=%q (changed unexpectedly)", id, path, got)
-		}
-	}
-}
-
 func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 	type call struct{ cwd, branch string }
 	var calls []call
@@ -334,7 +283,6 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 		ClaudeHome:  "../../../tests/fixtures/claude-home",
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
-		Pricer:      &fakeCostPricer{},
 		PRLookupFn: func(_ context.Context, cwd, branch string) (*session.PRInfo, error) {
 			calls = append(calls, call{cwd, branch})
 			return nil, nil
@@ -408,7 +356,6 @@ func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 		ClaudeHome:  claudeHome,
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
-		Pricer:      &fakeCostPricer{},
 	}
 	tree, _, err := p.Snapshot(context.Background())
 	if err != nil {

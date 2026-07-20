@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -405,26 +406,31 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 		t.Fatalf("write session fixture: %v", err)
 	}
 
-	// --- active-block fixture ---
-	activeBlock := &usage.Block{
-		ID:        "2026-06-01T10Z",
-		StartTime: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC),
-		EndTime:   time.Date(2026, 6, 1, 15, 0, 0, 0, time.UTC),
-		IsActive:  true,
-		CostUSD:   5.0,
+	// --- active-block fixture: a recent assistant usage record so the poller's
+	// (auto-wired) corpus Monitor UsagePricing observer produces a non-nil active
+	// block for the session's transcript. ---
+	recTS := time.Now().Add(-30 * time.Minute)
+	projSlug := strings.NewReplacer("/", "-", "_", "-").Replace(dir)
+	projDir := filepath.Join(dir, "projects", projSlug)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcript := `{"type":"assistant","timestamp":"` + recTS.Format(time.RFC3339Nano) +
+		`","message":{"model":"m","role":"assistant","usage":{"input_tokens":1000,"output_tokens":500}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projDir, "test-sess-1.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// --- real *poller.Poller wired with DB and WriteService, driven through a
-	// fake CostPricer returning the fixture block (the native adapter is
-	// exercised in usage package tests; here we only need a known block). ---
+	// --- real *poller.Poller wired with DB and WriteService. The poller lazily
+	// builds a corpus Monitor over SessionsDir/ClaudeHome (buildPoller wires one in
+	// production); the block comes from that Monitor, not an injected pricer. ---
 	p := &poller.Poller{
 		SessionsDir:  sessDir,
 		ClaudeHome:   dir,
 		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
 		Now:          time.Now,
-		Pricer:       &fakeCostPricer{block: activeBlock},
 		WriteService: ws,
 		DB:           db,
 	}
@@ -465,19 +471,19 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 		}
 	}
 
-	// --- assert blocks table ---
+	// --- assert blocks table: the daemon persisted the Monitor's active block ---
 	var blockID int64
 	var blockStringID string
 	err = db.QueryRowContext(context.Background(),
-		"SELECT id, block_id FROM blocks WHERE block_id = ?", "2026-06-01T10Z").Scan(&blockID, &blockStringID)
+		"SELECT id, block_id FROM blocks ORDER BY id DESC LIMIT 1").Scan(&blockID, &blockStringID)
 	if err == sql.ErrNoRows {
-		t.Fatal("blocks table: expected row for 2026-06-01T10Z, got none")
+		t.Fatal("blocks table: expected an active-block row from the Monitor, got none")
 	}
 	if err != nil {
 		t.Fatalf("blocks query: %v", err)
 	}
-	if blockStringID != "2026-06-01T10Z" {
-		t.Errorf("block_id = %q, want 2026-06-01T10Z", blockStringID)
+	if blockStringID == "" {
+		t.Errorf("persisted block_id is empty, want the Monitor's block id")
 	}
 
 	// Wait for one more tick to ensure contributions land (they need ActiveBlockID set).

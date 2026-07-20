@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
-	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
@@ -63,12 +64,23 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 		t.Fatalf("write session fixture: %v", err)
 	}
 
-	activeBlock := &usage.Block{
-		ID:        "2026-06-01T10Z",
-		StartTime: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC),
-		EndTime:   time.Date(2026, 6, 1, 15, 0, 0, 0, time.UTC),
-		IsActive:  true,
-		CostUSD:   5.0,
+	// Fixture: a recent assistant usage record (so the poller's auto-wired corpus
+	// Monitor produces a non-nil active block to carry the limits) plus a status
+	// sibling with the authoritative 5h reading (34%). The daemon now samples
+	// rate_limits from the Monitor's Limits observer (ADR 0029), not opts.Limits.
+	recTS := time.Now().Add(-30 * time.Minute)
+	projSlug := strings.NewReplacer("/", "-", "_", "-").Replace(dir)
+	projDir := filepath.Join(dir, "projects", projSlug)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcript := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"model":"m","role":"assistant","usage":{"input_tokens":1000,"output_tokens":500}}}`+"\n", recTS.Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(projDir, "test-sess-1.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+	status := fmt.Sprintf(`{"ts":%d,"five_hour_pct":34,"five_hour_resets_at":%d}`+"\n", time.Now().Unix(), time.Now().Add(4*time.Hour).Unix())
+	if err := os.WriteFile(filepath.Join(projDir, "test-sess-1.status.jsonl"), []byte(status), 0o600); err != nil {
+		t.Fatalf("write status sibling fixture: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,20 +90,9 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 		ClaudeHome:   dir,
 		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
 		Now:          time.Now,
-		Pricer:       &fakeCostPricer{block: activeBlock},
 		WriteService: ws,
 		DB:           db,
 	}
-
-	// Fake LimitsSource: fixed authoritative 5h reading (account-global).
-	fivePct := 34.0
-	fiveRst := time.Unix(1782958200, 0)
-	captured := time.Now()
-	limits := &fakeLimitsSource{limits: &Limits{
-		FiveHourPct:      &fivePct,
-		FiveHourResetsAt: fiveRst,
-		CapturedAt:       captured,
-	}}
 
 	tickSynced := make(chan struct{}, 10)
 	done := make(chan error, 1)
@@ -101,7 +102,6 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 			Tick:         30 * time.Millisecond,
 			Poller:       p,
 			WriteService: ws,
-			Limits:       limits,
 			TreeObserver: func(_ *aggregate.Tree) {
 				_ = ws.Sync(ctx)
 				select {
@@ -124,13 +124,13 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 	var fivePctCol sql.NullFloat64
 	var fiveRstCol sql.NullString
 	err = db.QueryRowContext(context.Background(),
-		"SELECT five_hour_pct, five_hour_resets_at FROM blocks WHERE block_id = ?",
-		"2026-06-01T10Z").Scan(&fivePctCol, &fiveRstCol)
+		"SELECT five_hour_pct, five_hour_resets_at FROM blocks ORDER BY id DESC LIMIT 1").
+		Scan(&fivePctCol, &fiveRstCol)
 	if err != nil {
 		t.Fatalf("query block limits: %v", err)
 	}
 	if !fivePctCol.Valid || fivePctCol.Float64 != 34.0 {
-		t.Errorf("persisted five_hour_pct valid=%v value=%v, want 34 (sampled from LimitsSource)",
+		t.Errorf("persisted five_hour_pct valid=%v value=%v, want 34 (sampled from the Monitor's Limits observer)",
 			fivePctCol.Valid, fivePctCol.Float64)
 	}
 	if !fiveRstCol.Valid {
