@@ -152,10 +152,16 @@ func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
 func (p *Poller) SetLabeler(fn func(sv *aggregate.SessionView) map[string]string) { p.Labeler = fn }
 
 // SetPhaseRecorder wires a PhaseRecorder. Takes any so the daemon can call it
-// through an anonymous interface without importing this package.
+// through an anonymous interface without importing this package. It also fans
+// the recorder out to the Monitor (when delegating), so the Monitor's scan
+// metrics (transcript.scan.duration modes + the discover phase) reach the same
+// emitter from their new home — the daemon keeps a single wiring site.
 func (p *Poller) SetPhaseRecorder(r any) {
 	if pr, ok := r.(PhaseRecorder); ok {
 		p.Rec = pr
+	}
+	if p.Monitor != nil {
+		p.Monitor.SetPhaseRecorder(r)
 	}
 }
 

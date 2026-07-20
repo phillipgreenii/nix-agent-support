@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
@@ -358,6 +359,21 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account) (*p
 		PRLookupFn:         prCache.Get,
 		Signalers:          signalers,
 	}
+
+	// Corpus Monitor (pg2-uojfm phase 1a): the single owner of transcript
+	// discovery, resolution, and transcript+subagent tailing. Poller.Snapshot
+	// delegates its per-session corpus reads to it, eliminating the dead
+	// ResolveTranscript title-probe and the per-tick uncached subagent scans. It
+	// runs synchronously on the tick goroutine (no new concurrency); the metric
+	// recorder is threaded via p.SetPhaseRecorder, which fans out to the Monitor.
+	mon := corpus.New(claudeHome, &session.Discoverer{
+		SessionsDir: session.DefaultSessionsDir(),
+		PidAlive:    session.DefaultPidAlive,
+	})
+	mon.Register(corpus.NewSessionSnapshotObserver())
+	mon.Register(corpus.NewSubagentErrorObserver())
+	p.Monitor = mon
+	p.UseCorpusMonitor = true
 
 	blockTr := block.NewTracker()
 	weekTr := week.NewTracker()

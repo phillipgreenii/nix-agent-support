@@ -183,6 +183,41 @@ func TestSnapshot_CorpusMonitorEqualsInline(t *testing.T) {
 	}
 }
 
+// TestSnapshot_CorpusMonitor_MetricParity verifies the pg2-sewtz metric contract
+// is preserved after delegation: the Monitor tail emits transcript.scan
+// full/cache_hit modes and the "discover" phase (re-homed from the poller),
+// while the poller still emits the subprocess metrics (git_branch). The recorder
+// is wired once via p.SetPhaseRecorder, which fans out to the Monitor.
+func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
+	sessionsDir, home, pidAlive := buildEquivalenceCorpus(t)
+	now := time.Unix(1_776_000_300, 0)
+	ctx := context.Background()
+
+	rec := newFakeRec()
+	p := newMonitorPoller(sessionsDir, home, pidAlive, now)
+	p.SetPhaseRecorder(rec)
+
+	if _, _, err := p.Snapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rec.scans["full"] == 0 {
+		t.Errorf("cold scan: RecordScan(full) not emitted from the Monitor tail; scans=%v", rec.scans)
+	}
+	if rec.phases["discover"] == 0 {
+		t.Errorf("discover phase not emitted from the Monitor; phases=%v", rec.phases)
+	}
+	if rec.spawns["git_branch"] == 0 {
+		t.Errorf("git_branch subprocess metric not emitted from the poller; spawns=%v", rec.spawns)
+	}
+	// Second scan on the unchanged corpus -> cache_hit from the Monitor tail.
+	if _, _, err := p.Snapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rec.scans["cache_hit"] == 0 {
+		t.Errorf("second scan: RecordScan(cache_hit) not emitted from the Monitor tail; scans=%v", rec.scans)
+	}
+}
+
 // TestSnapshot_TitleAtLine500_CorrectedResolution asserts the one intended,
 // documented divergence: a custom-title beyond the old 200-line cap resolves
 // correctly under the Monitor path but not under the (capped) inline path.
