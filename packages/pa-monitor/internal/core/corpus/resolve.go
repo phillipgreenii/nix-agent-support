@@ -131,3 +131,14 @@ func (h *titleCache) resolve(claudeHome string, s *session.Session) (string, tim
 	}
 	return cands[0].path, cands[0].mtime, true
 }
+
+// prune drops title-cache entries whose file is not under an active session's
+// project dir, bounding the cache to live project dirs (write-once titles within
+// those dirs are retained across ticks).
+func (h *titleCache) prune(activeDirs map[string]bool) {
+	for p := range h.entries {
+		if !activeDirs[filepath.Dir(p)] {
+			delete(h.entries, p)
+		}
+	}
+}
