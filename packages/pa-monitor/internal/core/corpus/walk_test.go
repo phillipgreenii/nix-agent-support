@@ -44,6 +44,32 @@ func TestWalkCorpus_ClassifiesAndWindows(t *testing.T) {
 	}
 }
 
+// TestWalkCorpus_RecursesIntoSubagents proves the walk descends into
+// <slug>/<id>/subagents/, so subagent transcripts (billable token usage the old
+// recursive pricer counted) are surfaced for pricing.
+func TestWalkCorpus_RecursesIntoSubagents(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	home := t.TempDir()
+	dir := projectDir(t, home, "/tmp/proj")
+	main := writeTranscript(t, dir, "s1.jsonl", now, assistantLine("m", 1, 1))
+	sub := subagentsDirFor(t, main)
+	writeTranscript(t, sub, "agent-1.jsonl", now, assistantLine("m", 2, 2))
+
+	files, err := walkCorpus(home, 24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundSub := false
+	for _, f := range files {
+		if f.class == Transcript && filepath.Base(f.path) == "agent-1.jsonl" {
+			foundSub = true
+		}
+	}
+	if !foundSub {
+		t.Fatalf("walk did not recurse into subagents/ — subagent transcript missing (pricing would undercount)")
+	}
+}
+
 func TestWalkCorpus_MissingProjectsDir(t *testing.T) {
 	files, err := walkCorpus(t.TempDir(), time.Hour, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
 	if err != nil {
