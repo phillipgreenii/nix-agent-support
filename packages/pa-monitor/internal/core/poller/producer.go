@@ -41,6 +41,24 @@ type Producer struct {
 // hand-off). Exactly one goroutine calls this in async mode.
 func (pr *Producer) Publish(ds *DerivedState) { pr.ref.Store(ds) }
 
+// RepoLabelSource adapts a Producer to the detectors.Repo Cache interface
+// (RepoLabel(cwd) (string, bool)): it reads the workspace.repo label from the
+// most recently published DerivedState (C1). Wiring the Repo detector to this
+// instead of provider.Cache keeps the tick's label pipeline off the shared
+// provider Cache — the read is an atomic DerivedState Load, so it can never race
+// the producer's cwd-node eviction. Before the first Publish it returns
+// ("", false), so the label is simply absent for one tick.
+type RepoLabelSource struct{ Prod *Producer }
+
+// RepoLabel returns the published workspace.repo label for cwd (false = not a
+// repo / not yet published).
+func (s RepoLabelSource) RepoLabel(cwd string) (string, bool) {
+	if s.Prod == nil {
+		return "", false
+	}
+	return s.Prod.Load().RepoLabel(cwd)
+}
+
 // Load returns the most recently published DerivedState (nil before the first
 // Publish).
 func (pr *Producer) Load() *DerivedState { return pr.ref.Load() }
@@ -102,8 +120,23 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		}
 	}
 
-	// Repo labels are populated in Phase-3 step 2 (C1). Empty here.
+	// Repo labels (C1): compute the workspace.repo label IN THE PRODUCER (it owns
+	// the Cache) and publish a cwd->label map, so the tick's label/gauge pipeline
+	// reads the map instead of calling provider.Cache.RepoLabel — which would
+	// otherwise race the producer's cwd-node eviction. Only positive labels are
+	// stored; an absent cwd is a non-repo (RepoLabel returns false).
 	repoLabels := map[string]string{}
+	for _, s := range sessions {
+		if s.Cwd == "" {
+			continue
+		}
+		if _, done := repoLabels[s.Cwd]; done {
+			continue
+		}
+		if v, ok := pr.Providers.RepoLabel(s.Cwd); ok {
+			repoLabels[s.Cwd] = v
+		}
+	}
 
 	// Evict provider-cache nodes for vanished sessions/cwds + prune vanished PR
 	// keys — once per batch, after the per-session loop + PR calls.

@@ -204,13 +204,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		Version:             ver,
 		BridgeRegistry:      bridgeRegistry,
 		CmuxAncestor:        cmuxAncestor,
-		Detectors: []labels.Detector{
-			detectors.DefaultScope{}, // sets workspace.scope=personal; decorators may override
-			detectors.Terminal{},
-			detectors.Repo{Cache: providerCache}, // per-cwd LongLived repo-label cache
-			detectors.Project{},
-			detectors.Agent{},
-		},
+		// Repo-label source defaults to the shared provider cache; the poller
+		// branch below overrides it to poller.RepoLabelSource so the tick reads
+		// the producer-published repo-label map instead of the shared Cache (C1).
+		Detectors:  defaultDetectors(providerCache),
 		Decorators: buildDecorators(cfg.Decorators),
 		// Re-read the config each tick and rebuild the decorator pipeline on
 		// change, so a decorator written by `pn workspace apply` after the
@@ -230,6 +227,12 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	if !disablePoller {
 		p, blockTr, weekTr := buildPoller(ctx, cfg, acct, providerCache)
 		p.BridgeRegistry = bridgeRegistry
+
+		// C1: the tick's repo-label source is the producer-published DerivedState
+		// map (atomic Load), NOT the shared provider Cache — so the label pipeline
+		// cannot race the producer's cwd-node eviction. The producer computes the
+		// label (owning the Cache) in Assemble and publishes it.
+		opts.Detectors = defaultDetectors(poller.RepoLabelSource{Prod: p.Producer()})
 
 		// Open the SQLite database and wire WriteService into the poller so
 		// that contribution rows are persisted on every tick. The DB lives at
@@ -313,6 +316,23 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	}
 
 	return opts, cleanup, nil
+}
+
+// defaultDetectors builds the daemon's built-in label detector set. repoCache is
+// the workspace.repo source for the Repo detector: the shared provider Cache in
+// the no-poller fallback, or poller.RepoLabelSource (the producer-published map)
+// on the live path (C1). Both satisfy the Repo detector's Cache interface.
+func defaultDetectors(repoCache interface {
+	RepoLabel(cwd string) (string, bool)
+},
+) []labels.Detector {
+	return []labels.Detector{
+		detectors.DefaultScope{}, // sets workspace.scope=personal; decorators may override
+		detectors.Terminal{},
+		detectors.Repo{Cache: repoCache},
+		detectors.Project{},
+		detectors.Agent{},
+	}
 }
 
 // buildDecorators translates the user's [[decorator]] config blocks into
