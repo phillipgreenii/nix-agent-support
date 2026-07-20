@@ -2,22 +2,17 @@ package daemon
 
 import (
 	"context"
-	"time"
+
+	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 )
 
-// Limits is the current account-global rate_limits reading (ADR 0021 §1).
-// Every field is independently optional: a nil *float64 or a zero time.Time
-// means "unknown/stale", explicitly distinct from a real 0% reading or a 1970
-// timestamp. Phase 0 observed seven_day absent on this account, so those fields
-// are commonly unset. No consumer reads this yet — the LimitsSource adapter and
-// its wiring land in Phase 3.
-type Limits struct {
-	FiveHourPct      *float64
-	FiveHourResetsAt time.Time
-	SevenDayPct      *float64
-	SevenDayResetsAt time.Time
-	CapturedAt       time.Time
-}
+// Limits is the current account-global rate_limits reading (ADR 0021 §1). It is
+// an alias of limits.Limits: the DTO + the ADR-0029 window-peak fold moved to the
+// leaf package internal/core/limits so both this daemon port and the corpus
+// Monitor's Limits observer share one implementation (pg2-5sxkb). The alias keeps
+// every existing daemon.Limits reference (applyLimits, blockToStoreBlockWithLimits)
+// working unchanged.
+type Limits = limits.Limits
 
 // LimitsSource is the daemon's consumer-side port (ADR 0021 §1 + §3) for the
 // authoritative status-line rate_limits. Current returns the account-global
