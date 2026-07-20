@@ -45,14 +45,6 @@ func eqAPIError(kind, text, ts string) string {
 		`","message":{"content":[{"type":"text","text":"` + text + `"}]}}`
 }
 
-func eqFillers(n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = `{"type":"system","subtype":"noise"}`
-	}
-	return out
-}
-
 func eqSession(t *testing.T, sessionsDir string, pid int, sessID, name, cwd string) {
 	t.Helper()
 	nameField := ""
