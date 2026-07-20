@@ -17,11 +17,17 @@ type cacheEntry struct {
 }
 
 // PRCache is a file-backed write-through cache for PR lookups.
-// Found entries never expire. Not-found entries expire after prNotFoundTTL.
+// Found entries re-validate after FoundTTL (0 = never expire). Not-found
+// entries expire after prNotFoundTTL.
 type PRCache struct {
 	Path     string
 	LookupFn func(ctx context.Context, cwd, branch string) (PRInfo, bool, error)
 	Now      func() time.Time
+	// FoundTTL bounds how long a FOUND entry is served before re-validating via
+	// LookupFn. 0 preserves the legacy never-expire behavior. Set >0 (e.g. 15m)
+	// to catch a PR that is closed/merged/renumbered during a long session and to
+	// keep the cache from pinning stale PR data forever.
+	FoundTTL time.Duration
 
 	mu      sync.Mutex
 	entries map[string]cacheEntry
@@ -56,6 +62,34 @@ func prCacheKey(cwd, branch string) string {
 	return cwd + "\x00" + branch
 }
 
+// PRCacheKey returns the cache key for a (cwd, branch) pair. Exported so callers
+// (e.g. the provider cache) can build the live-key set passed to Prune.
+func PRCacheKey(cwd, branch string) string {
+	return prCacheKey(cwd, branch)
+}
+
+// Prune drops every entry whose key is not in live, bounding the cache to the
+// currently-active (cwd,branch) pairs. Persists the pruned map only when
+// something was removed. This is the growth bound for the otherwise-unbounded
+// cache; combined with FoundTTL it fixes the never-expire/never-shrink bug.
+func (c *PRCache) Prune(live map[string]bool) {
+	c.mu.Lock()
+	changed := false
+	for k := range c.entries {
+		if !live[k] {
+			delete(c.entries, k)
+			changed = true
+		}
+	}
+	if !changed {
+		c.mu.Unlock()
+		return
+	}
+	data, _ := json.Marshal(c.entries)
+	c.mu.Unlock()
+	c.writeFile(data)
+}
+
 // Get returns the cached PRInfo for (cwd, branch), fetching via LookupFn on miss.
 // Returns (nil, nil) when no PR exists for the branch.
 func (c *PRCache) Get(ctx context.Context, cwd, branch string) (*PRInfo, error) {
@@ -63,8 +97,8 @@ func (c *PRCache) Get(ctx context.Context, cwd, branch string) (*PRInfo, error) 
 
 	c.mu.Lock()
 	e, ok := c.entries[key]
-	if ok && e.PR != nil {
-		// Found entry — never expires.
+	if ok && e.PR != nil && (c.FoundTTL == 0 || c.Now().Sub(e.FetchedAt) < c.FoundTTL) {
+		// Found entry within its TTL (FoundTTL == 0 → never expires).
 		c.mu.Unlock()
 		return e.PR, nil
 	}
@@ -89,7 +123,11 @@ func (c *PRCache) Get(ctx context.Context, cwd, branch string) (*PRInfo, error) 
 
 	c.mu.Lock()
 	existing, alreadySet := c.entries[key]
-	if !alreadySet || (existing.PR == nil && entry.PR != nil) {
+	// Overwrite when: no entry yet; a not-found is upgraded to found; or a found
+	// entry has aged past FoundTTL (refresh it — otherwise an expired found entry
+	// would re-spawn gh every tick forever, never storing the fresh result).
+	staleFound := existing.PR != nil && c.FoundTTL > 0 && now.Sub(existing.FetchedAt) >= c.FoundTTL
+	if !alreadySet || (existing.PR == nil && entry.PR != nil) || staleFound {
 		c.entries[key] = entry
 		data, _ := json.Marshal(c.entries)
 		c.mu.Unlock()

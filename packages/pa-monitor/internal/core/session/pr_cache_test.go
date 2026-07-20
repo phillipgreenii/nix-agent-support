@@ -150,6 +150,88 @@ func TestDefaultPRCachePathFallback(t *testing.T) {
 	}
 }
 
+func TestPRCache_FoundEntryExpiresAfterFoundTTL(t *testing.T) {
+	calls := 0
+	base := time.Now()
+	now := base
+	c := newTestCache(t, func(_ context.Context, _, _ string) (PRInfo, bool, error) {
+		calls++
+		return PRInfo{Number: 1}, true, nil
+	})
+	c.Now = func() time.Time { return now }
+	c.FoundTTL = 15 * time.Minute
+
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // calls=1
+	now = base.Add(10 * time.Minute)
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // within TTL → cached
+	if calls != 1 {
+		t.Fatalf("within FoundTTL should not re-fetch: %d calls", calls)
+	}
+	now = base.Add(16 * time.Minute)
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // expired → re-fetch
+	if calls != 2 {
+		t.Fatalf("post-FoundTTL should re-fetch: %d calls", calls)
+	}
+}
+
+// The blocker-#2 guard: after a post-TTL re-fetch, the fresh result MUST be
+// stored, so an immediate subsequent Get is served from cache — not re-spawned
+// every tick forever.
+func TestPRCache_ExpiredThenRefetchedIsCachedAgain(t *testing.T) {
+	calls := 0
+	base := time.Now()
+	now := base
+	c := newTestCache(t, func(_ context.Context, _, _ string) (PRInfo, bool, error) {
+		calls++
+		return PRInfo{Number: 1}, true, nil
+	})
+	c.Now = func() time.Time { return now }
+	c.FoundTTL = 15 * time.Minute
+
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // calls=1
+	now = base.Add(16 * time.Minute)
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // expired → re-fetch, calls=2, FetchedAt refreshed
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck  // same now → MUST be cached
+	if calls != 2 {
+		t.Fatalf("refreshed found entry must be cached, not re-fetched every tick: %d calls", calls)
+	}
+}
+
+func TestPRCache_FoundEntryNeverExpiresWhenTTLZero(t *testing.T) {
+	calls := 0
+	base := time.Now()
+	now := base
+	c := newTestCache(t, func(_ context.Context, _, _ string) (PRInfo, bool, error) {
+		calls++
+		return PRInfo{Number: 1}, true, nil
+	})
+	c.Now = func() time.Time { return now }
+	// FoundTTL left 0.
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck
+	now = base.Add(365 * 24 * time.Hour)
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck
+	if calls != 1 {
+		t.Fatalf("FoundTTL==0 must never expire: %d calls", calls)
+	}
+}
+
+func TestPRCache_PruneDropsVanishedKeys(t *testing.T) {
+	c := newTestCache(t, func(_ context.Context, _, branch string) (PRInfo, bool, error) {
+		return PRInfo{Number: 1, Title: branch}, true, nil
+	})
+	c.Get(context.Background(), "/r", "a") //nolint:errcheck
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck
+
+	c.Prune(map[string]bool{PRCacheKey("/r", "a"): true})
+
+	if _, ok := c.entries[PRCacheKey("/r", "b")]; ok {
+		t.Fatal("vanished key /r,b was not pruned")
+	}
+	if _, ok := c.entries[PRCacheKey("/r", "a")]; !ok {
+		t.Fatal("live key /r,a was wrongly pruned")
+	}
+}
+
 // newTestCache creates a PRCache wired to a given lookup function, using a temp file.
 func newTestCache(t *testing.T, fn func(context.Context, string, string) (PRInfo, bool, error)) *PRCache {
 	t.Helper()
