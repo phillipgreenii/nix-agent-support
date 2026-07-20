@@ -543,25 +543,47 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// literal newest record, which can be a lagging session's stale snapshot).
 		// A nil source or a nil/err reading leaves the tree's rate_limits at
 		// whatever the poller set — never clobbered with 0.
+		// When the poller delegates its corpus reads to the Monitor, the Monitor's
+		// single per-tick walk already produced the rate_limits + weekly
+		// projections; read them here instead of re-walking the tree via
+		// opts.Limits / opts.WeeklyFn (which stay wired only as the pre-removal
+		// equivalence oracle). A nil reading leaves the tree untouched — never 0.
+		useMon := usesCorpusMonitor(opts.Poller)
+		tickNow := time.Now().UTC()
+
 		limitsStart := time.Now()
-		if opts.Limits != nil {
+		if useMon {
+			if lr := monitorLimits(opts.Poller); lr != nil {
+				applyLimits(tree, lr)
+			}
+		} else if opts.Limits != nil {
 			if lr, lerr := opts.Limits.Current(ctx); lerr == nil {
 				applyLimits(tree, lr)
 			}
 		}
 		phase("limits", limitsStart)
 
-		fetchWeek := opts.WeeklyFn != nil && (opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0)
+		// Preserve the WeeklyEvery cadence (the ~1/12-tick UpsertWeek + weekly
+		// histogram sample rate) whether the value comes from the Monitor or
+		// opts.WeeklyFn — reading the (now cheap) Monitor projection every tick
+		// would 12x the weekly DB writes.
+		fetchWeek := opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0
 		if fetchWeek {
 			// Record the weekly phase only on ticks that actually fetch, so the
 			// histogram reflects real fetch cost instead of being diluted by the
-			// ~0ms no-op ticks (WeeklyEvery gates the fetch). Mirrors how the
-			// poller guards its pricer / db_write_sessions phase recording.
+			// ~0ms no-op ticks. Mirrors how the poller guards its pricer phase.
 			weeklyStart := time.Now()
-			if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
-				tree.ActiveWeek = w
+			if useMon {
+				if w := monitorWeekly(opts.Poller, tickNow); w != nil {
+					tree.ActiveWeek = w
+				}
+				phase("weekly", weeklyStart)
+			} else if opts.WeeklyFn != nil {
+				if w, err := opts.WeeklyFn(ctx); err == nil && w != nil {
+					tree.ActiveWeek = w
+				}
+				phase("weekly", weeklyStart)
 			}
-			phase("weekly", weeklyStart)
 		}
 
 		// Persist the active block and week to the DB, then propagate
@@ -1365,6 +1387,36 @@ func blockToStoreBlockWithLimits(b *usage.Block, capUSD float64, now time.Time, 
 		sb.LimitsCapturedAt = &t
 	}
 	return sb
+}
+
+// usesCorpusMonitor / monitorLimits / monitorWeekly read the poller's Monitor
+// projections through anonymous interfaces, so the daemon does not import
+// internal/core/poller (which imports internal/daemon-adjacent core packages).
+// They return the zero value when the poller is not the corpus-Monitor-backed
+// one (e.g. a test fake), so the caller falls back to opts.Limits / opts.WeeklyFn.
+// *Limits is daemon.Limits, an alias of limits.Limits, so the assertion matches
+// the poller's MonitorLimits() *limits.Limits signature exactly.
+func usesCorpusMonitor(p any) bool {
+	if m, ok := p.(interface{ UsesCorpusMonitor() bool }); ok {
+		return m.UsesCorpusMonitor()
+	}
+	return false
+}
+
+func monitorLimits(p any) *Limits {
+	if m, ok := p.(interface{ MonitorLimits() *Limits }); ok {
+		return m.MonitorLimits()
+	}
+	return nil
+}
+
+func monitorWeekly(p any, now time.Time) *usage.WeeklyEntry {
+	if m, ok := p.(interface {
+		MonitorWeekly(time.Time) *usage.WeeklyEntry
+	}); ok {
+		return m.MonitorWeekly(now)
+	}
+	return nil
 }
 
 // applyLimits copies a LimitsSource reading onto the tree's account-global
