@@ -20,6 +20,17 @@ func ResolveSignaler(signalers []Signaler, pid int) Signaler {
 	return nil
 }
 
+// DetectHost returns the Name() of the first Signaler that detects pid, or
+// "unknown" when none match. This is the bare terminal-host name; the
+// cmux/bridge refinement is applied separately (in the poller). Shared by the
+// poller's terminal-host provider fetch boundary.
+func DetectHost(signalers []Signaler, pid int) string {
+	if s := ResolveSignaler(signalers, pid); s != nil {
+		return s.Name()
+	}
+	return "unknown"
+}
+
 // BinaryRequirer is implemented by Signalers that shell out to an external
 // executable for detection and/or delivery. The daemon checks these at
 // startup: a missing binary (e.g. tmux/cmux absent from the launchd PATH)
