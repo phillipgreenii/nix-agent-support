@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/burnrate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
+	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/subshell"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
@@ -143,6 +144,30 @@ type subshellCacheEntry struct {
 // main loop after upserting the active block so that the next Snapshot can
 // attach per-session contributions to the correct block row.
 func (p *Poller) SetActiveBlockID(id int64) { p.ActiveBlockID = id }
+
+// UsesCorpusMonitor reports whether Snapshot reads its corpus projections (block,
+// resolution, snapshot, subagent error) from the Monitor rather than the inline
+// path. The daemon lifecycle reads this to route its limits/weekly reads to the
+// Monitor too (so the whole-corpus walk happens once, in the Monitor).
+func (p *Poller) UsesCorpusMonitor() bool { return p.UseCorpusMonitor && p.Monitor != nil }
+
+// MonitorLimits returns the Monitor's account-global rate_limits projection, or
+// nil when not delegating (the lifecycle then falls back to opts.Limits).
+func (p *Poller) MonitorLimits() *limits.Limits {
+	if !p.UsesCorpusMonitor() {
+		return nil
+	}
+	return p.Monitor.Limits()
+}
+
+// MonitorWeekly returns the Monitor's current-week cost at now, or nil when not
+// delegating (the lifecycle then falls back to opts.WeeklyFn).
+func (p *Poller) MonitorWeekly(now time.Time) *usage.WeeklyEntry {
+	if !p.UsesCorpusMonitor() {
+		return nil
+	}
+	return p.Monitor.Weekly(now)
+}
 
 // SetActiveWeekID implements daemon.BlockWeekIDSetter.
 func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
@@ -474,7 +499,16 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	var block *usage.Block
 	var costProbed bool
 	var costProbeErr error
-	if p.Pricer != nil {
+	if p.UseCorpusMonitor && p.Monitor != nil {
+		// The Monitor's UsagePricing observer already folded the in-window records
+		// during Scan; Block/CostProbed are a cheap projection read priced at the
+		// same `now`. The "pricer" phase timer stays (metric parity) — it now
+		// measures the projection read, not the whole-corpus WalkDir.
+		pricerStart := time.Now()
+		block = p.Monitor.Block(now)
+		costProbed, costProbeErr = p.Monitor.CostProbed()
+		p.phase("pricer", pricerStart)
+	} else if p.Pricer != nil {
 		pricerStart := time.Now()
 		block, _ = p.Pricer.ActiveBlock(ctx)
 		costProbed, costProbeErr = p.Pricer.Probed()

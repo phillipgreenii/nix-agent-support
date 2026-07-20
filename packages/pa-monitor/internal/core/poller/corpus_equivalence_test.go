@@ -13,7 +13,13 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 )
+
+// eqPrices is the shared price table used by BOTH equivalence arms (the inline
+// NativePricer and the Monitor's UsagePricing observer), so a non-nil block is
+// priced identically on both sides.
+var eqPrices = usage.PriceTable{Default: usage.ModelPrices{InputPerMTok: 5, OutputPerMTok: 25}}
 
 // --- equivalence-test corpus builders (local to package poller) ---
 
@@ -25,6 +31,11 @@ func eqUserPrompt(text string) string {
 
 func eqAssistant(model string, in, out int) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[]}}`, model, in, out)
+}
+
+func eqAssistantTS(model string, in, out int, ts time.Time) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"role":"assistant","model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[]}}`,
+		ts.Format(time.RFC3339Nano), model, in, out)
 }
 
 func eqTitle(title string) string {
@@ -142,7 +153,10 @@ func newInlinePoller(sessionsDir, home string, pidAlive func(int) bool, now time
 		PidAlive:      pidAlive,
 		IdleThreshold: time.Hour,
 		Now:           func() time.Time { return now },
-		Pricer:        &fakeCostPricer{},
+		// A real NativePricer over the same corpus, so the inline block/CostProbed
+		// match what the Monitor's UsagePricing observer now produces (the genuine
+		// equivalence: NativePricer vs Monitor pricing).
+		Pricer: &usage.NativePricer{ClaudeHome: home, Prices: eqPrices, Now: func() time.Time { return now }},
 	}
 }
 
@@ -151,6 +165,8 @@ func newMonitorPoller(sessionsDir, home string, pidAlive func(int) bool, now tim
 	mon := corpus.New(home, &session.Discoverer{SessionsDir: sessionsDir, PidAlive: pidAlive})
 	mon.Register(corpus.NewSessionSnapshotObserver())
 	mon.Register(corpus.NewSubagentErrorObserver())
+	mon.Register(corpus.NewUsagePricingObserver(eqPrices))
+	mon.Register(corpus.NewLimitsObserver())
 	p.Monitor = mon
 	p.UseCorpusMonitor = true
 	return p
@@ -159,6 +175,10 @@ func newMonitorPoller(sessionsDir, home string, pidAlive func(int) bool, now tim
 func zeroVolatile(tree *aggregate.Tree) {
 	if tree != nil {
 		tree.GeneratedAt = time.Time{}
+		// CostProbeErr is an error interface; the folded and inline paths may carry
+		// different concrete error values for the same failure, so it is not a
+		// deep-equal field. Its presence/absence is covered by dedicated tests.
+		tree.CostProbeErr = nil
 	}
 }
 
@@ -254,5 +274,42 @@ func TestSnapshot_TitleAtLine500_CorrectedResolution(t *testing.T) {
 	}
 	if delegatedFP != "fromX" {
 		t.Fatalf("delegated FirstPrompt = %q, want fromX (Monitor resolves the late title)", delegatedFP)
+	}
+}
+
+// TestSnapshot_MonitorBlockEqualsPricer proves the delegated tree's ActiveBlock
+// (from the Monitor's UsagePricing observer) is byte-identical to the inline
+// tree's block (from NativePricer) on a corpus with timestamped in-window usage —
+// the meaningful, non-nil block equivalence.
+func TestSnapshot_MonitorBlockEqualsPricer(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	home := filepath.Join(root, "claude-home")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_776_000_300, 0)
+	eqSession(t, sessionsDir, 900020, "blk", "", "/w/blk")
+	eqTranscript(t, home, "/w/blk", "blk.jsonl", now,
+		eqUserPrompt("hi"), eqAssistantTS("m", 1000, 500, now.Add(-1*time.Hour)))
+	pidAlive := func(int) bool { return true }
+	ctx := context.Background()
+
+	inline, _, err := newInlinePoller(sessionsDir, home, pidAlive, now).Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("inline Snapshot: %v", err)
+	}
+	delegated, _, err := newMonitorPoller(sessionsDir, home, pidAlive, now).Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("delegated Snapshot: %v", err)
+	}
+	if inline.ActiveBlock == nil || delegated.ActiveBlock == nil {
+		t.Fatalf("expected non-nil block in both: inline=%v delegated=%v", inline.ActiveBlock, delegated.ActiveBlock)
+	}
+	if !reflect.DeepEqual(inline.ActiveBlock, delegated.ActiveBlock) {
+		t.Fatalf("block mismatch:\n inline=%+v\n delegated=%+v", inline.ActiveBlock, delegated.ActiveBlock)
+	}
+	if !inline.CostProbed || !delegated.CostProbed {
+		t.Fatalf("CostProbed = inline %v / delegated %v, want both true", inline.CostProbed, delegated.CostProbed)
 	}
 }

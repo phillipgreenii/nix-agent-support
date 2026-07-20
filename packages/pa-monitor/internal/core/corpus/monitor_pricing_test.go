@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,34 @@ func TestScan_PrunesVanishedPricingAndStatus(t *testing.T) {
 	}
 	if len(po.recs) != 1 || len(lo.recs) != 1 {
 		t.Fatalf("after prune: pricing paths=%d limits paths=%d, want 1/1", len(po.recs), len(lo.recs))
+	}
+}
+
+// TestScan_CostProbeErrOnCorruptTranscript proves a transcript scan failure (an
+// oversized line) threads through to Monitor.CostProbed — so the TUI's
+// "5h unavailable — cost scan failed" signal survives the fold (SHOULD-FIX 4).
+func TestScan_CostProbeErrOnCorruptTranscript(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	home := filepath.Join(root, "claude-home")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := projectDir(t, home, "/tmp/proj")
+	// A line exceeding transcript.maxTranscriptLine (16 MiB) makes ScanIncremental
+	// return bufio.ErrTooLong — the same failure the old NativePricer surfaced.
+	oversized := strings.Repeat("x", 16*1024*1024+10)
+	writeTranscript(t, dir, "big.jsonl", now, oversized)
+
+	disc := &session.Discoverer{SessionsDir: sessionsDir, PidAlive: func(int) bool { return true }, ReadEnv: stubEnv}
+	m, _, _ := newMonitorAllObservers(home, disc, pricingFixture())
+	if _, err := m.Scan(now); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	m.Block(now) // set probed, as the poller does each tick
+	if _, err := m.CostProbed(); err == nil {
+		t.Fatalf("CostProbed err = nil, want non-nil (corrupt pricing file must surface)")
 	}
 }
 

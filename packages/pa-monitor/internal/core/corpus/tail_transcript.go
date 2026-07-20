@@ -64,6 +64,13 @@ func (tt *transcriptTail) fold(path string, mtime time.Time, rec Recorder) (tran
 	snap, acc, stats, err := transcript.ScanIncremental(path, prevAcc)
 	tt.scans++
 	recordScan(rec, string(stats.Mode), time.Since(start), stats.BytesFolded)
+	if err != nil {
+		// ScanIncremental returns a nil Accumulator on error (open/stat/oversized
+		// line). Do NOT dereference it or cache it; surface the error so the caller
+		// can thread it to CostProbeErr (parity with NativePricer's firstErr). The
+		// prior cache entry is left intact for a possible next-tick recovery.
+		return transcript.Snapshot{}, nil, err
+	}
 	records := acc.Records()
 	tt.accs[path] = acc
 	tt.cache[path] = tcacheEntry{mtime: mtime, snap: snap, records: records}
