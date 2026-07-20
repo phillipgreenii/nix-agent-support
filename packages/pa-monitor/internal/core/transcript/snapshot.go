@@ -97,6 +97,12 @@ type scanState struct {
 	lastCtxModel string
 	totalOut     int
 	modelTokens  map[string]usage.ModelTokens
+	// records is the timestamped pricing ingestion for the UsagePricing
+	// observer: one usage.Record per non-error, modeled, non-zero-usage
+	// assistant line, in file order. Folded from the SAME single decode as the
+	// Snapshot fields, so the native pricer's separate scanFile decode is
+	// eliminated (bead pg2-5sxkb). Exposed via Accumulator.Records().
+	records []usage.Record
 
 	openTasks  map[string]bool
 	pendingAUQ map[string]bool
@@ -217,6 +223,25 @@ func (st *scanState) feed(line []byte) {
 				mt.CacheCreation += u.CacheCreationInputTokens
 				mt.CacheRead += u.CacheReadInputTokens
 				st.modelTokens[m] = mt
+				// Timestamped pricing record for the UsagePricing observer,
+				// applying the native CostPricer's per-line skip
+				// (native_pricer.go:218-224): non-error assistant (this switch
+				// branch is only reached when !IsApiErrorMessage), non-empty
+				// model (this if), and non-zero usage (below). One decode feeds
+				// both the Snapshot fold and the pricing records (pg2-5sxkb).
+				if u.InputTokens != 0 || u.OutputTokens != 0 ||
+					u.CacheCreationInputTokens != 0 || u.CacheReadInputTokens != 0 {
+					st.records = append(st.records, usage.Record{
+						Timestamp: ev.Timestamp,
+						Model:     m,
+						Tokens: usage.ModelTokens{
+							Input:         u.InputTokens,
+							Output:        u.OutputTokens,
+							CacheCreation: u.CacheCreationInputTokens,
+							CacheRead:     u.CacheReadInputTokens,
+						},
+					})
+				}
 			}
 			st.pendingAUQ = map[string]bool{}
 			for _, b := range ev.Message.Content {
@@ -329,6 +354,20 @@ type Accumulator struct {
 
 func newAccumulator() *Accumulator {
 	return &Accumulator{st: newScanState()}
+}
+
+// Records returns a copy of the timestamped pricing records folded so far — one
+// usage.Record per non-error, modeled, non-zero-usage assistant line (the native
+// CostPricer's per-line skip), in file order. The copy prevents the returned
+// slice from aliasing accumulator state that subsequent incremental scans keep
+// appending to. nil when the transcript has no priceable usage.
+func (a *Accumulator) Records() []usage.Record {
+	if len(a.st.records) == 0 {
+		return nil
+	}
+	out := make([]usage.Record, len(a.st.records))
+	copy(out, a.st.records)
+	return out
 }
 
 // ScanMode reports whether a ScanIncremental call performed a fresh full parse

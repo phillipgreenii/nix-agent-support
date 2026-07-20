@@ -12,7 +12,7 @@
 
 - **No new external deps.** Add nothing to `go.mod`/`gomod2nix.toml`.
 - **Import direction (no cycles):** `corpus` MAY import `session`, `transcript`, `usage`, the new `limits`, and `claude-transcript` (`ct`); none of those may import `corpus`. `transcript` already imports `usage` (snapshot.go:14) — that stays. The new `limits` package is a leaf: it imports only stdlib + `session` (for `IsStatusSiblingFile`). `daemon` MAY import `limits` and `corpus` (via `poller`); `limits`/`corpus` MUST NOT import `daemon`.
-- **`Event` placement correction (vs epic DESIGN §1):** the design sketched `corpus/event.go` with `Observer.OnLine(*Event)`. Placing `Event` in `corpus` while `transcript.scanState.feed` consumes it would require `transcript`→`corpus`, a cycle (corpus imports transcript). **The decoded-line `Event` type lives in `transcript`** (it is the transcript-line vocabulary), and the single decode happens inside `transcript.scanState` (which already centralizes the one `json.Unmarshal` per line). The generic per-observer `OnLine(*Event)` firehose + producer dispatch is deferred to phase 3; 1b keeps concrete-typed observers (matching phase 1a).
+- **`Event` refactor — resolved simpler than the design sketch (IMPLEMENTED, deviation noted):** the design sketched a new `corpus/event.go` with `Observer.OnLine(*Event)`. Two facts made a new `Event` type unnecessary and impossible-as-named: (a) `transcript.Event` **already exists** as an exported alias of `ct.Event` (events.go:11), so a new struct would collide; (b) `transcript.scanState.feed` **already does exactly one `json.Unmarshal` per line** — the double-decode the epic targets was the pricer's SEPARATE `scanFile` pass, not a second decode inside the transcript fold. So the single-decode goal is met by accumulating timestamped `usage.Record`s **inside the existing `feed`** (eliminating `scanFile`), exposed via `Accumulator.Records()`; `feed`'s signature is unchanged (Reuse First / minimal blast radius). The generic per-observer `OnLine(*Event)` firehose + producer dispatch remains deferred to phase 3; 1b keeps concrete-typed observers (matching phase 1a).
 - **Behavior-preserving except one documented, tested correction** (the analogue of 1a's dead title cap):
   - **Pricing/limits windowing:** the old `NativePricer` walked the corpus **unbounded** (entire history, every file ever); the Monitor opens only transcript files with `mtime >= now - W`, where **`W = max(now.Sub(usage.MondayAnchor(now)), 12*time.Hour)`** computed each `Scan` (the design's "never open files older than the current week", §2/§8, plus a ≥12h block-anchor safety margin for early-week). Because a file's `mtime` ≥ its newest record's timestamp, this drops **only** records older than `now-W` and retains **every** record newer than `now-W`; the observer's record set is always a subset of full-history, never a superset.
   - **Weekly is EXACTLY equivalent:** `CurrentWeekly` (native_weekly.go:23-31) filters to `[MondayAnchor(now), +7d)`; every current-week record has timestamp `> now-7d > now-W`, so all are retained and extras outside the week are ignored. No weekly divergence for any `W ≥ 7d`-worth-of-week (guaranteed by the `MondayAnchor` term).
@@ -51,7 +51,7 @@
 
 **Modify:**
 
-- `internal/core/transcript/snapshot.go` — introduce exported `Event` (= decoded line) + `decodeEvent(line []byte) (Event, bool)`; refactor `scanState.feed(line []byte)` → `feed(ev *Event)` with the one `json.Unmarshal` moved to `decodeEvent`; add `records []usage.Record` accumulation in `feed` (pricer skip); add `func (a *Accumulator) Records() []usage.Record`. `foldReader` decodes then feeds. `Snapshot`/`ScanIncremental` signatures UNCHANGED.
+- `internal/core/transcript/snapshot.go` — add `records []usage.Record` accumulation inside the existing single-decode `scanState.feed` (native-pricer skip: non-error assistant + non-empty model + non-zero usage); add `func (a *Accumulator) Records() []usage.Record` (copy). `feed`/`Snapshot`/`ScanIncremental` signatures UNCHANGED; no new `Event` type (the `transcript.Event` alias already exists).
 - `internal/core/usage/native_weekly.go` — **export** `mondayAnchor` → `MondayAnchor(t time.Time) time.Time` (rename + update its callers in `native_weekly.go`), so the Monitor computes the pricing walk window `W` DRY. Pure non-behavioral extraction (body unchanged).
 - `internal/core/corpus/criteria.go` — add `StatusSibling` to `FileClass`; add `newestActivity`/`Window`-only gating already present (no `ActiveOnly` for pricing). `matches` unchanged; `classIn` unchanged.
 - `internal/core/corpus/tail_transcript.go` — re-key from `sessionID` to **path** (`map[string]tcacheEntry` keyed by path; `accs` keyed by path); `fold(path, mtime, rec)` → Snapshot + records; expose the fold's `records` (for pricing). `prune(activePaths)`.
@@ -74,22 +74,9 @@
 // internal/core/transcript/snapshot.go — new/changed
 package transcript
 
-// Event is one decoded transcript line, parsed exactly once by decodeEvent and
-// folded by scanState. Exported so the single decode is an explicit, testable
-// seam (the design's "generic Event", homed in transcript to avoid a
-// transcript->corpus cycle). Fields are the former scanEv fields.
-type Event struct {
-	Type              string
-	Subtype           string
-	Timestamp         time.Time
-	RetryInMs         int64
-	Message           Message
-	Error             json.RawMessage
-	IsApiErrorMessage bool
-}
-
-func decodeEvent(line []byte) (Event, bool)          // json.Unmarshal; ok=false on error
-func (st *scanState) feed(ev *Event)                 // was feed(line []byte)
+// No new Event type — transcript.Event already exists (alias of ct.Event).
+// The single decode already lives in scanState.feed; 1b only adds a records
+// slice folded from that same decode, plus an accessor.
 func (a *Accumulator) Records() []usage.Record       // copy of the file's pricing records (post-skip)
 ```
 
@@ -180,13 +167,13 @@ func (p *Poller) UsesCorpusMonitor() bool                  // exposes the flag t
 
 **Files:** Modify `internal/core/transcript/snapshot.go`; add cases to `internal/core/transcript/snapshot_test.go` (or a new `records_test.go`).
 
-**Interfaces produced:** `transcript.Event`, `decodeEvent`, `feed(*Event)`, `(*Accumulator).Records() []usage.Record`. `Snapshot`/`Scan`/`ScanIncremental` signatures UNCHANGED (blast-radius zero for existing callers).
+**Interfaces produced:** `(*Accumulator).Records() []usage.Record`. `Snapshot`/`Scan`/`ScanIncremental`/`feed` signatures UNCHANGED (blast-radius zero for existing callers). No new `Event` type (`transcript.Event` alias already exists — deviation from the design sketch, see Global Constraints).
 
-**Key logic:** move the `var ev scanEv; json.Unmarshal(line, &ev)` out of `feed` into `decodeEvent(line) (Event, bool)`; `feed` takes `*Event`. In `foldReader`, replace `st.feed(line[:n-1])` with `if ev, ok := decodeEvent(line[:n-1]); ok { st.st.feed(&ev) }`. Add `records []usage.Record` to `scanState`; in the `case "assistant":` non-error branch, after the existing `ModelTokens` accumulation, append a record **iff** the pricer skip passes (`ev.Message.Model != "" && !allZero(u)`): `st.records = append(st.records, usage.Record{Timestamp: ev.Timestamp, Model: ev.Message.Model, Tokens: usage.ModelTokens{Input:u.InputTokens, Output:u.OutputTokens, CacheCreation:u.CacheCreationInputTokens, CacheRead:u.CacheReadInputTokens}})`. (`IsApiErrorMessage` is already excluded by being in the `if !ev.IsApiErrorMessage` block.) `Accumulator.Records()` returns a fresh copy of `a.st.records`.
+**Key logic:** add `records []usage.Record` to `scanState`; in the existing `case "assistant":` `if !ev.IsApiErrorMessage` → `if m := ev.Message.Model; m != ""` block, after the `ModelTokens` accumulation, append a record **iff** usage is non-zero (`u.InputTokens|Output|CacheCreation|CacheRead != 0`) — reproducing the native pricer's skip (native_pricer.go:218-224) from the SAME single decode. `Accumulator.Records()` returns a fresh copy of `a.st.records`.
 
 - [ ] **Step 1 — failing tests** `records_test.go`: `TestAccumulatorRecords_MatchesPricerSkip` (build a transcript with an assistant record, an `isApiErrorMessage` assistant record, an all-zero-usage assistant record, a user record; assert `Records()` yields exactly the one non-error non-zero assistant record with correct ts/model/tokens); `TestFeed_SingleDecodeEquivalence` (a transcript folded via `Scan` yields the SAME `Snapshot` as before — reuse an existing snapshot golden — proving the decode split is behavior-preserving); `TestAccumulatorRecords_IncrementalEqualsCold` (append then incremental-scan yields the same `Records()` as a cold full parse).
 - [ ] **Step 2 — run, expect FAIL** (`go test ./internal/core/transcript/ -run 'Records|SingleDecode'`).
-- [ ] **Step 3 — implement** the `decodeEvent`/`feed(*Event)`/`records`/`Records()` changes.
+- [x] **Step 3 — implement** the `records` accumulation in `feed` + `Records()` (no `decodeEvent`/`feed(*Event)` split — unnecessary, see above).
 - [ ] **Step 4 — run, expect PASS**, plus `go test ./internal/core/transcript/...` (all existing snapshot/incremental tests still green — this is the behavior-preservation gate).
 - [ ] **Step 5 — commit** `refactor(transcript): single-decode Event + pricing-record accumulation (pg2-5sxkb)`.
 
