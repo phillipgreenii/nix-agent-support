@@ -36,7 +36,7 @@ func (c *Cache) Subshell(sessionID string, pid int, path string, mtime time.Time
 	// Fetch without holding c.mu — Count spawns pgrep.
 	start := c.now()
 	n, _ := fetch(pid)
-	c.record("subshell", start)
+	c.record("child_procs", start)
 
 	c.mu.Lock()
 	if path != "" {

@@ -49,7 +49,7 @@ func TestSubshell_RecordsOnlyOnFetch(t *testing.T) {
 	m := time.Unix(1000, 0)
 	c.Subshell("s", 42, "/t.jsonl", m)
 	c.Subshell("s", 42, "/t.jsonl", m) // cache hit
-	if n := countKind(fr, "subshell"); n != 1 {
+	if n := countKind(fr, "child_procs"); n != 1 {
 		t.Fatalf("subshell metric should fire only on fetch: got %d", n)
 	}
 }

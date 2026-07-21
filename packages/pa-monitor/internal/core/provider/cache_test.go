@@ -53,7 +53,7 @@ func TestSetRecorder_CacheNotRecorder(t *testing.T) {
 	fr := &fakeRec{}
 	c.SetRecorder(fr)
 	c.SetRecorder(c) // must be ignored (Cache is not a Recorder)
-	c.Record("subshell", time.Second)
+	c.Record("child_procs", time.Second)
 	if len(fr.kinds) != 1 {
 		t.Fatalf("SetRecorder(cache) changed the wired recorder: %v", fr.kinds)
 	}

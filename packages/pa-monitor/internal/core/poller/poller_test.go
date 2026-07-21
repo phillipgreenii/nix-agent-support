@@ -176,8 +176,8 @@ func TestSnapshotRecordsPhases(t *testing.T) {
 	if rec.spawns["git_branch"] == 0 {
 		t.Error("git_branch subprocess not recorded")
 	}
-	if rec.spawns["subshell"] == 0 {
-		t.Error("subshell subprocess not recorded")
+	if rec.spawns["child_procs"] == 0 {
+		t.Error("child_procs subprocess not recorded")
 	}
 }
 

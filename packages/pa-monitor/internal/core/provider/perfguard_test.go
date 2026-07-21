@@ -69,7 +69,7 @@ func TestPerfGuard_SteadyScanZeroFetches(t *testing.T) {
 	if gitN != 1 || subN != 1 || termN != 1 || envN != 1 || prN != 1 {
 		t.Fatalf("cold scan fetch counts: git=%d sub=%d term=%d env=%d pr=%d (want all 1)", gitN, subN, termN, envN, prN)
 	}
-	for _, k := range []string{"git_branch", "subshell", "terminal_host", "pr_lookup"} {
+	for _, k := range []string{"git_branch", "child_procs", "terminal_host", "pr_lookup"} {
 		if countKind(fr, k) == 0 {
 			t.Fatalf("cold scan: metered kind %q not recorded (presence parity)", k)
 		}
