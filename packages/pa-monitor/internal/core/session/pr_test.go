@@ -28,7 +28,7 @@ func writeFakeGH(t *testing.T, stdout string, exitCode int) {
 func TestLookupPRFound(t *testing.T) {
 	writeFakeGH(
 		t,
-		`{"number":42,"title":"Add the thing","url":"https://github.com/owner/repo/pull/42"}`,
+		`{"number":42,"title":"Add the thing","state":"OPEN","url":"https://github.com/owner/repo/pull/42"}`,
 		0,
 	)
 	info, found, err := LookupPR(context.Background(), t.TempDir(), "feat/xyz")
@@ -43,6 +43,10 @@ func TestLookupPRFound(t *testing.T) {
 	}
 	if info.Title != "Add the thing" {
 		t.Errorf("Title = %q, want \"Add the thing\"", info.Title)
+	}
+	// State (F3): gh's --json list now includes `state`, and PRInfo parses it.
+	if info.State != "OPEN" {
+		t.Errorf("State = %q, want \"OPEN\"", info.State)
 	}
 	if info.URL != "https://github.com/owner/repo/pull/42" {
 		t.Errorf("URL = %q unexpected", info.URL)

@@ -107,7 +107,7 @@ func TestPRCacheFileRoundTrip(t *testing.T) {
 	c1 := &PRCache{
 		Path: path,
 		LookupFn: func(_ context.Context, _, _ string) (PRInfo, bool, error) {
-			return PRInfo{Number: 99, Title: "Round trip", URL: "u"}, true, nil
+			return PRInfo{Number: 99, Title: "Round trip", State: "MERGED", URL: "u"}, true, nil
 		},
 		Now:     time.Now,
 		entries: map[string]cacheEntry{},
@@ -127,6 +127,11 @@ func TestPRCacheFileRoundTrip(t *testing.T) {
 	}
 	if pr == nil || pr.Number != 99 {
 		t.Fatalf("file round-trip: want Number=99, got %v", pr)
+	}
+	// State (F3) must survive the on-disk JSON round-trip too — the cache stores
+	// the whole *PRInfo, so the new json:"state" field persists automatically.
+	if pr.State != "MERGED" {
+		t.Errorf("file round-trip: State = %q, want \"MERGED\"", pr.State)
 	}
 }
 

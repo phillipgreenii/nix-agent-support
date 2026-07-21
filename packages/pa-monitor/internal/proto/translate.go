@@ -72,6 +72,7 @@ func dirToProto(d *aggregate.Directory) *Directory {
 		pd.PrInfo = &PRInfo{
 			Number: uint32(d.PRInfo.Number),
 			Title:  d.PRInfo.Title,
+			State:  d.PRInfo.State,
 			Url:    d.PRInfo.URL,
 		}
 	}

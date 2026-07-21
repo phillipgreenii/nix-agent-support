@@ -79,6 +79,7 @@ func dirFromProto(pd *Directory) *aggregate.Directory {
 		d.PRInfo = &session.PRInfo{
 			Number: int(p.GetNumber()),
 			Title:  p.GetTitle(),
+			State:  p.GetState(),
 			URL:    p.GetUrl(),
 		}
 	}
