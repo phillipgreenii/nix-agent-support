@@ -202,6 +202,30 @@ func TestPRCache_ExpiredThenRefetchedIsCachedAgain(t *testing.T) {
 	}
 }
 
+// Mirror of TestPRCache_ExpiredThenRefetchedIsCachedAgain for the NOT-FOUND path
+// (pg2-uvzi3): after a not-found entry expires and is re-checked (still no PR), the
+// fresh not-found result MUST refresh FetchedAt so the next Get within prNotFoundTTL
+// is a cache hit — otherwise `gh pr view` is re-spawned every tick forever for any
+// directory/branch that has no open PR.
+func TestPRCache_NotFoundExpiredThenRefetchedIsCachedAgain(t *testing.T) {
+	calls := 0
+	base := time.Now()
+	now := base
+	c := newTestCache(t, func(_ context.Context, _, _ string) (PRInfo, bool, error) {
+		calls++
+		return PRInfo{}, false, nil
+	})
+	c.Now = func() time.Time { return now }
+
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck // calls=1, not-found cached
+	now = base.Add(prNotFoundTTL + time.Minute)
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck // expired → re-fetch, calls=2, FetchedAt MUST refresh
+	c.Get(context.Background(), "/r", "b") //nolint:errcheck // same now → MUST be a cache hit
+	if calls != 2 {
+		t.Fatalf("refreshed not-found entry must be cached, not re-fetched every tick: %d calls", calls)
+	}
+}
+
 func TestPRCache_FoundEntryNeverExpiresWhenTTLZero(t *testing.T) {
 	calls := 0
 	base := time.Now()

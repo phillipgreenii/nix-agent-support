@@ -123,11 +123,15 @@ func (c *PRCache) Get(ctx context.Context, cwd, branch string) (*PRInfo, error) 
 
 	c.mu.Lock()
 	existing, alreadySet := c.entries[key]
-	// Overwrite when: no entry yet; a not-found is upgraded to found; or a found
-	// entry has aged past FoundTTL (refresh it — otherwise an expired found entry
-	// would re-spawn gh every tick forever, never storing the fresh result).
+	// Overwrite when: no entry yet; a not-found is upgraded to found; a found entry
+	// has aged past FoundTTL; or a not-found entry has aged past prNotFoundTTL. In
+	// every case we only reach this fetch path on a miss/expiry, so the fresh result
+	// MUST be stored — otherwise an expired entry would re-spawn gh every tick forever,
+	// never refreshing its FetchedAt (the found case is staleFound; the not-found case
+	// is staleNotFound — pg2-uvzi3: no-PR dirs re-spawned `gh pr view` continuously).
 	staleFound := existing.PR != nil && c.FoundTTL > 0 && now.Sub(existing.FetchedAt) >= c.FoundTTL
-	if !alreadySet || (existing.PR == nil && entry.PR != nil) || staleFound {
+	staleNotFound := alreadySet && existing.PR == nil && now.Sub(existing.FetchedAt) >= prNotFoundTTL
+	if !alreadySet || (existing.PR == nil && entry.PR != nil) || staleFound || staleNotFound {
 		c.entries[key] = entry
 		data, _ := json.Marshal(c.entries)
 		c.mu.Unlock()
