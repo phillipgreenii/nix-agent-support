@@ -152,6 +152,7 @@ func (p *Poller) ensureProducer() *Producer {
 		Now:             p.Now,
 		Signalers:       p.Signalers,
 		BridgeRegistry:  p.BridgeRegistry,
+		Rec:             p.Rec,
 		SynchronousMode: true,
 	}
 	return p.producer
@@ -215,6 +216,9 @@ func (p *Poller) SetPhaseRecorder(r any) {
 	}
 	if p.Providers != nil {
 		p.Providers.SetRecorder(r)
+	}
+	if p.producer != nil {
+		p.producer.Rec = p.Rec
 	}
 }
 
@@ -415,13 +419,10 @@ func (p *Poller) buildTree(ctx context.Context, ds *DerivedState, now time.Time)
 		}
 	}
 
-	// The producer's UsagePricing observer already folded the in-window records;
-	// Block/CostProbed are read back from the DerivedState. The "pricer" phase
-	// timer stays (metric parity) — Phase-3 step 6 re-homes it to the producer.
-	pricerStart := time.Now()
+	// Block/CostProbed are read back from the DerivedState (the producer folded
+	// them and fired the "pricer" phase off-tick, step 6).
 	block := ds.Block
 	costProbed, costProbeErr := ds.CostProbed, ds.CostProbeErr
-	p.phase("pricer", pricerStart)
 
 	aggregateBuildStart := time.Now()
 	tree := aggregate.Build(built, enriched, prByDir, block, p.BlockCapUSD)

@@ -552,23 +552,22 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// leaves the tree's values untouched — never clobbered with 0.
 		tickNow := time.Now().UTC()
 
-		limitsStart := time.Now()
+		// rate_limits + weekly are read from the poller's PUBLISHED DerivedState
+		// (producer-owned). The producer fires the "limits"/"weekly" phase timers
+		// off-tick (step 6); the tick only reads the projection and applies it.
 		if lr := monitorLimits(opts.Poller); lr != nil {
 			applyLimits(tree, lr)
 		}
-		phase("limits", limitsStart)
 
 		// Preserve the WeeklyEvery cadence: read + upsert the weekly cost only on
 		// ~1/WeeklyEvery ticks (the pre-fold walk cadence), so the weekly histogram
 		// sample rate and the UpsertWeek DB-write rate are unchanged even though the
-		// value now comes from the (cheap) Monitor projection.
+		// value now comes from the (cheap) published DerivedState projection.
 		fetchWeek := opts.WeeklyEvery <= 0 || tickCount%opts.WeeklyEvery == 0
 		if fetchWeek {
-			weeklyStart := time.Now()
 			if w := monitorWeekly(opts.Poller, tickNow); w != nil {
 				tree.ActiveWeek = w
 			}
-			phase("weekly", weeklyStart)
 		}
 
 		// Persist the active block and week to the DB, then propagate

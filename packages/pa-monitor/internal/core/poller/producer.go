@@ -29,6 +29,11 @@ type Producer struct {
 	Signalers      []signal.Signaler
 	BridgeRegistry *bridge.Registry
 
+	// Rec receives the producer-side phase timings (discover/pricer/limits/weekly
+	// re-homed off the emit tick, step 6). nil disables recording. Wired by the
+	// poller's SetPhaseRecorder. discover is fired by the Monitor itself.
+	Rec PhaseRecorder
+
 	// SynchronousMode drives the equivalence gate (C2). When true (Phase 1-3 and
 	// the default), the emit tick Assembles + publishes inline before reading the
 	// state back — Scan-on-tick. When false (Phase 4), a producer goroutine owns
@@ -229,6 +234,16 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		}
 	}
 
+	// Limits/weekly are cheap projection reads (the fold happened in Scan); the
+	// phase timers are re-homed here from the emit tick (step 6, §11 parity).
+	limitsStart := time.Now()
+	lim := pr.Monitor.Limits()
+	pr.phase("limits", limitsStart)
+
+	weeklyStart := time.Now()
+	weekly := pr.Monitor.Weekly(now)
+	pr.phase("weekly", weeklyStart)
+
 	// Repo labels (C1): compute the workspace.repo label IN THE PRODUCER (it owns
 	// the Cache) and publish a cwd->label map, so the tick's label/gauge pipeline
 	// reads the map instead of calling provider.Cache.RepoLabel — which would
@@ -251,8 +266,13 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 	// keys — once per batch, after the per-session loop + PR calls.
 	pr.Providers.Reconcile(sessions)
 
+	// pricer phase re-homed here from the emit tick (step 6): the pricing fold ran
+	// in Scan; this times the block projection read (§11 parity — the phase label
+	// is preserved, now fired from the producer).
+	pricerStart := time.Now()
 	block := pr.Monitor.Block(now)
 	costProbed, costProbeErr := pr.Monitor.CostProbed()
+	pr.phase("pricer", pricerStart)
 
 	return &DerivedState{
 		GeneratedAt:  now,
@@ -263,7 +283,14 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		Block:        block,
 		CostProbed:   costProbed,
 		CostProbeErr: costProbeErr,
-		Limits:       pr.Monitor.Limits(),
-		Weekly:       pr.Monitor.Weekly(now),
+		Limits:       lim,
+		Weekly:       weekly,
 	}, nil
+}
+
+// phase records a producer-side phase duration when a Rec is wired (nil-safe).
+func (pr *Producer) phase(name string, start time.Time) {
+	if pr.Rec != nil {
+		pr.Rec.RecordPhase(name, time.Since(start))
+	}
 }
