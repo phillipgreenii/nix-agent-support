@@ -58,7 +58,7 @@ func TestSnapshotZeroesStaleRateLimitResetsAt(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC) },
 	}
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestSnapshotKeepsRecentRateLimitResetsAt(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 5, 5, 13, 2, 0, 0, time.UTC) },
 	}
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestSnapshotProducesTree(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestSnapshotRecordsPhases(t *testing.T) {
 	rec := newFakeRec()
 	p := newTestPoller(t)
 	p.Rec = rec
-	_, _, err := p.Snapshot(context.Background())
+	_, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestSnapshotEnrichmentFields(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Now() },
 	}
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestSnapshotPRLookupCalledOncePerDir(t *testing.T) {
 		Now:         func() time.Time { return time.Now() },
 		Providers:   cache,
 	}
-	_, _, err := p.Snapshot(context.Background())
+	_, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestSnapshotSubagentDisruptSurfacedAsLastError(t *testing.T) {
 		PidAlive:    func(int) bool { return true },
 		Now:         func() time.Time { return time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC) },
 	}
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestPoller_WritesToStores(t *testing.T) {
 		Signalers:        nil,
 		WriteService:     ws,
 	}
-	if _, _, err := p.Snapshot(ctx); err != nil {
+	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if err := ws.Sync(ctx); err != nil {
@@ -478,7 +478,7 @@ func TestPoller_PersistsLabels(t *testing.T) {
 			return map[string]string{"workspace.scope": "ziprecruiter"}
 		},
 	}
-	if _, _, err := p.Snapshot(ctx); err != nil {
+	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if err := ws.Sync(ctx); err != nil {
@@ -532,6 +532,25 @@ func makeRegistryFixture(t *testing.T, status, waitingFor string, statusUpdatedA
 	return sessionsDir, claudeHome
 }
 
+// assembleAndSnapshot drives the full producer→tick pipeline synchronously for a
+// test: it Assembles + Publishes one DerivedState (the producer's job) and then
+// runs Snapshot (the tick's Load + buildTree). Snapshot itself only Loads the
+// last published state (the sole path since the transitional sync-on-tick flag
+// was removed), so a
+// test that needs a populated tree must publish one first; this helper does that
+// deterministically without spawning the producer goroutine (which would make
+// scan-count / cache-hit assertions racy).
+func assembleAndSnapshot(t *testing.T, p *Poller, ctx context.Context) (*aggregate.Tree, bool, error) {
+	t.Helper()
+	prod := p.Producer()
+	ds, err := prod.Assemble(ctx, p.Now())
+	if err != nil {
+		return nil, false, err
+	}
+	prod.Publish(ds)
+	return p.Snapshot(ctx)
+}
+
 func snapshotStatus(t *testing.T, p *Poller) session.Status {
 	t.Helper()
 	return snapshotSession(t, p).Status
@@ -541,7 +560,7 @@ func snapshotStatus(t *testing.T, p *Poller) session.Status {
 // Status/Blocker/LongIdle for the ADR 0024 derivation tests.
 func snapshotSession(t *testing.T, p *Poller) *aggregate.SessionView {
 	t.Helper()
-	tree, _, err := p.Snapshot(context.Background())
+	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

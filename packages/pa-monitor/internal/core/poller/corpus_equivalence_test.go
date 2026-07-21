@@ -167,7 +167,7 @@ func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
 	p := newMonitorPoller(sessionsDir, home, pidAlive, now)
 	p.SetPhaseRecorder(rec)
 
-	if _, _, err := p.Snapshot(ctx); err != nil {
+	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if rec.scans["full"] == 0 {
@@ -180,7 +180,7 @@ func TestSnapshot_CorpusMonitor_MetricParity(t *testing.T) {
 		t.Errorf("git_branch subprocess metric not emitted from the poller; spawns=%v", rec.spawns)
 	}
 	// Second scan on the unchanged corpus -> cache_hit from the Monitor tail.
-	if _, _, err := p.Snapshot(ctx); err != nil {
+	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if rec.scans["cache_hit"] == 0 {

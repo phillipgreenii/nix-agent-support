@@ -115,9 +115,9 @@ type Poller struct {
 	burn burnSampler
 
 	// producer owns the Monitor + provider Cache and assembles the immutable
-	// DerivedState the emit tick reads (Phase 3). Lazily built from p.Monitor /
-	// p.Providers on first Snapshot; SynchronousMode=true keeps Scan on the tick
-	// until Phase 4 introduces the producer goroutine.
+	// DerivedState the emit tick reads. Lazily built from p.Monitor / p.Providers
+	// on first Snapshot / Producer access; the daemon drives its goroutine via
+	// StartProducer and the tick only Loads the last published DerivedState.
 	producer *Producer
 }
 
@@ -147,13 +147,12 @@ func (p *Poller) ensureProducer() *Producer {
 		p.Providers.SetRecorder(p.Rec)
 	}
 	p.producer = &Producer{
-		Monitor:         p.Monitor,
-		Providers:       p.Providers,
-		Now:             p.Now,
-		Signalers:       p.Signalers,
-		BridgeRegistry:  p.BridgeRegistry,
-		Rec:             p.Rec,
-		SynchronousMode: true,
+		Monitor:        p.Monitor,
+		Providers:      p.Providers,
+		Now:            p.Now,
+		Signalers:      p.Signalers,
+		BridgeRegistry: p.BridgeRegistry,
+		Rec:            p.Rec,
 	}
 	return p.producer
 }
@@ -249,47 +248,34 @@ func (p *Poller) phase(name string, start time.Time) {
 	}
 }
 
-// Snapshot builds the per-tick aggregate.Tree. It obtains one immutable
-// DerivedState from the Producer — assembled + published inline in
-// SynchronousMode (Scan on the tick), or Loaded from the last producer publish
-// otherwise (Phase 4) — then builds the tree from it (buildTree). The producer /
-// tick split is field-owned per C5: Monitor + providers are producer-side; the
-// burn-rate maps + prevTotalTokens are tick-side.
+// Snapshot builds the per-tick aggregate.Tree. It Loads the most recently
+// published immutable DerivedState from the Producer — the producer goroutine
+// owns Assemble+Publish (StartProducer), so the tick ONLY Loads and must NEVER
+// assemble, or it would race the goroutine's concurrent Assemble (two writers of
+// the Monitor/providers). Producer.Start seeds one publish before spawning, so
+// ds is non-nil by the first tick; a nil Load is a brief pre-seed window → emit
+// an empty tree. It then builds the tree (buildTree). The producer / tick split
+// is field-owned per C5: Monitor + providers are producer-side; the burn-rate
+// maps + prevTotalTokens are tick-side.
 func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 	now := p.Now()
 	prod := p.ensureProducer()
 
-	var ds *DerivedState
-	if prod.SynchronousMode {
-		var err error
-		ds, err = prod.Assemble(ctx, now)
-		if err != nil {
-			return nil, false, err
-		}
-		prod.Publish(ds)
-	} else {
-		// Async: the producer goroutine owns Assemble+Publish. The tick ONLY
-		// Loads — it must NEVER assemble here, or it would race the goroutine's
-		// concurrent Assemble (two writers of the Monitor/providers). Producer.
-		// Start seeds one publish before spawning, so ds is non-nil by the first
-		// tick; a nil Load is a brief pre-seed window → emit an empty tree.
-		ds = prod.Load()
-		if ds == nil {
-			return aggregate.Build(nil, nil, nil, nil, p.BlockCapUSD), false, nil
-		}
+	ds := prod.Load()
+	if ds == nil {
+		return aggregate.Build(nil, nil, nil, nil, p.BlockCapUSD), false, nil
 	}
 
 	return p.buildTree(ctx, ds, now)
 }
 
-// StartProducer switches the poller to the decoupled (async) mode and starts the
-// single producer goroutine: it owns Monitor+provider assembly and publishes the
-// DerivedState the emit tick Loads. The emit tick becomes a thin reader. Wired by
-// the daemon (RunWith); the read-only TUI poller and tests that never call this
-// stay synchronous (SynchronousMode=true).
+// StartProducer starts the single producer goroutine: it owns Monitor+provider
+// assembly and publishes the DerivedState the emit tick Loads, making the tick a
+// thin reader. Wired by the daemon (RunWith). A poller that never calls this
+// publishes nothing, so Snapshot Loads nil and emits an empty tree — tests that
+// need a populated tree must Assemble+Publish (or StartProducer) first.
 func (p *Poller) StartProducer(ctx context.Context) {
 	prod := p.ensureProducer()
-	prod.SynchronousMode = false
 	prod.Start(ctx)
 }
 

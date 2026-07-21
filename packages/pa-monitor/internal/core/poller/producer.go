@@ -16,9 +16,9 @@ import (
 // Producer is the single writer of the corpus-derived state: it owns the corpus
 // Monitor (topology + observer projections) and the provider Cache, and on each
 // dispatch batch it Assembles one immutable DerivedState and publishes it via an
-// atomic pointer (design §3). Phase 4 runs Assemble on a dedicated goroutine at
-// the ChangeSource cadence; through Phase 1-3 the emit tick drives it inline
-// (SynchronousMode).
+// atomic pointer (design §3). Assemble runs on a dedicated producer goroutine at
+// the ChangeSource cadence (Start); the emit tick only Loads the last published
+// DerivedState.
 //
 // Field ownership (C5): Monitor + Providers + Signalers + BridgeRegistry are
 // producer-side; the burn-rate maps stay on the Poller (tick-side).
@@ -33,12 +33,6 @@ type Producer struct {
 	// re-homed off the emit tick, step 6). nil disables recording. Wired by the
 	// poller's SetPhaseRecorder. discover is fired by the Monitor itself.
 	Rec PhaseRecorder
-
-	// SynchronousMode drives the equivalence gate (C2). When true (Phase 1-3 and
-	// the default), the emit tick Assembles + publishes inline before reading the
-	// state back — Scan-on-tick. When false (Phase 4), a producer goroutine owns
-	// Assemble+publish and the tick only Loads the last published DerivedState.
-	SynchronousMode bool
 
 	// Interval is the SLOW-tier cadence — the periodic full rescan that catches
 	// newly-in-window (non-active) files. 0 defaults to 5s. FastInterval is the

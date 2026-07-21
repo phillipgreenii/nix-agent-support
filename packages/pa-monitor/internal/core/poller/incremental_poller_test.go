@@ -70,7 +70,7 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 
 	warm := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
 
-	t1, _, err := warm.Snapshot(context.Background())
+	t1, _, err := assembleAndSnapshot(t, warm, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,14 +96,14 @@ func TestSnapshotIncrementalMatchesColdAfterAppend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t2, _, err := warm.Snapshot(context.Background()) // incremental fold path
+	t2, _, err := assembleAndSnapshot(t, warm, context.Background()) // incremental fold path
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := findSession(t, t2, cwd)
 
 	cold := &Poller{SessionsDir: sessionsDir, ClaudeHome: claudeHome, PidAlive: func(int) bool { return true }, Now: now}
-	t3, _, err := cold.Snapshot(context.Background()) // cold full parse
+	t3, _, err := assembleAndSnapshot(t, cold, context.Background()) // cold full parse
 	if err != nil {
 		t.Fatal(err)
 	}

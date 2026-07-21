@@ -67,7 +67,7 @@ func TestProducer_ConcurrentPublishAndSnapshot_NoRace(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	p.StartProducer(ctx) // async: SynchronousMode=false + producer goroutine
+	p.StartProducer(ctx) // starts the producer goroutine (async publish)
 	defer p.StopProducer()
 
 	deadline := time.Now().Add(150 * time.Millisecond)
