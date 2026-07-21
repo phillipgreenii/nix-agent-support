@@ -16,7 +16,6 @@ import (
 
 type Config struct {
 	PlanTier         string
-	TopupPoolUSD     float64
 	BurnWindowShort  time.Duration
 	BurnWindowLong   time.Duration
 	RefreshInterval  time.Duration
@@ -103,22 +102,21 @@ type DecoratorConfig struct {
 }
 
 type tomlConfig struct {
-	PlanTier                 *string  `toml:"plan_tier"`
-	TopupPoolUSD             *float64 `toml:"topup_pool_usd"`
-	BurnWindowShortS         *int     `toml:"burn_window_short_s"`
-	BurnWindowLongS          *int     `toml:"burn_window_long_s"`
-	RefreshIntervalMS        *int     `toml:"refresh_interval_ms"`
-	CaffeinateGraceS         *int     `toml:"caffeinate_grace_s"`
-	WorkingThresholdS        *int     `toml:"working_threshold_s"`
-	IdleThresholdS           *int     `toml:"idle_threshold_s"`
-	WaitingFreshWindowS      *int     `toml:"waiting_fresh_window_s"`
-	StaleAfterS              *int     `toml:"stale_after_s"`
-	AutoResumeDelayS         *int     `toml:"auto_resume_delay_s"`
-	AutoResumeMessage        *string  `toml:"auto_resume_message"`
-	DisruptGraceS            *int     `toml:"disrupt_grace_s"`
-	EscalationAfterS         *int     `toml:"escalation_after_s"`
-	CmuxSidebarEnable        *bool    `toml:"cmux_sidebar_enable"`
-	CmuxSidebarIntervalTicks *int     `toml:"cmux_sidebar_interval_ticks"`
+	PlanTier                 *string `toml:"plan_tier"`
+	BurnWindowShortS         *int    `toml:"burn_window_short_s"`
+	BurnWindowLongS          *int    `toml:"burn_window_long_s"`
+	RefreshIntervalMS        *int    `toml:"refresh_interval_ms"`
+	CaffeinateGraceS         *int    `toml:"caffeinate_grace_s"`
+	WorkingThresholdS        *int    `toml:"working_threshold_s"`
+	IdleThresholdS           *int    `toml:"idle_threshold_s"`
+	WaitingFreshWindowS      *int    `toml:"waiting_fresh_window_s"`
+	StaleAfterS              *int    `toml:"stale_after_s"`
+	AutoResumeDelayS         *int    `toml:"auto_resume_delay_s"`
+	AutoResumeMessage        *string `toml:"auto_resume_message"`
+	DisruptGraceS            *int    `toml:"disrupt_grace_s"`
+	EscalationAfterS         *int    `toml:"escalation_after_s"`
+	CmuxSidebarEnable        *bool   `toml:"cmux_sidebar_enable"`
+	CmuxSidebarIntervalTicks *int    `toml:"cmux_sidebar_interval_ticks"`
 	// Longer field name than the aligned block above; the comment breaks the
 	// gofmt alignment run so the whole struct is not reflowed.
 	AutoRestartOnVersionMismatch *bool           `toml:"auto_restart_on_version_mismatch"`
@@ -160,7 +158,6 @@ type tomlOTel struct {
 func defaults() Config {
 	return Config{
 		PlanTier:         "max_5x",
-		TopupPoolUSD:     0,
 		BurnWindowShort:  60 * time.Second,
 		BurnWindowLong:   300 * time.Second,
 		RefreshInterval:  1 * time.Second,
@@ -229,9 +226,6 @@ func Load(path string) (Config, error) {
 func apply(cfg *Config, raw tomlConfig) {
 	if raw.PlanTier != nil {
 		cfg.PlanTier = *raw.PlanTier
-	}
-	if raw.TopupPoolUSD != nil {
-		cfg.TopupPoolUSD = *raw.TopupPoolUSD
 	}
 	if raw.BurnWindowShortS != nil {
 		cfg.BurnWindowShort = time.Duration(*raw.BurnWindowShortS) * time.Second

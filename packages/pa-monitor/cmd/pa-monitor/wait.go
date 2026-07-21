@@ -160,7 +160,6 @@ func runConfigShow(args []string) {
 		os.Exit(2)
 	}
 	fmt.Printf("plan_tier:                 %s\n", cfg.PlanTier)
-	fmt.Printf("topup_pool_usd:            %.2f\n", cfg.TopupPoolUSD)
 	fmt.Printf("burn_window_short:         %s\n", cfg.BurnWindowShort)
 	fmt.Printf("burn_window_long:          %s\n", cfg.BurnWindowLong)
 	fmt.Printf("refresh_interval:          %s\n", cfg.RefreshInterval)

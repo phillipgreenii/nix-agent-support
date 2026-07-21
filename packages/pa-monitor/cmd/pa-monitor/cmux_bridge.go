@@ -302,6 +302,19 @@ func diffSessionsAndLog(prev, curr bridgeSessions, log func(string)) bridgeSessi
 //
 // Errors (daemon unreachable, missing env) are best-effort: the
 // sidebar shows "daemon offline" rather than crashing the host pane.
+// cmuxBridgeReporterOptions builds the cmuxstatus.Options for the bridge's
+// sidebar reporter. It honors the cmux_sidebar_enable config kill switch
+// (pg2-4x2g3): CmuxSidebarEnable=false forces NewReporter to return a Noop, so
+// an operator can disable the sidebar without an env change. Async is always
+// on — the paint shells out to `cmux` and must never run on the gRPC loop.
+func cmuxBridgeReporterOptions(cfg config.Config, logf func(string)) cmuxstatus.Options {
+	return cmuxstatus.Options{
+		Enable: cfg.CmuxSidebarEnable,
+		Async:  true,
+		Logf:   logf,
+	}
+}
+
 func runCmuxBridge(args []string) {
 	ws := os.Getenv("CMUX_WORKSPACE_ID")
 	if ws == "" {
@@ -332,11 +345,9 @@ func runCmuxBridge(args []string) {
 	// slow under load) runs on the reporter's own worker, never on the gRPC
 	// receive loop below. This is what keeps a hung `cmux` call from stalling the
 	// daemon stream past its watchdog and manufacturing a false "Lost connection".
-	reporter := cmuxstatus.NewReporter(cmuxstatus.Options{
-		Enable: true,
-		Async:  true,
-		Logf:   func(s string) { log.Detail("cmux.reporter", map[string]string{"msg": s}) },
-	})
+	reporter := cmuxstatus.NewReporter(cmuxBridgeReporterOptions(cfg, func(s string) {
+		log.Detail("cmux.reporter", map[string]string{"msg": s})
+	}))
 	defer reporter.Clear()
 
 	announcer := &connAnnouncer{

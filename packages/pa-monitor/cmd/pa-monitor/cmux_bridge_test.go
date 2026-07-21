@@ -9,10 +9,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/config"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// TestCmuxBridgeReporterOptionsHonorsKillSwitch pins pg2-4x2g3: the bridge's
+// sidebar reporter must honor the cmux_sidebar_enable config kill switch
+// (previously the bridge hardcoded Enable:true, so cmux_sidebar_enable=false
+// never disabled the sidebar). Async is always set — the sidebar paint shells
+// out to `cmux` and must never run on the gRPC receive loop.
+func TestCmuxBridgeReporterOptionsHonorsKillSwitch(t *testing.T) {
+	if got := cmuxBridgeReporterOptions(config.Config{CmuxSidebarEnable: false}, nil); got.Enable {
+		t.Errorf("Enable = true; want false when cmux_sidebar_enable=false")
+	}
+	got := cmuxBridgeReporterOptions(config.Config{CmuxSidebarEnable: true}, nil)
+	if !got.Enable {
+		t.Errorf("Enable = false; want true when cmux_sidebar_enable=true")
+	}
+	if !got.Async {
+		t.Errorf("Async = false; want true (sidebar paint must not block the gRPC loop)")
+	}
+}
 
 // captureLog returns a log function that appends each line to lines.
 func captureLog(lines *[]string) func(string) {

@@ -115,7 +115,6 @@ func TestOverridesFromFile(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 	content := `
 plan_tier = "pro"
-topup_pool_usd = 50.0
 working_threshold_s = 15
 idle_threshold_s = 300
 `
@@ -128,9 +127,6 @@ idle_threshold_s = 300
 	}
 	if cfg.PlanTier != "pro" {
 		t.Errorf("PlanTier: got %q", cfg.PlanTier)
-	}
-	if cfg.TopupPoolUSD != 50.0 {
-		t.Errorf("TopupPoolUSD: got %v", cfg.TopupPoolUSD)
 	}
 	if cfg.WorkingThreshold != 15*time.Second {
 		t.Errorf("WorkingThreshold: got %v", cfg.WorkingThreshold)
