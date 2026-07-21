@@ -1257,13 +1257,14 @@
         "w": 24,
         "h": 1
       },
-      "collapsed": false
+      "collapsed": false,
+      "description": "Phase 3 decoupled corpus work from the emit tick: a single producer goroutine owns the corpus Monitor + provider Cache and assembles an immutable DerivedState (driven by a two-tier ChangeSource), which the emit tick Loads and emits. discover/pricer/limits/weekly, transcript.scan.*, and subprocess.* are now PRODUCER-side (off-tick); poll.tick.duration is the thin emit."
     },
     {
       "id": 201,
-      "title": "Poll tick duration (p95)",
+      "title": "Poll tick duration (p95) — emit only",
       "type": "timeseries",
-      "description": "p95 duration of a full poll tick, in milliseconds. Account-global metric (no per-session workspace_scope/plan_tier labels) — not filtered by $scope/$plan_tier.",
+      "description": "p95 duration of the EMIT tick only (Load DerivedState + burn-rate sample + label pipeline + aggregate.Build + DB persist + gRPC publish + nudge), in milliseconds — the corpus Scan no longer runs here (it moved to the producer goroutine). A sharp drop across the Phase-3 rollout is the near-idle proof. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1291,7 +1292,7 @@
       "id": 202,
       "title": "Poll phase duration (p95, by phase)",
       "type": "timeseries",
-      "description": "p95 duration per poll phase, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "p95 duration per phase, in milliseconds. PRODUCER-side phases, off the emit tick (Phase 3): discover, pricer, limits, weekly. EMIT-tick phases: aggregate_build, db_write_sessions, db_write_block, nudge. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1319,7 +1320,7 @@
       "id": 203,
       "title": "Transcript scan duration (p95, by mode)",
       "type": "timeseries",
-      "description": "p95 duration of transcript scans per mode, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "p95 duration of transcript scans per mode, in milliseconds. Emitted by the Monitor tail, which runs in the producer goroutine (off the emit tick) after Phase 3. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1375,7 +1376,7 @@
       "id": 205,
       "title": "Subprocess duration (p95, by kind)",
       "type": "timeseries",
-      "description": "p95 subprocess duration per kind, in milliseconds. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "p95 subprocess duration per kind, in milliseconds. Emitted by the providers, which run in the producer goroutine (off the emit tick) after Phase 3. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1403,7 +1404,7 @@
       "id": 206,
       "title": "Subprocess spawns (rate, by kind)",
       "type": "timeseries",
-      "description": "Subprocess spawn rate per kind. Account-global metric — not filtered by $scope/$plan_tier.",
+      "description": "Subprocess spawn rate per kind. Emitted by the providers in the producer goroutine (off the emit tick) after Phase 3; spawns_total falls as they cache. Account-global metric — not filtered by $scope/$plan_tier.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
