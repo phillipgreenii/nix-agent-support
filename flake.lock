@@ -462,6 +462,31 @@
     "nur": {
       "inputs": {
         "flake-parts": [
+          "phillipgreenii-nix-overlay",
+          "flake-parts"
+        ],
+        "nixpkgs": [
+          "phillipgreenii-nix-overlay",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1784312703,
+        "narHash": "sha256-a0NqtZyYZud/ILSaR3RKWy+ogGIexcsxf92cusjp1bA=",
+        "owner": "nix-community",
+        "repo": "nur",
+        "rev": "b643b754868a52d1038a6492a9b6c8aa6e99c54d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nur",
+        "type": "github"
+      }
+    },
+    "nur_2": {
+      "inputs": {
+        "flake-parts": [
           "stylix",
           "flake-parts"
         ],
@@ -502,11 +527,11 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1784303704,
-        "narHash": "sha256-xBZOeAOPuHDPLSHfUXY6BvPt0T19U66m4oM3uIyWpKs=",
+        "lastModified": 1784614589,
+        "narHash": "sha256-kczmrzjX6/AVlJCse1L+ErLp6VJHtYuMXX+UYIymk4A=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "96bdc837cbdd1725350e9e995c4251c03b59dd60",
+        "rev": "04278001ac52a2ae1b54924638412a90c38f1d97",
         "type": "github"
       },
       "original": {
@@ -524,16 +549,17 @@
         "nixpkgs": [
           "nixpkgs"
         ],
+        "nur": "nur",
         "phillipgreenii-nix-base": [
           "phillipgreenii-nix-base"
         ]
       },
       "locked": {
-        "lastModified": 1784505657,
-        "narHash": "sha256-3pzbogCQ1n2JmctIk9B9lH9REK13NEMQpVelNlevJNY=",
+        "lastModified": 1784615971,
+        "narHash": "sha256-0N1ewbaA4Bs1Z/XCb2ZInw+j2Y6eQ3OlBnDszqQjf3U=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "f7faf0e4790ff273ad382d3f5dc23878cd2589db",
+        "rev": "a5202e450e496b33b2783a8bca5d53dc9e8ed4f2",
         "type": "github"
       },
       "original": {
@@ -701,7 +727,7 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "nur": "nur",
+        "nur": "nur_2",
         "systems": "systems_5",
         "tinted-kitty": "tinted-kitty",
         "tinted-schemes": "tinted-schemes",
