@@ -36,6 +36,12 @@ type Monitor struct {
 
 	topo map[string]sessionTopology
 
+	// watch is the fast-tier ChangeSource watch set from the last Scan: the active
+	// sessions' resolved transcript paths + all status-sibling paths. The producer
+	// hands this to the ChangeSource so its ≤1s poll stats the low-latency set
+	// (active transcripts + status) for size/mtime changes (design §6).
+	watch []string
+
 	// perf deltas from the last Scan (Monitor-initiated work; proxies for opens,
 	// which happen inside transcript.ScanIncremental / transcript.LastAPIError /
 	// limits.ReadStatusRecords).
@@ -208,6 +214,19 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 		o.Prune(activeIDs)
 	}
 
+	// Build the fast-tier watch set: active sessions' resolved transcripts + all
+	// status siblings. Order is irrelevant (the ChangeSource stats into a map).
+	watch := make([]string, 0, len(newTopo)+len(activeStatusPaths))
+	for _, tp := range newTopo {
+		if tp.resolvedPath != "" {
+			watch = append(watch, tp.resolvedPath)
+		}
+	}
+	for sp := range activeStatusPaths {
+		watch = append(watch, sp)
+	}
+	m.watch = watch
+
 	m.lastTitleProbes = m.titles.opens - titleBase
 	m.lastScans = m.tt.scans - scanBase
 	m.lastReadDirs = m.st.readDirs - readDirBase
@@ -217,6 +236,11 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 
 	return sessions, nil
 }
+
+// WatchPaths returns the fast-tier ChangeSource watch set from the last Scan:
+// the active sessions' resolved transcript paths plus all status-sibling paths.
+// The producer feeds it to the ChangeSource after each Assemble.
+func (m *Monitor) WatchPaths() []string { return m.watch }
 
 // ResolvedPath returns sessionID's resolved transcript path + mtime, and whether
 // a transcript exists (ok=false when the project dir is missing/empty).

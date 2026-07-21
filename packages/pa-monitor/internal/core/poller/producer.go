@@ -35,20 +35,48 @@ type Producer struct {
 	// Assemble+publish and the tick only Loads the last published DerivedState.
 	SynchronousMode bool
 
-	// Interval is the producer loop cadence (Phase 4). 0 defaults to 5s (the
-	// pre-Phase-3 tick cadence, conservative). Phase-3 step 5 replaces the fixed
-	// ticker with the two-tier ChangeSource.
-	Interval time.Duration
+	// Interval is the SLOW-tier cadence — the periodic full rescan that catches
+	// newly-in-window (non-active) files. 0 defaults to 5s. FastInterval is the
+	// fast-tier poll that stats the active set + status siblings for size/mtime
+	// changes (low-latency); 0 defaults to 1s (capped at Interval). Ignored when a
+	// ChangeSource is injected via SetChangeSource.
+	Interval     time.Duration
+	FastInterval time.Duration
 
 	ref atomic.Pointer[DerivedState]
+
+	// changes drives the loop cadence (two-tier default, or an injected source).
+	changes ChangeSource
 
 	// Lifecycle (modeled on service.WriteService): Start seeds one synchronous
 	// publish then runs exactly one goroutine (startOnce); Stop cancels + joins.
 	started   atomic.Bool
 	startOnce sync.Once
 	stopOnce  sync.Once
-	stop      chan struct{}
+	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+}
+
+// SetChangeSource injects a ChangeSource (tests / custom transports). Must be
+// called before Start.
+func (pr *Producer) SetChangeSource(cs ChangeSource) { pr.changes = cs }
+
+// ensureChangeSource builds the two-tier default from Interval/FastInterval when
+// none was injected.
+func (pr *Producer) ensureChangeSource() ChangeSource {
+	if pr.changes != nil {
+		return pr.changes
+	}
+	slow := pr.Interval
+	if slow <= 0 {
+		slow = 5 * time.Second
+	}
+	fast := pr.FastInterval
+	if fast <= 0 || fast > slow {
+		fast = min(slow, time.Second)
+	}
+	pr.changes = newTwoTierChangeSource(fast, slow, pr.now)
+	return pr.changes
 }
 
 // Register adds an observer to the Monitor. It MUST be called before Start — the
@@ -63,19 +91,23 @@ func (pr *Producer) Register(o corpus.Observer) {
 
 // Start seeds one synchronous Assemble+Publish (so the first Load is non-nil
 // before any goroutine runs — the tick never assembles) and then spawns the
-// single producer goroutine. Idempotent (sync.Once): a second Start is a no-op.
+// single producer goroutine driven by the ChangeSource. Idempotent (sync.Once):
+// a second Start is a no-op.
 func (pr *Producer) Start(ctx context.Context) {
 	pr.startOnce.Do(func() {
 		pr.started.Store(true)
-		pr.stop = make(chan struct{})
+		cctx, cancel := context.WithCancel(ctx)
+		pr.cancel = cancel
+		cs := pr.ensureChangeSource()
 		// Seed BEFORE spawning so exactly one goroutine ever mutates the Monitor /
 		// providers (single writer): the seed runs on the caller's goroutine with
 		// no concurrent assembler, and thereafter only pr.loop assembles.
-		if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
+		if ds, err := pr.Assemble(cctx, pr.now()); err == nil {
 			pr.Publish(ds)
+			cs.SetWatch(pr.Monitor.WatchPaths())
 		}
 		pr.wg.Add(1)
-		go pr.loop(ctx)
+		go pr.loop(cctx, cs)
 	})
 }
 
@@ -83,34 +115,25 @@ func (pr *Producer) Start(ctx context.Context) {
 // safe to call even if Start was never called.
 func (pr *Producer) Stop() {
 	pr.stopOnce.Do(func() {
-		if pr.stop != nil {
-			close(pr.stop)
+		if pr.cancel != nil {
+			pr.cancel()
 		}
 	})
 	pr.wg.Wait()
 }
 
-// loop is the single producer goroutine: it Assembles + Publishes on Interval
-// until ctx is cancelled or Stop closes pr.stop. Exactly this goroutine performs
-// the swap (Publish) once Start has spawned it.
-func (pr *Producer) loop(ctx context.Context) {
+// loop is the single producer goroutine: it waits for the ChangeSource to signal
+// a rescan (fast-tier change or slow-tier period), Assembles + Publishes, and
+// re-arms the watch set. Exactly this goroutine performs the swap once spawned.
+func (pr *Producer) loop(ctx context.Context, cs ChangeSource) {
 	defer pr.wg.Done()
-	interval := pr.Interval
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-pr.stop:
-			return
-		case <-t.C:
-			if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
-				pr.Publish(ds)
-			}
+		if !cs.WaitForChange(ctx) {
+			return // ctx cancelled (Stop or parent shutdown)
+		}
+		if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
+			pr.Publish(ds)
+			cs.SetWatch(pr.Monitor.WatchPaths())
 		}
 	}
 }
