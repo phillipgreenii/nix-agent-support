@@ -1361,13 +1361,13 @@
       },
       "targets": [
         {
-          "expr": "rate(pa_monitor_transcript_scan_files_total[5m])",
-          "legendFormat": "files/sec",
+          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_files_total[5m]))",
+          "legendFormat": "{{mode}} files/sec",
           "refId": "A"
         },
         {
-          "expr": "rate(pa_monitor_transcript_scan_bytes_total[5m])",
-          "legendFormat": "bytes/sec",
+          "expr": "sum by (mode) (rate(pa_monitor_transcript_scan_bytes_total[5m]))",
+          "legendFormat": "{{mode}} bytes/sec",
           "refId": "B"
         }
       ]
@@ -1417,7 +1417,7 @@
       },
       "targets": [
         {
-          "expr": "rate(pa_monitor_subprocess_spawns_total[5m])",
+          "expr": "sum by (kind) (rate(pa_monitor_subprocess_spawns_total[5m]))",
           "legendFormat": "{{kind}}",
           "refId": "A"
         }
