@@ -4,6 +4,42 @@ import (
 	"testing"
 )
 
+// TestNudgeSuppressionNote pins pg2-65dyf: the CLI nudge must warn (parity with
+// the TUI 'N' path) that a freshly-queued nudge will be suppressed until idle
+// for any queued session that is Working (session_active) or blocked awaiting a
+// human (waiting_for_human). Non-human blocks (usage_limit/error) and idle are
+// NOT suppressed by the dispatcher, so they produce no warning.
+func TestNudgeSuppressionNote(t *testing.T) {
+	status := map[string][2]string{
+		"w1":   {"working", ""},
+		"w2":   {"working", ""},
+		"hi":   {"blocked", "human_input"},
+		"ha":   {"blocked", "human_authn"},
+		"ul":   {"blocked", "usage_limit"},
+		"idle": {"idle", ""},
+	}
+	statusOf := func(sid string) (string, string) { return status[sid][0], status[sid][1] }
+
+	for _, tc := range []struct {
+		name   string
+		queued []string
+		want   string
+	}{
+		{"empty", nil, ""},
+		{"idle not suppressed", []string{"idle"}, ""},
+		{"usage-limit block is not human-suppression", []string{"ul"}, ""},
+		{"one working", []string{"w1"}, "note: 1 working — suppressed until idle"},
+		{"two working", []string{"w1", "w2"}, "note: 2 working — suppressed until idle"},
+		{"human_input waiting", []string{"hi"}, "note: 1 waiting for human — suppressed until idle"},
+		{"human_authn waiting", []string{"ha"}, "note: 1 waiting for human — suppressed until idle"},
+		{"working + waiting combined", []string{"w1", "hi", "ha", "idle", "ul"}, "note: 1 working, 2 waiting for human — suppressed until idle"},
+	} {
+		if got := nudgeSuppressionNote(tc.queued, statusOf); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestCLINudgeUsesNudgeQueue verifies that parseNudgeFlags returns the
 // expected selector (and no cancel flag) when called with a plain selector
 // argument — matching the NudgeQueue code path.

@@ -170,6 +170,58 @@ func runNudge(args []string) {
 	if len(resp.GetAlreadyQueuedSessionIds()) > 0 {
 		fmt.Printf("already queued for: %s\n", strings.Join(resp.GetAlreadyQueuedSessionIds(), ", "))
 	}
+
+	// Parity with the TUI 'N' warning (pg2-65dyf): a manual nudge queued for a
+	// session that is currently Working, or blocked awaiting a human, is dropped
+	// by the dispatcher until the session goes idle (session_active /
+	// waiting_for_human). Surface that with a best-effort extra GetSessionInfo
+	// lookup per freshly-queued session (queued only, not already-queued —
+	// matching the TUI). A failed lookup just omits that session from the count.
+	if q := resp.GetQueuedSessionIds(); len(q) > 0 {
+		statusOf := func(sid string) (status, blocker string) {
+			sel := &pb.Selector{Target: &pb.Selector_SessionId{SessionId: sid}}
+			r, err := client.C.GetSessionInfo(ctx, &pb.GetSessionInfoRequest{Selector: sel})
+			if err != nil || r.GetView() == nil {
+				return "", ""
+			}
+			return r.GetView().GetStatus(), r.GetView().GetBlocker()
+		}
+		if note := nudgeSuppressionNote(q, statusOf); note != "" {
+			fmt.Println(note)
+		}
+	}
+}
+
+// nudgeSuppressionNote returns a one-line "suppressed until idle" warning when
+// any freshly-queued session is currently Working or blocked awaiting a human —
+// the two states the daemon's nudge dispatcher drops a manual nudge for
+// (session_active / waiting_for_human; see internal/daemon/nudger/dispatcher.go),
+// giving the CLI parity with the TUI 'N' warning (pg2-65dyf). statusOf yields a
+// session's (status, blocker) as SessionView wire strings; a lookup that fails
+// should return ("", "") so the session is simply not counted. Non-human blocks
+// (usage_limit/error) and idle are not suppressed and produce no note. Returns ""
+// when nothing is suppressible.
+func nudgeSuppressionNote(queued []string, statusOf func(sid string) (status, blocker string)) string {
+	working, waiting := 0, 0
+	for _, sid := range queued {
+		switch status, blocker := statusOf(sid); {
+		case status == "working":
+			working++
+		case status == "blocked" && (blocker == "human_input" || blocker == "human_authn"):
+			waiting++
+		}
+	}
+	if working+waiting == 0 {
+		return ""
+	}
+	var supp []string
+	if working > 0 {
+		supp = append(supp, fmt.Sprintf("%d working", working))
+	}
+	if waiting > 0 {
+		supp = append(supp, fmt.Sprintf("%d waiting for human", waiting))
+	}
+	return "note: " + strings.Join(supp, ", ") + " — suppressed until idle"
 }
 
 // runInfo implements `info <selector>` — prints session detail (when
