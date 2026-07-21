@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"os"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
@@ -13,6 +14,7 @@ const scanModeCacheHit = "cache_hit"
 
 type tcacheEntry struct {
 	mtime   time.Time
+	size    int64 // file size at fold time; part of the cache-hit key (C3)
 	snap    transcript.Snapshot
 	records []usage.Record
 }
@@ -53,8 +55,17 @@ func (tt *transcriptTail) fold(path string, mtime time.Time, rec Recorder) (tran
 		return transcript.Snapshot{}, nil, nil
 	}
 	if c, ok := tt.cache[path]; ok && c.mtime.Equal(mtime) {
-		recordScan(rec, scanModeCacheHit, 0, 0)
-		return c.snap, c.records, nil
+		// C3: mtime alone is not a sufficient cache key — a same-mtime append
+		// (coarse-grained FS mtime, or a rapid same-second append) grows the file
+		// without advancing mtime. Confirm the SIZE is also unchanged before
+		// serving a cache hit; on any size change (or a failed stat) fall through
+		// to ScanIncremental, which correctly tails the appended bytes via its
+		// size/offset/inode/newline check. This reconciles the tail gate with the
+		// ChangeSource's size/offset change detection (design §6/§8).
+		if fi, serr := os.Stat(path); serr == nil && fi.Size() == c.size {
+			recordScan(rec, scanModeCacheHit, 0, 0)
+			return c.snap, c.records, nil
+		}
 	}
 	// prevAcc when we have prior state for this exact path (incremental tail); a
 	// new path starts fresh, matching poller.go:200-206 (a rotated/renamed
@@ -73,7 +84,13 @@ func (tt *transcriptTail) fold(path string, mtime time.Time, rec Recorder) (tran
 	}
 	records := acc.Records()
 	tt.accs[path] = acc
-	tt.cache[path] = tcacheEntry{mtime: mtime, snap: snap, records: records}
+	// Record the folded size as part of the cache key (C3). Best-effort: a failed
+	// stat leaves size 0, which simply forces a re-fold next tick (safe).
+	var size int64
+	if fi, serr := os.Stat(path); serr == nil {
+		size = fi.Size()
+	}
+	tt.cache[path] = tcacheEntry{mtime: mtime, size: size, snap: snap, records: records}
 	return snap, records, err
 }
 
