@@ -10,7 +10,7 @@ The `pa-monitor` daemon loads `~/.config/pa-monitor/config.toml` **once** at sta
 (`cmd/pa-monitor/daemon.go`). Bead `pg2-r1f1j.8` added a narrow hot-reload: `configReloader`
 (`internal/daemon/config_reload.go`) fingerprints the config file each tick and, on change, rebuilds
 **only the decorator pipeline** (`RunOptions.ReloadDecorators`), swapping `decorators` and clearing
-`labelCache` in the tick goroutine (`internal/daemon/lifecycle.go:493`).
+`labelCache` in the tick goroutine (`internal/daemon/lifecycle.go:538-539`).
 
 Every **other** config-only field still requires a daemon restart, and the launchd restart is keyed
 on the package (wrapper) hash — not on the config file — so a config-only edit applied by
@@ -37,7 +37,7 @@ flowchart TD
 ```
 
 The `*poller.Poller`, its `NativePricer`, and the `block`/`week` trackers are built **once** in
-`buildPoller` (`cmd/pa-monitor/daemon.go:333`) with `BlockCapUSD = acct.BlockCap()`,
+`buildPoller` (`cmd/pa-monitor/daemon.go:368`) with `BlockCapUSD = acct.BlockCap()`,
 `Pricer.Prices = acct.PriceTable()`, `PlanTier`, and the config thresholds
 (`WorkingThreshold`, `IdleThreshold`, `WaitingFreshWindow`, `BurnWindowShort/Long`) all captured by
 value. They are then consumed via the `Poller` interface each tick.
