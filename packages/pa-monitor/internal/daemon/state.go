@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
@@ -18,6 +19,16 @@ import (
 // nudge sources per session at snapshot time. *nudger.Nudger satisfies it.
 type pendingNudgeQuerier interface {
 	PendingSourcesForSession(sid string) []nudger.Source
+}
+
+// prByDirQuerier reports the live cwd -> *PRInfo map at snapshot time. The
+// served tree is re-materialised from the DB, which drops PRInfo (no PR
+// columns), so snapshot() re-annotates dir.PRInfo by cwd from this live map —
+// the same delivery pattern pending-nudge uses (F1). The poller satisfies it
+// via MonitorPRByDir, an atomic Load of the producer-owned DerivedState.PRByDir
+// (Phase 3), so the read never touches the producer-owned Monitor/providers.
+type prByDirQuerier interface {
+	MonitorPRByDir() map[string]*session.PRInfo
 }
 
 // sharedState holds the daemon's current view of the world. The tick
@@ -38,6 +49,7 @@ type sharedState struct {
 	runtimePath              string // for persistence on toggle
 	nudger                   *nudger.Nudger
 	nudgerForPending         pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
+	prByDir                  prByDirQuerier      // used by snapshot() to re-annotate dir.PRInfo by cwd (F1)
 	watermarks               *WatermarkStore
 	autoResumeDelay          time.Duration // static config: how long to wait before auto-nudging
 
@@ -68,12 +80,22 @@ func (s *sharedState) setPendingNudgeQueue(q pendingNudgeQuerier) {
 	s.mu.Unlock()
 }
 
+// setPRByDirSource wires in the live cwd -> *PRInfo source used to re-annotate
+// the DB-materialised tree with PR info at snapshot time (F1). The poller
+// satisfies prByDirQuerier via MonitorPRByDir.
+func (s *sharedState) setPRByDirSource(q prByDirQuerier) {
+	s.mu.Lock()
+	s.prByDir = q
+	s.mu.Unlock()
+}
+
 // snapshot materialises the current aggregate.Tree from the DB via ReadService.
 // Returns nil when ReadService is not yet wired (daemon not fully started).
 func (s *sharedState) snapshot() *aggregate.Tree {
 	s.mu.RLock()
 	rs := s.readService
 	pq := s.nudgerForPending
+	prSrc := s.prByDir
 	s.mu.RUnlock()
 
 	if rs == nil {
@@ -88,6 +110,20 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 		return nil
 	}
 	tree := convertStateToAggregateTree(st)
+	// Re-annotate PRInfo by cwd from the live producer map (F1). PRInfo is NOT
+	// persisted (no PR columns), so convertDirectory left dir.PRInfo nil; the
+	// served tree would otherwise never carry a PR and the TUI would show
+	// nothing. The map is an atomic read of the producer-owned DerivedState —
+	// immutable once published, so this is race-free off the tick goroutine.
+	if prSrc != nil && tree != nil {
+		if prByDir := prSrc.MonitorPRByDir(); len(prByDir) > 0 {
+			for _, dir := range tree.Dirs {
+				if info, ok := prByDir[dir.Path]; ok && info != nil {
+					dir.PRInfo = info
+				}
+			}
+		}
+	}
 	// Annotate sessions with live pending-nudge state from the in-memory
 	// nudger. The DB does not persist pending intents — they live only in
 	// the nudger's PendingStore.

@@ -195,6 +195,23 @@ func (p *Poller) MonitorWeekly(now time.Time) *usage.WeeklyEntry {
 	return ds.Weekly
 }
 
+// MonitorPRByDir returns the cwd -> *PRInfo map from the last PUBLISHED
+// DerivedState (C5). The daemon's snapshot() re-annotates the DB-materialised
+// tree with it (F1: PRInfo is not persisted, so the served tree would otherwise
+// drop every PR). The read is an atomic Load of producer-owned state, so it
+// never touches the Monitor/providers the producer owns off-tick. Nil before
+// the first publish.
+func (p *Poller) MonitorPRByDir() map[string]*session.PRInfo {
+	if p.producer == nil {
+		return nil
+	}
+	ds := p.producer.Load()
+	if ds == nil {
+		return nil
+	}
+	return ds.PRByDir
+}
+
 // SetActiveWeekID implements daemon.BlockWeekIDSetter.
 func (p *Poller) SetActiveWeekID(id int64) { p.ActiveWeekID = id }
 

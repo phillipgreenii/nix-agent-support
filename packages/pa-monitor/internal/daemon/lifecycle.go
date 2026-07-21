@@ -276,6 +276,15 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if opts.ReadService != nil {
 		state.setReadService(opts.ReadService)
 	}
+	// Wire the live cwd -> *PRInfo source so snapshot() re-annotates the
+	// DB-materialised tree with PR info (F1). PRInfo is not persisted, so the
+	// served tree would otherwise drop every PR. The poller satisfies
+	// prByDirQuerier via MonitorPRByDir (an atomic read of the producer's
+	// published DerivedState); a bare test fake that doesn't implement it simply
+	// leaves the served tree PR-less, as before.
+	if q, ok := opts.Poller.(prByDirQuerier); ok {
+		state.setPRByDirSource(q)
+	}
 
 	// bridgeReg is the single bridge.Registry instance shared by the gRPC
 	// server (BridgeChannel attaches live bridge streams to it), the
