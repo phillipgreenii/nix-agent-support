@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,7 +35,92 @@ type Producer struct {
 	// Assemble+publish and the tick only Loads the last published DerivedState.
 	SynchronousMode bool
 
+	// Interval is the producer loop cadence (Phase 4). 0 defaults to 5s (the
+	// pre-Phase-3 tick cadence, conservative). Phase-3 step 5 replaces the fixed
+	// ticker with the two-tier ChangeSource.
+	Interval time.Duration
+
 	ref atomic.Pointer[DerivedState]
+
+	// Lifecycle (modeled on service.WriteService): Start seeds one synchronous
+	// publish then runs exactly one goroutine (startOnce); Stop cancels + joins.
+	started   atomic.Bool
+	startOnce sync.Once
+	stopOnce  sync.Once
+	stop      chan struct{}
+	wg        sync.WaitGroup
+}
+
+// Register adds an observer to the Monitor. It MUST be called before Start — the
+// observer set is frozen once the producer goroutine owns the Monitor (design
+// §3). Calling it after Start panics.
+func (pr *Producer) Register(o corpus.Observer) {
+	if pr.started.Load() {
+		panic("poller: Producer.Register called after Start (observer set is frozen)")
+	}
+	pr.Monitor.Register(o)
+}
+
+// Start seeds one synchronous Assemble+Publish (so the first Load is non-nil
+// before any goroutine runs — the tick never assembles) and then spawns the
+// single producer goroutine. Idempotent (sync.Once): a second Start is a no-op.
+func (pr *Producer) Start(ctx context.Context) {
+	pr.startOnce.Do(func() {
+		pr.started.Store(true)
+		pr.stop = make(chan struct{})
+		// Seed BEFORE spawning so exactly one goroutine ever mutates the Monitor /
+		// providers (single writer): the seed runs on the caller's goroutine with
+		// no concurrent assembler, and thereafter only pr.loop assembles.
+		if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
+			pr.Publish(ds)
+		}
+		pr.wg.Add(1)
+		go pr.loop(ctx)
+	})
+}
+
+// Stop cancels the producer goroutine and joins it (wg.Wait). Idempotent and
+// safe to call even if Start was never called.
+func (pr *Producer) Stop() {
+	pr.stopOnce.Do(func() {
+		if pr.stop != nil {
+			close(pr.stop)
+		}
+	})
+	pr.wg.Wait()
+}
+
+// loop is the single producer goroutine: it Assembles + Publishes on Interval
+// until ctx is cancelled or Stop closes pr.stop. Exactly this goroutine performs
+// the swap (Publish) once Start has spawned it.
+func (pr *Producer) loop(ctx context.Context) {
+	defer pr.wg.Done()
+	interval := pr.Interval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-pr.stop:
+			return
+		case <-t.C:
+			if ds, err := pr.Assemble(ctx, pr.now()); err == nil {
+				pr.Publish(ds)
+			}
+		}
+	}
+}
+
+// now returns the producer clock (Now, or time.Now when unset).
+func (pr *Producer) now() time.Time {
+	if pr.Now != nil {
+		return pr.Now()
+	}
+	return time.Now()
 }
 
 // Publish stores ds as the current DerivedState (the atomic producer->tick

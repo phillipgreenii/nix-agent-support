@@ -247,20 +247,36 @@ func (p *Poller) Snapshot(ctx context.Context) (*aggregate.Tree, bool, error) {
 		}
 		prod.Publish(ds)
 	} else {
+		// Async: the producer goroutine owns Assemble+Publish. The tick ONLY
+		// Loads — it must NEVER assemble here, or it would race the goroutine's
+		// concurrent Assemble (two writers of the Monitor/providers). Producer.
+		// Start seeds one publish before spawning, so ds is non-nil by the first
+		// tick; a nil Load is a brief pre-seed window → emit an empty tree.
 		ds = prod.Load()
 		if ds == nil {
-			// Producer goroutine has not published yet — bootstrap one batch so
-			// the first tick is not empty.
-			var err error
-			ds, err = prod.Assemble(ctx, now)
-			if err != nil {
-				return nil, false, err
-			}
-			prod.Publish(ds)
+			return aggregate.Build(nil, nil, nil, nil, p.BlockCapUSD), false, nil
 		}
 	}
 
 	return p.buildTree(ctx, ds, now)
+}
+
+// StartProducer switches the poller to the decoupled (async) mode and starts the
+// single producer goroutine: it owns Monitor+provider assembly and publishes the
+// DerivedState the emit tick Loads. The emit tick becomes a thin reader. Wired by
+// the daemon (RunWith); the read-only TUI poller and tests that never call this
+// stay synchronous (SynchronousMode=true).
+func (p *Poller) StartProducer(ctx context.Context) {
+	prod := p.ensureProducer()
+	prod.SynchronousMode = false
+	prod.Start(ctx)
+}
+
+// StopProducer stops + joins the producer goroutine (no-op if never started).
+func (p *Poller) StopProducer() {
+	if p.producer != nil {
+		p.producer.Stop()
+	}
 }
 
 // buildTree is the emit-tick reader: it Loads no state itself but takes an

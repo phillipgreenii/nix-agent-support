@@ -495,6 +495,18 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// whether an Emitter was configured.
 	phase := func(name string, start time.Time) { opts.Emitter.RecordPhase(name, time.Since(start)) }
 
+	// Phase 3: decouple corpus/provider work from the emit tick. When the poller
+	// exposes the producer lifecycle, start its single producer goroutine (it owns
+	// Monitor+provider assembly and publishes the DerivedState the tick Loads) and
+	// stop+join it on return. Test fakes that don't implement this stay synchronous.
+	if pr, ok := opts.Poller.(interface {
+		StartProducer(context.Context)
+		StopProducer()
+	}); ok {
+		pr.StartProducer(ctx)
+		defer pr.StopProducer()
+	}
+
 	tickCount := 0
 	// runTick is the whole per-tick body, extracted into a closure (rather than
 	// left inline in the `case <-t.C:` arm) so RecordTickDuration can be recorded
