@@ -4,8 +4,62 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/render/wrap"
 )
+
+// TestRenderPathNodePRHyperlink pins F2's OSC-8 render: PR#<n> is emitted as a
+// balanced OSC-8 hyperlink (ST-terminated) to pr.url, the URL is zero-width
+// (so the row-width math is unaffected), the branch renders, and the link stays
+// balanced under wrap.Line truncation at every width.
+func TestRenderPathNodePRHyperlink(t *testing.T) {
+	url := "https://github.com/owner/repo/pull/42"
+	n := &aggregate.PathNode{
+		FullPath:    "/p",
+		DisplayPath: "/p",
+		Branch:      "feat/x",
+		PRInfo:      &session.PRInfo{Number: 42, State: "OPEN", URL: url},
+	}
+	out := RenderPathNode(n, TreeOpts{Width: 200}, false, false)
+
+	if !strings.Contains(out, "PR#42") {
+		t.Errorf("want visible PR#42, got %q", out)
+	}
+	if !strings.Contains(out, "feat/x") {
+		t.Errorf("want branch feat/x rendered, got %q", out)
+	}
+	opener := "\x1b]8;;" + url + "\x1b\\"
+	closer := "\x1b]8;;\x1b\\"
+	if !strings.Contains(out, opener) {
+		t.Errorf("missing OSC 8 opener %q in %q", opener, out)
+	}
+	if !strings.Contains(out, closer) {
+		t.Errorf("missing OSC 8 closer in %q", out)
+	}
+	// Exactly one opener + one closer: both start with "\x1b]8;;", so a balanced
+	// link has exactly two such markers.
+	if got := strings.Count(out, "\x1b]8;;"); got != 2 {
+		t.Errorf("OSC 8 marker count = %d, want 2 (balanced opener+closer)", got)
+	}
+
+	// Truncation invariant: at every width the row stays <= width and the link
+	// never ends up with an opener but no closer (ansi.Truncate keeps it balanced).
+	full := lipgloss.Width(out)
+	for w := 1; w <= full+3; w++ {
+		clip := wrap.Line(out, w)
+		if lw := lipgloss.Width(clip); lw > w {
+			t.Fatalf("wrap.Line width = %d, want <= %d: %q", lw, w, clip)
+		}
+		hasOpen := strings.Contains(clip, opener)
+		hasClose := strings.Contains(clip, closer)
+		if hasOpen && !hasClose {
+			t.Fatalf("truncation to %d left an unbalanced OSC 8 opener: %q", w, clip)
+		}
+	}
+}
 
 func TestRenderPathNodeExpandedGlyph(t *testing.T) {
 	n := &aggregate.PathNode{

@@ -300,6 +300,17 @@ func FmtTok(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// osc8Link wraps text in an OSC 8 terminal hyperlink to url, using the ST
+// (ESC-backslash) terminator. The pinned github.com/charmbracelet/x/ansi
+// exposes only SetHyperlink/ResetHyperlink (BEL-terminated) and no Hyperlink
+// helper; the ST form is the one render/wrap's ansi.Truncate is proven to keep
+// balanced under truncation (wrap.TestLinePreservesOSC8Link) and that
+// lipgloss.Width counts as zero-width — so the visible text is all that occupies
+// columns. Terminals that don't support OSC 8 simply render the visible text.
+func osc8Link(url, text string) string {
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
 // RenderPathNode renders one PathNode row with collapse glyph, indentation, and rollup stats.
 // selected controls the cursor mark prefix. collapsed controls the ▶/▼ glyph.
 func RenderPathNode(n *aggregate.PathNode, opts TreeOpts, selected, collapsed bool) string {
@@ -314,6 +325,21 @@ func RenderPathNode(n *aggregate.PathNode, opts TreeOpts, selected, collapsed bo
 	indent := strings.Repeat("  ", n.Depth)
 	// Glyph sits AFTER the depth indent so the collapse structure mirrors the tree.
 	label := indent + glyph + " " + n.DisplayPath
+	// Branch + clickable PR link (F2). Both are appended to the visible label;
+	// the OSC-8 hyperlink is zero-width under lipgloss.Width (the URL and escape
+	// bytes don't count), so the row-width math below is unaffected, and the
+	// View boundary's wrap.Line (ansi.Truncate) keeps the link balanced under
+	// truncation. Theme.Branch styles both (previously defined but unused).
+	if n.Branch != "" {
+		label += "  " + opts.Theme.Branch.Render(n.Branch)
+	}
+	if pr := n.PRInfo; pr != nil && pr.Number > 0 {
+		prText := fmt.Sprintf("PR#%d", pr.Number)
+		if pr.URL != "" {
+			prText = osc8Link(pr.URL, prText)
+		}
+		label += " " + opts.Theme.Branch.Render(prText)
+	}
 
 	col1, pct, bar, amount, burn := nodeRollupCols(n, opts)
 	stats := renderStatsBlock(col1, pct, bar, amount, burn)

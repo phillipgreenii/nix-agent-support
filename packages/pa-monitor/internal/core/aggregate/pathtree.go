@@ -15,6 +15,11 @@ type PathNode struct {
 	Depth          int
 	DirectSessions []*SessionView
 	Children       []*PathNode
+	// Branch and PRInfo are carried from the node's Directory so the TUI can
+	// render the branch and a clickable PR#<n> link (F2). Empty / nil when the
+	// node has no backing Directory (a pure branch-point) or no PR.
+	Branch string
+	PRInfo *session.PRInfo
 	// Rollup stats aggregated from this node and all descendants (ADR 0024
 	// {working, blocked, idle} model; long-idle counts as idle).
 	WorkingN     int
@@ -92,6 +97,8 @@ func compressAndBuild(n *trieNode, parentFullPath string, depth int) []*PathNode
 	}
 	if cur.dir != nil {
 		pn.DirectSessions = cur.dir.Sessions
+		pn.Branch = cur.dir.Branch
+		pn.PRInfo = cur.dir.PRInfo
 	}
 	for _, child := range sortedTrieChildren(cur) {
 		pn.Children = append(pn.Children, compressAndBuild(child, cur.fullPath, depth+1)...)

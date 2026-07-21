@@ -15,6 +15,30 @@ func TestBuildPathTreeEmpty(t *testing.T) {
 	}
 }
 
+// TestBuildPathTreeCarriesBranchAndPRInfo pins F2: the compressed PathNode must
+// carry the directory's Branch and PRInfo so the TUI can render the branch and
+// the clickable PR link (both were dropped before Phase 4).
+func TestBuildPathTreeCarriesBranchAndPRInfo(t *testing.T) {
+	pr := &session.PRInfo{Number: 42, State: "OPEN", URL: "https://example.com/pull/42"}
+	d := &Directory{
+		Path:     "/home/user/proj",
+		Branch:   "feat/x",
+		PRInfo:   pr,
+		Sessions: []*SessionView{{Session: &session.Session{Status: session.Working}}},
+	}
+	nodes := BuildPathTree([]*Directory{d})
+	if len(nodes) != 1 {
+		t.Fatalf("want 1 node, got %d", len(nodes))
+	}
+	n := nodes[0]
+	if n.Branch != "feat/x" {
+		t.Errorf("PathNode.Branch = %q, want feat/x", n.Branch)
+	}
+	if n.PRInfo != pr {
+		t.Errorf("PathNode.PRInfo = %v, want the directory's PRInfo pointer", n.PRInfo)
+	}
+}
+
 func TestBuildPathTreeSingleDir(t *testing.T) {
 	d := &Directory{
 		Path:     "/home/user/proj",
