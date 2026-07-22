@@ -52,10 +52,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Module:   r.Name(),
 			}
 		}
-		// Everything else (apply, delete, scale, exec, etc.) -> ASK
+		// Everything else (apply, delete, scale, exec, etc.) -> defer to mode/settings
 		return hookio.RuleResult{
-			Decision: hookio.Ask,
-			Reason:   "modifying kubectl command",
+			Decision: hookio.Abstain,
+			Reason:   "modifying kubectl command (defer)",
 			Module:   r.Name(),
 		}
 	}

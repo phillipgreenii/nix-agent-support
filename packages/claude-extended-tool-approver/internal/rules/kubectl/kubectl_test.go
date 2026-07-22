@@ -70,7 +70,7 @@ func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
 	}
 }
 
-func TestKubectl_KubeconfigModifying_Ask(t *testing.T) {
+func TestKubectl_KubeconfigModifying_Abstain(t *testing.T) {
 	r := New(nil, nil)
 	commands := []string{
 		"KUBECONFIG=/other kubectl apply -f x.yaml",
@@ -83,13 +83,13 @@ func TestKubectl_KubeconfigModifying_Ask(t *testing.T) {
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
 }
 
-func TestKubectl_Modifying_Ask(t *testing.T) {
+func TestKubectl_Modifying_Abstain(t *testing.T) {
 	r := New(nil, nil)
 	commands := []string{
 		"kubectl apply -f deploy.yaml",
@@ -107,8 +107,8 @@ func TestKubectl_Modifying_Ask(t *testing.T) {
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
 		got := r.Evaluate(input)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
 }
