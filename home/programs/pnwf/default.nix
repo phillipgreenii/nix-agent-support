@@ -43,8 +43,8 @@ in
   options.phillipgreenii.programs.pnwf = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = claudeEnable && pluginEnabled "pn-workspace-rules";
-      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable && <pn-workspace-rules plugin enabled>";
+      default = claudeEnable && pluginEnabled "pn-workspace-rules" && (pkgs ? pnwf);
+      defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-code.enable && <pn-workspace-rules plugin enabled> && (pkgs ? pnwf)";
       example = true;
       description = ''
         Install the `pnwf` CLI (the deterministic helper the pn-workspace-rules
@@ -53,6 +53,16 @@ in
         itself is enabled, so the helper and the plugin's skills ship together with no
         separate per-machine enable — closing the "CLI not on PATH after apply" gap
         (pg2-sikj3, pg2-xs5cj). Set false to opt out even when the plugin is enabled.
+
+        The extra `pkgs ? pnwf` term is defense-in-depth: unlike
+        integrate-branch-support (built in this repo's own overlay), `pnwf` is built
+        in phillipg-nix-repo-base and threaded in via the system-guarded overlay. It is
+        absent on the systems repo-base does not publish, AND absent when this flake's
+        locked repo-base rev predates `modules/pnwf` (i.e. before the producer→consumer
+        relock, pg2-3grza). Gating on availability makes those cases a graceful no-op
+        rather than a hard `pnwf cannot be found in pkgs` eval error at apply time. Once
+        the sibling is relocked onto a rev carrying `pnwf`, this term is true and the
+        helper ships with the plugin as intended.
       '';
     };
     package = lib.mkPackageOption pkgs "pnwf" { };

@@ -788,7 +788,16 @@
                   evalEnable =
                     cfg:
                     (lib.evalModules {
-                      specialArgs = { inherit pkgs lib; };
+                      # Inject a stub `pnwf` so the module's `pkgs ? pnwf` availability
+                      # term is satisfied — this test exercises the PLUGIN-ENABLED
+                      # resolution logic, not the package-availability guard (the check's
+                      # real pkgs may lack pnwf when the locked repo-base predates it).
+                      specialArgs = {
+                        pkgs = pkgs // {
+                          pnwf = pkgs.hello;
+                        };
+                        inherit lib;
+                      };
                       modules = [
                         ./home/programs/pnwf/default.nix
                         (
