@@ -27,6 +27,13 @@
         name = "ccusage";
         features = [ "ccusage" ];
       }
+      # codeburn is a SEPARATE opt-in token/cost tracker leaf (like ccusage), not in any bundle.
+      # Inert on darwin (the capabilities/isHuman layer is NixOS-only); the darwin machine enables
+      # it via a plain `phillipgreenii.programs.codeburn.enable = true`.
+      {
+        name = "codeburn";
+        features = [ "codeburn" ];
+      }
       # perles is a human-only TUI for beads. (gc-dolt-maintenance was removed from
       # this repo on main; the beads leaf no longer references it.)
       {

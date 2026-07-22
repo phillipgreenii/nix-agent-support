@@ -1,0 +1,24 @@
+{
+  "name": "codeburn",
+  "version": "0.9.19",
+  "description": "Repackaging shim for getagentseal/codeburn: prebuilt dist + the runtime deps its tsup bundle leaves external (tsup externalizes all `dependencies` by default).",
+  "type": "module",
+  "bin": {
+    "codeburn": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "bonjour-service": "1.4.1",
+    "chalk": "5.6.2",
+    "commander": "13.1.0",
+    "ink": "7.0.0",
+    "react": "19.2.5",
+    "selfsigned": "5.5.0",
+    "strip-ansi": "7.2.0",
+    "undici": "7.27.2",
+    "zod": "3.25.76"
+  }
+}

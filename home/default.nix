@@ -10,6 +10,7 @@
     ./programs/agent-rules
     ./programs/agentsview
     ./programs/ccusage
+    ./programs/codeburn
     ./programs/ollama
     ./programs/opencode
     ./programs/tuicr

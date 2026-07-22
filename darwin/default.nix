@@ -7,5 +7,6 @@
     ./modules/pr-pool
     ./modules/ccpool
     ./modules/ollama
+    ./modules/codeburn
   ];
 }
