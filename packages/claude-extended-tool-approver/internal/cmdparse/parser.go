@@ -63,7 +63,7 @@ func isSafeSubstitutionCommand(tokens []string) bool {
 	}
 	if cmd == "go" && len(tokens) >= 2 && tokens[1] == "env" {
 		for _, t := range tokens[2:] { // go env -w/-u mutate persistent config
-			if t == "-w" || t == "-u" {
+			if isGoEnvMutatingFlag(t) {
 				return false
 			}
 		}
@@ -75,6 +75,12 @@ func isSafeSubstitutionCommand(tokens []string) bool {
 	if fileReaderSubstitutions[cmd] {
 		for _, t := range tokens[1:] {
 			if strings.HasPrefix(t, "-") {
+				// A glued value (--flag=value) still names a real path to
+				// read (e.g. `grep --file=.env`); recheck the value half.
+				// Bare short flags (-c, -v, ...) carry no value — skip them.
+				if eq := strings.IndexByte(t, '='); eq >= 0 && secretpath.IsSecret(t[eq+1:]) {
+					return false
+				}
 				continue
 			}
 			if secretpath.IsSecret(t) {
@@ -84,6 +90,46 @@ func isSafeSubstitutionCommand(tokens []string) bool {
 		return true
 	}
 	return false
+}
+
+// isGoEnvMutatingFlag reports whether t is any spelling of go env's -w/-u
+// mutating flag: dash count (-w, --w) and a glued value (-w=true) must not
+// let it slip past a naive exact-token match.
+func isGoEnvMutatingFlag(t string) bool {
+	if !strings.HasPrefix(t, "-") {
+		return false
+	}
+	name := strings.TrimLeft(t, "-")
+	if eq := strings.IndexByte(name, '='); eq >= 0 {
+		name = name[:eq]
+	}
+	return name == "w" || name == "u"
+}
+
+// isSafeSubstitutionBody reports whether cmdStr — the inner body of a
+// $(...) or `...` command substitution — is safe. A body is safe only when
+// it parses (via the quote-aware Parse) to EXACTLY ONE leaf command with no
+// redirection/heredoc, and that leaf's command+args pass
+// isSafeSubstitutionCommand.
+//
+// Requiring exactly one leaf is what makes this quote-aware for free: Parse
+// (via splitCompound/tokenize) already tracks single/double-quote and
+// backtick state while scanning for ';', '&&', '||', '|', and '&', so a
+// top-level (unquoted) compound operator splits the body into 2+ leaves
+// (unsafe), while the SAME byte inside the command's own quotes — e.g. the
+// '|' in `grep -E 'a|b' file` — stays glued into one argument token and the
+// body still parses to a single leaf.
+func isSafeSubstitutionBody(cmdStr string) bool {
+	leaves := Parse(cmdStr)
+	if len(leaves) != 1 {
+		return false
+	}
+	leaf := leaves[0]
+	if leaf.Executable == "" || len(leaf.Redirections) > 0 || leaf.HasHeredoc {
+		return false
+	}
+	tokens := append([]string{leaf.Executable}, leaf.Args...)
+	return isSafeSubstitutionCommand(tokens)
 }
 
 // wrapperPrefixes lists (executable, subcommand) pairs that act as transparent
@@ -825,11 +871,10 @@ func classifyCmdSubstitution(value string) ExpansionKind {
 		return ExpansionUnknown
 	}
 	cmdStr := strings.TrimSpace(inner[:end])
-	tokens := strings.Fields(cmdStr)
-	if len(tokens) == 0 {
+	if cmdStr == "" {
 		return ExpansionUnknown
 	}
-	if isSafeSubstitutionCommand(tokens) {
+	if isSafeSubstitutionBody(cmdStr) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown
@@ -851,11 +896,10 @@ func classifyBacktickSubstitution(value string) ExpansionKind {
 		return ExpansionUnknown
 	}
 	cmdStr := strings.TrimSpace(value[first+1 : last])
-	tokens := strings.Fields(cmdStr)
-	if len(tokens) == 0 {
+	if cmdStr == "" {
 		return ExpansionUnknown
 	}
-	if isSafeSubstitutionCommand(tokens) {
+	if isSafeSubstitutionBody(cmdStr) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown
