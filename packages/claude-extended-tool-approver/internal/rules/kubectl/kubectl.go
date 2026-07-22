@@ -19,6 +19,8 @@ var readOnlyOperations = map[string]bool{
 
 var rolloutReadOnlySubcommands = map[string]bool{"status": true, "history": true}
 
+var execOperations = map[string]bool{"exec": true, "exe": true, "shell": true, "wsexec": true}
+
 // scopedApproveOperations are kc plugin verbs that mutate a dev workspace only;
 // auto-approved iff the command targets a personal dev workspace.
 var scopedApproveOperations = map[string]bool{
@@ -55,6 +57,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if operation == "" {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 		}
+		if execOperations[operation] {
+			if isDevWorkspaceScope(pc.Args, pc.EnvVars) {
+				return r.evaluateExec(pc.Args, input)
+			}
+			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kubectl exec (defer to mode/settings)", Module: r.Name()}
+		}
 		if operation == "rollout" {
 			if rolloutReadOnlySubcommands[rolloutSubcommand(pc.Args)] {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}
@@ -82,6 +90,45 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// evaluateExec recurses into the inner command after `--` through the full
+// rule chain, using a pod-internal path evaluator (docker-exec pattern).
+func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleResult {
+	inner := innerAfterDoubleDash(args)
+	if len(inner) == 0 {
+		return hookio.RuleResult{Decision: hookio.Abstain, Reason: "kc exec without inner command", Module: r.Name()}
+	}
+	if r.exprEval == nil {
+		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	}
+	innerExpr := extractInnerCommand(inner)
+	outerExpr := strings.Join(strings.Fields(strings.Join(args, " ")), " ")
+	stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "kc exec", Expression: outerExpr}}
+	scoped := *input
+	if r.pe != nil {
+		scoped.PathEval = r.pe.WithMounts([]patheval.Mount{}) // pod-internal paths
+	}
+	return r.exprEval.EvaluateExpression(innerExpr, stack, &scoped)
+}
+
+// innerAfterDoubleDash returns the args after the first `--`, or nil if none.
+func innerAfterDoubleDash(args []string) []string {
+	for i, a := range args {
+		if a == "--" {
+			return args[i+1:]
+		}
+	}
+	return nil
+}
+
+// extractInnerCommand converts inner command args into an expression string.
+// For "bash -c 'expr'" it extracts the expression; otherwise joins args.
+func extractInnerCommand(cmdArgs []string) string {
+	if len(cmdArgs) >= 3 && (cmdArgs[0] == "bash" || cmdArgs[0] == "sh") && cmdArgs[1] == "-c" {
+		return strings.Join(cmdArgs[2:], " ")
+	}
+	return strings.Join(cmdArgs, " ")
 }
 
 // nonDevAWSAccounts are AWS_PROFILE accounts (the part before '/') that name a
