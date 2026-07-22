@@ -137,6 +137,21 @@ func TestKubectl_NonKubectl_Abstain(t *testing.T) {
 	}
 }
 
+func TestKubectl_FlagValueNotOperation(t *testing.T) {
+	r := New(nil, nil)
+	// -n's value "get" must NOT be read as the operation; the real op is "delete".
+	cmds := []string{
+		"kubectl --namespace get delete pod foo",
+		"kubectl -n sync delete pod foo",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (delete is modifying)", cmd, got.Decision)
+		}
+	}
+}
+
 func TestKubectl_Name(t *testing.T) {
 	r := New(nil, nil)
 	if got := r.Name(); got != "kubectl" {
