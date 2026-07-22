@@ -10,7 +10,8 @@ import (
 var approvedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
-	"tilt": true,
+	"tilt":  true,
+	"prove": true, "yath": true,
 }
 
 // approvedScripts lists project-relative script basenames that are safe to run.

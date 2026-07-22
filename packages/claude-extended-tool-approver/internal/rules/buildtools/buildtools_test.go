@@ -152,6 +152,16 @@ func TestBuildtools_GenerateBuildDeps(t *testing.T) {
 	}
 }
 
+func TestBuildTools_Prove(t *testing.T) {
+	r := New()
+	for _, cmd := range []string{"prove -v t/foo.t", "mp/ui/customer/bin/devxp/prove t/bar.t", "yath test"} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s want approve", cmd, got.Decision)
+		}
+	}
+}
+
 func TestBuildtools_CueVet(t *testing.T) {
 	r := New()
 	tests := []struct {
