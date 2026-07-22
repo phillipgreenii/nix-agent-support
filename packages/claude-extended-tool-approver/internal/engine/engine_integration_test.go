@@ -273,6 +273,10 @@ func TestIntegration_KcRules(t *testing.T) {
 		{"dev profile prod namespace NOT approved", "AWS_PROFILE=dev/developers-dev bin/kc exec -n prod pod -- rm -rf /data", hookio.Abstain},
 		// v3: modifying kubectl-rule-own outcomes abstain (not ask).
 		{"rollout restart abstains", "kubectl rollout restart deploy/foo", hookio.Abstain},
+		// kc sync takes the dev workspace as a POSITIONAL arg (real form, row 301185).
+		{"real sync positional dev workspace approve", "AWS_PROFILE=dev/developers-dev bin/kc sync -f mp/ui/customer/layouts/test-runner d-phillipg01", hookio.Approve},
+		// non-dev positional target for sync must NOT be approved.
+		{"sync positional non-dev target NOT approved", "bin/kc sync -f x prod-target", hookio.Abstain},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

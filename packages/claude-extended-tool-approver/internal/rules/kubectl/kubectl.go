@@ -58,7 +58,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 		}
 		if execOperations[operation] {
-			if isDevWorkspaceScope(pc.Args, pc.EnvVars) {
+			if isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return r.evaluateExec(pc.Args, input)
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kubectl exec (defer to mode/settings)", Module: r.Name()}
@@ -70,7 +70,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "modifying kubectl command (defer)", Module: r.Name()}
 		}
 		if scopedApproveOperations[operation] {
-			if isDevWorkspaceScope(pc.Args, pc.EnvVars) {
+			if isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kc command (defer)", Module: r.Name()}
@@ -143,11 +143,18 @@ var devScopeFlags = map[string]bool{
 	"--ws": true, "--workspace": true, "-n": true, "--namespace": true,
 }
 
+// positionalWorkspaceOps take the dev workspace as a bare POSITIONAL argument
+// (e.g. `kc sync -f <path> d-phillipg01`) rather than behind a --ws/-n flag.
+var positionalWorkspaceOps = map[string]bool{"sync": true, "syncdev": true}
+
 func isPersonalDevName(v string) bool { return strings.HasPrefix(v, "d-") }
 
 // isDevWorkspaceScope reports whether a kc/kubectl invocation targets a personal
-// dev workspace (see "Devxp scope" contract).
-func isDevWorkspaceScope(args []string, env []cmdparse.EnvAssignment) bool {
+// dev workspace (see "Devxp scope" contract). For sync/syncdev the workspace is a
+// bare positional arg; for every other op only the --ws/--workspace/-n/--namespace
+// flags count — so a positional d- token elsewhere (e.g. an exec pod name) is never
+// mistaken for a scope signal.
+func isDevWorkspaceScope(operation string, args []string, env []cmdparse.EnvAssignment) bool {
 	for _, e := range env {
 		switch e.Name {
 		case "AWS_PROFILE":
@@ -164,6 +171,8 @@ func isDevWorkspaceScope(args []string, env []cmdparse.EnvAssignment) bool {
 			}
 		}
 	}
+	seenOp := false
+	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
@@ -174,6 +183,23 @@ func isDevWorkspaceScope(args []string, env []cmdparse.EnvAssignment) bool {
 		}
 		for _, pfx := range []string{"--ws=", "--workspace=", "--namespace="} {
 			if strings.HasPrefix(a, pfx) && isPersonalDevName(strings.TrimPrefix(a, pfx)) {
+				return true
+			}
+		}
+		// sync/syncdev: the workspace is a bare positional past the subcommand token.
+		if positionalWorkspaceOps[operation] {
+			if valueFlags[a] { // e.g. `-f <path>` — consume the value, not the workspace
+				i++
+				continue
+			}
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			if !seenOp { // the subcommand token itself (e.g. "sync")
+				seenOp = true
+				continue
+			}
+			if isPersonalDevName(a) {
 				return true
 			}
 		}

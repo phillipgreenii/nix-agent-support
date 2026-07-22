@@ -254,6 +254,12 @@ func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 		{"prod namespace", "kubectl exec -n prod pod -- rm -rf /x", false},
 		{"prod aws profile overrides dev ws", "AWS_PROFILE=prod/admin bin/kc exe --ws d-phillipg01 -- rm -rf /x", false},
 		{"decoy inner flag after --", "kubectl exec -n prod pod -- bats -n d-fake", false},
+		// sync/syncdev take the workspace as a bare POSITIONAL arg (not --ws/-n).
+		{"sync positional d- workspace", "AWS_PROFILE=dev/developers-dev bin/kc sync -f mp/ui/customer/layouts/test-runner d-phillipg01", true},
+		{"syncdev positional d- workspace", "bin/kc syncdev d-phillipg01", true},
+		{"sync positional non-dev target", "bin/kc sync -f x prod-target", false},
+		// positional detection must NOT leak to exec: a d- pod name is not a scope signal.
+		{"exec positional d- pod not dev-scoped", "kubectl exec d-somepod -- rm -rf /x", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,7 +272,7 @@ func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 					break
 				}
 			}
-			if got := isDevWorkspaceScope(pc.Args, pc.EnvVars); got != tt.want {
+			if got := isDevWorkspaceScope(extractOperation(pc.Args), pc.Args, pc.EnvVars); got != tt.want {
 				t.Errorf("%s: got %v want %v", tt.name, got, tt.want)
 			}
 		})
