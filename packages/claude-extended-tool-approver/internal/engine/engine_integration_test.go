@@ -231,6 +231,66 @@ func TestIntegration_SecretPathsPrompt(t *testing.T) {
 	}
 }
 
+// TestIntegration_KcRules drives kc/kubectl commands through the real rule
+// chain (buildFullEngine + EvaluateHook) — proving end-to-end, not under a
+// mocked evaluator, that:
+//   - exec-family recursion into an approved inner command (bats/prove)
+//     really resolves to Approve through the full chain (buildtools);
+//   - the dev-scoped sqitch guard and a non-dev prod exec are NOT approved
+//     (v3 decision: kubectl-rule-own outcomes are Abstain, never Ask/Reject —
+//     see docs/superpowers/plans/2026-07-21-kc-kubectl-rule-enhancements.md);
+//   - a plain read-only kc command approves;
+//   - a mutating rollout sub-verb abstains (v3, not ask);
+//   - a compound command folds most-restrictive-wins across its leaves.
+func TestIntegration_KcRules(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"dev exe bats approve", "AWS_PROFILE=dev/developers-dev bin/kc exe --ws d-phillipg01 -n mp--ui--customer -c test-runner -- bats", hookio.Approve},
+		{"dev shell prove approve", "AWS_PROFILE=dev/developers-dev bin/kc shell --ws d-phillipg01 -n X -c test-runner -- bash -c 'prove -v t/foo.t'", hookio.Approve},
+		{"kc get approve", "bin/kc get pods -n mp--ui--customer", hookio.Approve},
+		// SECURITY (mandatory): dev-scoped exec recurses into an unknown inner
+		// `shell zr-sqitch deploy …` — no rule approves it, so it must NOT
+		// resolve to Approve. v3: the kubectl rule's own outcome is Abstain.
+		{"dev sqitch guard NOT approved", "bin/kc exe -n d-phillipgs0-db--sqitch -c sqitch-ui -- shell zr-sqitch deploy zr_finance", hookio.Abstain},
+		// SECURITY (mandatory): non-dev (prod) exec must NOT be approved.
+		// v3: Abstain, NOT Ask.
+		{"prod exec NOT approved", "kubectl exec -n prod pod -- rm -rf /var/lib/data", hookio.Abstain},
+		// v3: modifying kubectl-rule-own outcomes abstain (not ask).
+		{"rollout restart abstains", "kubectl rollout restart deploy/foo", hookio.Abstain},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != tc.want {
+				t.Errorf("%s: got %s (%s: %s) want %s", tc.name, got.Decision, got.Module, got.Reason, tc.want)
+			}
+		})
+	}
+
+	// Compound: `cd`, `export`, and the kc-exe leaf fold most-restrictive-wins
+	// (engine.EvaluateExpression). `cd` and `export` are both in safecmds'
+	// alwaysSafe set (unconditionally, regardless of the exported var), so
+	// they do not demote the fold; the kc-exe leaf recurses to an approved
+	// inner `bats` exactly like the standalone case above. Net: Approve.
+	t.Run("compound cd+export+exe", func(t *testing.T) {
+		cmd := "cd " + projectRoot + " && export PATH=/x && AWS_PROFILE=dev/developers-dev bin/kc exe --ws d-phillipg01 -c c -- bats"
+		in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)}
+		got := eng.EvaluateHook(in)
+		if got.Decision != hookio.Approve {
+			t.Errorf("compound cd+export+exe: got %s (%s: %s) want %s", got.Decision, got.Module, got.Reason, hookio.Approve)
+		}
+	})
+}
+
 func makeFileJSON(path string) json.RawMessage {
 	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
 	return b
