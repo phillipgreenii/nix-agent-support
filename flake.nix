@@ -83,7 +83,7 @@
     let
       # Overlay populated incrementally as packages are migrated.
       overlay =
-        final: _prev:
+        final: prev:
         let
           bashBuilders = phillipgreenii-nix-base.lib.mkBashBuilders {
             pkgs = final;
@@ -100,6 +100,14 @@
             inherit (final) lib;
             inherit (phillipgreenii-nix-base.lib) mkSrcDigest;
           };
+          # `pnwf` is built in repo-base (modules/pnwf), not here. Thread it in from
+          # repo-base's packages, system-guarded: repo-base publishes only x86_64-linux +
+          # aarch64-darwin (this repo builds 4 systems), and a locked repo-base rev may
+          # predate the package. The `? pnwf` guard below makes a missing package a
+          # graceful no-op (attr absent) instead of an eval error (pg2-xs5cj C1).
+          # NB: use `prev` (the input pkgs), never `final`, to derive the system and the
+          # attr — deriving the overlay's OUTPUT SHAPE from `final` is a fixpoint cycle.
+          basePkgs = phillipgreenii-nix-base.packages.${prev.stdenv.hostPlatform.system} or { };
         in
         {
           # packages added in later tasks
@@ -196,7 +204,8 @@
             };
           pw-reset-agents = final.callPackage ./packages/pw-reset-agents { };
           pw-agent-activity = final.callPackage ./packages/pw-agent-activity { };
-        };
+        }
+        // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; };
 
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -752,6 +761,107 @@
                 assert claudeOff == false;
                 assert explicitOn == true;
                 pkgs.runCommand "integrate-branch-support-enable-default-ok" { } "touch $out";
+
+              # Durable eval test (pg2-xs5cj) for the pnwf enable DEFAULT: the pnwf CLI
+              # (the deterministic helper the pn-workspace-rules plugin's workforest
+              # stage-skills + /pn-workspace-sync invoke as a bare PATH command) must ship
+              # exactly when the pn-workspace-rules PLUGIN is enabled, so skills + helper
+              # can't drift apart. Mirrors test-integrate-branch-support-enable-default;
+              # reads ONLY the resolved `enable` so cfg.package (pkgs.pnwf) is never forced
+              # — which is why this test needs no repo-base package present.
+              test-pnwf-enable-default =
+                let
+                  mockMarketplace = pkgs.runCommand "mock-pnwf-marketplace" {
+                    passthru = {
+                      marketplaceName = "mock-pnwf-marketplace-local";
+                      plugins = [
+                        {
+                          name = "pn-workspace-rules";
+                          version = "0.1.0+aaaaaaaa";
+                          key = "pn-workspace-rules@mock-pnwf-marketplace-local";
+                          defaultEnabled = true;
+                        }
+                      ];
+                    };
+                  } "mkdir -p $out/.claude-plugin; echo '{}' > $out/.claude-plugin/marketplace.json";
+
+                  evalEnable =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pnwf/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the config surface the module reads/writes; the
+                            # real options live in claude-code / claude-marketplaces /
+                            # home-manager, not pulled in here.
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.marketplaces = {
+                                nixProvided = lib.mkOption {
+                                  type = lib.types.listOf lib.types.package;
+                                  default = [ ];
+                                };
+                                enabled = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                overrides = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config.phillipgreenii.programs.pnwf.enable;
+
+                  # claude on + pn-workspace-rules plugin present (defaultEnabled) => on.
+                  onDefault = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  # plugin explicitly overridden off => off, even with claude on.
+                  overriddenOff = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                      marketplaces.overrides."pn-workspace-rules@mock-pnwf-marketplace-local" = false;
+                    };
+                  };
+                  # claude disabled => off, even though plugin metadata is present.
+                  claudeOff = evalEnable {
+                    phillipgreenii.programs.claude-code = {
+                      enable = false;
+                      marketplaces.nixProvided = [ mockMarketplace ];
+                    };
+                  };
+                  # explicit opt-in still wins upward.
+                  explicitOn = evalEnable {
+                    phillipgreenii.programs.claude-code.enable = false;
+                    phillipgreenii.programs.pnwf.enable = true;
+                  };
+                in
+                assert onDefault == true;
+                assert overriddenOff == false;
+                assert claudeOff == false;
+                assert explicitOn == true;
+                pkgs.runCommand "pnwf-enable-default-ok" { } "touch $out";
 
               # Regression guard for pg2-1ygj: the claude-settings activation must
               # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry

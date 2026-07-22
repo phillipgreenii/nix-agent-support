@@ -25,6 +25,7 @@
     ./programs/git-tools
     ./programs/pg-pr
     ./programs/integrate-branch-support
+    ./programs/pnwf
     ./programs/wait-for-agents
     ./programs/beads
     ./programs/serena
