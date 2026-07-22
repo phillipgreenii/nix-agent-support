@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -149,6 +150,38 @@ func TestKubectl_FlagValueNotOperation(t *testing.T) {
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
 			t.Errorf("cmd %q: got %s, want abstain (delete is modifying)", cmd, got.Decision)
 		}
+	}
+}
+
+func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"ws d- prefix", "bin/kc exe --ws d-phillipg01 -n mp--ui--customer -c c -- bats", true},
+		{"ns d- prefix", "bin/kc exe -n d-phillipgs0-db--sqitch -c c -- shell", true},
+		{"ws= form", "bin/kc exe --ws=d-phillipg01 -- bats", true},
+		{"aws dev profile + dev ws", "AWS_PROFILE=dev/developers-dev bin/kc exe --ws d-phillipg01 -- bats", true},
+		{"no dev signal", "kubectl exec -it pod/foo -- bash", false},
+		{"prod namespace", "kubectl exec -n prod pod -- rm -rf /x", false},
+		{"prod aws profile overrides dev ws", "AWS_PROFILE=prod/admin bin/kc exe --ws d-phillipg01 -- rm -rf /x", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed := cmdparse.Parse(tt.cmd)
+			// take the leaf whose executable is kc/kubectl
+			var pc cmdparse.ParsedCommand
+			for _, p := range parsed {
+				if isKubectlExecutable(p.Executable) {
+					pc = p
+					break
+				}
+			}
+			if got := isDevWorkspaceScope(pc.Args, pc.EnvVars); got != tt.want {
+				t.Errorf("%s: got %v want %v", tt.name, got, tt.want)
+			}
+		})
 	}
 }
 

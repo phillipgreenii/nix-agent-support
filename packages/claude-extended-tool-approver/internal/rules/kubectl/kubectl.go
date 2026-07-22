@@ -62,6 +62,53 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 }
 
+// nonDevAWSAccounts are AWS_PROFILE accounts (the part before '/') that name a
+// prod/shared cluster; their presence forces a non-dev classification.
+var nonDevAWSAccounts = map[string]bool{
+	"prod": true, "dprod": true, "euprod": true,
+	"build": true, "fastlane": true, "pdx": true, "test": true,
+}
+
+// devScopeFlags name a workspace/namespace we can check for the personal-dev prefix.
+var devScopeFlags = map[string]bool{
+	"--ws": true, "--workspace": true, "-n": true, "--namespace": true,
+}
+
+func isPersonalDevName(v string) bool { return strings.HasPrefix(v, "d-") }
+
+// isDevWorkspaceScope reports whether a kc/kubectl invocation targets a personal
+// dev workspace (see "Devxp scope" contract).
+func isDevWorkspaceScope(args []string, env []cmdparse.EnvAssignment) bool {
+	for _, e := range env {
+		switch e.Name {
+		case "AWS_PROFILE":
+			acct := e.Value
+			if i := strings.IndexByte(acct, '/'); i >= 0 {
+				acct = acct[:i]
+			}
+			if nonDevAWSAccounts[acct] {
+				return false
+			}
+		case "KC_CLUSTER":
+			if e.Value != "" && !strings.HasPrefix(e.Value, "d1-") && !strings.HasPrefix(e.Value, "dd1-") {
+				return false
+			}
+		}
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if devScopeFlags[a] && i+1 < len(args) && isPersonalDevName(args[i+1]) {
+			return true
+		}
+		for _, pfx := range []string{"--ws=", "--workspace=", "--namespace="} {
+			if strings.HasPrefix(a, pfx) && isPersonalDevName(strings.TrimPrefix(a, pfx)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isKubectlExecutable(exec string) bool {
 	base := filepath.Base(exec)
 	return base == "kubectl" || base == "kc" || strings.HasSuffix(base, "kubectl")
