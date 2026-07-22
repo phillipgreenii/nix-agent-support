@@ -555,11 +555,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784615971,
-        "narHash": "sha256-0N1ewbaA4Bs1Z/XCb2ZInw+j2Y6eQ3OlBnDszqQjf3U=",
+        "lastModified": 1784750377,
+        "narHash": "sha256-0CVyGQJZODgdsXILgWm4AxBw4p5gB9/3I9+Bx6iSqxs=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "a5202e450e496b33b2783a8bca5d53dc9e8ed4f2",
+        "rev": "706783eb84afe711ed5ff05b755910f49e2848f1",
         "type": "github"
       },
       "original": {
