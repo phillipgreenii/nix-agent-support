@@ -13,7 +13,11 @@ var readOnlyOperations = map[string]bool{
 	"get": true, "describe": true, "logs": true, "top": true,
 	"cluster-info": true, "config": true, "api-resources": true,
 	"api-versions": true, "version": true, "explain": true, "auth": true,
+	"events": true, "diff": true, "wait": true,
+	"wslogs": true, "zrlog": true, "wsfirstpod": true,
 }
+
+var rolloutReadOnlySubcommands = map[string]bool{"status": true, "history": true}
 
 type Rule struct {
 	exprEval hookio.Evaluator
@@ -44,6 +48,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		operation := extractOperation(pc.Args)
 		if operation == "" {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		}
+		if operation == "rollout" {
+			if rolloutReadOnlySubcommands[rolloutSubcommand(pc.Args)] {
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}
+			}
+			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "modifying kubectl command (defer)", Module: r.Name()}
 		}
 		if readOnlyOperations[operation] {
 			return hookio.RuleResult{
@@ -137,6 +147,30 @@ func extractOperation(args []string) string {
 		}
 		if strings.HasPrefix(a, "-") {
 			continue // bare flag or --flag=value
+		}
+		return a
+	}
+	return ""
+}
+
+// rolloutSubcommand returns the sub-verb after `rollout` (the second bare token).
+func rolloutSubcommand(args []string) string {
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return ""
+		}
+		if valueFlags[a] {
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if !seen {
+			seen = true
+			continue
 		}
 		return a
 	}

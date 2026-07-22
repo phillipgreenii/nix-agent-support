@@ -100,7 +100,6 @@ func TestKubectl_Modifying_Abstain(t *testing.T) {
 		"kubectl port-forward svc/foo 8080:80",
 		"kubectl edit deployment foo",
 		"kubectl patch deployment foo -p '{}'",
-		"kubectl rollout restart deployment foo",
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{
@@ -149,6 +148,32 @@ func TestKubectl_FlagValueNotOperation(t *testing.T) {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
 			t.Errorf("cmd %q: got %s, want abstain (delete is modifying)", cmd, got.Decision)
+		}
+	}
+}
+
+func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
+	r := New(nil, nil)
+	cmds := []string{
+		"kubectl events", "kubectl diff -f x.yaml", "kubectl wait --for=condition=Ready pod/foo",
+		"bin/kc wslogs -n mp--ui--customer", "bin/kc zrlog -n mp--ui--customer",
+		"bin/kc wsfirstpod --ws d-phillipg01",
+		"kubectl rollout status deploy/foo", "bin/kc rollout history deploy/foo",
+	}
+	for _, cmd := range cmds {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
+func TestKubectl_RolloutMutating_Abstain(t *testing.T) { // regression guard
+	r := New(nil, nil)
+	for _, cmd := range []string{"kubectl rollout restart deploy/foo", "kubectl rollout undo deploy/foo"} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
 }
