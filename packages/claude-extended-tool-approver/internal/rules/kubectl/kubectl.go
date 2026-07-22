@@ -166,6 +166,9 @@ func isDevWorkspaceScope(args []string, env []cmdparse.EnvAssignment) bool {
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--" {
+			break
+		}
 		if devScopeFlags[a] && i+1 < len(args) && isPersonalDevName(args[i+1]) {
 			return true
 		}
@@ -195,6 +198,7 @@ var valueFlags = map[string]bool{
 // extractOperation returns the first bare (non-flag, non-flag-value) token
 // before any `--`, i.e. the kubectl verb. Returns "" if none.
 func extractOperation(args []string) string {
+	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
@@ -215,6 +219,7 @@ func extractOperation(args []string) string {
 // rolloutSubcommand returns the sub-verb after `rollout` (the second bare token).
 func rolloutSubcommand(args []string) string {
 	seen := false
+	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {

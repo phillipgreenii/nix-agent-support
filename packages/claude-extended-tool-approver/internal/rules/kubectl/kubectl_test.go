@@ -194,6 +194,7 @@ func TestKubectl_DevxpNative(t *testing.T) {
 	abstain := []string{
 		"bin/kc sync -f x -n prod",
 		"AWS_PROFILE=prod/admin bin/kc workspace delete --ws d-phillipg01",
+		"bin/kc sync -f x -n prod -- extra -n d-fake",
 	}
 	for _, cmd := range abstain {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
@@ -209,6 +210,10 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 			"bats":                              {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 			"prove -v t/foo.t":                  {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 			"shell zr-sqitch deploy zr_finance": {Decision: hookio.Ask, Reason: "unknown", Module: "mock"},
+			// Deliberately Approve: if isDevWorkspaceScope wrongly scans past `--`
+			// and mistakes this inner `-n d-fake` for the outer scope, evaluateExec
+			// recurses here and the mock would let it through — exposing the spoof.
+			"bats -n d-fake": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
 	}
@@ -223,6 +228,7 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 		{"NON-dev exec stays abstain", "kubectl exec -n prod pod -- rm -rf /var/lib/data", hookio.Abstain},
 		{"NON-dev exec no ns stays abstain", "kubectl exec -it pod/foo -- bash", hookio.Abstain},
 		{"dev exe no double-dash abstains", "bin/kc exe --ws d-phillipg01 -c test-runner", hookio.Abstain},
+		{"prod exec with decoy inner d- flag", "kubectl exec -n prod pod -- bats -n d-fake", hookio.Abstain},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -247,6 +253,7 @@ func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 		{"no dev signal", "kubectl exec -it pod/foo -- bash", false},
 		{"prod namespace", "kubectl exec -n prod pod -- rm -rf /x", false},
 		{"prod aws profile overrides dev ws", "AWS_PROFILE=prod/admin bin/kc exe --ws d-phillipg01 -- rm -rf /x", false},
+		{"decoy inner flag after --", "kubectl exec -n prod pod -- bats -n d-fake", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
