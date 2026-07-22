@@ -19,6 +19,12 @@ var readOnlyOperations = map[string]bool{
 
 var rolloutReadOnlySubcommands = map[string]bool{"status": true, "history": true}
 
+// scopedApproveOperations are kc plugin verbs that mutate a dev workspace only;
+// auto-approved iff the command targets a personal dev workspace.
+var scopedApproveOperations = map[string]bool{
+	"sync": true, "syncdev": true, "workspace": true,
+}
+
 type Rule struct {
 	exprEval hookio.Evaluator
 	pe       *patheval.PathEvaluator
@@ -54,6 +60,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "modifying kubectl command (defer)", Module: r.Name()}
+		}
+		if scopedApproveOperations[operation] {
+			if isDevWorkspaceScope(pc.Args, pc.EnvVars) {
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}
+			}
+			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kc command (defer)", Module: r.Name()}
 		}
 		if readOnlyOperations[operation] {
 			return hookio.RuleResult{

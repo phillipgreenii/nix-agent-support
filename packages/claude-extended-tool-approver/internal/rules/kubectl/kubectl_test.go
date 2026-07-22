@@ -178,6 +178,32 @@ func TestKubectl_RolloutMutating_Abstain(t *testing.T) { // regression guard
 	}
 }
 
+func TestKubectl_DevxpNative(t *testing.T) {
+	r := New(nil, nil)
+	approve := []string{
+		"AWS_PROFILE=dev/developers-dev bin/kc sync -f mp/ui/customer/layouts/test-runner --ws d-phillipg01",
+		"bin/kc workspace list --ws d-phillipg01",
+		"bin/kc syncdev --ws d-phillipg01",
+	}
+	for _, cmd := range approve {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+	// Non-dev scope must NOT be auto-approved.
+	abstain := []string{
+		"bin/kc sync -f x -n prod",
+		"AWS_PROFILE=prod/admin bin/kc workspace delete --ws d-phillipg01",
+	}
+	for _, cmd := range abstain {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
+		}
+	}
+}
+
 func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 	tests := []struct {
 		name string
