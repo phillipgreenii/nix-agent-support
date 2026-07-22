@@ -6,6 +6,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
 var readOnlyOperations = map[string]bool{
@@ -14,10 +15,13 @@ var readOnlyOperations = map[string]bool{
 	"api-versions": true, "version": true, "explain": true, "auth": true,
 }
 
-type Rule struct{}
+type Rule struct {
+	exprEval hookio.Evaluator
+	pe       *patheval.PathEvaluator
+}
 
-func New() *Rule {
-	return &Rule{}
+func New(eval hookio.Evaluator, pe *patheval.PathEvaluator) *Rule {
+	return &Rule{exprEval: eval, pe: pe}
 }
 
 func (r *Rule) Name() string {

@@ -63,7 +63,7 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		dockerRule,
 		safecmds.New(pe),
 		curl.New(),
-		kubectl.New(),
+		kubectl.New(eng, pe),
 		buildtools.New(),
 		sqlite3rule.New(pe),
 	)

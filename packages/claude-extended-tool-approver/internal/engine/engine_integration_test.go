@@ -47,7 +47,7 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 		dockerRule,
 		safecmds.New(pe),
 		curl.New(),
-		kubectl.New(),
+		kubectl.New(eng, pe),
 		buildtools.New(),
 		sqlite3rule.New(pe),
 	)

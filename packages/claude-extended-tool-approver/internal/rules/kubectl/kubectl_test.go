@@ -2,6 +2,7 @@ package kubectl
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -12,8 +13,21 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+type mockEvaluator struct {
+	results       map[string]hookio.RuleResult
+	defaultResult hookio.RuleResult
+}
+
+func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	expr = strings.TrimSpace(expr)
+	if r, ok := m.results[expr]; ok {
+		return r
+	}
+	return m.defaultResult
+}
+
 func TestKubectl_ReadOnly_Approve(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	commands := []string{
 		"kubectl get pods",
 		"kubectl describe pod foo",
@@ -38,7 +52,7 @@ func TestKubectl_ReadOnly_Approve(t *testing.T) {
 }
 
 func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	commands := []string{
 		"KUBECONFIG=/other kubectl get pods",
 		"KUBECONFIG=/other kubectl describe pod foo",
@@ -57,7 +71,7 @@ func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
 }
 
 func TestKubectl_KubeconfigModifying_Ask(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	commands := []string{
 		"KUBECONFIG=/other kubectl apply -f x.yaml",
 		"KUBECONFIG=/other kubectl delete pod foo",
@@ -76,7 +90,7 @@ func TestKubectl_KubeconfigModifying_Ask(t *testing.T) {
 }
 
 func TestKubectl_Modifying_Ask(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	commands := []string{
 		"kubectl apply -f deploy.yaml",
 		"kubectl delete pod foo",
@@ -100,7 +114,7 @@ func TestKubectl_Modifying_Ask(t *testing.T) {
 }
 
 func TestKubectl_DoubleDash_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "kubectl -- get pods"}),
@@ -112,7 +126,7 @@ func TestKubectl_DoubleDash_Abstain(t *testing.T) {
 }
 
 func TestKubectl_NonKubectl_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
@@ -124,7 +138,7 @@ func TestKubectl_NonKubectl_Abstain(t *testing.T) {
 }
 
 func TestKubectl_Name(t *testing.T) {
-	r := New()
+	r := New(nil, nil)
 	if got := r.Name(); got != "kubectl" {
 		t.Errorf("Name() = %q, want kubectl", got)
 	}
