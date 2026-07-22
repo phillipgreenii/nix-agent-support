@@ -2,6 +2,7 @@ package envvars
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -120,6 +121,21 @@ func TestEnvVars_NonBash_Abstain(t *testing.T) {
 	got := r.Evaluate(input)
 	if got.Decision != hookio.Abstain {
 		t.Errorf("Read tool: got %s, want abstain", got.Decision)
+	}
+}
+
+func TestEnvVars_WidenedSafeSubstitution_NoUnclassifiableReason(t *testing.T) {
+	r := New()
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		ToolInput: mustJSON(map[string]string{"command": "FOO=$(git rev-parse HEAD) make"}),
+	}
+	got := r.Evaluate(input)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("cmd %q: got %s, want abstain", "FOO=$(git rev-parse HEAD) make", got.Decision)
+	}
+	if strings.Contains(got.Reason, "unclassifiable expression") {
+		t.Errorf("cmd %q: got Reason %q, want no unclassifiable-expression reason (git rev-parse is now a safe substitution)", "FOO=$(git rev-parse HEAD) make", got.Reason)
 	}
 }
 

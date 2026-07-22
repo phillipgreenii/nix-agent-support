@@ -25,11 +25,65 @@ import (
 	"unicode"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
+// safeCmdSubstitutions: commands that never mutate and never read a file, safe
+// inside $(...) regardless of arguments.
 var safeCmdSubstitutions = map[string]bool{
 	"mktemp": true, "date": true, "whoami": true, "id": true,
 	"pwd": true, "basename": true, "dirname": true,
+	"readlink": true, "realpath": true, "uname": true,
+	"echo": true, "printf": true,
+}
+
+// fileReaderSubstitutions: read-only readers whose PATH ARGS must be re-checked
+// against secretpath so a $(cat .env) still forces a prompt.
+var fileReaderSubstitutions = map[string]bool{
+	"cat": true, "grep": true, "head": true, "tail": true, "wc": true, "ls": true,
+}
+
+// gitReadSubcommands: git subcommands that only read metadata (no diff/show/log —
+// those honor textconv/external-diff, an RCE surface a hook cannot neutralize).
+var gitReadSubcommands = map[string]bool{
+	"rev-parse": true, "rev-list": true, "symbolic-ref": true,
+	"merge-base": true, "describe": true, "status": true,
+}
+
+func isSafeSubstitutionCommand(tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+	cmd := tokens[0]
+	if safeCmdSubstitutions[cmd] {
+		return true
+	}
+	if cmd == "hostname" && len(tokens) == 1 { // bare hostname reads; `hostname X` sets it
+		return true
+	}
+	if cmd == "go" && len(tokens) >= 2 && tokens[1] == "env" {
+		for _, t := range tokens[2:] { // go env -w/-u mutate persistent config
+			if t == "-w" || t == "-u" {
+				return false
+			}
+		}
+		return true
+	}
+	if cmd == "git" && len(tokens) >= 2 && gitReadSubcommands[tokens[1]] {
+		return true
+	}
+	if fileReaderSubstitutions[cmd] {
+		for _, t := range tokens[1:] {
+			if strings.HasPrefix(t, "-") {
+				continue
+			}
+			if secretpath.IsSecret(t) {
+				return false // reading a secret → force a prompt
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // wrapperPrefixes lists (executable, subcommand) pairs that act as transparent
@@ -775,7 +829,7 @@ func classifyCmdSubstitution(value string) ExpansionKind {
 	if len(tokens) == 0 {
 		return ExpansionUnknown
 	}
-	if safeCmdSubstitutions[tokens[0]] {
+	if isSafeSubstitutionCommand(tokens) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown
@@ -801,7 +855,7 @@ func classifyBacktickSubstitution(value string) ExpansionKind {
 	if len(tokens) == 0 {
 		return ExpansionUnknown
 	}
-	if safeCmdSubstitutions[tokens[0]] {
+	if isSafeSubstitutionCommand(tokens) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown

@@ -83,6 +83,29 @@ func TestHasUnsafeCommandSubstitution(t *testing.T) {
 		{"$PWD", false},
 		{"plainarg", false},
 		{"", false},
+		// pure utils + guarded go env + git metadata (safe → false)
+		{"$(go env GOMODCACHE)", false},
+		{"$(git rev-parse --show-toplevel)", false},
+		{"$(git symbolic-ref --short HEAD)", false},
+		{"$(git merge-base main HEAD)", false},
+		{"$(uname -m)", false},
+		{"$(readlink -f /x)", false},
+		{"`git rev-parse HEAD`", false},
+		// file-readers, secret-rechecked (non-secret path → safe)
+		{"$(cat VERSION)", false},
+		{"$(grep -c foo bar.txt)", false},
+		{"$(head -1 go.mod)", false},
+		// file-readers on SECRET paths → unsafe (guard preserved)
+		{"$(cat .env)", true},
+		{"$(cat secrets/prod.yaml)", true},
+		{"$(cat ~/.ssh/id_rsa)", true},
+		// mutating / RCE forms stay unsafe
+		{"$(go env -w GOPROXY=https://evil)", true},
+		{"$(go build ./...)", true},
+		{"$(git push origin main)", true},
+		{"$(git show HEAD)", true}, // excluded: textconv/external-diff RCE
+		{"$(git diff)", true},      // excluded
+		{"$(find . -delete)", true},
 	}
 	for _, tt := range tests {
 		if got := HasUnsafeCommandSubstitution(tt.in); got != tt.want {
