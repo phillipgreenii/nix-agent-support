@@ -263,6 +263,14 @@ func TestIntegration_KcRules(t *testing.T) {
 		// SECURITY (mandatory): non-dev (prod) exec must NOT be approved.
 		// v3: Abstain, NOT Ask.
 		{"prod exec NOT approved", "kubectl exec -n prod pod -- rm -rf /var/lib/data", hookio.Abstain},
+		// SECURITY: a prod AWS_PROFILE must override a decoy dev --ws — the
+		// scope detector rejects the prod account before the d- workspace can
+		// count, and no earlier rule (assume/envvars/configrules) approves an
+		// AWS_PROFILE-prefixed command. Must NOT be approved.
+		{"prod profile overrides dev ws NOT approved", "AWS_PROFILE=prod/admin bin/kc exe --ws d-phillipg01 -c c -- rm -rf /data", hookio.Abstain},
+		// SECURITY: a dev AWS_PROFILE with a prod namespace and no d- workspace
+		// carries no positive dev-scope signal. Must NOT be approved.
+		{"dev profile prod namespace NOT approved", "AWS_PROFILE=dev/developers-dev bin/kc exec -n prod pod -- rm -rf /data", hookio.Abstain},
 		// v3: modifying kubectl-rule-own outcomes abstain (not ask).
 		{"rollout restart abstains", "kubectl rollout restart deploy/foo", hookio.Abstain},
 	}
