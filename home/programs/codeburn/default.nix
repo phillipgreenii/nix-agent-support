@@ -102,21 +102,29 @@ in
       }
 
       # Menubar escape-hatch (darwin only). `codeburn menubar` downloads + installs the signed
-      # `.app` into ~/Applications and launches it. HM activation runs in the user's GUI session
-      # (nix-darwin's `launchctl asuser <uid> sudo -u <user> --set-home`), so the download and
-      # launch work there. We:
-      #   - guard on app presence, so a re-activation doesn't re-download / relaunch every switch;
-      #   - capture output to a log for diagnosis;
-      #   - tolerate failure (network etc.) WITHOUT silently swallowing it — a `|| echo` surfaces
-      #     the failure in the activation output and points at the log + manual command, rather
-      #     than the old bare `|| true` that hid it.
+      # `.app` matching the CLI's own version into ~/Applications and launches it. HM activation
+      # runs in the user's GUI session (nix-darwin's `launchctl asuser <uid> sudo -u <user>
+      # --set-home`), so the download and launch work there.
+      #
+      # We reinstall (with --force — codeburn will not overwrite an existing copy otherwise) only
+      # when the app is MISSING or its installed version differs from the nix-packaged CLI version.
+      # A stamp file records the last-installed version. So a codeburn version bump updates the
+      # menubar in lockstep with the CLI, while an unrelated switch (same version, app present) is
+      # a no-op — no network, no relaunch. Failures are logged and surfaced (never a silent
+      # `|| true`).
       (lib.mkIf (isDarwin && cfg.menubar.enable) {
         home.activation.codeburnMenubar = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          if [ ! -e "$HOME/Applications/CodeBurnMenubar.app" ]; then
-            $DRY_RUN_CMD mkdir -p "$HOME/Library/Logs"
-            $DRY_RUN_CMD ${cfg.package}/bin/codeburn menubar \
-              > "$HOME/Library/Logs/codeburn-menubar-install.log" 2>&1 \
-              || echo "codeburn: menubar install failed — see ~/Library/Logs/codeburn-menubar-install.log; run 'codeburn menubar' manually" >&2
+          _cb_want="${cfg.package.version}"
+          _cb_stamp="$HOME/.cache/codeburn/.menubar-nix-version"
+          _cb_have="$(cat "$_cb_stamp" 2>/dev/null || echo none)"
+          if [ ! -e "$HOME/Applications/CodeBurnMenubar.app" ] || [ "$_cb_have" != "$_cb_want" ]; then
+            $DRY_RUN_CMD mkdir -p "$HOME/Library/Logs" "$HOME/.cache/codeburn"
+            if $DRY_RUN_CMD ${cfg.package}/bin/codeburn menubar --force \
+                 > "$HOME/Library/Logs/codeburn-menubar-install.log" 2>&1; then
+              $DRY_RUN_CMD sh -c "printf %s \"$_cb_want\" > \"$_cb_stamp\""
+            else
+              echo "codeburn: menubar install/update to $_cb_want failed — see ~/Library/Logs/codeburn-menubar-install.log; run 'codeburn menubar --force' manually" >&2
+            fi
           fi
         '';
       })
