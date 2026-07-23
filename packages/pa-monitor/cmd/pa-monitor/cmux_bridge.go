@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	ossignal "os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
@@ -315,6 +317,22 @@ func cmuxBridgeReporterOptions(cfg config.Config, logf func(string)) cmuxstatus.
 	}
 }
 
+// bridgeShutdownSignals are the signals that MUST trigger a graceful cmux-bridge
+// shutdown. SIGINT/SIGTERM mirror the daemon (see daemon.go). SIGHUP is added
+// because the bridge runs inside a cmux pane: a closing pane delivers SIGHUP, and
+// under the default disposition that would kill the process WITHOUT running the
+// deferred reporter.Clear() — leaving the cmux sidebar status/progress stale.
+// Catching it lets ctx cancel, the stream loop return, and the deferred Clear()
+// run so the sidebar is cleared on exit (bead pg2-gveej).
+var bridgeShutdownSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}
+
+// newBridgeShutdownContext returns a context cancelled when the process receives
+// any bridgeShutdownSignals, plus a stop func that restores the default signal
+// disposition. Extracted so the signal→cancel wiring is unit-testable.
+func newBridgeShutdownContext() (context.Context, context.CancelFunc) {
+	return ossignal.NotifyContext(context.Background(), bridgeShutdownSignals...)
+}
+
 func runCmuxBridge(args []string) {
 	ws := os.Getenv("CMUX_WORKSPACE_ID")
 	if ws == "" {
@@ -325,7 +343,10 @@ func runCmuxBridge(args []string) {
 
 	cfg, _ := config.Load(config.DefaultPath())
 	config.ApplyOTelEnv(cfg.OTel)
-	ctx, cancel := context.WithCancel(context.Background())
+	// Catch shutdown signals so the deferred reporter.Clear() below runs on exit
+	// (bead pg2-gveej): without this a SIGHUP/SIGTERM would skip deferred cleanup
+	// and leave the cmux sidebar status/progress stale.
+	ctx, cancel := newBridgeShutdownContext()
 	defer cancel()
 
 	emit, err := otel.NewConnectionEmitter(ctx, otel.ConnOptions{

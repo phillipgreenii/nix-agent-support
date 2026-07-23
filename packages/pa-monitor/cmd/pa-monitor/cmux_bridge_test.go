@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -453,5 +454,43 @@ func TestSnapshotForWorkspaceWorkspaceColor(t *testing.T) {
 				t.Errorf("ProgressLabel = %q, want suffix %q", snap.ProgressLabel, tc.wantLabelSuffix)
 			}
 		})
+	}
+}
+
+// TestBridgeShutdownSignalsIncludePaneClose pins bead pg2-gveej: the bridge must
+// catch SIGHUP (the signal a closing cmux pane delivers) in addition to the
+// daemon's SIGINT/SIGTERM, so its deferred reporter.Clear() runs on exit instead
+// of the process dying on the default disposition with a stale sidebar.
+func TestBridgeShutdownSignalsIncludePaneClose(t *testing.T) {
+	want := map[os.Signal]bool{syscall.SIGINT: false, syscall.SIGTERM: false, syscall.SIGHUP: false}
+	for _, s := range bridgeShutdownSignals {
+		if _, ok := want[s]; ok {
+			want[s] = true
+		}
+	}
+	for s, present := range want {
+		if !present {
+			t.Errorf("bridgeShutdownSignals missing %v", s)
+		}
+	}
+}
+
+// TestBridgeShutdownContextCancelsOnSignal verifies the signal→cancel wiring
+// (bead pg2-gveej): a delivered SIGHUP cancels the bridge's context, which is
+// what lets runCmuxBridge return and its deferred reporter.Clear() fire. Uses
+// SIGHUP specifically because `go test` does not special-case it, so delivering
+// it to our own process is safe once NotifyContext has installed the handler.
+func TestBridgeShutdownContextCancelsOnSignal(t *testing.T) {
+	ctx, stop := newBridgeShutdownContext()
+	defer stop()
+
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("kill self with SIGHUP: %v", err)
+	}
+	select {
+	case <-ctx.Done():
+		// success: the signal cancelled the context
+	case <-time.After(2 * time.Second):
+		t.Fatal("context not cancelled within 2s of SIGHUP")
 	}
 }
