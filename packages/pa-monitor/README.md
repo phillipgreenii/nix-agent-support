@@ -133,6 +133,10 @@ only warns on the first upgrade — restart it once manually; every later upgrad
 
 A Grafana dashboard ships at `grafana/pa-monitor-overview.json` and is registered via
 `phillipgreenii.observability.dashboardProviders.pa-monitor` when observability is enabled.
+A full-width **usage-limit banner** sits at the very top: each row appears only while that
+window's authoritative `used_percentage` is at the cap (the 5h or weekly limit is hit) and shows
+a live countdown to the window reset (`resets_at - now`); the banner is blank when no limit is
+active.
 
 ## Labels
 
