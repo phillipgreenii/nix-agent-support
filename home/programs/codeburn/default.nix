@@ -101,12 +101,23 @@ in
         };
       }
 
-      # Menubar escape-hatch (darwin only). `codeburn menubar` is idempotent without --force
-      # (it skips reinstall when a copy already exists in ~/Applications). It touches the
-      # network, so it must never fail activation.
+      # Menubar escape-hatch (darwin only). `codeburn menubar` downloads + installs the signed
+      # `.app` into ~/Applications and launches it. HM activation runs in the user's GUI session
+      # (nix-darwin's `launchctl asuser <uid> sudo -u <user> --set-home`), so the download and
+      # launch work there. We:
+      #   - guard on app presence, so a re-activation doesn't re-download / relaunch every switch;
+      #   - capture output to a log for diagnosis;
+      #   - tolerate failure (network etc.) WITHOUT silently swallowing it — a `|| echo` surfaces
+      #     the failure in the activation output and points at the log + manual command, rather
+      #     than the old bare `|| true` that hid it.
       (lib.mkIf (isDarwin && cfg.menubar.enable) {
         home.activation.codeburnMenubar = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          $DRY_RUN_CMD ${cfg.package}/bin/codeburn menubar || true
+          if [ ! -e "$HOME/Applications/CodeBurnMenubar.app" ]; then
+            $DRY_RUN_CMD mkdir -p "$HOME/Library/Logs"
+            $DRY_RUN_CMD ${cfg.package}/bin/codeburn menubar \
+              > "$HOME/Library/Logs/codeburn-menubar-install.log" 2>&1 \
+              || echo "codeburn: menubar install failed — see ~/Library/Logs/codeburn-menubar-install.log; run 'codeburn menubar' manually" >&2
+          fi
         '';
       })
     ]
