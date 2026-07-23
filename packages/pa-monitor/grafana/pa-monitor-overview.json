@@ -42,6 +42,23 @@
           "value": "$__all",
           "text": "All"
         }
+      },
+      {
+        "name": "limit_active",
+        "label": "limit_active",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "query_result(count( ((pa_monitor_block_usage_percentage >= 100) and (pa_monitor_block_usage_resets_at - time() > 0)) or ((pa_monitor_week_usage_percentage >= 100) and (pa_monitor_week_usage_resets_at - time() > 0)) ))",
+        "hide": 2,
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "regex": "",
+        "current": {},
+        "options": []
       }
     ]
   },
@@ -50,7 +67,7 @@
       "id": 300,
       "title": "",
       "type": "stat",
-      "description": "Conditional usage-limit banner (bead pg2-jfdz2). Each row appears ONLY while that window's authoritative used_percentage is at the cap (i.e. the limit is hit), and shows a live countdown to the window reset (resets_at - now). The panel is blank/transparent when no 5h or weekly limit is active.",
+      "description": "Conditional usage-limit banner (bead pg2-jfdz2). Rendered ONLY when a 5h or weekly usage limit is currently hit — the panel repeats over the hidden `limit_active` variable, whose query returns no value unless a limit is active, so the panel is not drawn at all (no 'No data' box) while nothing is limited. When shown, each row is a live red countdown to that window's reset (resets_at - now). Presence updates on dashboard refresh.",
       "transparent": true,
       "datasource": {
         "type": "prometheus",
@@ -106,7 +123,9 @@
           "refId": "B",
           "instant": true
         }
-      ]
+      ],
+      "repeat": "limit_active",
+      "repeatDirection": "h"
     },
     {
       "id": 100,
