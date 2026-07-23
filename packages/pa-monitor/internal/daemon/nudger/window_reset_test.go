@@ -76,7 +76,9 @@ func TestWindowResetProducerNoOpWhenDisabled(t *testing.T) {
 
 func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 	now := time.Date(2026, 5, 28, 15, 0, 30, 0, time.UTC)
-	resetsAt := now.Add(-31 * time.Second) // delay elapsed (30s)
+	// Configured delay (90s) exceeds the clock-skew floor and has elapsed, so
+	// firing is governed purely by the configured delay here.
+	resetsAt := now.Add(-91 * time.Second)
 	p := &WindowResetProducer{}
 	store := NewPendingStore()
 	tree := treeWith(
@@ -86,7 +88,7 @@ func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 		newSV("dorm-1", 3, session.Idle),
 	)
 	p.Reconcile(TickContext{
-		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
+		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 90 * time.Second,
 		AutoResumeMessage: "continue",
 		Tree:              tree, Watermarks: wmStub{},
 	}, store)
@@ -107,17 +109,47 @@ func TestWindowResetProducerFiresAfterDelay(t *testing.T) {
 	}
 }
 
+// TestWindowResetProducerClockSkewFloor covers bead pg2-t8n96: even when the
+// configured AutoResumeDelay is shorter than the clock-skew guard, the producer
+// MUST wait at least windowResetClockSkewGuard after the window's computed reset
+// before firing. This margin absorbs a local clock running ahead of the server,
+// which would otherwise nudge a session whose window has not truly reset yet.
+func TestWindowResetProducerClockSkewFloor(t *testing.T) {
+	resetsAt := time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC)
+	// The configured 30s delay has elapsed, but the 60s clock-skew floor has not.
+	beforeFloor := resetsAt.Add(45 * time.Second)
+	afterFloor := resetsAt.Add(windowResetClockSkewGuard + time.Second)
+
+	fireCount := func(now time.Time) int {
+		p := &WindowResetProducer{}
+		store := NewPendingStore()
+		tree := treeWith(resetsAt, newSV("idle-1", 1, session.Idle))
+		p.Reconcile(TickContext{
+			Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
+			AutoResumeMessage: "continue", Tree: tree, Watermarks: wmStub{},
+		}, store)
+		return len(store.List())
+	}
+
+	if got := fireCount(beforeFloor); got != 0 {
+		t.Errorf("intents at resetsAt+45s = %d, want 0 (still within %s clock-skew floor)", got, windowResetClockSkewGuard)
+	}
+	if got := fireCount(afterFloor); got != 1 {
+		t.Errorf("intents at resetsAt+%s = %d, want 1 (past clock-skew floor)", windowResetClockSkewGuard+time.Second, got)
+	}
+}
+
 func TestWindowResetProducerNudgesBlockedSession(t *testing.T) {
 	// ADR 0024 R4: a session that formerly read Working while rate-limited now
 	// reads Blocked/usage_limit and MUST become nudge-eligible (only genuinely
 	// Working sessions are skipped).
 	now := time.Date(2026, 5, 28, 15, 0, 30, 0, time.UTC)
-	resetsAt := now.Add(-31 * time.Second)
+	resetsAt := now.Add(-91 * time.Second)
 	p := &WindowResetProducer{}
 	store := NewPendingStore()
 	tree := treeWith(resetsAt, newSVBlocked("blk-1", 5, session.UsageLimit))
 	p.Reconcile(TickContext{
-		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
+		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 90 * time.Second,
 		AutoResumeMessage: "continue", Tree: tree, Watermarks: wmStub{},
 	}, store)
 	if got := len(store.List()); got != 1 {
@@ -127,12 +159,12 @@ func TestWindowResetProducerNudgesBlockedSession(t *testing.T) {
 
 func TestWindowResetProducerSkipsIfAlreadyFired(t *testing.T) {
 	now := time.Date(2026, 5, 28, 15, 0, 30, 0, time.UTC)
-	resetsAt := now.Add(-31 * time.Second)
+	resetsAt := now.Add(-91 * time.Second)
 	p := &WindowResetProducer{}
 	store := NewPendingStore()
 	tree := treeWith(resetsAt, newSV("idle-1", 1, session.Idle))
 	p.Reconcile(TickContext{
-		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 30 * time.Second,
+		Now: now, AutoResumeEnabled: true, AutoResumeDelay: 90 * time.Second,
 		AutoResumeMessage: "continue",
 		Tree:              tree,
 		Watermarks:        wmStub{wr: resetsAt}, // already fired for this window

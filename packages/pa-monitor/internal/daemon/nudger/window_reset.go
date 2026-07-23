@@ -1,8 +1,20 @@
 package nudger
 
 import (
+	"time"
+
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
+
+// windowResetClockSkewGuard is the minimum delay after a window's computed reset
+// time before a window-reset nudge may fire. The reset time is derived from the
+// local clock, which can run ahead of the server that actually clears the limit;
+// firing exactly at (or a few seconds after) the computed reset risks nudging a
+// session whose window has not truly reset yet. Waiting at least this long
+// absorbs plausible clock discrepancies (bead pg2-t8n96). It acts as a floor on
+// the configured AutoResumeDelay — a longer configured delay already satisfies
+// the margin and is left untouched.
+const windowResetClockSkewGuard = 60 * time.Second
 
 // Reconcile implements Producer. See spec §Architecture §Producers
 // §WindowResetProducer for the rule table.
@@ -24,9 +36,10 @@ func (p *WindowResetProducer) Reconcile(ctx TickContext, store *PendingStore) {
 		cancelAll()
 		return
 	}
-	fireAt := resetsAt.Add(ctx.AutoResumeDelay)
+	fireAt := resetsAt.Add(max(ctx.AutoResumeDelay, windowResetClockSkewGuard))
 	if ctx.Now.Before(fireAt) {
-		// Window still pending; producer waits silently.
+		// Window still pending (or within the clock-skew guard); producer waits
+		// silently.
 		return
 	}
 	if ctx.Watermarks.WindowResetFiredFor().Equal(resetsAt) {
