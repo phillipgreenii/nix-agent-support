@@ -522,6 +522,27 @@ func TestServerNudgeCancelRemovesIntent(t *testing.T) {
 	}
 }
 
+// TestServerNudgeCancelReportsOnlyPending verifies NudgeCancel reports a session
+// ONLY when it actually had a pending manual nudge. Cancelling a matched session
+// with nothing queued returns an empty CancelledSessionIds, so the CLI prints
+// "nudge cancel: nothing queued" instead of a misleading "cancelled for: <sid>"
+// (bead pg2-f643u).
+func TestServerNudgeCancelReportsOnlyPending(t *testing.T) {
+	srv := newTestServerWithNudger(t, "sid-c")
+	ctx := context.Background()
+
+	// No NudgeQueue first — nothing is pending for sid-c.
+	resp, err := srv.NudgeCancel(ctx, &pb.NudgeCancelRequest{
+		Selector: "session:sid-c",
+	})
+	if err != nil {
+		t.Fatalf("NudgeCancel: %v", err)
+	}
+	if len(resp.GetCancelledSessionIds()) != 0 {
+		t.Errorf("CancelledSessionIds = %v, want [] (nothing was pending)", resp.GetCancelledSessionIds())
+	}
+}
+
 // TestServerNudgeQueueEmptySelector verifies InvalidArgument is returned.
 func TestServerNudgeQueueEmptySelector(t *testing.T) {
 	srv := newTestServerWithNudger(t, "sid-err")

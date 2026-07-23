@@ -368,8 +368,19 @@ func (s *server) NudgeCancel(ctx context.Context, req *pb.NudgeCancelRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	// Report only sessions that actually had a pending manual nudge removed, not
+	// every session the selector matched — otherwise `nudge --cancel` prints a
+	// misleading "cancelled for" even when nothing was queued (bead pg2-f643u).
+	// Capture the pending set before cancelling; CancelManual is a no-op for
+	// sessions with nothing queued, so cancelling the full match set is harmless.
+	var cancelled []string
+	for _, sid := range sids {
+		if n.PendingForSource(sid, nudger.SourceManual) {
+			cancelled = append(cancelled, sid)
+		}
+	}
 	n.CancelManual(sids)
-	return &pb.NudgeCancelResponse{CancelledSessionIds: sids}, nil
+	return &pb.NudgeCancelResponse{CancelledSessionIds: cancelled}, nil
 }
 
 // RegisterBridge is a no-op shim. Bridges self-report their cmux server PID
