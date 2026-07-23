@@ -391,3 +391,48 @@ func TestCmuxPushPartialFailureContinuesAndLogs(t *testing.T) {
 		t.Errorf("expected 1 log line for the failed call, got %d: %v", len(logs), logs)
 	}
 }
+
+// TestPushGivesEachCmuxCallItsOwnTimeout pins bead pg2-ii0be: the several cmux
+// calls a single Push makes must each get their OWN timeout budget, not share
+// one. A shared context let a slow first call (set-status) eat the budget so the
+// calls after it (set-progress / workspace-action) hit "context deadline
+// exceeded". Independence is proven by recording each call's context deadline:
+// per-call contexts yield strictly-increasing (distinct) deadlines; a single
+// shared context yields identical ones.
+func TestPushGivesEachCmuxCallItsOwnTimeout(t *testing.T) {
+	var deadlines []time.Time
+	run := func(ctx context.Context, _ string, args ...string) ([]byte, error) {
+		d, ok := ctx.Deadline()
+		if !ok {
+			t.Errorf("cmux %v: context carried no deadline", args)
+		}
+		deadlines = append(deadlines, d)
+		// Advance the clock a hair so per-call deadlines are measurably distinct.
+		time.Sleep(2 * time.Millisecond)
+		return []byte(""), nil
+	}
+	r := cmuxstatus.NewReporter(cmuxstatus.Options{
+		Enable:    true,
+		RunCmd:    run,
+		LookupEnv: inCmuxEnv(),
+	})
+	// A snapshot that triggers all three calls: set-status + set-progress +
+	// workspace-action (colorEmitted starts false, so the color call fires).
+	r.Push(cmuxstatus.Snapshot{
+		State:             cmuxstatus.StateWorking,
+		HasProgress:       true,
+		Progress:          0.5,
+		ProgressLabel:     "x",
+		HasWorkspaceColor: true,
+		WorkspaceColor:    "#cc3333",
+	})
+	if len(deadlines) != 3 {
+		t.Fatalf("expected 3 cmux calls, got %d", len(deadlines))
+	}
+	for i := 1; i < len(deadlines); i++ {
+		if !deadlines[i].After(deadlines[i-1]) {
+			t.Errorf("call %d deadline (%v) is not after call %d (%v) — calls are sharing one budget instead of each getting its own",
+				i, deadlines[i], i-1, deadlines[i-1])
+		}
+	}
+}

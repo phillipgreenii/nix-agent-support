@@ -116,6 +116,23 @@ func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]
 	return signal.RunCmux(ctx, name, args...)
 }
 
+// cmuxCallTimeout is the deadline for a SINGLE `cmux` subprocess invocation.
+// Each call gets its own budget (see runCall) rather than sharing one across the
+// several calls a Push/Clear makes: a shared budget let a slow first call
+// (set-status) starve the ones after it (set-progress / workspace-action), which
+// then failed with "context deadline exceeded" — and a set-status that ran past
+// the shared deadline was SIGKILLed ("signal: killed"). Per-call budgets remove
+// that cross-call starvation (bead pg2-ii0be).
+const cmuxCallTimeout = 5 * time.Second
+
+// runCall runs one `cmux` invocation under its OWN fresh timeout, so sequential
+// calls within a single Push/Clear never share (and thus never starve) a budget.
+func (c *cmuxReporter) runCall(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cmuxCallTimeout)
+	defer cancel()
+	return c.run(ctx, name, args...)
+}
+
 func (c *cmuxReporter) log(msg string) {
 	if c.logf != nil {
 		c.logf(msg)
@@ -125,15 +142,13 @@ func (c *cmuxReporter) log(msg string) {
 // Push issues 1 cmux set-status call (single pill, key="claude-agents"),
 // optionally one cmux set-progress call (when HasProgress), and — when the
 // snapshot has an opinion on the workspace color (HasWorkspaceColor) and it
-// differs from the last emitted one — one cmux workspace-action call. All share
-// one 5-second context. Errors per call route to logf but do not short-circuit
-// subsequent calls.
+// differs from the last emitted one — one cmux workspace-action call. Each call
+// runs under its OWN timeout (runCall / cmuxCallTimeout), so a slow call never
+// starves the ones after it. Errors per call route to logf but do not
+// short-circuit subsequent calls.
 func (c *cmuxReporter) Push(s Snapshot) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	value, icon, color := pillContent(s)
-	if _, err := c.run(ctx, "cmux", "set-status", "claude-agents", value,
+	if _, err := c.runCall("cmux", "set-status", "claude-agents", value,
 		"--icon", icon, "--color", color); err != nil {
 		c.log(fmt.Sprintf("cmux set-status claude-agents: %v", err))
 	}
@@ -150,7 +165,7 @@ func (c *cmuxReporter) Push(s Snapshot) {
 		if s.ProgressLabel != "" {
 			args = append(args, "--label", s.ProgressLabel)
 		}
-		if _, err := c.run(ctx, "cmux", args...); err != nil {
+		if _, err := c.runCall("cmux", args...); err != nil {
 			c.log(fmt.Sprintf("cmux set-progress: %v", err))
 		}
 	}
@@ -162,11 +177,11 @@ func (c *cmuxReporter) Push(s Snapshot) {
 	// calls above.
 	if s.HasWorkspaceColor && (!c.colorEmitted || s.WorkspaceColor != c.lastWorkspaceColor) {
 		if s.WorkspaceColor == "" {
-			if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "clear-color"); err != nil {
+			if _, err := c.runCall("cmux", "workspace-action", "--action", "clear-color"); err != nil {
 				c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
 			}
 		} else {
-			if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "set-color", "--color", s.WorkspaceColor); err != nil {
+			if _, err := c.runCall("cmux", "workspace-action", "--action", "set-color", "--color", s.WorkspaceColor); err != nil {
 				c.log(fmt.Sprintf("cmux workspace-action set-color: %v", err))
 			}
 		}
@@ -211,25 +226,23 @@ func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
 
 // Notify issues one cmux notify call. Failures log but do not panic.
 func (c *cmuxReporter) Notify(title, body string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := c.run(ctx, "cmux", "notify", "--title", title, "--body", body); err != nil {
+	if _, err := c.runCall("cmux", "notify", "--title", title, "--body", body); err != nil {
 		c.log(fmt.Sprintf("cmux notify: %v", err))
 	}
 }
 
 // Clear removes the single sidebar entry this reporter owns plus the progress
-// bar. Best-effort; partial failures are logged and ignored.
+// bar. Best-effort; partial failures are logged and ignored. Each call runs
+// under its own timeout (runCall) so a slow clear-status cannot starve the
+// clear-progress / clear-color that follow it (bead pg2-ii0be).
 func (c *cmuxReporter) Clear() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := c.run(ctx, "cmux", "clear-status", "claude-agents"); err != nil {
+	if _, err := c.runCall("cmux", "clear-status", "claude-agents"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-status claude-agents: %v", err))
 	}
-	if _, err := c.run(ctx, "cmux", "clear-progress"); err != nil {
+	if _, err := c.runCall("cmux", "clear-progress"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-progress: %v", err))
 	}
-	if _, err := c.run(ctx, "cmux", "workspace-action", "--action", "clear-color"); err != nil {
+	if _, err := c.runCall("cmux", "workspace-action", "--action", "clear-color"); err != nil {
 		c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
 	}
 	c.colorEmitted = true
