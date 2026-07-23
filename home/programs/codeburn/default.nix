@@ -119,7 +119,13 @@ in
           _cb_have="$(cat "$_cb_stamp" 2>/dev/null || echo none)"
           if [ ! -e "$HOME/Applications/CodeBurnMenubar.app" ] || [ "$_cb_have" != "$_cb_want" ]; then
             $DRY_RUN_CMD mkdir -p "$HOME/Library/Logs" "$HOME/.cache/codeburn"
-            if $DRY_RUN_CMD ${cfg.package}/bin/codeburn menubar --force \
+            # codeburn's menubar installer resolves a PERSISTENT `codeburn` from $PATH (it records
+            # that path so the GUI menubar app can spawn the CLI, and refuses to install if it
+            # finds none — rejecting only npx-temp paths). The bare nix store path we invoke is not
+            # on $PATH during activation, so put the GC-rooted per-user profile bin on PATH (a
+            # stable symlink that retargets on version bumps); the installer records that path.
+            if $DRY_RUN_CMD env PATH="/etc/profiles/per-user/$(id -un)/bin:$HOME/.nix-profile/bin:$PATH" \
+                 ${cfg.package}/bin/codeburn menubar --force \
                  > "$HOME/Library/Logs/codeburn-menubar-install.log" 2>&1; then
               $DRY_RUN_CMD sh -c "printf %s \"$_cb_want\" > \"$_cb_stamp\""
             else
