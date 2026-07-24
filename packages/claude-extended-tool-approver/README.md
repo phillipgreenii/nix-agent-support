@@ -95,13 +95,14 @@ Rules are evaluated in order; first non-ABSTAIN wins:
 4. **claudetools** -- AskQuestion, Glob, Grep, etc.
 5. **pathsafety** -- file operations with path-based policies
 6. **mcp** -- MCP tool allowlist + read-only-verb approval (search/get/list/read/fetch/check); mutating verbs (create/edit/update/delete/…) abstain
-7. **git** -- git subcommands
-8. **gh** -- GitHub CLI
-9. **monorepo** -- monorepo bin commands
-10. **safecmds** -- safe commands with path checks
-11. **curl** -- read-only curl to allowed domains
-12. **kubectl** -- Kubernetes operations
-13. **buildtools** -- gradle, pre-commit, bats, etc.
+7. **primary-commit** -- Reject a `git commit` on the canonical clone's primary branch in an auto-approving (`bypassPermissions`) session; Abstain otherwise.
+8. **git** -- git subcommands
+9. **gh** -- GitHub CLI; `gh pr merge` (immediate) → Reject, `gh pr merge --auto` → Abstain
+10. **monorepo** -- monorepo bin commands
+11. **safecmds** -- safe commands with path checks
+12. **curl** -- read-only curl to allowed domains
+13. **kubectl** -- Kubernetes operations
+14. **buildtools** -- gradle, pre-commit, bats, etc.
 
 ## Dependencies
 
