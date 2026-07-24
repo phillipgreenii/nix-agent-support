@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
@@ -40,6 +41,7 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 		claudetools.New(),
 		pathsafety.New(pe),
 		mcp.New(),
+		primarycommit.New(primarycommit.NewFileResolver()),
 		git.New(),
 		gh.New(nil),
 		monorepo.New(pe),
@@ -301,6 +303,56 @@ func TestIntegration_KcRules(t *testing.T) {
 			t.Errorf("compound cd+export+exe: got %s (%s: %s) want %s", got.Decision, got.Module, got.Reason, hookio.Approve)
 		}
 	})
+}
+
+type fakePrimaryResolver struct {
+	canonical    bool
+	primary, cur string
+}
+
+func (f fakePrimaryResolver) IsCanonical(string) (bool, error)     { return f.canonical, nil }
+func (f fakePrimaryResolver) PrimaryBranch(string) (string, error) { return f.primary, nil }
+func (f fakePrimaryResolver) CurrentBranch(string) (string, error) { return f.cur, nil }
+
+// TestPrecedence_PrimaryCommitBeatsGit proves primary-commit is consulted before the
+// generic git rule (registration order). On the REAL hook path (EvaluateHook) a
+// bypass-mode commit on the canonical primary branch is Rejected by primary-commit;
+// otherwise the commit is not rejected. The deciding-rule identity for the non-reject
+// cases is asserted via Evaluate (first-match-wins), because EvaluateHook's
+// most-restrictive fold reports Module=="engine" on an all-approve expression.
+func TestPrecedence_PrimaryCommitBeatsGit(t *testing.T) {
+	mk := func(cur string) *Engine {
+		e := New()
+		e.RegisterRules(
+			primarycommit.New(fakePrimaryResolver{canonical: true, primary: "main", cur: cur}),
+			git.New(),
+		)
+		return e
+	}
+	in := func(cmd, mode string) *hookio.HookInput {
+		return &hookio.HookInput{ToolName: "Bash", ToolInput: makeBashJSON(cmd), CWD: "/repo", PermissionMode: mode}
+	}
+
+	// 1) bypass + on primary -> real hook path Rejects; deciding rule is primary-commit.
+	if r := mk("main").EvaluateHook(in("git commit -m x", "bypassPermissions")); r.Decision != hookio.Reject || r.Module != "primary-commit" {
+		t.Errorf("bypass on-primary (EvaluateHook) = %v/%s; want Reject/primary-commit", r.Decision, r.Module)
+	}
+
+	// 2) default + on primary -> not rejected. Real hook path Approves; first-match chain shows git decides.
+	if r := mk("main").EvaluateHook(in("git commit -m x", "default")); r.Decision != hookio.Approve {
+		t.Errorf("default on-primary (EvaluateHook) = %v; want Approve", r.Decision)
+	}
+	if r := mk("main").Evaluate(in("git commit -m x", "default")); r.Decision != hookio.Approve || r.Module != "git" {
+		t.Errorf("default on-primary (Evaluate) = %v/%s; want Approve/git", r.Decision, r.Module)
+	}
+
+	// 3) bypass + off primary -> primary-commit abstains; not rejected; git decides.
+	if r := mk("feat").EvaluateHook(in("git commit -m x", "bypassPermissions")); r.Decision != hookio.Approve {
+		t.Errorf("bypass off-primary (EvaluateHook) = %v; want Approve", r.Decision)
+	}
+	if r := mk("feat").Evaluate(in("git commit -m x", "bypassPermissions")); r.Decision != hookio.Approve || r.Module != "git" {
+		t.Errorf("bypass off-primary (Evaluate) = %v/%s; want Approve/git", r.Decision, r.Module)
+	}
 }
 
 func makeFileJSON(path string) json.RawMessage {
