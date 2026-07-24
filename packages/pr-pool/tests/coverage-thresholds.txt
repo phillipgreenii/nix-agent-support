@@ -1,0 +1,21 @@
+# Per-package STATEMENT-coverage thresholds enforced by the `pr-pool-go-tests`
+# flake check (bead pg2-hvlyj.19, plan item 5.7 / FIX 2). Format:
+#
+#   <package-import-suffix> <min-statement-percent>
+#
+# A rule matches the package whose import path equals the suffix or ends with
+# "/<suffix>". A gated package ABSENT from the profile FAILS the gate (so a
+# renamed/removed package cannot silently pass its bar). `#` comments and blank
+# lines are ignored.
+#
+# The four pinned Cluster-5 bars (agreed in the plan / bead pg2-hvlyj):
+#   queue impl (5.4, bead .16)              >= 90%
+#   schemas + conformance suite (5.1, .13)  >= 85%
+#   command-source (5.5, bead .17)          >= 85%
+#   OTel emission (5.6, bead .18)           >= 80%
+#
+# Each Cluster-5 Go bead ACTIVATES its line below when its package lands (this
+# gate "wires the enforcer first and is extended as each package appears"). Only
+# packages that exist are listed here so the tree stays green at every commit.
+
+# --- active rules (uncommented as each gated package lands) ---

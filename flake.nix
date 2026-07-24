@@ -545,6 +545,90 @@
                 gomod2nixToml = ./packages/pa-monitor/gomod2nix.toml;
               };
 
+              # pr-pool — full internal/* suite PLUS a per-package STATEMENT-
+              # coverage gate (bead pg2-hvlyj.19, plan item 5.7 / FIX 2). This is
+              # the enforcer the Cluster-5 Go items (.13/.16/.17/.18) cite by
+              # name. It EXTENDS the base `mkGoTest` builder (ADR 0021's preferred
+              # builder, same as pa-monitor-go-tests): mkGoTest runs
+              # `go test -coverprofile=cover.out -covermode=set ./...` from the
+              # module root (its vendor/goConfigHook setup is reused verbatim),
+              # then an overridden postBuild runs the committed coverage-gate
+              # script against the committed thresholds table and FAILs the build
+              # if any gated package is below its pinned bar. Pattern-B module
+              # (local replace ../ccpool, ../claude-transcript) so root the
+              # fileset at packages/ and pass modRoot, mirroring the pr-pool
+              # goLint + default.nix (docs excluded — behavior docs, not build
+              # inputs). The thresholds start empty and each Go bead activates its
+              # line as its package lands (the gate is wired first, extended after).
+              pr-pool-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pr-pool-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                  modRoot = "pr-pool";
+                  gomod2nixToml = ./packages/pr-pool/gomod2nix.toml;
+                  testFlags = [
+                    "-coverprofile=cover.out"
+                    "-covermode=set"
+                  ];
+                }).overrideAttrs
+                  (old: {
+                    # mkGoTest's buildPhase ends with `runHook postBuild`; run the
+                    # gate there, in the module cwd where `go test ./...` wrote
+                    # cover.out and where tests/ (script + thresholds) lives.
+                    postBuild = (old.postBuild or "") + ''
+                      echo "=== pr-pool per-package statement-coverage gate (bead pg2-hvlyj.19) ==="
+                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    '';
+                  });
+
+              # Red/green meta-test for the coverage gate (bead pg2-hvlyj.19
+              # acceptance): a synthetic profile deliberately BELOW its bar makes
+              # the gate FAIL, at/above PASSES, and a gated-but-absent package
+              # FAILS — proving the gate actually blocks, not merely measures.
+              test-pr-pool-coverage-gate =
+                let
+                  gate = ./packages/pr-pool/tests/coverage-gate.sh;
+                  # queue = 3/4 stmts = 75%; msgschema = 9/10 = 90%.
+                  profile = pkgs.writeText "synthetic.cover" ''
+                    mode: set
+                    ex/internal/queue/a.go:1.1,2.2 2 1
+                    ex/internal/queue/a.go:3.1,4.2 1 1
+                    ex/internal/queue/b.go:1.1,2.2 1 0
+                    ex/internal/msgschema/s.go:1.1,2.2 9 1
+                    ex/internal/msgschema/s.go:3.1,4.2 1 0
+                  '';
+                  belowBar = pkgs.writeText "below.txt" "internal/queue 90\n";
+                  atBar = pkgs.writeText "at.txt" "internal/queue 70\ninternal/msgschema 85\n";
+                  absent = pkgs.writeText "absent.txt" "internal/doesnotexist 80\n";
+                in
+                pkgs.runCommand "test-pr-pool-coverage-gate" { nativeBuildInputs = [ pkgs.bash ]; } ''
+                  fail() { echo "META-TEST FAIL: $1" >&2; exit 1; }
+
+                  # BELOW threshold must be rejected (non-zero).
+                  if bash ${gate} ${profile} ${belowBar} >/dev/null 2>&1; then
+                    fail "gate passed a below-threshold package (should block)"
+                  fi
+
+                  # AT/ABOVE threshold must pass (zero).
+                  bash ${gate} ${profile} ${atBar} >/dev/null 2>&1 \
+                    || fail "gate blocked an at/above-threshold set (should pass)"
+
+                  # A gated-but-absent package must be rejected (non-zero).
+                  if bash ${gate} ${profile} ${absent} >/dev/null 2>&1; then
+                    fail "gate passed a gated-but-absent package (should block)"
+                  fi
+
+                  echo "coverage-gate meta-test: block/pass/absent all correct"
+                  touch $out
+                '';
+
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
               # passthru shape repo-base's mkClaudeMarketplace produces — no build
