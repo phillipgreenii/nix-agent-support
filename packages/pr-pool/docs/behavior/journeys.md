@@ -35,9 +35,9 @@ load and failure.
 - **`STORY-OP-7`** — get **throughput through concurrency** yet be able to **serialize** sensitive
   event types, so parallelism never corrupts order-dependent work. _(→ `INV-CONC-1`; safety over
   efficiency, `INV-PREC-1`.)_
-- **`STORY-OP-8`** — rely on clear **delivery semantics** (best-effort, in-memory, duplicates
-  possible, `ttl`-bounded), so I design handlers to be idempotent and don't assume a lost event is
-  fatal. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
+- **`STORY-OP-8`** — rely on clear **delivery semantics** (durable, at-least-once, de-duped,
+  `ttl`-bounded), so I design handlers to be idempotent and know an accepted event survives a
+  restart. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
 - **`STORY-OP-9`** — declare a **workflow** tying sources → event types → handlers through their
   bindings, so the wiring is a first-class, inspectable artifact rather than an emergent accident.
   _(→ `JOURNEY-WORKFLOW`; `INV-WORKFLOW-1`.)_
@@ -240,8 +240,9 @@ it while it runs (`INV-LIFE-1`).
 `--only` / `--disable` selectors for this invocation, and starts the **socket service**. Then:
 
 - **`run`** — run continuously as a daemon; sources and managers **push** over the socket.
-- **`run-until-idle`** — dispatch everything currently deliverable, **await outstanding deferred
-  work up to `ttl`**, then exit; the socket stays open throughout so managers can still push.
+- **`run-until-idle`** — dispatch from the durable queue and exit once the **queue is drained and no
+  offer is outstanding** (every enqueued event accepted or TTL-expired, and no handler holding an
+  offer, `INV-LIFE-1`); the socket stays open throughout so managers can still push.
 
 Both modes keep the socket available. The operator inspects a running core with `status` (resolved
 config + live handler-sessions + queue depths) and `config` (the resolved configuration); every
@@ -341,31 +342,37 @@ sequenceDiagram
     Note over OP: confirm the shapes before trusting it in a live run
 ```
 
-### `JOURNEY-PAUSE` — a handler hits a resource limit
+### `JOURNEY-PAUSE` — capacity and resource-limit at the acceptance boundary
 
 **Actors:** core, `ACTOR-HDL`, `ACTOR-SRC`.
-**Intent:** a handler reports `resource-limit`; the core pauses that work and lets it resume once the
-ceiling lifts, without pinning an open call.
+**Intent:** show how capacity and a resource limit resolve on the two sides of the **acceptance
+boundary** (`INV-FAIL-1`), without pinning an open call.
 
-**Flow.** A handler-session reports `failed` with class **`resource-limit`** (e.g. a usage window
-reached) — not a defect, and it will be able again once the ceiling lifts (`INV-FAIL-1`). The core
-does **not** hold an open call; preferring **continuity over efficiency** (`INV-PREC-1`), it re-offers
-the same event **within `ttl`** once capacity returns, or the source re-emits it on a later trigger
-(`INV-EVT-2`). If `ttl` expires first, the event is dropped (a pull source will re-derive it; a
-push-only source's event is lost). `critical` is never retried (`JOURNEY-FAIL`).
+**Flow — pre-accept (`busy`).** A handler at capacity **declines pre-accept** with `busy`
+(`INV-CONC-1`). This is the **core's** to handle: preferring **continuity over efficiency**
+(`INV-PREC-1`), it re-offers the event **within `ttl`** once the handler frees up, or offers it to
+another bound handler; the event stays durable in the queue until then (`INV-EVT-1`). If `ttl`
+expires still-unaccepted, the event is dropped (unconsumed-expired) — a pull source re-derives it on
+its next trigger.
+
+**Flow — post-accept (`resource-limit`).** A handler that has **already accepted** an event and then
+hits a usage-window / quota ceiling reports **`resource-limit`**. Post-accept, the **handler owns**
+persistence and resume (`INV-FAIL-1`): it pauses its own work and resumes once the ceiling lifts, or
+surfaces the outcome / emits a new event. The core does **not** re-offer accepted work. `critical` is
+never retried (`JOURNEY-FAIL`).
 
 ```mermaid
 sequenceDiagram
     participant CORE as core
     participant HDL as event handler
-    participant SRC as pull source
-    CORE->>HDL: dispatch event (handler-session)
-    HDL-->>CORE: failed, class = resource-limit (INV-FAIL-1)
-    Note over CORE: does not hold an open call; continuity over efficiency (INV-PREC-1)
-    alt still within ttl
-        CORE->>HDL: re-offer the same event once capacity returns
-    else ttl expired
-        SRC-->>CORE: re-emits on a later trigger (INV-EVT-2)
+    CORE->>HDL: offer event
+    alt at capacity (pre-accept)
+        HDL-->>CORE: busy (INV-CONC-1)
+        Note over CORE: continuity over efficiency (INV-PREC-1)
+        CORE->>HDL: re-offer within ttl once capacity returns
+    else accepted, then hits a ceiling (post-accept)
+        HDL-->>CORE: accept (ack)
+        HDL-->>CORE: session-status resource-limit — handler pauses/resumes (INV-FAIL-1)
     end
     HDL-->>CORE: completed once the ceiling lifts
 ```
@@ -376,32 +383,28 @@ sequenceDiagram
 **Intent:** show the spread of failures and how the core's precedence (`INV-PREC-1`: safety >
 continuity > efficiency) shapes each response.
 
-**Flow — handler failure by class (`INV-FAIL-1`).** The re-offer decision follows the class, and
-only within the event's `ttl`:
+**Flow — handler failure at the acceptance boundary (`INV-FAIL-1`).** The response splits at
+acceptance:
 
-- **`retryable`** — transient; the same event MAY be re-offered within `ttl` and may then succeed.
-- **`resource-limit`** — a ceiling; pause and re-offer within `ttl`, or the source re-emits later
-  (`JOURNEY-PAUSE`).
-- **`unavailable`** — the handler can't take work right now; re-offer within `ttl` or route to
-  another session under capacity.
-- **`critical`** — never retried; the core **surfaces it to a human** — safety over continuity
-  (`INV-PREC-1`).
+- **pre-accept declines** — `busy` (at capacity, `INV-CONC-1`) or `unavailable` (can't take work
+  now) — are the **core's**: it re-offers the event **within `ttl`**, once the handler frees up or to
+  another bound handler; the event stays durable in the queue until accepted or TTL (`INV-EVT-1`).
+- **post-accept outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that
+  **already accepted** — are the **handler's** own (it owns persistence/resume/retry once it
+  accepts). The core does **not** re-offer accepted work; the outcome is surfaced back or becomes a
+  new event, and `critical` is **surfaced to a human** — safety over continuity (`INV-PREC-1`).
 
 ```mermaid
 flowchart TD
-    f["handler-session reports failed with a class (INV-FAIL-1)"] --> k{"failure class?"}
-    k -->|retryable| r["re-offer within ttl; may then succeed"]
-    k -->|resource-limit| rl["pause; re-offer within ttl or source re-emits (JOURNEY-PAUSE)"]
-    k -->|unavailable| u["can't take work now; re-offer within ttl or route to another session"]
-    k -->|critical| c["never retried: surface to a human (safety over continuity, INV-PREC-1)"]
-    r --> ttl{"still within ttl?"}
-    rl --> ttl
-    u --> ttl
-    ttl -->|yes| redo["delivered again; handler tolerates the duplicate (INV-EVT-2)"]
-    ttl -->|no| drop["event dropped (INV-EVT-1)"]
-    drop --> kind{"source kind?"}
-    kind -->|pull| reemit["re-derived and re-emitted next trigger (INV-EVT-2)"]
-    kind -->|push-only| lost["lost - the push-only caveat (INV-EVT-2)"]
+    off["core offers event to a bound handler (INV-CONC-1)"] --> acc{"accepted?"}
+    acc -->|"no — busy / unavailable (pre-accept)"| reoff["core re-offers within ttl, or to another handler (INV-FAIL-1)"]
+    reoff --> ttl{"still within ttl?"}
+    ttl -->|yes| off
+    ttl -->|no| drop["dropped undelivered — unconsumed-expired (INV-EVT-1)"]
+    acc -->|yes| own["handler owns the work: persist / resume / retry"]
+    own --> out{"post-accept outcome?"}
+    out -->|retryable / resource-limit| surf["handler retries/resumes, or surfaces / emits a new event (INV-FAIL-1)"]
+    out -->|critical| human["never retried: surfaced to a human (safety over continuity, INV-PREC-1)"]
 ```
 
 **Flow — source infrastructure failure vs "no work."** A pull source's `query` can fail because its
@@ -424,25 +427,29 @@ sequenceDiagram
     end
 ```
 
-**Flow — event `ttl`-drop.** An event not delivered before its `ttl` expires is dropped from memory
-(`INV-EVT-1`); this is the `ttl` branch in the failure-class flow above. A pull source re-derives it
-next trigger; a push-only source's dropped event is lost (`INV-EVT-2`).
+**Flow — event `ttl`-drop.** An event stays in the **durable queue** until its `ttl` (`INV-EVT-1`),
+surviving restarts; it is dropped only when the `ttl` expires **without acceptance**
+(unconsumed-expired) — the `ttl` branch in the flow above. A pull source re-derives it on its next
+trigger; a push-only source's event was durable to TTL, so it is lost only if nothing accepted it
+before it expired (`INV-EVT-2`).
 
 **Flow — core crash.** On a fatal condition the core makes a **best-effort** `crashing` signal to
-registered participants (`INV-LIFE-1`); because delivery is best-effort in-memory, **in-flight work
-is not guaranteed to survive a restart** (`INV-EVT-1`). After restart, pull sources re-derive current
-truth on their next trigger, while push-only in-flight work may be lost (`INV-EVT-2`). (Whether the
-core needs an explicit branch/deadletter path beyond re-entry is `OQ-BRANCH`.)
+registered participants (`INV-LIFE-1`). That signal stays best-effort and MAY be lost — but event
+**data** is now durable (`INV-EVT-1`, `ADR 0031`): an accepted-and-persisted event **survives the
+restart** and is redelivered at-least-once, and only the **narrow crash window** (accepted but not
+yet persisted) MAY redeliver — absorbed by idempotent handlers (`INV-EVT-2`). After restart the core
+resumes offering from the durable queue; pull sources also re-derive current truth on their next
+trigger. (Whether the core needs an explicit branch/deadletter path beyond re-entry is `OQ-BRANCH`.)
 
 ```mermaid
 sequenceDiagram
     participant CORE as core
     participant M as registered participants
     Note over CORE: fatal condition
-    CORE-->>M: best-effort crashing signal (INV-LIFE-1)
-    Note over CORE: in-memory events are NOT guaranteed to survive (INV-EVT-1)
+    CORE-->>M: best-effort crashing signal (INV-LIFE-1) — MAY be lost
+    Note over CORE: accepted events are durable (INV-EVT-1); only the narrow crash window may redeliver
     CORE->>CORE: restart
-    Note over CORE,M: pull sources re-derive next trigger; push-only in-flight work may be lost (INV-EVT-2)
+    Note over CORE,M: core resumes offering from the durable queue; idempotent handlers absorb any redelivery (INV-EVT-2)
 ```
 
 ### `JOURNEY-OBSERVE` — watch health
@@ -483,6 +490,12 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   selection, and the `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet
   fixed. _Owner_: operator/author. _Path_: extract from pr-pool's TOML prior art and settle the
   schema. _Blocks_: authoring config (`JOURNEY-CONFIG`); `INTF-CLI`.
+- **`OQ-EVT-TTL-ORIGIN`** <!-- uuid: 48ca567c-6b64-4a98-b3c0-dc5f03b2b46b --> — the **TTL clock
+  origin**: whether an event's `ttl` is measured from the event's `at` (creation) time or from the
+  time the core **ingests** it. _Gap_: the durable queue de-dups and expires by `ttl` (`INV-EVT-3`),
+  but which instant starts the clock is unsettled. _Owner_: author. _Path_: decide `at` vs. ingest
+  when settling the queue's realization. _Blocks_: exact dedup/expiry timing (`INV-EVT-1`,
+  `INV-EVT-3`); the queue implementation.
 - **`OQ-AUTOSTART`** — whether the **CLI auto-starts** a core when it finds none running, versus
   requiring an explicit `run`. _Gap_: the locate-then-act behavior is undecided. _Owner_: operator/
   author. _Path_: decide auto-start vs. fail-with-hint. _Blocks_: `INTF-CLI` locate behavior;

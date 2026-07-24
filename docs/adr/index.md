@@ -33,3 +33,4 @@
 | [0028](0028-pa-monitor-general-daemon-config-hot-reload.md)         | pa-monitor general daemon config hot-reload                     | Proposed                                                                        | 2026-07-15 |
 | [0029](0029-pa-monitor-rate-limit-window-peak.md)                   | pa-monitor rate-limit reader holds current window's peak        | Accepted                                                                        | 2026-07-15 |
 | [0030](0030-decommission-gascity.md)                                | Decommission gascity + gc-dolt-maintenance                      | Accepted                                                                        | 2026-07-15 |
+| [0031](0031-pr-pool-durable-ordered-event-queue.md)                 | pr-pool durable, ordered, de-duped, TTL-bounded event queue     | Accepted (reverses `pg2-r6cf`)                                                  | 2026-07-24 |

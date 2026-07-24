@@ -122,28 +122,30 @@ stateDiagram-v2
 
 ## Event delivery (shared by `INTF-SOURCE` and `INTF-HANDLER`)
 
-Delivery of an **event** from a source to a handler is **best-effort**. An event is **dropped**
-under exactly three conditions, and no others:
+Delivery of an **event** from a source to a handler goes through the core's **durable, ordered,
+de-duped, TTL-bounded queue** and is **at-least-once** (`INV-EVT-1`, `ADR 0031`). An event is
+enqueued durably and the core **offers it until a handler accepts** (`INV-CONC-1`); it is **dropped
+only when its `ttl` expires without acceptance** (unconsumed-expired). An accepted event is
+**retained in the queue until its `ttl`**, so a handler that binds within the TTL can still receive
+it, and delivery **survives a restart**.
 
-1. it has been **delivered** to a handler (its purpose is served);
-2. its **`ttl` expires** before a bound handler takes it;
-3. the **core stops**.
+**Acceptance** is the reply that hands responsibility to the handler: an inline **completion**
+(synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The core's delivery
+responsibility ends at acceptance; the durable record is written **after acceptance is confirmed**,
+so a **narrow crash window** (accepted but not yet persisted) MAY redeliver. Therefore:
 
-Delivery is **not guaranteed to survive a restart**: an event in flight when the core goes down is
-not promised to reappear afterward. (Whether the core hardens this is a decision-doc concern, out
-of scope here.)
+- an **event handler MUST tolerate duplicates** (be idempotent) — the crash window, a pre-accept
+  re-offer within `ttl`, or a source re-emitting can redeliver the same event (`INV-EVT-2`);
+- the core **de-duplicates by event `id` across the retained-until-`ttl` id set** — including ids
+  already delivered/accepted (`INV-EVT-3`) — so a source never has to track "did I already emit
+  this";
+- a **pull source** re-derives current truth on its next **query trigger**; a **push-only source**'s
+  events are now **durable to TTL** (no longer lost on a core restart), lost only if nothing accepts
+  them before they expire.
 
-Because delivery is best-effort and an event MAY be re-offered within its `ttl`:
-
-- an **event handler MUST tolerate duplicates** (be idempotent) — a retry within `ttl`, or a source
-  re-emitting, can redeliver the same event (`INV-EVT-2`);
-- the core **de-duplicates by event `id` within `ttl`** (`INV-EVT-3`), so a source never has to
-  track "did I already emit this";
-- a **pull source** re-derives current truth on its next **query trigger**, so a missed or expired
-  event simply reappears — re-emission, not resurrection;
-- a **push-only source** cannot re-derive: an event it emits while the core is down, or that no
-  bound handler takes within its `ttl`, is **lost**. This is the explicit caveat push-only sources
-  accept.
+A callback bearing a **tracking id the core does not recognize** (never issued, or already
+TTL-expired and evicted) is **acknowledged and ignored** — a logged no-op, not an error, and it does
+not resurrect an expired event (`INV-INTF-1`).
 
 ## `INTF-SOURCE` — event source
 
@@ -175,9 +177,10 @@ lifecycle is known.
 }
 ```
 
-- `id` — unique; the core de-duplicates on it within `ttl`.
+- `id` — unique; the core de-duplicates on it across the retained-until-`ttl` id set (`INV-EVT-3`).
 - `type` — the primary field a **binding** matches on.
-- `ttl` — how long the core may hold or redeliver the event before dropping it.
+- `ttl` — how long the core **holds, offers, and retains** the event in the queue before dropping it
+  if still unaccepted (`INV-EVT-1`).
 - `correlationId` — optional; groups several events for aggregation (distinct from the per-call
   tracking id).
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
@@ -266,14 +269,18 @@ sequenceDiagram
 A handler reporting **its own** health (not a session's) uses the common **self-status** channel
 instead, so the two never collide.
 
-**Failure class** (coarse; the core's re-offer decision derives from it):
+**Failure class** (coarse; response follows the **acceptance boundary**, `INV-FAIL-1`):
 
-| class            | meaning                                                       | core response                    |
-| ---------------- | ------------------------------------------------------------- | -------------------------------- |
-| `retryable`      | transient (network blip, flake)                               | MAY re-offer within `ttl`        |
-| `resource-limit` | a capacity/quota ceiling (e.g. a usage window) — not a defect | re-offer once the ceiling lifts  |
-| `unavailable`    | cannot take work now (down, starting, or at capacity)         | offer to another session / retry |
-| `critical`       | MUST NOT be retried; a human is needed                        | do not re-offer                  |
+| class            | meaning                                                       | response                                            |
+| ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
+| `retryable`      | transient (network blip, flake)                               | post-accept: handler retries; MAY surface / re-emit |
+| `resource-limit` | a capacity/quota ceiling (e.g. a usage window) — not a defect | post-accept: handler pauses, resumes once it lifts  |
+| `unavailable`    | cannot take work now (down, starting, or at capacity)         | pre-accept decline: core re-offers within `ttl`     |
+| `critical`       | MUST NOT be retried; a human is needed                        | post-accept: surfaced to a human; never re-offered  |
+
+The core itself re-offers **only on a pre-accept decline** — an `unavailable` report, or a **`busy`
+exit code `2`** when the handler is at capacity (`INV-CONC-1`). Once a handler **accepts** an event,
+retry/resume/persistence is the **handler's** responsibility (`INV-FAIL-1`), not the core's.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -371,14 +378,14 @@ config** — the mechanism behind `STORY-OP-3`. They scope which sources and han
 
 ### Operator subcommands
 
-| Subcommand                | Arguments                      | Behavior                                                                                                                                                                                                                                             |
-| ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                     | —                              | Start the core as a long-running **daemon** (socket service); route events as sources emit them until stopped.                                                                                                                                       |
-| `run-until-idle`          | —                              | Start the socket service, dispatch **every currently-deliverable event**, **await** outstanding deferred handler sessions up to their `ttl`, then **exit**. The default when no subcommand is given.                                                 |
-| `run-role <role> <event>` | role, event                    | **Smoke test**: dispatch **one named event** through **one handler** (its CLI-facing name is its _role_), then tear down. Runs **no discovery** — the event is explicit. Sets a **test-mode** signal (env) so the handler knows a test is in flight. |
-| `run-query <query>`       | query                          | **Smoke test**: run **one pull source's query** once, **read-only**, and print the events it would emit. Also sets the test-mode signal.                                                                                                             |
-| `status`                  | —                              | Resolved-config summary **plus** live **handler sessions** and per-`type` **queue depths**.                                                                                                                                                          |
-| `config`                  | `--show` \| `--print-defaults` | `--show` prints the **resolved** configuration; `--print-defaults` prints the built-in defaults as a copy-paste starting point.                                                                                                                      |
+| Subcommand                | Arguments                      | Behavior                                                                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`                     | —                              | Start the core as a long-running **daemon** (socket service); route events as sources emit them until stopped.                                                                                                                                                       |
+| `run-until-idle`          | —                              | Start the socket service and dispatch from the durable queue; **exit once the queue is drained and no offer is outstanding** (every enqueued event accepted or TTL-expired, and no handler holding an offer, `INV-LIFE-1`). The default when no subcommand is given. |
+| `run-role <role> <event>` | role, event                    | **Smoke test**: dispatch **one named event** through **one handler** (its CLI-facing name is its _role_), then tear down. Runs **no discovery** — the event is explicit. Sets a **test-mode** signal (env) so the handler knows a test is in flight.                 |
+| `run-query <query>`       | query                          | **Smoke test**: run **one pull source's query** once, **read-only**, and print the events it would emit. Also sets the test-mode signal.                                                                                                                             |
+| `status`                  | —                              | Resolved-config summary **plus** live **handler sessions** and per-`type` **queue depths**.                                                                                                                                                                          |
+| `config`                  | `--show` \| `--print-defaults` | `--show` prints the **resolved** configuration; `--print-defaults` prints the built-in defaults as a copy-paste starting point.                                                                                                                                      |
 
 _"role"_ is the operator-facing name for a configured **event handler** (its concrete kind); the
 core dispatches it as a **handler session**. _"query"_ names one pull **event source**'s query.
@@ -486,10 +493,10 @@ sequenceDiagram
     activate Core
     Core->>Src: query { id, callback }
     Src-->>Core: { id, events: [Event] }
-    Core->>H: dispatch { id, event, callback }
-    H-->>Core: { id, deferred: true }
+    Core->>H: offer { id, event, callback }
+    H-->>Core: { id, deferred: true }  (accept = ack)
     H->>Core: session-status { id, state: completed }
-    Note over Core: all deliverable events dispatched; deferred work awaited up to ttl
+    Note over Core: queue drained and no offer outstanding → exit (INV-LIFE-1)
     Core-->>Op: exit 0
     deactivate Core
 ```

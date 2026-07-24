@@ -19,11 +19,20 @@ their own terms in `zr pr-pool-components`.
   field that is absent on an event simply does not match (it is not an error).
 - **Query trigger** — what fires a pull event source's query: **periodic** (a tick, itself an event)
   or **threshold** ("enough events").
-- **TTL** — how long the core may hold or redeliver an event before dropping it.
+- **TTL** — how long the core **holds, offers, and retains** an event in the queue before dropping
+  it if still unaccepted (`INV-EVT-1`).
 - **Correlation id** — an optional grouping key on events, used to correlate several events for
   aggregation.
 - **Tracking id** — the id the core assigns to a call so a deferred reply or later callback can be
   matched back to it. Per-call, and distinct from a correlation id (which is per-event-group).
+- **Queue** — the core's **durable, ordered, de-duped, TTL-bounded** store of events (`INV-EVT-1`,
+  `ADR 0031`). An event stays in the queue until its TTL **even after acceptance**, so a handler that
+  binds within the TTL can still receive it and de-duplication (`INV-EVT-3`) covers already-delivered
+  ids. A deployment MAY opt in to evicting an event once all bound handlers have accepted it.
+- **Acceptance** — a handler's signal that it has taken responsibility for an event: an inline
+  **completion** (synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The
+  core retries delivery **only until acceptance** (`INV-FAIL-1`); after acceptance the handler owns
+  persistence, resume, and retry.
 
 ## Participants (the system actors)
 

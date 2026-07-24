@@ -16,10 +16,10 @@ journeys, and open questions in [journeys](journeys.md).
 flowchart LR
     SRCa["event source (pull / push)"] -->|typed events| core
     SRCb["event source"] -->|typed events| core
-    subgraph prpool["pr-pool core — dispatcher + registry"]
-      core["match event → route to a bound handler"]
+    subgraph prpool["pr-pool core — dispatcher + durable queue + registry"]
+      core["enqueue event → match → offer to a bound handler until accepted"]
     end
-    core -->|dispatch event| HDL["event handler → handler session (agent or non-agent)"]
+    core -->|offer until accepted| HDL["event handler → handler session (agent or non-agent)"]
     core --- MON["monitoring sink (pull / push metrics)"]
     core --- STO["storage (optional)"]
     OP["operator via CLI"] -->|configure / run / inspect| core
@@ -33,9 +33,9 @@ implementation is a detail the core never sees. Handlers may be agent or non-age
 ## Scope (extent + floor)
 
 - **Extent (in)** — matching and routing typed events to bound handlers; the participant interfaces
-  and their common contract; best-effort delivery with TTL; concurrency and per-handler capacity; the
-  operator CLI; the metric catalog; **workflows** (declared wiring + validation); the daemon /
-  run-until-idle lifecycle.
+  and their common contract; the **durable, ordered, de-duped, TTL-bounded event queue** with
+  at-least-once delivery; concurrency and per-handler capacity; the operator CLI; the metric catalog;
+  **workflows** (declared wiring + validation); the daemon / run-until-idle lifecycle.
 - **Extent (out)** — concrete participant **implementations** (ccpool, beads, prometheus, …) and any
   deployment-specific behavior live in `zr pr-pool-components`; governance authority and tech choices
   are decision docs; the "how" is downstream.

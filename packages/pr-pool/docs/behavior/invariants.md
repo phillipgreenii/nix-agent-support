@@ -14,14 +14,17 @@ An event's path from a source to a handler is a match-then-route decision:
 
 ```mermaid
 flowchart TD
-    emit["a source emits a typed event"] --> dedup{"seen this id within ttl?"}
+    emit["a source emits a typed event"] --> enq["append to the durable queue (INV-EVT-1)"]
+    enq --> dedup{"id already in the queue within ttl? (incl. already-accepted)"}
     dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
     dedup -->|no| match{"a binding matches the event's fields? (type + declared fields)"}
     match -->|no binding matches type| err["error → logs + metrics; error to caller on ingest (INV-DISP-3)"]
-    match -->|matched| route["route to a bound handler as a handler session (INTF-HANDLER)"]
-    route --> cap{"handler at capacity?"}
-    cap -->|no| disp["dispatch — exactly one handler session (INV-CONC-1)"]
-    cap -->|yes| hold["hold within ttl; re-offer or offer elsewhere"]
+    match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
+    offer --> acc{"handler accepts? (ack or completion)"}
+    acc -->|"busy / pre-accept decline"| reoffer["re-offer within ttl, or offer elsewhere (INV-FAIL-1)"]
+    reoffer --> acc
+    acc -->|accepted| mark["mark accepted per (event, handler); retain in queue until ttl (INV-EVT-1)"]
+    offer -->|ttl expires unaccepted| expire["dropped undelivered — unconsumed-expired (INV-EVT-1)"]
 ```
 
 - **`INV-DISP-1`** — Sources **emit typed events**; handlers **bind** to events via a **binding**
@@ -40,26 +43,41 @@ flowchart TD
 
 ## Delivery
 
-- **`INV-EVT-1`** — Event delivery is **best-effort**. An event is **dropped** under exactly three
-  conditions: it is **delivered** to a handler, its **`ttl` expires**, or the **core stops**.
-  Delivery is **not guaranteed to survive a restart**. _(The core MAY harden restart survival; that
-  is a decision-doc concern and never strengthens this best-effort guarantee.)_
-- **`INV-EVT-2`** — A handler **MUST tolerate duplicate events** (be idempotent); a source **MAY**
-  emit the same event more than once. A **pull** source re-derives on its next **query trigger**, so
-  a dropped event reappears; a **push-only** source cannot re-derive, so its dropped events are
-  **lost** (its caveat).
-- **`INV-EVT-3`** — The core **de-duplicates within `ttl` by event `id`**, so a source never needs
-  to track whether it already emitted an event.
+- **`INV-EVT-1`** <!-- uuid: faf59ce3-6a27-42c8-8bfa-0903f895eed6 --> — The core holds a
+  **durable, ordered, de-duped, TTL-bounded event queue** (`ADR 0031`), and event delivery is
+  **at-least-once**: an event is enqueued durably, and the core **attempts delivery until a handler
+  accepts it**. The durable record is written **after acceptance is confirmed**, so a narrow crash
+  window MAY redeliver (absorbed by idempotent handlers, `INV-EVT-2`). An event is **dropped only
+  when its `ttl` expires without acceptance** (**unconsumed-expired**); an accepted event is
+  **retained in the queue until its `ttl`** so a handler that binds within the TTL can still receive
+  it. Delivery therefore **survives a restart** — the storage mechanism (jsonl / DB / WAL) is a
+  realization choice, not behavior. _(The `crashing` lifecycle signal in `INV-LIFE-1` stays
+  best-effort — that is a separate concern from event-data durability.)_
+- **`INV-EVT-2`** <!-- uuid: 06649d39-2734-409a-8098-f3c2cef44cbe --> — A handler **MUST tolerate
+  duplicate events** (be idempotent) — required, because at-least-once delivery (`INV-EVT-1`) and the
+  narrow crash window MAY redeliver an accepted event. A source **MAY** emit the same event more than
+  once; the durable queue makes **both pull and push** events durable to TTL, so a push-only source
+  no longer loses events it cannot re-derive.
+- **`INV-EVT-3`** <!-- uuid: d54ad229-ed48-4862-aa27-bc2181b4d6c4 --> — The core **de-duplicates by
+  event `id` across the retained-until-`ttl` id set** — including ids of events already delivered or
+  accepted — so a source never needs to track whether it already emitted an event, and a re-emit
+  within TTL is dropped as a duplicate. _(The **TTL clock origin** — event `at` vs ingest time — is
+  `OQ-EVT-TTL-ORIGIN`.)_
 
 ## Interfaces
 
-- **`INV-INTF-1`** — Every participant interaction follows the **common manager contract**
-  ([interfaces](interfaces.md)): schema-versioned JSON over stdin/stdout, a per-call **tracking id**,
-  a reply that is **inline or deferred** (a deferred reply is reconciled later over the participant's
-  **callback**, keyed by the tracking id), a single-`command` **callback**, and coarse exit codes
-  (`0` ok / `1` error / `2` busy) with the rich outcome in the JSON. The core **accepts messages
-  only after a participant is `started` and before it is `stopping`** (the lifecycle is owned by
-  `INV-LIFE-1`).
+- **`INV-INTF-1`** <!-- uuid: ddffe016-17c0-4673-896a-70532c968b72 --> — Every participant
+  interaction follows the **common manager contract** ([interfaces](interfaces.md)): schema-versioned
+  JSON over stdin/stdout, a per-call **tracking id**, a reply that is **inline or deferred**, a
+  single-`command` **callback**, and coarse exit codes (`0` ok / `1` error / `2` busy) with the rich
+  outcome in the JSON. A reply is the participant's **acceptance** signal: an **inline completion**
+  (synchronous — `accept == complete`) or a **deferred ack** reconciled later over the participant's
+  callback, keyed by the tracking id (asynchronous — `accept == ack`, outcome reported later). The
+  core's delivery responsibility **ends at acceptance** (`INV-EVT-1`, `INV-FAIL-1`). A callback
+  bearing a **tracking id the core does not recognize** — never issued, or already TTL-expired and
+  evicted — is **acknowledged and ignored** (a logged no-op): not an error, and it does not resurrect
+  an expired event. The core **accepts messages only after a participant is `started` and before it
+  is `stopping`** (the lifecycle is owned by `INV-LIFE-1`).
 - **`INV-INTF-2`** — Every interface is accompanied by a **conformance suite** (positive and
   negative checks against its JSON Schema) so an implementation can verify it adheres **before** the
   core is trusted to route through it. Because a counterparty here is an **implementer** — a
@@ -72,26 +90,37 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant Core as core
-    participant A as handler session A
-    participant B as handler session B
-    Note over Core,B: competing consumers — one event to exactly one session
-    Core->>A: dispatch event E1 (id hs-A)
-    Core->>B: dispatch event E2 (id hs-B)
-    B-->>Core: deferred; later session-status failed { class: resource-limit }
-    Note over Core: not a defect — re-offer once the ceiling lifts, within E2's ttl
-    Core->>A: re-offer E2 when A has capacity (still within ttl)
-    A-->>Core: session-status completed
+    participant A as handler A
+    participant B as handler B
+    Note over Core,B: competing consumers — offer/accept, one outstanding offer per handler
+    Core->>A: offer event E1
+    A-->>Core: accept (ack)
+    Core->>B: offer event E2
+    B-->>Core: busy — pre-accept decline (at capacity)
+    Note over Core: not a defect — re-offer E2 within its ttl (INV-FAIL-1)
+    Core->>A: re-offer E2 once A has capacity (still within ttl)
+    A-->>Core: accept → later session-status completed
 ```
 
-- **`INV-CONC-1`** — The core dispatches **concurrently**, delivering each event to **exactly one**
-  handler session (**competing consumers**), bounded by each handler's **capacity**. Concurrency is
-  **not assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a
-  shutdown or time-of-day event) so its events never run in parallel.
-- **`INV-FAIL-1`** — A handler-session failure carries a coarse **failure class** — `retryable`,
-  `resource-limit`, `unavailable`, or `critical`. The core's re-offer decision **follows the class**
-  and happens **only within the event's `ttl`**: `retryable` and `resource-limit` MAY be re-offered
-  (the latter once the ceiling lifts), `unavailable` MAY be offered to another session, and
-  `critical` is **never** retried — a human is needed.
+- **`INV-CONC-1`** <!-- uuid: 20c84e0f-8ffb-428c-9acc-dcaabb4fdf1b --> — Capacity is
+  **handler-enforced** via a **pre-accept `busy` decline**, not a core-tracked number: the core
+  offers an event and the handler declines with `busy` when at capacity, and the core then re-offers
+  within `ttl` (`INV-FAIL-1`). **"One event → one session" holds _within_ a handler**; **fan-out is
+  _across_ handlers** — the core tracks acceptance per `(event, handler)` (`INV-EVT-1`) and keeps
+  **one outstanding offer per handler** (per-handler serial FIFO, `ADR 0031`). Concurrency is **not
+  assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a shutdown
+  or time-of-day event) so its events never run in parallel. _(A source-side, per-source
+  claim-exclusion role — e.g. a downstream deployment's durable in-session claim — is an **external
+  actor's** concern, complementary to and not duplicating the core's acceptance tracking.)_
+- **`INV-FAIL-1`** <!-- uuid: 2da0d587-f116-42e6-b986-8abf80ed023c --> — Failure classes split at
+  the **acceptance boundary** (`INV-EVT-1`, `ADR 0031`). **Pre-accept declines** — a handler is
+  `busy` (at capacity) or `unavailable` — are the **core's** to handle: it re-offers the event within
+  its `ttl`, to the same handler once the ceiling lifts or to another bound handler. **Post-accept
+  outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that has
+  **already accepted** the event — are the **handler's** own (once it accepts, the handler owns
+  persistence/resume/retry); the core does **not** re-offer post-accept work. Such an outcome is
+  **surfaced back** (session status + logs/metrics) or turned into a **new event**, and `critical`
+  still means **a human is needed** — never a silent core retry.
 
 ## Workflow
 
@@ -107,13 +136,15 @@ sequenceDiagram
 - **`INV-OBS-1`** — The core exposes a declared **metric catalog** (each metric's `name`, `kind`,
   `unit`, labels); a **monitoring sink** pulls or pushes a declared subset (`INTF-MON`). The core is
   unaware of any concrete monitoring backend, and an **observer** reads the sink, never the core.
-- **`INV-LIFE-1`** — The core runs as a **socket service** in both modes — a long-running **daemon**
-  (`run`) and a one-off **run-until-idle** (dispatch everything deliverable, await outstanding
-  deferred work up to `ttl`, then exit). Both keep the socket available so push sources can reach it.
-  The core signals each registered participant through the lifecycle
-  `starting → started → stopping → stopped`, plus a **best-effort `crashing`** signal on sudden
-  shutdown; because `crashing` is best-effort (it MAY be lost), **no correctness rule may depend on
-  it**.
+- **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs as a **socket
+  service** in both modes — a long-running **daemon** (`run`) and a one-off **run-until-idle**, which
+  exits when the **queue is drained and no offer is outstanding** (every enqueued event is accepted
+  or TTL-expired, and no handler has an outstanding offer), then stops. Both keep the socket
+  available so push sources can reach it. The core signals each registered participant through the
+  lifecycle `starting → started → stopping → stopped`, plus a **best-effort `crashing`** signal on
+  sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no correctness rule may
+  depend on it** — this signal stays best-effort even though event **data** is now durable
+  (`INV-EVT-1`).
 
 ## Precedence
 
