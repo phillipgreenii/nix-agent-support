@@ -22,8 +22,10 @@ sec "Files"
 printf '%s\n' ./*.md | sed 's#^\./##'
 
 sec "IDs present (INV-3) — by family, then full list"
-grep -rhoE "$IDRE" ./*.md | sed -E 's/-[0-9]+$//' | sort | uniq -c
-grep -rhoE "$IDRE" ./*.md | sort -uV | tr '\n' ' '
+# `|| true` so a set with no IDs (e.g. a minimal fixture) does not trip
+# `set -o pipefail` and abort the whole run.
+{ grep -rhoE "$IDRE" ./*.md || true; } | sed -E 's/-[0-9]+$//' | sort | uniq -c
+{ grep -rhoE "$IDRE" ./*.md || true; } | sort -uV | tr '\n' ' '
 echo
 
 sec "UUID carriers (INV-3) — well-formed + intra-set-unique; expect clean"
@@ -60,6 +62,14 @@ grep -rniE '(^|[[:space:]])(status|state)[[:space:]]*[:=]|\(draft\)|\(partial\)|
   grep -viE 'state (diagram|machine)|status-projection|handler.?state|session.?state|failure|lifecycle|per-state|session-status|state[[:space:]]*[:=][[:space:]]*(running|completed|paused|failed|healthy|degraded|unavailable|starting|started|stopping|stopped|crashing)' ||
   echo "  clean"
 
+sec "Inline status framing (INV-4 / V2 #15) — expect none"
+# A behavior-docs set is LIVING by default (INV-4): it states the intended behavior as-if-true,
+# never annotating a rule with its current implementation status. #15's flagship catch is inline
+# status framing in PROSE — "unmet by the current implementation", "not yet implemented" — which the
+# per-doc status-header check above does NOT catch (it is prose, not a `status:` header). Flag it.
+grep -rniE 'unmet by the current implementation|not[[:space:]]+yet[[:space:]]+implemented|currently[[:space:]]+unimplemented|no[[:space:]]+current[[:space:]]+implementation|does[[:space:]]+not[[:space:]]+yet[[:space:]]+(exist|support|implement)|planned[[:space:]]+but[[:space:]]+not[[:space:]]+(yet[[:space:]]+)?(built|implemented)|to[[:space:]]+be[[:space:]]+implemented' ./*.md ||
+  echo "  clean"
+
 sec "Cross-set relative links (INV-8) — expect none; use textual '<repo> · <path> · <ID>'"
 grep -rnoE '\]\(\.\.?/[^)]*\)' ./*.md || echo "  none"
 
@@ -76,7 +86,8 @@ for f in ./*.md; do case "${f##*/}" in *[Gg]loss*)
 esac done
 if [ -n "${gloss:-}" ]; then
   # bold headwords from glossary bullets, minus any trailing "(...)" qualifier
-  grep -oE '^[[:space:]]*[-*][[:space:]]+\*\*[^*]+\*\*' "$gloss" |
+  # (`|| true` so a glossary with no bold-bullet headwords does not abort the run)
+  { grep -oE '^[[:space:]]*[-*][[:space:]]+\*\*[^*]+\*\*' "$gloss" || true; } |
     sed -E 's/.*\*\*(.+)\*\*/\1/; s/[[:space:]]*\(.*\)//' |
     while IFS= read -r term; do
       [ -n "$term" ] || continue
@@ -93,7 +104,9 @@ else
 fi
 
 sec "Mermaid fences balanced"
-opens=$(grep -rhoc '```mermaid' ./*.md | paste -sd+ - | bc 2>/dev/null || grep -rho '```mermaid' ./*.md | wc -l)
-fences=$(grep -rho '```' ./*.md | wc -l | tr -d ' ')
+# `|| true` so a set with no mermaid fences (or no code fences at all) does not
+# trip `set -o pipefail` and abort the run.
+opens=$({ grep -rho '```mermaid' ./*.md || true; } | wc -l | tr -d ' ')
+fences=$({ grep -rho '```' ./*.md || true; } | wc -l | tr -d ' ')
 printf '  mermaid opens: %s ; total code fences: %s (%s)\n' "$opens" "$fences" \
   "$([ $((fences % 2)) -eq 0 ] && echo even || echo ODD-unbalanced)"

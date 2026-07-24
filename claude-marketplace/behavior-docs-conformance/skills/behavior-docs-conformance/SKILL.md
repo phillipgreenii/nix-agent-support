@@ -83,6 +83,33 @@ These need reading, not grep. Judge each and cite the rule.
 - **Gaps are explicit open questions** — known gaps are recorded as well-formed open questions
   (gap, owner, resolution path, where it blocks), not guessed. `INV-13`.
 
+## V2 intra-evaluation — the five declared categories
+
+This skill **is** the method's **V2 intra-evaluator**: an agent reviews ONE set against the method's
+own rules (distinct from **V1**, a set's implementation vs. its own docs, and **V3**, the cross-set
+inter-evaluator — see the `behavior-docs-inter-conformance` sibling skill). Steps 2–3 above cover the
+general checklist; the five categories V2 is specifically accountable for — each with a FAIL and a
+PASS fixture under [`corpus/v2/`](corpus/v2/) — are:
+
+| Category                         | What FAILs                                                                                                    | Layer                                               | Rule       |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------- |
+| **inline-status** (#15)          | a rule annotated with its current implementation status in prose (e.g. "unmet by the current implementation") | mechanical (self-checks "Inline status framing")    | `INV-4`    |
+| **floor-leakage**                | a below-floor realization detail (`file:line`, retry counts, backoff ms)                                      | mechanical (self-checks "Floor-leakage candidates") | `INV-2/10` |
+| **substitution**                 | an extent statement that fails the substitution test (names an artifact, not a behavior)                      | judgment (Step 3)                                   | `INV-2/10` |
+| **extent-traceability**          | an extent-in/out claim (story/journey) no invariant traces                                                    | judgment (Step 3)                                   | `INV-11`   |
+| **seam-vocab inherit-or-rename** | a borrowed (cited) term silently REDEFINED instead of inherited-or-renamed                                    | judgment (Step 3)                                   | `INV-20`   |
+
+The mechanical categories are enforced by the bundled `self-checks.sh` (and gated by the
+`test-behavior-docs-conformance-v2` bats check under `nix flake check`); the judgment categories are
+the agent's, using the corpus fixtures as the reference for what a FLAG vs. CLEAN looks like.
+
+**Real-world corpus via pre-fix snapshots.** `scripts/capture-prefix-snapshots.sh <out>` captures the
+git snapshot of each behavior-docs set as it was immediately BEFORE a review-resolution edit pass —
+those PRE-FIX sets are real-world FAIL fixtures (they still carry findings such as #15 inline-status
+"unmet by the current implementation", the #1 owner→consumer `pr-pool-components` pointer, and the
+#6-A stranded past-framing note), and the current POST-FIX sets are the PASS fixtures. The script
+documents the exact revs so the fixture is reproducible.
+
 ## Step 4 — Report
 
 Produce a **ranked findings list**, most-severe first. For each: the **method invariant ID** it

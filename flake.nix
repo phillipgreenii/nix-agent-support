@@ -629,6 +629,19 @@
                   touch $out
                 '';
 
+              # V2 intra-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
+              # item 5.2): drive the behavior-docs-conformance skill's
+              # self-checks.sh over inline-status / floor-leakage FAIL & PASS
+              # fixtures and assert it flags / stays clean. bc for the mermaid
+              # fence-count section.
+              test-behavior-docs-conformance-v2 = checksHelpers.testBashScripts {
+                package = pkgs.writeShellScriptBin "self-checks" ''
+                  exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/scripts/self-checks.sh} "$@"
+                '';
+                tests = ./tests/behavior-docs-conformance-v2.bats;
+                extraInputs = [ pkgs.bc ];
+              };
+
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
               # passthru shape repo-base's mkClaudeMarketplace produces — no build
