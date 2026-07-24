@@ -3,11 +3,16 @@
 Who interacts with the core. Everything the core integrates with is an actor — human or system;
 an **interface** is _how_ an actor interacts. A behavior docs set MUST define all of its actors.
 
+## Principals (human or agent)
+
+- **`ACTOR-OP` — Operator** <!-- uuid: 41f74815-a594-4443-9dd3-bb83252cf5e9 --> — a **principal — a
+  human or an agent** — that configures the core (participants, event sources, handlers and their
+  bindings, TTLs, selectors, wiring), runs it as a daemon or run-until-idle, and inspects it
+  (status, resolved config, live handler sessions). Works through the CLI (`INTF-CLI`), which is
+  drivable by either a human or an agent.
+
 ## Human actors
 
-- **`ACTOR-OP` — Operator** — configures the core (participants, event sources, handlers and their
-  bindings, TTLs, selectors, wiring), runs it as a daemon or run-until-idle, and inspects it
-  (status, resolved config, live handler sessions). Works through the CLI (`INTF-CLI`).
 - **`ACTOR-OBS` — Observer** — consumes the core's monitoring output (the metric catalog surfaced
   through a monitoring sink) to judge throughput, backlog, failures, and liveness.
 

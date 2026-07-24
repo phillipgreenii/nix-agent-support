@@ -84,7 +84,11 @@ their own terms in a downstream deployment set.
   unconsumed-expired (`INV-OBS-1`). **OTel** is the default emission transport for **metrics only**;
   logs stay JSONL.
 
+## Principals (human or agent)
+
+- **Operator** — a **principal — a human or an agent** — that configures, runs, and inspects the core
+  via the CLI (drivable by either).
+
 ## Human actors
 
-- **Operator** — configures, runs, and inspects the core via the CLI.
 - **Observer** — consumes the core's monitoring output.
