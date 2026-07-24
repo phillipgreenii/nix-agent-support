@@ -35,9 +35,9 @@ implementation is a detail the core never sees. Handlers may be agent or non-age
 - **Extent (in)** — matching and routing typed events to bound handlers; the participant interfaces
   and their common contract; the **durable, ordered, de-duped, TTL-bounded event queue** with
   at-least-once delivery; concurrency and per-handler capacity; the operator CLI; the metric catalog;
-  **workflows** (declared wiring + validation); the daemon / run-until-idle lifecycle.
+  the **wiring** (declared routing graph + validation); the daemon / run-until-idle lifecycle.
 - **Extent (out)** — concrete participant **implementations** (ccpool, beads, prometheus, …) and any
-  deployment-specific behavior live in `zr pr-pool-components`; governance authority and tech choices
-  are decision docs; the "how" is downstream.
-- **Floor** — pr-pool speaks in events, bindings, participants, handler sessions, and workflows. It
+  deployment-specific behavior live in a downstream deployment set that implements these interfaces;
+  governance authority and tech choices are decision docs; the "how" is downstream.
+- **Floor** — pr-pool speaks in events, bindings, participants, handler sessions, and wiring. It
   names no concrete tool, transport, tuning constant, or file layout.

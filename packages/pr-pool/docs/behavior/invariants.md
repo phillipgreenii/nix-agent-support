@@ -10,7 +10,9 @@ concept distinction come from the behavior-docs method
 
 ## Dispatch (the event model)
 
-An event's path from a source to a handler is a match-then-route decision:
+An event's path from a source to a handler is a match-then-route decision. (An operator MAY also
+inject an event directly via the `push-inject` `INTF-CLI` subcommand — the same push-ingest path,
+governed by these same delivery invariants, `INV-EVT-*`.)
 
 ```mermaid
 flowchart TD
@@ -18,7 +20,7 @@ flowchart TD
     enq --> dedup{"id already in the queue within ttl? (incl. already-accepted)"}
     dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
     dedup -->|no| match{"a binding matches the event's fields? (type + declared fields)"}
-    match -->|no binding matches type| err["error → logs + metrics; error to caller on ingest (INV-DISP-3)"]
+    match -->|no binding matches type| noh["no handler: waits in queue → unconsumed-expired at ttl; logged + metric; config-time warning (INV-DISP-3)"]
     match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
     offer --> acc{"handler accepts? (ack or completion)"}
     acc -->|"busy / pre-accept decline"| reoffer["re-offer within ttl, or offer elsewhere (INV-FAIL-1)"]
@@ -36,10 +38,16 @@ flowchart TD
 - **`INV-DISP-2`** — The core reaches every source and handler **only through a manager interface**
   (`INTF-SOURCE` / `INTF-HANDLER`); their implementations are opaque to it. Nothing specific to a
   source, handler, or deployment lives in the core.
-- **`INV-DISP-3`** — An event whose `type` **no configured binding matches** is an **error**: the
-  core records it to logs and metrics **and returns an error to the caller** on the push/ingest
-  path. It is **not** silently dropped. (An _absent declared field_ is a non-match, not this error;
-  this error is specifically "no binding for the `type`.")
+- **`INV-DISP-3`** <!-- uuid: 421db242-e1fc-49ba-a1a6-38211abf5569 --> — An event whose `type` **no
+  configured binding matches** is **not** a runtime error under the durable queue: it is enqueued and,
+  with no handler to accept it, **waits and expires at its `ttl`** (**unconsumed-expired**,
+  `INV-EVT-1`) — a visibility signal ("no event misses"), recorded to logs and metrics, not a
+  rejection of the caller. Visibility is surfaced two ways: **config-time**, `JOURNEY-VALIDATE` emits
+  a **warning** when a source-emitted `type` has **no configured binding at all** (you would queue
+  events nothing can take); and at runtime the **unconsumed-expired** metric counts such drops. A
+  binding merely **disabled for this run** (`--only`/`--disable`) is expected and is neither warned
+  nor an error — its events simply wait to `ttl`. (An _absent declared field_ is a non-match, not a
+  no-binding condition.)
 
 ## Delivery
 
@@ -67,10 +75,13 @@ flowchart TD
 ## Interfaces
 
 - **`INV-INTF-1`** <!-- uuid: ddffe016-17c0-4673-896a-70532c968b72 --> — Every participant
-  interaction follows the **common manager contract** ([interfaces](interfaces.md)): schema-versioned
-  JSON over stdin/stdout, a per-call **tracking id**, a reply that is **inline or deferred**, a
-  single-`command` **callback**, and coarse exit codes (`0` ok / `1` error / `2` busy) with the rich
-  outcome in the JSON. A reply is the participant's **acceptance** signal: an **inline completion**
+  interaction follows the **common manager contract** ([interfaces](interfaces.md)): it conforms to
+  the interface's **message schema** (the JSON Schema shapes, `INV-INTF-2`) realized over a
+  **transport contract** — the default is the **CLI transport** (schema-versioned JSON on stdin → JSON
+  on stdout, coarse exit codes `0` ok / `1` error / `2` busy, rich outcome in the JSON); a gRPC or
+  in-code transport is equivalent. Each call carries a per-call **tracking id** and a reply that is
+  **inline or deferred** over a single-`command` **callback**. A reply is the participant's
+  **acceptance** signal: an **inline completion**
   (synchronous — `accept == complete`) or a **deferred ack** reconciled later over the participant's
   callback, keyed by the tracking id (asynchronous — `accept == ack`, outcome reported later). The
   core's delivery responsibility **ends at acceptance** (`INV-EVT-1`, `INV-FAIL-1`). A callback
@@ -78,12 +89,12 @@ flowchart TD
   evicted — is **acknowledged and ignored** (a logged no-op): not an error, and it does not resurrect
   an expired event. The core **accepts messages only after a participant is `started` and before it
   is `stopping`** (the lifecycle is owned by `INV-LIFE-1`).
-- **`INV-INTF-2`** — Every interface is accompanied by a **conformance suite** (positive and
-  negative checks against its JSON Schema) so an implementation can verify it adheres **before** the
-  core is trusted to route through it. Because a counterparty here is an **implementer** — a
-  pluggable implementation, or a downstream set (e.g. zr's `pr-pool-components`) that realizes these
-  interfaces — this suite, not a peer cross-check, is how agreement is confirmed (method `INV-18`,
-  implementer form).
+- **`INV-INTF-2`** <!-- uuid: 26f9be4d-8481-4a44-9f1a-d79a92c0016a --> — Every interface is
+  accompanied by a **conformance suite** (positive and negative checks against its JSON Schema) so an
+  implementation can verify it adheres **before** the core is trusted to route through it. Because a
+  counterparty here is an **implementer** — a pluggable implementation, or a downstream deployment
+  set that realizes these interfaces — this suite, not a peer cross-check, is how agreement is
+  confirmed (method `INV-18`, implementer form).
 
 ## Concurrency, capacity & failure
 
@@ -122,20 +133,35 @@ sequenceDiagram
   **surfaced back** (session status + logs/metrics) or turned into a **new event**, and `critical`
   still means **a human is needed** — never a silent core retry.
 
-## Workflow
+## Wiring
 
-- **`INV-WORKFLOW-1`** — A **workflow** is a declared flow tying **event sources → event types →
-  event handlers** through their **bindings**. The core **MUST** be able to **validate the wiring**
-  — no orphan event types, no unhandled source output, no disconnected handlers, and loop detection
-  — and **report** on it. Declaring or altering a workflow is **configuration**: it **MUST NOT**
-  require changing the core (`GOAL-MIN-1`). _(Whether validation runs pre-runtime and exactly how a
-  serialize mark is expressed are open questions, `OQ-WORKFLOW` and `OQ-CONC-MARK`.)_
+- **`INV-WORKFLOW-1`** <!-- uuid: 66dfe98d-a564-4414-a3db-77b518d27f31 --> — The **wiring** (a
+  **routing graph**) is the declared flow tying **event sources → event types → event handlers**
+  through their **bindings**. The core is a **flat edge-router, not a workflow engine**: it **MUST**
+  be able to **validate the wiring** — no orphan event types, no unhandled source output, no
+  disconnected handlers, and loop detection — and **report** on it, and it validates **nothing
+  beyond** that — **no workflow-completeness and no sequencing** (source semantics are opaque to the
+  core, and the core sees only single directed edges, never a handler's outcome or how it correlates
+  to a next event). The core defines **delivery** outcomes (accept / decline / delivery-failure
+  class), **not work** outcomes (did the review pass?) — those live in the handler and a downstream
+  tracker. Declaring or altering the wiring is **configuration**: it **MUST NOT** require changing the
+  core (`GOAL-MIN-1`). _(Whether validation runs pre-runtime and exactly how a serialize mark is
+  expressed are open questions, `OQ-WORKFLOW` and `OQ-CONC-MARK`.)_
 
 ## Observability & lifecycle
 
-- **`INV-OBS-1`** — The core exposes a declared **metric catalog** (each metric's `name`, `kind`,
-  `unit`, labels); a **monitoring sink** pulls or pushes a declared subset (`INTF-MON`). The core is
-  unaware of any concrete monitoring backend, and an **observer** reads the sink, never the core.
+- **`INV-OBS-1`** <!-- uuid: 1ab39347-6835-40bf-9145-4d5e658780dd --> — The core exposes a declared
+  **metric catalog** (each metric's `name`, `kind`, `unit`, labels); a **monitoring sink** pulls or
+  pushes a declared subset (`INTF-MON`). Observability covers **metrics and logs** (traces are a later
+  concern). The catalog MUST declare at least: **queue depth** (gauge, per `type`), **failure rate**
+  (counter, per failure class), and **unconsumed-expired** (counter, per `type` — events that reached
+  `ttl` with no handler accepting them, the concrete "no event misses" signal, `INV-DISP-3`),
+  alongside the existing throughput / backlog / liveness metrics. The metric catalog is the neutral
+  **shape**; **OTel** is the default **emission transport for metrics only** (a neutral standard, not
+  a mandated tool — `GOAL-MIN-1` still holds), while logs stay JSONL; the concrete backend is a
+  deployment binding via `INTF-MON`. The core is unaware of any concrete monitoring backend, and an
+  **observer** reads the sink, never the core. A daemon emits continuously; `run-until-idle` MAY emit
+  a final snapshot.
 - **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs as a **socket
   service** in both modes — a long-running **daemon** (`run`) and a one-off **run-until-idle**, which
   exits when the **queue is drained and no offer is outstanding** (every enqueued event is accepted
@@ -148,16 +174,16 @@ sequenceDiagram
 
 ## Precedence
 
-- **`INV-PREC-1`** — When two invariants **conflict**, the ordering is
+- **`INV-PREC-1`** <!-- uuid: b298120d-2344-496b-a849-63e4af071ec0 --> — When two invariants **conflict**, the ordering is
   **safety/isolation > continuity (never drop work) > efficiency**. A newly-discovered conflict
   **MUST** be recorded as an **open question** and resolved by a **decision** (an ADR), **not**
   chosen ad hoc by an agent. This is pr-pool's **precedence** ordering under the method's optional
   precedence mechanism (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-19`).
-  _(Downstream deployments — e.g. zr's `pr-pool-components` set — cite this ordering rather than
-  restate it.)_
+  _(A downstream deployment set cites this ordering rather than restate it.)_
 
 ## Goal
 
-- **`GOAL-MIN-1`** — Keep the core **minimal**: anything specific to a source, handler, monitor,
-  workflow, or deployment belongs **behind an interface** (realized in zr's `pr-pool-components`),
-  **never** in the core. Over time, **less** implementation detail should live in the core, not more.
+- **`GOAL-MIN-1`** <!-- uuid: e0be6f1c-8eb9-4d7e-9900-bc14e7a38d4a --> — Keep the core **minimal**:
+  anything specific to a source, handler, monitor, or deployment belongs **behind an
+  interface** (realized in a downstream deployment set), **never** in the core. Over time, **less**
+  implementation detail should live in the core, not more.

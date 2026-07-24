@@ -4,11 +4,12 @@ User stories, lifecycle journeys, and open questions. Stories and journeys carry
 can cite them; together they establish the extent. See the [glossary](glossary.md),
 [actors](actors.md), [interfaces](interfaces.md), and [invariants](invariants.md) — every ID cited
 below resolves in one of those files. Diagrams are illustrative (`GOAL-MIN-1` keeps the core minimal;
-concrete tools, transports, and tuning constants live in `zr pr-pool-components` and decision docs).
+concrete tools, transports, and tuning constants live in a downstream deployment set and decision
+docs).
 
 Each journey states its **actor(s)**, a **one-line intent**, the **flow**, and at least one
 **flow and/or sequence diagram**. Journeys are ordered as an implementer would meet them —
-build a participant, configure it, wire and validate a workflow, run, then watch it behave under
+build a participant, configure it, wire and validate the routing graph, run, then watch it behave under
 load and failure.
 
 ## User stories
@@ -38,7 +39,7 @@ load and failure.
 - **`STORY-OP-8`** — rely on clear **delivery semantics** (durable, at-least-once, de-duped,
   `ttl`-bounded), so I design handlers to be idempotent and know an accepted event survives a
   restart. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
-- **`STORY-OP-9`** — declare a **workflow** tying sources → event types → handlers through their
+- **`STORY-OP-9`** — declare the **wiring** tying sources → event types → handlers through their
   bindings, so the wiring is a first-class, inspectable artifact rather than an emergent accident.
   _(→ `JOURNEY-WORKFLOW`; `INV-WORKFLOW-1`.)_
 - **`STORY-OP-10`** — **validate** that wiring before running — no orphan event types, no unhandled
@@ -91,7 +92,7 @@ contract, then run the **conformance suite** (positive + negative) before trusti
 3. Implement the interface's subcommands:
    - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
      callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`,
-     `ttl`, `at`, optional `correlationId`, and a **JSON-object** `payload`.
+     `ttl`, `at`, and a **JSON-object** `payload`.
    - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
      and (if deferred) push `running / paused / completed / failed` via the callback; a `failed`
      carries a **failure class** (`INV-FAIL-1`). MUST tolerate a **duplicate event** idempotently
@@ -135,26 +136,27 @@ sequenceDiagram
 
 - **Participants** — for each, the **command** the core invokes and its **mode** where the interface
   offers one (a source's **pull** vs **push**; a monitoring sink's **pull** vs **push**).
-- **Event sources** (`INTF-SOURCE`) — and, for a pull source, its **query trigger**: **periodic** (a
-  tick) or **threshold** ("enough events").
+- **Event sources** (`INTF-SOURCE`) — and, for a pull source, its **query trigger**: a **periodic**
+  tick.
 - **Event handlers / roles** (`INTF-HANDLER`) — each with its behavior and its **capacity (cap)**,
   the per-handler concurrency ceiling.
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` is the default
   field; a binding MAY match other declared fields (`INV-DISP-1`).
-- **Per-event `ttl`** — how long the core may hold or redeliver an event before dropping it
-  (`INV-EVT-1`), and any event type **marked to serialize** (`INV-CONC-1`, see `OQ-CONC-MARK`).
+- **Per-event `ttl`** — how long the core **holds, offers, and retains** an event in the queue
+  before dropping it if unaccepted (`INV-EVT-1`), and any event type **marked to serialize**
+  (`INV-CONC-1`, see `OQ-CONC-MARK`).
 - **Monitoring sink** (`INTF-MON`, optional) — its mode and the **metric subset** it handles.
 - **Storage** (`ACTOR-STO` via `INTF-STORE`, optional; the default is in-memory).
 - **Selectors** — `--only` / `--disable` to restrict the active set of sources/handlers for a single
   run **without editing config** (`STORY-OP-3`).
 
-The resolved config is validated as a workflow (`JOURNEY-VALIDATE`) and run (`JOURNEY-RUN`). The
+The resolved config is validated as a routing graph (`JOURNEY-VALIDATE`) and run (`JOURNEY-RUN`). The
 full configuration **schema** is not yet fixed (see `OQ-CONFIG`).
 
 ```mermaid
 flowchart TD
     start["operator authors the deployment config"] --> parts["declare each participant: command + mode"]
-    parts --> src["event sources INTF-SOURCE: pull (periodic/threshold trigger) or push"]
+    parts --> src["event sources INTF-SOURCE: pull (periodic tick) or push"]
     parts --> hdl["event handlers/roles INTF-HANDLER: behavior + per-handler capacity (cap)"]
     parts --> mon["monitoring sink INTF-MON: mode + metric subset"]
     parts --> sto["storage INTF-STORE: optional; in-memory default"]
@@ -165,11 +167,12 @@ flowchart TD
     sel --> out["resolved config then JOURNEY-VALIDATE then JOURNEY-RUN"]
 ```
 
-### `JOURNEY-WORKFLOW` — implement a workflow
+### `JOURNEY-WORKFLOW` — declare the wiring
 
 **Actor:** `ACTOR-OP`.
-**Intent:** declare the **workflow** — the flow tying event sources → event types → event handlers
-through their bindings (`INV-WORKFLOW-1`).
+**Intent:** declare the **wiring** (a routing graph) — the flow tying event sources → event types →
+event handlers through their bindings (`INV-WORKFLOW-1`). This is pr-pool's routing graph, **not** a
+deployment's user-facing workflow.
 
 **Flow.**
 
@@ -182,8 +185,9 @@ through their bindings (`INV-WORKFLOW-1`).
 5. Mark **order-dependent** event types to serialize (`INV-CONC-1`) so concurrency never corrupts
    them.
 
-The result is a **declared workflow**: an inspectable graph of sources → types → handlers that
-`JOURNEY-VALIDATE` checks.
+The result is a **declared routing graph**: an inspectable graph of sources → types → handlers that
+`JOURNEY-VALIDATE` checks. The core validates the graph's **wiring** only — it never models work
+sequencing or completeness (`INV-WORKFLOW-1`).
 
 ```mermaid
 flowchart TD
@@ -191,40 +195,45 @@ flowchart TD
     types --> b["for each type, declare a handler binding (INV-DISP-1)"]
     b --> reentry["route handler-produced new work back in as events via a query (re-entry)"]
     reentry --> serialize["mark order-dependent types to serialize (INV-CONC-1)"]
-    serialize --> decl["declared workflow (INV-WORKFLOW-1): graph of sources then types then handlers"]
+    serialize --> decl["declared routing graph (INV-WORKFLOW-1): sources then types then handlers"]
     decl --> val["validate it: JOURNEY-VALIDATE"]
 ```
 
-### `JOURNEY-VALIDATE` — verify a workflow will work
+### `JOURNEY-VALIDATE` — verify the wiring will work
 
 **Actor:** `ACTOR-OP`.
-**Intent:** validate the wiring **before running**, and report the result (`INV-WORKFLOW-1`).
+**Intent:** validate the **wiring** **before running**, and report the result (`INV-WORKFLOW-1`).
+This checks the routing graph's flat wiring **only** — never workflow-completeness or sequencing.
 
-**Flow.** The core walks the declared workflow and checks, failing with the **specific offense**:
+**Flow.** The core walks the declared routing graph and reports, distinguishing an **error** (a
+malformed graph) from a **warning** (a graph that would queue events nobody can take):
 
 - **Orphan event type** — a binding matches a `type` no configured source emits → error.
-- **Unhandled source output** — a source emits a `type` no handler binds → error (this is exactly
-  the `INV-DISP-3` runtime error, caught early).
+- **Unhandled source output** — a source emits a `type` **no configured binding covers at all** →
+  **warning** (`INV-DISP-3`): under the durable queue such events simply wait and expire at TTL
+  (unconsumed-expired, `INV-EVT-1`), so it is a visibility signal ("no event misses"), not a runtime
+  error. A binding merely **disabled for this run** (`--only`/`--disable`) is expected and does not
+  warn.
 - **Disconnected handler** — a handler no binding can reach → error.
 - **Loop** — a re-entry cycle (`handler → query → same type`) that would not terminate → flagged.
 
-A run is blocked until the workflow passes; the report names each offense so the operator can fix
-config. (This is the resolution of the former workflow open question — validation is now first-class
-via `INV-WORKFLOW-1`.)
+A run is blocked only on an **error**; a warning is reported and the run proceeds. The report names
+each finding so the operator can fix config. (This resolves the former wiring open question —
+validation is first-class via `INV-WORKFLOW-1`.)
 
 ```mermaid
 flowchart TD
-    wf["declared workflow (INV-WORKFLOW-1)"] --> c1{"every bound type emitted by some source?"}
-    c1 -->|no| e1["orphan event type: error"]
-    c1 -->|yes| c2{"every source-emitted type bound by a handler?"}
-    c2 -->|no| e2["unhandled source output: error (INV-DISP-3 at runtime)"]
-    c2 -->|yes| c3{"every handler reachable by some binding?"}
-    c3 -->|no| e3["disconnected handler: error"]
+    wf["declared routing graph (INV-WORKFLOW-1)"] --> c1{"every bound type emitted by some source?"}
+    c1 -->|no| e1["orphan event type: ERROR"]
+    c1 -->|yes| c2{"every source-emitted type covered by some binding?"}
+    c2 -->|"no binding at all"| w2["unhandled source output: WARNING — events wait to TTL (INV-DISP-3, INV-EVT-1)"]
+    c2 -->|"yes / only disabled this run"| c3{"every handler reachable by some binding?"}
+    w2 --> c3
+    c3 -->|no| e3["disconnected handler: ERROR"]
     c3 -->|yes| c4{"any unbounded re-entry cycle?"}
     c4 -->|yes| e4["loop detected: flagged"]
     c4 -->|no| ok["wiring valid: report PASS"]
-    e1 --> rep["report the specific offense; block the run"]
-    e2 --> rep
+    e1 --> rep["errors block the run; warnings are reported, run proceeds"]
     e3 --> rep
     e4 --> rep
     ok --> run["clear to run: JOURNEY-RUN"]
@@ -236,7 +245,7 @@ flowchart TD
 **Intent:** run the validated config as a **daemon** (`run`) or as **`run-until-idle`**, and inspect
 it while it runs (`INV-LIFE-1`).
 
-**Flow.** The core resolves config, validates the workflow (`JOURNEY-VALIDATE`), applies any
+**Flow.** The core resolves config, validates the wiring (`JOURNEY-VALIDATE`), applies any
 `--only` / `--disable` selectors for this invocation, and starts the **socket service**. Then:
 
 - **`run`** — run continuously as a daemon; sources and managers **push** over the socket.
@@ -251,7 +260,7 @@ subcommand emits text by default and `--json` for machines (`INTF-CLI`). Whether
 
 ```mermaid
 flowchart TD
-    cfg["resolve config (INTF-CLI)"] --> val["validate workflow (JOURNEY-VALIDATE)"]
+    cfg["resolve config (INTF-CLI)"] --> val["validate wiring (JOURNEY-VALIDATE)"]
     val --> sel["apply --only / --disable for this run"]
     sel --> sock["start the socket service"]
     sock --> mode{"run vs run-until-idle?"}
@@ -458,13 +467,15 @@ sequenceDiagram
 **Intent:** watch throughput, backlog, failures, and liveness through the metric catalog.
 
 **Flow.** The core **owns the metric catalog** — a declared set of metrics, each with `name`, `kind`
-(counter / gauge / histogram), `unit`, and label shape (`INV-OBS-1`). Illustrative metrics: events
-emitted (counter), events dropped by `ttl` (counter), dispatch outcomes by failure class (counter),
-active handler-sessions (gauge), queue depth / backlog (gauge), dispatch latency (histogram). A
-monitoring sink **declares its mode and metric subset** and either **pulls** current values on its
-own schedule or receives **pushed** updates as they change (`INTF-MON`); it serves its own external
-surface (dashboards, alerts). The core stays unaware of the concrete backend (`GOAL-MIN-1`). Whether
-observability also covers **logs/traces** or stays metrics-only is undecided (`OQ-OBS-SCOPE`).
+(counter / gauge / histogram), `unit`, and label shape (`INV-OBS-1`). The catalog MUST declare at
+least **queue depth** (gauge, per `type`), **failure rate** (counter, per failure class), and
+**unconsumed-expired** (counter, per `type` — the "no event misses" signal, `INV-DISP-3`), alongside
+throughput / backlog / liveness / dispatch-latency metrics. A monitoring sink **declares its mode and
+metric subset** and either **pulls** current values on its own schedule or receives **pushed** updates
+(`INTF-MON`); it serves its own external surface (dashboards, alerts). Emission uses **OTel for
+metrics only**; **logs stay JSONL**, and observability covers **metrics + logs** (traces are a later
+concern). A **daemon** emits continuously; **`run-until-idle`** MAY emit a final snapshot. The core
+stays unaware of the concrete backend (`GOAL-MIN-1`).
 
 ```mermaid
 sequenceDiagram
@@ -500,10 +511,6 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   requiring an explicit `run`. _Gap_: the locate-then-act behavior is undecided. _Owner_: operator/
   author. _Path_: decide auto-start vs. fail-with-hint. _Blocks_: `INTF-CLI` locate behavior;
   `JOURNEY-RUN`.
-- **`OQ-OBS-SCOPE`** — whether monitoring covers **logs and traces** or stays **metrics-only**.
-  _Gap_: the observability surface's extent is undecided. _Owner_: author. _Path_: decide whether
-  structured logs/traces are in `INTF-MON`'s scope or a separate concern. _Blocks_: `INV-OBS-1`
-  scope; `JOURNEY-OBSERVE`.
 - **`OQ-CONC-MARK`** — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
   mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
   per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;
@@ -511,5 +518,5 @@ Each states the gap, its owner, a resolution path, and where it blocks.
 - **`OQ-BRANCH`** — whether the core needs **branching on failure** (e.g. a deadletter path), or
   whether a handler's internal branches producing new events (re-entering via queries) suffice.
   _Gap_: no branching primitive exists; this is **deferred**. _Owner_: author. _Path_: let it fall
-  out as real workflows demand it rather than guess now. _Blocks_: nothing yet; revisit if a
+  out as real usage demands it rather than guess now. _Blocks_: nothing yet; revisit if a
   failure-routing need appears in `JOURNEY-FAIL`.
