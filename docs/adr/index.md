@@ -34,3 +34,4 @@
 | [0029](0029-pa-monitor-rate-limit-window-peak.md)                   | pa-monitor rate-limit reader holds current window's peak        | Accepted                                                                        | 2026-07-15 |
 | [0030](0030-decommission-gascity.md)                                | Decommission gascity + gc-dolt-maintenance                      | Accepted                                                                        | 2026-07-15 |
 | [0031](0031-pr-pool-durable-ordered-event-queue.md)                 | pr-pool durable, ordered, de-duped, TTL-bounded event queue     | Accepted (reverses `pg2-r6cf`)                                                  | 2026-07-24 |
+| [0032](0032-beads-dolt-no-autostart.md)                             | Machine-wide "no rogue dolt auto-start" for beads               | Accepted                                                                        | 2026-07-24 |

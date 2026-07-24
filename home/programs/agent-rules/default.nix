@@ -2,10 +2,18 @@
   config,
   lib,
   ...
-}:
+}@args:
 let
   cfg = config.phillipgreenii.programs.claude-code;
   rulesFile = ./pgii-agent-rules.md;
+  beadsDoltRule = ./beads-dolt-rule.md;
+  # Read the machine-wide policy flag propagated from the agent-support darwin
+  # module via `home-manager.extraSpecialArgs` (design §6.1). Read off the
+  # module argument set with a fail-safe default of `true` (secure-by-default,
+  # design P5): a named `arg ? true` default is NOT honoured by the module
+  # system (it forces `config._module.args.<arg>`), whereas `args.<arg> or true`
+  # is a real default when no consumer propagates the flag.
+  forbidDoltAutoStart = args.forbidDoltAutoStart or true;
 in
 {
   # Personal always-on Claude Code rules, delivered as the user-level
@@ -30,7 +38,14 @@ in
   # (the leading note tells autonomous agents to ignore the interactive
   # section); it is intentionally NOT enforced by any hook/mechanism, since
   # no reliable interactive-vs-`-p` signal exists for hooks.
+  # Delivered as composed `.text` (not `.source`) so the flag-gated beads/dolt
+  # section can be conditionally appended — a `.source` store path cannot
+  # include/exclude a section (design §6.3.1). When the machine forbids dolt
+  # auto-start, the beads/dolt no-autostart rule is appended (a blank line keeps
+  # the sections separated cleanly).
   config = lib.mkIf cfg.enable {
-    home.file.".claude/CLAUDE.md".source = rulesFile;
+    home.file.".claude/CLAUDE.md".text =
+      builtins.readFile rulesFile
+      + lib.optionalString forbidDoltAutoStart ("\n" + builtins.readFile beadsDoltRule);
   };
 }

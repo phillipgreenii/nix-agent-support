@@ -20,6 +20,11 @@
       "description": "Claude skill: review open beads (bd/beads) and bring them to plan-ready quality."
     },
     {
+      "name": "beads-dolt-doctor",
+      "source": "./beads-dolt-doctor",
+      "description": "Claude skill: diagnose a rogue/looping beads dolt sql-server and find the process that keeps starting it."
+    },
+    {
       "name": "claude-activity",
       "source": "./claude-activity",
       "description": "Claude Code activity tracking via hooks"

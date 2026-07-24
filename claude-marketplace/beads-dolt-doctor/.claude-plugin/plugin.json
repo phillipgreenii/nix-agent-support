@@ -1,0 +1,6 @@
+{
+  "name": "beads-dolt-doctor",
+  "description": "Claude skill: diagnose a rogue/looping beads dolt sql-server and find the process that keeps starting it.",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}
