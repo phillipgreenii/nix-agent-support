@@ -29,13 +29,13 @@ flowchart TD
     offer -->|ttl expires unaccepted| expire["dropped undelivered — unconsumed-expired (INV-EVT-1)"]
 ```
 
-- **`INV-DISP-1`** — Sources **emit typed events**; handlers **bind** to events via a **binding**
+- **`INV-DISP-1`** <!-- uuid: 5ad7c9a4-37ea-4496-8f23-51964a8aae54 --> — Sources **emit typed events**; handlers **bind** to events via a **binding**
   that **matches over event fields**. `type` is matched **by default**; a binding **MAY** also match
   on **other fields the source declares** as matchable (including a **declared path into `payload`**,
   which thereby stops being opaque _for matching_). A matched field that is **absent** on an event
   **does not match** — a non-match, **not** an error. The core routes a matched event to a bound
   handler, and a handler responds to **any** of its bound events.
-- **`INV-DISP-2`** — The core reaches every source and handler **only through a manager interface**
+- **`INV-DISP-2`** <!-- uuid: 06662087-a4de-4732-9417-f7440c9aa471 --> — The core reaches every source and handler **only through a manager interface**
   (`INTF-SOURCE` / `INTF-HANDLER`); their implementations are opaque to it. Nothing specific to a
   source, handler, or deployment lives in the core.
 - **`INV-DISP-3`** <!-- uuid: 421db242-e1fc-49ba-a1a6-38211abf5569 --> — An event whose `type` **no

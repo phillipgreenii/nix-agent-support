@@ -34,7 +34,7 @@ a sequence diagram — or a one-word initiator note — carries them.
 - **Actor** — a human or agent that drives the system through the interface. The interface
   definition itself is the agreement; there is no second set to cross-check.
 
-## `INTF-1` — Behavior docs → downstream
+## `INTF-1` — Behavior docs → downstream <!-- uuid: f8e47ad0-bf96-43d1-b174-baa959a2b6a2 -->
 
 The behavior docs set is the sole authority downstream artifacts derive from.
 

@@ -149,7 +149,7 @@ A callback bearing a **tracking id the core does not recognize** (never issued, 
 TTL-expired and evicted) is **acknowledged and ignored** — a logged no-op, not an error, and it does
 not resurrect an expired event (`INV-INTF-1`).
 
-## `INTF-SOURCE` — event source
+## `INTF-SOURCE` — event source <!-- uuid: fe42416a-5f10-4db1-b8c3-46b1609213c7 -->
 
 - **Counterparty:** `ACTOR-SRC`, a pluggable event source. **Initiator:** core (**pull**) or source
   (**push**). **Multiplicity:** zero or more.
@@ -332,7 +332,7 @@ sequenceDiagram
     M-->>Core: { id, accepted }
 ```
 
-## `INTF-STORE` — storage
+## `INTF-STORE` — storage <!-- uuid: aa658dfb-7631-4f16-87aa-6c17d9abc097 -->
 
 - **Counterparty:** `ACTOR-STO`, an optional pluggable storage. **Initiator:** core.
   **Multiplicity:** optional; a **default in-memory** store applies when none is configured.

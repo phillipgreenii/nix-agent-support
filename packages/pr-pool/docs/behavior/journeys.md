@@ -16,48 +16,48 @@ load and failure.
 
 **Operator (`ACTOR-OP`)**
 
-- **`STORY-OP-1`** — configure event sources, event handlers, and their event-type **bindings**,
+- **`STORY-OP-1`** <!-- uuid: a2c94489-5224-42d6-a0ee-72964abbcdaf --> — configure event sources, event handlers, and their event-type **bindings**,
   then run the core as a **daemon** (`run`) or **`run-until-idle`**, so work is dispatched without
   babysitting. _(→ `JOURNEY-CONFIG`, `JOURNEY-RUN`; `INV-DISP-1`, `INV-LIFE-1`.)_
-- **`STORY-OP-2`** — add a new event source or handler and **smoke-test** it against the live config
+- **`STORY-OP-2`** <!-- uuid: 09c4dd4b-6bbd-4495-b338-0e173e9f7402 --> — add a new event source or handler and **smoke-test** it against the live config
   before trusting it, so a misconfiguration is caught early. _(→ `JOURNEY-SMOKE`.)_
-- **`STORY-OP-3`** — restrict the active set of sources/handlers for a single run **without editing
+- **`STORY-OP-3`** <!-- uuid: 2e016bb5-c241-4795-a371-36e94e55c786 --> — restrict the active set of sources/handlers for a single run **without editing
   config** (`--only` / `--disable`), so I can isolate or pause parts of the system quickly.
   _(→ `JOURNEY-RUN`.)_
-- **`STORY-OP-4`** — swap a manager implementation without touching the core, so which tools back a
+- **`STORY-OP-4`** <!-- uuid: f23554c2-91f5-454a-af95-1c714a4f44f2 --> — swap a manager implementation without touching the core, so which tools back a
   source/handler/monitor/storage is my choice, not the core's concern. _(→ `INV-DISP-2`,
   `GOAL-MIN-1`.)_
-- **`STORY-OP-5`** — have orphaned bindings and misrouted event types **surfaced**, not silently
+- **`STORY-OP-5`** <!-- uuid: dd96bcfb-509c-4543-b32c-1f77af7330b7 --> — have orphaned bindings and misrouted event types **surfaced**, not silently
   dropped — ideally **before runtime** — so a broken wiring is visible. _(→ `JOURNEY-VALIDATE`;
   `INV-WORKFLOW-1`, `INV-DISP-3`.)_
-- **`STORY-OP-6`** — trust a stable interface **contract** plus a **conformance suite**, so I can
+- **`STORY-OP-6`** <!-- uuid: 6e131756-a26d-42ac-a49b-05a8bb875c32 --> — trust a stable interface **contract** plus a **conformance suite**, so I can
   add a manager and verify it adheres before relying on it. _(→ `JOURNEY-CONFORM`; `INV-INTF-1`,
   `INV-INTF-2`.)_
-- **`STORY-OP-7`** — get **throughput through concurrency** yet be able to **serialize** sensitive
+- **`STORY-OP-7`** <!-- uuid: 0a52eff8-35ca-46c3-a7c1-79582fd4ce44 --> — get **throughput through concurrency** yet be able to **serialize** sensitive
   event types, so parallelism never corrupts order-dependent work. _(→ `INV-CONC-1`; safety over
   efficiency, `INV-PREC-1`.)_
-- **`STORY-OP-8`** — rely on clear **delivery semantics** (durable, at-least-once, de-duped,
+- **`STORY-OP-8`** <!-- uuid: 627ec338-12a6-483d-a792-2168bc3841a8 --> — rely on clear **delivery semantics** (durable, at-least-once, de-duped,
   `ttl`-bounded), so I design handlers to be idempotent and know an accepted event survives a
   restart. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
-- **`STORY-OP-9`** — declare the **wiring** tying sources → event types → handlers through their
+- **`STORY-OP-9`** <!-- uuid: 9d593740-745e-42fd-a74c-2a283b57b81c --> — declare the **wiring** tying sources → event types → handlers through their
   bindings, so the wiring is a first-class, inspectable artifact rather than an emergent accident.
   _(→ `JOURNEY-WORKFLOW`; `INV-WORKFLOW-1`.)_
-- **`STORY-OP-10`** — **validate** that wiring before running — no orphan event types, no unhandled
+- **`STORY-OP-10`** <!-- uuid: 738e4c5e-01f9-4c2b-bb11-81ed0a4c6dc9 --> — **validate** that wiring before running — no orphan event types, no unhandled
   source output, no disconnected handlers, no unbounded loops — so I get a pass/fail report, not a
   runtime surprise. _(→ `JOURNEY-VALIDATE`; `INV-WORKFLOW-1`.)_
-- **`STORY-OP-11`** — have a handler failure handled **by its class** (`retryable` re-offered within
+- **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **by its class** (`retryable` re-offered within
   `ttl`, `resource-limit` paused and re-offered, `unavailable` deferred, `critical` never retried
   and sent to a human), so transient trouble self-heals and only genuine defects reach me.
   _(→ `JOURNEY-PAUSE`, `JOURNEY-FAIL`; `INV-FAIL-1`.)_
-- **`STORY-OP-12`** — trust that when the core must trade off, it prefers **safety over continuity
+- **`STORY-OP-12`** <!-- uuid: 20a9f5f1-9b4a-4f67-a18b-bb1dedf23153 --> — trust that when the core must trade off, it prefers **safety over continuity
   over efficiency**, so it will halt on a `critical` fault and pause rather than push order-dependent
   work unsafely. _(→ `JOURNEY-FAIL`; `INV-PREC-1`.)_
 
 **Observer (`ACTOR-OBS`)**
 
-- **`STORY-OBS-1`** — see throughput, backlog, failures, and liveness through dashboards fed by the
+- **`STORY-OBS-1`** <!-- uuid: ce97e9c6-5719-4b18-9de9-fa1900b951bd --> — see throughput, backlog, failures, and liveness through dashboards fed by the
   **metric catalog**, so I know the system's health. _(→ `JOURNEY-OBSERVE`; `INV-OBS-1`.)_
-- **`STORY-OBS-2`** — distinguish a **source infrastructure failure** from a genuinely idle "no
+- **`STORY-OBS-2`** <!-- uuid: 257f9e86-187b-4ee8-8123-b75b71d976b5 --> — distinguish a **source infrastructure failure** from a genuinely idle "no
   work" reading, and see `ttl`-drops and failure classes as metrics, so a silent outage does not
   read as "nothing to do." _(→ `JOURNEY-FAIL`, `JOURNEY-OBSERVE`; `INV-DISP-3`, `INV-OBS-1`.)_
 
@@ -74,7 +74,7 @@ observability (`INV-OBS-1`) by `JOURNEY-OBSERVE` / `STORY-OBS-*`; lifecycle (`IN
 
 ## Journeys
 
-### `JOURNEY-CONFORM` — create and verify a new participant implementation
+### `JOURNEY-CONFORM` — create and verify a new participant implementation <!-- uuid: 612b7808-c90f-4792-baa6-670ce22dd6d2 -->
 
 **Actor:** `ACTOR-OP` (as the participant's implementer/integrator).
 **Intent:** build an event source, event handler, monitoring sink, or storage against its `INTF-*`
@@ -90,15 +90,15 @@ contract, then run the **conformance suite** (positive + negative) before trusti
    exit codes (`0` ok / `1` error / `2` busy), and the `starting → started → stopping → stopped`
    lifecycle. Messages are accepted **only after `started` and before `stopping`**.
 3. Implement the interface's subcommands:
-   - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
+   - **`INTF-SOURCE`** <!-- uuid: 20f6bd96-8c08-4996-b28e-120310ca1c57 --> — `query` returning `{ events }` or `{ deferred: true }` (then push via
      callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`,
      `ttl`, `at`, and a **JSON-object** `payload`.
-   - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
+   - **`INTF-HANDLER`** <!-- uuid: 5b58b72c-15f1-4b8e-be9a-f83a0f164cc1 --> — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
      and (if deferred) push `running / paused / completed / failed` via the callback; a `failed`
      carries a **failure class** (`INV-FAIL-1`). MUST tolerate a **duplicate event** idempotently
      (`INV-EVT-2`).
-   - **`INTF-MON`** — declare push or pull, and the metric subset handled.
-   - **`INTF-STORE`** — `get` / `put` / `delete` over string keys and JSON-string values.
+   - **`INTF-MON`** <!-- uuid: 0572b0aa-b01f-4ed6-9681-c16c93e45c3b --> — declare push or pull, and the metric subset handled.
+   - **`INTF-STORE`** <!-- uuid: 3f4b7167-3271-4972-b7a7-adf6488d9b9a --> — `get` / `put` / `delete` over string keys and JSON-string values.
 4. Run the interface's **conformance suite** (`INV-INTF-2`): **positive** checks (well-formed
    requests get schema-valid replies; the deferred path echoes the tracking `id`; lifecycle
    transitions are accepted) and **negative** checks (an unknown `schemaVersion` is _reported_, not
@@ -127,7 +127,7 @@ sequenceDiagram
     Suite-->>OP: PASS both suites then trust; else FAIL naming the offending check
 ```
 
-### `JOURNEY-CONFIG` — configure participants and the app
+### `JOURNEY-CONFIG` — configure participants and the app <!-- uuid: db696e7c-ec86-4980-808d-add7744e0bc1 -->
 
 **Actor:** `ACTOR-OP`.
 **Intent:** author the deployment configuration that the core resolves and runs.
@@ -167,7 +167,7 @@ flowchart TD
     sel --> out["resolved config then JOURNEY-VALIDATE then JOURNEY-RUN"]
 ```
 
-### `JOURNEY-WORKFLOW` — declare the wiring
+### `JOURNEY-WORKFLOW` — declare the wiring <!-- uuid: 8dbe959c-e1bc-4ea4-890f-778d2651ffb4 -->
 
 **Actor:** `ACTOR-OP`.
 **Intent:** declare the **wiring** (a routing graph) — the flow tying event sources → event types →
@@ -199,7 +199,7 @@ flowchart TD
     decl --> val["validate it: JOURNEY-VALIDATE"]
 ```
 
-### `JOURNEY-VALIDATE` — verify the wiring will work
+### `JOURNEY-VALIDATE` — verify the wiring will work <!-- uuid: 1aafdfa5-b3c4-4a41-bde8-4e368e6ec819 -->
 
 **Actor:** `ACTOR-OP`.
 **Intent:** validate the **wiring** **before running**, and report the result (`INV-WORKFLOW-1`).
@@ -239,7 +239,7 @@ flowchart TD
     ok --> run["clear to run: JOURNEY-RUN"]
 ```
 
-### `JOURNEY-RUN` — configure and run
+### `JOURNEY-RUN` — configure and run <!-- uuid: 0e286925-9bca-4cba-bc37-ed4079e8637c -->
 
 **Actor:** `ACTOR-OP`.
 **Intent:** run the validated config as a **daemon** (`run`) or as **`run-until-idle`**, and inspect
@@ -271,7 +271,7 @@ flowchart TD
     life --> inspect["inspect live via status / config (INTF-CLI)"]
 ```
 
-### `JOURNEY-FLOW` — an event's life
+### `JOURNEY-FLOW` — an event's life <!-- uuid: 507d3b05-87b5-43f3-9098-e4e9cdebc9bd -->
 
 **Actors:** `ACTOR-SRC`, core, `ACTOR-HDL`.
 **Intent:** follow one event from a source, through routing, to a bound handler, through a
@@ -325,7 +325,7 @@ sequenceDiagram
     Note over HDL,Q: handler's new work re-enters later as events via a query
 ```
 
-### `JOURNEY-SMOKE` — add and verify
+### `JOURNEY-SMOKE` — add and verify <!-- uuid: 2ea962a3-b598-40a8-8ad9-60bb4e2a4ddb -->
 
 **Actor:** `ACTOR-OP`.
 **Intent:** add a source or handler to config and smoke-test it against the live config before
@@ -351,7 +351,7 @@ sequenceDiagram
     Note over OP: confirm the shapes before trusting it in a live run
 ```
 
-### `JOURNEY-PAUSE` — capacity and resource-limit at the acceptance boundary
+### `JOURNEY-PAUSE` — capacity and resource-limit at the acceptance boundary <!-- uuid: 8752e12e-7ea2-4edd-8620-839fc5ef3cff -->
 
 **Actors:** core, `ACTOR-HDL`, `ACTOR-SRC`.
 **Intent:** show how capacity and a resource limit resolve on the two sides of the **acceptance
@@ -386,7 +386,7 @@ sequenceDiagram
     HDL-->>CORE: completed once the ceiling lifts
 ```
 
-### `JOURNEY-FAIL` — failure scenarios
+### `JOURNEY-FAIL` — failure scenarios <!-- uuid: fd32bd84-c5e8-456e-a1f7-f60dc3e05c05 -->
 
 **Actors:** core, `ACTOR-SRC`, `ACTOR-HDL`, `ACTOR-OBS`.
 **Intent:** show the spread of failures and how the core's precedence (`INV-PREC-1`: safety >
@@ -461,7 +461,7 @@ sequenceDiagram
     Note over CORE,M: core resumes offering from the durable queue; idempotent handlers absorb any redelivery (INV-EVT-2)
 ```
 
-### `JOURNEY-OBSERVE` — watch health
+### `JOURNEY-OBSERVE` — watch health <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 
 **Actors:** core, `ACTOR-MON`, `ACTOR-OBS`.
 **Intent:** watch throughput, backlog, failures, and liveness through the metric catalog.
@@ -496,7 +496,7 @@ sequenceDiagram
 
 Each states the gap, its owner, a resolution path, and where it blocks.
 
-- **`OQ-CONFIG`** — the full **configuration schema**: participants (command + mode), event sources,
+- **`OQ-CONFIG`** <!-- uuid: e004fda6-f6e6-41e1-8ec4-0b90c17fd2b2 --> — the full **configuration schema**: participants (command + mode), event sources,
   handlers/roles + their event-type **bindings**, per-event `ttl`, caps, monitoring/storage
   selection, and the `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet
   fixed. _Owner_: operator/author. _Path_: extract from pr-pool's TOML prior art and settle the
@@ -507,15 +507,15 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   but which instant starts the clock is unsettled. _Owner_: author. _Path_: decide `at` vs. ingest
   when settling the queue's realization. _Blocks_: exact dedup/expiry timing (`INV-EVT-1`,
   `INV-EVT-3`); the queue implementation.
-- **`OQ-AUTOSTART`** — whether the **CLI auto-starts** a core when it finds none running, versus
+- **`OQ-AUTOSTART`** <!-- uuid: f0cc2ca2-9f58-4c57-bfff-d81d003370fb --> — whether the **CLI auto-starts** a core when it finds none running, versus
   requiring an explicit `run`. _Gap_: the locate-then-act behavior is undecided. _Owner_: operator/
   author. _Path_: decide auto-start vs. fail-with-hint. _Blocks_: `INTF-CLI` locate behavior;
   `JOURNEY-RUN`.
-- **`OQ-CONC-MARK`** — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
+- **`OQ-CONC-MARK`** <!-- uuid: 427e52f7-223f-428e-b8c7-e8140d557f8e --> — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
   mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
   per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;
   `JOURNEY-CONFIG`, `JOURNEY-WORKFLOW`.
-- **`OQ-BRANCH`** — whether the core needs **branching on failure** (e.g. a deadletter path), or
+- **`OQ-BRANCH`** <!-- uuid: d846f637-19dd-4c12-aa02-3519683884dc --> — whether the core needs **branching on failure** (e.g. a deadletter path), or
   whether a handler's internal branches producing new events (re-entering via queries) suffice.
   _Gap_: no branching primitive exists; this is **deferred**. _Owner_: author. _Path_: let it fall
   out as real usage demands it rather than guess now. _Blocks_: nothing yet; revisit if a

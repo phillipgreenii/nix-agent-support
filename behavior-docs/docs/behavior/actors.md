@@ -5,9 +5,9 @@ Who **acts upon** a behavior docs set. A behavior docs set MUST define all of it
 an actor _here_ because it acts upon this method, and the same party is a **counterparty** in a
 set that integrates with it (see the [glossary](glossary.md)).
 
-- **`ACTOR-1` — Author** — owns and writes the behavior docs; the authority for intended
+- **`ACTOR-1` — Author** <!-- uuid: 21ef684c-f0bb-4f18-87c7-23fd8040fe63 --> — owns and writes the behavior docs; the authority for intended
   behavior, which derives from business need. A change of intent originates here.
-- **`ACTOR-2` — Implementer** — consumes the behavior docs to produce downstream work
+- **`ACTOR-2` — Implementer** <!-- uuid: 29f48d82-00dd-455c-ac6f-c68e42a698f4 --> — consumes the behavior docs to produce downstream work
   (design, plan, tests, the implementation). Resolves uncertainty against the docs, cites
   the IDs of what it builds, and classifies a gap rather than guessing.
 
