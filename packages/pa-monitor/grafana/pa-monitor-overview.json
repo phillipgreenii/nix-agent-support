@@ -42,23 +42,6 @@
           "value": "$__all",
           "text": "All"
         }
-      },
-      {
-        "name": "limit_active",
-        "label": "limit_active",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "prometheus"
-        },
-        "query": "query_result(count( ((pa_monitor_block_usage_percentage >= 100) and (pa_monitor_block_usage_resets_at - time() > 0)) or ((pa_monitor_week_usage_percentage >= 100) and (pa_monitor_week_usage_resets_at - time() > 0)) ))",
-        "hide": 2,
-        "refresh": 2,
-        "includeAll": false,
-        "multi": false,
-        "regex": "",
-        "current": {},
-        "options": []
       }
     ]
   },
@@ -67,7 +50,7 @@
       "id": 300,
       "title": "",
       "type": "stat",
-      "description": "Conditional usage-limit banner (bead pg2-jfdz2). Rendered ONLY when a 5h or weekly usage limit is currently hit — the panel repeats over the hidden `limit_active` variable, whose query returns no value unless a limit is active, so the panel is not drawn at all (no 'No data' box) while nothing is limited. When shown, each row is a live red countdown to that window's reset (resets_at - now). Presence updates on dashboard refresh.",
+      "description": "Conditional usage-limit banner (bead pg2-jfdz2). Two targets guarantee the panel ALWAYS has exactly one series so Grafana never renders a 'No data' box: A returns the soonest active reset countdown ONLY when a 5h/weekly limit is hit (percentage>=100 AND resets_at in the future); B is a sentinel (vector(-1) unless a limit is active) whose -1 maps to blank text. With no active limit the panel is a blank transparent strip (colorMode=value → no fill, empty text); when a limit is hit it shows the live red countdown.",
       "transparent": true,
       "datasource": {
         "type": "prometheus",
@@ -82,10 +65,8 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "noValue": "",
           "color": {
-            "mode": "fixed",
-            "fixedColor": "red"
+            "mode": "thresholds"
           },
           "thresholds": {
             "mode": "absolute",
@@ -95,12 +76,25 @@
                 "color": "red"
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": -1000000000,
+                "to": -0.001,
+                "result": {
+                  "text": "",
+                  "index": 0
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "textMode": "value_and_name",
@@ -112,20 +106,18 @@
       },
       "targets": [
         {
-          "expr": "clamp_min(pa_monitor_block_usage_resets_at - time(), 0) and (pa_monitor_block_usage_percentage >= 100)",
-          "legendFormat": "⚠ 5h limit — resets in",
           "refId": "A",
+          "expr": "min( (clamp_min(pa_monitor_block_usage_resets_at - time(), 0) and (pa_monitor_block_usage_percentage >= 100)) or (clamp_min(pa_monitor_week_usage_resets_at - time(), 0) and (pa_monitor_week_usage_percentage >= 100)) )",
+          "legendFormat": "⚠ usage limit — resets in",
           "instant": true
         },
         {
-          "expr": "clamp_min(pa_monitor_week_usage_resets_at - time(), 0) and (pa_monitor_week_usage_percentage >= 100)",
-          "legendFormat": "⚠ Weekly limit — resets in",
           "refId": "B",
+          "expr": "vector(-1) unless on() ((pa_monitor_block_usage_percentage >= 100) or (pa_monitor_week_usage_percentage >= 100))",
+          "legendFormat": "",
           "instant": true
         }
-      ],
-      "repeat": "limit_active",
-      "repeatDirection": "h"
+      ]
     },
     {
       "id": 100,
