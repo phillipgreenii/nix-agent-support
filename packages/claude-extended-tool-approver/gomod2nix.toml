@@ -14,8 +14,8 @@ schema = 3
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
 
   [mod.'github.com/mattn/go-isatty']
-    version = 'v0.0.23'
-    hash = 'sha256-CbvLefXb6HYNFEsPyLDGj5jhnYwXNNC4aOM2oJsGhnk='
+    version = 'v0.0.24'
+    hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
 
   [mod.'github.com/ncruces/go-strftime']
     version = 'v1.0.0'
@@ -38,8 +38,8 @@ schema = 3
     hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
-    version = 'v1.74.1'
-    hash = 'sha256-dkbFqIG1OM1ZnhqWW3LNMl+trbOBZBru6ZjarXhYs3Y='
+    version = 'v1.74.3'
+    hash = 'sha256-aWSAtyc9RotOrcZtc5bqUSqksvgVIKfkppWsgtvPysk='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
