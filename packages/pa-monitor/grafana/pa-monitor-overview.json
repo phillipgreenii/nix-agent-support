@@ -47,91 +47,12 @@
   },
   "panels": [
     {
-      "id": 300,
-      "title": "",
-      "type": "stat",
-      "description": "Usage-limit banner (bead pg2-jfdz2). Shows a live red countdown to reset for whichever of the 5h / weekly windows is currently hit (percentage>=100 AND resets_at in the future). A sentinel target (vector(-1) unless a limit is active) guarantees exactly one series so Grafana never renders a 'No data' box; -1 maps to blank, so idle is a blank/transparent strip. NOTE: Grafana OSS cannot fully hide/reclaim a panel's grid space by data in a classic provisioned dashboard (native conditional rendering needs the new-layouts schema, which is not enabled), so a thin empty strip remains when idle; the paired alerts (5h + weekly usage-limit hit) carry the notification.",
-      "transparent": true,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 24,
-        "h": 3
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "value": null,
-                "color": "red"
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "range",
-              "options": {
-                "from": -1000000000,
-                "to": -0.001,
-                "result": {
-                  "text": "",
-                  "index": 0
-                }
-              }
-            }
-          ]
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "textMode": "value_and_name",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "clamp_min(pa_monitor_block_usage_resets_at - time(), 0) and (pa_monitor_block_usage_percentage >= 100)",
-          "legendFormat": "⚠ 5h limit — resets in",
-          "instant": true
-        },
-        {
-          "refId": "B",
-          "expr": "clamp_min(pa_monitor_week_usage_resets_at - time(), 0) and (pa_monitor_week_usage_percentage >= 100)",
-          "legendFormat": "⚠ Weekly limit — resets in",
-          "instant": true
-        },
-        {
-          "refId": "C",
-          "expr": "vector(-1) unless on() ((pa_monitor_block_usage_percentage >= 100) or (pa_monitor_week_usage_percentage >= 100))",
-          "legendFormat": "",
-          "instant": true
-        }
-      ]
-    },
-    {
       "id": 100,
       "title": "Current status",
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 3,
         "w": 24,
         "h": 1
       },
@@ -147,7 +68,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 7,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -169,7 +90,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 7,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -208,7 +129,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 7,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -267,7 +188,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 7,
+        "y": 4,
         "w": 6,
         "h": 4
       },
@@ -327,7 +248,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 11,
+        "y": 8,
         "w": 8,
         "h": 7
       },
@@ -359,7 +280,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 11,
+        "y": 8,
         "w": 8,
         "h": 7
       },
@@ -383,7 +304,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 11,
+        "y": 8,
         "w": 8,
         "h": 7
       },
@@ -414,7 +335,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 15,
         "w": 24,
         "h": 8
       },
@@ -650,7 +571,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 23,
         "w": 12,
         "h": 7
       },
@@ -679,7 +600,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 23,
         "w": 12,
         "h": 7
       },
@@ -708,7 +629,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 30,
         "w": 6,
         "h": 4
       },
@@ -729,7 +650,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 33,
+        "y": 30,
         "w": 6,
         "h": 4
       },
@@ -746,7 +667,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 34,
         "w": 24,
         "h": 1
       },
@@ -762,7 +683,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 38,
+        "y": 35,
         "w": 12,
         "h": 7
       },
@@ -793,7 +714,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 38,
+        "y": 35,
         "w": 12,
         "h": 7
       },
@@ -816,7 +737,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 45,
+        "y": 42,
         "w": 12,
         "h": 7
       },
@@ -838,7 +759,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 45,
+        "y": 42,
         "w": 12,
         "h": 7
       },
@@ -870,7 +791,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 49,
         "w": 6,
         "h": 4
       },
@@ -891,7 +812,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 52,
+        "y": 49,
         "w": 6,
         "h": 4
       },
@@ -912,7 +833,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 52,
+        "y": 49,
         "w": 6,
         "h": 4
       },
@@ -935,7 +856,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 52,
+        "y": 49,
         "w": 6,
         "h": 4
       },
@@ -957,7 +878,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 53,
         "w": 16,
         "h": 6
       },
@@ -995,7 +916,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 56,
+        "y": 53,
         "w": 8,
         "h": 6
       },
@@ -1013,7 +934,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 62,
+        "y": 59,
         "w": 24,
         "h": 1
       },
@@ -1029,7 +950,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 63,
+        "y": 60,
         "w": 12,
         "h": 7
       },
@@ -1061,7 +982,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 63,
+        "y": 60,
         "w": 12,
         "h": 7
       },
@@ -1088,7 +1009,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 70,
+        "y": 67,
         "w": 24,
         "h": 1
       },
@@ -1105,7 +1026,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 71,
+        "y": 68,
         "w": 12,
         "h": 7
       },
@@ -1128,7 +1049,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 71,
+        "y": 68,
         "w": 12,
         "h": 7
       },
@@ -1155,7 +1076,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 78,
+        "y": 75,
         "w": 24,
         "h": 1
       },
@@ -1172,7 +1093,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 79,
+        "y": 76,
         "w": 24,
         "h": 10
       },
@@ -1200,7 +1121,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 0,
         "w": 12,
         "h": 3
       },
@@ -1266,7 +1187,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 3,
+        "y": 0,
         "w": 12,
         "h": 3
       },
@@ -1332,7 +1253,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 90,
+        "y": 87,
         "w": 24,
         "h": 1
       },
@@ -1350,7 +1271,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 91,
+        "y": 88,
         "w": 8,
         "h": 7
       },
@@ -1378,7 +1299,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 91,
+        "y": 88,
         "w": 8,
         "h": 7
       },
@@ -1406,7 +1327,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 91,
+        "y": 88,
         "w": 8,
         "h": 7
       },
@@ -1434,7 +1355,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 98,
+        "y": 95,
         "w": 12,
         "h": 7
       },
@@ -1462,7 +1383,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 98,
+        "y": 95,
         "w": 6,
         "h": 7
       },
@@ -1490,7 +1411,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 98,
+        "y": 95,
         "w": 6,
         "h": 7
       },
@@ -1508,7 +1429,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 105,
+        "y": 102,
         "w": 24,
         "h": 1
       },
@@ -1525,7 +1446,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 106,
+        "y": 103,
         "w": 12,
         "h": 7
       },
@@ -1553,7 +1474,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 106,
+        "y": 103,
         "w": 12,
         "h": 7
       },
@@ -1571,7 +1492,7 @@
       "type": "row",
       "gridPos": {
         "x": 0,
-        "y": 113,
+        "y": 110,
         "w": 24,
         "h": 1
       },
@@ -1588,7 +1509,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 114,
+        "y": 111,
         "w": 8,
         "h": 7
       },
@@ -1616,7 +1537,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 114,
+        "y": 111,
         "w": 8,
         "h": 7
       },
@@ -1634,7 +1555,7 @@
       "type": "text",
       "gridPos": {
         "x": 16,
-        "y": 114,
+        "y": 111,
         "w": 8,
         "h": 7
       },
