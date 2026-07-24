@@ -105,15 +105,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		if resource == "pr" && subcmd == "merge" {
 			if hasFlag(pc.Args, "--auto") {
+				// Intentionally Abstain — NOT a bypass. PRs open as draft, so --auto cannot
+				// merge until a human un-drafts (the real gate); toggling --auto also refreshes
+				// the merge-commit message from the current PR title/body. Do not change to Reject.
 				return hookio.RuleResult{
 					Decision: hookio.Abstain,
-					Reason:   "gh pr merge --auto (deferred to claude-code)",
+					Reason:   "gh pr merge --auto: allowed (draft-gated; --auto refreshes merge message from PR title/body)",
 					Module:   r.Name(),
 				}
 			}
 			return hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "gh pr merge (immediate)",
+				Decision: hookio.Reject,
+				Reason:   "gh pr merge (immediate) is prohibited: it merges now, bypassing the draft-first landing flow. Open/keep the PR as draft and use --auto, or merge via the WORKSPACE landing flow.",
 				Module:   r.Name(),
 			}
 		}

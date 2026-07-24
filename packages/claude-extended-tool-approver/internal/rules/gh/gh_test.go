@@ -71,15 +71,15 @@ func TestGH_Modifying_Ask(t *testing.T) {
 	}
 }
 
-func TestGH_PrMerge_Ask(t *testing.T) {
+func TestGH_PrMerge_Reject(t *testing.T) {
 	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "gh pr merge"}),
 	}
 	got := r.Evaluate(input)
-	if got.Decision != hookio.Ask {
-		t.Errorf("gh pr merge: got %s, want ask", got.Decision)
+	if got.Decision != hookio.Reject {
+		t.Errorf("gh pr merge: got %s, want reject", got.Decision)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestGH_PrMergeAuto_Abstain(t *testing.T) {
 	}
 }
 
-func TestGH_PrMergeAutoMerge_Ask(t *testing.T) {
+func TestGH_PrMergeAutoMerge_Reject(t *testing.T) {
 	// --auto-merge is not a real gh flag, but guard against substring matching
 	r := New(nil)
 	input := &hookio.HookInput{
@@ -110,8 +110,8 @@ func TestGH_PrMergeAutoMerge_Ask(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"command": "gh pr merge --auto-merge"}),
 	}
 	got := r.Evaluate(input)
-	if got.Decision != hookio.Ask {
-		t.Errorf("gh pr merge --auto-merge: got %s, want ask", got.Decision)
+	if got.Decision != hookio.Reject {
+		t.Errorf("gh pr merge --auto-merge: got %s, want reject", got.Decision)
 	}
 }
 
