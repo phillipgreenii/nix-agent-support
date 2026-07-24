@@ -73,6 +73,7 @@ in
         alertRuleFiles = [
           ../../../packages/pa-monitor/grafana/alerting/auth-failure.yaml
           ../../../packages/pa-monitor/grafana/alerting/daemon-connection.yaml
+          ../../../packages/pa-monitor/grafana/alerting/usage-limits.yaml
         ];
       };
 

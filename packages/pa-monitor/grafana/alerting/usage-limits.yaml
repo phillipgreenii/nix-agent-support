@@ -1,0 +1,131 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pa-monitor-usage-limits
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      # 5-hour (block) usage limit hit. Fires when the account's authoritative 5h
+      # used_percentage is at/over the cap; the annotation carries a humanized
+      # countdown to the window reset (resets_at - now). Threshold is gt 99 rather
+      # than 100 because the classic threshold evaluator has no ">=" and the metric
+      # reports the cap as ~100 (bead pg2-jfdz2 / pg2-memel).
+      - uid: pa-monitor-5h-usage-limit-hit
+        title: pa-monitor 5h usage limit hit
+        condition: C
+        for: 0m
+        keepFiringFor: 5m # hold through a brief dip so it doesn't flap while capped
+        noDataState: OK # metric absent (unknown window) => no alarm
+        execErrState: OK
+        labels:
+          severity: warning
+          window: 5h
+        annotations:
+          summary: "pa-monitor 5h usage limit hit"
+          description: 'The account 5h usage limit is at the cap ({{ printf "%.0f" $values.B.Value }}% used). Window resets in {{ humanizeDuration $values.D.Value }}.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pa_monitor_block_usage_percentage)
+          - refId: R
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: R
+              editorMode: code
+              instant: true
+              expr: clamp_min(max(pa_monitor_block_usage_resets_at) - time(), 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: D
+            datasourceUid: __expr__
+            model:
+              refId: D
+              type: reduce
+              expression: R
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [99]
+      # Weekly (7d) usage limit hit. Same shape, keyed off the weekly window
+      # metrics. When the weekly window metrics are absent (unknown), noDataState
+      # OK keeps it silent until they appear.
+      - uid: pa-monitor-weekly-usage-limit-hit
+        title: pa-monitor weekly usage limit hit
+        condition: C
+        for: 0m
+        keepFiringFor: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          window: weekly
+        annotations:
+          summary: "pa-monitor weekly usage limit hit"
+          description: 'The account weekly usage limit is at the cap ({{ printf "%.0f" $values.B.Value }}% used). Window resets in {{ humanizeDuration $values.D.Value }}.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pa_monitor_week_usage_percentage)
+          - refId: R
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: R
+              editorMode: code
+              instant: true
+              expr: clamp_min(max(pa_monitor_week_usage_resets_at) - time(), 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: D
+            datasourceUid: __expr__
+            model:
+              refId: D
+              type: reduce
+              expression: R
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [99]
