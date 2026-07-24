@@ -642,6 +642,19 @@
                 extraInputs = [ pkgs.bc ];
               };
 
+              # V3 inter-evaluator mechanical coverage (bead pg2-hvlyj.15, plan
+              # item 5.3): drive the behavior-docs-inter-conformance skill's
+              # resolve-imports.sh over a shared owner set and per-seam-check-type
+              # implementer fixtures (aligned/stale-name/divergence/external) and
+              # assert the classification + exit code.
+              test-behavior-docs-conformance-v3 = checksHelpers.testBashScripts {
+                package = pkgs.writeShellScriptBin "resolve-imports" ''
+                  exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh} "$@"
+                '';
+                tests = ./tests/behavior-docs-conformance-v3.bats;
+                extraInputs = [ pkgs.gawk ];
+              };
+
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
               # passthru shape repo-base's mkClaudeMarketplace produces — no build
