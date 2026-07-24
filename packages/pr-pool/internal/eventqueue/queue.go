@@ -1,0 +1,347 @@
+package eventqueue
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+// Listener is a bound event handler as the queue sees it (INTF-HANDLER, core
+// side). It declares which events it binds (Matches, INV-DISP-1) and accepts or
+// declines an offer (Offer). A return of accepted=false is a PRE-ACCEPT decline
+// (busy / unavailable, INV-CONC-1 / INV-FAIL-1): the core re-offers within the
+// ttl. Once Offer returns true the event is ACCEPTED and the core's delivery
+// responsibility ends (INV-EVT-1); post-accept retry/resume is the handler's.
+type Listener interface {
+	ID() string
+	Matches(evt Event) bool
+	Offer(evt Event) (accepted bool)
+}
+
+// Observer receives queue lifecycle signals for metric emission (INV-OBS-1).
+// The OTel emitter (bead pg2-hvlyj.18) implements it; the default is a no-op.
+type Observer interface {
+	OnEnqueue(evt Event)
+	OnAccept(eventID, listenerID string)
+	OnUnconsumedExpired(evtType string)
+}
+
+type noopObserver struct{}
+
+func (noopObserver) OnEnqueue(Event)            {}
+func (noopObserver) OnAccept(string, string)    {}
+func (noopObserver) OnUnconsumedExpired(string) {}
+
+// EnqueueResult reports whether an enqueue added a new event or was dropped as
+// a duplicate of a still-retained id (INV-EVT-3).
+type EnqueueResult int
+
+const (
+	// Enqueued means the event was newly appended to the durable queue.
+	Enqueued EnqueueResult = iota
+	// Deduped means an event with the same id is still retained within ttl, so
+	// this re-emit was dropped (INV-EVT-3).
+	Deduped
+)
+
+type entry struct {
+	evt        Event
+	enqueuedAt time.Time
+	// accepted tracks acceptance per (event, listener) (INV-EVT-1). An entry is
+	// retained until its ttl even after acceptance so a listener binding within
+	// the ttl can still receive it.
+	accepted map[string]bool
+}
+
+func (e *entry) deadline() time.Time { return e.enqueuedAt.Add(e.evt.TTL) }
+
+type listenerState struct {
+	l Listener
+}
+
+// Queue is the durable, ordered, de-duped, TTL-bounded event queue (ADR 0031).
+// It is safe for concurrent use.
+type Queue struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	store Store
+	obs   Observer
+
+	entries map[string]*entry // by event id; the retained-until-ttl set
+	order   []string          // enqueue order (event ids) — the FIFO spine
+
+	listeners []*listenerState // registration order; stable per-listener cursors
+
+	// evictWhenAllAccept is the opt-in early-eviction switch (ADR 0031). Default
+	// off: keep every event until ttl. On: evict once all currently-bound
+	// listeners have accepted (disk savings; shortens the dedup window — safe
+	// only when the consumer set is fixed).
+	evictWhenAllAccept bool
+}
+
+// Option configures a Queue.
+type Option func(*Queue)
+
+// WithClock injects a clock seam (default time.Now) for deterministic ttl tests.
+func WithClock(now func() time.Time) Option { return func(q *Queue) { q.now = now } }
+
+// WithObserver installs a metrics Observer (INV-OBS-1).
+func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
+
+// WithEarlyEviction opts into evicting an event once all bound listeners have
+// accepted it (ADR 0031 "opt-in early eviction").
+func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept = true } }
+
+// New constructs a Queue over store, replaying any prior durable state so
+// delivery survives a restart (INV-EVT-1). Records for events already past
+// their ttl are dropped on replay; evicted ids are not resurrected.
+func New(store Store, opts ...Option) (*Queue, error) {
+	q := &Queue{
+		now:     time.Now,
+		store:   store,
+		obs:     noopObserver{},
+		entries: map[string]*entry{},
+	}
+	for _, opt := range opts {
+		opt(q)
+	}
+	if err := q.replay(); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+// replay reconstructs in-memory state from the durable log. Accept records write
+// after acceptance is confirmed (ADR 0031 req 4), so an event whose accept
+// record was lost to a crash window replays as un-accepted and is re-offered
+// (at-least-once, at-most-one redelivery).
+func (q *Queue) replay() error {
+	recs, err := q.store.Replay()
+	if err != nil {
+		return err
+	}
+	now := q.now()
+	for _, r := range recs {
+		switch r.Op {
+		case opEnqueue:
+			e := &entry{evt: r.event(), enqueuedAt: r.EnqueuedAt, accepted: map[string]bool{}}
+			if now.Before(e.deadline()) { // still within ttl
+				if _, seen := q.entries[e.evt.ID]; !seen {
+					q.order = append(q.order, e.evt.ID)
+				}
+				q.entries[e.evt.ID] = e
+			}
+		case opAccept:
+			if e, ok := q.entries[r.EventID]; ok {
+				e.accepted[r.ListenerID] = true
+			}
+		case opEvict:
+			delete(q.entries, r.EventID)
+		}
+	}
+	return nil
+}
+
+// Register binds a listener to the queue. Its per-listener cursor is
+// independent of every other listener's (ADR 0031); fan-out delivers a matching
+// event to each bound listener.
+func (q *Queue) Register(l Listener) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.listeners = append(q.listeners, &listenerState{l: l})
+}
+
+// Enqueue durably appends an event (INV-EVT-1). A malformed event is rejected
+// (Validate). A re-emit of an id still retained within ttl is dropped as a
+// duplicate (INV-EVT-3). The enqueue record is persisted BEFORE the in-memory
+// add, so an accepted-then-crashed event is never lost.
+func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
+	if err := evt.Validate(); err != nil {
+		return Enqueued, err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	if e, ok := q.entries[evt.ID]; ok {
+		if now.Before(e.deadline()) {
+			return Deduped, nil // still-retained duplicate id (INV-EVT-3)
+		}
+		// The id exists but has expired and not yet been swept. A re-emit is a
+		// FRESH event and MUST go to the tail (FIFO), not reuse the stale
+		// position — so evict the stale entry first.
+		delete(q.entries, evt.ID)
+		q.dropFromOrder(evt.ID)
+	}
+	if err := q.store.Append(recordFromEvent(evt, now)); err != nil {
+		return Enqueued, err
+	}
+	q.entries[evt.ID] = &entry{evt: evt, enqueuedAt: now, accepted: map[string]bool{}}
+	q.order = append(q.order, evt.ID)
+	q.obs.OnEnqueue(evt)
+	return Enqueued, nil
+}
+
+// dropFromOrder removes every occurrence of id from the FIFO spine so the spine
+// never carries a stale duplicate position for a re-enqueued id. Caller holds
+// q.mu.
+func (q *Queue) dropFromOrder(id string) {
+	kept := q.order[:0:0]
+	for _, x := range q.order {
+		if x != id {
+			kept = append(kept, x)
+		}
+	}
+	q.order = kept
+}
+
+// headFor returns the head deliverable event for a listener: the earliest (by
+// enqueue order) event that matches the listener's binding, is not yet accepted
+// by it, and has not expired. Per-listener serial FIFO with head-of-line
+// blocking (ADR 0031): only the head is offered; a declined head is re-offered
+// until accepted or expired. Caller holds q.mu.
+func (q *Queue) headFor(l Listener, now time.Time) *entry {
+	for _, id := range q.order {
+		e, ok := q.entries[id]
+		if !ok {
+			continue // evicted
+		}
+		if !now.Before(e.deadline()) {
+			continue // expired; Expire will drop it
+		}
+		if e.accepted[l.ID()] {
+			continue // already accepted by this listener
+		}
+		if !l.Matches(e.evt) {
+			continue // not bound
+		}
+		return e
+	}
+	return nil
+}
+
+// Dispatch offers each listener its head deliverable event once, in
+// registration order, and returns how many events were accepted this pass. A
+// busy pre-accept decline leaves the head for a later pass (re-offer within
+// ttl, INV-FAIL-1 / INV-CONC-1).
+func (q *Queue) Dispatch() (accepted int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	for _, ls := range q.listeners {
+		e := q.headFor(ls.l, now)
+		if e == nil {
+			continue
+		}
+		if ls.l.Offer(e.evt) {
+			// In-memory accept first; the durable accept record is written AFTER
+			// (ADR 0031 req 4) — the crash window that yields at-most-one redelivery.
+			e.accepted[ls.l.ID()] = true
+			_ = q.store.Append(Record{Op: opAccept, EventID: e.evt.ID, ListenerID: ls.l.ID()})
+			q.obs.OnAccept(e.evt.ID, ls.l.ID())
+			accepted++
+			q.maybeEvict(e)
+		}
+	}
+	return accepted
+}
+
+// maybeEvict evicts an event early when opted-in and every currently-bound
+// listener has accepted it (ADR 0031). Caller holds q.mu.
+func (q *Queue) maybeEvict(e *entry) {
+	if !q.evictWhenAllAccept {
+		return
+	}
+	for _, ls := range q.listeners {
+		if ls.l.Matches(e.evt) && !e.accepted[ls.l.ID()] {
+			return // a bound listener has not accepted yet
+		}
+	}
+	_ = q.store.Append(Record{Op: opEvict, EventID: e.evt.ID})
+	delete(q.entries, e.evt.ID)
+}
+
+// Expire drops every event past its ttl and returns how many were dropped. An
+// event that expires with NO listener having accepted it is unconsumed-expired
+// (INV-DISP-3 / INV-OBS-1) and is reported to the Observer. Retention is
+// independent of consumer state: an event is dropped only at its ttl, never
+// because a consumer is down or disabled.
+func (q *Queue) Expire() (dropped int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	kept := q.order[:0:0]
+	for _, id := range q.order {
+		e, ok := q.entries[id]
+		if !ok {
+			continue // already evicted
+		}
+		if now.Before(e.deadline()) {
+			kept = append(kept, id)
+			continue
+		}
+		if len(e.accepted) == 0 {
+			q.obs.OnUnconsumedExpired(e.evt.Type)
+		}
+		delete(q.entries, id)
+		dropped++
+	}
+	q.order = kept
+	return dropped
+}
+
+// Idle reports whether no (event, listener) pair is still deliverable — every
+// enqueued event is accepted by each bound listener or has expired — the
+// condition run-until-idle exits on (INV-LIFE-1). Caller must NOT hold q.mu.
+func (q *Queue) Idle() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	for _, ls := range q.listeners {
+		if q.headFor(ls.l, now) != nil {
+			return false // a deliverable head is still outstanding (incl. fan-out)
+		}
+	}
+	// A non-expired event that no one has accepted is still pending — an orphan
+	// (no binding) or a disabled/absent consumer's event waiting to reach ttl. It
+	// is neither accepted nor expired, so the queue is NOT drained (INV-LIFE-1).
+	for _, id := range q.order {
+		if e, ok := q.entries[id]; ok && now.Before(e.deadline()) && len(e.accepted) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// DepthByType returns the per-type count of retained, non-expired events — the
+// "queue depth" gauge source (INV-OBS-1). Caller must NOT hold q.mu.
+func (q *Queue) DepthByType() map[string]int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	depth := map[string]int{}
+	for _, id := range q.order {
+		if e, ok := q.entries[id]; ok && now.Before(e.deadline()) {
+			depth[e.evt.Type]++
+		}
+	}
+	return depth
+}
+
+// RunUntilIdle dispatches and expires on a fixed tick until the queue is idle
+// (INV-LIFE-1) or ctx is cancelled. It is the drive loop behind the
+// `run-until-idle` operator subcommand; a busy handler simply keeps its head
+// re-offered until the head is accepted or its ttl expires.
+func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
+	for {
+		q.Expire()
+		q.Dispatch()
+		if q.Idle() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(tick):
+		}
+	}
+}

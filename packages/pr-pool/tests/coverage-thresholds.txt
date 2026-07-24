@@ -19,3 +19,4 @@
 # packages that exist are listed here so the tree stays green at every commit.
 
 # --- active rules (uncommented as each gated package lands) ---
+internal/eventqueue 90
