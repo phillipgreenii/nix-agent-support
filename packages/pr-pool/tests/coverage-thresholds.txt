@@ -20,3 +20,5 @@
 
 # --- active rules (uncommented as each gated package lands) ---
 internal/eventqueue 90
+schemas 85
+conformance 85

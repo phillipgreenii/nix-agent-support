@@ -1,0 +1,12 @@
+{
+  "$id": "source.query",
+  "title": "INTF-SOURCE query (core -> source)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "callback"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "callback": { "type": "string" }
+  }
+}

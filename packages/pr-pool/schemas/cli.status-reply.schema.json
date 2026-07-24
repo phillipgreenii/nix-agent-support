@@ -1,0 +1,49 @@
+{
+  "$id": "cli.status-reply",
+  "title": "INTF-CLI status --json reply",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sessions", "queues", "config"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "handler", "event", "state"],
+        "properties": {
+          "id": { "type": "string" },
+          "handler": { "type": "string" },
+          "event": { "type": "string" },
+          "state": {
+            "type": "string",
+            "enum": ["running", "paused", "completed", "failed"]
+          },
+          "progress": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "queues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "depth"],
+        "properties": {
+          "type": { "type": "string" },
+          "depth": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "handlers"],
+      "properties": {
+        "sources": { "type": "integer", "minimum": 0 },
+        "handlers": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

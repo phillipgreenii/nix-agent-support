@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "id": "trk-9f2c",
+  "events": [
+    {
+      "id": "evt-abc123",
+      "type": "review-requested",
+      "ttl": "15m",
+      "payload": {}
+    }
+  ]
+}

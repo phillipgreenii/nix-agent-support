@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "id": "evt-op-1",
+  "type": "review-requested",
+  "ttl": "15m",
+  "payload": { "pr": 42 }
+}

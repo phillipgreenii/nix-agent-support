@@ -1,0 +1,14 @@
+{
+  "$id": "mon.update",
+  "title": "INTF-MON update (core -> sink, push)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "value"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "value": { "type": "number" },
+    "labels": { "type": "object" }
+  }
+}

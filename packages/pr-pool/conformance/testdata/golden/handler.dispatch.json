@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1",
+  "id": "hs-771e",
+  "event": {
+    "id": "evt-abc123",
+    "type": "review-requested",
+    "ttl": "15m",
+    "payload": {}
+  },
+  "callback": "pr-pool session-status --socket s --token t"
+}

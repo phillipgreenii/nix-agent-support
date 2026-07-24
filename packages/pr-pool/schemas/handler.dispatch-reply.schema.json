@@ -1,0 +1,26 @@
+{
+  "$id": "handler.dispatch-reply",
+  "title": "INTF-HANDLER dispatch reply (sync outcome OR deferred ack)",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "outcome"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "id": { "type": "string" },
+        "outcome": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "deferred"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "id": { "type": "string" },
+        "deferred": { "const": true }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1",
+  "id": "m-1",
+  "values": [
+    {
+      "name": "queue_depth",
+      "value": 3,
+      "labels": { "type": "review-requested" }
+    }
+  ]
+}

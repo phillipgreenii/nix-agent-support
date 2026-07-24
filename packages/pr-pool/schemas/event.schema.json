@@ -1,0 +1,16 @@
+{
+  "$id": "event",
+  "title": "INTF-SOURCE event",
+  "description": "A typed event flowing from a source through the core's durable queue to a handler (interfaces.md, INV-EVT-1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "ttl"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "id": { "type": "string" },
+    "type": { "type": "string" },
+    "ttl": { "type": "string" },
+    "at": { "type": "string" },
+    "payload": { "type": "object" }
+  }
+}

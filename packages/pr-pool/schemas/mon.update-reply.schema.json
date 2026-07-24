@@ -1,0 +1,12 @@
+{
+  "$id": "mon.update-reply",
+  "title": "INTF-MON update ack (sink -> core)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "accepted"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "accepted": { "type": "boolean" }
+  }
+}

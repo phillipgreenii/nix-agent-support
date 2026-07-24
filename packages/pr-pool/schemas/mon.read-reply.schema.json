@@ -1,0 +1,24 @@
+{
+  "$id": "mon.read-reply",
+  "title": "INTF-MON read reply (core -> sink)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "values"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "values": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "number" },
+          "labels": { "type": "object" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1",
+  "id": "evt-abc123",
+  "type": "review-requested",
+  "ttl": "15m",
+  "at": "2026-07-16T12:00:00Z",
+  "payload": { "note": "hi" }
+}

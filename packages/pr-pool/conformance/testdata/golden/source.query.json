@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "1",
+  "id": "q-1",
+  "callback": "pr-pool ingest-event --socket s --token t"
+}

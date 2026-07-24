@@ -1,0 +1,13 @@
+{
+  "$id": "store.reply",
+  "title": "INTF-STORE reply (storage -> core)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "ok": { "type": "boolean" },
+    "value": { "type": "string" }
+  }
+}

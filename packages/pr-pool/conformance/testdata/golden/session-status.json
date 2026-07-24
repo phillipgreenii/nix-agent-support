@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1",
+  "id": "hs-771e",
+  "state": "failed",
+  "detail": "usage window reached",
+  "failure": {
+    "class": "resource-limit",
+    "message": "provider usage window exhausted"
+  },
+  "at": "2026-07-16T12:07:00Z"
+}

@@ -1,0 +1,26 @@
+{
+  "$id": "source.query-reply",
+  "title": "INTF-SOURCE query reply (inline events OR deferred)",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "events"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "id": { "type": "string" },
+        "events": { "type": "array", "items": { "$ref": "event" } }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "deferred"],
+      "properties": {
+        "schemaVersion": { "const": "1" },
+        "id": { "type": "string" },
+        "deferred": { "const": true }
+      }
+    }
+  ]
+}

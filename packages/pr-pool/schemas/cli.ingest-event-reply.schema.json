@@ -1,0 +1,24 @@
+{
+  "$id": "cli.ingest-event-reply",
+  "title": "INTF-CLI ingest-event reply (accepted count + rejected malformed list)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "accepted", "rejected"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "accepted": { "type": "integer", "minimum": 0 },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "reason"],
+        "properties": {
+          "id": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

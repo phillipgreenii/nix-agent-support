@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "1",
+  "id": "m-1",
+  "metrics": ["queue_depth", "unconsumed_expired"]
+}

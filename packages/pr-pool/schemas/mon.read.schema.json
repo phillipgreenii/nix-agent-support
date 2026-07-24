@@ -1,0 +1,12 @@
+{
+  "$id": "mon.read",
+  "title": "INTF-MON read (sink -> core, pull)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "metrics"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "metrics": { "type": "array", "items": { "type": "string" } }
+  }
+}

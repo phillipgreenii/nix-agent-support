@@ -1,0 +1,31 @@
+{
+  "$id": "session-status",
+  "title": "handler-session status (handler -> core via session-status callback)",
+  "description": "The failure object is present iff state=failed; that cross-field rule is a conformance check (interfaces.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "state"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["running", "paused", "completed", "failed"]
+    },
+    "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+    "detail": { "type": "string" },
+    "at": { "type": "string" },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "message"],
+      "properties": {
+        "class": {
+          "type": "string",
+          "enum": ["retryable", "resource-limit", "unavailable", "critical"]
+        },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$id": "store.request",
+  "title": "INTF-STORE get/put/delete request (core -> storage)",
+  "description": "op selects the operation; value is required only for put (a conformance check).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "op", "key"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" },
+    "op": { "type": "string", "enum": ["get", "put", "delete"] },
+    "key": { "type": "string" },
+    "value": { "type": "string" }
+  }
+}
