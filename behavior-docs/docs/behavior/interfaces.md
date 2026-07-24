@@ -23,10 +23,14 @@ a sequence diagram — or a one-word initiator note — carries them.
 - **Peer** — an independent product that keeps its **own** behavior docs set. Each side defines the
   interface on its own side (`INV-8`) and the two are **cross-checked** outgoing-to-incoming
   (`INV-18`).
-- **Implementer** — a set or a pluggable implementation that **realizes** the contract, and which
-  often keeps **no** set of its own. It **cites** the owner's interface, states only its own
-  obligations, and reconciles agreement with a **conformance suite** rather than a peer cross-check
-  (`INV-18`).
+- **Implementer** — a set or a pluggable implementation that **realizes** _this set's_ contract,
+  and which often keeps **no** set of its own. It **cites** the owner's interface, states only its
+  own obligations, and reconciles agreement with a **conformance suite** rather than a peer
+  cross-check (`INV-18`).
+- **Owner** — the dual of implementer: the set whose contract _this set_ implements. This set
+  **cites** the owner's interface (one-directional) and reconciles by running the owner's
+  **conformance suite** — a looser coupling than a peer cross-check, and never a mutual one (the
+  owner does not cite its implementers, `INV-3`).
 - **Actor** — a human or agent that drives the system through the interface. The interface
   definition itself is the agreement; there is no second set to cross-check.
 

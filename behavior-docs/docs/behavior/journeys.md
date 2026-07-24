@@ -57,6 +57,8 @@ flowchart TD
 
 ### `JOURNEY-2` — Changing intended behavior
 
+_Actor:_ `ACTOR-1` (Author) — a change of intent originates here.
+
 Edit the behavior docs first to state the new intended state. Downstream (spec → design →
 plan) is re-derived from the change and thrown away on re-convergence. Record a decision doc
 (ADR) if the change is consequential. Until the implementation catches up, the difference is a
@@ -65,8 +67,36 @@ the doc (`INV-4`).
 
 ### `JOURNEY-3` — Resolving an open question
 
+_Actor:_ `ACTOR-1` (Author) — owns the question and its resolution.
+
 Decide → state the decision in the docs → record a decision doc if consequential → delete
 the question. A question is a placeholder for a gap, not a home for debate.
+
+### `JOURNEY-4` — Propagating a contract change across a reference seam
+
+<!-- uuid: 0d9f88cb-d020-43ac-a87e-c415db77073e -->
+
+_Actor:_ `ACTOR-1` (Author) of the owning set.
+
+An owner edits its contract (`JOURNEY-2`). It does **not** notify consumers — an owner does not
+know its implementers (`INV-3`). Each consumer instead **re-converges by pull**: it re-runs its
+conformance suite (`INV-18`) against the owner's _current_ contract, matching cited elements by
+UUID (`INV-3`). A reconciliation failure is a **realization gap** (`INV-15`) on the consumer's
+side, tracked against the cited elements — not a status header (`INV-4`). The conformance suite
+versions with the contract, so the pull always checks against the latest owner state. This is the
+same **level-triggered** re-convergence the docs use everywhere: no push, no notification — each
+side pulls the current truth from the reference seam.
+
+```mermaid
+flowchart TD
+    edit["owner Author edits its contract (JOURNEY-2)"] --> nonotify["owner does NOT notify consumers (INV-3)"]
+    nonotify --> pull["each consumer re-runs its conformance suite vs the owner's current contract (INV-18), matching by UUID (INV-3)"]
+    pull --> ok{"reconciles?"}
+    ok -->|yes| done["converged"]
+    ok -->|no| gap["realization gap (INV-15) on the consumer, tracked against the cited elements"]
+    gap --> fix["consumer re-converges docs-down"]
+    fix --> pull
+```
 
 ## Open questions
 
@@ -89,7 +119,7 @@ Each open question states the gap, its owner, a resolution path, and where it bl
   an observability framing on real cases. _Blocks_: clean placement at the seam.
 - **`OQ-6` — Enforcing docs-first, and onboarding.** Companion tooling that directs
   contributors to start from the behavior docs, keeps their downstream work tied back to the
-  cited IDs (`INV-3`, `GOAL-16`), and helps maintain the docs. The **conformance/drift pass**
+  cited IDs (`INV-3`, `INV-21`), and helps maintain the docs. The **conformance/drift pass**
   partially realizes this by checking a set against the method, but the direct-to-source
   onboarding and the tie-back enforcement are undefined. _Owner_: author. _Path_: co-develop
   with the companion tooling. _Blocks_: automated docs-first enforcement.

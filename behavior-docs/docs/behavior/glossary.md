@@ -38,9 +38,12 @@ system's glossary, not here.
 - **Counterparty** — the party on the far side of an interface, seen from this set. Its **kind**
   fixes how agreement is reconciled: a **peer** (an independent product that keeps its own behavior
   docs set — cross-checked outgoing-to-incoming); an **implementer** (a set or a pluggable
-  implementation that realizes the contract — reconciled by a conformance suite); or an **actor**
-  driving the system through the stated contract. Whether an integrated system is named an actor or
-  a counterparty is scope-relative, not absolute.
+  implementation that realizes _this set's_ contract — reconciled by a conformance suite); an
+  **owner** (the dual of implementer: the set whose contract _this set_ implements — this set cites
+  the owner's interface and reconciles by running the owner's conformance suite, a one-directional
+  coupling looser than a peer cross-check); or an **actor** driving the system through the stated
+  contract. Whether an integrated system is named an actor or a counterparty is scope-relative, not
+  absolute.
 - **Interface** — a boundary described by **what crosses it** (its field-shape) and **what must
   hold** — never how it is implemented — so the parties on each side can be confirmed to agree.
   Agreement is reconciled by a peer cross-check where the counterparty keeps its own set, otherwise
@@ -63,6 +66,14 @@ system's glossary, not here.
 - **Realization gap** — the distance between intended behavior (the docs) and what an
   implementation has yet built. A realization gap is normal — the docs may lead the build — and is
   tracked against the cited IDs, never annotated inline (the docs stay living, `INV-4`).
+- **UUID** — an element's **stable identity**: a value minted once at the element's definition and
+  never changed (`INV-3`), carried in an HTML comment on the definition line. The typed **name** is
+  a mutable, intra-consistent label; references are name-based and cross-set matching is by UUID. A
+  **removed** element leaves no tombstone — a deprecated/removed section would fight the living-doc
+  rule (`INV-4`) — so when and why an element was removed lives in git history, not in the docs.
+- **Reference seam** — a set together with the sets it references; the edge across which one set
+  cites another's contract and vocabulary. Consistency is required along a reference seam
+  (`INV-18`, `INV-20`) but not across unrelated sets.
 
 ## Examples
 

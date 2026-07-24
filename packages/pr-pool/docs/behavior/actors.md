@@ -23,6 +23,3 @@ which concrete implementation fills the role is a `zr pr-pool-components` concer
   Interface: `INTF-MON`.
 - **`ACTOR-STO` — Storage** — optional; provides a key/value scratch for core state, never delivery.
   Interface: `INTF-STORE`.
-
-(Interface IDs move from `INTF-1..5` to these named forms in the interfaces rebuild, so a citation
-reads for itself.)

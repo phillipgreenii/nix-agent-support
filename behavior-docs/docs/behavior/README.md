@@ -49,13 +49,29 @@ decision docs) a _behavior-conformant_ implementation can be regenerated.
 
 ## IDs
 
-Each citable element carries a typed, stable ID (`INV-3`): invariants `INV-`, goals `GOAL-`,
-user stories `STORY-`, journeys `JOURNEY-`, interfaces `INTF-`, actors `ACTOR-`, open questions
-`OQ-`. Concepts are cited by name. Numbers are stable and never renumbered; gaps are legal.
-Across behavior docs sets, an ID is cited as `<repo-name> · <set-path> · <ID>`. A set that cites
-another set SHOULD namespace its own IDs by topic (`INV-DISP-1`, `INTF-SOURCE`) so a cited ID
-never collides with one of its own; this **root** method, citing no other set, keeps bare numeric
-IDs.
+Each citable element carries a **typed name** (`INV-3`): invariants `INV-`, goals `GOAL-`, user
+stories `STORY-`, journeys `JOURNEY-`, interfaces `INTF-`, actors `ACTOR-`, open questions `OQ-`;
+concepts are cited by name. **Identity is a stable UUID** minted at the element's definition and
+never changed, carried in an HTML comment on the definition line; the **name is a mutable,
+human-readable label**, consistent only within its own set. Namespacing (`INV-DISP-1`,
+`INTF-SOURCE`) is for readability, not identity — matching is by UUID — so a name MAY be renamed
+without breaking identity, and gaps and out-of-sequence numbers are legal. Across behavior docs
+sets an element is cited by name as `<repo-name> · <set-path> · <name>`, and a set declares the
+external elements it references — each with the owner's UUID — in
+[External references](#external-references) below. A set that cites another set SHOULD namespace
+its own names by topic so a cited name never collides with one of its own; this **root** method,
+citing no other set, keeps bare numeric names.
+
+## External references
+
+A set declares every external element it cites here, so a cross-set reference resolves by the
+owner's UUID (`INV-3`) — the same imports mechanism used for external contracts. Removed elements
+leave no tombstone; their history lives in git (`INV-4`).
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+
+_This **root** method references no other behavior docs set, so its imports table is empty._
 
 ## What belongs — with examples
 
