@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
@@ -56,6 +57,7 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		claudetools.New(),
 		pathsafety.New(pe),
 		mcp.New(),
+		primarycommit.New(primarycommit.NewFileResolver()),
 		git.New(),
 		gh.New(gh.NewExecResolver()),
 		monorepo.New(pe),

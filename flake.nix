@@ -484,12 +484,15 @@
                     touch $out
                   '';
 
-              # ceta — the finding's primary motivation: 31 internal rule / engine
-              # / patheval security tests, all sandbox-safe (zero net/exec).
+              # ceta — the finding's primary motivation: internal rule / engine /
+              # patheval security tests. git on PATH for the primary-commit
+              # resolver's real-git contract test (builds fixtures only; the
+              # resolver itself is filesystem-only, never a git subprocess).
               claude-extended-tool-approver-go-tests = mkGoTestCheck {
                 pname = "claude-extended-tool-approver-go-tests";
                 src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
                 gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
+                nativeCheckInputs = [ pkgs.git ];
               };
 
               # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
