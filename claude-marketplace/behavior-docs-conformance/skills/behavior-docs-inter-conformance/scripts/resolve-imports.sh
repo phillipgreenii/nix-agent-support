@@ -45,6 +45,15 @@ fail=0
 found_rows=0
 echo "=== V3 seam resolution: $IMPL  ->  $OWNER ==="
 
+# Does the implementer declare an imports table at all? (case-insensitive). With
+# NO `## External references` section the V3 inter-check is vacuous for this seam,
+# so surface a NOTICE rather than exiting 0 silently (an empty-but-present table
+# is a different, quieter case handled after the loop).
+has_table=0
+if grep -qiE '^##[[:space:]]+External references' "$IMPL"/*.md 2>/dev/null; then
+  has_table=1
+fi
+
 # Read the implementer's imports-table rows (skip header + separator; a data row
 # has a UUID OR an explicit (external) marker in its cells).
 while IFS= read -r row; do
@@ -57,14 +66,20 @@ while IFS= read -r row; do
   uuidcell=$(printf '%s\n' "$row" | awk -F'|' '{print $4}' | trim)
   # Skip the header and the |----| separator.
   [ "$name" = "Name" ] && continue
-  printf '%s' "$name" | grep -qE '^-+$' && continue
+  # Separator row: dashes, tolerating GFM alignment colons (:---, :---:, ---:).
+  printf '%s' "$name" | grep -qE '^:?-+:?$' && continue
   [ -z "$name" ] && continue
 
   found_rows=$((found_rows + 1))
 
-  # External contract: no owner UUID, path marked external / not a docs/behavior set.
+  # External contract: no owner UUID. Classify on the UUID CELL ALONE, anchored —
+  # never on the PATH, because a real repo path contains hyphens and a bare '-'
+  # would spuriously read as the external marker (making the WARN branch below
+  # unreachable). Strip a markdown code span first so `(external)` matches whether
+  # or not it is wrapped in backticks.
   if ! printf '%s' "$uuidcell" | grep -qE "$UUIDRE"; then
-    if printf '%s %s' "$opath" "$uuidcell" | grep -qiE 'external|n/a|—|-'; then
+    uuidnorm=$(printf '%s' "$uuidcell" | tr -d '`')
+    if printf '%s' "$uuidnorm" | grep -qiE '^[[:space:]]*(\(?external\)?|n/a|[—-])[[:space:]]*$'; then
       printf '  external  %-22s (declared external contract: %s)\n' "$name" "$opath"
     else
       printf '  WARN      %-22s (row has no owner UUID and is not marked external)\n' "$name"
@@ -88,15 +103,22 @@ while IFS= read -r row; do
     printf '  WARN      %-22s (stale name: owner UUID %s now names %s)\n' "$name" "$u" "$ownername"
   fi
 done < <(
-  # Emit only the lines of the `## External references` section.
+  # Emit only the lines of the `## External references` section. Reset `insec` at
+  # each file boundary (FNR==1) so a file that ENDS mid-section does not leak its
+  # state into the next concatenated file. Header match is case-insensitive.
   awk '
-    /^##[[:space:]]+External references/ { insec=1; next }
+    FNR==1 { insec=0 }
+    toupper($0) ~ /^##[[:space:]]+EXTERNAL REFERENCES/ { insec=1; next }
     /^##[[:space:]]/ && insec { insec=0 }
     insec { print }
   ' "$IMPL"/*.md 2>/dev/null || true
 )
 
-[ "$found_rows" -gt 0 ] || echo "  (implementer declares no external references)"
+if [ "$has_table" -eq 0 ]; then
+  echo "  NOTICE: implementer declares no imports table (## External references) — the V3 inter-check is vacuous for this seam"
+elif [ "$found_rows" -eq 0 ]; then
+  echo "  (implementer declares no external references)"
+fi
 if [ "$fail" -ne 0 ]; then
   echo "V3: FAIL — one or more owner UUIDs did not resolve (genuine divergence)"
   exit 1

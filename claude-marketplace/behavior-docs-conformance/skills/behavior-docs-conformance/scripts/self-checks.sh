@@ -103,7 +103,11 @@ sec "Inline status framing (INV-4 / V2 #15) — expect none"
 # never annotating a rule with its current implementation status. #15's flagship catch is inline
 # status framing in PROSE — "unmet by the current implementation", "not yet implemented" — which the
 # per-doc status-header check above does NOT catch (it is prose, not a `status:` header). Flag it.
-grep -rniE 'unmet by the current implementation|not[[:space:]]+yet[[:space:]]+implemented|currently[[:space:]]+unimplemented|no[[:space:]]+current[[:space:]]+implementation|does[[:space:]]+not[[:space:]]+yet[[:space:]]+(exist|support|implement)|planned[[:space:]]+but[[:space:]]+not[[:space:]]+(yet[[:space:]]+)?(built|implemented)|to[[:space:]]+be[[:space:]]+implemented' ./*.md ||
+# NOTE the last alternative is anchored to a status-framing lead-in
+# (yet/still/remain(s)) so it flags "yet to be implemented" (a status claim) but
+# NOT contract prose like "the interface to be implemented by an implementer"
+# (INV-8/INV-18) — the bare "to be implemented" substring was a latent false positive.
+grep -rniE 'unmet by the current implementation|not[[:space:]]+yet[[:space:]]+implemented|currently[[:space:]]+unimplemented|no[[:space:]]+current[[:space:]]+implementation|does[[:space:]]+not[[:space:]]+yet[[:space:]]+(exist|support|implement)|planned[[:space:]]+but[[:space:]]+not[[:space:]]+(yet[[:space:]]+)?(built|implemented)|(yet|still|remains?)[[:space:]]+to[[:space:]]+be[[:space:]]+implemented' ./*.md ||
   echo "  clean"
 
 sec "Cross-set relative links (INV-8) — expect none; use textual '<repo> · <path> · <ID>'"
@@ -123,18 +127,25 @@ esac done
 if [ -n "${gloss:-}" ]; then
   # bold headwords from glossary bullets, minus any trailing "(...)" qualifier
   # (`|| true` so a glossary with no bold-bullet headwords does not abort the run)
-  { grep -oE '^[[:space:]]*[-*][[:space:]]+\*\*[^*]+\*\*' "$gloss" || true; } |
-    sed -E 's/.*\*\*(.+)\*\*/\1/; s/[[:space:]]*\(.*\)//' |
-    while IFS= read -r term; do
-      [ -n "$term" ] || continue
-      total=$({ grep -rhoiF "$term" ./*.md || true; } | wc -l | tr -d ' ')
-      g=$({ grep -hoiF "$term" "$gloss" || true; } | wc -l | tr -d ' ')
-      outside=$((total - g))
-      if [ "$outside" -lt 2 ]; then
-        printf '  FAIL (%s uses outside definition)  %s\n' "$outside" "$term"
-      fi
-    done
-  echo "  (terms not listed are used >=2x beyond their definition; confirm FAILs by hand — see note)"
+  headwords=$({ grep -oE '^[[:space:]]*[-*][[:space:]]+\*\*[^*]+\*\*' "$gloss" || true; } |
+    sed -E 's/.*\*\*(.+)\*\*/\1/; s/[[:space:]]*\(.*\)//')
+  if [ -z "$headwords" ]; then
+    # No headwords => the >=2x heuristic never runs; report that instead of
+    # passing vacuously (the glossary may not use "- **term** —" bullets).
+    printf '  NOTICE: no bold headwords extracted from %s — heuristic did not run (glossary not using "- **term** —" bullets)\n' "${gloss#./}"
+  else
+    printf '%s\n' "$headwords" |
+      while IFS= read -r term; do
+        [ -n "$term" ] || continue
+        total=$({ grep -rhoiF "$term" ./*.md || true; } | wc -l | tr -d ' ')
+        g=$({ grep -hoiF "$term" "$gloss" || true; } | wc -l | tr -d ' ')
+        outside=$((total - g))
+        if [ "$outside" -lt 2 ]; then
+          printf '  FAIL (%s uses outside definition)  %s\n' "$outside" "$term"
+        fi
+      done
+    echo "  (terms not listed are used >=2x beyond their definition; confirm FAILs by hand — see note)"
+  fi
 else
   echo "  no glossary file found (looked for *gloss*.md)"
 fi

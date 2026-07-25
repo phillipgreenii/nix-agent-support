@@ -87,10 +87,16 @@ awk -v thresholds="$thresholds" '
 		for (r = 1; r <= n; r++) {
 			suffix = ruleSuffix[r]
 			minPct = ruleMin[r]
-			# Find the package(s) matching this rule.
+			# Find the package(s) matching this rule. Match LITERALLY (equal to
+			# the suffix, or ending in "/<suffix>") — never as a regex, so a
+			# metachar in a suffix (e.g. ".") cannot over-match a different package.
 			matchPkg = ""
+			sfx = "/" suffix
+			slen = length(sfx)
 			for (pkg in seen) {
-				if (pkg == suffix || pkg ~ ("/" suffix "$")) {
+				plen = length(pkg)
+				endsWithSuffix = (plen >= slen && substr(pkg, plen - slen + 1) == sfx)
+				if (pkg == suffix || endsWithSuffix) {
 					matchPkg = pkg
 					ruleMatched[r] = 1
 					if (pct[pkg] + 0.0000001 < minPct) {

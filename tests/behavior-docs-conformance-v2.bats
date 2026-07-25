@@ -132,9 +132,99 @@ MD
   ! echo "$output" | grep -qiE "dual identity|orphan carrier"
 }
 
-@test "self-checks fails on an empty set (no .md files)" {
+@test "self-checks fails on a MISSING dir AND on an empty set (no .md files)" {
+  # #6: both runs are asserted — the missing-dir run (cd fails) and the
+  # exists-but-empty run (no *.md) must each exit non-zero.
   run self-checks "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -ne 0 ]
   mkdir -p "$BATS_TEST_TMPDIR/empty"
   run self-checks "$BATS_TEST_TMPDIR/empty"
   [ "$status" -ne 0 ]
+}
+
+# --- Targeted hardening (bead pg2-vybrv) — each FAILs before its fix -----------
+
+@test "inline-status (#7): contract prose 'interface to be implemented by an implementer' is NOT flagged" {
+  # INV-8/INV-18 contract prose legitimately says an interface is "to be
+  # implemented by an implementer". The old inline-status regex matched the bare
+  # 'to be implemented' substring — a latent false positive. It must stay clean.
+  cat > "$SET/invariants.md" <<'MD'
+# Invariants
+- **`INV-8`** — A cross-product interaction defines the interface to be implemented by an implementer, citing the owner's contract.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -qi "to be implemented by an implementer"
+}
+
+@test "inline-status (#7): genuine status framing 'yet to be implemented' is still flagged" {
+  cat > "$SET/invariants.md" <<'MD'
+# Invariants
+- **`INV-1`** — The core delivers each accepted event; this rule is yet to be implemented.
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi "yet to be implemented"
+}
+
+@test "heuristic (#8): a glossary with no bold headwords emits a 'no headwords' NOTICE (not a vacuous pass)" {
+  cat > "$SET/glossary.md" <<'MD'
+# Glossary
+Terms are described in prose here, without bold-bullet headwords.
+- event: a typed message routed to a handler (plain bullet, no bold markup).
+MD
+  run_selfchecks
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi "no bold headwords"
+}
+
+# --- Shipped corpus is genuinely exercised (#5) --------------------------------
+# Drive the real self-checks.sh over the durable corpus/v2 fixtures so the corpus
+# cannot rot while the gate stays green. The two MECHANICAL categories
+# (inline-status, floor-leakage) are asserted fail->flagged / pass->clean; every
+# fixture (incl. the judgment-only categories) is asserted to run to completion.
+
+corpus_v2_dir() {
+  if [ -n "${CORPUS_V2_DIR:-}" ]; then
+    printf '%s' "$CORPUS_V2_DIR"
+  else
+    printf '%s' "$BATS_TEST_DIRNAME/../claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/corpus/v2"
+  fi
+}
+
+@test "corpus v2 (#5): every fail/pass fixture is genuinely exercised (self-checks runs to completion)" {
+  C=$(corpus_v2_dir); [ -d "$C" ] || skip "corpus not found at $C"
+  local found=0
+  for d in "$C"/*/fail "$C"/*/pass; do
+    [ -d "$d" ] || continue
+    found=$((found + 1))
+    run self-checks "$d"
+    [ "$status" -eq 0 ] || {
+      echo "self-checks did not complete cleanly on $d (status=$status)"
+      echo "$output"
+      false
+    }
+    echo "$output" | grep -q "=== IDs present"
+  done
+  [ "$found" -gt 0 ]
+}
+
+@test "corpus v2 (#5): inline-status fail fixture is mechanically flagged; pass fixture is clean" {
+  C=$(corpus_v2_dir); [ -d "$C/inline-status" ] || skip "corpus not found at $C"
+  run self-checks "$C/inline-status/fail"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi "unmet by the current implementation"
+  run self-checks "$C/inline-status/pass"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -qi "unmet by the current implementation"
+}
+
+@test "corpus v2 (#5): floor-leakage fail fixture is mechanically flagged; pass reports none obvious" {
+  C=$(corpus_v2_dir); [ -d "$C/floor-leakage" ] || skip "corpus not found at $C"
+  run self-checks "$C/floor-leakage/fail"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "orchestrator.go:142"
+  run self-checks "$C/floor-leakage/pass"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "none obvious"
 }

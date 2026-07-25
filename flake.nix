@@ -603,10 +603,14 @@
                     ex/internal/queue/b.go:1.1,2.2 1 0
                     ex/internal/msgschema/s.go:1.1,2.2 9 1
                     ex/internal/msgschema/s.go:3.1,4.2 1 0
+                    ex/internal/vaXb/c.go:1.1,2.2 5 1
                   '';
                   belowBar = pkgs.writeText "below.txt" "internal/queue 90\n";
                   atBar = pkgs.writeText "at.txt" "internal/queue 70\ninternal/msgschema 85\n";
                   absent = pkgs.writeText "absent.txt" "internal/doesnotexist 80\n";
+                  # A suffix with a regex metachar ('.') must be matched LITERALLY;
+                  # it must NOT over-match `ex/internal/vaXb` (bead pg2-vybrv #9).
+                  metachar = pkgs.writeText "metachar.txt" "internal/va.b 90\n";
                 in
                 pkgs.runCommand "test-pr-pool-coverage-gate" { nativeBuildInputs = [ pkgs.bash ]; } ''
                   fail() { echo "META-TEST FAIL: $1" >&2; exit 1; }
@@ -625,7 +629,15 @@
                     fail "gate passed a gated-but-absent package (should block)"
                   fi
 
-                  echo "coverage-gate meta-test: block/pass/absent all correct"
+                  # A threshold suffix with a regex metachar ('.') must be matched
+                  # LITERALLY: it must NOT over-match a package differing only at
+                  # that position (ex/internal/vaXb), so the gated suffix is
+                  # literally absent and the gate must FAIL (bead pg2-vybrv #9).
+                  if bash ${gate} ${profile} ${metachar} >/dev/null 2>&1; then
+                    fail "gate passed a suffix whose regex metachar over-matched a different package (should block as absent)"
+                  fi
+
+                  echo "coverage-gate meta-test: block/pass/absent/metachar all correct"
                   touch $out
                 '';
 
@@ -634,26 +646,64 @@
               # self-checks.sh over inline-status / floor-leakage FAIL & PASS
               # fixtures and assert it flags / stays clean. bc for the mermaid
               # fence-count section.
-              test-behavior-docs-conformance-v2 = checksHelpers.testBashScripts {
-                package = pkgs.writeShellScriptBin "self-checks" ''
-                  exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/scripts/self-checks.sh} "$@"
-                '';
-                tests = ./tests/behavior-docs-conformance-v2.bats;
-                extraInputs = [ pkgs.bc ];
-              };
+              # Not checksHelpers.testBashScripts: that helper cannot inject an env
+              # var, and the suite now also drives the shipped corpus/v2 fixtures
+              # (bead pg2-vybrv #5) via CORPUS_V2_DIR so the durable corpus cannot
+              # rot while the gate stays green. Mirrors that helper otherwise.
+              test-behavior-docs-conformance-v2 =
+                let
+                  package = pkgs.writeShellScriptBin "self-checks" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/scripts/self-checks.sh} "$@"
+                  '';
+                in
+                pkgs.runCommand "test-behavior-docs-conformance-v2"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.which
+                      pkgs.bc
+                      package
+                    ];
+                  }
+                  ''
+                    export PATH="${package}/bin:$PATH"
+                    export CORPUS_V2_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/corpus/v2}"
+                    bats ${./tests/behavior-docs-conformance-v2.bats}
+                    touch $out
+                  '';
 
               # V3 inter-evaluator mechanical coverage (bead pg2-hvlyj.15, plan
               # item 5.3): drive the behavior-docs-inter-conformance skill's
               # resolve-imports.sh over a shared owner set and per-seam-check-type
               # implementer fixtures (aligned/stale-name/divergence/external) and
               # assert the classification + exit code.
-              test-behavior-docs-conformance-v3 = checksHelpers.testBashScripts {
-                package = pkgs.writeShellScriptBin "resolve-imports" ''
-                  exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh} "$@"
-                '';
-                tests = ./tests/behavior-docs-conformance-v3.bats;
-                extraInputs = [ pkgs.gawk ];
-              };
+              # Not checksHelpers.testBashScripts: that helper cannot inject an env
+              # var, and the suite now also drives the shipped corpus/v3 fixtures
+              # (bead pg2-vybrv #5) via CORPUS_V3_DIR so the durable corpus cannot
+              # rot while the gate stays green. Mirrors that helper otherwise.
+              test-behavior-docs-conformance-v3 =
+                let
+                  package = pkgs.writeShellScriptBin "resolve-imports" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh} "$@"
+                  '';
+                in
+                pkgs.runCommand "test-behavior-docs-conformance-v3"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.which
+                      pkgs.gawk
+                      package
+                    ];
+                  }
+                  ''
+                    export PATH="${package}/bin:$PATH"
+                    export CORPUS_V3_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/corpus/v3}"
+                    bats ${./tests/behavior-docs-conformance-v3.bats}
+                    touch $out
+                  '';
 
               # Durable eval test for the claude-marketplaces consumer module
               # (pg2-7j5j). Uses a MOCK marketplace derivation carrying the same
