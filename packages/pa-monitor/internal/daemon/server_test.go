@@ -243,6 +243,7 @@ func TestServeWithMeterProviderRecordsRPCDuration(t *testing.T) {
 	}
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
 
 	st := newSharedState()
 	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil, nil, mp)

@@ -166,6 +166,17 @@ func TestSnapshotRecordsPhases(t *testing.T) {
 	if rec.phases["pricer"] == 0 {
 		t.Error("pricer phase not recorded")
 	}
+	// limits/weekly are producer-owned phases (producer.go buildDerivedState,
+	// re-homed off the emit tick in step 6). They fire in the same Assemble pass
+	// as pricer above, so assert them here — this is their coverage home; the
+	// daemon tick only READS the published projections (see the daemon-side
+	// TestTick_RecordsDaemonPhases which deliberately does NOT assert them).
+	if rec.phases["limits"] == 0 {
+		t.Error("limits phase not recorded")
+	}
+	if rec.phases["weekly"] == 0 {
+		t.Error("weekly phase not recorded")
+	}
 	// newTestPoller wires no WriteService, so db_write_sessions is correctly
 	// skipped (guarded by `if p.WriteService != nil`); not asserted here.
 	// The fixture session's transcript is new to this Poller instance, so the

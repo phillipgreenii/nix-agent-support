@@ -335,6 +335,26 @@ func TestExportDecoratorLogRecordsWhenInstrumentsSet(t *testing.T) {
 		t.Errorf("expected RECOVERED summary on stderr (health-line behavior unchanged), got %q", buf.String())
 	}
 
+	// export.duration histogram: mirror the metric-decorator assertion above,
+	// but for signal="log" — one data point per Export call (failure + success).
+	durMetric, ok := collectMetric(t, reader, "pa_monitor.otel.export.duration")
+	if !ok {
+		t.Fatal("pa_monitor.otel.export.duration not emitted")
+	}
+	durHist, ok := durMetric.Data.(metricdata.Histogram[float64])
+	if !ok {
+		t.Fatalf("export.duration is %T, want metricdata.Histogram[float64]", durMetric.Data)
+	}
+	var logSignalCount uint64
+	for _, dp := range durHist.DataPoints {
+		if sig, present := dp.Attributes.Value("signal"); present && sig.AsString() == "log" {
+			logSignalCount += dp.Count
+		}
+	}
+	if logSignalCount != 2 {
+		t.Errorf("export.duration signal=log count = %d, want 2 (one per Export call)", logSignalCount)
+	}
+
 	attemptsMetric, ok := collectMetric(t, reader, "pa_monitor.otel.export.attempts_total")
 	if !ok {
 		t.Fatal("pa_monitor.otel.export.attempts_total not emitted")

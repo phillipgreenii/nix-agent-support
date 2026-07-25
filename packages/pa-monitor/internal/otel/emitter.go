@@ -178,6 +178,25 @@ type Emitter struct {
 	weekUsageAttrs     []attribute.KeyValue
 }
 
+// NewWithReader builds a metrics-only Emitter whose instruments are served by
+// the supplied SDK reader instead of the production OTLP gRPC exporters, so a
+// test in ANOTHER package (e.g. internal/daemon, which records its tick/phase
+// durations through a concrete *Emitter and has no way to reach the unexported
+// registerMetrics) can observe those recordings via a ManualReader without a
+// live collector. It wires only the metric pipeline — no log provider and no
+// export-health decorators — so LogEvent is a no-op (logger nil) and the
+// export.duration/attempts_total instruments exist but are never driven here.
+// Production code MUST use New.
+func NewWithReader(reader sdkmetric.Reader) (*Emitter, error) {
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	e := &Emitter{metricsProvider: mp}
+	if err := e.registerMetrics(mp); err != nil {
+		_ = mp.Shutdown(context.Background())
+		return nil, err
+	}
+	return e, nil
+}
+
 // New constructs an Emitter if OTEL_EXPORTER_OTLP_ENDPOINT is set,
 // otherwise returns (nil, nil).
 func New(ctx context.Context, opts Options) (*Emitter, error) {

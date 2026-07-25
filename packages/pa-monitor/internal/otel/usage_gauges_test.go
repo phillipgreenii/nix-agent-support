@@ -14,10 +14,9 @@ import (
 func newTestEmitter(t *testing.T) (*Emitter, *metric.ManualReader) {
 	t.Helper()
 	reader := metric.NewManualReader()
-	mp := metric.NewMeterProvider(metric.WithReader(reader))
-	e := &Emitter{metricsProvider: mp}
-	if err := e.registerMetrics(mp); err != nil {
-		t.Fatalf("registerMetrics: %v", err)
+	e, err := NewWithReader(reader)
+	if err != nil {
+		t.Fatalf("NewWithReader: %v", err)
 	}
 	return e, reader
 }

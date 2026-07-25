@@ -1370,7 +1370,54 @@
           "legendFormat": "{{mode}} bytes/sec",
           "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*files/sec"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cps"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "files/sec"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*bytes/sec"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Bps"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "bytes/sec"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "id": 205,
@@ -1543,8 +1590,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(pa_monitor_otel_export_attempts_total[5m]))",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum by (outcome, signal) (rate(pa_monitor_otel_export_attempts_total[5m]))",
+          "legendFormat": "{{signal}} {{outcome}}",
           "refId": "A"
         }
       ]
