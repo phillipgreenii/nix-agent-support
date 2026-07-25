@@ -2,6 +2,7 @@ package eventqueue
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -62,8 +63,14 @@ type listenerState struct {
 // Queue is the durable, ordered, de-duped, TTL-bounded event queue (ADR 0031).
 // It is safe for concurrent use.
 type Queue struct {
-	mu    sync.Mutex
-	now   func() time.Time
+	mu  sync.Mutex
+	now func() time.Time
+	// after is the wait seam RunUntilIdle blocks on between passes (default
+	// time.After). It is paired with the `now` clock seam so a mock clock can
+	// drive BOTH coherently: a mock `after` advances virtual time by the tick and
+	// fires immediately, so RunUntilIdle terminates on ttl deterministically
+	// without real sleeping (see WithSleeper). The real default genuinely waits.
+	after func(time.Duration) <-chan time.Time
 	store Store
 	obs   Observer
 
@@ -85,6 +92,16 @@ type Option func(*Queue)
 // WithClock injects a clock seam (default time.Now) for deterministic ttl tests.
 func WithClock(now func() time.Time) Option { return func(q *Queue) { q.now = now } }
 
+// WithSleeper injects the wait seam RunUntilIdle blocks on between passes
+// (default time.After). It is the companion to WithClock: a mock clock supplies
+// an `after` that ADVANCES its virtual time by the requested tick and fires
+// immediately, so RunUntilIdle drains and terminates on ttl deterministically
+// without sleeping real time (and without the frozen-clock busy-loop the real
+// time.After caused under a mock clock).
+func WithSleeper(after func(time.Duration) <-chan time.Time) Option {
+	return func(q *Queue) { q.after = after }
+}
+
 // WithObserver installs a metrics Observer (INV-OBS-1).
 func WithObserver(o Observer) Option { return func(q *Queue) { q.obs = o } }
 
@@ -98,6 +115,7 @@ func WithEarlyEviction() Option { return func(q *Queue) { q.evictWhenAllAccept =
 func New(store Store, opts ...Option) (*Queue, error) {
 	q := &Queue{
 		now:     time.Now,
+		after:   time.After,
 		store:   store,
 		obs:     noopObserver{},
 		entries: map[string]*entry{},
@@ -303,9 +321,22 @@ func (q *Queue) Dispatch() (accepted int) {
 			continue // already recorded by a concurrent/re-entrant pass: at-most-once
 		}
 		// In-memory accept first; the durable accept record is written AFTER
-		// (ADR 0031 req 4) — the crash window that yields at-most-one redelivery.
+		// (ADR 0031 req 4) — the crash window that yields the at-least-once
+		// redelivery (one extra re-offer per crash window).
 		e.accepted[lid] = true
-		_ = q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid})
+		if err := q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
+			// The in-memory accept already happened and the listener has taken
+			// delivery responsibility (INV-EVT-1); we do NOT roll back or change
+			// delivery semantics. But a swallowed accept-write is a durability
+			// degradation — the event replays as un-accepted on EVERY restart and
+			// is redelivered forever with no signal. Enqueue surfaces its append
+			// error by returning it; Dispatch cannot return here without altering
+			// delivery, so it surfaces the failure via a structured log instead
+			// (matching the codebase's slog convention for a swallowed durable
+			// write, cf. orchestrator "event log emit failed").
+			slog.Error("eventqueue: accept-append failed; event will redeliver on restart until the write succeeds",
+				"eventId", p.evt.ID, "listenerId", lid, "err", err)
+		}
 		q.obs.OnAccept(p.evt.ID, lid)
 		accepted++
 		q.maybeEvict(e)
@@ -405,6 +436,13 @@ func (q *Queue) DepthByType() map[string]int {
 // (INV-LIFE-1) or ctx is cancelled. It is the drive loop behind the
 // `run-until-idle` operator subcommand; a busy handler simply keeps its head
 // re-offered until the head is accepted or its ttl expires.
+//
+// The between-pass wait blocks on the `after` seam (WithSleeper), NOT directly
+// on time.After, so it advances on the SAME clock the ttl math uses. Under the
+// real default this genuinely waits `tick`; under a mock clock whose `after`
+// advances virtual time, the loop makes deadline progress and terminates on ttl
+// deterministically without real sleeping (and without the frozen-clock
+// busy-loop a real time.After caused when q.now never advanced).
 func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
 	for {
 		q.Expire()
@@ -415,7 +453,7 @@ func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(tick):
+		case <-q.after(tick):
 		}
 	}
 }

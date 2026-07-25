@@ -1,8 +1,12 @@
 package eventqueue
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,10 +27,59 @@ func (d *dropAcceptStore) Append(r Record) error {
 func (d *dropAcceptStore) Replay() ([]Record, error) { return d.inner.Replay() }
 func (d *dropAcceptStore) Close() error              { return d.inner.Close() }
 
+// failAcceptStore returns an ERROR on the durable accept write (persisting every
+// other op) — modeling a persistent accept-write failure, as opposed to
+// dropAcceptStore's silent success-then-loss.
+type failAcceptStore struct{ inner Store }
+
+func (s *failAcceptStore) Append(r Record) error {
+	if r.Op == opAccept {
+		return errors.New("accept-append boom")
+	}
+	return s.inner.Append(r)
+}
+func (s *failAcceptStore) Replay() ([]Record, error) { return s.inner.Replay() }
+func (s *failAcceptStore) Close() error              { return s.inner.Close() }
+
+// Fix 1: a failing accept-append is a durability degradation — the event replays
+// un-accepted and redelivers on EVERY restart until the write succeeds. Dispatch
+// MUST surface it (asymmetric with Enqueue, which returns its append error),
+// not discard it with `_ =`. Delivery semantics stay unchanged: the in-memory
+// accept still stands because the listener already took responsibility when
+// Offer returned true (INV-EVT-1); the failure is surfaced via a structured log.
+func TestDispatchSurfacesAcceptAppendError(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	q, err := New(&failAcceptStore{inner: NewMemStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := newListener("h", "T")
+	q.Register(l)
+	mustEnqueue(t, q, evt("e1", "T", time.Hour))
+
+	if n := q.Dispatch(); n != 1 {
+		t.Fatalf("accepted = %d, want 1 (delivery unchanged despite the append failure)", n)
+	}
+	if !equal(l.accepted, []string{"e1"}) {
+		t.Fatalf("listener accept = %v, want [e1] (in-memory accept stands)", l.accepted)
+	}
+	if !strings.Contains(buf.String(), "accept-append failed") {
+		t.Fatalf("accept-append error was swallowed, not surfaced; log = %q", buf.String())
+	}
+}
+
 // Kill-mid-write: an event accepted just before a crash (accept record lost) is
-// NOT lost — it is redelivered exactly once on restart, and an idempotent
-// handler absorbs the duplicate (INV-EVT-1 / INV-EVT-2, ADR 0031 req 4).
-func TestCrashWindowRedeliversAcceptedEventExactlyOnce(t *testing.T) {
+// NOT lost — it redelivers at-least-once on restart (one extra re-offer per
+// crash window), and an idempotent handler absorbs the duplicate (INV-EVT-1 /
+// INV-EVT-2, ADR 0031 req 4). ADR-0031 guarantees at-least-once, NOT exactly
+// once: across repeated crashes an accepted-but-unpersisted event can redeliver
+// more than once (one extra per crash window). This test pins the single-crash
+// case: exactly one extra re-offer for one crash window.
+func TestCrashWindowRedeliversAcceptedEventAtLeastOnce(t *testing.T) {
 	mem := NewMemStore()
 	store := &dropAcceptStore{inner: mem}
 
@@ -45,7 +98,8 @@ func TestCrashWindowRedeliversAcceptedEventExactlyOnce(t *testing.T) {
 
 	// Simulate restart: a fresh queue replays the SAME durable log (which holds
 	// the enqueue record but not the lost accept record). The event survives and
-	// is re-offered exactly once.
+	// is re-offered once for this one crash window (at-least-once; a further crash
+	// in the same window would add another re-offer).
 	q2, err := New(mem) // replay from the real underlying store (enqueue persisted)
 	if err != nil {
 		t.Fatal(err)
@@ -55,10 +109,10 @@ func TestCrashWindowRedeliversAcceptedEventExactlyOnce(t *testing.T) {
 	}
 	l2 := newListener("h", "T")
 	q2.Register(l2)
-	q2.Dispatch() // redelivery
-	q2.Dispatch() // must NOT deliver a second time (at-most-one redelivery)
+	q2.Dispatch() // the one redelivery for this crash window
+	q2.Dispatch() // must NOT re-offer again within this restart (re-accepted)
 	if !equal(l2.offered, []string{"e1"}) {
-		t.Fatalf("redelivery count = %v, want exactly one re-offer of e1", l2.offered)
+		t.Fatalf("redelivery count = %v, want one re-offer of e1 for this crash window", l2.offered)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
@@ -111,17 +112,19 @@ func Emit(jsonArg []byte, loc Locator, enq Enqueuer) (Result, error) {
 	return Result{Core: core, Event: evt, Status: status}, nil
 }
 
-// wireEvent is the on-the-wire event shape (ttl as a duration string).
+// wireEvent is the on-the-wire event shape (ttl as a duration string, at as an
+// RFC3339 timestamp string — event.schema.json).
 type wireEvent struct {
 	SchemaVersion string         `json:"schemaVersion"`
 	ID            string         `json:"id"`
 	Type          string         `json:"type"`
 	TTL           string         `json:"ttl"`
+	At            string         `json:"at"`
 	Payload       map[string]any `json:"payload"`
 }
 
 // parseEvent decodes the validated JSON into a core event, converting the ttl
-// string to a duration.
+// string to a duration and the optional at string to a time.
 func parseEvent(data []byte) (eventqueue.Event, error) {
 	var w wireEvent
 	if err := json.Unmarshal(data, &w); err != nil {
@@ -131,11 +134,31 @@ func parseEvent(data []byte) (eventqueue.Event, error) {
 	if err != nil {
 		return eventqueue.Event{}, fmt.Errorf("emit: %w", err)
 	}
+	at, err := parseAt(w.At)
+	if err != nil {
+		return eventqueue.Event{}, fmt.Errorf("emit: %w", err)
+	}
 	return eventqueue.Event{
 		SchemaVersion: w.SchemaVersion,
 		ID:            w.ID,
 		Type:          w.Type,
 		TTL:           ttl,
+		At:            at,
 		Payload:       w.Payload,
 	}, nil
+}
+
+// parseAt reads the optional wire `at` source-stamp (RFC3339, event.schema.json).
+// `at` MAY be absent (empty), in which case Event.At is the zero time — the core
+// treats At as optional (OQ-EVT-TTL-ORIGIN); a present-but-unparseable value is a
+// malformed event, classified like ParseTTL's rejection.
+func parseAt(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: unparseable at %q: %v", eventqueue.ErrInvalidEvent, s, err)
+	}
+	return t, nil
 }

@@ -18,6 +18,16 @@ func newClock() *mockClock {
 func (c *mockClock) now() time.Time          { return c.t }
 func (c *mockClock) advance(d time.Duration) { c.t = c.t.Add(d) }
 
+// after is the WithSleeper wait seam paired with this mock clock: it advances
+// virtual time by d and fires immediately (no real sleep), so RunUntilIdle
+// makes deadline progress and terminates on ttl under the mock clock.
+func (c *mockClock) after(d time.Duration) <-chan time.Time {
+	c.advance(d)
+	ch := make(chan time.Time, 1)
+	ch <- c.t
+	return ch
+}
+
 // fakeListener records every offer and can be configured to decline (busy) a
 // given number of times per event id before accepting, or to never bind / never
 // accept — enough to drive every INV-CONC-1 / INV-FAIL-1 branch.
@@ -454,6 +464,35 @@ func TestRunUntilIdleCancel(t *testing.T) {
 	defer cancel()
 	if err := q.RunUntilIdle(ctx, time.Millisecond); err == nil {
 		t.Fatalf("expected context error, got nil")
+	}
+}
+
+// Fix 3 (clock seam): under a MOCK clock, RunUntilIdle terminates on ttl by
+// driving its between-pass wait off the SAME clock seam (WithSleeper), advancing
+// virtual time each pass. With the old real-time.After it would sleep real time
+// while q.now stayed frozen — deadlines never advanced, so it could never expire
+// the orphan and busy-looped until ctx. Here the orphan (30m ttl, no binding)
+// must drain via virtual-time expiry, NOT via the real 5s ctx deadline.
+func TestRunUntilIdleMockClockExpiresWithoutRealSleep(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk, WithSleeper(clk.after))
+	q.Register(newListener("h", "other")) // binds nothing -> the event is an orphan
+	mustEnqueue(t, q, evt("e1", "orphan", 30*time.Minute))
+
+	start := time.Now()
+	// A real 5s ceiling proves termination is by VIRTUAL ttl, not by this ctx: a
+	// 1-minute tick advances virtual time 1m/pass, so ~30 passes expire the orphan
+	// essentially instantly in real time.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := q.RunUntilIdle(ctx, time.Minute); err != nil {
+		t.Fatalf("RunUntilIdle under mock clock: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("RunUntilIdle slept real time (%v); it must advance the mock clock", elapsed)
+	}
+	if len(q.DepthByType()) != 0 {
+		t.Fatalf("orphan not drained by virtual-time expiry: %v", q.DepthByType())
 	}
 }
 
