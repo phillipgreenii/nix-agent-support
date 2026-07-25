@@ -22,18 +22,23 @@ func newReportCmd() *cobra.Command {
 	var days int
 	cmd := &cobra.Command{
 		Use:   "report",
-		Short: "Summarize logged decisions grouped by tool, hook decision, or outcome",
+		Short: "Summarize logged decisions grouped by tool, hook decision, outcome, or command",
 		Long: `Summarize logged decisions from the asklog database, grouped by
-tool_name, hook_decision, or outcome. Optionally filter to only show
-miss categories (where hook disagreed with user outcome) and to
-restrict the time window.`,
+tool_name, hook_decision, outcome, sandbox_enabled, or command.
+
+Grouping by "command" keys on the full normalized command class (see
+CommandClass): compound commands are bucketed by their real constituent
+commands rather than a newline-truncated summary, so "cd foo && work" and
+"cd foo\nwork" fall in the same bucket. Optionally filter to only show miss
+categories (where hook disagreed with user outcome) and restrict the time
+window.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runReport(groupBy, missesOnly, format, days, since)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&groupBy, "group-by", "tool_name", "Group results by: tool_name|hook_decision|outcome|sandbox_enabled")
+	cmd.Flags().StringVar(&groupBy, "group-by", "tool_name", "Group results by: tool_name|hook_decision|outcome|sandbox_enabled|command")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show miss categories")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: json|table")
 	cmd.Flags().IntVar(&days, "days", 0, "Only report rows from the last N days")
@@ -91,6 +96,8 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 			key = row.Outcome
 		case "sandbox_enabled":
 			key = sandboxEnabledKey(row.SandboxEnabled)
+		case "command":
+			key = asklog.CommandClass(row.ToolName, json.RawMessage(row.ToolInputJSON), row.CWD)
 		default:
 			key = row.ToolName
 		}

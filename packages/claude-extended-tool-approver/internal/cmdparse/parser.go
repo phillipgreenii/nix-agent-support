@@ -972,3 +972,40 @@ func NormalizeExecutable(executable, projectRoot, cwd string) string {
 	}
 	return executable
 }
+
+// NormalizeCommand returns a canonical, NON-truncated representation of a bash
+// command, suitable as a stable grouping key for "same command" analysis (e.g.
+// bucketing decision rows in the identify-hook-misses taxonomy).
+//
+// It parses the command into leaf commands — splitting on &&, ||, ;, |,
+// newlines, loops and subshells (see Parse / splitCompound) — and re-joins each
+// leaf's normalized "<executable> <args...>" form with " && ". Because Parse
+// splits newline- and &&-separated compounds into the SAME leaf sequence,
+// "cd foo && work" and "cd foo\nwork" yield the SAME key. Env-assignment-only
+// and redirection-only leaves (no executable) are dropped from the key.
+//
+// Unlike asklog.bashSummary, NormalizeCommand NEVER truncates at the first
+// newline or at a fixed length, so two distinct commands that share a long
+// (>120-char) common prefix remain distinct keys instead of collapsing into a
+// phantom bucket (bead pg2-okd13.3). projectRoot/cwd thread through to
+// NormalizeExecutable so path executables normalize consistently; pass "" when
+// unknown (non-path executables are unaffected by either).
+func NormalizeCommand(command, projectRoot, cwd string) string {
+	leaves := Parse(command)
+	parts := make([]string, 0, len(leaves))
+	for _, lc := range leaves {
+		if lc.Executable == "" {
+			continue
+		}
+		exec := NormalizeExecutable(lc.Executable, projectRoot, cwd)
+		if len(lc.Args) > 0 {
+			parts = append(parts, exec+" "+strings.Join(lc.Args, " "))
+		} else {
+			parts = append(parts, exec)
+		}
+	}
+	if len(parts) == 0 {
+		return strings.TrimSpace(command)
+	}
+	return strings.Join(parts, " && ")
+}

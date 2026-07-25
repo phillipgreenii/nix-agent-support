@@ -2,6 +2,7 @@ package cmdparse
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -1104,5 +1105,45 @@ func TestParse_Heredoc(t *testing.T) {
 				t.Errorf("HasHeredoc = %v, want %v", hasHeredoc, tt.want)
 			}
 		})
+	}
+}
+
+// --- NormalizeCommand (grouping-key producer, bead pg2-okd13.3) ---
+
+func TestNormalizeCommand_CompoundAndMultilineSameKey(t *testing.T) {
+	// The core of pg2-okd13.3: asklog.bashSummary truncated at the first
+	// newline, so "cd foo\nwork" collapsed to a bare "cd foo" and never matched
+	// the "cd foo && work" form. NormalizeCommand parses both into the same leaf
+	// sequence, so they MUST produce the same grouping key.
+	compound := NormalizeCommand("cd foo && work", "", "")
+	multiline := NormalizeCommand("cd foo\nwork", "", "")
+	if compound != multiline {
+		t.Fatalf("compound %q != multiline %q; must group under the same key", compound, multiline)
+	}
+	// It must NOT collapse to the (buggy) newline-truncated first line "cd foo".
+	if multiline == "cd foo" {
+		t.Errorf("multiline key = %q; must not be the newline-truncated first line", multiline)
+	}
+	// And it must reflect the real tail command "work".
+	if !strings.Contains(multiline, "work") {
+		t.Errorf("key %q should contain the tail command 'work'", multiline)
+	}
+}
+
+func TestNormalizeCommand_LongDistinctNotCollapsed(t *testing.T) {
+	// Two DISTINCT commands sharing a >120-char common prefix must NOT collapse
+	// to the same key. asklog.bashSummary truncated at maxSummaryLen (120),
+	// which merged them into one phantom bucket.
+	prefix := "echo " + strings.Repeat("a", 150)
+	a := NormalizeCommand(prefix+" AAA", "", "")
+	b := NormalizeCommand(prefix+" BBB", "", "")
+	if a == b {
+		t.Fatalf("distinct long commands collapsed to same key (len %d)", len(a))
+	}
+	if !strings.HasSuffix(a, " AAA") {
+		t.Errorf("key a should preserve the full command past 120 chars, got %q", a)
+	}
+	if !strings.HasSuffix(b, " BBB") {
+		t.Errorf("key b should preserve the full command past 120 chars, got %q", b)
 	}
 }

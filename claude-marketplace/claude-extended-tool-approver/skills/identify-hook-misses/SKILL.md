@@ -40,9 +40,15 @@ If zero misses, report "No misses found" and stop.
 
 ### Step 2: Group by pattern and rank
 
+Group on the `command_class` field, NOT `tool_summary`. `command_class` is the
+full normalized command emitted by `evaluate` (via `CommandClass`); `tool_summary`
+truncates Bash commands at the first newline and at 120 chars, so multi-line
+compound commands (`cd <dir> && …`) collapsed into phantom `cd` buckets (bead
+pg2-okd13.3).
+
 ```bash
-jq 'group_by(.tool_summary) | map({
-  pattern: .[0].tool_summary,
+jq 'group_by(.command_class) | map({
+  pattern: .[0].command_class,
   tool_name: .[0].tool_name,
   count: length,
   ids: [.[].id],
@@ -71,7 +77,7 @@ Present exactly this format:
 ```text
 ## Hook Miss Patterns (ranked by frequency)
 
-1. **`<tool_summary pattern>` — <N> misses** (sandbox: on=<X> off=<Y> unknown=<Z>)
+1. **`<command_class pattern>` — <N> misses** (sandbox: on=<X> off=<Y> unknown=<Z>)
    Hook says: <hook_decision> | Expected: <expected from outcome>
    Categories: <miss-uncaught, miss-caught-by-settings, etc.>
    Sample rows: <id1>, <id2>, <id3>
@@ -124,7 +130,7 @@ expected decision is `<expected_decision>` (based on user outcome: <outcome>).
 ## Reproduce
 
 claude-extended-tool-approver evaluate --misses-only --format=json | \
- jq '[.[] | select(.tool_summary | test("<pattern-regex>"))]'
+ jq '[.[] | select(.command_class | test("<pattern-regex>"))]'
 
 claude-extended-tool-approver show <id1> <id2> <id3> --format=json
 

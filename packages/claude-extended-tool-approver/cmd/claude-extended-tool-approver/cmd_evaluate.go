@@ -17,6 +17,7 @@ type evalResult struct {
 	ID             int    `json:"id"`
 	ToolName       string `json:"tool_name"`
 	ToolSummary    string `json:"tool_summary"`
+	CommandClass   string `json:"command_class"`
 	HookDecision   string `json:"hook_decision"`
 	ReplayResult   string `json:"replay_result"`
 	SettingsResult string `json:"settings_result,omitempty"`
@@ -107,6 +108,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 			ID:             row.ID,
 			ToolName:       row.ToolName,
 			ToolSummary:    row.ToolSummary,
+			CommandClass:   asklog.CommandClass(row.ToolName, json.RawMessage(row.ToolInputJSON), row.CWD),
 			Outcome:        row.Outcome,
 			SandboxEnabled: sandboxEnabledPtr(row.SandboxEnabled),
 		}
