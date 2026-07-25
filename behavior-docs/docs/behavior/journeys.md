@@ -72,9 +72,7 @@ _Actor:_ `ACTOR-1` (Author) — owns the question and its resolution.
 Decide → state the decision in the docs → record a decision doc if consequential → delete
 the question. A question is a placeholder for a gap, not a home for debate.
 
-### `JOURNEY-4` — Propagating a contract change across a reference seam <!-- uuid: b7351f46-b8bc-4fff-bc52-54ec6aa578bf -->
-
-<!-- uuid: 0d9f88cb-d020-43ac-a87e-c415db77073e -->
+### `JOURNEY-4` — Propagating a contract change across a reference seam <!-- uuid: 0d9f88cb-d020-43ac-a87e-c415db77073e -->
 
 _Actor:_ `ACTOR-1` (Author) of the owning set.
 

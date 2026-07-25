@@ -28,13 +28,16 @@ sec "IDs present (INV-3) — by family, then full list"
 { grep -rhoE "$IDRE" ./*.md || true; } | sort -uV | tr '\n' ' '
 echo
 
-sec "UUID carriers (INV-3) — well-formed + intra-set-unique; expect clean"
+sec "UUID carriers (INV-3) — well-formed, intra-set-unique, one-per-ID, no orphans; expect clean"
 # Identity is a UUID minted at a definition (INV-3), carried in an HTML comment
 # '<!-- uuid: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX -->'. Retrofit is lazy, so most definitions
 # carry no UUID yet; this validates only the carriers that ARE present: each MUST be a canonical
-# RFC-4122 UUID and no two definitions in this set may share one. Cross-set resolution
-# (owner-UUID resolves to exactly one owner definition) is inherently multi-set and is checked by
-# the V3 inter-evaluator, not here.
+# RFC-4122 UUID and no two definitions in this set may share one. Because a UUID is minted ONCE at
+# its definition, two further intra-set rules hold: each leading-ID token MUST bear at most one
+# carrier (no DUAL IDENTITY — e.g. a reference re-minting the owner's UUID), and every carrier MUST
+# sit on a line that carries an ID token (no ORPHAN carrier). Cross-set resolution (owner-UUID
+# resolves to exactly one owner definition) is inherently multi-set and is checked by the V3
+# inter-evaluator, not here.
 UUIDRE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 carriers=$({ grep -rhoE '<!--[[:space:]]*uuid:[[:space:]]*[^[:space:]]+[[:space:]]*-->' ./*.md || true; } |
   sed -E 's/<!--[[:space:]]*uuid:[[:space:]]*//; s/[[:space:]]*-->$//')
@@ -54,7 +57,40 @@ else
     while IFS= read -r d; do [ -n "$d" ] && printf '  FAIL duplicate UUID within set: %s\n' "$d"; done <<<"$dups"
     uuid_bad=1
   fi
-  [ "$uuid_bad" -eq 0 ] && printf '  clean (%s carrier(s), all well-formed + unique)\n' "$(printf '%s\n' "$carriers" | grep -c .)"
+  # Pair each carrier line with the FIRST ID token appearing BEFORE its marker (the
+  # definition the carrier identifies). Field 1 is that ID (empty for an orphan
+  # line); field 2 is the UUID. Space-separated — IDs and UUIDs contain no spaces.
+  pairs=$(
+    { grep -rhE '<!--[[:space:]]*uuid:[[:space:]]*[^[:space:]]+[[:space:]]*-->' ./*.md || true; } |
+      while IFS= read -r line; do
+        u=$(printf '%s\n' "$line" |
+          grep -oE '<!--[[:space:]]*uuid:[[:space:]]*[^[:space:]]+[[:space:]]*-->' |
+          sed -E 's/<!--[[:space:]]*uuid:[[:space:]]*//; s/[[:space:]]*-->$//' | head -n1)
+        prefix=${line%%<!--*}
+        id=$({ printf '%s\n' "$prefix" | grep -oE "$IDRE" || true; } | head -n1)
+        printf '%s %s\n' "$id" "$u"
+      done
+  )
+  # ORPHAN carrier: a carrier line with no leading ID token (empty field 1 → a
+  # leading space). Each such carrier has no definition to identify.
+  orphans=$(printf '%s\n' "$pairs" | { grep '^ ' || true; } | sed -E 's/^ //')
+  if [ -n "$orphans" ]; then
+    while IFS= read -r o; do
+      [ -n "$o" ] && printf '  FAIL orphan carrier (no ID token on its line): %s\n' "$o"
+    done <<<"$orphans"
+    uuid_bad=1
+  fi
+  # DUAL IDENTITY: an ID token appearing with more than one DISTINCT carrier. Dedup
+  # identical (id,uuid) pairs first (a verbatim repeat is a value-dup, caught above),
+  # then a leading ID seen twice bears two carriers.
+  dual=$(printf '%s\n' "$pairs" | { grep -v '^ ' || true; } | sort -u | cut -d' ' -f1 | sort | uniq -d)
+  if [ -n "$dual" ]; then
+    while IFS= read -r id; do
+      [ -n "$id" ] && printf '  FAIL dual identity: %s bears more than one carrier\n' "$id"
+    done <<<"$dual"
+    uuid_bad=1
+  fi
+  [ "$uuid_bad" -eq 0 ] && printf '  clean (%s carrier(s): well-formed, unique, one per ID, none orphaned)\n' "$(printf '%s\n' "$carriers" | grep -c .)"
 fi
 
 sec "Status headers (INV-4) — expect none"

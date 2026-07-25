@@ -90,15 +90,15 @@ contract, then run the **conformance suite** (positive + negative) before trusti
    exit codes (`0` ok / `1` error / `2` busy), and the `starting → started → stopping → stopped`
    lifecycle. Messages are accepted **only after `started` and before `stopping`**.
 3. Implement the interface's subcommands:
-   - **`INTF-SOURCE`** <!-- uuid: 20f6bd96-8c08-4996-b28e-120310ca1c57 --> — `query` returning `{ events }` or `{ deferred: true }` (then push via
+   - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
      callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`,
      `ttl`, `at`, and a **JSON-object** `payload`.
-   - **`INTF-HANDLER`** <!-- uuid: 5b58b72c-15f1-4b8e-be9a-f83a0f164cc1 --> — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
+   - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
      and (if deferred) push `running / paused / completed / failed` via the callback; a `failed`
      carries a **failure class** (`INV-FAIL-1`). MUST tolerate a **duplicate event** idempotently
      (`INV-EVT-2`).
-   - **`INTF-MON`** <!-- uuid: 0572b0aa-b01f-4ed6-9681-c16c93e45c3b --> — declare push or pull, and the metric subset handled.
-   - **`INTF-STORE`** <!-- uuid: 3f4b7167-3271-4972-b7a7-adf6488d9b9a --> — `get` / `put` / `delete` over string keys and JSON-string values.
+   - **`INTF-MON`** — declare push or pull, and the metric subset handled.
+   - **`INTF-STORE`** — `get` / `put` / `delete` over string keys and JSON-string values.
 4. Run the interface's **conformance suite** (`INV-INTF-2`): **positive** checks (well-formed
    requests get schema-valid replies; the deferred path echoes the tracking `id`; lifecycle
    transitions are accepted) and **negative** checks (an unknown `schemaVersion` is _reported_, not
