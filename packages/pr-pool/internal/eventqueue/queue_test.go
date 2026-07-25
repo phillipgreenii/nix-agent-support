@@ -280,6 +280,81 @@ func TestNoEvictionRetainsUntilTTL(t *testing.T) {
 	}
 }
 
+// Regression (bead pg2-f8btt): with early eviction on, evicting an id MUST drop
+// it from the FIFO spine (q.order), not leave a tombstone. Otherwise a re-emit
+// of the evicted id BEFORE the next Expire() is treated as fresh and appends a
+// SECOND spine entry — double-counting the id in DepthByType (INV-OBS-1 queue
+// depth) and jumping the re-emitted event ahead of earlier events (ADR-0031
+// req 1, FIFO).
+func TestEvictedIdReEmitLeavesNoTombstone(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk, WithEarlyEviction())
+	a := newListener("a", "T")
+	q.Register(a)
+	mustEnqueue(t, q, evt("A", "T", time.Hour))
+	mustEnqueue(t, q, evt("B", "T", time.Hour))
+	// One pass offers a its head A; a accepts; a is the only bound listener, so
+	// A is evicted early. B is NOT offered this pass (one head per listener).
+	q.Dispatch()
+	if d := q.DepthByType()["T"]; d != 1 {
+		t.Fatalf("after evicting A, depth[T] = %d, want 1 (only B retained)", d)
+	}
+	// Re-emit A BEFORE any Expire(). A is a genuinely fresh event now; it MUST
+	// go to the FIFO tail (after B), not resurrect a stale spine position.
+	if r := mustEnqueue(t, q, evt("A", "T", time.Hour)); r != Enqueued {
+		t.Fatalf("re-emit of evicted A = %v, want Enqueued (fresh event)", r)
+	}
+	// INV-OBS-1: depth counts distinct retained events (B + fresh A) = 2. A
+	// tombstoned A left in q.order would inflate this to 3.
+	if d := q.DepthByType()["T"]; d != 2 {
+		t.Fatalf("depth[T] = %d after re-emit, want 2 (B + fresh A); tombstone double-count", d)
+	}
+	// Drain. FIFO (ADR-0031 req 1): B (enqueued before the re-emit) is delivered
+	// before the re-emitted A. With a tombstone the fresh A jumps to spine index
+	// 0 and is delivered before B — the corruption this guards against.
+	for range 5 {
+		q.Dispatch()
+	}
+	if !equal(a.accepted, []string{"A", "B", "A"}) {
+		t.Fatalf("delivery order = %v, want [A B A] (B before the re-emitted A; FIFO)", a.accepted)
+	}
+}
+
+// Regression (bead pg2-f8btt): the same evict-leaves-tombstone defect on the
+// durable replay path (opEvict). A WAL of enqueue A, enqueue B, evict A, then
+// re-emit A (fresh) MUST replay to a tombstone-free spine — B before the
+// re-emitted A, and A counted once.
+func TestReplayEvictedIdReEmitLeavesNoTombstone(t *testing.T) {
+	clk := newClock()
+	store := NewMemStore()
+	enq := func(id string) Record { return recordFromEvent(evt(id, "T", time.Hour), clk.now()) }
+	for _, r := range []Record{
+		enq("A"),
+		enq("B"),
+		{Op: opEvict, EventID: "A"},
+		enq("A"), // re-emit of the evicted id, still within ttl
+	} {
+		if err := store.Append(r); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	q, err := New(store, WithClock(clk.now), WithEarlyEviction())
+	if err != nil {
+		t.Fatalf("New(replay): %v", err)
+	}
+	if d := q.DepthByType()["T"]; d != 2 {
+		t.Fatalf("post-replay depth[T] = %d, want 2 (B + fresh A); opEvict tombstone double-count", d)
+	}
+	a := newListener("a", "T")
+	q.Register(a)
+	for range 5 {
+		q.Dispatch()
+	}
+	if !equal(a.accepted, []string{"B", "A"}) {
+		t.Fatalf("post-replay delivery order = %v, want [B A] (FIFO; B before the re-emitted A)", a.accepted)
+	}
+}
+
 // Fan-out: an event bound by several listeners is delivered to each, with
 // acceptance tracked per (event, listener) (INV-EVT-1).
 func TestFanOut(t *testing.T) {

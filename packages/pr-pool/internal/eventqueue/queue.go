@@ -137,6 +137,7 @@ func (q *Queue) replay() error {
 			}
 		case opEvict:
 			delete(q.entries, r.EventID)
+			q.dropFromOrder(r.EventID) // no tombstone: a re-emit must re-append fresh
 		}
 	}
 	return nil
@@ -258,6 +259,12 @@ func (q *Queue) maybeEvict(e *entry) {
 	}
 	_ = q.store.Append(Record{Op: opEvict, EventID: e.evt.ID})
 	delete(q.entries, e.evt.ID)
+	// Drop the evicted id from the FIFO spine too. Leaving it as a tombstone lets
+	// a re-emit BEFORE the next Expire() append a SECOND spine entry (the stale-
+	// removal branch in Enqueue only fires while q.entries still holds the id),
+	// which double-counts the id (INV-OBS-1) and reorders delivery (ADR-0031
+	// req 1). Bead pg2-f8btt.
+	q.dropFromOrder(e.evt.ID)
 }
 
 // Expire drops every event past its ttl and returns how many were dropped. An
