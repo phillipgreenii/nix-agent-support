@@ -539,6 +539,160 @@ func TestRecordPreToolDecision_NilTrace_NoTraceEntries(t *testing.T) {
 	}
 }
 
+// queryHookContext returns the v5 context columns for the most recent row in
+// the given session as *string (nil = SQL NULL).
+func queryHookContext(t *testing.T, s *Store, sessionID string) (permMode, promptID, transcript, toolResp *string) {
+	t.Helper()
+	err := s.db.QueryRow(
+		`SELECT permission_mode, prompt_id, transcript_path, tool_response
+		 FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&permMode, &promptID, &transcript, &toolResp)
+	if err != nil {
+		t.Fatalf("query hook context: %v", err)
+	}
+	return
+}
+
+func TestRecordPreToolDecision_PersistsHookContext(t *testing.T) {
+	for _, trace := range []bool{false, true} {
+		name := "non-trace"
+		if trace {
+			name = "trace"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := testStore(t)
+			input := testInput("hc", "Bash", "tool-hc", json.RawMessage(`{"command":"ls"}`))
+			input.PermissionMode = "acceptEdits"
+			input.PromptID = "prompt-9"
+			input.TranscriptPath = "/x/t.jsonl"
+			input.AgentType = "Explore"
+			result := hookio.RuleResult{Decision: hookio.Approve, Reason: "safe"}
+			if trace {
+				result.Trace = []hookio.TraceEntry{{RuleName: "safecmds", Decision: hookio.Approve, Reason: "safe"}}
+			}
+			if err := RecordPreToolDecision(s, input, result); err != nil {
+				t.Fatalf("RecordPreToolDecision: %v", err)
+			}
+
+			pm, pid, tp, _ := queryHookContext(t, s, "hc")
+			if pm == nil || *pm != "acceptEdits" {
+				t.Errorf("permission_mode = %v, want acceptEdits", pm)
+			}
+			if pid == nil || *pid != "prompt-9" {
+				t.Errorf("prompt_id = %v, want prompt-9", pid)
+			}
+			if tp == nil || *tp != "/x/t.jsonl" {
+				t.Errorf("transcript_path = %v, want /x/t.jsonl", tp)
+			}
+			var agentType *string
+			_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='hc'").Scan(&agentType)
+			if agentType == nil || *agentType != "Explore" {
+				t.Errorf("agent_type = %v, want Explore", agentType)
+			}
+		})
+	}
+}
+
+func TestResolveApproved_SetsToolResponse_NoClobber(t *testing.T) {
+	s := testStore(t)
+	input := testInput("tr", "Bash", "tool-tr", json.RawMessage(`{"command":"ls"}`))
+	input.PermissionMode = "default"
+	input.PromptID = "prompt-1"
+	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "ask"}
+	if err := RecordPreToolDecision(s, input, result); err != nil {
+		t.Fatalf("RecordPreToolDecision: %v", err)
+	}
+
+	// PostToolUse carries the tool_response payload.
+	input.ToolResponse = json.RawMessage(`{"stdout":"hi","is_error":false}`)
+	if err := ResolveApproved(s, input, "done"); err != nil {
+		t.Fatalf("ResolveApproved: %v", err)
+	}
+
+	pm, pid, _, tr := queryHookContext(t, s, "tr")
+	if pm == nil || *pm != "default" {
+		t.Errorf("permission_mode clobbered by PostToolUse = %v, want default", pm)
+	}
+	if pid == nil || *pid != "prompt-1" {
+		t.Errorf("prompt_id clobbered by PostToolUse = %v, want prompt-1", pid)
+	}
+	if tr == nil || *tr != `{"stdout":"hi","is_error":false}` {
+		t.Errorf("tool_response = %v, want the raw payload", tr)
+	}
+	if o := getOutcome(t, s, "tr"); o != "approved" {
+		t.Errorf("outcome = %q, want approved", o)
+	}
+}
+
+func TestResolveApproved_NoPendingRow_DropsToolResponse(t *testing.T) {
+	s := testStore(t)
+	input := testInput("drop", "Bash", "tool-drop", json.RawMessage(`{"command":"ls"}`))
+	input.ToolResponse = json.RawMessage(`{"is_error":true}`)
+
+	if err := ResolveApproved(s, input, ""); err != nil {
+		t.Fatalf("ResolveApproved: %v", err)
+	}
+	// No pending PreToolUse row existed → ResolveApproved does NOT INSERT a
+	// fallback row, so the tool_response is dropped on the floor.
+	if n := countRows(t, s, "1=1"); n != 0 {
+		t.Errorf("rows = %d, want 0 (ResolveApproved has no INSERT fallback)", n)
+	}
+}
+
+func TestRecordPermissionDenied_FallbackSetsPermissionModeAndAgentType(t *testing.T) {
+	s := testStore(t)
+	input := testInput("den", "Bash", "tool-den", json.RawMessage(`{"command":"curl http://evil"}`))
+	input.PermissionMode = "auto"
+	input.AgentType = "general-purpose"
+	input.Reason = "Auto mode denied: network access not allowed"
+
+	if err := RecordPermissionDenied(s, input); err != nil {
+		t.Fatalf("RecordPermissionDenied: %v", err)
+	}
+	if n := countRows(t, s, "1=1"); n != 1 {
+		t.Fatalf("rows = %d, want 1", n)
+	}
+
+	pm, _, _, _ := queryHookContext(t, s, "den")
+	if pm == nil || *pm != "auto" {
+		t.Errorf("permission_mode = %v, want auto (else auto-denials derive to unknown)", pm)
+	}
+	var at *string
+	_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='den'").Scan(&at)
+	if at == nil || *at != "general-purpose" {
+		t.Errorf("agent_type = %v, want general-purpose", at)
+	}
+	// This auto-mode denial (the primary calibration signal) now buckets as auto.
+	if got := ApprovalSource(pm, nil, nil); got != "auto" {
+		t.Errorf("ApprovalSource = %q, want auto", got)
+	}
+}
+
+func TestRecordPermissionRequest_FallbackSetsPermissionMode(t *testing.T) {
+	s := testStore(t)
+	input := testInput("req", "Write", "", json.RawMessage(`{"file_path":"/etc/hosts"}`))
+	input.PermissionMode = "default"
+	input.PromptID = "prompt-2"
+	input.AgentType = "Explore"
+
+	if err := RecordPermissionRequest(s, input, `[{"type":"toolAlwaysAllow"}]`); err != nil {
+		t.Fatalf("RecordPermissionRequest: %v", err)
+	}
+
+	pm, pid, _, _ := queryHookContext(t, s, "req")
+	if pm == nil || *pm != "default" {
+		t.Errorf("permission_mode = %v, want default", pm)
+	}
+	if pid == nil || *pid != "prompt-2" {
+		t.Errorf("prompt_id = %v, want prompt-2", pid)
+	}
+	var at *string
+	_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='req'").Scan(&at)
+	if at == nil || *at != "Explore" {
+		t.Errorf("agent_type = %v, want Explore", at)
+	}
+}
+
 func TestFullLifecycle_Abstain_ThenPermissionDenied(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-pd4", json.RawMessage(`{"command":"dangerous-cmd"}`))

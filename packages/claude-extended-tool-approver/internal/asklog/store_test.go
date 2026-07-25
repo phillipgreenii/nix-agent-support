@@ -109,8 +109,8 @@ func TestNewStore_SchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 4 {
-		t.Errorf("schema_version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("schema_version = %d, want 5", version)
 	}
 }
 
@@ -150,6 +150,61 @@ func TestNewStore_Migration2_NewColumns(t *testing.T) {
 	}
 	if correctExplanation != "test explanation" {
 		t.Errorf("correct_hook_decision_explanation = %q, want 'test explanation'", correctExplanation)
+	}
+}
+
+func TestNewStore_Migration5_NewColumns(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	// The v5 columns are writable and round-trip verbatim.
+	_, err = s.db.Exec(`INSERT INTO tool_decisions
+		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at,
+		 permission_mode, prompt_id, tool_response, transcript_path)
+		VALUES ('v5', '/tmp', 'Bash', 'h1', '{}', '2026-01-01T00:00:00Z',
+		        'bypassPermissions', 'p-1', '{"is_error":true}', '/x/t.jsonl')`)
+	if err != nil {
+		t.Fatalf("insert with v5 columns: %v", err)
+	}
+
+	var permMode, promptID, toolResp, transcript string
+	err = s.db.QueryRow(`SELECT permission_mode, prompt_id, tool_response, transcript_path
+		FROM tool_decisions WHERE session_id = 'v5'`).Scan(&permMode, &promptID, &toolResp, &transcript)
+	if err != nil {
+		t.Fatalf("query v5 columns: %v", err)
+	}
+	if permMode != "bypassPermissions" {
+		t.Errorf("permission_mode = %q, want bypassPermissions", permMode)
+	}
+	if promptID != "p-1" {
+		t.Errorf("prompt_id = %q, want p-1", promptID)
+	}
+	if toolResp != `{"is_error":true}` {
+		t.Errorf("tool_response = %q, want the raw JSON payload", toolResp)
+	}
+	if transcript != "/x/t.jsonl" {
+		t.Errorf("transcript_path = %q, want /x/t.jsonl", transcript)
+	}
+
+	// A row inserted WITHOUT the new columns (an old row) leaves them NULL and readable.
+	_, err = s.db.Exec(`INSERT INTO tool_decisions
+		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
+		VALUES ('v5-null', '/tmp', 'Bash', 'h2', '{}', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert without v5 columns: %v", err)
+	}
+	var pm, pid, tr, tp *string
+	err = s.db.QueryRow(`SELECT permission_mode, prompt_id, tool_response, transcript_path
+		FROM tool_decisions WHERE session_id = 'v5-null'`).Scan(&pm, &pid, &tr, &tp)
+	if err != nil {
+		t.Fatalf("query null v5 columns: %v", err)
+	}
+	if pm != nil || pid != nil || tr != nil || tp != nil {
+		t.Errorf("new columns should be NULL for a row that omits them, got %v/%v/%v/%v", pm, pid, tr, tp)
 	}
 }
 
@@ -213,8 +268,8 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 	// Verify schema version is now 3
 	var version int
 	_ = s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
-	if version != 4 {
-		t.Errorf("schema_version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("schema_version = %d, want 5", version)
 	}
 
 	// Verify old row has excluded = 0 (default)
@@ -268,8 +323,8 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 4 {
-		t.Errorf("schema_version = %d, want 4", version)
+	if version != 5 {
+		t.Errorf("schema_version = %d, want 5", version)
 	}
 }
 
@@ -291,8 +346,8 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 
 	var count int
 	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
-	if count != 4 {
-		t.Errorf("schema_version rows = %d, want 4", count)
+	if count != 5 {
+		t.Errorf("schema_version rows = %d, want 5", count)
 	}
 }
 
@@ -480,5 +535,124 @@ func TestStore_QueryTraceByDecisionID(t *testing.T) {
 	}
 	if entries[1].RuleName != "git" || entries[1].Decision != "allow" {
 		t.Errorf("entry[1] = %+v, want git/allow", entries[1])
+	}
+}
+
+func sp(s string) *string { return &s }
+
+// TestApprovalSource_Classification exercises the ordered approval-source
+// derivation. approval_source is the approval-MECHANISM axis only
+// {unknown,bypass,auto,settings,hook,user}; subagent is NOT in this axis
+// (agent_type stays a separate column, see the segmentation test below).
+func TestApprovalSource_Classification(t *testing.T) {
+	allow := sp("allow")
+	tests := []struct {
+		name         string
+		permission   *string
+		promptID     *string
+		hookDecision *string
+		want         string
+	}{
+		{"NULL permission_mode -> unknown (all pre-migration rows)", nil, nil, allow, "unknown"},
+		{"bypassPermissions -> bypass", sp("bypassPermissions"), nil, nil, "bypass"},
+		{"auto -> auto", sp("auto"), nil, nil, "auto"},
+		{"dontAsk -> auto", sp("dontAsk"), nil, nil, "auto"},
+		{"acceptEdits falls through: prompt present -> user", sp("acceptEdits"), sp("p1"), nil, "user"},
+		{"acceptEdits falls through: no prompt + not approved -> settings", sp("acceptEdits"), nil, sp("deny"), "settings"},
+		{"acceptEdits falls through: no prompt + CETA approved -> hook", sp("acceptEdits"), nil, allow, "hook"},
+		{"default: prompt present -> user", sp("default"), sp("p2"), nil, "user"},
+		{"default: no prompt + CETA approved -> hook", sp("default"), nil, allow, "hook"},
+		{"default: no prompt + CETA abstained -> settings", sp("default"), nil, sp("abstain"), "settings"},
+		{"empty prompt_id string counts as no-prompt", sp("default"), sp(""), allow, "hook"},
+		// approval_source classifies CONTEXT, not outcome: a denied/pending row
+		// still gets its mechanism bucket. An auto-mode DENIAL is the primary
+		// false-denial calibration signal for pg2-okd13.2, so it MUST bucket as auto.
+		{"auto-mode denial still buckets as auto", sp("auto"), nil, sp("deny"), "auto"},
+		{"mode wins over prompt: bypass with a prompt_id still bypass", sp("bypassPermissions"), sp("p3"), allow, "bypass"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ApprovalSource(tt.permission, tt.promptID, tt.hookDecision); got != tt.want {
+				t.Errorf("ApprovalSource() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestQueryRows_ExposesRawFieldsAndAgentTypeSegmentation verifies QueryRows
+// exposes all four raw fields (permission_mode, agent_type, outcome_notes,
+// tool_response) plus prompt_id, and that agent_type is a SEPARATE filterable
+// axis from approval_source — subagent segmentation is agent_type IS NOT NULL,
+// crossed with (not merged into) the approval_source mechanism enum.
+func TestQueryRows_ExposesRawFieldsAndAgentTypeSegmentation(t *testing.T) {
+	s, err := NewStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	// A subagent row (agent_type set) auto-approved under bypassPermissions.
+	_, err = s.db.Exec(`INSERT INTO tool_decisions
+		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at,
+		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
+		VALUES (1,'s','/tmp','Bash','h1','{}','approved','2026-01-01T00:00:00Z',
+		        'bypassPermissions','Explore','note-1','{"is_error":false}',NULL)`)
+	if err != nil {
+		t.Fatalf("insert subagent row: %v", err)
+	}
+	// A main-agent row (agent_type NULL) DENIED under auto mode.
+	_, err = s.db.Exec(`INSERT INTO tool_decisions
+		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at,
+		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
+		VALUES (2,'s','/tmp','Bash','h2','{}','denied','2026-01-01T00:00:00Z',
+		        'auto',NULL,'auto_mode_classifier: x',NULL,NULL)`)
+	if err != nil {
+		t.Fatalf("insert main-agent row: %v", err)
+	}
+
+	rows, err := s.QueryRows("")
+	if err != nil {
+		t.Fatalf("QueryRows: %v", err)
+	}
+	byID := map[int]DecisionRow{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+
+	sub := byID[1]
+	if sub.AgentType == nil || *sub.AgentType != "Explore" {
+		t.Errorf("row1 AgentType = %v, want Explore", sub.AgentType)
+	}
+	if sub.PermissionMode == nil || *sub.PermissionMode != "bypassPermissions" {
+		t.Errorf("row1 permission_mode = %v, want bypassPermissions", sub.PermissionMode)
+	}
+	if sub.OutcomeNotes == nil || *sub.OutcomeNotes != "note-1" {
+		t.Errorf("row1 outcome_notes = %v, want note-1", sub.OutcomeNotes)
+	}
+	if sub.ToolResponse == nil || *sub.ToolResponse != `{"is_error":false}` {
+		t.Errorf("row1 tool_response = %v, want the raw payload", sub.ToolResponse)
+	}
+	if got := ApprovalSource(sub.PermissionMode, sub.PromptID, sub.HookDecision); got != "bypass" {
+		t.Errorf("row1 approval_source = %q, want bypass", got)
+	}
+
+	main := byID[2]
+	if main.AgentType != nil {
+		t.Errorf("row2 AgentType = %v, want nil (main agent)", *main.AgentType)
+	}
+	if got := ApprovalSource(main.PermissionMode, main.PromptID, main.HookDecision); got != "auto" {
+		t.Errorf("row2 approval_source = %q, want auto (denied row still bucketed)", got)
+	}
+
+	// Cross the two axes: subagent segmentation is agent_type IS NOT NULL,
+	// independent of the approval_source of each row.
+	subagentCount := 0
+	for _, r := range rows {
+		if r.AgentType != nil {
+			subagentCount++
+		}
+	}
+	if subagentCount != 1 {
+		t.Errorf("agent_type IS NOT NULL rows = %d, want 1", subagentCount)
 	}
 }

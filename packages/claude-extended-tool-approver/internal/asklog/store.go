@@ -108,13 +108,60 @@ type DecisionRow struct {
 	Excluded       int
 	CorrectDec     *string
 	SandboxEnabled sql.NullInt64
+	// Richer hook context (nullable; NULL on pre-v5 rows). PermissionMode,
+	// AgentType, OutcomeNotes and ToolResponse are the four raw fields exposed
+	// in `evaluate --format=json`; PromptID is read back only to discriminate
+	// settings vs hook vs user in ApprovalSource.
+	PermissionMode *string
+	AgentType      *string
+	OutcomeNotes   *string
+	ToolResponse   *string
+	PromptID       *string
+}
+
+// ApprovalSource derives the approval-MECHANISM bucket for a decision row from
+// its raw context. The axis is {unknown,bypass,auto,settings,hook,user}. It is
+// orthogonal to agent_type (subagent segmentation is a SEPARATE column) and
+// classifies CONTEXT, not outcome — a denied/pending row still gets its bucket
+// (e.g. an auto-mode denial derives to "auto"). Evaluated top-to-bottom:
+//
+//  1. permission_mode IS NULL -> "unknown" (all pre-migration rows)
+//  2. "bypassPermissions"     -> "bypass"
+//  3. "auto" / "dontAsk"      -> "auto"
+//  4. no prompt (prompt_id absent): CETA returned Approve -> "hook";
+//     otherwise the tool ran with no CETA approval and no prompt, i.e. the user
+//     pre-authorized it in settings -> "settings"
+//  5. prompt present -> "user"
+//
+// "acceptEdits" and "default"/"plan"/empty are NOT their own buckets — they
+// fall through to steps 4/5 (acceptEdits does not auto-approve Bash). Historical
+// rows have a NULL prompt_id, so a no-prompt row logged before prompt_id was
+// persisted cannot be split from a prompted one — a documented limitation.
+func ApprovalSource(permissionMode, promptID, hookDecision *string) string {
+	if permissionMode == nil {
+		return "unknown"
+	}
+	switch *permissionMode {
+	case "bypassPermissions":
+		return "bypass"
+	case "auto", "dontAsk":
+		return "auto"
+	}
+	if promptID != nil && *promptID != "" {
+		return "user"
+	}
+	if hookDecision != nil && *hookDecision == "allow" {
+		return "hook"
+	}
+	return "settings"
 }
 
 // QueryRows returns non-excluded decision rows, optionally filtered by date.
 func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
 	query := `SELECT id, session_id, cwd, tool_name, tool_input_json,
 		COALESCE(tool_summary, ''), hook_decision, outcome, excluded, correct_hook_decision,
-		sandbox_enabled
+		sandbox_enabled,
+		permission_mode, agent_type, outcome_notes, tool_response, prompt_id
 		FROM tool_decisions WHERE excluded = 0`
 	args := []interface{}{}
 	if sinceDate != "" {
@@ -134,7 +181,8 @@ func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
 		var r DecisionRow
 		if err := rows.Scan(&r.ID, &r.SessionID, &r.CWD, &r.ToolName,
 			&r.ToolInputJSON, &r.ToolSummary, &r.HookDecision, &r.Outcome, &r.Excluded, &r.CorrectDec,
-			&r.SandboxEnabled); err != nil {
+			&r.SandboxEnabled,
+			&r.PermissionMode, &r.AgentType, &r.OutcomeNotes, &r.ToolResponse, &r.PromptID); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -349,6 +397,30 @@ var migrations = []migration{
 			// Claude Code's bash sandbox at insert time.
 			_, err := tx.Exec(`
 			ALTER TABLE tool_decisions ADD COLUMN sandbox_enabled INTEGER;
+			`)
+			return err
+		},
+	},
+	{
+		version: 5,
+		up: func(tx *sql.Tx) error {
+			// Richer hook context, all nullable for back-compat (NULL means
+			// "unknown / logged before this field was captured"):
+			//   permission_mode — raw permission mode string, stored VERBATIM
+			//     (no normalization; unknown/future values survive). Feeds the
+			//     approval_source derivation and primarycommit hardening.
+			//   prompt_id       — identifies the triggering user prompt; its
+			//     presence discriminates user vs settings/hook approval.
+			//   tool_response   — PostToolUse result payload (raw JSON); lets
+			//     downstream analysis detect a failed tool call (pg2-okd13.2).
+			//   transcript_path — pointer to the session transcript file.
+			// agent_type and outcome_notes already exist (v1), so they are not
+			// re-added here — v5 only exposes them via SELECT.
+			_, err := tx.Exec(`
+			ALTER TABLE tool_decisions ADD COLUMN permission_mode TEXT;
+			ALTER TABLE tool_decisions ADD COLUMN prompt_id TEXT;
+			ALTER TABLE tool_decisions ADD COLUMN tool_response TEXT;
+			ALTER TABLE tool_decisions ADD COLUMN transcript_path TEXT;
 			`)
 			return err
 		},

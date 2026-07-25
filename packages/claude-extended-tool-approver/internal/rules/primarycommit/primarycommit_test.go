@@ -41,7 +41,11 @@ func TestPrimaryCommitRule(t *testing.T) {
 	}{
 		{"bypass: commit on primary", "git commit -m x", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"bypass: commit --amend on primary", "git commit --amend", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
+		{"auto: commit on primary", "git commit -m x", "Bash", "auto", canonMain(), hookio.Reject},
+		{"dontAsk: commit on primary", "git commit -m x", "Bash", "dontAsk", canonMain(), hookio.Reject},
 		{"default: commit on primary (no friction)", "git commit -m x", "Bash", "default", canonMain(), hookio.Abstain},
+		{"acceptEdits: commit on primary (does not auto-approve Bash)", "git commit -m x", "Bash", "acceptEdits", canonMain(), hookio.Abstain},
+		{"plan: commit on primary", "git commit -m x", "Bash", "plan", canonMain(), hookio.Abstain},
 		{"empty mode: commit on primary", "git commit -m x", "Bash", "", canonMain(), hookio.Abstain},
 		{"bypass: off primary", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat"}, hookio.Abstain},
 		{"bypass: linked worktree", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: false, primary: "main", cur: "main"}, hookio.Abstain},

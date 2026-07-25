@@ -148,6 +148,45 @@ func TestParseInput_NoAgentFields(t *testing.T) {
 	}
 }
 
+func TestParseInput_HookContextFields(t *testing.T) {
+	input := `{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp","session_id":"abc123",` +
+		`"permission_mode":"acceptEdits","prompt_id":"prompt-42","transcript_path":"/x/t.jsonl",` +
+		`"tool_response":{"stdout":"ok","is_error":false}}`
+	got, err := ParseInput(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseInput: %v", err)
+	}
+	if got.PermissionMode != "acceptEdits" {
+		t.Errorf("PermissionMode = %q, want acceptEdits", got.PermissionMode)
+	}
+	if got.PromptID != "prompt-42" {
+		t.Errorf("PromptID = %q, want prompt-42", got.PromptID)
+	}
+	if got.TranscriptPath != "/x/t.jsonl" {
+		t.Errorf("TranscriptPath = %q, want /x/t.jsonl", got.TranscriptPath)
+	}
+	if string(got.ToolResponse) != `{"stdout":"ok","is_error":false}` {
+		t.Errorf("ToolResponse = %q, want the raw tool_response object", string(got.ToolResponse))
+	}
+}
+
+func TestParseInput_NoHookContextFields(t *testing.T) {
+	input := `{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/tmp","session_id":"abc123"}`
+	got, err := ParseInput(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseInput: %v", err)
+	}
+	if got.PromptID != "" {
+		t.Errorf("PromptID = %q, want empty", got.PromptID)
+	}
+	if got.TranscriptPath != "" {
+		t.Errorf("TranscriptPath = %q, want empty", got.TranscriptPath)
+	}
+	if got.ToolResponse != nil {
+		t.Errorf("ToolResponse = %q, want nil", string(got.ToolResponse))
+	}
+}
+
 func TestSearchPath_GlobWithPath(t *testing.T) {
 	input := `{"tool_name":"Glob","tool_input":{"pattern":"**/*.go","path":"/project/src"},"cwd":"/project"}`
 	got, err := ParseInput(strings.NewReader(input))

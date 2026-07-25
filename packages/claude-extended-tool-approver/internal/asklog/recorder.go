@@ -55,8 +55,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 				(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 				 tool_input_hash, tool_input_json, tool_summary,
 				 hook_decision, hook_reason, outcome, created_at, resolved_at,
-				 sandbox_enabled)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 sandbox_enabled, permission_mode, prompt_id, transcript_path)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			input.SessionID, input.CWD,
 			nilIfEmpty(input.AgentID), nilIfEmpty(input.AgentType),
 			input.ToolName, nilIfEmpty(input.ToolUseID),
@@ -65,6 +65,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 			hookDec, result.Reason,
 			outcome, nowISO(), resolvedAt,
 			s.sandboxEnabledArg(),
+			nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
+			nilIfEmpty(input.TranscriptPath),
 		)
 		if err != nil {
 			_ = tx.Rollback()
@@ -102,8 +104,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 			 tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, hook_reason, outcome, created_at, resolved_at,
-			 sandbox_enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 sandbox_enabled, permission_mode, prompt_id, transcript_path)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		input.SessionID, input.CWD,
 		nilIfEmpty(input.AgentID), nilIfEmpty(input.AgentType),
 		input.ToolName, nilIfEmpty(input.ToolUseID),
@@ -112,6 +114,8 @@ func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.Rule
 		hookDec, result.Reason,
 		outcome, nowISO(), resolvedAt,
 		s.sandboxEnabledArg(),
+		nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
+		nilIfEmpty(input.TranscriptPath),
 	)
 	return err
 }
@@ -145,8 +149,9 @@ func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSugges
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name,
 			 tool_input_hash, tool_input_json, tool_summary,
-			 permission_suggestions, outcome, created_at, sandbox_enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+			 permission_suggestions, outcome, created_at, sandbox_enabled,
+			 permission_mode, prompt_id, transcript_path)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
 		input.SessionID, input.CWD,
 		nilIfEmpty(input.AgentID), nilIfEmpty(input.AgentType),
 		input.ToolName,
@@ -155,20 +160,30 @@ func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSugges
 		nilIfEmpty(permissionSuggestions),
 		nowISO(),
 		s.sandboxEnabledArg(),
+		nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
+		nilIfEmpty(input.TranscriptPath),
 	)
 	return err
 }
 
+// ResolveApproved marks the pending row for this tool call as approved and
+// records the PostToolUse tool_response. It is a pure UPDATE: it only sets
+// outcome/resolved_at/outcome_notes/tool_response and never touches columns set
+// at PreToolUse (permission_mode, prompt_id, transcript_path, agent_type). If no
+// pending row matches (by tool_use_id, then by hash), there is NO INSERT
+// fallback — the tool_response is dropped, since without a PreToolUse row there
+// is no context to attach it to.
 func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) error {
 	now := nowISO()
+	toolResponse := nilIfEmpty(string(input.ToolResponse))
 
 	if input.ToolUseID != "" {
 		res, err := s.db.Exec(
 			`
 			UPDATE tool_decisions
-			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?
+			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?, tool_response = ?
 			WHERE tool_use_id = ? AND outcome = 'pending'`,
-			now, nilIfEmpty(outcomeNotes), input.ToolUseID,
+			now, nilIfEmpty(outcomeNotes), toolResponse, input.ToolUseID,
 		)
 		if err != nil {
 			return err
@@ -182,9 +197,9 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	_, err := s.db.Exec(
 		`
 		UPDATE tool_decisions
-		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?
+		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?, tool_response = ?
 		WHERE session_id = ? AND tool_name = ? AND tool_input_hash = ? AND outcome = 'pending'`,
-		now, nilIfEmpty(outcomeNotes),
+		now, nilIfEmpty(outcomeNotes), toolResponse,
 		input.SessionID, input.ToolName, hash,
 	)
 	return err
@@ -237,13 +252,18 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 		return nil
 	}
 
+	// Fallback INSERT for an auto-mode-classifier denial with no prior PreToolUse
+	// row. This is the primary auto-denial calibration signal, so it MUST capture
+	// permission_mode (and agent_type) — otherwise the denial would derive to an
+	// approval_source of "unknown", defeating the calibration.
 	_, err = s.db.Exec(
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 			 tool_input_hash, tool_input_json, tool_summary,
-			 outcome, outcome_notes, created_at, resolved_at, sandbox_enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'denied', ?, ?, ?, ?)`,
+			 outcome, outcome_notes, created_at, resolved_at, sandbox_enabled,
+			 permission_mode, prompt_id, transcript_path)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'denied', ?, ?, ?, ?, ?, ?, ?)`,
 		input.SessionID, input.CWD,
 		nilIfEmpty(input.AgentID), nilIfEmpty(input.AgentType),
 		input.ToolName, nilIfEmpty(input.ToolUseID),
@@ -251,6 +271,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 		ToolSummary(input.ToolName, input.ToolInput),
 		notes, now, now,
 		s.sandboxEnabledArg(),
+		nilIfEmpty(input.PermissionMode), nilIfEmpty(input.PromptID),
+		nilIfEmpty(input.TranscriptPath),
 	)
 	return err
 }

@@ -24,11 +24,19 @@ type evalResult struct {
 	Category       string `json:"category"`
 	Outcome        string `json:"outcome"`
 	SandboxEnabled *int   `json:"sandbox_enabled"`
+	// approval_source is the derived approval-MECHANISM axis
+	// {unknown,bypass,auto,settings,hook,user}; the four raw fields below back
+	// it and let the skill segment orthogonally (e.g. agent_type IS NOT NULL).
+	ApprovalSource string          `json:"approval_source"`
+	PermissionMode *string         `json:"permission_mode"`
+	AgentType      *string         `json:"agent_type"`
+	OutcomeNotes   *string         `json:"outcome_notes"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
 }
 
 func newEvaluateCmd() *cobra.Command {
 	var days int
-	var since, settingsPath, format string
+	var since, settingsPath, format, approvalSource string
 	var missesOnly bool
 	cmd := &cobra.Command{
 		Use:   "evaluate",
@@ -39,10 +47,13 @@ needs-review, or stale-cwd.
 
 Use --settings to additionally evaluate each decision against a
 Claude Code settings file so misses can be attributed to settings
-coverage.`,
+coverage.
+
+Use --approval-source to restrict evaluation to a single approval-mechanism
+bucket (unknown|bypass|auto|settings|hook|user).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runEvaluate(days, since, settingsPath, format, missesOnly)
+			runEvaluate(days, since, settingsPath, format, approvalSource, missesOnly)
 			return nil
 		},
 	}
@@ -50,15 +61,17 @@ coverage.`,
 	cmd.Flags().StringVar(&since, "since", "", "Only evaluate rows after this date (ISO8601)")
 	cmd.Flags().StringVar(&settingsPath, "settings", "", "Path to settings file for settings evaluation")
 	cmd.Flags().StringVar(&format, "format", "summary", "Output format: json|summary")
+	cmd.Flags().StringVar(&approvalSource, "approval-source", "", "Only evaluate rows with this approval_source (unknown|bypass|auto|settings|hook|user)")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show rows where hook is wrong")
 	return cmd
 }
 
-func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, missesOnlyVal bool) {
+func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSourceVal string, missesOnlyVal bool) {
 	days := &daysVal
 	since := &sinceVal
 	settingsPath := &settingsPathVal
 	format := &formatVal
+	approvalSourceFilter := &approvalSourceVal
 	missesOnly := &missesOnlyVal
 
 	sinceDate := *since
@@ -103,6 +116,13 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 	var results []evalResult
 
 	for _, row := range rows {
+		// approval_source classifies CONTEXT, not outcome, so it is derived and
+		// filtered before anything else (including the stale-cwd short-circuit).
+		approvalSource := asklog.ApprovalSource(row.PermissionMode, row.PromptID, row.HookDecision)
+		if *approvalSourceFilter != "" && approvalSource != *approvalSourceFilter {
+			continue
+		}
+
 		sandboxCounts[sandboxEnabledKey(row.SandboxEnabled)]++
 		r := evalResult{
 			ID:             row.ID,
@@ -111,6 +131,13 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal string, misse
 			CommandClass:   asklog.CommandClass(row.ToolName, json.RawMessage(row.ToolInputJSON), row.CWD),
 			Outcome:        row.Outcome,
 			SandboxEnabled: sandboxEnabledPtr(row.SandboxEnabled),
+			ApprovalSource: approvalSource,
+			PermissionMode: row.PermissionMode,
+			AgentType:      row.AgentType,
+			OutcomeNotes:   row.OutcomeNotes,
+		}
+		if row.ToolResponse != nil && *row.ToolResponse != "" {
+			r.ToolResponse = json.RawMessage(*row.ToolResponse)
 		}
 		if row.HookDecision != nil {
 			r.HookDecision = *row.HookDecision

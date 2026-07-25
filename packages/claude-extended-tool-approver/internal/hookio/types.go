@@ -70,6 +70,19 @@ type HookInput struct {
 	PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitempty"`
 	Reason                string          `json:"reason,omitempty"`
 
+	// PromptID identifies the user prompt that triggered this tool call. Its
+	// presence discriminates a user-approved (prompted) row from a no-prompt
+	// settings/hook auto-approval when deriving approval_source. Historical
+	// rows (logged before this field was persisted) have it empty/NULL.
+	PromptID string `json:"prompt_id,omitempty"`
+	// TranscriptPath points at the session transcript file. Persisted as a
+	// pointer only (not parsed/inlined); useful for post-hoc investigation.
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	// ToolResponse is the PostToolUse result payload (raw JSON). Persisted so
+	// downstream analysis can tell whether a tool call errored — see the
+	// tool_response shape in references/database-schema.md.
+	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
+
 	// PathEval, when non-nil, overrides the rule-injected path evaluator for
 	// this input. Set by the docker rule when delegating inner expression
 	// evaluation to provide mount-aware container semantics. Not serialized.

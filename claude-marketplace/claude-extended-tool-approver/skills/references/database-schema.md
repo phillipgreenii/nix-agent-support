@@ -6,17 +6,23 @@ This reference describes the JSON fields produced by `evaluate` and `show`. Sour
 
 Each row in the output array has the following fields:
 
-| Field             | Type        | Description                                                                             |
-| ----------------- | ----------- | --------------------------------------------------------------------------------------- |
-| `id`              | int         | Row id in the asks database.                                                            |
-| `tool_name`       | string      | Tool that was invoked (e.g. `Bash`, `Read`, `Edit`).                                    |
-| `tool_summary`    | string      | One-line summary of the invocation, suitable for grouping similar calls.                |
-| `hook_decision`   | string      | The decision the hook returned at log time: `APPROVE`, `ASK`, `DENY`, or `ABSTAIN`.     |
-| `replay_result`   | string      | The decision the current rule engine returns when replaying this row.                   |
-| `settings_result` | string      | (Only with `--settings=<path>`) The decision `settings.local.json` would have returned. |
-| `category`        | string      | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, or `stale-cwd`.  |
-| `outcome`         | string      | The user's actual decision — ground truth.                                              |
-| `sandbox_enabled` | int or null | `1`, `0`, or `null`. See [sandbox-enabled.md](sandbox-enabled.md).                      |
+| Field             | Type           | Description                                                                                                                                                          |
+| ----------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | int            | Row id in the asks database.                                                                                                                                         |
+| `tool_name`       | string         | Tool that was invoked (e.g. `Bash`, `Read`, `Edit`).                                                                                                                 |
+| `tool_summary`    | string         | One-line DISPLAY summary of the invocation. Truncated — MUST NOT be used as a grouping key; use `command_class` instead.                                             |
+| `command_class`   | string         | Stable, non-truncated grouping key for the invocation. Analysis that buckets rows by "same command" MUST group on this.                                              |
+| `hook_decision`   | string         | The decision the hook returned at log time: `allow`, `ask`, `deny`, or `abstain` (or empty for a built-in ASK with no CETA row).                                     |
+| `replay_result`   | string         | The decision the current rule engine returns when replaying this row.                                                                                                |
+| `settings_result` | string         | (Only with `--settings=<path>`) The decision `settings.local.json` would have returned.                                                                              |
+| `category`        | string         | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, or `stale-cwd`.                                                                               |
+| `outcome`         | string         | The user's actual decision — ground truth (`approved`, `denied`, `pending`).                                                                                         |
+| `sandbox_enabled` | int or null    | `1`, `0`, or `null`. See [sandbox-enabled.md](sandbox-enabled.md).                                                                                                   |
+| `approval_source` | string         | Derived approval-MECHANISM bucket. One of `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. See below.                                                        |
+| `permission_mode` | string or null | Raw Claude Code permission mode at log time, stored VERBATIM (e.g. `default`, `plan`, `acceptEdits`, `dontAsk`, `auto`, `bypassPermissions`). `null` on pre-v5 rows. |
+| `agent_type`      | string or null | The subagent type that issued the call (e.g. `Explore`), or `null` for the main agent. A SEPARATE axis from `approval_source`.                                       |
+| `outcome_notes`   | string or null | Free-form notes attached at resolution (e.g. the `auto_mode_classifier: <reason>` string on an auto-mode denial).                                                    |
+| `tool_response`   | object or null | The PostToolUse result payload as a nested JSON object, or `null`. See [`tool_response` shape](#tool_response-shape).                                                |
 
 ## `show <id...> --format=json`
 
@@ -37,3 +43,40 @@ From `cmd_evaluate.go`:
 - `miss-caught-by-settings` — hook abstained / wrong, but `settings.local.json` would have decided correctly.
 - `needs-review` — ground truth missing or ambiguous.
 - `stale-cwd` — row's working directory is no longer relevant.
+
+## `approval_source`
+
+`approval_source` is the approval-**mechanism** axis — WHO/WHAT let the tool run.
+It is derived from `permission_mode`, `prompt_id`, and `hook_decision` by
+`asklog.ApprovalSource`; it is NOT a stored column. It classifies **context, not
+outcome**: a `denied` or `pending` row still gets a bucket (an auto-mode denial
+buckets as `auto`), which is what the false-denial calibration relies on.
+
+`subagent` is deliberately NOT a value on this axis — it would conflate two
+orthogonal axes. Segment subagents by crossing this axis with the separate
+`agent_type` column (`agent_type IS NOT NULL`), not by a merged enum.
+
+The derivation is an ordered decision list (first match wins):
+
+1. `permission_mode` is `null` → `unknown` — every pre-v5 (pre-migration) row, since the field was not captured then.
+2. `permission_mode == "bypassPermissions"` → `bypass`.
+3. `permission_mode` in {`auto`, `dontAsk`} → `auto`.
+4. no prompt (`prompt_id` absent): CETA's own decision returned Approve (`hook_decision == "allow"`) → `hook`; otherwise the tool ran with no prompt and no CETA approval, i.e. the user pre-authorized it in settings → `settings`.
+5. otherwise (a prompt fired, `prompt_id` present) → `user`.
+
+`acceptEdits` and `default`/`plan`/empty are NOT their own buckets — they fall
+through to steps 4/5 (`acceptEdits` auto-accepts edits, not Bash).
+
+**Known limit:** historical rows have a `null` `prompt_id`, so a no-prompt row
+logged before `prompt_id` was persisted cannot be split from a prompted one; such
+rows resolve via step 4 (`settings`/`hook`) and never reach `user`.
+
+## `tool_response` shape
+
+`tool_response` is the raw PostToolUse result payload, emitted as a nested JSON
+object (or `null` when the row predates capture or no PostToolUse fired). Its
+shape is tool-dependent, but a failed tool call is signalled by the boolean key
+**`is_error`**: `is_error == true` means the tool call errored. Consumers that
+define an "errored" call (e.g. the `identify-hook-misses` skill) MUST key off
+`tool_response.is_error`, treating a missing/`null` `tool_response` as "unknown /
+not errored".

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 )
 
 var cliBinary string
@@ -313,7 +315,7 @@ func TestCLI_SubcommandHelp_ShowsFlags(t *testing.T) {
 	}{
 		{"baseline", []string{"--settings", "--output"}},
 		{"compare", []string{"--settings", "--baseline", "--format"}},
-		{"evaluate", []string{"--days", "--since", "--settings", "--format", "--misses-only"}},
+		{"evaluate", []string{"--days", "--since", "--settings", "--format", "--misses-only", "--approval-source"}},
 		{"mark-excluded", []string{"--reason"}},
 		{"report", []string{"--group-by", "--misses-only", "--format", "--days", "--since"}},
 		{"set-correct-decision", []string{"--decision", "--explanation"}},
@@ -331,6 +333,89 @@ func TestCLI_SubcommandHelp_ShowsFlags(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	store, err := asklog.NewStore(asklog.DefaultDBPath())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	// cwd must exist so rows are not classified stale-cwd.
+	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
+		 hook_decision, outcome, created_at,
+		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
+		VALUES
+		 (1,'s',?,'Bash','h1','{"command":"ls"}','ls','allow','denied','2026-01-01T00:00:00Z',
+		  'auto','Explore','auto_mode_classifier: x','{"is_error":true}',NULL),
+		 (2,'s',?,'Bash','h2','{"command":"pwd"}','pwd','allow','approved','2026-01-01T00:00:00Z',
+		  'bypassPermissions',NULL,NULL,'{"is_error":false}',NULL)`, dir, dir)
+	if err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	_ = store.Close()
+
+	rowByID := func(out string) map[float64]map[string]any {
+		t.Helper()
+		var arr []map[string]any
+		if err := json.Unmarshal([]byte(out), &arr); err != nil {
+			t.Fatalf("unmarshal evaluate json: %v\nraw: %s", err, out)
+		}
+		m := map[float64]map[string]any{}
+		for _, r := range arr {
+			m[r["id"].(float64)] = r
+		}
+		return m
+	}
+
+	// Full JSON: both rows, each carrying approval_source + the four raw fields.
+	stdout, stderr, err := runCLI(t, "evaluate", "--format=json")
+	if err != nil {
+		t.Fatalf("evaluate --format=json: %v\nstderr: %s", err, stderr)
+	}
+	all := rowByID(stdout)
+	if len(all) != 2 {
+		t.Fatalf("evaluate json rows = %d, want 2\n%s", len(all), stdout)
+	}
+	r1 := all[1]
+	if r1["approval_source"] != "auto" {
+		t.Errorf("row1 approval_source = %v, want auto (denied row still bucketed)", r1["approval_source"])
+	}
+	if r1["permission_mode"] != "auto" {
+		t.Errorf("row1 permission_mode = %v, want auto", r1["permission_mode"])
+	}
+	if r1["agent_type"] != "Explore" {
+		t.Errorf("row1 agent_type = %v, want Explore", r1["agent_type"])
+	}
+	if r1["outcome_notes"] != "auto_mode_classifier: x" {
+		t.Errorf("row1 outcome_notes = %v", r1["outcome_notes"])
+	}
+	tr, ok := r1["tool_response"].(map[string]any)
+	if !ok || tr["is_error"] != true {
+		t.Errorf("row1 tool_response = %v, want a nested object with is_error=true", r1["tool_response"])
+	}
+	if all[2]["approval_source"] != "bypass" {
+		t.Errorf("row2 approval_source = %v, want bypass", all[2]["approval_source"])
+	}
+	if all[2]["agent_type"] != nil {
+		t.Errorf("row2 agent_type = %v, want null (main agent)", all[2]["agent_type"])
+	}
+
+	// --approval-source=auto restricts the evaluation to the auto bucket only.
+	stdout, stderr, err = runCLI(t, "evaluate", "--format=json", "--approval-source=auto")
+	if err != nil {
+		t.Fatalf("evaluate --approval-source=auto: %v\nstderr: %s", err, stderr)
+	}
+	filtered := rowByID(stdout)
+	if len(filtered) != 1 {
+		t.Fatalf("filtered rows = %d, want 1\n%s", len(filtered), stdout)
+	}
+	if _, ok := filtered[1]; !ok {
+		t.Errorf("filtered output missing the auto row (id 1)\n%s", stdout)
 	}
 }
 

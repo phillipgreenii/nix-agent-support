@@ -1,11 +1,15 @@
 // Package primarycommit gates a `git commit` on the PRIMARY branch of the CANONICAL
 // clone (the main working tree — the real .git directory, never a linked worktree).
-// It returns Reject only when the session is auto-approving (permission_mode ==
-// "bypassPermissions"): such a session would silently accept an Ask, so a hard deny is
-// the only thing that stops it. Interactive/default sessions get Abstain — no
-// every-commit prompt; a human directing a primary commit is permitted (R-6) and left
-// to the normal flow. Worktrees, feature branches, non-commit git, and any resolver
-// error all Abstain (fail-open; the worktree discipline is the primary control).
+// It returns Reject only when the session is in an AUTO-ACCEPTING permission mode —
+// the set {bypassPermissions, auto, dontAsk} — because such a session would silently
+// accept an Ask, so a hard deny is the only thing that stops it. The deny-honoring
+// mechanism is validated empirically for bypassPermissions (pg2-2t9wz); auto/dontAsk
+// are covered by inference (bypass ⊃ auto) plus a unit case here. Interactive modes
+// (default/plan/acceptEdits/empty) get Abstain — no every-commit prompt; a human
+// directing a primary commit is permitted (R-6) and left to the normal flow.
+// acceptEdits is moot: it auto-accepts edits, not Bash. Worktrees, feature branches,
+// non-commit git, and any resolver error all Abstain (fail-open; the worktree
+// discipline is the primary control).
 package primarycommit
 
 import (
@@ -15,7 +19,13 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-const bypassMode = "bypassPermissions"
+// autoApprovingModes is the set of permission modes that silently accept an Ask,
+// so a commit on the canonical primary under one of these MUST be hard-denied.
+var autoApprovingModes = map[string]bool{
+	"bypassPermissions": true,
+	"auto":              true,
+	"dontAsk":           true,
+}
 
 type PrimaryResolver interface {
 	IsCanonical(dir string) (bool, error)     // main working tree (real .git dir), not a worktree
@@ -64,7 +74,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		// Commit on canonical primary. Block only an auto-approving session (which would
 		// otherwise silently accept); trust interactive/default sessions (R-6).
-		if input.PermissionMode == bypassMode {
+		if autoApprovingModes[input.PermissionMode] {
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
 				Reason:   "primary-commit: refusing a commit on the primary branch (" + primary + ") of the canonical clone in an auto-approving session — advancing shared primary requires explicit human direction (R-6); use a feature branch/worktree.",
