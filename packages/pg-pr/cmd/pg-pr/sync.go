@@ -84,18 +84,25 @@ var newSyncEngineForCLI = func(cfg *config.Config) (*sync.Engine, error) {
 //
 // Events whose repo is not in the config are silently ignored (the repo may
 // have been removed from config between enqueueing and flushing).
-func newBeadsBridgeHandler(cfg *config.Config) event.Handler {
-	// Build a repo-remote → path index once.
-	repoPaths := make(map[string]string, len(cfg.Repos))
-	for _, r := range cfg.Repos {
+//
+// Review kill switch (bead pg2-ynhr.11 / pg2-8vp9e): the handler re-reads
+// review.enabled from the LIVE config on EACH dispatch (liveCfg is bound to the
+// engine's per-poll config pointer, which the daemon re-reads from disk each
+// poll — see Engine.reloadCfgFromDisk). So a review.enabled flip — e.g. from
+// `pn workspace apply` rewriting config.yaml — stops/starts draft-review bead
+// PRODUCTION on the NEXT poll WITHOUT a daemon restart, mirroring the review
+// CONSUMER's per-poll gate (internal/sync.reviewHookEnabled). Merge-request/
+// attention/process-feedback beads are produced regardless of the flag. The
+// repo→path index is still built once from the startup snapshot (the bead
+// scope is the review flag only).
+func newBeadsBridgeHandler(liveCfg func() *config.Config) event.Handler {
+	// Build a repo-remote → path index once from the startup config snapshot.
+	repoPaths := make(map[string]string)
+	for _, r := range liveCfg().Repos {
 		if r.Path != "" {
 			repoPaths[r.Remote] = r.Path
 		}
 	}
-	// Review kill switch (bead pg2-ynhr.11): when reviews are disabled, the
-	// bridge stops PRODUCING draft-review beads on pr.opened/updated (merge-
-	// request/attention/process-feedback are still produced).
-	produceDraftReviews := cfg.ReviewEnabled()
 	return func(ctx context.Context, e store.Event) error {
 		// Extract the repo identifier from the event payload. All current event
 		// types carry a "repo" field at the top level.
@@ -109,13 +116,26 @@ func newBeadsBridgeHandler(cfg *config.Config) event.Handler {
 		if !ok {
 			return nil // repo not in config; skip silently
 		}
-		client := beads.NewClientForRepo(path)
+		client := newBeadClientForRepo(path)
 		var opts []beadsbridge.Option
-		if !produceDraftReviews {
+		// Re-read review.enabled from the LIVE config on EACH dispatch (NOT a
+		// startup capture) so a runtime flip de-latches on the next poll without
+		// a daemon restart (bead pg2-8vp9e).
+		if !liveCfg().ReviewEnabled() {
 			opts = append(opts, beadsbridge.WithoutDraftReviews())
 		}
 		return beadsbridge.New(client, opts...).Handle(ctx, e)
 	}
+}
+
+// newBeadClientForRepo constructs the per-repo bd client the producer bridge
+// writes through. It is a package var so tests can inject a fake bead client and
+// observe whether the review kill switch suppressed draft-review production
+// (bead pg2-8vp9e). Production returns the real per-repo CLI-backed client;
+// beads.NewClientForRepo is cheap (no I/O until a bd command is issued), so
+// constructing it per-dispatch is safe.
+var newBeadClientForRepo = func(path string) beadsbridge.BeadClient {
+	return beads.NewClientForRepo(path)
 }
 
 var syncCmd = &cobra.Command{
@@ -149,7 +169,10 @@ configured repo.`,
 		}
 		defer func() { _ = eventStore.Close() }()
 		disp := event.New()
-		disp.Register(newBeadsBridgeHandler(cfg))
+		// Pass engine.Config (bound method) as the live-config provider so the
+		// producer reads review.enabled per-dispatch from the daemon's per-poll
+		// config pointer, not a startup snapshot (bead pg2-8vp9e).
+		disp.Register(newBeadsBridgeHandler(engine.Config))
 		engine.SetStoreAndDispatch(eventStore, disp.Dispatch)
 
 		if syFlags.daemon {

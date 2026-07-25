@@ -246,6 +246,15 @@ func (e *Engine) cfg() *config.Config {
 	return e.deps.Cfg
 }
 
+// Config returns the engine's LIVE config pointer — the same value cfg() reads,
+// swapped atomically per poll by the daemon's ReplaceCfg/reloadCfgFromDisk. It
+// is exported so the cmd/pg-pr producer handler (which lives outside this
+// package and cannot call the unexported cfg()) can read review.enabled
+// per-dispatch instead of latching it at startup (bead pg2-8vp9e, the producer
+// follow-up to the consumer fix pg2-bw30). Bind it as a func() *config.Config
+// live-config provider; do not cache the returned pointer across polls.
+func (e *Engine) Config() *config.Config { return e.cfg() }
+
 // bdClientFor returns the BeadClient the engine should use for operations
 // against the given repo's workspace.
 //
