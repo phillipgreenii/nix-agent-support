@@ -400,7 +400,17 @@ func (e *Engine) Sync(ctx context.Context) (*Summary, error) {
 	cachesByRepo := make(map[string]*beads.TickCache, len(repoClients))
 	for repo, bdc := range repoClients {
 		if c, ok := bdc.(*beads.Client); ok {
-			cachesByRepo[repo] = c.LoadTickCache(ctx)
+			cache := c.LoadTickCache(ctx)
+			cachesByRepo[repo] = cache
+			// Attach the snapshot to this repo's read client so its
+			// identity/existence lookups (FindByRepoAndNumber / GetMergeRequest
+			// by id) are served from memory instead of a fresh `bd list` scan.
+			// Safe: these engine clients drive only reads (buildPRInput's bead
+			// id + dep-tree lookups). The diff-before-write projections
+			// (EnsureMergeRequest / SetMergeRequestCoOwned / reconcilePriority)
+			// run at outbox flush on the beadsbridge's SEPARATE, cache-less
+			// clients, so they keep comparing against fresh state (FB-1/2/4).
+			c.UseTickCache(cache)
 		}
 	}
 

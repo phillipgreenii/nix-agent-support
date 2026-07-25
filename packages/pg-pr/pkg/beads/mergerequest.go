@@ -76,6 +76,38 @@ type bdDependency struct {
 // Client is a stateful wrapper holding a Runner. Use NewClient to construct.
 type Client struct {
 	Runner Runner
+	// tickCache, when non-nil, is a per-sync-tick snapshot consulted by the
+	// IDENTITY/EXISTENCE lookups (FindByRepoAndNumber, GetMergeRequest) to
+	// answer "does a bead with this repo+PR / this id exist, and what is its
+	// id/status" from memory instead of a fresh full `bd list` scan. Set it
+	// via UseTickCache for the lifetime of one tick.
+	//
+	// The cache is DELIBERATELY NOT consulted by the diff-before-write paths
+	// (findByRepoPR, which EnsureMergeRequest uses for its FB-2 field diff; and
+	// getMergeRequestUncached, which CloseMergeRequest's idempotency check and
+	// SetMergeRequestCoOwned's FB-4 label diff use). Those compare STORED field
+	// values against desired, and a tick-start snapshot can be stale relative
+	// to a write issued earlier in the same tick (a backlogged/retried outbox
+	// row) or an external writer on the shared workspace — feeding it into a
+	// diff could skip a needed write or re-introduce the no-op commit churn
+	// FB-1/FB-2 eliminated. Identity/existence is stale-tolerant; field diffs
+	// are not.
+	tickCache *TickCache
+}
+
+// UseTickCache attaches (or clears, with nil) a per-tick snapshot the
+// IDENTITY/EXISTENCE lookups consult before shelling out to bd. Returns the
+// receiver for chaining. Callers MUST only attach a cache to a Client that is
+// used for identity/existence reads — never to one that also drives the
+// diff-before-write paths — because those paths intentionally bypass the cache
+// (see the tickCache field doc) and rely on reading fresh state. In pg-pr the
+// sync engine attaches it to its per-repo read clients; the beadsbridge
+// (which runs the diff-before-write projections at outbox flush) constructs
+// its own SEPARATE clients and never attaches a cache, so its writes stay
+// fresh.
+func (c *Client) UseTickCache(cache *TickCache) *Client {
+	c.tickCache = cache
+	return c
 }
 
 // NewClient returns a Client backed by the default CLIRunner.
@@ -160,7 +192,9 @@ func (c *Client) CloseMergeRequest(ctx context.Context, id, reason string) error
 	if id == "" {
 		return errors.New("merge-request: id required")
 	}
-	mr, err := c.GetMergeRequest(ctx, id)
+	// Idempotency hinges on the bead's CURRENT status, so read fresh — never a
+	// (possibly stale) per-tick cache snapshot.
+	mr, err := c.getMergeRequestUncached(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -176,9 +210,29 @@ func (c *Client) CloseMergeRequest(ctx context.Context, id, reason string) error
 }
 
 // GetMergeRequest returns a single merge-request bead by ID, or nil if not
-// found. Uses `bd list --id=<id> --all` since `bd show --json` is not as
-// reliably structured for the subset we need.
+// found. This is an IDENTITY/EXISTENCE lookup: when a per-tick cache is
+// attached (UseTickCache) and holds the id, it is answered from memory with no
+// bd call; a cache MISS falls back to the verbatim scan (getMergeRequestUncached)
+// so a bead created/changed after the snapshot is still found.
+//
+// State-decision callers that need FRESH stored fields — CloseMergeRequest's
+// already-closed idempotency check and SetMergeRequestCoOwned's FB-4 label
+// diff — MUST call getMergeRequestUncached directly, NOT this method, so a
+// stale snapshot can never corrupt their decision.
 func (c *Client) GetMergeRequest(ctx context.Context, id string) (*MergeRequest, error) {
+	if c.tickCache != nil {
+		if mr, ok := c.tickCache.MergeRequestsByID[id]; ok {
+			cached := mr
+			return &cached, nil
+		}
+	}
+	return c.getMergeRequestUncached(ctx, id)
+}
+
+// getMergeRequestUncached always shells out to bd, bypassing any attached
+// per-tick cache. Uses `bd list --id=<id> --all` since `bd show --json` is not
+// as reliably structured for the subset we need.
+func (c *Client) getMergeRequestUncached(ctx context.Context, id string) (*MergeRequest, error) {
 	out, err := c.Runner.Run(ctx, "list", "--all", "--id="+id, "--json")
 	if err != nil {
 		return nil, err
@@ -284,8 +338,10 @@ func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned 
 	// refresh. If the label is already in the desired state, skip the `bd update`
 	// (and its Dolt commit) entirely. We only skip when we can POSITIVELY read the
 	// current label set; if the bead can't be read or isn't found, fall through to
-	// the write rather than risk skipping a genuinely needed one.
-	if mr, err := c.GetMergeRequest(ctx, id); err == nil && mr != nil {
+	// the write rather than risk skipping a genuinely needed one. Read fresh
+	// (getMergeRequestUncached) — the FB-4 diff must not compare against a stale
+	// per-tick cache snapshot.
+	if mr, err := c.getMergeRequestUncached(ctx, id); err == nil && mr != nil {
 		if hasLabel(mr.Labels, coOwnedLabel) == coOwned {
 			return nil
 		}
@@ -337,8 +393,13 @@ func (c *Client) RemoveLabel(ctx context.Context, id, label string) error {
 	return err
 }
 
-// findByRepoPR finds a merge-request bead by repo + pr_number metadata.
-// Returns nil if not found. Includes closed beads.
+// findByRepoPR finds a merge-request bead by repo + pr_number metadata with a
+// fresh full scan (never the per-tick cache). Returns nil if not found.
+// Includes closed beads.
+//
+// This is the UNCACHED path on purpose: EnsureMergeRequest's FB-2
+// diff-before-write compares the returned bead's STORED fields against desired,
+// and must therefore read current state, not a tick-start snapshot.
 func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeRequest, error) {
 	all, err := c.ListMergeRequests(ctx, true)
 	if err != nil {
@@ -352,12 +413,24 @@ func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeR
 	return nil, nil
 }
 
-// FindByRepoAndNumber finds a merge-request bead by repo + pr_number
-// metadata. Returns nil if not found. Includes closed beads. Public
-// wrapper around findByRepoPR for callers outside the beads package.
+// FindByRepoAndNumber finds a merge-request bead by repo + pr_number metadata.
+// Returns nil if not found. Includes closed beads. Public wrapper for callers
+// outside the beads package.
+//
+// This is an IDENTITY/EXISTENCE lookup (callers use the returned id and coarse
+// open/closed status, never a field-value diff): when a per-tick cache is
+// attached (UseTickCache) and holds a bead for repo+PR, it is answered from
+// memory with no bd call; a cache MISS falls back to the verbatim full scan
+// (findByRepoPR) so a bead created/changed after the snapshot is still found.
 func (c *Client) FindByRepoAndNumber(ctx context.Context, repo string, prNumber int) (*MergeRequest, error) {
 	if repo == "" || prNumber <= 0 {
 		return nil, errors.New("merge-request: repo and pr_number required")
+	}
+	if c.tickCache != nil {
+		if mr, ok := c.tickCache.FindMergeRequest(repo, prNumber); ok {
+			cached := mr
+			return &cached, nil
+		}
 	}
 	return c.findByRepoPR(ctx, repo, prNumber)
 }
