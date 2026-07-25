@@ -40,6 +40,10 @@ var safeReadCmds = map[string]bool{
 	"wc": true, "diff": true,
 	"sort": true, "uniq": true, "awk": true,
 	"jq": true, "tq": true, "xxd": true,
+	// strings dumps a file's printable content, so it reads file contents and
+	// is routed through the same hasUnsafeReadPath zone check as cat/head/tail
+	// (pg2-t76k8). Previously it hit the unknown-command fallthrough and abstained.
+	"strings": true,
 }
 
 // logReadSubcommands are the macOS unified-logging verbs that only read; the

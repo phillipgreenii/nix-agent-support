@@ -440,3 +440,50 @@ func makeBashJSON(cmd string) json.RawMessage {
 	b, _ := json.Marshal(hookio.BashToolInput{Command: cmd})
 	return b
 }
+
+// TestIntegration_ExtraReadOnlyRoots proves the CETA_EXTRA_READONLY_ROOTS
+// allow-list mechanism (patheval) makes read commands within a configured root
+// Approve through the REAL decision path (buildFullEngine + EvaluateHook),
+// covering the Part A `strings` addition and the Part B nix env-var wiring
+// together (pg2-t76k8). Crucially, the adversarial secret/system regressions
+// MUST still stay Ask/Abstain regardless of the extra roots — the secrets rule
+// runs before safe-commands, and the extra roots do NOT include any secret dir.
+func TestIntegration_ExtraReadOnlyRoots(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	// Read at PathEvaluator construction, so set BEFORE buildFullEngine.
+	roRoot := "/ceta-test-ro-root"
+	t.Setenv("CETA_EXTRA_READONLY_ROOTS", roRoot)
+
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// Extra-root APPROVE: read commands on a file under a configured extra
+		// read-only root are approved (cat + the newly-added strings).
+		{"cat under extra root", "cat " + roRoot + "/notes.txt", hookio.Approve},
+		{"strings under extra root", "strings " + roRoot + "/bin/tool", hookio.Approve},
+		// Adversarial secret regressions — must NOT be swept in by the extra roots.
+		{"cat ssh private key asks", "cat ~/.ssh/id_rsa", hookio.Ask},
+		{"strings aws credentials stays protected", "strings ~/.aws/credentials", hookio.Abstain},
+		{"cat dotenv asks", "cat .env", hookio.Ask},
+		// System path guard: extra roots must not broaden /etc.
+		{"cat /etc/passwd abstains", "cat /etc/passwd", hookio.Abstain},
+		// Exec-prefix-with-inner is judged on the inner command; the env prefix
+		// must NOT smuggle a dangerous inner command into approval.
+		{"env prefix hides rm still abstains", "env X=y rm -rf /", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != tt.want {
+				t.Errorf("%s: got %v (%s: %s), want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}

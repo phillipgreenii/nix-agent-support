@@ -945,3 +945,40 @@ func TestSafecmds_BashSyntaxCheck(t *testing.T) {
 		})
 	}
 }
+
+// TestSafecmds_Strings covers `strings` as a read command (pg2-t76k8). Before
+// this bead `strings` hit the unknown-command fallthrough and abstained; it now
+// belongs to safeReadCmds, so it is routed through the SAME hasUnsafeReadPath
+// path-safety check as cat/head/tail/wc — approved only for readable zones,
+// abstaining for unknown/secret-adjacent paths (mirrors
+// TestSafecmds_CatEtcPasswd_Abstain / TestSafecmds_HeadProjectFile_Approve).
+func TestSafecmds_Strings(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// In-zone file (project root) -> Approve.
+		{"strings project binary", "strings /home/user/project/bin/tool", hookio.Approve},
+		// Secret-adjacent path stays protected (~/.aws is an unknown zone, so the
+		// read command abstains — the secret is never auto-approved).
+		{"strings aws credentials abstains", "strings ~/.aws/credentials", hookio.Abstain},
+		// Unknown system path -> Abstain (zone guard, matches cat /etc/passwd).
+		{"strings /etc/passwd abstains", "strings /etc/passwd", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+			}
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}

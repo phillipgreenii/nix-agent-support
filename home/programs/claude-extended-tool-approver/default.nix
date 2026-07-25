@@ -64,13 +64,35 @@ in
       description = ''
         Additional absolute paths whose subtrees the path-safety evaluator
         classifies read-only (exported as CETA_EXTRA_READONLY_ROOTS, a
-        ":"-separated list). Checked after all built-in zones. Empty by default
-        so this repo stays generic; set org/machine paths in the consuming flake.
+        ":"-separated list). Checked after all built-in zones. The option
+        DEFAULT is empty so the option itself stays generic, but this module
+        contributes a base set of home read-only inspection roots when enabled
+        (see config, pg2-t76k8); definitions list-merge, so consumer/machine
+        additions here are additive on top of that base set.
       '';
     };
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
+    # Base read-only inspection roots (pg2-t76k8): home dot-files/dirs that are
+    # safe to READ for inspection but are deliberately NOT base-code path-safety
+    # zones (broadening base zones was rejected in favor of this allow-list).
+    # Fed through the existing extraReadOnlyRoots -> CETA_EXTRA_READONLY_ROOTS
+    # plumbing; consumer definitions list-merge, so these stay present alongside
+    # any org/machine additions. Absolute paths with ~ expanded to the HM home
+    # directory, as CETA_EXTRA_READONLY_ROOTS expects (patheval symlink-resolves
+    # each at runtime). Individual rc FILES are valid roots (pathContains
+    # exact-matches a file). NOT ~/.config / ~/.gc / ~/.colima (secret-adjacent
+    # or out of scope).
+    phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyRoots = [
+      "${config.home.homeDirectory}/.beads"
+      "${config.home.homeDirectory}/.zshrc"
+      "${config.home.homeDirectory}/.zshenv"
+      "${config.home.homeDirectory}/.zprofile"
+      "${config.home.homeDirectory}/.profile"
+      "${config.home.homeDirectory}/.local/bin"
+      "${config.home.homeDirectory}/.local/state"
+    ];
     home = {
       # Plugin registration + content (plugin.json, skills, hooks/hooks.json) now
       # live in the committed claude-marketplace/ tree, built by the nix

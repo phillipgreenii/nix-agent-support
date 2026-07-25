@@ -994,6 +994,79 @@
                 assert explicitOn == true;
                 pkgs.runCommand "pnwf-enable-default-ok" { } "touch $out";
 
+              # Durable eval test (pg2-t76k8) for the CETA base read-only roots:
+              # when claude-code + ceta are enabled, the module must contribute the
+              # human-named home inspection roots to extraReadOnlyRoots (which the
+              # module exports as CETA_EXTRA_READONLY_ROOTS), consumer additions must
+              # list-merge on top, and a disabled module must contribute nothing.
+              # Reads ONLY the resolved option so cfg.package / home.packages are
+              # never forced (no ceta package needed in the check's pkgs).
+              test-ceta-extra-readonly-roots =
+                let
+                  evalRoots =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the config surface the module reads/writes;
+                            # the real options live in claude-code / home-manager.
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config.phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyRoots;
+
+                  base = [
+                    "/home/test/.beads"
+                    "/home/test/.zshrc"
+                    "/home/test/.zshenv"
+                    "/home/test/.zprofile"
+                    "/home/test/.profile"
+                    "/home/test/.local/bin"
+                    "/home/test/.local/state"
+                  ];
+
+                  # claude + ceta enabled => exactly the base inspection roots.
+                  enabled = evalRoots {
+                    phillipgreenii.programs.claude-code.enable = true;
+                    phillipgreenii.programs.claude-extended-tool-approver.enable = true;
+                  };
+                  # A consumer/machine addition list-merges on top of the base set.
+                  withConsumerExtra = evalRoots {
+                    phillipgreenii.programs.claude-code.enable = true;
+                    phillipgreenii.programs.claude-extended-tool-approver = {
+                      enable = true;
+                      extraReadOnlyRoots = [ "/org/extra" ];
+                    };
+                  };
+                  # claude disabled => the guarded config is inactive, so the module
+                  # contributes nothing (option stays at its empty default).
+                  disabled = evalRoots {
+                    phillipgreenii.programs.claude-code.enable = false;
+                    phillipgreenii.programs.claude-extended-tool-approver.enable = true;
+                  };
+                in
+                assert enabled == base;
+                assert lib.length withConsumerExtra == lib.length base + 1;
+                assert lib.all (r: lib.elem r withConsumerExtra) (base ++ [ "/org/extra" ]);
+                assert disabled == [ ];
+                pkgs.runCommand "ceta-extra-readonly-roots-ok" { } "touch $out";
+
               # Regression guard for pg2-1ygj: the claude-settings activation must
               # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
               # BEFORE the per-plugin install loop (otherwise the first apply fails
