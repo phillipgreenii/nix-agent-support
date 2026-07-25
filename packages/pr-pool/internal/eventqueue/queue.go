@@ -220,28 +220,95 @@ func (q *Queue) headFor(l Listener, now time.Time) *entry {
 	return nil
 }
 
+// pendingOffer is one (listener, event) pair to offer this pass — a snapshot
+// taken under q.mu so the listener callback (Listener.Offer) runs UNLOCKED.
+type pendingOffer struct {
+	ls  *listenerState
+	evt Event // value copy: Offer never sees queue-internal state
+}
+
 // Dispatch offers each listener its head deliverable event once, in
 // registration order, and returns how many events were accepted this pass. A
 // busy pre-accept decline leaves the head for a later pass (re-offer within
 // ttl, INV-FAIL-1 / INV-CONC-1).
+//
+// Locking discipline (bead pg2-56186). The pass is three phases and the queue
+// lock is held only in phases 1 and 3, NEVER across the listener callback:
+//
+//  1. SNAPSHOT (locked): compute each listener's head deliverable event and
+//     capture the (listener, event) pairs. No Offer, no store write here.
+//  2. OFFER (UNLOCKED): call Listener.Offer for each pair. Releasing the lock is
+//     what makes a synchronous listener's accept path free to re-enter the queue
+//     (Enqueue / push-inject a follow-on event) without self-deadlocking on the
+//     non-reentrant q.mu, and stops all ingest from serializing behind an
+//     in-flight (possibly long) handler offer.
+//  3. RECORD (locked): for each acceptance, re-validate against CURRENT state
+//     then mark accepted, append the durable opAccept record, notify the
+//     observer, and maybe-evict — reproducing the original per-acceptance
+//     ordering (maybeEvict after each mark, in registration order).
+//
+// Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
+// Dispatch, or a re-entrant call from inside Offer), so RECORD looks the entry
+// up FRESH by id and skips two ways rather than mutating a stale snapshot:
+//   - entry no longer present (expired past ttl and swept, or early-evicted): the
+//     event has legitimately left the queue, so there is nothing to record and
+//     nothing to redeliver; drop the acceptance record (a stray opAccept for a
+//     gone id is a no-op on replay anyway). Delivery is unaffected — the listener
+//     already took responsibility when Offer returned true (INV-EVT-1).
+//   - already accepted by this listener (a concurrent/re-entrant Dispatch offered
+//     the same head and recorded first): skip, preserving at-most-once acceptance
+//     per (event, listener) binding — the duplicate Offer is absorbed by the
+//     idempotent-listener contract (INV-EVT-2).
+//
+// The store append stays under q.mu in phase 3 on purpose: the Store is not
+// internally synchronized (its writes are serialized solely by q.mu), so moving
+// it out would introduce a data race. Phase 3 is short and calls no listener
+// code, unlike the original monolithic pass that held the lock across every
+// Offer.
 func (q *Queue) Dispatch() (accepted int) {
+	// Phase 1 — SNAPSHOT (locked).
+	q.mu.Lock()
+	now := q.now()
+	pending := make([]pendingOffer, 0, len(q.listeners))
+	for _, ls := range q.listeners {
+		if e := q.headFor(ls.l, now); e != nil {
+			pending = append(pending, pendingOffer{ls: ls, evt: e.evt})
+		}
+	}
+	q.mu.Unlock()
+
+	// Phase 2 — OFFER (UNLOCKED). ls.l is set once at Register and never mutated,
+	// so reading it here without the lock is safe.
+	toRecord := make([]pendingOffer, 0, len(pending))
+	for _, p := range pending {
+		if p.ls.l.Offer(p.evt) {
+			toRecord = append(toRecord, p)
+		}
+	}
+	if len(toRecord) == 0 {
+		return 0
+	}
+
+	// Phase 3 — RECORD (locked), re-validating each acceptance against current
+	// state (see the locking-discipline note above).
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	now := q.now()
-	for _, ls := range q.listeners {
-		e := q.headFor(ls.l, now)
-		if e == nil {
-			continue
+	for _, p := range toRecord {
+		lid := p.ls.l.ID()
+		e, ok := q.entries[p.evt.ID]
+		if !ok {
+			continue // entry left the queue mid-dispatch (expired/evicted): skip
 		}
-		if ls.l.Offer(e.evt) {
-			// In-memory accept first; the durable accept record is written AFTER
-			// (ADR 0031 req 4) — the crash window that yields at-most-one redelivery.
-			e.accepted[ls.l.ID()] = true
-			_ = q.store.Append(Record{Op: opAccept, EventID: e.evt.ID, ListenerID: ls.l.ID()})
-			q.obs.OnAccept(e.evt.ID, ls.l.ID())
-			accepted++
-			q.maybeEvict(e)
+		if e.accepted[lid] {
+			continue // already recorded by a concurrent/re-entrant pass: at-most-once
 		}
+		// In-memory accept first; the durable accept record is written AFTER
+		// (ADR 0031 req 4) — the crash window that yields at-most-one redelivery.
+		e.accepted[lid] = true
+		_ = q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid})
+		q.obs.OnAccept(p.evt.ID, lid)
+		accepted++
+		q.maybeEvict(e)
 	}
 	return accepted
 }
