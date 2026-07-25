@@ -241,6 +241,16 @@ func (c *Client) EnsureMergeRequest(ctx context.Context, userTitle string, field
 		if existing.Status == "closed" {
 			return existing.ID, true, nil
 		}
+		// Diff-before-write (FB-1/FB-2): the per-minute daemon re-asserts the full
+		// field set every refresh. When the stored bead already holds the desired
+		// values, skip UpdateMergeRequest entirely so no `bd update` — and no Dolt
+		// commit — is issued. last_synced_at is DELIBERATELY excluded from the
+		// comparison (see metadataUnchanged), so a refresh whose ONLY delta is the
+		// per-tick timestamp bump writes nothing: this is what eliminated the 428k
+		// no-op 'nothing to commit' commits driving the Dolt journal growth.
+		if metadataUnchanged(existing.Fields, fields) {
+			return existing.ID, false, nil
+		}
 		if err := c.UpdateMergeRequest(ctx, existing.ID, fields); err != nil {
 			return existing.ID, false, err
 		}
@@ -270,13 +280,27 @@ func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned 
 	if id == "" {
 		return errors.New("merge-request: id required")
 	}
+	// Diff-before-write (FB-4): the daemon re-asserts the co-owned label every
+	// refresh. If the label is already in the desired state, skip the `bd update`
+	// (and its Dolt commit) entirely. We only skip when we can POSITIVELY read the
+	// current label set; if the bead can't be read or isn't found, fall through to
+	// the write rather than risk skipping a genuinely needed one.
+	if mr, err := c.GetMergeRequest(ctx, id); err == nil && mr != nil {
+		if hasLabel(mr.Labels, coOwnedLabel) == coOwned {
+			return nil
+		}
+	}
 	flag := "--remove-label"
 	if coOwned {
 		flag = "--add-label"
 	}
-	_, err := c.Runner.Run(ctx, "update", id, flag, "co-owned")
+	_, err := c.Runner.Run(ctx, "update", id, flag, coOwnedLabel)
 	return err
 }
+
+// coOwnedLabel marks a teammate PR I have pushed commits onto (a visibility
+// marker synced onto the merge-request bead by SetMergeRequestCoOwned).
+const coOwnedLabel = "co-owned"
 
 // SetPriority sets the bead's priority (0=highest … 4=lowest). Used by the
 // conflict-urgency reconciler (pg2-tsgkj). Out-of-range values are clamped
@@ -336,6 +360,55 @@ func (c *Client) FindByRepoAndNumber(ctx context.Context, repo string, prNumber 
 		return nil, errors.New("merge-request: repo and pr_number required")
 	}
 	return c.findByRepoPR(ctx, repo, prNumber)
+}
+
+// metadataUnchanged reports whether applying encodeMetadata(desired) as a bd
+// `--metadata` patch onto stored would be a no-op — i.e. every field the patch
+// WOULD set (encodeMetadata omits zero values, and draft only when true) already
+// holds that value in stored. It mirrors encodeMetadata's omit semantics exactly,
+// so it is true precisely when `bd update --metadata` would change nothing.
+//
+// last_synced_at is INTENTIONALLY excluded: the daemon bumps it every refresh,
+// but nothing reads the bead's copy of it (the authoritative sync timestamp is
+// the SQLite store row's last_synced_at, written independently each tick), so a
+// refresh whose only delta is last_synced_at must not trigger a commit (FB-1).
+// When a real field DOES change and a write is issued, the fresh last_synced_at
+// rides along with that same write.
+func metadataUnchanged(stored, desired MergeRequestFields) bool {
+	if desired.Repo != "" && desired.Repo != stored.Repo {
+		return false
+	}
+	if desired.PRNumber != 0 && desired.PRNumber != stored.PRNumber {
+		return false
+	}
+	if desired.State != "" && desired.State != stored.State {
+		return false
+	}
+	if desired.Branch != "" && desired.Branch != stored.Branch {
+		return false
+	}
+	if desired.Base != "" && desired.Base != stored.Base {
+		return false
+	}
+	if desired.Author != "" && desired.Author != stored.Author {
+		return false
+	}
+	if desired.URL != "" && desired.URL != stored.URL {
+		return false
+	}
+	if desired.SyncError != "" && desired.SyncError != stored.SyncError {
+		return false
+	}
+	if desired.CIOnlyAttempts != 0 && desired.CIOnlyAttempts != stored.CIOnlyAttempts {
+		return false
+	}
+	// encodeMetadata only ever SETS draft (=true); it never clears it, so a
+	// desired.Draft==false can never produce a change regardless of stored.
+	if desired.Draft && !stored.Draft {
+		return false
+	}
+	// last_synced_at excluded by design (FB-1).
+	return true
 }
 
 // encodeMetadata serializes the non-zero fields of f as a JSON object that

@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -677,4 +678,188 @@ func TestNewClientForRepo_HitsRepoWorkspace(t *testing.T) {
 	if gotA == nil {
 		t.Fatalf("bead %s not visible from its own workspace", idA)
 	}
+}
+
+// ----------------------------------------------------------------------
+// Diff-before-write (write-amplification elimination: pg2-ojqz5 FB-1/2/4)
+// ----------------------------------------------------------------------
+
+// mrDiffRunner is a fake Runner for the diff-before-write proofs. It returns a
+// canned bd-list envelope for any READ (`bd list ...`) so the diff logic has a
+// current stored state to compare against, and records EVERY call so a test can
+// assert whether a WRITE (each of which, against real bd, produces a Dolt
+// commit) was issued. Distinct from coOwnedRunner, which returns "" for every
+// call (i.e. "bead not found") and so cannot exercise the already-in-desired-
+// state skip path.
+type mrDiffRunner struct {
+	listJSON string
+	calls    [][]string
+}
+
+func (r *mrDiffRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	if len(args) > 0 && args[0] == "list" {
+		return r.listJSON, nil
+	}
+	return "", nil
+}
+
+// writeCalls returns only the recorded calls that MUTATE bd state — the ones
+// that, against real bd, produce a Dolt commit. Reads (`list`) are excluded.
+func (r *mrDiffRunner) writeCalls() [][]string {
+	var w [][]string
+	for _, c := range r.calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "update", "create", "close", "dep":
+			w = append(w, c)
+		}
+	}
+	return w
+}
+
+// cannedList marshals issues into the bd 1.0.4+ list envelope parseBDList reads.
+func cannedList(t *testing.T, issues ...bdIssue) string {
+	t.Helper()
+	env := struct {
+		Data          []bdIssue `json:"data"`
+		SchemaVersion int       `json:"schema_version"`
+	}{Data: issues, SchemaVersion: 1}
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal canned list: %v", err)
+	}
+	return string(b)
+}
+
+// storedMR is the current-state bead the daemon re-observes each refresh: an
+// open merge-request whose metadata already reflects the upstream PR.
+func storedMR() bdIssue {
+	return bdIssue{
+		ID: "mr-1", Title: "foo/bar#7", Status: "open", Type: "merge-request",
+		Metadata: map[string]any{
+			"repo":           "foo/bar",
+			"pr_number":      float64(7),
+			"state":          "open",
+			"branch":         "feat/x",
+			"base":           "main",
+			"author":         "alice",
+			"url":            "https://github.com/foo/bar/pull/7",
+			"last_synced_at": "2020-01-01T00:00:00Z",
+		},
+	}
+}
+
+// TestEnsureMergeRequest_NoOpDoesNotWrite is the core FB-1/FB-2 proof: a refresh
+// whose ONLY delta from the stored bead is a fresh last_synced_at (exactly what
+// the per-minute daemon produces) issues NO bd write/commit — killing the 428k
+// no-op 'nothing to commit' commits.
+func TestEnsureMergeRequest_NoOpDoesNotWrite(t *testing.T) {
+	ctx := context.Background()
+	r := &mrDiffRunner{listJSON: cannedList(t, storedMR())}
+	c := NewClientWithRunner(r)
+
+	id, alreadyClosed, err := c.EnsureMergeRequest(ctx, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "open", Branch: "feat/x", Base: "main",
+		Author: "alice", URL: "https://github.com/foo/bar/pull/7",
+		LastSyncedAt: "2026-07-25T12:00:00Z", // the ONLY "change": a new poll timestamp
+	})
+	if err != nil {
+		t.Fatalf("EnsureMergeRequest: %v", err)
+	}
+	if id != "mr-1" || alreadyClosed {
+		t.Fatalf("id=%q alreadyClosed=%v, want mr-1/false", id, alreadyClosed)
+	}
+	if w := r.writeCalls(); len(w) != 0 {
+		t.Fatalf("expected ZERO bd writes for a last_synced_at-only refresh, got %v", w)
+	}
+}
+
+// TestEnsureMergeRequest_RealChangeWritesOnce proves a refresh that changes a
+// REAL field (state open->ready) still issues exactly one bd update/commit, and
+// that the fresh last_synced_at rides along with it.
+func TestEnsureMergeRequest_RealChangeWritesOnce(t *testing.T) {
+	ctx := context.Background()
+	r := &mrDiffRunner{listJSON: cannedList(t, storedMR())}
+	c := NewClientWithRunner(r)
+
+	if _, _, err := c.EnsureMergeRequest(ctx, "foo/bar#7", MergeRequestFields{
+		Repo: "foo/bar", PRNumber: 7, State: "ready", // real change
+		LastSyncedAt: "2026-07-25T12:00:00Z",
+	}); err != nil {
+		t.Fatalf("EnsureMergeRequest: %v", err)
+	}
+	w := r.writeCalls()
+	if len(w) != 1 {
+		t.Fatalf("expected exactly one bd write on a real change, got %d: %v", len(w), w)
+	}
+	if w[0][0] != "update" || w[0][1] != "mr-1" {
+		t.Fatalf("expected `update mr-1 --metadata ...`, got %v", w[0])
+	}
+}
+
+// TestSetMergeRequestCoOwned_SkipsWhenAlreadyInDesiredState proves the daemon's
+// per-tick co-owned re-assertion issues NO bd write when the label already
+// matches the desired state (FB-4). The current labels are read from the
+// scripted list; the diff then suppresses the redundant add/remove-label.
+func TestSetMergeRequestCoOwned_SkipsWhenAlreadyInDesiredState(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("label present, desired co-owned -> no write", func(t *testing.T) {
+		iss := storedMR()
+		iss.Labels = []string{"co-owned"}
+		r := &mrDiffRunner{listJSON: cannedList(t, iss)}
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(ctx, "mr-1", true); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		if w := r.writeCalls(); len(w) != 0 {
+			t.Fatalf("expected no write when already co-owned, got %v", w)
+		}
+	})
+
+	t.Run("label absent, desired not-co-owned -> no write", func(t *testing.T) {
+		r := &mrDiffRunner{listJSON: cannedList(t, storedMR())} // no labels
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(ctx, "mr-1", false); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		if w := r.writeCalls(); len(w) != 0 {
+			t.Fatalf("expected no write when already not-co-owned, got %v", w)
+		}
+	})
+}
+
+// TestSetMergeRequestCoOwned_WritesOnChange proves a genuine co-owned transition
+// still issues exactly one add/remove-label write.
+func TestSetMergeRequestCoOwned_WritesOnChange(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("label absent, desired co-owned -> add-label", func(t *testing.T) {
+		r := &mrDiffRunner{listJSON: cannedList(t, storedMR())}
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(ctx, "mr-1", true); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		w := r.writeCalls()
+		if len(w) != 1 || w[0][2] != "--add-label" || w[0][3] != "co-owned" {
+			t.Fatalf("expected one `update mr-1 --add-label co-owned`, got %v", w)
+		}
+	})
+
+	t.Run("label present, desired not-co-owned -> remove-label", func(t *testing.T) {
+		iss := storedMR()
+		iss.Labels = []string{"co-owned"}
+		r := &mrDiffRunner{listJSON: cannedList(t, iss)}
+		c := NewClientWithRunner(r)
+		if err := c.SetMergeRequestCoOwned(ctx, "mr-1", false); err != nil {
+			t.Fatalf("SetMergeRequestCoOwned: %v", err)
+		}
+		w := r.writeCalls()
+		if len(w) != 1 || w[0][2] != "--remove-label" || w[0][3] != "co-owned" {
+			t.Fatalf("expected one `update mr-1 --remove-label co-owned`, got %v", w)
+		}
+	})
 }
