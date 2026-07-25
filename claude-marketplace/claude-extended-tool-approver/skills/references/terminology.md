@@ -18,3 +18,17 @@ These terms appear in both `identify-hook-misses` and `absorb-settings-rules`. A
 | `tool_response`     | `evaluate.tool_response`                                 | PostToolUse result payload (nested JSON object) or `null`. A failed tool call is signalled by `tool_response.is_error == true`. See [database-schema.md](database-schema.md#tool_response-shape). |
 
 Note: in skill documents the placeholder `<hook_decision>` (in `identify-hook-misses`) and `<settings_decision>` (in `absorb-settings-rules`) are used inside template strings to indicate "substitute the value from the corresponding field of the row you are reporting on."
+
+## Calibration terms (auto-mode two-way signal)
+
+These derived terms appear in `identify-hook-misses`' calibration steps. Each is defined purely in terms of the fields above (no new data source). Full mapping and the APPROVE-vs-ASK/DENY interpretation live in [database-schema.md](database-schema.md#calibration-tiers-auto-mode-two-way-signal) and [auto-mode-signal.md](auto-mode-signal.md).
+
+| Term                           | Definition                                                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| APPROVE candidate              | `hook_decision == "abstain"` and `outcome == "approved"` — a command CETA could learn to APPROVE.                                                                                     |
+| Human (PRIMARY) tier           | APPROVE candidate with `approval_source == "user"` and `agent_type == null` — the human approved a main-agent call. Strongest APPROVE evidence.                                       |
+| Weaker tier                    | APPROVE candidate with `approval_source in {auto, bypass}` OR `agent_type != null` — machine- or subagent-approved. NOT human endorsement. Segment by `approval_source × agent_type`. |
+| Errored / approved-but-errored | `tool_response.is_error == true` (a `null`/missing `tool_response` counts as not errored). Excluded from / demoted in APPROVE candidates.                                             |
+| False-denial                   | `hook_decision == "abstain"` and `outcome == "denied"` with an `auto_mode_classifier:` reason in `outcome_notes`. Candidate CETA APPROVE.                                             |
+| "Actually risky"               | `replay_result in {"deny", "ask"}` — the current engine self-consistently rejects the row. No curated list.                                                                           |
+| False-approval / over-approval | Ran under `auto`/`bypass` and "actually risky", OR a CETA-`allow` row whose `command_class` the `auto_mode_classifier` denied elsewhere. Candidate ASK/DENY.                          |

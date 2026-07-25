@@ -80,3 +80,26 @@ shape is tool-dependent, but a failed tool call is signalled by the boolean key
 define an "errored" call (e.g. the `identify-hook-misses` skill) MUST key off
 `tool_response.is_error`, treating a missing/`null` `tool_response` as "unknown /
 not errored".
+
+## Calibration tiers (auto-mode two-way signal)
+
+The `identify-hook-misses` skill uses these fields to grade candidates for
+rule changes. The mapping, so it is defined in one place:
+
+| Concept                        | Definition (fields)                                                                                                                                   | Feeds                      |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| APPROVE candidate              | `hook_decision == "abstain"` AND `outcome == "approved"`                                                                                              | new APPROVE rule           |
+| Human (PRIMARY) tier           | APPROVE candidate with `approval_source == "user"` AND `agent_type == null`                                                                           | strongest APPROVE evidence |
+| Weaker tier                    | APPROVE candidate with `approval_source IN (auto, bypass)` OR `agent_type != null`; segment by `approval_source × agent_type`                         | weak APPROVE evidence      |
+| "Errored" / down-weighting     | `tool_response.is_error == true` (missing/`null` = not errored) — exclude from APPROVE candidates                                                     | demote APPROVE candidate   |
+| False-denial                   | `hook_decision == "abstain"` AND `outcome == "denied"` AND `outcome_notes` matches `auto_mode_classifier`                                             | candidate CETA APPROVE     |
+| "Actually risky"               | `replay_result IN ("deny", "ask")` (the current engine self-consistently rejects the row; no curated list)                                            | risk signal                |
+| False-approval / over-approval | ran under `auto`/`bypass` and "actually risky", OR a `hook_decision == "allow"` row whose `command_class` the `auto_mode_classifier` denied elsewhere | candidate ASK/DENY         |
+
+`subagent` is deliberately NOT an `approval_source` value — the weaker tier
+crosses `approval_source` with the separate `agent_type` axis rather than
+inventing a merged bucket. The cross-reference join for over-approval is on the
+FULL normalized command (`command_class`), NOT the leading executable.
+
+Interpretation (when to write an APPROVE rule vs an ASK/DENY rule):
+[auto-mode-signal.md](auto-mode-signal.md).
