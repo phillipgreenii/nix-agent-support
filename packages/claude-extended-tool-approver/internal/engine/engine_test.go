@@ -343,6 +343,61 @@ func TestEngine_EvaluateExpression_ProcessSubstitution(t *testing.T) {
 	}
 }
 
+func TestEngine_EvaluateExpression_SubstitutionRecursion(t *testing.T) {
+	// pg2-1q5i3: a $(...) / `...` / <(...) / >(...) body is re-evaluated through
+	// ALL rules and folded most-risky-wins into the outer leaf. The mock owns echo
+	// (approve) and rm (reject); an unowned command abstains.
+	rule := &conditionalMockRule{approvePrefix: "echo", rejectPrefix: "rm"}
+	e := New(rule)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+
+	tests := []struct {
+		name string
+		expr string
+		want hookio.Decision
+	}{
+		// Approvable inner command keeps the outer approve.
+		{"approvable inner cmd sub", "echo $(echo hi)", hookio.Approve},
+		{"approvable inner backtick", "echo `echo hi`", hookio.Approve},
+		// A rejecting inner command propagates most-risky-wins.
+		{"rejecting inner cmd sub", "echo $(rm -rf /)", hookio.Reject},
+		{"rejecting inner backtick", "echo `rm -rf /`", hookio.Reject},
+		{"rejecting inner process sub", "echo <(rm -rf /)", hookio.Reject},
+		// An unowned (abstaining) inner command demotes the outer approve.
+		{"abstaining inner demotes", "echo $(unowned thing)", hookio.Abstain},
+		// Nested: the inner rm surfaces on re-evaluation of the outer body.
+		{"nested rm surfaces", "echo $(cat $(rm -rf /))", hookio.Reject},
+		{"process sub nested in cmd sub", "echo $(cat <(rm -rf /))", hookio.Reject},
+		// Single-quoted body is literal — no substitution, outer approve stands.
+		{"single quoted literal not recursed", "echo '$(rm -rf /)'", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.EvaluateExpression(tt.expr, nil, origin)
+			if got.Decision != tt.want {
+				t.Errorf("EvaluateExpression(%q) = %v (%s), want %v", tt.expr, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngine_EvaluateExpression_SubstitutionCycleDetection(t *testing.T) {
+	// The substitution recursion MUST push a StackFrame so the existing cycle
+	// check fires: a substitution body equal to an ancestor expression yields
+	// Abstain, which then demotes the outer approve.
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp"}
+
+	stack := []hookio.StackFrame{
+		{RuleName: "docker", Command: "docker run", Expression: "echo hello"},
+	}
+	got := e.EvaluateExpression("echo $(echo hello)", stack, origin)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("Decision = %v, want Abstain (substitution body cycles with ancestor)", got.Decision)
+	}
+}
+
 func TestEngine_EvaluateExpression_SafeDeviceRedirects(t *testing.T) {
 	// pg2-9ctmb: a redirect whose target is a standard special device file
 	// (/dev/null, /dev/stdout, /dev/stderr, /dev/tty, /dev/fd/<n>) MUST NOT demote

@@ -191,36 +191,45 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// Evaluate through rule chain
 		cmdResult := e.Evaluate(syntheticInput)
 
-		// Command-substitution guard: an unresolved, non-safe $(...) / backtick in
-		// the executable or ANY arg runs an inner command the leaf's own rule never
-		// sees (e.g. `echo $(rm -rf ~)` — echo is "always safe" and approves). Demote
-		// such a leaf to at least Abstain. $(date)/$(mktemp) stay approved.
-		if hasUnsafeSubstitution(pc) && hookio.Abstain > cmdResult.Decision {
-			cmdResult = hookio.RuleResult{Decision: hookio.Abstain, Reason: "unresolved command substitution runs an unevaluated inner command", Module: "engine"}
-		}
-
 		// Evaluate I/O redirections. With the restrictiveness ordering
 		// (Approve < Abstain < Ask < Reject) a plain most-restrictive-wins
 		// comparison correctly lets an unknown redirection path (Abstain) demote
 		// an otherwise-approved command — no special case needed.
 		redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
-		if redirResult.Decision > cmdResult.Decision {
-			cmdResult = redirResult
-		}
+		cmdResult = hookio.MostRestrictive(cmdResult, redirResult)
 
-		// Evaluate process substitutions recursively
-		for _, psub := range pc.ProcessSubstitutions {
-			psubStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "process-substitution", Expression: normalized})
-			psubResult := e.EvaluateExpression(psub, psubStack, origin)
-			if psubResult.Decision > cmdResult.Decision {
-				cmdResult = psubResult
+		// Substitution-body recursion (pg2-1q5i3). Every top-level $(...) / `...` /
+		// <(...) / >(...) body in the COMMAND (env-assignment values excluded — those
+		// are the static classifyExpansion path / pg2-gkd5e) is re-evaluated through
+		// ALL rules with a pushed StackFrame (so the cycle check above fires) and
+		// folded most-risky-wins. The raw command text is scanned (not post-unquote
+		// args) so a single-quoted literal `'$(rm -rf ~)'` is correctly skipped and a
+		// double-quoted `"$(cmd)"` is still recursed. This replaces the former
+		// static command-substitution guard AND the process-substitution loop with
+		// one shared enumerator.
+		for _, sub := range cmdparse.EnumerateSubstitutions(cmdparse.StripLeadingEnvAssignments(pc.Raw)) {
+			subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
+			subResult := e.EvaluateExpression(sub.Body, subStack, origin)
+
+			// Static allowlist FLOOR for command substitutions ($()/backtick): a body
+			// the static allowlist rejects (e.g. `git show HEAD` — textconv/external-diff
+			// RCE) can be no LESS restrictive than Abstain even if full-engine recursion
+			// would approve the inner command. Recursion only ADDS demotions. Process
+			// substitutions have no static allowlist and are governed by recursion alone.
+			if sub.IsCommandSubstitution() && !cmdparse.IsSafeSubstitutionBody(sub.Body) &&
+				subResult.Decision < hookio.Abstain {
+				subResult = hookio.RuleResult{
+					Decision: hookio.Abstain,
+					Reason:   "command substitution not on static safe allowlist: " + sub.Body,
+					Module:   "engine",
+				}
 			}
+
+			cmdResult = hookio.MostRestrictive(cmdResult, subResult)
 		}
 
 		// Track most restrictive
-		if cmdResult.Decision > mostRestrictive.Decision {
-			mostRestrictive = cmdResult
-		}
+		mostRestrictive = hookio.MostRestrictive(mostRestrictive, cmdResult)
 
 		// After processing the leaf, advance the running cwd if it is a simple
 		// `cd <dir>` with exactly one non-flag argument, so subsequent leaves
@@ -246,20 +255,6 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 func normalizeExpression(expr string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(expr)), " ")
-}
-
-// hasUnsafeSubstitution reports whether a parsed leaf's executable or any arg
-// embeds an unresolved, non-safe command substitution ($(...) / backtick).
-func hasUnsafeSubstitution(pc cmdparse.ParsedCommand) bool {
-	if cmdparse.HasUnsafeCommandSubstitution(pc.Executable) {
-		return true
-	}
-	for _, a := range pc.Args {
-		if cmdparse.HasUnsafeCommandSubstitution(a) {
-			return true
-		}
-	}
-	return false
 }
 
 func mustBashJSON(cmd string) json.RawMessage {

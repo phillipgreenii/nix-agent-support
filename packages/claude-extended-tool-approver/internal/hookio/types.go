@@ -51,6 +51,19 @@ type RuleResult struct {
 	Trace    []TraceEntry // nil when tracing is disabled
 }
 
+// MostRestrictive returns whichever of current/candidate is more restrictive
+// under the Decision ordering (Approve < Abstain < Ask < Reject); ties keep
+// current. This is the shared most-risky-wins aggregation primitive for
+// substitution-body recursion (pg2-1q5i3); sibling env-value recursion
+// (pg2-gkd5e) reuses it so both fold identically. An expression is Approve iff
+// EVERY level affirmatively Approves; any Abstain/Ask/Reject at any level wins.
+func MostRestrictive(current, candidate RuleResult) RuleResult {
+	if candidate.Decision > current.Decision {
+		return candidate
+	}
+	return current
+}
+
 type TraceEntry struct {
 	RuleName string
 	Decision Decision

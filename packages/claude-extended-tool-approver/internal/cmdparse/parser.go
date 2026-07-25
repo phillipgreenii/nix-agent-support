@@ -106,11 +106,11 @@ func isGoEnvMutatingFlag(t string) bool {
 	return name == "w" || name == "u"
 }
 
-// isSafeSubstitutionBody reports whether cmdStr — the inner body of a
-// $(...) or `...` command substitution — is safe. A body is safe only when
-// it parses (via the quote-aware Parse) to EXACTLY ONE leaf command with no
-// redirection/heredoc, and that leaf's command+args pass
-// isSafeSubstitutionCommand.
+// IsSafeSubstitutionBody reports whether cmdStr — the inner body of a
+// $(...) or `...` command substitution — is safe under the STATIC allowlist. A
+// body is safe only when it contains no nested substitution AND it parses (via
+// the quote-aware Parse) to EXACTLY ONE leaf command with no redirection/heredoc,
+// and that leaf's command+args pass isSafeSubstitutionCommand.
 //
 // Requiring exactly one leaf is what makes this quote-aware for free: Parse
 // (via splitCompound/tokenize) already tracks single/double-quote and
@@ -119,7 +119,19 @@ func isGoEnvMutatingFlag(t string) bool {
 // (unsafe), while the SAME byte inside the command's own quotes — e.g. the
 // '|' in `grep -E 'a|b' file` — stays glued into one argument token and the
 // body still parses to a single leaf.
-func isSafeSubstitutionBody(cmdStr string) bool {
+//
+// This is the STATIC FLOOR consulted by the engine's substitution-body
+// recursion (pg2-1q5i3): a body the allowlist rejects can never be made LESS
+// restrictive by full-engine recursion (e.g. `git show HEAD` is approved by the
+// git rule but deliberately excluded here for the textconv/external-diff RCE
+// surface). Recursion may only ADD demotions, never unlock what this blocks.
+func IsSafeSubstitutionBody(cmdStr string) bool {
+	// A body that itself embeds a command/process substitution is opaque to the
+	// static allowlist — the nested command is never inspected here. Reject it;
+	// the engine's full-engine recursion evaluates the inner command instead.
+	if len(EnumerateSubstitutions(cmdStr)) > 0 {
+		return false
+	}
 	leaves := Parse(cmdStr)
 	if len(leaves) != 1 {
 		return false
@@ -130,6 +142,235 @@ func isSafeSubstitutionBody(cmdStr string) bool {
 	}
 	tokens := append([]string{leaf.Executable}, leaf.Args...)
 	return isSafeSubstitutionCommand(tokens)
+}
+
+// SubstitutionKind classifies an extracted shell substitution.
+type SubstitutionKind int
+
+const (
+	SubstCommand    SubstitutionKind = iota // $(...)
+	SubstBacktick                           // `...`
+	SubstProcessIn                          // <(...)
+	SubstProcessOut                         // >(...)
+)
+
+// Substitution is one top-level shell substitution extracted from raw command
+// text by EnumerateSubstitutions.
+type Substitution struct {
+	Kind SubstitutionKind
+	Body string // inner command text, verbatim (NOT unquoted)
+}
+
+// IsCommandSubstitution reports whether the substitution captures a command's
+// OUTPUT — $(...) or `...`. Only these are governed by the static allowlist
+// floor (IsSafeSubstitutionBody); process substitutions (<(...) / >(...)) have
+// no static allowlist and are governed by full-engine recursion alone.
+func (s Substitution) IsCommandSubstitution() bool {
+	return s.Kind == SubstCommand || s.Kind == SubstBacktick
+}
+
+// EnumerateSubstitutions scans raw shell text and returns every TOP-LEVEL
+// command/process substitution body: $(...), `...`, <(...) and >(...). It is the
+// single shared substitution enumerator (pg2-1q5i3) used by the engine's
+// substitution-body recursion and reusable by sibling env-value recursion
+// (pg2-gkd5e).
+//
+// Semantics:
+//   - Single-quoted spans are literal — bash performs NO substitution there — so
+//     they are skipped entirely.
+//   - Double-quoted spans still permit $(...) and `...` (bash performs those
+//     inside double quotes); a backslash-escaped $ or ` is literal.
+//   - Arithmetic $((...)) is NOT a command substitution and is skipped.
+//   - Only TOP-LEVEL substitutions are returned; a nested substitution stays
+//     inside the returned outer body and surfaces when the engine re-evaluates
+//     that body (parallel to the existing process-substitution recursion). This
+//     avoids double-processing and lets the engine cycle check apply per level.
+//   - Paren matching counts every '(' (bare, $(, <(, >() so a process sub nested
+//     inside a command sub — the `$(cat <(rm -rf ~))` depth-counter gotcha — is
+//     NOT truncated.
+//   - An unterminated substitution stops the scan (best-effort, safe default).
+func EnumerateSubstitutions(s string) []Substitution {
+	var out []Substitution
+	inSingle, inDouble := false, false
+	i, n := 0, len(s)
+	for i < n {
+		c := s[i]
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			}
+			i++
+		case c == '\\' && i+1 < n:
+			// Escaped char (bare or double-quote context): the next byte is
+			// literal, so \$ / \` cannot begin a substitution.
+			i += 2
+		case c == '\'' && !inDouble:
+			inSingle = true
+			i++
+		case c == '"':
+			inDouble = !inDouble
+			i++
+		case c == '`':
+			end := indexUnescapedBacktick(s, i+1)
+			if end < 0 {
+				return out // unterminated backtick — stop
+			}
+			out = append(out, Substitution{Kind: SubstBacktick, Body: s[i+1 : end]})
+			i = end + 1
+		case c == '$' && i+1 < n && s[i+1] == '(':
+			rel := matchParen(s[i+1:]) // s[i+1] == '('
+			if rel < 0 {
+				return out // unterminated — stop
+			}
+			closeAbs := i + 1 + rel
+			if i+2 < n && s[i+2] == '(' {
+				// Arithmetic $((...)) — not a command substitution; skip it.
+				i = closeAbs + 1
+				continue
+			}
+			out = append(out, Substitution{Kind: SubstCommand, Body: s[i+2 : closeAbs]})
+			i = closeAbs + 1
+		case (c == '<' || c == '>') && !inDouble && i+1 < n && s[i+1] == '(':
+			rel := matchParen(s[i+1:])
+			if rel < 0 {
+				i++ // malformed <( — treat '<' as a redirect operator, keep scanning
+				continue
+			}
+			closeAbs := i + 1 + rel
+			kind := SubstProcessIn
+			if c == '>' {
+				kind = SubstProcessOut
+			}
+			out = append(out, Substitution{Kind: kind, Body: s[i+2 : closeAbs]})
+			i = closeAbs + 1
+		default:
+			i++
+		}
+	}
+	return out
+}
+
+// matchParen returns the index within s of the ')' that closes the '(' assumed
+// to be at s[0], or -1 if unbalanced. Quote- and backslash-aware: it counts
+// every '(' as depth+1 and every ')' as depth-1 outside single/double quotes, so
+// nested $()/<()/>()/subshells all balance and a '(' from '<(' or '>(' does NOT
+// leak (the pg2-1q5i3 truncation gotcha). Parens inside single or double quotes
+// are literal and ignored.
+func matchParen(s string) int {
+	inSingle, inDouble := false, false
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			}
+		case c == '\\':
+			i++ // skip escaped char
+		case c == '\'' && !inDouble:
+			inSingle = true
+		case c == '"':
+			inDouble = !inDouble
+		case inDouble:
+			// Parens are literal inside double quotes — ignore them.
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// indexUnescapedBacktick returns the index of the next '`' at or after from
+// that is not backslash-escaped, or -1.
+func indexUnescapedBacktick(s string, from int) int {
+	for i := from; i < len(s); i++ {
+		if s[i] == '\\' {
+			i++
+			continue
+		}
+		if s[i] == '`' {
+			return i
+		}
+	}
+	return -1
+}
+
+// StripLeadingEnvAssignments returns raw with any leading NAME=VALUE
+// environment-assignment tokens (and the whitespace separating them) removed,
+// yielding the raw text of the command itself (executable + args + redirections
+// + process/command substitutions). The engine feeds THIS — not the whole
+// segment — to EnumerateSubstitutions so a substitution inside an env VALUE
+// (e.g. the `$(curl evil)` in `FOO=$(curl evil) echo hi`) is NOT recursed here:
+// env-value handling is the static classifyExpansion path (and the separate
+// env-value recursion of pg2-gkd5e), not this bead's command choke point.
+func StripLeadingEnvAssignments(raw string) string {
+	return raw[commandStartOffset(raw):]
+}
+
+// commandStartOffset returns the byte offset into raw where the executable
+// begins — i.e. after any leading NAME=VALUE env-assignment tokens. It scans
+// quote/paren-aware so a value with spaces inside $(...) or quotes stays one
+// token. Returns len(raw) when raw is entirely env assignments.
+func commandStartOffset(raw string) int {
+	inSingle, inDouble := false, false
+	parenDepth := 0
+	tokenStart := -1
+	i, n := 0, len(raw)
+	for i < n {
+		c := raw[i]
+		if !inSingle && !inDouble && parenDepth == 0 && (c == ' ' || c == '\t' || c == '\n') {
+			if tokenStart >= 0 {
+				if !isEnvAssign(raw[tokenStart:i]) {
+					return tokenStart
+				}
+				tokenStart = -1
+			}
+			i++
+			continue
+		}
+		if tokenStart < 0 {
+			tokenStart = i
+		}
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			}
+			i++
+		case c == '\\' && i+1 < n:
+			i += 2
+		case c == '\'' && !inDouble:
+			inSingle = true
+			i++
+		case c == '"':
+			inDouble = !inDouble
+			i++
+		case c == '(':
+			parenDepth++
+			i++
+		case c == ')':
+			if parenDepth > 0 {
+				parenDepth--
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	if tokenStart >= 0 {
+		if !isEnvAssign(raw[tokenStart:]) {
+			return tokenStart
+		}
+		return n
+	}
+	return 0
 }
 
 // wrapperPrefixes lists (executable, subcommand) pairs that act as transparent
@@ -844,37 +1085,26 @@ func classifyCmdSubstitution(value string) ExpansionKind {
 	if start == -1 {
 		return ExpansionUnknown
 	}
-	inner := value[start+2:]
-	depth := 1
-	end := -1
-	for i := 0; i < len(inner); i++ {
-		if i+1 < len(inner) && inner[i] == '$' && inner[i+1] == '(' {
-			depth++
-			i++
-		} else if inner[i] == ')' {
-			depth--
-			if depth == 0 {
-				end = i
-				break
-			}
-		}
-	}
-	if end == -1 {
+	// Find the matching ')' with the shared quote/paren-aware matcher so a
+	// process sub nested in the body (e.g. `$(cat <(rm -rf ~))`) does NOT
+	// truncate the body at the process sub's own ')' (pg2-1q5i3 gotcha).
+	rel := matchParen(value[start+1:]) // value[start+1] == '('
+	if rel < 0 {
 		return ExpansionUnknown
 	}
+	closeAbs := start + 1 + rel
 	// Check for additional expansions in prefix or remainder (security: multiple substitutions)
-	fullEnd := start + 2 + end + 1
-	remainder := value[fullEnd:]
+	remainder := value[closeAbs+1:]
 	prefix := value[:start]
 	if strings.Contains(remainder, "$(") || strings.Contains(remainder, "`") || strings.Contains(remainder, "$") ||
 		strings.Contains(prefix, "$(") || strings.Contains(prefix, "`") || strings.Contains(prefix, "$") {
 		return ExpansionUnknown
 	}
-	cmdStr := strings.TrimSpace(inner[:end])
+	cmdStr := strings.TrimSpace(value[start+2 : closeAbs])
 	if cmdStr == "" {
 		return ExpansionUnknown
 	}
-	if isSafeSubstitutionBody(cmdStr) {
+	if IsSafeSubstitutionBody(cmdStr) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown
@@ -899,7 +1129,7 @@ func classifyBacktickSubstitution(value string) ExpansionKind {
 	if cmdStr == "" {
 		return ExpansionUnknown
 	}
-	if isSafeSubstitutionBody(cmdStr) {
+	if IsSafeSubstitutionBody(cmdStr) {
 		return ExpansionSafeCmd
 	}
 	return ExpansionUnknown

