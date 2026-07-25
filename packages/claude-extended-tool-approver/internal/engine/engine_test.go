@@ -447,6 +447,46 @@ func TestEngine_EvaluateExpression_CdRelativeRedirection(t *testing.T) {
 	}
 }
 
+func TestEngine_EvaluateExpression_CdConservativeBranches(t *testing.T) {
+	// pg2-trh3z: guard the pg2-opclh conservative `cd` branches (engine.go:230-231).
+	// The running cwd advances ONLY for a simple `cd <dir>` with exactly one
+	// non-flag, non-`~` argument. `cd -`, `cd <a> <b>`, etc. MUST NOT re-root — a
+	// relative redirect after them still resolves against the (non-writable) origin
+	// cwd and stays Abstain. Same setup as CdRelativeRedirection above: base cwd is
+	// /etc (a non-writable zone), so a relative `> ./out` is Abstain unless a valid
+	// re-root moves it into a writable zone.
+	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
+	e := New(approve)
+	pe := patheval.NewWithCWD("/tmp/project", "/etc")
+	e.SetPathEvaluator(pe)
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/etc"}
+
+	tests := []struct {
+		name string
+		expr string
+		want hookio.Decision
+	}{
+		// `cd -` (previous dir) carries a `-`-prefixed arg — the conservative branch
+		// refuses to re-root, so ./out stays under /etc (Abstain).
+		{"cd - does not re-root", "cd - && echo hi > ./out", hookio.Abstain},
+		// Two args — the `len(pc.Args) == 1` guard refuses to re-root (Abstain).
+		{"cd two relative args does not re-root", "cd a b && echo hi > ./out", hookio.Abstain},
+		// Discriminating two-arg case: the FIRST arg IS a writable zone (/tmp). If the
+		// multi-arg guard were removed and the code re-rooted on pc.Args[0], ./out
+		// would resolve under /tmp and Approve — so this case flips to Approve the
+		// moment the guard breaks, proving the guard is exercised.
+		{"cd two args first writable does not re-root", "cd /tmp extra && echo hi > ./out", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.EvaluateExpression(tt.expr, nil, origin)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (%s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
 func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
 	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "not relevant"}
 	a2 := &mockRule{name: "rule-b", decision: hookio.Abstain, reason: "also not relevant"}

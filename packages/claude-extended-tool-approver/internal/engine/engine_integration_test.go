@@ -305,6 +305,71 @@ func TestIntegration_KcRules(t *testing.T) {
 	})
 }
 
+// TestIntegration_CdCompoundTail is the pg2-trh3z whole-chain regression guard
+// for the compound-tail `cd` mechanism (landed as pg2-opclh). These MUST run
+// through the full rule chain via EvaluateHook, not safecmds alone: safecmds
+// Abstains on a `git status` leaf — approval of the tail comes from
+// internal/rules/git — so a safecmds-only test could not observe the approve.
+func TestIntegration_CdCompoundTail(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+
+	t.Run("cd-then-approved-tail", func(t *testing.T) {
+		eng := buildFullEngine(projectRoot, projectRoot)
+		cases := []struct {
+			name    string
+			command string
+			want    hookio.Decision
+		}{
+			// `cd <dir> && git status`: the cd leaf is alwaysSafe (safecmds) and the
+			// git-status tail is approved by the git rule — whole chain Approves.
+			{"cd project then git status", "cd " + projectRoot + " && git status", hookio.Approve},
+			{"cd tmp then git status", "cd /tmp && git status", hookio.Approve},
+			// `cd /tmp && rm -rf /etc`: the dangerous tail (`rm` of the non-writable
+			// /etc) is NOT approved — the leaf Abstains and demotes the whole compound.
+			// Guards that a leading safe `cd` cannot green-light a dangerous tail.
+			{"cd tmp then rm -rf etc not approved", "cd /tmp && rm -rf /etc", hookio.Abstain},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(tc.command)}
+				got := eng.EvaluateHook(in)
+				if got.Decision != tc.want {
+					t.Errorf("%q: got %s (%s: %s), want %s", tc.command, got.Decision, got.Module, got.Reason, tc.want)
+				}
+			})
+		}
+	})
+
+	// Non-redirect re-root: a relative path arg in a NON-redirect tail (`cat ./x`)
+	// resolves against the cd target too, not only redirection targets. Origin cwd
+	// is /etc (a non-readable zone), so `cat ./x` Abstains at origin; after
+	// `cd /tmp` (a readable zone) the same ./x resolves under /tmp and Approves.
+	// This is the positive, non-redirect complement to engine_test.go's
+	// redirect-only CdRelativeRedirection coverage, run through the real chain
+	// because path resolution lives in the safecmds rule.
+	t.Run("relative-non-redirect-tail-re-roots", func(t *testing.T) {
+		eng := buildFullEngine(projectRoot, "/etc")
+		cases := []struct {
+			name    string
+			command string
+			want    hookio.Decision
+		}{
+			{"cat relative at non-readable origin abstains", "cat ./x", hookio.Abstain},
+			{"cd tmp re-roots relative cat", "cd /tmp && cat ./x", hookio.Approve},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				in := &hookio.HookInput{ToolName: "Bash", CWD: "/etc", ToolInput: makeBashJSON(tc.command)}
+				got := eng.EvaluateHook(in)
+				if got.Decision != tc.want {
+					t.Errorf("%q: got %s (%s: %s), want %s", tc.command, got.Decision, got.Module, got.Reason, tc.want)
+				}
+			})
+		}
+	})
+}
+
 type fakePrimaryResolver struct {
 	canonical    bool
 	primary, cur string

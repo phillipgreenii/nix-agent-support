@@ -98,6 +98,35 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Cd_Approve is the pg2-trh3z regression guard for `cd`'s
+// membership in the alwaysSafe set (safecmds.go:21), which was previously
+// untested. A bare `cd <abs-path>` MUST Approve — and because `cd` is in NO
+// other command map (browsingCmds/safeReadCmds/safeWriteCmds), that Approve can
+// only come from the alwaysSafe branch: drop "cd" from alwaysSafe and every case
+// here falls through to the "Unknown command" Abstain. The cd target is
+// irrelevant (alwaysSafe short-circuits before any path check), so an
+// out-of-zone absolute path still Approves.
+func TestSafecmds_Cd_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"cd /home/user/project",
+		"cd /tmp",
+		"cd /some/other/absolute/path",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (cd is alwaysSafe)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 func TestSafecmds_JqWithProjectPath_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
