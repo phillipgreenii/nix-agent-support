@@ -56,7 +56,11 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		// prompted (Ask) instead of being silently approved by pathsafety or
 		// safe-commands (pg2-to8pe). first-match-wins makes ordering the override.
 		secrets.New(pe),
-		envvars.New(),
+		// envvars is DECISIVE for flagged vars and runs before safe-commands so a
+		// dangerous `export VAR=…` cannot be re-approved as a bare `export`
+		// (pg2-gkd5e). It takes the engine as its Evaluator so a dynamic value's
+		// substitution body can be recursed through the full chain.
+		envvars.NewWithEvaluator(eng),
 		assume.New(),
 		new(webfetch.Rule),
 		claudetools.New(),

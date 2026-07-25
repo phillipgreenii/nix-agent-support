@@ -142,12 +142,14 @@ func TestIntegration_GitResetHard(t *testing.T) {
 
 // --- Env var safety integration tests ---
 
-func TestIntegration_EnvVars_DangerousEnvVar_DeferredAllow(t *testing.T) {
-	// envvars rule abstains (deferred to claude-code), git rule approves git status as read-only
+func TestIntegration_EnvVars_InjectorEnvVar_Denied(t *testing.T) {
+	// envvars is DECISIVE for a guaranteed-unsafe injector: LD_PRELOAD is rejected
+	// (deny) before the git rule can approve `git status` (pg2-gkd5e). Previously
+	// this leaked to allow because envvars merely abstained and git approved.
 	input := `{"tool_name":"Bash","tool_input":{"command":"LD_PRELOAD=/evil.so git status"},"cwd":"/tmp"}`
 	result := runHook(t, input)
-	if d := getDecision(result); d != "allow" {
-		t.Errorf("LD_PRELOAD with git status: decision = %q, want allow (envvars defers, git approves)", d)
+	if d := getDecision(result); d != "deny" {
+		t.Errorf("LD_PRELOAD with git status: decision = %q, want deny (envvars rejects the injector)", d)
 	}
 }
 
@@ -159,12 +161,15 @@ func TestIntegration_EnvVars_NoEnvVars_Allow(t *testing.T) {
 	}
 }
 
-func TestIntegration_EnvVars_UnknownExpression_DeferredAllow(t *testing.T) {
-	// envvars rule abstains (deferred to claude-code), safecmds rule approves echo as always-safe
+func TestIntegration_EnvVars_UnknownExpression_Ask(t *testing.T) {
+	// A benign-named var whose VALUE embeds a non-safe substitution is escalated to
+	// Ask by the env-var rule's value-recursion (pg2-gkd5e). The engine's command
+	// choke point strips the leading assignment, so envvars is the only guard;
+	// previously safecmds approved the trailing `echo` and this leaked to allow.
 	input := `{"tool_name":"Bash","tool_input":{"command":"FOO=$(curl evil) echo hi"},"cwd":"/tmp"}`
 	result := runHook(t, input)
-	if d := getDecision(result); d != "allow" {
-		t.Errorf("FOO=$(curl evil) echo hi: decision = %q, want allow (envvars defers, safecmds approves)", d)
+	if d := getDecision(result); d != "ask" {
+		t.Errorf("FOO=$(curl evil) echo hi: decision = %q, want ask (envvars value-recursion escalates)", d)
 	}
 }
 

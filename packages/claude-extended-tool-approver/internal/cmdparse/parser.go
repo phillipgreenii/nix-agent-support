@@ -390,10 +390,13 @@ var wrapperPrefixes = []struct {
 var execPrefixes = map[string]bool{"env": true, "command": true}
 
 // unwrapExecPrefix strips an env/command prefix's flags and NAME=VALUE
-// assignments and returns the inner executable + its args. ok is false when no
-// inner command follows (bare `env`, or only flags/assignments) — the caller
-// then leaves the command as-is (a read-only env query).
-func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, ok bool) {
+// assignments and returns the inner executable + its args. Any `env NAME=VALUE`
+// assignments encountered are CAPTURED into envAssigns (not merely stripped) so
+// the env-var guard sees them regardless of the prefix form (pg2-gkd5e). ok is
+// false when no inner command follows (bare `env`, or only flags/assignments) —
+// the caller then leaves the command as-is (a read-only env query) but still
+// records the captured assignments.
+func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []string, envAssigns []EnvAssignment, ok bool) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -405,10 +408,12 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		// execute NAME. Do not unwrap: leave the bare `command` for the safe-commands
 		// rule to approve as a read-only lookup. (`command -p` DOES execute → unwrap.)
 		if base == "command" && (a == "-v" || a == "-V") {
-			return "", nil, false
+			return "", nil, nil, false
 		}
-		// env NAME=VALUE assignment (command has none)
+		// env NAME=VALUE assignment (command has none) — capture it so the env-var
+		// guard can inspect it, then continue past it to the inner command.
 		if base == "env" && !strings.HasPrefix(a, "-") && strings.Contains(a, "=") {
+			envAssigns = append(envAssigns, newEnvAssignment(a))
 			i++
 			continue
 		}
@@ -424,28 +429,65 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 		break // first bare, non-assignment token is the inner executable
 	}
 	if i >= len(args) {
-		return "", nil, false
+		return "", nil, envAssigns, false
 	}
-	return args[i], args[i+1:], true
+	return args[i], args[i+1:], envAssigns, true
+}
+
+// newEnvAssignment builds an EnvAssignment from a raw NAME=VALUE token,
+// classifying its value's expansion the same way extractExecAndArgs does. The
+// bash append form NAME+=VALUE is normalized to NAME so name-based guards (e.g.
+// the env-var rule's injector set) are not bypassed by `export LD_PRELOAD+=…` —
+// a '+' can only be the append operator here, since env-var names cannot contain
+// one.
+func newEnvAssignment(raw string) EnvAssignment {
+	eq := strings.Index(raw, "=")
+	name := strings.TrimSuffix(raw[:eq], "+")
+	return EnvAssignment{
+		Name:      name,
+		Value:     raw[eq+1:],
+		Raw:       raw,
+		Expansion: classifyExpansion(raw[eq+1:]),
+	}
 }
 
 func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	base := filepath.Base(pc.Executable)
+	// `export VAR=VALUE ...` is an assignment builtin: lift each NAME=VALUE arg
+	// into EnvVars so the env-var guard sees the assignment regardless of position
+	// (leading / export / env-prefix), while keeping the leaf rule-visible with
+	// Executable=="export". Keeping Executable non-empty matters: a leaf with an
+	// empty Executable is handled by the engine's command-less-leaf branch and
+	// never reaches the env-var rule (pg2-gkd5e). Non-assignment args (a bare name
+	// to export, `-f`, ...) stay as args so a bare `export`/`export NAME` remains a
+	// read-only query the safe-commands rule can approve; the env-var rule is
+	// DECISIVE for flagged vars and runs first, so it prevents auto-approval of a
+	// dangerous `export VAR=VALUE` before safe-commands is consulted.
+	if base == "export" {
+		return liftAssignmentArgs(pc)
+	}
 	if execPrefixes[base] {
-		if inner, innerArgs, ok := unwrapExecPrefix(base, pc.Args); ok {
+		if inner, innerArgs, envAssigns, ok := unwrapExecPrefix(base, pc.Args); ok {
 			return unwrapCommand(ParsedCommand{
 				Executable:           inner,
 				Args:                 innerArgs,
-				EnvVars:              pc.EnvVars,
+				EnvVars:              appendEnvAssignments(pc.EnvVars, envAssigns),
 				Redirections:         pc.Redirections,
 				ProcessSubstitutions: pc.ProcessSubstitutions,
 				HasHeredoc:           pc.HasHeredoc,
 				Raw:                  pc.Raw,
 				Comment:              pc.Comment,
 			})
+		} else if len(envAssigns) > 0 {
+			// No inner command (bare `env`/`command`, or flags + NAME=VALUE only) —
+			// leave the leaf as a read-only env query, but keep the captured
+			// assignments visible to the env-var guard so a standalone
+			// `env DANGEROUS=…` does not slip past it (pg2-gkd5e).
+			pc.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			return pc
 		}
-		// No inner command (bare `env`/`command` or flags only) — leave as-is;
-		// it is a read-only environment query handled by the safe-commands rule.
+		// No inner command and no assignments (bare `env`/`command` or flags only) —
+		// leave as-is; it is a read-only environment query handled by safe-commands.
 		return pc
 	}
 	for _, wp := range wrapperPrefixes {
@@ -468,6 +510,35 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		}
 	}
 	return pc
+}
+
+// liftAssignmentArgs moves every leading-style NAME=VALUE token out of pc.Args
+// and into pc.EnvVars (classifying each value), returning the leaf with the
+// remaining non-assignment args. Used for the `export` assignment builtin so the
+// env-var guard inspects `export VAR=VALUE` exactly like the leading `VAR=VALUE`
+// form (pg2-gkd5e).
+func liftAssignmentArgs(pc ParsedCommand) ParsedCommand {
+	var remaining []string
+	envVars := pc.EnvVars
+	for _, a := range pc.Args {
+		if isEnvAssign(a) {
+			envVars = append(envVars, newEnvAssignment(a))
+			continue
+		}
+		remaining = append(remaining, a)
+	}
+	pc.EnvVars = envVars
+	pc.Args = remaining
+	return pc
+}
+
+// appendEnvAssignments concatenates captured assignments onto an existing slice,
+// returning base unchanged when there is nothing to add.
+func appendEnvAssignments(base, extra []EnvAssignment) []EnvAssignment {
+	if len(extra) == 0 {
+		return base
+	}
+	return append(base, extra...)
 }
 
 type ExpansionKind int
@@ -1052,13 +1123,7 @@ func extractExecAndArgs(tokens []string) (exec string, args []string, envVars []
 			}
 			return
 		}
-		eq := strings.Index(t, "=")
-		envVars = append(envVars, EnvAssignment{
-			Name:      t[:eq],
-			Value:     t[eq+1:],
-			Raw:       t,
-			Expansion: classifyExpansion(t[eq+1:]),
-		})
+		envVars = append(envVars, newEnvAssignment(t))
 	}
 	return "", nil, envVars
 }

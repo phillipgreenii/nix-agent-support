@@ -317,6 +317,93 @@ func TestParse_EnvPrefix(t *testing.T) {
 	}
 }
 
+// TestParse_ExportLiftsEnvVars asserts that `export VAR=VALUE ...` populates
+// EnvVars (position-independent env-var guard, pg2-gkd5e) while keeping the leaf
+// rule-visible (Executable stays "export" so a bare `export`/`export NAME`
+// read-only query is still approvable by safe-commands).
+func TestParse_ExportLiftsEnvVars(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantExec string
+		wantArgs []string
+		wantEnvs []string // "NAME=VALUE" pairs
+	}{
+		{"export PATH=/x", "export", nil, []string{"PATH=/x"}},
+		{"export FOO=bar BAZ=qux", "export", nil, []string{"FOO=bar", "BAZ=qux"}},
+		{"export LD_PRELOAD=/evil.so", "export", nil, []string{"LD_PRELOAD=/evil.so"}},
+		// Non-assignment args (bare name, -f flag) stay as args; no EnvVars.
+		{"export FOO", "export", []string{"FOO"}, nil},
+		{"export -f myfunc", "export", []string{"-f", "myfunc"}, nil},
+		// A dynamic value is lifted verbatim (recursion happens downstream).
+		{"export FOO=$(curl evil)", "export", nil, []string{"FOO=$(curl evil)"}},
+	}
+	for _, tt := range tests {
+		got := Parse(tt.input)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d commands, want 1", tt.input, len(got))
+		}
+		if got[0].Executable != tt.wantExec {
+			t.Errorf("Parse(%q).Executable = %q, want %q", tt.input, got[0].Executable, tt.wantExec)
+		}
+		if !reflect.DeepEqual(nilIfEmpty(got[0].Args), tt.wantArgs) {
+			t.Errorf("Parse(%q).Args = %v, want %v", tt.input, got[0].Args, tt.wantArgs)
+		}
+		gotEnvs := envPairs(got[0].EnvVars)
+		if !reflect.DeepEqual(gotEnvs, tt.wantEnvs) {
+			t.Errorf("Parse(%q).EnvVars = %v, want %v", tt.input, gotEnvs, tt.wantEnvs)
+		}
+	}
+}
+
+// TestParse_EnvPrefixLiftsEnvVars asserts that `env VAR=VALUE cmd` copies the
+// NAME=VALUE assignments into EnvVars (not just strips them) so the env-var guard
+// sees them (pg2-gkd5e), including the standalone `env VAR=VALUE` (no inner cmd).
+func TestParse_EnvPrefixLiftsEnvVars(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantExec string
+		wantEnvs []string
+	}{
+		{"env PATH=/x git status", "git", []string{"PATH=/x"}},
+		{"env FOO=bar BAZ=qux ls", "ls", []string{"FOO=bar", "BAZ=qux"}},
+		{"env LD_PRELOAD=/evil.so echo hi", "echo", []string{"LD_PRELOAD=/evil.so"}},
+		// Standalone: no inner command — leaf stays `env` but assignment is visible.
+		{"env PATH=/x", "env", []string{"PATH=/x"}},
+		{"env DYLD_INSERT_LIBRARIES=/evil.dylib", "env", []string{"DYLD_INSERT_LIBRARIES=/evil.dylib"}},
+	}
+	for _, tt := range tests {
+		got := Parse(tt.input)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d commands, want 1", tt.input, len(got))
+		}
+		if got[0].Executable != tt.wantExec {
+			t.Errorf("Parse(%q).Executable = %q, want %q", tt.input, got[0].Executable, tt.wantExec)
+		}
+		gotEnvs := envPairs(got[0].EnvVars)
+		if !reflect.DeepEqual(gotEnvs, tt.wantEnvs) {
+			t.Errorf("Parse(%q).EnvVars = %v, want %v", tt.input, gotEnvs, tt.wantEnvs)
+		}
+	}
+}
+
+func envPairs(evs []EnvAssignment) []string {
+	if len(evs) == 0 {
+		return nil
+	}
+	out := make([]string, len(evs))
+	for i, ev := range evs {
+		out[i] = ev.Name + "=" + ev.Value
+	}
+	return out
+}
+
+func nilIfEmpty(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
+
 func TestParse_RespectsQuotingInSplitters(t *testing.T) {
 	got := Parse(`echo "a && b"`)
 	if len(got) != 1 {
