@@ -13,7 +13,7 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func TestGit_ConfigInjection_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil)
 	// A pre-subcommand -c / --config-env injects config that runs on a read-only
 	// subcommand (RCE class) — must Abstain (pg2-t4uyx).
 	abstain := []string{
@@ -65,7 +65,7 @@ func TestGit_ReadOnly_Approve(t *testing.T) {
 		"git check-ignore foo.log", "git check-attr diff -- file.txt",
 		"git check-mailmap user@example.com", "git check-ref-format refs/heads/main",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range readOnly {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -83,7 +83,7 @@ func TestGit_Modifying_Approve(t *testing.T) {
 		"git add .", "git commit -m msg", "git branch feat", "git fetch",
 		"git push", "git stash", "git config x y", "git mu",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range modifying {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -101,7 +101,7 @@ func TestGit_ResetSoft_Approve(t *testing.T) {
 		"git reset HEAD~1",
 		"git reset --soft HEAD~1",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -116,7 +116,7 @@ func TestGit_ResetSoft_Approve(t *testing.T) {
 
 func TestGit_ResetHard_Ask(t *testing.T) {
 	// Ensure reset --hard still asks
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git reset --hard HEAD~1"}),
@@ -135,7 +135,7 @@ func TestGit_Destructive_Ask(t *testing.T) {
 		"git push -f",
 		"git branch -D feat",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range destructive {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -149,7 +149,7 @@ func TestGit_Destructive_Ask(t *testing.T) {
 }
 
 func TestGit_NonGit_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
@@ -161,7 +161,7 @@ func TestGit_NonGit_Abstain(t *testing.T) {
 }
 
 func TestGit_NonBash_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"}),
@@ -173,14 +173,14 @@ func TestGit_NonBash_Abstain(t *testing.T) {
 }
 
 func TestGit_Name(t *testing.T) {
-	r := New()
+	r := New(nil)
 	if got := r.Name(); got != "git" {
 		t.Errorf("Name() = %q, want git", got)
 	}
 }
 
 func TestGit_GitDirReadOnly_Approve(t *testing.T) {
-	r := New()
+	r := New(nil)
 	commands := []string{
 		"GIT_DIR=/other git log",
 		"GIT_DIR=/other git diff",
@@ -201,7 +201,7 @@ func TestGit_GitDirReadOnly_Approve(t *testing.T) {
 }
 
 func TestGit_GitDirModifying_Ask(t *testing.T) {
-	r := New()
+	r := New(nil)
 	commands := []string{
 		"GIT_DIR=/other git push",
 		"GIT_DIR=/other git commit -m msg",
@@ -222,7 +222,7 @@ func TestGit_GitDirModifying_Ask(t *testing.T) {
 }
 
 func TestGit_CosmeticEnvVars_Unchanged(t *testing.T) {
-	r := New()
+	r := New(nil)
 	commands := []string{
 		"GIT_AUTHOR_NAME=foo git commit -m msg",
 		"GIT_AUTHOR_EMAIL=foo@bar git commit -m msg",
@@ -242,7 +242,7 @@ func TestGit_CosmeticEnvVars_Unchanged(t *testing.T) {
 }
 
 func TestGit_RebaseNonInteractive_Approve(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git rebase main"}),
@@ -259,7 +259,7 @@ func TestGit_Checkout_Approve(t *testing.T) {
 		"git checkout -- src/main.go",
 		"git checkout -b new-branch",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -277,7 +277,7 @@ func TestGit_CheckoutDot_Approve(t *testing.T) {
 		"git checkout .",
 		"git checkout -- .",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -296,7 +296,7 @@ func TestGit_MvRm_Approve(t *testing.T) {
 		"git rm stale.go",
 		"git rm --cached file.go",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -318,7 +318,7 @@ func TestGit_Worktree_Approve(t *testing.T) {
 		"git worktree move ../old ../new",
 		"git worktree repair",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -332,7 +332,7 @@ func TestGit_Worktree_Approve(t *testing.T) {
 }
 
 func TestGit_CherryPick_Approve(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git cherry-pick abc123"}),
@@ -344,7 +344,7 @@ func TestGit_CherryPick_Approve(t *testing.T) {
 }
 
 func TestGit_RebaseInteractive_Abstain(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git rebase -i HEAD~3"}),
@@ -356,7 +356,7 @@ func TestGit_RebaseInteractive_Abstain(t *testing.T) {
 }
 
 func TestGit_RebaseInteractiveWithSequenceEditor_Approve(t *testing.T) {
-	r := New()
+	r := New(nil)
 	approve := []string{
 		`GIT_SEQUENCE_EDITOR="sed -i.bak 's/^pick /reword /'" git rebase -i HEAD~3`,
 		`GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase --interactive ae21327~1`,
@@ -374,7 +374,7 @@ func TestGit_RebaseInteractiveWithSequenceEditor_Approve(t *testing.T) {
 }
 
 func TestGit_FilterBranch_Approve(t *testing.T) {
-	r := New()
+	r := New(nil)
 	approve := []string{
 		`FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --msg-filter 'sed "/^Refs: NO-JIRA$/d"' HEAD~4..HEAD`,
 		`git filter-branch --msg-filter 'sed "s/old/new/"' HEAD~2..HEAD`,
@@ -392,7 +392,7 @@ func TestGit_FilterBranch_Approve(t *testing.T) {
 }
 
 func TestGit_FilterBranchWithGitDir_Ask(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": `GIT_DIR=/other git filter-branch --msg-filter 'cat' HEAD~1..HEAD`}),
@@ -409,7 +409,7 @@ func TestGit_Tag_Reject(t *testing.T) {
 		"git tag -d v1.0",
 		"git tag -a v1.0 -m \"msg\"",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range reject {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -427,7 +427,7 @@ func TestGit_PushForceWithLease_Approve(t *testing.T) {
 		"git push --force-with-lease",
 		"git push origin main --force-with-lease",
 	}
-	r := New()
+	r := New(nil)
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
@@ -441,7 +441,7 @@ func TestGit_PushForceWithLease_Approve(t *testing.T) {
 }
 
 func TestGit_PushForceWithLease_CrossBranch_Ask(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git push origin local:different --force-with-lease"}),
@@ -453,7 +453,7 @@ func TestGit_PushForceWithLease_CrossBranch_Ask(t *testing.T) {
 }
 
 func TestGit_PushForce_Ask(t *testing.T) {
-	r := New()
+	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git push --force"}),

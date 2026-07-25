@@ -58,7 +58,7 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		pathsafety.New(pe),
 		mcp.New(),
 		primarycommit.New(primarycommit.NewFileResolver()),
-		git.New(),
+		git.New(pe),
 		gh.New(gh.NewExecResolver()),
 		monorepo.New(pe),
 		nixRule,

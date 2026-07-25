@@ -1,11 +1,13 @@
 package git
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
 var readOnlySubcommands = map[string]bool{
@@ -37,10 +39,14 @@ var modifyingSubcommands = map[string]bool{
 	"worktree": true,
 }
 
-type Rule struct{}
+type Rule struct {
+	// eval gates a `-C <path>` chdir against path-safety zones. When nil (legacy
+	// construction) the `-C` path check is skipped and behavior is unchanged.
+	eval *patheval.PathEvaluator
+}
 
-func New() *Rule {
-	return &Rule{}
+func New(eval *patheval.PathEvaluator) *Rule {
+	return &Rule{eval: eval}
 }
 
 func (r *Rule) Name() string {
@@ -68,87 +74,158 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if hasGitConfigInjection(pc.Args) {
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git: -c/--config-env injects config; deferring to prompt", Module: r.Name()}
 		}
-		_, subcmd, rest := cmdparse.GitInvocation(pc.Args)
+		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 		if subcmd == "" {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 		}
-		if isDestructive(subcmd, rest) {
+		res := r.classify(pc, subcmd, rest)
+		// A `-C <path>` chdir runs the subcommand against a directory other than
+		// the invocation CWD. When the rule would otherwise Approve, demote to
+		// Abstain if that directory is unsafe for the subcommand's access class:
+		// a read-only subcommand needs the dir to be readable, a modifying one
+		// needs it writable. Most-restrictive aggregation then defers to the
+		// prompt (Abstain, never a hard Reject — the check uses CanRead/CanWrite,
+		// not IsDeny*) instead of auto-approving a write into an unknown zone
+		// (pg2-b3eow). Gated to a non-empty -C so a bare git command keeps its
+		// verdict regardless of the CWD's zone.
+		if res.Decision == hookio.Approve && !r.chdirSafe(input.CWD, chdirs, subcmd) {
 			return hookio.RuleResult{
-				Decision: hookio.Ask,
-				Reason:   "destructive git command",
+				Decision: hookio.Abstain,
+				Reason:   "git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)",
 				Module:   r.Name(),
 			}
 		}
-		if readOnlySubcommands[subcmd] {
-			return hookio.RuleResult{
-				Decision: hookio.Approve,
-				Reason:   "read-only git command",
-				Module:   r.Name(),
-			}
-		}
-		if subcmd == "checkout" {
-			if hasRedirectEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}
-		}
-		// rebase: approve unless interactive without automated editor
-		if subcmd == "rebase" {
-			if hasFlag(rest, "-i") || hasFlag(rest, "--interactive") {
-				if !hasSequenceEditorEnvVar(pc) {
-					return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git rebase -i requires editor", Module: r.Name()}
-				}
-			}
-			if hasRedirectEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
-		}
-		// filter-branch: approve (history rewriting used by agents for commit cleanup)
-		if subcmd == "filter-branch" {
-			if hasRedirectEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
-		}
-		// tag: always reject — tags cause confusion in this workflow
-		if subcmd == "tag" {
-			return hookio.RuleResult{Decision: hookio.Reject, Reason: "git: git tag is prohibited — tags cause confusion in this workflow", Module: r.Name()}
-		}
-		// remote: special handling
-		if subcmd == "remote" {
-			remoteSub := ""
-			if len(rest) > 0 {
-				remoteSub = rest[0]
-			}
-			if remoteBlockedSubcommands[remoteSub] {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git remote modifying command", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
-		}
-		// modifying: approve (includes tag, mv, rm, worktree, etc.)
-		if modifyingSubcommands[subcmd] {
-			if hasRedirectEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
-		}
-		// reset: approve unless --hard
-		if subcmd == "reset" {
-			if hasFlag(rest, "--hard") {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git reset --hard is destructive", Module: r.Name()}
-			}
-			if hasRedirectEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
-			}
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
-		}
-		if subcmd == "clean" {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git clean is destructive", Module: r.Name()}
-		}
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return res
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// classify returns the base verdict for a git subcommand, independent of any
+// `-C` path-safety concern (which Evaluate layers on top via chdirSafe).
+func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
+	if isDestructive(subcmd, rest) {
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason:   "destructive git command",
+			Module:   r.Name(),
+		}
+	}
+	if readOnlySubcommands[subcmd] {
+		return hookio.RuleResult{
+			Decision: hookio.Approve,
+			Reason:   "read-only git command",
+			Module:   r.Name(),
+		}
+	}
+	if subcmd == "checkout" {
+		if hasRedirectEnvVar(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}
+	}
+	// rebase: approve unless interactive without automated editor
+	if subcmd == "rebase" {
+		if hasFlag(rest, "-i") || hasFlag(rest, "--interactive") {
+			if !hasSequenceEditorEnvVar(pc) {
+				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git rebase -i requires editor", Module: r.Name()}
+			}
+		}
+		if hasRedirectEnvVar(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+	}
+	// filter-branch: approve (history rewriting used by agents for commit cleanup)
+	if subcmd == "filter-branch" {
+		if hasRedirectEnvVar(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+	}
+	// tag: always reject — tags cause confusion in this workflow
+	if subcmd == "tag" {
+		return hookio.RuleResult{Decision: hookio.Reject, Reason: "git: git tag is prohibited — tags cause confusion in this workflow", Module: r.Name()}
+	}
+	// remote: special handling
+	if subcmd == "remote" {
+		remoteSub := ""
+		if len(rest) > 0 {
+			remoteSub = rest[0]
+		}
+		if remoteBlockedSubcommands[remoteSub] {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git remote modifying command", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
+	}
+	// modifying: approve (includes tag, mv, rm, worktree, etc.)
+	if modifyingSubcommands[subcmd] {
+		if hasRedirectEnvVar(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+	}
+	// reset: approve unless --hard
+	if subcmd == "reset" {
+		if hasFlag(rest, "--hard") {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git reset --hard is destructive", Module: r.Name()}
+		}
+		if hasRedirectEnvVar(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
+	}
+	if subcmd == "clean" {
+		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git clean is destructive", Module: r.Name()}
+	}
+	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// chdirSafe reports whether the `-C` target directory is in a zone appropriate
+// for the subcommand's access class. Read-only subcommands — and a read-only
+// `git remote` — require the directory be READABLE; every other approvable
+// subcommand (checkout, rebase, filter-branch, soft reset, and the modifying
+// set) writes and requires it be WRITABLE. Returns true (no gate) when no `-C`
+// is present or no evaluator is configured, preserving legacy behavior.
+func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string) bool {
+	if r.eval == nil || len(chdirs) == 0 {
+		return true
+	}
+	access := r.eval.Evaluate(effectiveDir(cwd, chdirs))
+	if readOnlySubcommands[subcmd] || subcmd == "remote" {
+		return access.CanRead()
+	}
+	return access.CanWrite()
+}
+
+// effectiveDir folds git's `-C` chdir values onto cwd the way git does: an
+// absolute chdir resets the running directory, a relative one is joined onto
+// it. A leading `~` is expanded to the user's home so an unexpanded tilde
+// cannot be mistaken for an in-project directory (a shell would expand it
+// before git runs). Mirrors primarycommit.effectiveDir (unexported there); any
+// env var in the folded path is expanded by patheval.PathEvaluator.Evaluate.
+func effectiveDir(cwd string, chdirs []string) string {
+	dir := cwd
+	for _, c := range chdirs {
+		c = expandTilde(c)
+		if filepath.IsAbs(c) {
+			dir = c
+		} else {
+			dir = filepath.Join(dir, c)
+		}
+	}
+	return dir
+}
+
+// expandTilde expands a leading `~` or `~/` to the user's home directory,
+// mirroring patheval's cleanPath so a `-C ~/...` value is resolved to an
+// absolute path before zone classification. Non-tilde paths are returned as-is.
+func expandTilde(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
 }
 
 func isGitExecutable(exec string) bool {

@@ -42,7 +42,7 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 		pathsafety.New(pe),
 		mcp.New(),
 		primarycommit.New(primarycommit.NewFileResolver()),
-		git.New(),
+		git.New(pe),
 		gh.New(nil),
 		monorepo.New(pe),
 		nixRule,
@@ -398,7 +398,7 @@ func TestPrecedence_PrimaryCommitBeatsGit(t *testing.T) {
 		e := New()
 		e.RegisterRules(
 			primarycommit.New(fakePrimaryResolver{canonical: true, primary: "main", cur: cur}),
-			git.New(),
+			git.New(nil),
 		)
 		return e
 	}
