@@ -2,11 +2,13 @@ package kubectl
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
 func mustJSON(v any) json.RawMessage {
@@ -14,21 +16,19 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
-type mockEvaluator struct {
-	results       map[string]hookio.RuleResult
-	defaultResult hookio.RuleResult
-}
-
-func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
-	expr = strings.TrimSpace(expr)
-	if r, ok := m.results[expr]; ok {
-		return r
-	}
-	return m.defaultResult
+// zrKubectlConfig loads the ZR consumer config fixture and returns its kubectl
+// sub-config. This is the golden-set source of truth: it mirrors the inline
+// builtins.toJSON block in the ZR machine config
+// (phillipg-nix-ziprecruiter machines/phillipg-mbp-02/default.nix). Every test
+// below that used to exercise baked-in ZR behavior now injects THIS config, so
+// the verdicts are identical to pre-refactor behavior yet fully config-driven.
+func zrKubectlConfig(t *testing.T) configrules.KubectlConfig {
+	t.Helper()
+	return configrules.Load("../configrules/testdata/zr-rules.json").Kubectl
 }
 
 func TestKubectl_ReadOnly_Approve(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	commands := []string{
 		"kubectl get pods",
 		"kubectl describe pod foo",
@@ -53,7 +53,7 @@ func TestKubectl_ReadOnly_Approve(t *testing.T) {
 }
 
 func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	commands := []string{
 		"KUBECONFIG=/other kubectl get pods",
 		"KUBECONFIG=/other kubectl describe pod foo",
@@ -72,7 +72,7 @@ func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
 }
 
 func TestKubectl_KubeconfigModifying_Abstain(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	commands := []string{
 		"KUBECONFIG=/other kubectl apply -f x.yaml",
 		"KUBECONFIG=/other kubectl delete pod foo",
@@ -91,7 +91,7 @@ func TestKubectl_KubeconfigModifying_Abstain(t *testing.T) {
 }
 
 func TestKubectl_Modifying_Abstain(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	commands := []string{
 		"kubectl apply -f deploy.yaml",
 		"kubectl delete pod foo",
@@ -113,7 +113,7 @@ func TestKubectl_Modifying_Abstain(t *testing.T) {
 }
 
 func TestKubectl_DoubleDash_Abstain(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "kubectl -- get pods"}),
@@ -125,7 +125,7 @@ func TestKubectl_DoubleDash_Abstain(t *testing.T) {
 }
 
 func TestKubectl_NonKubectl_Abstain(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
@@ -137,7 +137,7 @@ func TestKubectl_NonKubectl_Abstain(t *testing.T) {
 }
 
 func TestKubectl_FlagValueNotOperation(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	// -n's value "get" must NOT be read as the operation; the real op is "delete".
 	cmds := []string{
 		"kubectl --namespace get delete pod foo",
@@ -152,7 +152,7 @@ func TestKubectl_FlagValueNotOperation(t *testing.T) {
 }
 
 func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	cmds := []string{
 		"kubectl events", "kubectl diff -f x.yaml", "kubectl wait --for=condition=Ready pod/foo",
 		"bin/kc wslogs -n mp--ui--customer", "bin/kc zrlog -n mp--ui--customer",
@@ -168,7 +168,7 @@ func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
 }
 
 func TestKubectl_RolloutMutating_Abstain(t *testing.T) { // regression guard
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	for _, cmd := range []string{"kubectl rollout restart deploy/foo", "kubectl rollout undo deploy/foo"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
@@ -178,7 +178,7 @@ func TestKubectl_RolloutMutating_Abstain(t *testing.T) { // regression guard
 }
 
 func TestKubectl_DevxpNative(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	approve := []string{
 		"AWS_PROFILE=dev/developers-dev bin/kc sync -f mp/ui/customer/layouts/test-runner --ws d-phillipg01",
 		"bin/kc workspace list --ws d-phillipg01",
@@ -204,6 +204,19 @@ func TestKubectl_DevxpNative(t *testing.T) {
 	}
 }
 
+type mockEvaluator struct {
+	results       map[string]hookio.RuleResult
+	defaultResult hookio.RuleResult
+}
+
+func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	expr = strings.TrimSpace(expr)
+	if r, ok := m.results[expr]; ok {
+		return r
+	}
+	return m.defaultResult
+}
+
 func TestKubectl_ExecRecursion(t *testing.T) {
 	mockEval := &mockEvaluator{
 		results: map[string]hookio.RuleResult{
@@ -217,7 +230,7 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 		},
 		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
 	}
-	r := New(mockEval, nil)
+	r := New(mockEval, nil, zrKubectlConfig(t))
 	tests := []struct {
 		name, command string
 		want          hookio.Decision
@@ -241,6 +254,7 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 }
 
 func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
+	r := New(nil, nil, zrKubectlConfig(t))
 	tests := []struct {
 		name string
 		cmd  string
@@ -267,12 +281,12 @@ func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 			// take the leaf whose executable is kc/kubectl
 			var pc cmdparse.ParsedCommand
 			for _, p := range parsed {
-				if isKubectlExecutable(p.Executable) {
+				if r.isKubectlExecutable(p.Executable) {
 					pc = p
 					break
 				}
 			}
-			if got := isDevWorkspaceScope(extractOperation(pc.Args), pc.Args, pc.EnvVars); got != tt.want {
+			if got := r.isDevWorkspaceScope(r.extractOperation(pc.Args), pc.Args, pc.EnvVars); got != tt.want {
 				t.Errorf("%s: got %v want %v", tt.name, got, tt.want)
 			}
 		})
@@ -280,8 +294,153 @@ func TestKubectl_IsDevWorkspaceScope(t *testing.T) {
 }
 
 func TestKubectl_Name(t *testing.T) {
-	r := New(nil, nil)
+	r := New(nil, nil, zrKubectlConfig(t))
 	if got := r.Name(); got != "kubectl" {
 		t.Errorf("Name() = %q, want kubectl", got)
+	}
+}
+
+// --- Base-only (empty config) guards: the base binary must carry NO ZR
+// literals. Under a zero KubectlConfig the rule recognizes only `kubectl`, the
+// generic verbs, and no dev-workspace scope. ---
+
+func emptyRule() *Rule { return New(nil, nil, configrules.KubectlConfig{}) }
+
+func TestKubectl_EmptyConfig_BaseGenericApproves(t *testing.T) {
+	r := emptyRule()
+	// Generic kubectl read-only verbs still approve with no config.
+	for _, cmd := range []string{"kubectl get pods", "kubectl version", "kubectl rollout status deploy/foo"} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (base generic)", cmd, got.Decision)
+		}
+	}
+}
+
+func TestKubectl_EmptyConfig_NoKcAlias(t *testing.T) {
+	r := emptyRule()
+	// `kc` is NOT recognized as kubectl without executableAliases config, so the
+	// rule abstains (leaves it to other rules / the user prompt).
+	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/kc get pods"})}); got.Decision != hookio.Abstain {
+		t.Errorf("bin/kc get pods under empty config: got %s, want abstain (kc not a base alias)", got.Decision)
+	}
+	// isKubectlExecutable must not treat kc as kubectl under empty config.
+	if r.isKubectlExecutable("bin/kc") {
+		t.Error("empty config: kc must not be recognized as kubectl")
+	}
+	if !r.isKubectlExecutable("kubectl") {
+		t.Error("empty config: kubectl must still be recognized")
+	}
+}
+
+func TestKubectl_EmptyConfig_ZRVerbsAbstain(t *testing.T) {
+	r := emptyRule()
+	// ZR plugin verbs are NOT base read-only/exec verbs; on real kubectl they fall
+	// through to "modifying -> abstain".
+	for _, cmd := range []string{
+		"kubectl wslogs -n x", "kubectl zrlog -n x",
+		"kubectl exe -c c -- bats", "kubectl shell -c c -- bash", "kubectl wsexec -- bats",
+		"kubectl sync -f x d-phillipg01", "kubectl syncdev d-phillipg01",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q under empty config: got %s, want abstain (ZR verb not baked in base)", cmd, got.Decision)
+		}
+	}
+}
+
+func TestKubectl_EmptyConfig_NoDevWorkspaceScope(t *testing.T) {
+	r := emptyRule()
+	// With no devWorkspacePrefix / devWorkspaceFlags / nonDevAccounts, NOTHING is
+	// ever dev-scoped — a `d-` token and `--ws` flag carry no meaning in the base.
+	for _, cmd := range []string{
+		"AWS_PROFILE=dev/developers-dev kubectl exec --ws d-phillipg01 -c c -- rm -rf /",
+		"kubectl exec -n d-phillipg01 pod -- rm -rf /",
+	} {
+		parsed := cmdparse.Parse(cmd)
+		var pc cmdparse.ParsedCommand
+		for _, p := range parsed {
+			if r.isKubectlExecutable(p.Executable) {
+				pc = p
+				break
+			}
+		}
+		if r.isDevWorkspaceScope(r.extractOperation(pc.Args), pc.Args, pc.EnvVars) {
+			t.Errorf("cmd %q under empty config: unexpectedly dev-scoped (base must have no d- literal)", cmd)
+		}
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision == hookio.Approve {
+			t.Errorf("cmd %q under empty config: got Approve, want non-approve (no dev-scope in base)", cmd)
+		}
+	}
+}
+
+// TestKubectl_EnvScopeParameterizedByConfig proves the dev-scope env axes
+// (non-dev accounts, cluster env var + prefixes) are driven ENTIRELY by config,
+// not baked `prod`/`d1-` literals: a custom config with different values changes
+// the outcome accordingly.
+func TestKubectl_EnvScopeParameterizedByConfig(t *testing.T) {
+	cfg := configrules.KubectlConfig{
+		ExecutableAliases:  []string{"kc"},
+		ScopedApproveVerbs: []string{"sync"},
+		DevWorkspacePrefix: "z-",
+		NonDevAccounts:     []string{"blocked-acct"},
+		ClusterEnvVar:      "MY_CLUSTER",
+		DevClusterPrefixes: []string{"ok-"},
+		DevWorkspaceFlags:  []string{"--ws"},
+	}
+	r := New(nil, nil, cfg)
+	cases := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"custom dev prefix z- matches", "kc sync --ws z-me", true},
+		{"old d- prefix no longer matches", "kc sync --ws d-me", false},
+		{"custom non-dev account blocks", "AWS_PROFILE=blocked-acct/x kc sync --ws z-me", false},
+		{"prod no longer hardcoded non-dev", "AWS_PROFILE=prod/x kc sync --ws z-me", true},
+		{"custom cluster prefix ok- allowed", "MY_CLUSTER=ok-1 kc sync --ws z-me", true},
+		{"non-matching cluster blocks", "MY_CLUSTER=nope-1 kc sync --ws z-me", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := cmdparse.Parse(tc.cmd)
+			var pc cmdparse.ParsedCommand
+			for _, p := range parsed {
+				if r.isKubectlExecutable(p.Executable) {
+					pc = p
+					break
+				}
+			}
+			if got := r.isDevWorkspaceScope(r.extractOperation(pc.Args), pc.Args, pc.EnvVars); got != tc.want {
+				t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestKubectl_NoZRLiteralsInSource is the optional base-has-no-ZR-literals source
+// scan (acceptance criterion): the quoted ZR-specific tokens MUST NOT appear as
+// string literals in the base kubectl rule — they belong exclusively in config.
+func TestKubectl_NoZRLiteralsInSource(t *testing.T) {
+	src, err := os.ReadFile("kubectl.go")
+	if err != nil {
+		t.Fatalf("read kubectl.go: %v", err)
+	}
+	text := string(src)
+	// Search for the QUOTED literal (e.g. `"kc"`) to avoid substring false
+	// positives (`"exec"` contains exe; comments explain the extraction).
+	forbidden := []string{
+		`"kc"`, `"wslogs"`, `"zrlog"`, `"wsfirstpod"`,
+		`"exe"`, `"shell"`, `"wsexec"`,
+		`"sync"`, `"syncdev"`, `"workspace"`,
+		`"--ws"`, `"--workspace"`,
+		`"KC_CLUSTER"`, `"d1-"`, `"dd1-"`, `"d-"`,
+		`"prod"`, `"dprod"`, `"euprod"`, `"fastlane"`,
+	}
+	for _, lit := range forbidden {
+		if strings.Contains(text, lit) {
+			t.Errorf("ZR literal %s found in kubectl.go — must live only in config", lit)
+		}
 	}
 }

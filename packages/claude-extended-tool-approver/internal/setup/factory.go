@@ -41,11 +41,16 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		eng.SetTrace(true)
 	}
 
+	// Load the consumer config ONCE and inject its structured sub-configs into
+	// the kubectl and build-tools rules (DI, ADR 0033), so the base binary stays
+	// generic and all consumer specifics live in rules.json.
+	cfg := configrules.Load(configrules.DefaultPath())
+
 	nixRule := nix.NewWithEvaluator(eng)
 	dockerRule := docker.New(eng, pe)
 
 	eng.RegisterRules(
-		configrules.New(),
+		configrules.NewFromConfig(cfg),
 		// secrets runs early (after consumer configrules, before the generic
 		// path/command approvers) so a credential/secret-path reference is
 		// prompted (Ask) instead of being silently approved by pathsafety or
@@ -65,8 +70,8 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		dockerRule,
 		safecmds.New(pe),
 		curl.New(),
-		kubectl.New(eng, pe),
-		buildtools.New(),
+		kubectl.New(eng, pe, cfg.Kubectl),
+		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),
 	)
 

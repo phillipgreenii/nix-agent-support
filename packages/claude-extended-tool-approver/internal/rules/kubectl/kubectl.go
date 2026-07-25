@@ -7,33 +7,105 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
-var readOnlyOperations = map[string]bool{
+// baseReadOnlyOperations are the generic, upstream kubectl read-only verbs.
+// Consumer-specific plugin verbs (e.g. ZR's wslogs/zrlog/wsfirstpod) are NOT
+// here — they arrive via KubectlConfig.ReadOnlyVerbs (ADR 0033).
+var baseReadOnlyOperations = map[string]bool{
 	"get": true, "describe": true, "logs": true, "top": true,
 	"cluster-info": true, "config": true, "api-resources": true,
 	"api-versions": true, "version": true, "explain": true, "auth": true,
 	"events": true, "diff": true, "wait": true,
-	"wslogs": true, "zrlog": true, "wsfirstpod": true,
 }
 
 var rolloutReadOnlySubcommands = map[string]bool{"status": true, "history": true}
 
-var execOperations = map[string]bool{"exec": true, "exe": true, "shell": true, "wsexec": true}
+// baseExecOperations are the generic exec-family verbs. Consumer exec verbs
+// (ZR's exe/shell/wsexec) arrive via KubectlConfig.ExecVerbs.
+var baseExecOperations = map[string]bool{"exec": true}
 
-// scopedApproveOperations are kc plugin verbs that mutate a dev workspace only;
-// auto-approved iff the command targets a personal dev workspace.
-var scopedApproveOperations = map[string]bool{
-	"sync": true, "syncdev": true, "workspace": true,
+// baseValueFlags consume the following token as their value; that token must not
+// be mistaken for the kubectl operation. Consumer workspace flags (--ws/
+// --workspace) are added from KubectlConfig.DevWorkspaceFlags at construction.
+var baseValueFlags = map[string]bool{
+	"-n": true, "--namespace": true, "-c": true, "--container": true,
+	"-f": true, "--filename": true,
+	"--context": true, "--kubeconfig": true, "-o": true, "--output": true,
+	"-l": true, "--selector": true,
+}
+
+// baseDevScopeFlags name a workspace/namespace we can check for the personal-dev
+// prefix. The generic k8s flags -n/--namespace are base; consumer workspace flags
+// (--ws/--workspace) are added from KubectlConfig.DevWorkspaceFlags.
+var baseDevScopeFlags = map[string]bool{
+	"-n": true, "--namespace": true,
 }
 
 type Rule struct {
 	exprEval hookio.Evaluator
 	pe       *patheval.PathEvaluator
+
+	// Resolved sets: base defaults merged with the injected KubectlConfig.
+	execAliases        map[string]bool
+	readOnlyOps        map[string]bool
+	execOps            map[string]bool
+	scopedApproveOps   map[string]bool
+	positionalWSOps    map[string]bool
+	devScopeFlags      map[string]bool
+	devScopeGlued      []string // "--<flag>=" forms of the long devScopeFlags
+	valueFlags         map[string]bool
+	nonDevAccounts     map[string]bool
+	clusterEnvVar      string
+	devClusterPrefixes []string
+	devWorkspacePrefix string
 }
 
-func New(eval hookio.Evaluator, pe *patheval.PathEvaluator) *Rule {
-	return &Rule{exprEval: eval, pe: pe}
+// New constructs the kubectl rule. cfg carries the consumer-specific extensions
+// (aliases, plugin verbs, dev-workspace scope) injected by factory.go; a zero
+// cfg yields the base generic kubectl behavior only.
+func New(eval hookio.Evaluator, pe *patheval.PathEvaluator, cfg configrules.KubectlConfig) *Rule {
+	r := &Rule{
+		exprEval:           eval,
+		pe:                 pe,
+		execAliases:        toSet(cfg.ExecutableAliases),
+		readOnlyOps:        mergeSet(baseReadOnlyOperations, cfg.ReadOnlyVerbs),
+		execOps:            mergeSet(baseExecOperations, cfg.ExecVerbs),
+		scopedApproveOps:   toSet(cfg.ScopedApproveVerbs),
+		positionalWSOps:    toSet(cfg.PositionalWorkspaceVerbs),
+		devScopeFlags:      mergeSet(baseDevScopeFlags, cfg.DevWorkspaceFlags),
+		valueFlags:         mergeSet(baseValueFlags, cfg.DevWorkspaceFlags),
+		nonDevAccounts:     toSet(cfg.NonDevAccounts),
+		clusterEnvVar:      cfg.ClusterEnvVar,
+		devClusterPrefixes: cfg.DevClusterPrefixes,
+		devWorkspacePrefix: cfg.DevWorkspacePrefix,
+	}
+	for f := range r.devScopeFlags {
+		if strings.HasPrefix(f, "--") {
+			r.devScopeGlued = append(r.devScopeGlued, f+"=")
+		}
+	}
+	return r
+}
+
+func toSet(items []string) map[string]bool {
+	m := make(map[string]bool, len(items))
+	for _, it := range items {
+		m[it] = true
+	}
+	return m
+}
+
+func mergeSet(base map[string]bool, extra []string) map[string]bool {
+	m := make(map[string]bool, len(base)+len(extra))
+	for k := range base {
+		m[k] = true
+	}
+	for _, e := range extra {
+		m[e] = true
+	}
+	return m
 }
 
 func (r *Rule) Name() string {
@@ -50,32 +122,32 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
-		if !isKubectlExecutable(pc.Executable) {
+		if !r.isKubectlExecutable(pc.Executable) {
 			continue
 		}
-		operation := extractOperation(pc.Args)
+		operation := r.extractOperation(pc.Args)
 		if operation == "" {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 		}
-		if execOperations[operation] {
-			if isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
+		if r.execOps[operation] {
+			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return r.evaluateExec(pc.Args, input)
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kubectl exec (defer to mode/settings)", Module: r.Name()}
 		}
 		if operation == "rollout" {
-			if rolloutReadOnlySubcommands[rolloutSubcommand(pc.Args)] {
+			if rolloutReadOnlySubcommands[r.rolloutSubcommand(pc.Args)] {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "modifying kubectl command (defer)", Module: r.Name()}
 		}
-		if scopedApproveOperations[operation] {
-			if isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
+		if r.scopedApproveOps[operation] {
+			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}
 			}
 			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kc command (defer)", Module: r.Name()}
 		}
-		if readOnlyOperations[operation] {
+		if r.readOnlyOps[operation] {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only kubectl command",
@@ -131,42 +203,42 @@ func extractInnerCommand(cmdArgs []string) string {
 	return strings.Join(cmdArgs, " ")
 }
 
-// nonDevAWSAccounts are AWS_PROFILE accounts (the part before '/') that name a
-// prod/shared cluster; their presence forces a non-dev classification.
-var nonDevAWSAccounts = map[string]bool{
-	"prod": true, "dprod": true, "euprod": true,
-	"build": true, "fastlane": true, "pdx": true, "test": true,
+// isPersonalDevName reports whether v names a personal dev workspace. With an
+// empty configured prefix (base/no-config) NO name qualifies — critically, an
+// empty prefix must NOT make strings.HasPrefix match everything.
+func (r *Rule) isPersonalDevName(v string) bool {
+	return r.devWorkspacePrefix != "" && strings.HasPrefix(v, r.devWorkspacePrefix)
 }
 
-// devScopeFlags name a workspace/namespace we can check for the personal-dev prefix.
-var devScopeFlags = map[string]bool{
-	"--ws": true, "--workspace": true, "-n": true, "--namespace": true,
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
-
-// positionalWorkspaceOps take the dev workspace as a bare POSITIONAL argument
-// (e.g. `kc sync -f <path> d-phillipg01`) rather than behind a --ws/-n flag.
-var positionalWorkspaceOps = map[string]bool{"sync": true, "syncdev": true}
-
-func isPersonalDevName(v string) bool { return strings.HasPrefix(v, "d-") }
 
 // isDevWorkspaceScope reports whether a kc/kubectl invocation targets a personal
-// dev workspace (see "Devxp scope" contract). For sync/syncdev the workspace is a
-// bare positional arg; for every other op only the --ws/--workspace/-n/--namespace
-// flags count — so a positional d- token elsewhere (e.g. an exec pod name) is never
-// mistaken for a scope signal.
-func isDevWorkspaceScope(operation string, args []string, env []cmdparse.EnvAssignment) bool {
+// dev workspace (see "Devxp scope" contract). For positional-workspace verbs the
+// workspace is a bare positional arg; for every other op only the configured
+// dev-workspace flags (base -n/--namespace plus consumer --ws/--workspace) count
+// — so a positional dev token elsewhere (e.g. an exec pod name) is never
+// mistaken for a scope signal. AWS_PROFILE is the generic env var; only the
+// non-dev account names and the cluster env var/prefixes are consumer config.
+func (r *Rule) isDevWorkspaceScope(operation string, args []string, env []cmdparse.EnvAssignment) bool {
 	for _, e := range env {
-		switch e.Name {
-		case "AWS_PROFILE":
+		if e.Name == "AWS_PROFILE" {
 			acct := e.Value
 			if i := strings.IndexByte(acct, '/'); i >= 0 {
 				acct = acct[:i]
 			}
-			if nonDevAWSAccounts[acct] {
+			if r.nonDevAccounts[acct] {
 				return false
 			}
-		case "KC_CLUSTER":
-			if e.Value != "" && !strings.HasPrefix(e.Value, "d1-") && !strings.HasPrefix(e.Value, "dd1-") {
+		}
+		if r.clusterEnvVar != "" && e.Name == r.clusterEnvVar {
+			if e.Value != "" && !hasAnyPrefix(e.Value, r.devClusterPrefixes) {
 				return false
 			}
 		}
@@ -178,28 +250,29 @@ func isDevWorkspaceScope(operation string, args []string, env []cmdparse.EnvAssi
 		if a == "--" {
 			break
 		}
-		if devScopeFlags[a] && i+1 < len(args) && isPersonalDevName(args[i+1]) {
+		if r.devScopeFlags[a] && i+1 < len(args) && r.isPersonalDevName(args[i+1]) {
 			return true
 		}
-		for _, pfx := range []string{"--ws=", "--workspace=", "--namespace="} {
-			if strings.HasPrefix(a, pfx) && isPersonalDevName(strings.TrimPrefix(a, pfx)) {
+		for _, pfx := range r.devScopeGlued {
+			if strings.HasPrefix(a, pfx) && r.isPersonalDevName(strings.TrimPrefix(a, pfx)) {
 				return true
 			}
 		}
-		// sync/syncdev: the workspace is a bare positional past the subcommand token.
-		if positionalWorkspaceOps[operation] {
-			if valueFlags[a] { // e.g. `-f <path>` — consume the value, not the workspace
+		// positional-workspace verbs: the workspace is a bare positional past the
+		// subcommand token.
+		if r.positionalWSOps[operation] {
+			if r.valueFlags[a] { // e.g. `-f <path>` — consume the value, not the workspace
 				i++
 				continue
 			}
 			if strings.HasPrefix(a, "-") {
 				continue
 			}
-			if !seenOp { // the subcommand token itself (e.g. "sync")
+			if !seenOp { // the subcommand token itself (the scoped verb)
 				seenOp = true
 				continue
 			}
-			if isPersonalDevName(a) {
+			if r.isPersonalDevName(a) {
 				return true
 			}
 		}
@@ -207,30 +280,24 @@ func isDevWorkspaceScope(operation string, args []string, env []cmdparse.EnvAssi
 	return false
 }
 
-func isKubectlExecutable(exec string) bool {
+func (r *Rule) isKubectlExecutable(exec string) bool {
 	base := filepath.Base(exec)
-	return base == "kubectl" || base == "kc" || strings.HasSuffix(base, "kubectl")
-}
-
-// valueFlags consume the following token as their value; that token must not be
-// mistaken for the kubectl operation.
-var valueFlags = map[string]bool{
-	"-n": true, "--namespace": true, "-c": true, "--container": true,
-	"-f": true, "--filename": true, "--ws": true, "--workspace": true,
-	"--context": true, "--kubeconfig": true, "-o": true, "--output": true,
-	"-l": true, "--selector": true,
+	if base == "kubectl" || strings.HasSuffix(base, "kubectl") {
+		return true
+	}
+	return r.execAliases[base]
 }
 
 // extractOperation returns the first bare (non-flag, non-flag-value) token
 // before any `--`, i.e. the kubectl verb. Returns "" if none.
-func extractOperation(args []string) string {
+func (r *Rule) extractOperation(args []string) string {
 	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
 			return ""
 		}
-		if valueFlags[a] {
+		if r.valueFlags[a] {
 			i++ // skip the flag's value
 			continue
 		}
@@ -243,7 +310,7 @@ func extractOperation(args []string) string {
 }
 
 // rolloutSubcommand returns the sub-verb after `rollout` (the second bare token).
-func rolloutSubcommand(args []string) string {
+func (r *Rule) rolloutSubcommand(args []string) string {
 	seen := false
 	// NOTE: not range-over-int — the i++ below intentionally skips a flag's value.
 	for i := 0; i < len(args); i++ {
@@ -251,7 +318,7 @@ func rolloutSubcommand(args []string) string {
 		if a == "--" {
 			return ""
 		}
-		if valueFlags[a] {
+		if r.valueFlags[a] {
 			i++
 			continue
 		}

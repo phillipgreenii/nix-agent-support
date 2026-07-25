@@ -2,9 +2,12 @@ package buildtools
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
 func mustJSON(v any) json.RawMessage {
@@ -12,8 +15,18 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+// zrBuildtoolsConfig loads the ZR consumer config fixture and returns its
+// buildtools sub-config — the golden-set source of truth mirroring the ZR
+// machine config's inline builtins.toJSON block. Tests that used to exercise
+// baked-in ZR behavior now inject THIS config, so verdicts are identical to
+// pre-refactor behavior yet fully config-driven.
+func zrBuildtoolsConfig(t *testing.T) configrules.BuildtoolsConfig {
+	t.Helper()
+	return configrules.Load("../configrules/testdata/zr-rules.json").Buildtools
+}
+
 func TestBuildtools_Approved_Approve(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	commands := []string{
 		"gradle build",
 		"./gradlew test",
@@ -35,7 +48,7 @@ func TestBuildtools_Approved_Approve(t *testing.T) {
 }
 
 func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	commands := []string{
 		"bd ready --json",
 		"bd show pg2-ce6 --json",
@@ -73,7 +86,7 @@ func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
 func TestBuildtools_Prek_Approve(t *testing.T) {
 	// pg2-o7ev5: prek is the Rust reimplementation of pre-commit and is in active
 	// use here; it must be blanket-approved exactly like pre-commit.
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	commands := []string{
 		"prek run --all-files",
 		"prek run",
@@ -92,7 +105,7 @@ func TestBuildtools_Prek_Approve(t *testing.T) {
 }
 
 func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "devbox search nodejs"}),
@@ -104,7 +117,7 @@ func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
 }
 
 func TestBuildtools_Npm_Abstain(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "npm install"}),
@@ -116,14 +129,14 @@ func TestBuildtools_Npm_Abstain(t *testing.T) {
 }
 
 func TestBuildtools_Name(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	if got := r.Name(); got != "build-tools" {
 		t.Errorf("Name() = %q, want build-tools", got)
 	}
 }
 
 func TestBuildtools_JarXf(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	tests := []struct {
 		name    string
 		command string
@@ -144,7 +157,7 @@ func TestBuildtools_JarXf(t *testing.T) {
 }
 
 func TestBuildtools_GenerateBuildDeps(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/generate-build-deps"})}
 	got := r.Evaluate(input)
 	if got.Decision != hookio.Approve {
@@ -153,7 +166,7 @@ func TestBuildtools_GenerateBuildDeps(t *testing.T) {
 }
 
 func TestBuildTools_Prove(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	for _, cmd := range []string{"prove -v t/foo.t", "mp/ui/customer/bin/devxp/prove t/bar.t", "yath test"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Approve {
@@ -163,7 +176,7 @@ func TestBuildTools_Prove(t *testing.T) {
 }
 
 func TestBuildtools_CueVet(t *testing.T) {
-	r := New()
+	r := New(zrBuildtoolsConfig(t))
 	tests := []struct {
 		name    string
 		command string
@@ -182,5 +195,91 @@ func TestBuildtools_CueVet(t *testing.T) {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}
 		})
+	}
+}
+
+// TestBuildtools_ApprovedScripts covers the 5 project scripts migrated from the
+// base Go source (and the flat approvedCommands) into buildtools.approvedScripts:
+// run directly OR via `bash <script>` / `sh <script>`. env-var prefixes do NOT
+// demote them (this rule ignores env), which is the whole reason they live here
+// and not only in the flat approvedCommands (which abstains when env is present).
+func TestBuildtools_ApprovedScripts(t *testing.T) {
+	r := New(zrBuildtoolsConfig(t))
+	scripts := []string{
+		"zr-proto-regenerate.sh", "pre-merge-protobuf-check",
+		"fix-ai-tools-ownership", "pre-merge-py-check", "generate-build-deps",
+	}
+	for _, s := range scripts {
+		for _, cmd := range []string{s, "bin/" + s, "bash " + s, "sh " + s, "FOO=bar " + s} {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			if got := r.Evaluate(input); got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s, want approve (migrated approvedScript)", cmd, got.Decision)
+			}
+		}
+	}
+}
+
+// TestBuildtools_VerbScopedFromConfig proves a consumer-authored verb-scoped
+// approval is honored (the schema is not dead code), and only for the named verb.
+func TestBuildtools_VerbScopedFromConfig(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+	})
+	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool check ./x"})}); got.Decision != hookio.Approve {
+		t.Errorf("mytool check: got %s, want approve", got.Decision)
+	}
+	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool run ./x"})}); got.Decision != hookio.Abstain {
+		t.Errorf("mytool run: got %s, want abstain (verb not approved)", got.Decision)
+	}
+}
+
+// --- Base-only (empty config) guards: the base binary must carry NO ZR
+// literals. Under a zero BuildtoolsConfig only the generic tools are approved. ---
+
+func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{
+		"go build ./...", "gradle build", "./gradlew test", "pre-commit run",
+		"prek run", "bats tests/", "bd ready", "tilt up",
+		"devbox search x", "cue vet ./x", "jar xf /tmp/a.jar",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q under empty config: got %s, want approve (base generic tool)", cmd, got.Decision)
+		}
+	}
+}
+
+func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{
+		"prove -v t/foo.t", "yath test",
+		"zr-proto-regenerate.sh", "bin/generate-build-deps",
+		"pre-merge-py-check", "bash pre-merge-protobuf-check", "sh fix-ai-tools-ownership",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q under empty config: got %s, want abstain (ZR tool not baked in base)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_NoZRLiteralsInSource is the optional base-has-no-ZR-literals
+// source scan: quoted ZR-specific tokens MUST NOT appear in the base rule.
+func TestBuildtools_NoZRLiteralsInSource(t *testing.T) {
+	src, err := os.ReadFile("buildtools.go")
+	if err != nil {
+		t.Fatalf("read buildtools.go: %v", err)
+	}
+	text := string(src)
+	forbidden := []string{
+		`"prove"`, `"yath"`, `"generate-build-deps"`,
+		`"zr-proto-regenerate.sh"`, `"pre-merge-protobuf-check"`,
+		`"fix-ai-tools-ownership"`, `"pre-merge-py-check"`,
+	}
+	for _, lit := range forbidden {
+		if strings.Contains(text, lit) {
+			t.Errorf("ZR literal %s found in buildtools.go — must live only in config", lit)
+		}
 	}
 }

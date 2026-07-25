@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/buildtools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/claudetools"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
@@ -27,6 +28,12 @@ import (
 )
 
 func buildFullEngine(projectRoot, cwd string) *Engine {
+	// Inject the ZR consumer config fixture into the kubectl/build-tools rules so
+	// the kc/prove integration cases below exercise real ZR behavior — now fully
+	// config-driven (ADR 0033). The fixture mirrors the ZR machine config's inline
+	// rules.json block.
+	cfg := configrules.Load("../rules/configrules/testdata/zr-rules.json")
+
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 	eng := New()
 	eng.SetPathEvaluator(pe)
@@ -49,8 +56,8 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 		dockerRule,
 		safecmds.New(pe),
 		curl.New(),
-		kubectl.New(eng, pe),
-		buildtools.New(),
+		kubectl.New(eng, pe, cfg.Kubectl),
+		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),
 	)
 	return eng

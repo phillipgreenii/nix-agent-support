@@ -1,8 +1,14 @@
 # CETA configrules: XDG Config File for Consumer-Specific Rules
 
-**Status**: Accepted
+**Status**: Accepted (Superseded in part by [0033](0033-ceta-config-driven-kubectl-buildtools.md))
 **Date**: 2026-05-01
 **Deciders**: phillipg
+
+> **Superseded in part by [ADR 0033](0033-ceta-config-driven-kubectl-buildtools.md)**: the
+> flat `approvedCommands`/`blockedCommands` schema below still stands, but the
+> consumer-config file now ALSO carries structured `kubectl {}` / `buildtools {}`
+> blocks (injected into their rules via DI) so that the base binary holds no
+> consumer-specific kc/kubectl or build-tools literals.
 
 ## Context
 
