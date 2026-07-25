@@ -276,6 +276,24 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 			continue
 		}
+		// gofmt: read-only unless it WRITES. -l (list), -d (diff), -s (simplify),
+		// -e (all errors) and bare/path/stdin forms only print to stdout; -w
+		// rewrites files in place. A -w invocation is NOT approved (deferred to the
+		// normal flow); a read-only invocation is treated like a read command —
+		// path-like args must be in a readable zone (matches cat/sed/yq).
+		if basename == "gofmt" {
+			if isGofmtWrite(pc.Args) {
+				return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			}
+			if unsafe, path := hasUnsafeReadPath(pc.Args, pe); unsafe {
+				return hookio.RuleResult{
+					Decision: hookio.Abstain,
+					Reason:   "safe-commands: gofmt references unknown path " + path + " (deferred to claude-code)",
+					Module:   r.Name(),
+				}
+			}
+			continue
+		}
 		// grep/rg: first non-flag arg is a pattern, not a file — skip it in path checks
 		if basename == "grep" || basename == "rg" {
 			fileArgs := skipGrepPattern(pc.Args)
@@ -706,6 +724,23 @@ func isYqInPlace(args []string) bool {
 func isSedInPlace(args []string) bool {
 	for _, a := range args {
 		if a == "-i" || a == "--in-place" || (strings.HasPrefix(a, "-i") && !strings.HasPrefix(a, "-in")) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGofmtWrite reports whether gofmt args request writing files in place.
+// gofmt only mutates with -w (a bool flag); every other flag (-l, -d, -s, -e,
+// -r) and bare/path/stdin invocations print to stdout and leave files
+// untouched. Go's flag package treats -w and --w identically and accepts
+// -w=<bool>, so all those forms are matched. Anything containing -w is
+// conservatively classified as a write so a mutating invocation is NEVER
+// approved (the rare -w=false read-only form Abstains, which is safe).
+func isGofmtWrite(args []string) bool {
+	for _, a := range args {
+		if a == "-w" || a == "--w" ||
+			strings.HasPrefix(a, "-w=") || strings.HasPrefix(a, "--w=") {
 			return true
 		}
 	}

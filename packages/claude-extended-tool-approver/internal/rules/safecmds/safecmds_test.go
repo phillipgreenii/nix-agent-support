@@ -871,6 +871,52 @@ func TestSafecmds_Unzip(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Gofmt covers pg2-wcsur: read-only gofmt (no -w) Approves, while
+// any -w (write-in-place) invocation is NOT approved (Abstain — deferred to the
+// normal flow). Read-mode path handling follows the read-command model
+// (cat/sed/yq): a path-like arg outside a readable zone Abstains; the common
+// `gofmt -l .` / `gofmt -d <name>` cases carry no path-like arg and Approve.
+func TestSafecmds_Gofmt(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// Read-only flags print to stdout only — Approve.
+		{"gofmt -l list (dot)", "gofmt -l .", hookio.Approve},
+		{"gofmt -d diff relative file", "gofmt -d main.go", hookio.Approve},
+		{"gofmt -d diff project path", "gofmt -d /home/user/project/main.go", hookio.Approve},
+		{"gofmt bare relative file", "gofmt main.go", hookio.Approve},
+		{"gofmt -s -l simplify list", "gofmt -s -l .", hookio.Approve},
+		{"gofmt -e all errors", "gofmt -e main.go", hookio.Approve},
+		{"gofmt -l project dir path", "gofmt -l /home/user/project", hookio.Approve},
+		// Read on an out-of-zone path defers, matching cat/sed read-command model.
+		{"gofmt -d out-of-zone path", "gofmt -d /etc/shadow", hookio.Abstain},
+		// Any -w write invocation is NOT approved — deferred to normal flow.
+		{"gofmt -w write relative", "gofmt -w main.go", hookio.Abstain},
+		{"gofmt -w write project path", "gofmt -w /home/user/project/main.go", hookio.Abstain},
+		{"gofmt -s -w simplify+write", "gofmt -s -w .", hookio.Abstain},
+		{"gofmt -l -w list+write", "gofmt -l -w .", hookio.Abstain},
+		{"gofmt --w double-dash write", "gofmt --w main.go", hookio.Abstain},
+		{"gofmt -w=true explicit write", "gofmt -w=true main.go", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+			}
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
 func TestSafecmds_BashSyntaxCheck(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)

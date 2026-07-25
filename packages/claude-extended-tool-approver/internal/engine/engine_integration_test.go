@@ -329,6 +329,14 @@ func TestIntegration_CdCompoundTail(t *testing.T) {
 			// /etc) is NOT approved — the leaf Abstains and demotes the whole compound.
 			// Guards that a leading safe `cd` cannot green-light a dangerous tail.
 			{"cd tmp then rm -rf etc not approved", "cd /tmp && rm -rf /etc", hookio.Abstain},
+			// pg2-wcsur: read-only `gofmt -l .` as a cd-compound tail — the engine
+			// unwraps `cd <dir> && <leaf>` and the safecmds gofmt rule approves the
+			// read-only leaf, so the whole chain Approves. The single-leaf cd gap
+			// (~17 misses of `cd <dir> && gofmt -l .`) is closed end-to-end.
+			{"cd project then gofmt -l", "cd " + projectRoot + " && gofmt -l .", hookio.Approve},
+			// The `-w` (write-in-place) tail is NOT approved; it demotes the whole
+			// compound — a leading safe `cd` cannot green-light a mutating gofmt.
+			{"cd project then gofmt -w not approved", "cd " + projectRoot + " && gofmt -w .", hookio.Abstain},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
