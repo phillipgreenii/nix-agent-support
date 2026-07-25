@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/provider/vcs"
 )
@@ -157,6 +158,103 @@ func TestReviewPost_AppliesMarkerAndPosts(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
 	if len(files) != 0 {
 		t.Fatalf("expected no staged files after post, got %d", len(files))
+	}
+}
+
+// TestReviewPost_SkipsWhenPendingReviewExists: a draft->post->re-draft->post
+// sequence must NOT stack a second PENDING review. When the reviewer already has
+// a PENDING review, `review post` must skip posting AND preserve the freshly
+// staged draft (Clear is suppressed), so the not-yet-posted work is not silently
+// discarded (pg2-ynhr.18).
+func TestReviewPost_SkipsWhenPendingReviewExists(t *testing.T) {
+	resetReviewFlags()
+	dir := t.TempDir()
+	t.Setenv("PG_PR_STATE_HOME", dir)
+
+	// Stage a draft.
+	in := `{"body":"top","comments":[{"path":"a.go","line":1,"body":"x"}]}`
+	rootCmd.SetIn(strings.NewReader(in))
+	rootCmd.SetOut(io_discard)
+	rootCmd.SetErr(io_discard)
+	rootCmd.SetArgs([]string{"review", "draft", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+
+	// Post against a provider that reports an existing PENDING review.
+	resetReviewFlags()
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{hasPending: true}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(""))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "post", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("post: %v (stderr=%s)", err, stderr.String())
+	}
+
+	if fake.postCalls != 0 {
+		t.Fatalf("PostReview must NOT be called when a pending review already exists, got %d call(s)", fake.postCalls)
+	}
+	if !strings.Contains(stdout.String(), "Skipped") {
+		t.Fatalf("expected a skip message on stdout, got %q", stdout.String())
+	}
+	// The key part: the staged draft MUST survive the skip (Clear suppressed).
+	if _, err := reviewstage.Load(reviewstage.DefaultDir(), "foo/bar", 42); err != nil {
+		t.Fatalf("staged draft must be preserved on skip, but Load failed: %v", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
+	if len(files) != 1 {
+		t.Fatalf("expected the staged draft file to remain, got %d files", len(files))
+	}
+}
+
+// TestReviewPost_PostsAndClearsWhenNoPending: with no existing PENDING review,
+// `review post` posts once and clears the staged draft — the unchanged happy
+// path (pg2-ynhr.18 regression guard).
+func TestReviewPost_PostsAndClearsWhenNoPending(t *testing.T) {
+	resetReviewFlags()
+	dir := t.TempDir()
+	t.Setenv("PG_PR_STATE_HOME", dir)
+
+	in := `{"body":"top","comments":[{"path":"a.go","line":1,"body":"x"}]}`
+	rootCmd.SetIn(strings.NewReader(in))
+	rootCmd.SetOut(io_discard)
+	rootCmd.SetErr(io_discard)
+	rootCmd.SetArgs([]string{"review", "draft", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+
+	resetReviewFlags()
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{hasPending: false}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(""))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "post", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("post: %v (stderr=%s)", err, stderr.String())
+	}
+
+	if fake.postCalls != 1 {
+		t.Fatalf("PostReview must be called exactly once when no pending review exists, got %d", fake.postCalls)
+	}
+	// Staged draft MUST be cleared on a normal post.
+	if _, err := reviewstage.Load(reviewstage.DefaultDir(), "foo/bar", 42); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged draft must be cleared after a normal post, Load err = %v", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
+	if len(files) != 0 {
+		t.Fatalf("expected no staged files after a normal post, got %d", len(files))
 	}
 }
 

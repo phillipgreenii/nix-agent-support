@@ -125,9 +125,22 @@ Re-runs replace any existing staged draft for the (repo, pr) pair.`,
 }
 
 // postStaged loads, dedups, marker-stamps, and POSTs the draft. Shared by
-// review post + review submit.
-func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emitJSON bool) error {
+// review post + review submit. It reports skipped=true (without posting) when
+// the authenticated viewer already has a PENDING review on the PR, so neither
+// path stacks a second PENDING review on a re-run (pg2-3fo3c, pg2-ynhr.18). The
+// guard lives here — the single choke-point both commands funnel through — so a
+// draft->post->re-draft->post sequence is guarded the same as a submit re-run.
+// Callers MUST honor skipped: `review post` suppresses its Clear so the
+// freshly-staged draft survives the skip.
+func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emitJSON bool) (skipped bool, err error) {
 	provider := vcsProviderFor(draft.Repo)
+
+	// Skip if this reviewer already has a PENDING review on the PR, so a re-run
+	// (the pr-pool review role may re-review on head advance) does not stack a
+	// second PENDING review (pg2-3fo3c). Fail-closed on detection error.
+	if skip, err := skipExistingPendingReview(ctx, provider, draft.Repo, draft.PR, w, emitJSON); err != nil || skip {
+		return skip, err
+	}
 
 	// Dedup against existing PR comments. We don't have an exact "review
 	// comments only" reader here — ListComments returns everything. For
@@ -135,7 +148,7 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 	// implies they were posted by us previously.
 	existing, _ := provider.ListComments(ctx, draft.Repo, draft.PR)
 
-	unique, skipped := reviewstage.Dedup(draft.Comments, existing)
+	unique, dupSkipped := reviewstage.Dedup(draft.Comments, existing)
 	for i := range unique {
 		unique[i].Body = marker.Stamp(unique[i].Body)
 	}
@@ -150,22 +163,22 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 	// falls back to GitHub's latest-commit anchoring, unchanged.
 	rev, err := provider.PostReview(ctx, draft.Repo, draft.PR, draft.HeadSHA, body, unique)
 	if err != nil {
-		return fmt.Errorf("post review: %w", err)
+		return false, fmt.Errorf("post review: %w", err)
 	}
 
 	if emitJSON {
-		return writeJSON(w, map[string]any{
+		return false, writeJSON(w, map[string]any{
 			"status":             "posted",
 			"comments_posted":    len(unique),
-			"duplicates_skipped": skipped,
+			"duplicates_skipped": dupSkipped,
 			"review_id":          rev.ID,
 			"review_state":       rev.State,
 		})
 	}
 	_, err = fmt.Fprintf(w,
 		"ok Posted review for PR #%d: %d comment(s) (%d skipped as duplicates); review state=%s\n",
-		draft.PR, len(unique), skipped, rev.State)
-	return err
+		draft.PR, len(unique), dupSkipped, rev.State)
+	return false, err
 }
 
 var reviewPostCmd = &cobra.Command{
@@ -192,8 +205,15 @@ VCS, and clear the staged file on success.`,
 			}
 			return err
 		}
-		if err := postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json)); err != nil {
+		skipped, err := postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json))
+		if err != nil {
 			return err
+		}
+		if skipped {
+			// A PENDING review already exists; postStaged did not post. Suppress
+			// Clear so the freshly-staged draft is preserved rather than silently
+			// discarded (pg2-ynhr.18).
+			return nil
 		}
 		return reviewstage.Clear(reviewstage.DefaultDir(), repo, num)
 	},
@@ -216,19 +236,18 @@ post immediately. No state is persisted.`,
 		if err != nil {
 			return err
 		}
-		// Skip if this reviewer already has a PENDING review on the PR, so a
-		// re-run (the pr-pool review role may re-review on head advance) does
-		// not stack a second PENDING review (pg2-3fo3c).
-		if skip, err := skipExistingPendingReview(ctx, vcsProviderFor(repo), repo, num, cmd.OutOrStdout(), output.Resolve(rvF.json)); err != nil || skip {
-			return err
-		}
 		draft, err := readDraftInput(cmd, rvF.fromFile)
 		if err != nil {
 			return err
 		}
 		draft.Repo = repo
 		draft.PR = num
-		return postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json))
+		// postStaged owns the skip-if-pending guard (pg2-3fo3c) at the shared
+		// choke-point, so submit no longer probes separately (avoids a double
+		// HasPendingReviewByViewer round-trip). Skip vs post is immaterial here:
+		// submit persists nothing, so there is no staged draft to preserve.
+		_, err = postStaged(ctx, draft, cmd.OutOrStdout(), output.Resolve(rvF.json))
+		return err
 	},
 }
 
