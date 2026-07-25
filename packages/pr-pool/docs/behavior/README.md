@@ -41,3 +41,15 @@ implementation is a detail the core never sees. Handlers may be agent or non-age
   governance authority and tech choices are decision docs; the "how" is downstream.
 - **Floor** — pr-pool speaks in events, bindings, participants, handler sessions, and wiring. It
   names no concrete tool, transport, tuning constant, or file layout.
+
+## External references
+
+This set follows the behavior-docs method and cites elements the method defines. Each external
+element it references is declared here with the owner's UUID, so a cross-set reference resolves by
+the owner's UUID — not the mutable name (a rename never breaks the seam). The owner set-path is the
+cited `<repo> · <set-path>`; every owner below lives in the method set.
+
+| Name     | Owner set-path                                                   | Owner UUID                           |
+| -------- | ---------------------------------------------------------------- | ------------------------------------ |
+| `INV-11` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | f8174e40-806c-4c42-97da-996efd7c6e23 |
+| `INV-19` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | 4325bdf4-2458-4606-8b37-2e5e996aa53a |
