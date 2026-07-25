@@ -104,10 +104,14 @@ possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 
 Only reached after FF-2 succeeds. Run every command against `<CC>`, and **relocate
 the shell out of `<WT>` first** — removing the worktree you are currently standing
-in breaks every subsequent command in that shell:
+in breaks every subsequent command in that shell. Also **stop `<WT>`'s fsmonitor
+daemon before removing the worktree** (best-effort): the daemon is keyed by
+worktree path and `git worktree remove` does NOT stop it, so it orphans and
+lingers. It may be absent (fsmonitor off / never started), so ignore its failure:
 
 ```bash
-cd "$CC"                              # leave <WT> before removing it
+cd "$CC"                                          # leave <WT> before removing it
+git -C "$WT" fsmonitor--daemon stop 2>/dev/null || true  # best-effort: stop the per-worktree daemon (else it orphans)
 git -C "$CC" worktree remove "$WT"
 git -C "$CC" branch -d "$FB"
 git -C "$CC" worktree prune
@@ -166,5 +170,9 @@ belongs to the `pull-request` handler.
   indefinitely.
 - FF-4 MUST relocate the shell out of `<WT>` before removing it, and MUST run the
   removal, branch deletion, and prune from `<CC>`.
+- FF-4 MUST stop `<WT>`'s `git fsmonitor--daemon` (best-effort, ignoring failure)
+  immediately before `git worktree remove "$WT"` — the daemon is keyed by worktree
+  path and is NOT torn down by the removal, so skipping this orphans it. It MAY be
+  absent (fsmonitor off / never started), so its non-zero exit MUST be ignored.
 - The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond the
   fast-forward merge and the FF-4 cleanup steps.
