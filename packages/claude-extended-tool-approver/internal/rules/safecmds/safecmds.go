@@ -156,7 +156,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 			// grep/rg: skip pattern arg before path checking
 			if innerBase == "grep" || innerBase == "rg" {
-				fileArgs := skipGrepPattern(innerArgs)
+				fileArgs := cmdparse.SkipGrepPattern(innerBase, innerArgs)
 				if unsafe, path := hasUnsafeReadPath(fileArgs, pe); unsafe {
 					return hookio.RuleResult{
 						Decision: hookio.Abstain,
@@ -300,7 +300,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		// grep/rg: first non-flag arg is a pattern, not a file — skip it in path checks
 		if basename == "grep" || basename == "rg" {
-			fileArgs := skipGrepPattern(pc.Args)
+			fileArgs := cmdparse.SkipGrepPattern(basename, pc.Args)
 			if unsafe, path := hasUnsafeReadPath(fileArgs, pe); unsafe {
 				return hookio.RuleResult{
 					Decision: hookio.Abstain,
@@ -313,7 +313,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		// jq: skip value arguments for --arg, --argjson, --slurpfile, --rawfile
 		// which take two args (name value) that may look like paths but aren't.
 		if basename == "jq" {
-			fileArgs := skipJqValueFlags(pc.Args)
+			fileArgs := cmdparse.SkipJqValueFlags(pc.Args)
 			if unsafe, path := hasUnsafeReadPath(fileArgs, pe); unsafe {
 				return hookio.RuleResult{
 					Decision: hookio.Abstain,
@@ -491,41 +491,6 @@ func hasUnsafeWritePath(args []string, pe *patheval.PathEvaluator) (bool, string
 	return false, ""
 }
 
-// jqValueFlags lists jq flags that consume two value arguments (name value).
-// These arguments may look like paths (e.g. --arg dir "/app/src") but are
-// jq variables, not file references.
-var jqValueFlags = map[string]bool{
-	"--arg": true, "--argjson": true,
-	"--slurpfile": true, "--rawfile": true, "--jsonargs": true,
-}
-
-// jqStandaloneFlags lists jq flags that consume one value argument.
-var jqOneArgFlags = map[string]bool{
-	"--indent": true, "--tab": true, "--from-file": true, "--jsonargs": true,
-	"-f": true, "--join-output": true,
-}
-
-// skipJqValueFlags returns the args with jq value-flag arguments removed,
-// so path checking only sees actual file arguments.
-func skipJqValueFlags(args []string) []string {
-	var result []string
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		if jqValueFlags[a] && i+2 < len(args) {
-			i += 3 // skip flag + name + value
-			continue
-		}
-		if jqOneArgFlags[a] && i+1 < len(args) {
-			i += 2 // skip flag + value
-			continue
-		}
-		result = append(result, a)
-		i++
-	}
-	return result
-}
-
 // evaluateCp handles cp with source (read) and destination (write) semantics.
 func evaluateCp(args []string, pe *patheval.PathEvaluator, module string) hookio.RuleResult {
 	// Check for -t/--target-directory
@@ -655,63 +620,6 @@ func extractXargsCommand(args []string) (string, []string) {
 		i++
 	}
 	return "", nil
-}
-
-// grepFlagsWithValue lists grep flags that consume the next argument.
-var grepFlagsWithValue = map[string]bool{
-	"-e": true, "--regexp": true,
-	"-f": true, "--file": true,
-	"-m": true, "--max-count": true,
-	"-A": true, "--after-context": true,
-	"-B": true, "--before-context": true,
-	"-C": true, "--context": true,
-	"--include": true, "--exclude": true, "--exclude-dir": true,
-	"--label": true, "--color": true, "--colours": true,
-}
-
-// skipGrepPattern returns the args with the first non-flag argument (the search
-// pattern) removed, since it's not a file path. If -e/--regexp is used, there
-// is no positional pattern, so all non-flag args are files.
-func skipGrepPattern(args []string) []string {
-	hasExplicitPattern := false
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "-e" || a == "--regexp" {
-			hasExplicitPattern = true
-			break
-		}
-	}
-	if hasExplicitPattern {
-		return args // all positional args are files
-	}
-	// Find and skip the first non-flag arg (the pattern)
-	var result []string
-	patternSkipped := false
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		if a == "--" {
-			// Everything after -- is files
-			result = append(result, args[i:]...)
-			break
-		}
-		if grepFlagsWithValue[a] && i+1 < len(args) {
-			i += 2
-			continue
-		}
-		if strings.HasPrefix(a, "-") {
-			i++
-			continue
-		}
-		if !patternSkipped {
-			patternSkipped = true
-			i++
-			continue // skip the pattern
-		}
-		result = append(result, a)
-		i++
-	}
-	return result
 }
 
 // isYqInPlace returns true if args contain -i or --inplace.

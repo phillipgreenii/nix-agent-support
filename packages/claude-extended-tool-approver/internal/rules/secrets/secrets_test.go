@@ -39,6 +39,22 @@ func TestRule(t *testing.T) {
 		{"head ssh config", bashInput("head -n 5 ~/.ssh/config"), hookio.Ask},
 		// grep whose FILE arg is a secret (pattern is not) → Ask
 		{"grep into ssh config", bashInput("grep Host ~/.ssh/config"), hookio.Ask},
+
+		// False-positive avoidance (pg2-ia640.2): the grep/rg positional PATTERN,
+		// grep -e/-f pattern-source values, rg value-flag values, and the jq value
+		// flags + bare filter are NOT secret file paths — must Abstain, not Ask.
+		{"grep pattern .env is not a file", bashInput("grep .env file.log"), hookio.Abstain},
+		{"rg pattern .env is not a file", bashInput("rg .env somefile.log"), hookio.Abstain},
+		{"grep -e .env pattern value is not a file", bashInput("grep -e .env file.log"), hookio.Abstain},
+		{"grep -f .env pattern-file value is not a file", bashInput("grep -f .env file.log"), hookio.Abstain},
+		{"rg -g glob value is not a file", bashInput("rg -g '*.env' pattern file.log"), hookio.Abstain},
+		{"jq --arg value .env is not a file", bashInput("jq --arg x .env '.'"), hookio.Abstain},
+		{"jq bare filter .credentials is not a file", bashInput("jq '.credentials' data.json"), hookio.Abstain},
+
+		// Regression — a real secret FILE arg still Asks (pattern/filter exemption
+		// must not suppress the actual secret file reference).
+		{"grep password into dotenv FILE", bashInput("grep password .env"), hookio.Ask},
+		{"jq token filter over auth.json FILE", bashInput("jq '.token' auth.json"), hookio.Ask},
 		// stdin redirect read of a secret must not bypass the check
 		{"cat stdin-redirect from secrets", bashInput("cat < secrets/prod.json"), hookio.Ask},
 		// sh/bash -c '<inner>' must not bypass the check

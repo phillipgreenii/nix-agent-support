@@ -106,7 +106,7 @@ func firstSecretRef(cmd string, depth int) (string, bool) {
 				continue
 			}
 		}
-		for _, arg := range pc.Args {
+		for _, arg := range secretCandidateArgs(pc) {
 			if isFlag(arg) {
 				continue
 			}
@@ -121,6 +121,59 @@ func firstSecretRef(cmd string, depth int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// secretCandidateArgs returns the subset of a command's arguments that could be
+// FILE-path references worth testing against secretpath.IsSecret — filtering out
+// arguments that merely LOOK path-like but are not files, which is what produced
+// the grep/rg/jq false positives (pg2-ia640.2):
+//
+//   - grep/rg: the positional search PATTERN and value-flag values (a bare .env
+//     pattern, `-e .env`, `-f .env`, `rg -g '*.env'`) are not searched files.
+//   - jq: the value-flag arguments (`--arg x .env`) and the bare FILTER program
+//     (the first positional, e.g. `.credentials`) are not files. The filter is
+//     only exempt when it IS a positional — with -f/--from-file the filter comes
+//     from a file and the first positional is instead an INPUT file, so it is
+//     kept (avoids missing a secret input file).
+func secretCandidateArgs(pc cmdparse.ParsedCommand) []string {
+	switch filepath.Base(pc.Executable) {
+	case "grep", "rg":
+		return cmdparse.SkipGrepPattern(filepath.Base(pc.Executable), pc.Args)
+	case "jq":
+		args := cmdparse.SkipJqValueFlags(pc.Args)
+		if !jqFilterFromFile(pc.Args) {
+			args = dropFirstPositional(args)
+		}
+		return args
+	default:
+		return pc.Args
+	}
+}
+
+// jqFilterFromFile reports whether the jq filter is supplied via -f/--from-file
+// (in which case there is no positional FILTER program to exempt).
+func jqFilterFromFile(args []string) bool {
+	for _, a := range args {
+		if a == "-f" || a == "--from-file" {
+			return true
+		}
+	}
+	return false
+}
+
+// dropFirstPositional returns args with the first non-flag argument removed,
+// preserving order of the rest.
+func dropFirstPositional(args []string) []string {
+	result := make([]string, 0, len(args))
+	dropped := false
+	for _, a := range args {
+		if !dropped && !isFlag(a) {
+			dropped = true
+			continue
+		}
+		result = append(result, a)
+	}
+	return result
 }
 
 // shellDashC returns the inner command string of a shell `-c` invocation —
