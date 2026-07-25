@@ -78,6 +78,43 @@ func TestValidator_ObjectConstraints(t *testing.T) {
 	}
 }
 
+// TestValidator_TypelessObjectKeywords proves that object keywords
+// (required / properties / additionalProperties) bind by keyword PRESENCE,
+// independent of a declared "type". A schema written with NO "type" (e.g. a
+// oneOf sub-branch, or a future/edited schema) must still ENFORCE these
+// constraints — otherwise it silently accepts anything, a hole in the
+// INV-INTF-2 conformance contract.
+func TestValidator_TypelessObjectKeywords(t *testing.T) {
+	doc := `{"additionalProperties":false,"required":["a"],"properties":{"a":{"type":"string"},"b":{"type":"integer"}}}`
+	if err := val(t, doc, `{"a":"x"}`); err != nil {
+		t.Fatalf("valid typeless object rejected: %v", err)
+	}
+	if err := val(t, doc, `{"b":1}`); err == nil {
+		t.Fatalf("typeless schema: missing required not caught")
+	}
+	if err := val(t, doc, `{"a":"x","z":1}`); err == nil {
+		t.Fatalf("typeless schema: additionalProperties violation not caught")
+	}
+	if err := val(t, doc, `{"a":1}`); err == nil {
+		t.Fatalf("typeless schema: wrong-type property not caught")
+	}
+}
+
+// TestValidator_TypelessArrayKeywords proves that array keywords (items /
+// minItems) bind by keyword PRESENCE, independent of a declared "type".
+func TestValidator_TypelessArrayKeywords(t *testing.T) {
+	doc := `{"minItems":1,"items":{"type":"string"}}`
+	if err := val(t, doc, `[]`); err == nil {
+		t.Fatalf("typeless schema: minItems not caught")
+	}
+	if err := val(t, doc, `["a",2]`); err == nil {
+		t.Fatalf("typeless schema: array item wrong-type not caught")
+	}
+	if err := val(t, doc, `["a"]`); err != nil {
+		t.Fatalf("valid typeless array rejected: %v", err)
+	}
+}
+
 func TestValidator_EnumConstOneOfArray(t *testing.T) {
 	if err := val(t, `{"enum":["a","b"]}`, `"c"`); err == nil {
 		t.Fatalf("enum out-of-range not caught")

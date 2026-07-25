@@ -84,13 +84,19 @@ func (s *schema) validate(value any, path string, resolve resolver) error {
 		}
 	}
 
+	// "type" asserts the value's kind (and validates scalar constraints). The
+	// object/array KEYWORDS are applied afterwards by keyword presence, below.
 	switch s.Type {
 	case "":
-		// no type constraint
+		// no declared type — object/array keywords below still apply when present.
 	case "object":
-		return s.validateObject(value, path, resolve)
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("%s: expected object, got %s", path, kindOf(value))
+		}
 	case "array":
-		return s.validateArray(value, path, resolve)
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("%s: expected array, got %s", path, kindOf(value))
+		}
 	case "string":
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("%s: expected string, got %s", path, kindOf(value))
@@ -117,6 +123,24 @@ func (s *schema) validate(value any, path string, resolve resolver) error {
 	default:
 		return fmt.Errorf("%s: unsupported schema type %q", path, s.Type)
 	}
+
+	// Object and array keywords bind by keyword PRESENCE, independent of the
+	// declared "type" (a typeless schema — e.g. a oneOf sub-branch — still
+	// enforces them; INV-INTF-2). Per JSON Schema semantics they apply only to a
+	// value of the matching kind: object keywords are a no-op on a non-object,
+	// array keywords a no-op on a non-array. When "type" already asserted the
+	// kind above, the matching branch here supplies the constraints — the kind
+	// is not re-checked, so there is no double validation.
+	if obj, ok := value.(map[string]any); ok {
+		if err := s.validateObjectConstraints(obj, path, resolve); err != nil {
+			return err
+		}
+	}
+	if arr, ok := value.([]any); ok {
+		if err := s.validateArrayConstraints(arr, path, resolve); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -130,11 +154,11 @@ func (s *schema) checkRange(f float64, path string) error {
 	return nil
 }
 
-func (s *schema) validateObject(value any, path string, resolve resolver) error {
-	obj, ok := value.(map[string]any)
-	if !ok {
-		return fmt.Errorf("%s: expected object, got %s", path, kindOf(value))
-	}
+// validateObjectConstraints applies the object keywords (required,
+// additionalProperties, properties) to an already-typed object. It is invoked
+// by keyword presence — required/properties/additionalProperties absent make it
+// a no-op — so it holds whether or not the schema declared type "object".
+func (s *schema) validateObjectConstraints(obj map[string]any, path string, resolve resolver) error {
 	for _, req := range s.Required {
 		if _, present := obj[req]; !present {
 			return fmt.Errorf("%s: missing required field %q", path, req)
@@ -168,11 +192,10 @@ func (s *schema) validateObject(value any, path string, resolve resolver) error 
 	return nil
 }
 
-func (s *schema) validateArray(value any, path string, resolve resolver) error {
-	arr, ok := value.([]any)
-	if !ok {
-		return fmt.Errorf("%s: expected array, got %s", path, kindOf(value))
-	}
+// validateArrayConstraints applies the array keywords (minItems, items) to an
+// already-typed array. Like the object helper it is invoked by keyword
+// presence, so it holds whether or not the schema declared type "array".
+func (s *schema) validateArrayConstraints(arr []any, path string, resolve resolver) error {
 	if s.MinItems != nil && len(arr) < *s.MinItems {
 		return fmt.Errorf("%s: array has %d items, want >= %d", path, len(arr), *s.MinItems)
 	}
