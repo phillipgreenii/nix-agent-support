@@ -22,6 +22,7 @@ import (
 type BeadClient interface {
 	EnsureMergeRequest(ctx context.Context, title string, fields beads.MergeRequestFields) (string, bool, error)
 	SetMergeRequestCoOwned(ctx context.Context, id string, coOwned bool) error
+	SetMergeRequestCoOwnedWith(ctx context.Context, id string, coOwned bool, prefetched *beads.MergeRequest) error
 	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
 	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
@@ -35,6 +36,7 @@ type BeadClient interface {
 	EnsureAttentionBead(ctx context.Context, prBeadID, title string) (string, error)
 	CloseAttentionBead(ctx context.Context, prBeadID, reason string) error
 	GetMergeRequest(ctx context.Context, id string) (*beads.MergeRequest, error)
+	GetMergeRequestUncached(ctx context.Context, id string) (*beads.MergeRequest, error)
 	SetPriority(ctx context.Context, id string, p int) error
 	AddLabel(ctx context.Context, id, label string) error
 	RemoveLabel(ctx context.Context, id, label string) error
@@ -94,12 +96,36 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		if alreadyClosed {
 			return nil // closed PR bead: do not attach a draft-review under it
 		}
-		// Keep the co-owned visibility label in sync with the current
-		// ownership verdict — added when co-owned, removed otherwise.
-		if err := h.client.SetMergeRequestCoOwned(ctx, mrID, p.Ownership == "co-owned"); err != nil {
+		// FB-3: read the MR bead ONCE per tick and thread it into BOTH the
+		// co-owned label diff AND the priority reconciler, instead of each
+		// re-fetching it (which doubled the per-tick MR-bead reads → Dolt
+		// connection churn).
+		//
+		// The read MUST be the UNCACHED one. Both consumers are
+		// diff-before-write STATE DECISIONS — the FB-4 co-owned label diff and
+		// reconcilePriority's priority/`pbase:<n>` baseline — and FB-5 excluded
+		// exactly those from the per-tick TickCache because a snapshot taken at
+		// tick start can predate a write issued earlier in the same tick. Reading
+		// via GetMergeRequest here would make that freshness depend on whether a
+		// cache happens to be attached to this client (today the bridge attaches
+		// none, so it would be correct by accident and silently wrong the day one
+		// is attached). Threading the read moves WHERE it happens, never WHETHER
+		// it is fresh.
+		mr, mrErr := h.client.GetMergeRequestUncached(ctx, mrID)
+		// Keep the co-owned visibility label in sync with the current ownership
+		// verdict — added when co-owned, removed otherwise. A nil-on-error mr
+		// falls through to the write, exactly as SetMergeRequestCoOwned's own
+		// read-failure path did (it swallowed the read error and wrote anyway).
+		if err := h.client.SetMergeRequestCoOwnedWith(ctx, mrID, p.Ownership == "co-owned", mr); err != nil {
 			return err
 		}
-		if err := h.reconcilePriority(ctx, mrID, p.Ownership, p.HasConflict); err != nil {
+		// reconcilePriority PROPAGATES a read error (its original behavior), so
+		// surface mrErr here before reconciling — preserving the exact error
+		// semantics of the two former in-function reads.
+		if mrErr != nil {
+			return mrErr
+		}
+		if err := h.reconcilePriority(ctx, mr, mrID, p.Ownership, p.HasConflict); err != nil {
 			return err
 		}
 		// Emit the review work item. My PRs and co-owned PRs are reviewed even
@@ -374,11 +400,13 @@ const pbaseLabelPrefix = "pbase:"
 // is stashed in a `pbase:<n>` label so a repeated conflicting tick is a no-op
 // and a clear restores the exact baseline. mine/co-owned raise (−1, clamp 0);
 // team lowers (+1, clamp 4). (pg2-tsgkj)
-func (h *Handler) reconcilePriority(ctx context.Context, mrID, ownershipStr string, hasConflict bool) error {
-	mr, err := h.client.GetMergeRequest(ctx, mrID)
-	if err != nil {
-		return err
-	}
+//
+// mr is the ALREADY-fetched merge-request bead (FB-3): the caller reads it once
+// per tick and threads it here rather than reconcilePriority re-fetching it. A
+// nil mr (not found) is a no-op, matching the prior in-function read that
+// returned nil on a nil bead. mrID is still passed explicitly for the label /
+// priority writes.
+func (h *Handler) reconcilePriority(ctx context.Context, mr *beads.MergeRequest, mrID, ownershipStr string, hasConflict bool) error {
 	if mr == nil {
 		return nil
 	}

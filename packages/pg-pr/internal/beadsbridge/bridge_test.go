@@ -55,6 +55,10 @@ func (noopBeadClient) EnsureMergeRequest(context.Context, string, beads.MergeReq
 
 func (noopBeadClient) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
 
+func (noopBeadClient) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
+	return nil
+}
+
 func (noopBeadClient) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return nil, nil
 }
@@ -86,6 +90,9 @@ func (noopBeadClient) CloseAttentionBead(context.Context, string, string) error 
 func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
 func (noopBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (noopBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
 func (noopBeadClient) SetPriority(context.Context, string, int) error    { return nil }
@@ -433,7 +440,10 @@ func (c *draftReviewClient) EnsureMergeRequest(context.Context, string, beads.Me
 	return "mr-1", c.alreadyClosed, nil
 }
 
-func (c *draftReviewClient) SetMergeRequestCoOwned(_ context.Context, _ string, coOwned bool) error {
+// SetMergeRequestCoOwnedWith is the variant Handle now calls (FB-3: the bead is
+// fetched once by Handle and threaded in). Counting moved here from
+// SetMergeRequestCoOwned so the co-owned assertions still track the real call.
+func (c *draftReviewClient) SetMergeRequestCoOwnedWith(_ context.Context, _ string, coOwned bool, _ *beads.MergeRequest) error {
 	c.coOwnedCalls++
 	c.lastCoOwned = coOwned
 	return nil
@@ -733,6 +743,10 @@ func (c *reconcileFakeClient) GetMergeRequest(context.Context, string) (*beads.M
 	return c.mr, nil
 }
 
+func (c *reconcileFakeClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
+	return c.mr, nil
+}
+
 func (c *reconcileFakeClient) SetPriority(_ context.Context, id string, p int) error {
 	c.setPriorityCalls = append(c.setPriorityCalls, setPriorityCall{id, p})
 	return nil
@@ -820,5 +834,74 @@ func TestHandle_TeamConflictLowersPriority(t *testing.T) {
 	}
 	if len(c.addLabelCalls) != 1 || c.addLabelCalls[0] != (labelCall{"mr-1", "pbase:2"}) {
 		t.Fatalf("expected AddLabel(mr-1, pbase:2), got %v", c.addLabelCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FB-3: single MR-bead read per pr.updated tick (Dolt connection churn).
+// ---------------------------------------------------------------------------
+
+// idCountingRunner is a beads.Runner backing a REAL beads.Client. It answers
+// every `bd list` with a canned single-MR envelope and counts how many of those
+// list calls target a specific bead id (`--id=mr-1`) — i.e. how many MR-bead
+// reads the pr.updated projection issues per tick. Counting at the RUNNER (not
+// at a fake client method) is what makes this guard robust: it measures actual
+// `bd` invocations, so it holds whichever read method the bridge calls and
+// cannot be satisfied by a cache hit. Non-list verbs (update/create/dep) return
+// empty and are ignored by the count.
+type idCountingRunner struct {
+	listJSON string
+	idReads  int
+	calls    [][]string
+}
+
+func (r *idCountingRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	isList := len(args) > 0 && args[0] == "list"
+	if isList {
+		for _, a := range args {
+			if a == "--id=mr-1" {
+				r.idReads++
+			}
+		}
+		return r.listJSON, nil
+	}
+	return "", nil
+}
+
+// cannedMRList renders the bd 1.0.4+ list envelope for one open merge-request
+// bead (id mr-1, o/r#7). Written inline (bridge_test is `package beadsbridge`,
+// so the beads-package test helpers storedMR/cannedList are out of reach).
+func cannedMRList() string {
+	return `{"schema_version":1,"data":[{` +
+		`"id":"mr-1","title":"o/r#7","status":"open","issue_type":"merge-request","priority":2,` +
+		`"metadata":{"repo":"o/r","pr_number":7,"state":"draft","branch":"feat","base":"main",` +
+		`"author":"teammate","url":"https://x/7","last_synced_at":"2020-01-01T00:00:00Z"}}]}`
+}
+
+// TestHandle_PRUpdatedReadsMRBeadOnce is the FB-3 red→green guard: a single
+// pr.updated projection must read the MR bead EXACTLY ONCE, not twice. Before
+// FB-3 both SetMergeRequestCoOwned (its FB-4 diff-read) and reconcilePriority
+// issued their own read (`bd list --id=mr-1`), so idReads was 2; after threading
+// one pre-fetched bead into both, it is 1. The prefetch uses the UNCACHED read
+// deliberately — see Handle's comment — so this count is 1 real `bd` call, not a
+// cache hit standing in for one.
+//
+// A team DRAFT PR is used deliberately: it still runs the co-owned + priority
+// reconcilers (which do the reads) but skips EnsureDraftReviewBead, so the only
+// `--id=mr-1` list calls are the MR-bead reads under test.
+func TestHandle_PRUpdatedReadsMRBeadOnce(t *testing.T) {
+	r := &idCountingRunner{listJSON: cannedMRList()}
+	client := beads.NewClientWithRunner(r)
+	h := New(client)
+
+	payload, _ := json.Marshal(store.PRPayload{
+		Repo: "o/r", Number: 7, Ownership: "team", Draft: true, HasConflict: false,
+	})
+	if err := h.Handle(context.Background(), store.Event{Type: store.EventPRUpdated, Payload: payload}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if r.idReads != 1 {
+		t.Fatalf("expected exactly 1 MR-bead read (`bd list --id=mr-1`) per pr.updated tick, got %d; calls=%v", r.idReads, r.calls)
 	}
 }

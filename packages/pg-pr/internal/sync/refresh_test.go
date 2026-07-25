@@ -273,6 +273,39 @@ func TestRefreshPR_ActiveMine_EnrichmentReused(t *testing.T) {
 	}
 }
 
+// TestRefreshPR_ActiveTeam_FlushesOutboxOnce is the FB-3 flush-collapse guard:
+// one refresh of an active (non-draft) TEAM PR must flush the outbox EXACTLY
+// ONCE. Before FB-3 the active path flushed twice — once right after
+// applyFetchedPR and again after emitAttention — churning bd connections.
+// Collapsing them to a single drain (emitAttention now enqueues BEFORE the one
+// flush) drops the count to 1 without changing which events are delivered or
+// their order. A team PR is used because own != Mine engages the attention
+// emit, which is the second (now-removed) flush's trigger.
+func TestRefreshPR_ActiveTeam_FlushesOutboxOnce(t *testing.T) {
+	origFlush := flushOutbox
+	t.Cleanup(func() { flushOutbox = origFlush })
+	var flushes int
+	flushOutbox = func(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
+		flushes++
+		origFlush(ctx, db, dispatch)
+	}
+
+	db := store.OpenForTest(t)
+	bdc := &refreshFakeBeads{}
+	pr := api.PR{
+		Repo: "o/r", Number: 4, State: "open",
+		Author: "teammate", URL: "https://github.com/o/r/pull/4",
+	}
+	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
+
+	if _, err := e.refreshPR(context.Background(), "o/r", pr.Number); err != nil {
+		t.Fatalf("refreshPR: %v", err)
+	}
+	if flushes != 1 {
+		t.Fatalf("expected exactly 1 flushOutbox invocation per active team refresh (collapsed), got %d", flushes)
+	}
+}
+
 // outboxFakeBeads is the bead client shared between the engine (Deps.Beads,
 // used by buildPRInput's dep path via FindByRepoAndNumber) and the beadsbridge
 // (which projects the PR bead at outbox flush). It records every
@@ -298,6 +331,10 @@ func (f *outboxFakeBeads) EnsureMergeRequest(_ context.Context, _ string, fields
 }
 
 func (f *outboxFakeBeads) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
+
+func (f *outboxFakeBeads) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
+	return nil
+}
 
 // FindByRepoAndNumber returns the projected bead only AFTER EnsureMergeRequest
 // has run — modelling that the bead exists once the bridge projected it from
@@ -349,6 +386,9 @@ func (f *outboxFakeBeads) CloseAttentionBead(context.Context, string, string) er
 func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
 func (f *outboxFakeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *outboxFakeBeads) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
 func (f *outboxFakeBeads) SetPriority(context.Context, string, int) error    { return nil }

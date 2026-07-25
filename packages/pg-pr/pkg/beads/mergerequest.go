@@ -222,8 +222,9 @@ func (c *Client) CloseMergeRequest(ctx context.Context, id, reason string) error
 //
 // State-decision callers that need FRESH stored fields — CloseMergeRequest's
 // already-closed idempotency check and SetMergeRequestCoOwned's FB-4 label
-// diff — MUST call getMergeRequestUncached directly, NOT this method, so a
-// stale snapshot can never corrupt their decision.
+// diff — MUST call getMergeRequestUncached directly (or, from outside this
+// package, GetMergeRequestUncached), NOT this method, so a stale snapshot can
+// never corrupt their decision.
 func (c *Client) GetMergeRequest(ctx context.Context, id string) (*MergeRequest, error) {
 	if c.tickCache != nil {
 		if mr, ok := c.tickCache.MergeRequestsByID[id]; ok {
@@ -231,6 +232,18 @@ func (c *Client) GetMergeRequest(ctx context.Context, id string) (*MergeRequest,
 			return &cached, nil
 		}
 	}
+	return c.getMergeRequestUncached(ctx, id)
+}
+
+// GetMergeRequestUncached is the exported form of getMergeRequestUncached, for
+// out-of-package STATE-DECISION callers that must not read through the per-tick
+// cache. It exists so an FB-3-style threaded read (one fetch serving several
+// per-tick reconcilers) can still be provably fresh: the beadsbridge prefetches
+// with this, then hands the result to SetMergeRequestCoOwnedWith's FB-4 diff and
+// to reconcilePriority. Using GetMergeRequest there instead would make the
+// freshness of a diff-before-write depend on whether a cache happens to be
+// attached to that client — the coupling FB-5's field doc warns against.
+func (c *Client) GetMergeRequestUncached(ctx context.Context, id string) (*MergeRequest, error) {
 	return c.getMergeRequestUncached(ctx, id)
 }
 
@@ -342,6 +355,11 @@ func (c *Client) EnsureMergeRequest(ctx context.Context, userTitle string, field
 // label on a merge-request bead — a visibility marker for a teammate PR I have
 // pushed commits onto. Idempotent (bd add/remove-label are no-ops when already
 // in the desired state).
+//
+// It reads the bead once (for the diff-before-write skip) and delegates to
+// SetMergeRequestCoOwnedWith. A caller that has ALREADY fetched the bead this
+// tick should call SetMergeRequestCoOwnedWith directly to avoid the redundant
+// read (FB-3).
 func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned bool) error {
 	if id == "" {
 		return errors.New("merge-request: id required")
@@ -353,10 +371,38 @@ func (c *Client) SetMergeRequestCoOwned(ctx context.Context, id string, coOwned 
 	// the write rather than risk skipping a genuinely needed one. Read fresh
 	// (getMergeRequestUncached) — the FB-4 diff must not compare against a stale
 	// per-tick cache snapshot.
-	if mr, err := c.getMergeRequestUncached(ctx, id); err == nil && mr != nil {
-		if hasLabel(mr.Labels, coOwnedLabel) == coOwned {
-			return nil
-		}
+	var prefetched *MergeRequest
+	if mr, err := c.getMergeRequestUncached(ctx, id); err == nil {
+		prefetched = mr
+	}
+	return c.SetMergeRequestCoOwnedWith(ctx, id, coOwned, prefetched)
+}
+
+// SetMergeRequestCoOwnedWith is SetMergeRequestCoOwned given an ALREADY-fetched
+// merge-request bead, letting the caller thread one GetMergeRequest read across
+// several per-tick reconcilers instead of each re-reading it (FB-3 — cut Dolt
+// connection churn on the hot pr.updated path).
+//
+// prefetched carries the current label set for the diff-before-write skip. A
+// nil prefetched (bead unknown / read failed / not found) falls through to the
+// write — identical to SetMergeRequestCoOwned's behavior when it cannot
+// POSITIVELY read the current labels. The bd command emitted and the skip
+// predicate are otherwise unchanged from SetMergeRequestCoOwned; the only
+// difference is where the bead read comes from.
+//
+// prefetched MUST come from an UNCACHED read (GetMergeRequestUncached, or
+// getMergeRequestUncached in-package) — NEVER from GetMergeRequest, whose
+// per-tick TickCache snapshot may predate a write issued earlier in the same
+// tick. This is the FB-4 diff, and FB-5 excluded the diff-before-write paths
+// from the cache for exactly this reason: a stale label set would skip a
+// genuinely needed write. Threading the read (FB-3) moves WHERE the read
+// happens, never WHETHER it is fresh.
+func (c *Client) SetMergeRequestCoOwnedWith(ctx context.Context, id string, coOwned bool, prefetched *MergeRequest) error {
+	if id == "" {
+		return errors.New("merge-request: id required")
+	}
+	if prefetched != nil && hasLabel(prefetched.Labels, coOwnedLabel) == coOwned {
+		return nil
 	}
 	flag := "--remove-label"
 	if coOwned {

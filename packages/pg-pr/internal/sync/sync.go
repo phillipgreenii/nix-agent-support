@@ -1618,7 +1618,12 @@ func (e *Engine) reconcileReplies(ctx context.Context) (int, error) {
 // flushOutbox drains the store's outbox through the dispatcher. Called at the
 // end of each one-shot Sync and each daemon maintenance cycle. No-op until
 // ingestion (a later phase) starts enqueuing events.
-func flushOutbox(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
+//
+// It is a package var (not a plain func) purely so tests can count invocations
+// — the flush-collapse guard (FB-3) asserts refreshPR flushes the outbox once
+// per active tick rather than after every sub-step. Production behavior is
+// identical to the equivalent func.
+var flushOutbox = func(ctx context.Context, db *store.DB, dispatch store.DispatchFunc) {
 	if db == nil || dispatch == nil {
 		return
 	}

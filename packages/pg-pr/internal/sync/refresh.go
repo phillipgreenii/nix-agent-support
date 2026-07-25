@@ -153,25 +153,40 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	if err := e.applyFetchedPR(ctx, rcfg, pr, enriched, summary); err != nil {
 		return nil, err
 	}
-	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 
 	// Teammate-attention projection (pg2-4c5i.13): emit for any PR that is NOT
 	// mine-authored. Team PRs carry the real predicate, re-derived from the
 	// just-persisted facts and emitted every tick (self-healing under
 	// fire-once delivery, R1). Co-owned PRs force Need=false so a team->co-owned
-	// transition idempotently CLOSES a previously-opened attention bead. Then
-	// flush so the bridge ensures/closes the attention bead. Mine PRs carry no
-	// attention signal.
+	// transition idempotently CLOSES a previously-opened attention bead. Mine
+	// PRs carry no attention signal.
+	//
+	// FB-3 (connection churn): the attention event is ENQUEUED here — BEFORE the
+	// single flush below — rather than after its own separate flush. That is safe
+	// because emitAttention is flush-INDEPENDENT: it takes no bead client and
+	// touches only e.deps.Store (ListRevisions + InTx), and the store row it reads
+	// was already upserted by applyFetchedPR, not by the outbox. Nothing it reads
+	// is produced by a flush, so its verdict is identical before or after one.
+	// (attention_emit_test.go pins this: the attention signal MUST NOT depend on
+	// the draft-review bead.) Collapsing the former two per-refresh flushes
+	// (post-applyFetchedPR + post-emitAttention) into one drain therefore
+	// preserves delivery order and outcomes: RunOutbox selects pending rows
+	// ORDER BY id and dispatches sequentially, so pr.updated is projected before
+	// pr.attention and the attention projection still finds the MR bead.
 	if e.deps.Store != nil && own != ownership.Mine {
 		if stored, gerr := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); gerr == nil && stored != nil {
 			if aerr := e.emitAttention(ctx, rcfg.Remote, pr.Number, stored.ID, own, pr.HasConflict()); aerr != nil {
 				// Non-fatal: a failed attention emit self-heals next tick.
 				summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: aerr.Error()})
-			} else {
-				flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 			}
 		}
 	}
+
+	// Single per-refresh flush (FB-3): drains pr.opened/updated, any
+	// feedback.created, and pr.attention in one outbox pass. MUST precede
+	// buildPRInput, whose dep path locates the bead via FindByRepoAndNumber —
+	// the bead does not exist until this flush projects it.
+	flushOutbox(ctx, e.deps.Store, e.deps.Dispatch)
 
 	in := e.buildPRInput(ctx, *pr, enriched, bdc, nil, rcfg, "")
 	return &in, nil

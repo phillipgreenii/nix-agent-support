@@ -71,6 +71,12 @@ func (c *concurrentBeadClient) SetMergeRequestCoOwned(context.Context, string, b
 	return nil
 }
 
+// SetMergeRequestCoOwnedWith is a no-op (FB-3 pre-fetched-bead variant): this
+// fake does not track labels.
+func (c *concurrentBeadClient) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
+	return nil
+}
+
 // FindByRepoAndNumber returns the recorded bead, or nil if not yet projected.
 func (c *concurrentBeadClient) FindByRepoAndNumber(_ context.Context, repo string, number int) (*beads.MergeRequest, error) {
 	c.mu.Lock()
@@ -127,6 +133,9 @@ func (c *concurrentBeadClient) CloseAttentionBead(context.Context, string, strin
 func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
 func (c *concurrentBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (c *concurrentBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
 func (c *concurrentBeadClient) SetPriority(context.Context, string, int) error    { return nil }

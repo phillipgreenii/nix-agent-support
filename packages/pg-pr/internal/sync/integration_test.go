@@ -51,6 +51,10 @@ func (f *fullChainBeadClient) SetMergeRequestCoOwned(_ context.Context, _ string
 	return nil
 }
 
+func (f *fullChainBeadClient) SetMergeRequestCoOwnedWith(_ context.Context, _ string, _ bool, _ *beads.MergeRequest) error {
+	return nil
+}
+
 func (f *fullChainBeadClient) FindByRepoAndNumber(_ context.Context, repo string, _ int) (*beads.MergeRequest, error) {
 	f.findCalls = append(f.findCalls, repo)
 	return f.findResult, nil
@@ -95,6 +99,9 @@ func (f *fullChainBeadClient) CloseAttentionBead(context.Context, string, string
 func (f *fullChainBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error { return nil }
 
 func (f *fullChainBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *fullChainBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
 func (f *fullChainBeadClient) SetPriority(context.Context, string, int) error    { return nil }

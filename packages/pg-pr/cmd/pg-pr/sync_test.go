@@ -274,6 +274,9 @@ func (f *fakeBridgeBeads) EnsureMergeRequest(context.Context, string, beads.Merg
 	return "mr-1", false, nil
 }
 func (f *fakeBridgeBeads) SetMergeRequestCoOwned(context.Context, string, bool) error { return nil }
+func (f *fakeBridgeBeads) SetMergeRequestCoOwnedWith(context.Context, string, bool, *beads.MergeRequest) error {
+	return nil
+}
 func (f *fakeBridgeBeads) FindByRepoAndNumber(context.Context, string, int) (*beads.MergeRequest, error) {
 	return nil, nil
 }
@@ -305,6 +308,9 @@ func (f *fakeBridgeBeads) EnsureAttentionBead(context.Context, string, string) (
 }
 func (f *fakeBridgeBeads) CloseAttentionBead(context.Context, string, string) error { return nil }
 func (f *fakeBridgeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
+	return nil, nil
+}
+func (f *fakeBridgeBeads) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
 func (f *fakeBridgeBeads) SetPriority(context.Context, string, int) error    { return nil }
