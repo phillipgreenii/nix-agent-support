@@ -44,6 +44,24 @@ func TestRule(t *testing.T) {
 		// sh/bash -c '<inner>' must not bypass the check
 		{"bash -c cat dotenv", bashInput("bash -c 'cat .env'"), hookio.Ask},
 		{"sh -c cat credentials", bashInput("sh -c \"cat ~/.claude/.credentials\""), hookio.Ask},
+		// Combined single-dash short-flag groups ending in `c` (bash -lc, sh -ilc)
+		// are also `-c` wrappers — the inner command is the NEXT token and must be
+		// scanned (pg2-ia640.4).
+		{"bash -lc cat dotenv", bashInput("bash -lc 'cat .env'"), hookio.Ask},
+		{"bash -ilc cat credentials", bashInput("bash -ilc 'cat ~/.claude/.credentials'"), hookio.Ask},
+		{"sh -ilc cat secrets json", bashInput("sh -ilc 'cat secrets/prod.json'"), hookio.Ask},
+		// env exec-prefix is unwrapped by cmdparse, so the combined-flag wrapper
+		// inside it is still scanned (regression guard for the env path).
+		{"env bash -lc cat dotenv", bashInput("env bash -lc 'cat .env'"), hookio.Ask},
+		// Nested combined-flag wrappers recurse within the maxShellUnwrap cap.
+		{"nested bash -lc sh -lc cat dotenv", bashInput("bash -lc 'sh -lc \"cat .env\"'"), hookio.Ask},
+		// OVER-MATCH GUARD: a `--` long option that merely contains `c` must NOT be
+		// treated as a `-c` wrapper (else its following token — the rcfile path — is
+		// wrongly scanned as an inner command).
+		{"bash --rcfile not a wrapper", bashInput("bash --rcfile ~/.bashrc"), hookio.Abstain},
+		// A combined-flag wrapper whose inner command reads no secret must not
+		// over-fire.
+		{"bash -lc echo hi", bashInput("bash -lc 'echo hi'"), hookio.Abstain},
 
 		// Bash without a secret path → Abstain (defer to rest of chain)
 		{"cat readme", bashInput("cat README.md"), hookio.Abstain},

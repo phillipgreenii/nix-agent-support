@@ -123,8 +123,21 @@ func firstSecretRef(cmd string, depth int) (string, bool) {
 	return "", false
 }
 
-// shellDashC returns the inner command string of a `sh -c '<inner>'` /
-// `bash -c '<inner>'` (or zsh/dash) invocation.
+// shellDashC returns the inner command string of a shell `-c` invocation —
+// `sh -c '<inner>'` / `bash -c '<inner>'` (or zsh/dash) — INCLUDING combined
+// single-dash short-flag groups that END in `c`, e.g. `bash -lc '<inner>'` or
+// `sh -ilc '<inner>'`, where the `-c` still takes the NEXT token as its command
+// string (pg2-ia640.4).
+//
+// It matches ONLY single-dash short-flag GROUPS whose final flag is `c`
+// (`-c`, `-lc`, `-ilc`). It deliberately does NOT match:
+//   - `--` long options — even ones that contain or end in `c`
+//     (`--rcfile FILE`, `--norc`): treating those as a `-c` wrapper would wrongly
+//     scan the following token (e.g. the rcfile path) as an inner command.
+//   - non-terminal-`c` groups such as `bash -cx …`: there bash's `-c` inline-
+//     consumes the REST OF THE SAME token (`x`) as its command string, so the
+//     next token is a positional parameter, not a command to run — there is
+//     nothing to unwrap, so we intentionally Abstain rather than mis-scan it.
 func shellDashC(pc cmdparse.ParsedCommand) (string, bool) {
 	switch filepath.Base(pc.Executable) {
 	case "sh", "bash", "zsh", "dash":
@@ -132,11 +145,20 @@ func shellDashC(pc cmdparse.ParsedCommand) (string, bool) {
 		return "", false
 	}
 	for i, a := range pc.Args {
-		if a == "-c" && i+1 < len(pc.Args) {
+		if isShortFlagGroupEndingInC(a) && i+1 < len(pc.Args) {
 			return pc.Args[i+1], true
 		}
 	}
 	return "", false
+}
+
+// isShortFlagGroupEndingInC reports whether arg is a single-dash short-flag
+// group whose last flag is `c` — i.e. a shell `-c` wrapper whose command is the
+// NEXT token. True for `-c`, `-lc`, `-ilc`; false for `--` long options
+// (`--rcfile`, `--norc`), for a bare `-`, and for groups not ending in `c`
+// (`-l`, `-cx`).
+func isShortFlagGroupEndingInC(arg string) bool {
+	return len(arg) >= 2 && arg[0] == '-' && arg[1] != '-' && arg[len(arg)-1] == 'c'
 }
 
 func isFlag(arg string) bool {
