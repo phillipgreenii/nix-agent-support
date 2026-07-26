@@ -403,6 +403,8 @@ not completable in a worktree.
   mechanism behind JR3.
 - `docs/adr/0023-agent-pr-comments-visible-bot-attribution.md` — bot attribution
   on posted reviews/comments (JR2).
+- `docs/adr/0034-pg-pr-prpool-review-ownership-split.md` — the pg-pr/pr-pool
+  review-ownership split (this doc is its living implementation reference).
 - `packages/pg-pr/pg-pr.md`, `packages/pr-pool/README.md` — the module docs
   (both cross-reference this doc).
 - `docs/superpowers/specs/2026-06-25-pr-pool-event-model-split-role-query-design.md`
