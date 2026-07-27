@@ -254,15 +254,15 @@ arguments, drain the whole ready `human` queue.
 
 ```mermaid
 flowchart TD
-    A[Start: set actor ID = session-unblock; bd prime; parse $ARGUMENTS; empty skip-set] --> R{Own an unfinished<br/>in_progress human bead?}
+    A["Start: set actor ID = session-unblock, bd prime, parse $ARGUMENTS, empty skip-set"] --> R{Own an unfinished<br/>in_progress human bead?}
     R -- yes --> U
     R -- no --> C["CLAIM: bd ready --claim --label human<br/>[+narrowing] --actor ID --json"]
     C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
     C -->|id already in skip-set| DONE
     C -->|transient bd/dolt error| C
-    C -->|got bead| U["UNDERSTAND: bd show;<br/>read stuck: comment + parked isolation"]
+    C -->|got bead| U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
     U --> T{TRIAGE rubric<br/>first match wins}
-    T -->|1 substrate-mutating| SUB[ENGAGE operator;<br/>NEVER release to drain]
+    T -->|1 substrate-mutating| SUB["ENGAGE operator,<br/>NEVER release to drain"]
     T -->|2 apply-waiting| REL
     T -->|3 mislabeled / normal work| REL
     T -->|4 genuine decision/input| ENG[ENGAGE operator<br/>pause loop, ask, wait]
@@ -271,7 +271,7 @@ flowchart TD
     SUB -->|can't now| DEF
     ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment →<br/>bd update --remove-label human --status open --assignee '' (one call)"]
     ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>bd create --labels human --defer, if a worktree is left)"]
-    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human);<br/>add id to skip-set"]
+    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human),<br/>add id to skip-set"]
     REL --> C
     CLO --> C
     DEF --> C
