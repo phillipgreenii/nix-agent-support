@@ -124,7 +124,7 @@ sequenceDiagram
     Suite->>P: negative - malformed / non-object payload
     P-->>Suite: rejected
     Note over Suite,P: handler only - same event twice is tolerated (INV-EVT-2)
-    Suite-->>OP: PASS both suites then trust; else FAIL naming the offending check
+    Suite-->>OP: PASS both suites then trust, else FAIL naming the offending check
 ```
 
 ### `JOURNEY-CONFIG` — configure participants and the app <!-- uuid: db696e7c-ec86-4980-808d-add7744e0bc1 -->
@@ -313,7 +313,7 @@ sequenceDiagram
     else push source
         SRC->>CORE: ingest-event callback
     end
-    CORE->>CORE: de-dup by id within ttl (INV-EVT-3); route by type (INV-DISP-1)
+    CORE->>CORE: de-dup by id within ttl (INV-EVT-3) route by type (INV-DISP-1)
     Note over CORE: unknown type is an error to logs+metrics and to the caller (INV-DISP-3)
     CORE->>HDL: dispatch event as a handler-session (tracking id)
     alt sync
@@ -347,7 +347,7 @@ sequenceDiagram
     OP->>CORE: run-query query  OR  run-role role event
     CORE->>M: set test-mode signal, then invoke (query / dispatch)
     M-->>CORE: reply (events, or outcome)
-    CORE-->>OP: rendered shapes (text; --json for machines)
+    CORE-->>OP: rendered shapes (text --json for machines)
     Note over OP: confirm the shapes before trusting it in a live run
 ```
 

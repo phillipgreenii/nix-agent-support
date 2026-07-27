@@ -521,7 +521,7 @@ sequenceDiagram
     participant Src as push event source
     participant CLI as pr-pool ingest-event
     participant Core as core (socket service)
-    Src->>CLI: pr-pool ingest-event  (event JSON on stdin; socket+token from callback)
+    Src->>CLI: pr-pool ingest-event  (event JSON on stdin, socket+token from callback)
     CLI->>Core: forward over socket { id, events }
     Core-->>CLI: { id, accepted } / error
     CLI-->>Src: exit 0/1/2 + JSON reply
