@@ -44,11 +44,21 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "config path: %s\n", cfg.ConfigPath)
 	_, _ = fmt.Fprintf(w, "roles (%d):\n", len(cfg.Roles))
 	for _, r := range cfg.Roles {
+		_, _ = fmt.Fprintf(w, "  - %-12s type=%-8s cap=%d enabled=%t binds=%v\n", r.Name, r.Type, r.Cap, r.Enabled, r.Binds)
+	}
+	// Queries are the producers (event model): show each one's emits, flagging any
+	// stub query type (not yet implemented; it errors when run).
+	_, _ = fmt.Fprintf(w, "queries (%d):\n", len(cfg.Queries))
+	for _, s := range cfg.Queries {
 		stub := ""
-		if r.Query != nil && query.IsStub(r.Query) {
+		if s.Query != nil && query.IsStub(s.Query) {
 			stub = "  (query type is a stub: not yet implemented)"
 		}
-		_, _ = fmt.Fprintf(w, "  - %-12s type=%-8s cap=%d enabled=%t%s\n", r.Name, r.Type, r.Cap, r.Enabled, stub)
+		emits := []string(nil)
+		if s.Query != nil {
+			emits = s.Query.Emits()
+		}
+		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
 	}
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)

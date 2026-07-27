@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pr-pool/internal/budget"
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/prompt"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -31,8 +32,9 @@ func (d *duration) UnmarshalText(text []byte) error {
 // (the classic `[[role]]` typo) makes toml.Decode fail with a table-vs-array type
 // mismatch, which surfaces as a hard error — no special detection needed.
 type fileShape struct {
-	Pool  poolTOML   `toml:"pool"`
-	Roles []roleTOML `toml:"role"`
+	Pool    poolTOML    `toml:"pool"`
+	Roles   []roleTOML  `toml:"role"`
+	Queries []queryTOML `toml:"query"`
 }
 
 type poolTOML struct {
@@ -48,24 +50,50 @@ type budgetTOML struct {
 }
 
 type roleTOML struct {
-	Name    string         `toml:"name"`
-	Type    string         `toml:"type"`
-	Cap     int            `toml:"cap"`
-	Enabled *bool          `toml:"enabled"` // pointer: absent => default true
-	Query   queryTOML      `toml:"query"`
-	CCPool  toml.Primitive `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
-	Command toml.Primitive `toml:"command"` // decoded by buildCommand iff type==command
+	Name    string           `toml:"name"`
+	Type    string           `toml:"type"`
+	Cap     int              `toml:"cap"`
+	Enabled *bool            `toml:"enabled"` // pointer: absent => default true
+	Binds   []string         `toml:"binds"`   // event types this role consumes (Observer)
+	Corr    *correlationTOML `toml:"correlation"`
+	CCPool  toml.Primitive   `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
+	Command toml.Primitive   `toml:"command"` // decoded by buildCommand iff type==command
 }
 
-// queryTOML holds the query discriminator plus each query type's sub-table as a
-// deferred-decode Primitive (the factory decodes the one matching `type`).
+// queryTOML is one top-level [[query]]: a named producer. It carries its config
+// name, the event type(s) it emits (roles bind these), an optional firing
+// trigger (default: period), the query type discriminator, and each query type's
+// sub-table as a deferred-decode Primitive (the factory decodes the one matching
+// `type`).
 type queryTOML struct {
+	Name         string         `toml:"name"`
+	Emits        []string       `toml:"emits"`
+	Trigger      *triggerTOML   `toml:"trigger"`
 	Type         string         `toml:"type"`
 	BeadsReady   toml.Primitive `toml:"beads-ready"`
 	BeadsList    toml.Primitive `toml:"beads-list"`
 	Command      toml.Primitive `toml:"command"`
 	GitHubIssues toml.Primitive `toml:"github-issues"`
 	JiraIssues   toml.Primitive `toml:"jira-issues"`
+	Event        toml.Primitive `toml:"event"`
+}
+
+// triggerTOML is a query's firing strategy (Q1). kind selects the concrete
+// Strategy: "period" (default), "threshold", or "manual".
+type triggerTOML struct {
+	Kind  string    `toml:"kind"`
+	Every *duration `toml:"every"` // period
+	Count int       `toml:"count"` // threshold
+	Binds []string  `toml:"binds"` // threshold: the upstream types to count
+}
+
+// correlationTOML is a role's opt-in Aggregator declaration (Q2). kind selects
+// the Completeness condition: "all-of" (every type in types present) or
+// "count-of" (>= count events for the correlation id).
+type correlationTOML struct {
+	Kind  string   `toml:"kind"`
+	Types []string `toml:"types"`
+	Count int      `toml:"count"`
 }
 
 // ccpoolTOML is decoded from the [role.ccpool] primitive. The enum fields validate
@@ -136,10 +164,42 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 		seen[role.Name] = true
 		out = append(out, role)
 	}
+	// Build the producer set from [[query]] (design M3). A config with [[role]]
+	// but no [[query]] leaves c.Queries empty; Validate then flags every role's
+	// Binds as an orphan consumer (a clear, aggregated diagnostic).
+	queries, qerrs := r.buildQueries(md, shape.Queries, *c)
+	errs = append(errs, qerrs...)
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
+	c.Queries = queries
 	return out, nil
+}
+
+// buildQueries decodes every [[query]] into a named producer (query.Source),
+// installing its emits + trigger. Duplicate query names are rejected.
+func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (query.SourceSet, []error) {
+	var out query.SourceSet
+	var errs []error
+	seen := map[string]bool{}
+	for i, qt := range qts {
+		if qt.Name == "" {
+			errs = append(errs, fmt.Errorf("query[%d]: name is required", i))
+			continue
+		}
+		if seen[qt.Name] {
+			errs = append(errs, fmt.Errorf("duplicate query name %q", qt.Name))
+			continue
+		}
+		seen[qt.Name] = true
+		q, err := r.buildQuery(md, qt, c)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
+			continue
+		}
+		out = append(out, query.Source{Name: qt.Name, Query: q})
+	}
+	return out, errs
 }
 
 // decodeGlobalBudget reads the XDG-global config file and applies ONLY its
@@ -164,7 +224,10 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if rt.Name == "" {
 		return roles.Role{}, fmt.Errorf("name is required")
 	}
-	q, err := r.decodeQuery(md, rt.Query)
+	if len(rt.Binds) == 0 {
+		return roles.Role{}, fmt.Errorf("binds is required (the event type(s) this role consumes)")
+	}
+	corr, err := buildCorrelation(rt.Corr)
 	if err != nil {
 		return roles.Role{}, err
 	}
@@ -172,7 +235,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if rt.Enabled != nil {
 		enabled = *rt.Enabled
 	}
-	role := roles.Role{Name: rt.Name, Type: rt.Type, Cap: rt.Cap, Enabled: enabled, Query: q}
+	role := roles.Role{Name: rt.Name, Type: rt.Type, Cap: rt.Cap, Enabled: enabled, Binds: rt.Binds, Correlation: corr}
 	switch rt.Type {
 	case "ccpool":
 		cc, err := buildCCPool(md, rt.CCPool, configDir, c)
@@ -192,19 +255,79 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	return role, nil
 }
 
-func (r *Registry) decodeQuery(md toml.MetaData, qt queryTOML) (query.Query, error) {
+// buildQuery decodes one [[query]] into a concrete query.Query, installing its
+// [[query]]-level Meta (emits + trigger).
+func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Query, error) {
+	if len(qt.Emits) == 0 {
+		return nil, fmt.Errorf("emits is required (the event type(s) this query produces)")
+	}
 	prims := map[string]toml.Primitive{
 		"beads-ready":   qt.BeadsReady,
 		"beads-list":    qt.BeadsList,
 		"command":       qt.Command,
 		"github-issues": qt.GitHubIssues,
 		"jira-issues":   qt.JiraIssues,
+		"event":         qt.Event,
 	}
 	prim, ok := prims[qt.Type]
 	if !ok {
 		return nil, fmt.Errorf("unknown query type %q", qt.Type)
 	}
-	return r.queries.Decode(qt.Type, md, prim)
+	trig, err := buildTrigger(qt.Trigger, c.PollInterval)
+	if err != nil {
+		return nil, err
+	}
+	return r.queries.Decode(qt.Type, query.Meta{EmitTypes: qt.Emits, Trig: trig}, md, prim)
+}
+
+// buildTrigger maps a [query.trigger] table to the concrete Trigger strategy
+// (Q1). An absent table (or kind "" / "period") is PeriodTrigger — a period
+// query with no explicit `every` inherits the pool PollInterval, reproducing
+// today's once-per-pass pull.
+func buildTrigger(t *triggerTOML, pollInterval time.Duration) (query.Trigger, error) {
+	if t == nil || t.Kind == "" || t.Kind == "period" {
+		every := pollInterval
+		if t != nil && t.Every != nil {
+			every = t.Every.D
+		}
+		return query.PeriodTrigger{Every: every}, nil
+	}
+	switch t.Kind {
+	case "threshold":
+		if t.Count <= 0 {
+			return nil, fmt.Errorf("threshold trigger: count must be > 0")
+		}
+		if len(t.Binds) == 0 {
+			return nil, fmt.Errorf("threshold trigger: binds is required (the upstream event type(s) to count)")
+		}
+		return query.ThresholdTrigger{Binds: t.Binds, Count: t.Count}, nil
+	case "manual":
+		return query.ManualTrigger{}, nil
+	default:
+		return nil, fmt.Errorf("unknown trigger kind %q (known: period, threshold, manual)", t.Kind)
+	}
+}
+
+// buildCorrelation maps a [role.correlation] table to the opt-in Aggregator spec
+// (Q2). nil table => nil spec (the simple ANY path).
+func buildCorrelation(t *correlationTOML) (*event.CorrelationSpec, error) {
+	if t == nil {
+		return nil, nil
+	}
+	switch t.Kind {
+	case "all-of":
+		if len(t.Types) == 0 {
+			return nil, fmt.Errorf("all-of correlation: types is required")
+		}
+		return &event.CorrelationSpec{Completeness: event.AllOf{Types: t.Types}}, nil
+	case "count-of":
+		if t.Count <= 0 {
+			return nil, fmt.Errorf("count-of correlation: count must be > 0")
+		}
+		return &event.CorrelationSpec{Completeness: event.CountOf{N: t.Count}}, nil
+	default:
+		return nil, fmt.Errorf("unknown correlation kind %q (known: all-of, count-of)", t.Kind)
+	}
 }
 
 func buildCCPool(md toml.MetaData, prim toml.Primitive, configDir string, c Config) (*roles.CCPoolConfig, error) {

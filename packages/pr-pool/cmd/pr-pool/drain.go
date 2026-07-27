@@ -130,12 +130,12 @@ func warnStrandedFeedback(ctx context.Context, br beads.Runner, self string) {
 	}
 }
 
-// warnStubQueries warns for any role whose query type is a not-yet-implemented stub
-// (it will error at drain time); surfaces it at pre-flight instead.
+// warnStubQueries warns for any configured query whose type is a not-yet-
+// implemented stub (it will error when run); surfaces it at pre-flight instead.
 func warnStubQueries(cfg config.Config) {
-	for _, r := range cfg.Roles {
-		if r.Query != nil && query.IsStub(r.Query) {
-			slog.Warn("role uses a stub query type (not yet implemented; it will error when dispatched)", "role", r.Name)
+	for _, s := range cfg.Queries {
+		if s.Query != nil && query.IsStub(s.Query) {
+			slog.Warn("query uses a stub type (not yet implemented; it will error when run)", "query", s.Name)
 		}
 	}
 }

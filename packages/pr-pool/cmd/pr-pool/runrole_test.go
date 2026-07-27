@@ -34,29 +34,35 @@ func TestRoleNames(t *testing.T) {
 	}
 }
 
-// TestBuildRunRoleDispatch_populatesMetadata is the pg2-jpci regression: the
-// direct-bead run-role path must load the bead's metadata into the dispatched Item
+// TestBuildRunRoleEvent_populatesMetadata is the pg2-jpci regression: the
+// direct-bead run-role path must load the bead's metadata into the event's Item
 // (mirroring the query/drain path), so the review prompt template renders the real
-// pr_number/repo/head_sha instead of <no value>. fakeBR (drain_test.go) returns the
-// bead's `bd show <id> --json` payload with populated metadata.
-func TestBuildRunRoleDispatch_populatesMetadata(t *testing.T) {
+// pr_number/repo/head_sha instead of <no value>. Under the event model run-role
+// builds a self-contained EVENT (design Q-meta); the dispatch context is derived
+// from it. fakeBR (drain_test.go) returns the bead's `bd show <id> --json` payload.
+func TestBuildRunRoleEvent_populatesMetadata(t *testing.T) {
 	const beadID = "zr-vd38a"
 	br := fakeBR{out: map[string]string{
 		"show " + beadID + " --json": `{"data":[{"id":"zr-vd38a","issue_type":"review-pr","title":"Review PR #99116","metadata":{"pr_number":99116,"repo":"ziprecruiter/ziprecruiter","head_sha":"abc123def","branch":"feature/x"}}]}`,
 	}}
-	dctx, err := buildRunRoleDispatch(context.Background(), br, roles.Role{Name: "review"}, beadID)
+	role := roles.Role{Name: "review", Binds: []string{"review.ready"}}
+	ev, err := buildRunRoleEvent(context.Background(), br, role, beadID)
 	if err != nil {
-		t.Fatalf("buildRunRoleDispatch error: %v", err)
+		t.Fatalf("buildRunRoleEvent error: %v", err)
 	}
-	if dctx.Item.ID != beadID {
-		t.Errorf("Item.ID = %q, want %q", dctx.Item.ID, beadID)
+	if ev.Item.ID != beadID {
+		t.Errorf("Item.ID = %q, want %q", ev.Item.ID, beadID)
 	}
-	if dctx.Item.Metadata == nil {
+	// The event's type is the role's bind (provenance); the context is derived.
+	if ev.Type != "review.ready" {
+		t.Errorf("event type = %q, want the role's bind review.ready", ev.Type)
+	}
+	if ev.Item.Metadata == nil {
 		t.Fatalf("Item.Metadata is nil; run-role did not load bead metadata (pg2-jpci)")
 	}
 	for _, k := range []string{"pr_number", "repo", "head_sha"} {
-		if _, ok := dctx.Item.Metadata[k]; !ok {
-			t.Errorf("Item.Metadata missing %q; got %#v", k, dctx.Item.Metadata)
+		if _, ok := ev.Item.Metadata[k]; !ok {
+			t.Errorf("Item.Metadata missing %q; got %#v", k, ev.Item.Metadata)
 		}
 	}
 }

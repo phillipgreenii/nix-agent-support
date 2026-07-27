@@ -28,6 +28,8 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
+	"github.com/phillipgreenii/pr-pool/internal/event"
+	"github.com/phillipgreenii/pr-pool/internal/eventbus"
 	"github.com/phillipgreenii/pr-pool/internal/eventlog"
 	"github.com/phillipgreenii/pr-pool/internal/executor"
 	"github.com/phillipgreenii/pr-pool/internal/query"
@@ -77,7 +79,7 @@ func (o *Orchestrator) DrainOnce(ctx context.Context) error {
 		return nil // NOTE: gated exit does NOT teardown (no sessions were created)
 	}
 	defer o.teardownAll(ctx) // always run teardown after the gated check, even on error
-	dispatches, err := discover.Discover(ctx, o.queryEnv(), o.Reg)
+	dispatches, err := o.discoverViaBus(ctx)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
@@ -97,13 +99,78 @@ func (o *Orchestrator) queryEnv() query.Env {
 	return query.Env{BD: o.BD, RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
 }
 
-// RunOne dispatches a single DispatchContext through the full workOne path and then
-// closes that one session (the drain's pass-level teardownAll is not involved). It is
-// the single-bead entry behind `pr-pool run-role`: smoke-test one role against one
-// bead without running discovery. Unlike DrainOnce it does NOT consult the quota/CICD
-// gates and does NOT reap stray pr-pool-* sessions — it is a manual, intentional
-// single dispatch where the operator is in control.
-func (o *Orchestrator) RunOne(ctx context.Context, d discover.DispatchContext) error {
+// nowTime returns the current time via the clock seam (default time.Now). The
+// bus, TTL sweep, and clock.tick all read the SAME clock so tests drive them
+// coherently.
+func (o *Orchestrator) nowTime() time.Time {
+	if o.now != nil {
+		return o.now()
+	}
+	return time.Now()
+}
+
+// discoverViaBus is the event-model producer→bus→lease drive (design M4). It
+// builds a per-pass Bus, subscribes each enabled role to its bound event types
+// (Observer; opt-in Aggregator when a correlation is declared), fires the query
+// set against the bus (Producers publish typed events), then leases per role in
+// config order — cap-gated by n = Cap − Inflight (Q5) — deriving one
+// DispatchContext per leased event and Acking it. With only PeriodTrigger + ANY
+// bindings this reproduces today's coupled discover→drain: each role gets up to
+// Cap dispatches from its query, in config order (behavior parity).
+func (o *Orchestrator) discoverViaBus(ctx context.Context) ([]discover.DispatchContext, error) {
+	opts := []eventbus.Option{eventbus.WithClock(o.nowTime), eventbus.WithTTL(o.Cfg.MaxWait)}
+	if o.Log != nil { // guard: a typed-nil *eventlog.Writer must not become a non-nil Logger
+		opts = append(opts, eventbus.WithLogger(o.Log))
+	}
+	bus := eventbus.New(opts...)
+
+	for _, r := range o.Reg {
+		if !r.Enabled {
+			slog.Info("role disabled; skipping subscription", "role", r.Name)
+			continue
+		}
+		if r.Correlation != nil {
+			bus.SubscribeAggregate(r.Name, r.Binds, *r.Correlation)
+			continue
+		}
+		for _, t := range r.Binds {
+			bus.Subscribe(r.Name, t)
+		}
+	}
+
+	if err := discover.Produce(ctx, o.queryEnv(), o.Cfg.Queries, bus, o.nowTime()); err != nil {
+		return nil, err
+	}
+
+	var out []discover.DispatchContext
+	for _, r := range o.Reg {
+		if !r.Enabled {
+			continue
+		}
+		n := r.Cap - bus.Inflight(r.Name)
+		leased, err := bus.Lease(ctx, r.Name, n)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range leased {
+			out = append(out, discover.DeriveContext(r, e))
+			_ = bus.Ack(ctx, r.Name, e.ID)
+		}
+	}
+	return out, nil
+}
+
+// RunOne dispatches a single self-contained EVENT through one role and then
+// closes that one session (the drain's pass-level teardownAll is not involved).
+// It is the single-bead entry behind `pr-pool run-role`: smoke-test one role
+// against one bead without running discovery. Per the design's context-vs-event
+// resolution (Q-meta), run-role accepts an EVENT (self-contained, replayable)
+// and DERIVES the ephemeral DispatchContext here at dispatch. Unlike DrainOnce it
+// does NOT consult the quota/CICD gates and does NOT reap stray pr-pool-*
+// sessions — it is a manual, intentional single dispatch where the operator is
+// in control.
+func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, ev event.Event) error {
+	d := discover.DeriveContext(role, ev)
 	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
 	defer func() {
 		// Tear down the one session we launched — but PRESERVE it if it ended in

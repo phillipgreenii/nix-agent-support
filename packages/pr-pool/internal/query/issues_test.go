@@ -44,7 +44,7 @@ func TestGitHubIssues_mapsResultsAndBuildsArgs(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("want 2 items, got %d: %+v", len(items), items)
 	}
-	got := items[0]
+	got := items[0].Item // M2: Run emits events wrapping the mapped items
 	if got.ID != "o/r#12" || got.Type != "github-issue" || got.Title != "Fix the thing" {
 		t.Errorf("item[0] mapped wrong: %+v", got)
 	}
@@ -106,7 +106,7 @@ func TestJiraIssues_mapsEnvelopeAndBuildsArgs(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("want 2 items, got %d: %+v", len(items), items)
 	}
-	got := items[0]
+	got := items[0].Item // M2: Run emits events wrapping the mapped items
 	if got.ID != "PROJ-1" || got.Type != "jira-issue" || got.Title != "Do X" {
 		t.Errorf("item[0] mapped wrong: %+v", got)
 	}

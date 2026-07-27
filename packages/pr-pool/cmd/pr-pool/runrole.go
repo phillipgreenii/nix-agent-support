@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/ccpool"
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/orchestrator"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
@@ -56,12 +57,14 @@ func runRunRole(roleName, beadID string) int {
 		printUsageErr(fmt.Sprintf("run-role: unknown role %q (configured: %s)", roleName, roleNames(cfg.Roles)))
 		return exitUsage
 	}
-	dctx, err := buildRunRoleDispatch(ctx, br, role, beadID)
+	ev, err := buildRunRoleEvent(ctx, br, role, beadID)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitGeneric
 	}
-	if err := dctx.Validate(); err != nil {
+	// Validate the DERIVED context (design Q-meta: run-role takes an event, the
+	// context is derived at dispatch) so a half-filled dispatch fails fast.
+	if err := discover.DeriveContext(role, ev).Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitUsage
 	}
@@ -71,24 +74,30 @@ func runRunRole(roleName, beadID string) int {
 		Reg: cfg.Roles,
 		Cfg: cfg,
 	}
-	if err := o.RunOne(ctx, dctx); err != nil {
+	if err := o.RunOne(ctx, role, ev); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitGeneric
 	}
 	return exitOK
 }
 
-// buildRunRoleDispatch builds the (role, item) dispatch for the direct-bead run-role
-// path. It loads the bead via `bd show` and maps its metadata into the dispatched
-// Item through the same query.FromIssue adapter the query/drain path uses (pg2-jpci),
-// so the review prompt template renders the real pr_number/repo/head_sha instead of
-// <no value>.
-func buildRunRoleDispatch(ctx context.Context, br beads.Runner, role roles.Role, beadID string) (discover.DispatchContext, error) {
+// buildRunRoleEvent builds the self-contained event for the direct-bead run-role
+// path (design Q-meta: run-role consumes an EVENT). It loads the bead via `bd
+// show` and maps its metadata into the event's Item through the same
+// query.FromIssue adapter the query/drain path uses (pg2-jpci), so the review
+// prompt template renders the real pr_number/repo/head_sha instead of <no value>.
+// The event type is the role's first bind (falling back to "run-role"); the type
+// is provenance only — RunOne derives the dispatch context from the event's Item.
+func buildRunRoleEvent(ctx context.Context, br beads.Runner, role roles.Role, beadID string) (event.Event, error) {
 	iss, err := beads.ShowObj(ctx, br, beadID)
 	if err != nil {
-		return discover.DispatchContext{}, fmt.Errorf("load bead %s: %w", beadID, err)
+		return event.Event{}, fmt.Errorf("load bead %s: %w", beadID, err)
 	}
-	return discover.DispatchContext{Role: role, Item: query.FromIssue(iss)}, nil
+	eventType := "run-role"
+	if len(role.Binds) > 0 {
+		eventType = role.Binds[0]
+	}
+	return event.NewItemEvent(eventType, "run-role", query.FromIssue(iss)), nil
 }
 
 // runRunQuery runs one role's discovery query read-only and prints the matches
@@ -110,15 +119,24 @@ func runRunQuery(roleName string) int {
 		printUsageErr(fmt.Sprintf("run-query: unknown role %q (configured: %s)", roleName, roleNames(cfg.Roles)))
 		return exitUsage
 	}
+	// A role no longer embeds a query; it binds event types. Resolve the
+	// producers that FEED this role (emit any of its bound types) and run each,
+	// printing the items the emitted events carry — the same read-only smoke view
+	// as before, now through the event model.
 	env := query.Env{BD: br, RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}}
-	dispatches, err := discover.ForRole(ctx, env, role)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "run-query:", err)
-		return exitGeneric
+	sources := discover.QueriesForRole(cfg.Queries, role)
+	total := 0
+	for _, s := range sources {
+		evts, err := s.Query.Run(ctx, env)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "run-query:", err)
+			return exitGeneric
+		}
+		for _, e := range evts {
+			fmt.Printf("%s\t%s\t%s\n", e.Item.ID, e.Item.Type, e.Item.Title)
+		}
+		total += len(evts)
 	}
-	for _, d := range dispatches {
-		fmt.Printf("%s\t%s\t%s\n", d.Item.ID, d.Item.Type, d.Item.Title)
-	}
-	fmt.Printf("# %d %s dispatch(es)\n", len(dispatches), role.Name)
+	fmt.Printf("# %d %s dispatch(es) from %d quer(ies)\n", total, role.Name, len(sources))
 	return exitOK
 }

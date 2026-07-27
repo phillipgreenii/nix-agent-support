@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os/exec"
 
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 )
 
 // CommandQuery runs an executable and parses its stdout into items.
 type CommandQuery struct {
+	Meta   `toml:"-"`
 	Argv   []string    `toml:"argv"`
 	Format QueryFormat `toml:"format"`
 }
@@ -34,7 +36,7 @@ type rawItem struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-func (q CommandQuery) Run(ctx context.Context, env Env) ([]item.Item, error) {
+func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	cmd := env.Cmd
 	if cmd == nil {
 		cmd = OSCommander{}
@@ -77,7 +79,7 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]item.Item, error) {
 		}
 		items = append(items, item.Item{ID: r.ID, Type: r.Type, Title: r.Title, Metadata: r.Metadata})
 	}
-	return items, nil
+	return eventsFromItems(items, firstEmit(q), ""), nil
 }
 
 // OSCommander is the default Commander: shells out via os/exec.

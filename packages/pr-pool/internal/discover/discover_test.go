@@ -5,64 +5,152 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/event"
+	"github.com/phillipgreenii/pr-pool/internal/eventbus"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// fakeQuery is a stand-in query.Query returning canned items (or an error).
+// fakeQuery is a stand-in producer: it embeds query.Meta (for Emits/Trigger) and
+// returns canned events (or an error).
 type fakeQuery struct {
-	items []item.Item
-	err   error
+	query.Meta
+	events []event.Event
+	err    error
 }
 
 func (f fakeQuery) Validate() error { return nil }
-func (f fakeQuery) Run(context.Context, query.Env) ([]item.Item, error) {
-	return f.items, f.err
+func (f fakeQuery) Run(context.Context, query.Env) ([]event.Event, error) {
+	return f.events, f.err
 }
 
-func TestDiscover_orderAndEnabled(t *testing.T) {
-	rs := roles.RoleSet{
-		{Name: "a", Enabled: true, Query: fakeQuery{items: []item.Item{{ID: "1"}}}},
-		{Name: "b", Enabled: false, Query: fakeQuery{items: []item.Item{{ID: "2"}}}},
-		{Name: "c", Enabled: true, Query: fakeQuery{items: []item.Item{{ID: "3"}}}},
+func itemEvt(typ, id string) event.Event {
+	return event.NewItemEvent(typ, "", item.Item{ID: id, Type: "task"})
+}
+
+var epoch = time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+
+func TestProduce_periodQueriesPublishToBoundRoles(t *testing.T) {
+	sources := query.SourceSet{
+		{Name: "feedback-source", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"feedback.ready"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("feedback.ready", "fb-1")},
+		}},
+		{Name: "worker-source", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"work.ready"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("work.ready", "wk-1"), itemEvt("work.ready", "wk-2")},
+		}},
 	}
-	got, err := Discover(context.Background(), query.Env{}, rs)
-	if err != nil {
+	bus := eventbus.New()
+	bus.Subscribe("feedback", "feedback.ready")
+	bus.Subscribe("worker", "work.ready")
+
+	if err := Produce(context.Background(), query.Env{}, sources, bus, epoch); err != nil {
 		t.Fatal(err)
 	}
-	// config order preserved; the disabled role yields nothing.
-	if len(got) != 2 || got[0].Role.Name != "a" || got[0].Item.ID != "1" || got[1].Role.Name != "c" || got[1].Item.ID != "3" {
-		t.Fatalf("order/enabled wrong: %+v", got)
+	fb, _ := bus.Lease(context.Background(), "feedback", 10)
+	wk, _ := bus.Lease(context.Background(), "worker", 10)
+	if len(fb) != 1 || fb[0].Item.ID != "fb-1" {
+		t.Fatalf("feedback queue wrong: %+v", fb)
+	}
+	if len(wk) != 2 {
+		t.Fatalf("worker queue wrong: %+v", wk)
+	}
+	// Provenance stamped from the source name.
+	if fb[0].Source != "feedback-source" {
+		t.Fatalf("event source must be stamped from the query name, got %q", fb[0].Source)
 	}
 }
 
-// pg2-qq9v: a query failure must NOT look like "no ready work" — it must propagate.
-func TestDiscover_queryErrorPropagates(t *testing.T) {
+func TestProduce_queryErrorPropagates(t *testing.T) {
 	sentinel := errors.New("bd down")
-	rs := roles.RoleSet{{Name: "a", Enabled: true, Query: fakeQuery{err: sentinel}}}
-	got, err := Discover(context.Background(), query.Env{}, rs)
-	if err == nil {
-		t.Fatal("a query error must propagate, not be swallowed as no-work")
+	sources := query.SourceSet{
+		{Name: "boom", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"x"}}, err: sentinel}},
 	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("propagated error should wrap the query error; got %v", err)
-	}
-	if got != nil {
-		t.Errorf("on error, dispatches must be nil; got %v", got)
+	err := Produce(context.Background(), query.Env{}, sources, eventbus.New(), epoch)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("a query error must propagate; got %v", err)
 	}
 }
 
-func TestForRole_bypassesEnabled(t *testing.T) {
-	// ForRole runs the query even when the role is disabled (smoke harness).
-	role := roles.Role{Name: "a", Enabled: false, Query: fakeQuery{items: []item.Item{{ID: "z"}}}}
-	got, err := ForRole(context.Background(), query.Env{}, role)
-	if err != nil {
+func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {
+	// upstream (period) emits one "up" event; downstream (threshold Count=1 on
+	// "up") should fire and emit a "down" event.
+	newSources := func(count int) query.SourceSet {
+		return query.SourceSet{
+			{Name: "up-source", Query: fakeQuery{
+				Meta:   query.Meta{EmitTypes: []string{"up"}, Trig: query.PeriodTrigger{}},
+				events: []event.Event{itemEvt("up", "u1")},
+			}},
+			{Name: "down-source", Query: fakeQuery{
+				Meta:   query.Meta{EmitTypes: []string{"down"}, Trig: query.ThresholdTrigger{Binds: []string{"up"}, Count: count}},
+				events: []event.Event{itemEvt("down", "d1")},
+			}},
+		}
+	}
+
+	// Count=1: one "up" is enough — the threshold query fires.
+	bus := eventbus.New()
+	bus.Subscribe("upR", "up")
+	bus.Subscribe("downR", "down")
+	if err := Produce(context.Background(), query.Env{}, newSources(1), bus, epoch); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Item.ID != "z" {
-		t.Fatalf("ForRole should run a disabled role's query; got %+v", got)
+	if got, _ := bus.Lease(context.Background(), "downR", 10); len(got) != 1 {
+		t.Fatalf("threshold(Count=1) must fire on one upstream event, got %d", len(got))
+	}
+
+	// Count=2: one "up" is NOT enough — the threshold query does not fire.
+	bus2 := eventbus.New()
+	bus2.Subscribe("upR", "up")
+	bus2.Subscribe("downR", "down")
+	if err := Produce(context.Background(), query.Env{}, newSources(2), bus2, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := bus2.Lease(context.Background(), "downR", 10); len(got) != 0 {
+		t.Fatalf("threshold(Count=2) must NOT fire on one upstream event, got %d", len(got))
+	}
+}
+
+func TestProduce_manualNeverFiresOnTick(t *testing.T) {
+	sources := query.SourceSet{
+		{Name: "manual", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"m"}, Trig: query.ManualTrigger{}},
+			events: []event.Event{itemEvt("m", "m1")},
+		}},
+	}
+	bus := eventbus.New()
+	bus.Subscribe("mR", "m")
+	if err := Produce(context.Background(), query.Env{}, sources, bus, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := bus.Lease(context.Background(), "mR", 10); len(got) != 0 {
+		t.Fatalf("manual trigger must not fire on a tick, got %d", len(got))
+	}
+}
+
+func TestDeriveContext(t *testing.T) {
+	role := roles.Role{Name: "worker"}
+	e := itemEvt("work.ready", "zr-9")
+	d := DeriveContext(role, e)
+	if d.Role.Name != "worker" || d.Item.ID != "zr-9" {
+		t.Fatalf("derived context wrong: %+v", d)
+	}
+}
+
+func TestQueriesForRole(t *testing.T) {
+	sources := query.SourceSet{
+		{Name: "a", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"feedback.ready"}}}},
+		{Name: "b", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"work.ready"}}}},
+		{Name: "c", Query: fakeQuery{Meta: query.Meta{EmitTypes: []string{"feedback.ready"}}}},
+	}
+	role := roles.Role{Name: "feedback", Binds: []string{"feedback.ready"}}
+	got := QueriesForRole(sources, role)
+	if len(got) != 2 || got[0].Name != "a" || got[1].Name != "c" {
+		t.Fatalf("QueriesForRole should return the feedback-emitting sources, got %+v", got)
 	}
 }
 

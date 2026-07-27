@@ -2,10 +2,21 @@ package roles
 
 import (
 	"text/template"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/budget"
 	"github.com/phillipgreenii/pr-pool/internal/prompt"
 	"github.com/phillipgreenii/pr-pool/internal/query"
+)
+
+// Built-in event types wire each built-in query (producer) to its role
+// (consumer). The type strings are the ONLY coupling between a query and a role
+// now (design M2/M3): the feedback query emits feedback.ready, the feedback role
+// binds it, and so on. Derived from the role names during the transition.
+const (
+	EventFeedbackReady = "feedback.ready"
+	EventWorkReady     = "work.ready"
+	EventReviewReady   = "review.ready"
 )
 
 // BuiltinParams carries the scalars the built-in roles need from config defaults.
@@ -16,6 +27,9 @@ type BuiltinParams struct {
 	MaxFeedback   int
 	MaxWorker     int
 	WorkerBudget  budget.Budget
+	// PollInterval seeds the built-in queries' PeriodTrigger{Every: PollInterval},
+	// reproducing today's once-per-pass pull. Zero is fine (fire every tick).
+	PollInterval time.Duration
 }
 
 // feedbackPromptBody / workerPromptBody are the task prompts (worker rails removed —
@@ -53,16 +67,15 @@ func mustParse(name, body string) *template.Template {
 	return t
 }
 
-// BuiltinRoleSet returns the in-Go default role set (feedback then worker), identical
-// in behavior to today. It is also what config/example.go serializes to TOML.
+// BuiltinRoleSet returns the in-Go default role set (feedback, worker, review),
+// identical in behavior to today. Each role now BINDS to the event type its
+// paired built-in query (BuiltinQuerySet) emits, instead of embedding the query.
+// It is also what config/example.go serializes to TOML.
 func BuiltinRoleSet(p BuiltinParams) RoleSet {
 	return RoleSet{
 		{
 			Name: "feedback", Type: "ccpool", Cap: p.MaxFeedback, Enabled: true,
-			Query: query.BeadsReady{
-				Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
-				TitlePrefix: "process-feedback:", ItemType: "task",
-			},
+			Binds: []string{EventFeedbackReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__process-feedback", SkillMD: p.SkillMD,
 				Completion: CloseOnly, OnFailure: Unclaim, OnDispatchFail: DispatchUnclaim,
@@ -72,7 +85,7 @@ func BuiltinRoleSet(p BuiltinParams) RoleSet {
 		},
 		{
 			Name: "worker", Type: "ccpool", Cap: p.MaxWorker, Enabled: true,
-			Query: query.BeadsReady{Labels: []string{"worker-ready"}, ExcludeLabels: []string{"human"}},
+			Binds: []string{EventWorkReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__worker", SkillMD: p.WorkerSkillMD,
 				Completion: CloseOrHandback, OnFailure: AddHuman, OnDispatchFail: DispatchLeave,
@@ -88,15 +101,47 @@ func BuiltinRoleSet(p BuiltinParams) RoleSet {
 			// AuthorshipGuard is FALSE: reviews cover teammate PRs too, so the
 			// guard's "author is me + my branch" assertion must NOT gate them.
 			Name: "review", Type: "ccpool", Cap: p.MaxWorker, Enabled: true,
-			Query: query.BeadsReady{
-				ExcludeLabels: []string{"human"},
-				TitlePrefix:   "review-pr: ", ItemType: "task",
-			},
+			Binds: []string{EventReviewReady},
 			CCPool: &CCPoolConfig{
 				Actor: "pgii-pool__review", SkillMD: "",
 				Completion: CloseOrHandback, OnFailure: AddHuman, OnDispatchFail: DispatchLeave,
 				AuthorshipGuard: false, PromptBody: reviewPromptBody, Prompt: mustParse("review", reviewPromptBody),
 				Budget: p.WorkerBudget,
+			},
+		},
+	}
+}
+
+// BuiltinQuerySet returns the in-Go default query set (producers) paired with the
+// built-in roles: the feedback query emits feedback.ready, the worker query emits
+// work.ready, the review query emits review.ready — the exact bd-ready filters
+// each role used to embed. Every built-in query uses PeriodTrigger{PollInterval},
+// so with the ANY binding path dispatch matches today's coupled role+query
+// (behavior parity). The wiring is now the shared event-type string only.
+func BuiltinQuerySet(p BuiltinParams) query.SourceSet {
+	trig := query.PeriodTrigger{Every: p.PollInterval}
+	return query.SourceSet{
+		{
+			Name: "feedback-source",
+			Query: query.BeadsReady{
+				Meta:   query.Meta{EmitTypes: []string{EventFeedbackReady}, Trig: trig},
+				Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
+				TitlePrefix: "process-feedback:", ItemType: "task",
+			},
+		},
+		{
+			Name: "worker-source",
+			Query: query.BeadsReady{
+				Meta:   query.Meta{EmitTypes: []string{EventWorkReady}, Trig: trig},
+				Labels: []string{"worker-ready"}, ExcludeLabels: []string{"human"},
+			},
+		},
+		{
+			Name: "review-source",
+			Query: query.BeadsReady{
+				Meta:          query.Meta{EmitTypes: []string{EventReviewReady}, Trig: trig},
+				ExcludeLabels: []string{"human"},
+				TitlePrefix:   "review-pr: ", ItemType: "task",
 			},
 		},
 	}

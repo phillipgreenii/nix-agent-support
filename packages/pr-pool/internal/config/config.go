@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/budget"
+	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
@@ -58,6 +59,12 @@ type Config struct {
 	// default set). ConfigPath is the resolved config file path (for `config --show`).
 	Roles      roles.RoleSet
 	ConfigPath string
+
+	// Queries is the resolved producer set (TOML [[query]] or the built-in default
+	// query set). Under the event model a role and a query are wired only through a
+	// shared event-type string (role.Binds ∩ query.Emits); Validate rejects orphan
+	// producers/consumers.
+	Queries query.SourceSet
 
 	// Budget watchdog (chunk B). Token/Cost <= 0 means unlimited.
 	BudgetTokens int64
@@ -184,14 +191,20 @@ func Load() (Config, error) {
 		slog.Info("no pr-pool config found; using built-in roles", "path", path)
 	}
 	if c.Roles == nil {
-		c.Roles = roles.BuiltinRoleSet(roles.BuiltinParams{
+		bp := roles.BuiltinParams{
 			WorktreeDir:   c.WorktreeDir,
 			SkillMD:       c.SkillMD,
 			WorkerSkillMD: c.WorkerSkillMD,
 			MaxFeedback:   c.MaxFeedback,
 			MaxWorker:     c.MaxWorker,
 			WorkerBudget:  c.WorkerBudget(),
-		})
+			PollInterval:  c.PollInterval,
+		}
+		c.Roles = roles.BuiltinRoleSet(bp)
+		// The built-in query set is paired with the built-in roles (feedback query
+		// emits feedback.ready, feedback role binds it, ...) — reproducing today's
+		// coupled role+query behavior through the event model.
+		c.Queries = roles.BuiltinQuerySet(bp)
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -214,17 +227,45 @@ var validPermissionModes = map[string]bool{
 }
 
 // Validate checks operator-overridable fields that would otherwise fail late:
-// PermissionMode, plus each resolved role's query. Errors are aggregated so a bad
-// config reports every problem at once at pre-flight.
+// PermissionMode, each resolved query, and the event-model wiring — every role's
+// Binds must be emitted by some query and every query's Emits must be bound by
+// some role (no orphan producers/consumers, design M3). Errors are aggregated so
+// a bad config reports every problem at once at pre-flight.
 func (c Config) Validate() error {
 	var errs []error
 	if !validPermissionModes[c.PermissionMode] {
 		errs = append(errs, fmt.Errorf("invalid PR_POOL_PERMISSION_MODE %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode))
 	}
+	// emitted collects every event type produced by some query; bound collects
+	// every event type consumed by some role.
+	emitted := map[string]bool{}
+	for _, s := range c.Queries {
+		if s.Query == nil {
+			continue
+		}
+		if err := s.Query.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("query %q: %w", s.Name, err))
+		}
+		for _, e := range s.Query.Emits() {
+			emitted[e] = true
+		}
+	}
+	bound := map[string]bool{}
 	for _, role := range c.Roles {
-		if role.Query != nil {
-			if err := role.Query.Validate(); err != nil {
-				errs = append(errs, fmt.Errorf("role %q query: %w", role.Name, err))
+		for _, b := range role.Binds {
+			bound[b] = true
+			if !emitted[b] {
+				errs = append(errs, fmt.Errorf("role %q binds event type %q that no query emits (orphan consumer)", role.Name, b))
+			}
+		}
+	}
+	for _, s := range c.Queries {
+		if s.Query == nil {
+			continue
+		}
+		for _, e := range s.Query.Emits() {
+			if !bound[e] {
+				errs = append(errs, fmt.Errorf("query %q emits event type %q that no role binds (orphan producer)", s.Name, e))
 			}
 		}
 	}

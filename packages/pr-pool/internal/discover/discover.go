@@ -1,22 +1,29 @@
-// Package discover turns each role's configured query into role→item dispatches,
-// in config order, honoring each role's Enabled flag. Query errors propagate
-// (pg2-qq9v): a query failure must NOT masquerade as "no ready work".
+// Package discover is the PRODUCER side of the event model (design 2026-06-25):
+// it fires each query's Trigger strategy, runs the triggered queries, and
+// publishes their typed events onto the bus. The role→item DispatchContext is
+// DERIVED from an event at the moment of delivery (the event is the
+// self-contained transportable fact; the context is ephemeral). Query errors
+// propagate (pg2-qq9v): a query failure must NOT masquerade as "no ready work".
 package discover
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/phillipgreenii/pr-pool/internal/event"
+	"github.com/phillipgreenii/pr-pool/internal/eventbus"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 )
 
-// DispatchContext is one (role, item) dispatch. It is the explicit growth point for
-// future resolved fields (worktree dir, self_login, template vars); keeping it a
-// struct keeps run-role's call shape stable as it accretes fields.
+// DispatchContext is one (role, item) dispatch, DERIVED from an event.Event at
+// delivery (design Q-meta: events cross the bus; contexts are built at dispatch).
+// It is the explicit growth point for future resolved fields (worktree dir,
+// self_login, template vars); keeping it a struct keeps run-role's call shape
+// stable as it accretes fields.
 type DispatchContext struct {
 	Role roles.Role
 	Item item.Item
@@ -38,35 +45,110 @@ func (d DispatchContext) Validate() error {
 	return nil
 }
 
-// Discover runs each enabled role's query, in config order, honoring Enabled.
-func Discover(ctx context.Context, env query.Env, rs roles.RoleSet) ([]DispatchContext, error) {
-	var out []DispatchContext
-	for _, role := range rs {
-		if !role.Enabled {
-			slog.Info("role disabled; skipping discovery", "role", role.Name)
-			continue
-		}
-		dcs, err := ForRole(ctx, env, role)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, dcs...)
-	}
-	return out, nil
+// DeriveContext builds the ephemeral DispatchContext for a role from a
+// self-contained event (design Q-meta). Run-time-only fields (worktree dir,
+// self_login, template vars) still resolve at dispatch, downstream on this
+// context — exactly as before.
+func DeriveContext(role roles.Role, e event.Event) DispatchContext {
+	return DispatchContext{Role: role, Item: e.Item}
 }
 
-// ForRole runs ONE role's query regardless of the role's Enabled flag (the smoke
-// harness must be able to query a role disabled in config).
-func ForRole(ctx context.Context, env query.Env, role roles.Role) ([]DispatchContext, error) {
-	items, err := role.Query.Run(ctx, env)
+// Produce fires the query set against the bus for one drain tick: it publishes
+// the internal clock.tick event (Q1: the period tick is itself an event), runs
+// every PeriodTrigger query (reproducing today's once-per-pass pull), then
+// settles any ThresholdTrigger queries whose upstream now has "enough events".
+// ManualTrigger queries never fire here (only via the smoke harness). Each
+// emitted event is stamped with its source query name (provenance) before
+// publish. A query error propagates (pg2-qq9v).
+func Produce(ctx context.Context, env query.Env, sources query.SourceSet, bus *eventbus.Bus, now time.Time) error {
+	// The tick is itself an event — uniform with the rest of the model and the
+	// observable "a pass happened" signal. No role binds it; it fans out to no
+	// queue.
+	_ = bus.Publish(ctx, event.Event{ID: "clock.tick:" + now.Format(time.RFC3339Nano), Type: event.ClockTick, EmittedAt: now})
+
+	fired := make([]bool, len(sources))
+	// Period-driven (and any non-threshold, non-manual) queries react to the tick.
+	for i, s := range sources {
+		t := s.Query.Trigger()
+		if query.IsManual(t) {
+			continue
+		}
+		if _, isThreshold := query.Threshold(t); isThreshold {
+			continue
+		}
+		if err := runAndPublish(ctx, env, s, bus); err != nil {
+			return err
+		}
+		fired[i] = true
+	}
+	// Threshold ("enough-events") settling: a threshold query fires once its bound
+	// upstream has produced >= Count events. Bounded fixpoint so a chain of
+	// threshold queries can cascade within the pass without looping forever.
+	for iter := 0; iter <= len(sources); iter++ {
+		progressed := false
+		for i, s := range sources {
+			if fired[i] {
+				continue
+			}
+			tt, ok := query.Threshold(s.Query.Trigger())
+			if !ok {
+				continue
+			}
+			depth := 0
+			for _, b := range tt.Binds {
+				depth += bus.Depth(b)
+			}
+			if depth >= tt.Count {
+				if err := runAndPublish(ctx, env, s, bus); err != nil {
+					return err
+				}
+				fired[i] = true
+				progressed = true
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	return nil
+}
+
+// runAndPublish runs one source's query and publishes every emitted event,
+// stamping the source query name as provenance when the query left it blank.
+func runAndPublish(ctx context.Context, env query.Env, s query.Source, bus *eventbus.Bus) error {
+	evts, err := s.Query.Run(ctx, env)
 	if err != nil {
 		// Propagate: a query failure must NOT masquerade as "no ready work", or the
 		// pool silently idles on infra failure. (pg2-qq9v)
-		return nil, fmt.Errorf("discover %s: %w", role.Name, err)
+		return fmt.Errorf("produce %s: %w", s.Name, err)
 	}
-	out := make([]DispatchContext, 0, len(items))
-	for _, it := range items {
-		out = append(out, DispatchContext{Role: role, Item: it})
+	for _, e := range evts {
+		if e.Source == "" {
+			e.Source = s.Name
+		}
+		if err := bus.Publish(ctx, e); err != nil {
+			return fmt.Errorf("publish %s: %w", s.Name, err)
+		}
 	}
-	return out, nil
+	return nil
+}
+
+// QueriesForRole returns the sources whose emitted event types intersect the
+// role's Binds — the producers that feed this role. Used by the run-query smoke
+// harness (which resolves a role name, then runs the queries wired to it).
+func QueriesForRole(sources query.SourceSet, role roles.Role) query.SourceSet {
+	bindSet := make(map[string]bool, len(role.Binds))
+	for _, b := range role.Binds {
+		bindSet[b] = true
+	}
+	var out query.SourceSet
+	for _, s := range sources {
+		for _, e := range s.Query.Emits() {
+			if bindSet[e] {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
 }

@@ -17,12 +17,13 @@ func TestCommandQuery_jsonl(t *testing.T) {
 	q := CommandQuery{Argv: []string{"x"}, Format: FormatJSONL}
 	cmd := fakeCmd{out: []byte(`{"id":"a","type":"task","title":"A","metadata":{"k":"v"}}` + "\n" +
 		`{"id":"b","type":"bug","title":"B"}` + "\n")}
-	items, err := q.Run(context.Background(), Env{Cmd: cmd})
+	evts, err := q.Run(context.Background(), Env{Cmd: cmd})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].ID != "a" || items[0].Metadata["k"] != "v" || items[1].ID != "b" {
-		t.Fatalf("items wrong: %+v", items)
+	// M2: events wrap the parsed items.
+	if len(evts) != 2 || evts[0].Item.ID != "a" || evts[0].Item.Metadata["k"] != "v" || evts[1].Item.ID != "b" {
+		t.Fatalf("events wrong: %+v", evts)
 	}
 }
 

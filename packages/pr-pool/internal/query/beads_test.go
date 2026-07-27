@@ -24,15 +24,23 @@ func TestBeadsReady_argsAndPostFilter(t *testing.T) {
 	  {"id":"c3","issue_type":"bug","title":"process-feedback: y"}
 	]`}
 	q := BeadsReady{
+		Meta:   Meta{EmitTypes: []string{"feedback.ready"}},
 		Labels: []string{"mine"}, ExcludeLabels: []string{"human"},
 		TitlePrefix: "process-feedback:", ItemType: "task",
 	}
-	items, err := q.Run(context.Background(), Env{BD: bd})
+	evts, err := q.Run(context.Background(), Env{BD: bd})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != "c1" {
-		t.Fatalf("post-filter wrong: %+v", items)
+	// M2: Run now emits typed events wrapping the filtered items.
+	if len(evts) != 1 || evts[0].Item.ID != "c1" {
+		t.Fatalf("post-filter wrong: %+v", evts)
+	}
+	if evts[0].Type != "feedback.ready" {
+		t.Fatalf("event type must be the query's emit type, got %q", evts[0].Type)
+	}
+	if evts[0].ID != "feedback.ready:c1" {
+		t.Fatalf("event id must be the stable fingerprint, got %q", evts[0].ID)
 	}
 	want := "ready --label mine --exclude-label human --json --limit 0"
 	if got := join(bd.args); got != want {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/pr-pool/internal/query"
 )
 
 // absentConfig points PR_POOL_CONFIG at a non-existent path so Load() resolves to
@@ -253,15 +255,19 @@ func TestLoad_noFile_builtinRoleSet(t *testing.T) {
 
 func TestLoad_tomlReplacesBuiltins(t *testing.T) {
 	writeCfg(t, `
+[[query]]
+name = "solo-source"
+emits = ["work.ready"]
+type = "beads-ready"
+[query.beads-ready]
+labels = ["worker-ready"]
+
 [[role]]
 name = "solo"
 type = "ccpool"
 cap = 2
 enabled = true
-[role.query]
-type = "beads-ready"
-[role.query.beads-ready]
-labels = ["worker-ready"]
+binds = ["work.ready"]
 [role.ccpool]
 actor = "a"
 completion = "close-or-handback"
@@ -276,8 +282,114 @@ prompt = "do {{.BeadID}}"
 	if len(c.Roles) != 1 || c.Roles[0].Name != "solo" || c.Roles[0].Cap != 2 {
 		t.Fatalf("toml must replace built-ins: %+v", c.Roles)
 	}
+	if len(c.Roles[0].Binds) != 1 || c.Roles[0].Binds[0] != "work.ready" {
+		t.Fatalf("role binds not decoded: %+v", c.Roles[0].Binds)
+	}
+	if len(c.Queries) != 1 || c.Queries[0].Name != "solo-source" {
+		t.Fatalf("[[query]] not decoded: %+v", c.Queries)
+	}
 	if c.Roles[0].CCPool == nil || c.Roles[0].CCPool.Completion != "close-or-handback" {
 		t.Fatalf("ccpool config not decoded: %+v", c.Roles[0].CCPool)
+	}
+}
+
+// A role binding an event type that no query emits is an orphan consumer (M3).
+func TestLoad_orphanBindIsError(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "lonely"
+type = "command"
+cap = 1
+binds = ["nobody.emits.this"]
+[role.command]
+argv = ["x"]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("a role binding an unemitted event type must error (orphan consumer)")
+	}
+}
+
+// A query emitting an event type that no role binds is an orphan producer (M3).
+func TestLoad_orphanEmitIsError(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "shouting-into-void"
+emits = ["heard.by.none"]
+type = "beads-ready"
+[query.beads-ready]
+labels = ["x"]
+
+[[role]]
+name = "r"
+type = "command"
+cap = 1
+binds = ["heard.by.none"]
+[role.command]
+argv = ["x"]
+
+[[query]]
+name = "orphan"
+emits = ["orphan.type"]
+type = "beads-ready"
+[query.beads-ready]
+labels = ["y"]
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("a query emitting an unbound event type must error (orphan producer)")
+	}
+}
+
+// A threshold-triggered query fires off an upstream event type (Q1); it decodes
+// and wires without error.
+func TestLoad_thresholdTriggerDecodes(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "up"
+emits = ["up.ready"]
+type = "beads-ready"
+[query.beads-ready]
+labels = ["a"]
+
+[[query]]
+name = "down"
+emits = ["down.ready"]
+type = "beads-ready"
+[query.trigger]
+kind = "threshold"
+count = 2
+binds = ["up.ready"]
+[query.beads-ready]
+labels = ["b"]
+
+[[role]]
+name = "ur"
+type = "command"
+cap = 1
+binds = ["up.ready"]
+[role.command]
+argv = ["x"]
+
+[[role]]
+name = "dr"
+type = "command"
+cap = 1
+binds = ["down.ready"]
+[role.command]
+argv = ["y"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("threshold config must load: %v", err)
+	}
+	var down query.Source
+	for _, s := range c.Queries {
+		if s.Name == "down" {
+			down = s
+		}
+	}
+	tt, ok := query.Threshold(down.Query.Trigger())
+	if !ok || tt.Count != 2 || len(tt.Binds) != 1 || tt.Binds[0] != "up.ready" {
+		t.Fatalf("threshold trigger not decoded: %#v", down.Query.Trigger())
 	}
 }
 
@@ -316,10 +428,7 @@ func TestLoad_unknownTypeIsError(t *testing.T) {
 name = "x"
 type = "weird"
 cap = 1
-[role.query]
-type = "beads-ready"
-[role.query.beads-ready]
-labels = ["a"]
+binds = ["a.ready"]
 [role.weird]
 foo = "bar"
 `)
@@ -420,10 +529,7 @@ func TestLoad_promptXorPromptFile(t *testing.T) {
 name = "x"
 type = "ccpool"
 cap = 1
-[role.query]
-type = "beads-ready"
-[role.query.beads-ready]
-labels = ["a"]
+binds = ["a.ready"]
 [role.ccpool]
 actor = "a"
 completion = "close-only"

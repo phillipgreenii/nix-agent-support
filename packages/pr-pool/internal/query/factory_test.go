@@ -19,7 +19,8 @@ exclude_labels = ["human"]
 		t.Fatal(err)
 	}
 	reg := NewQueryFactories()
-	q, err := reg.Decode("beads-ready", md, holder["beads-ready"])
+	meta := Meta{EmitTypes: []string{"work.ready"}, Trig: PeriodTrigger{}}
+	q, err := reg.Decode("beads-ready", meta, md, holder["beads-ready"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,14 @@ exclude_labels = ["human"]
 	if !ok || len(br.Labels) != 1 || br.Labels[0] != "worker-ready" || len(br.ExcludeLabels) != 1 || br.ExcludeLabels[0] != "human" {
 		t.Fatalf("decoded query wrong: %#v", q)
 	}
-	if _, err := reg.Decode("nope", md, toml.Primitive{}); err == nil {
+	// The [[query]]-level meta (emits/trigger) is installed post-decode.
+	if len(br.Emits()) != 1 || br.Emits()[0] != "work.ready" {
+		t.Fatalf("meta emits not installed: %#v", br.Emits())
+	}
+	if !IsPeriod(br.Trigger()) {
+		t.Fatalf("meta trigger not installed: %#v", br.Trigger())
+	}
+	if _, err := reg.Decode("nope", meta, md, toml.Primitive{}); err == nil {
 		t.Fatal("unknown query type must error")
 	}
 }
@@ -44,7 +52,7 @@ format = "jsonl"
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := NewQueryFactories().Decode("command", md, holder["command"])
+	q, err := NewQueryFactories().Decode("command", Meta{EmitTypes: []string{"cmd.ready"}}, md, holder["command"])
 	if err != nil {
 		t.Fatal(err)
 	}

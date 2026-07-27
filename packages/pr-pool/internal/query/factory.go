@@ -8,8 +8,9 @@ import (
 )
 
 // Factory decodes a query type's same-named sub-table (held as a Primitive) into a
-// concrete Query, then validates it.
-type Factory func(md toml.MetaData, prim toml.Primitive) (Query, error)
+// concrete Query, installs the [[query]]-level Meta (emits/trigger), then
+// validates it.
+type Factory func(meta Meta, md toml.MetaData, prim toml.Primitive) (Query, error)
 
 // Factories is an instance-scoped registry (NOT package-level init() maps — that
 // fights the codebase's constructor-injection convention). NewQueryFactories seeds
@@ -23,16 +24,25 @@ func NewQueryFactories() *Factories {
 	f.m["command"] = decodeInto(func() Query { return &CommandQuery{} })
 	f.m["github-issues"] = decodeInto(func() Query { return &GitHubIssues{} })
 	f.m["jira-issues"] = decodeInto(func() Query { return &JiraIssues{} })
+	// event: the spec-C-deferred type, registered here (design M5). It is an
+	// event SOURCE for the aggregator/saga path — it emits a typed, correlated
+	// event that feeds a role's opt-in Aggregator.
+	f.m["event"] = decodeInto(func() Query { return &EventQuery{} })
 	return f
 }
 
 // decodeInto builds a Factory that PrimitiveDecodes into a fresh pointer of the
-// concrete type, validates, and returns the value (dereferenced).
+// concrete type, installs the [[query]]-level Meta, validates, and returns the
+// value (dereferenced). Meta is installed BEFORE Validate so a query type can
+// validate its emits.
 func decodeInto(mk func() Query) Factory {
-	return func(md toml.MetaData, prim toml.Primitive) (Query, error) {
+	return func(meta Meta, md toml.MetaData, prim toml.Primitive) (Query, error) {
 		q := mk()
 		if err := md.PrimitiveDecode(prim, q); err != nil {
 			return nil, err
+		}
+		if ms, ok := q.(metaSetter); ok {
+			ms.setMeta(meta)
 		}
 		if err := q.Validate(); err != nil {
 			return nil, err
@@ -41,13 +51,14 @@ func decodeInto(mk func() Query) Factory {
 	}
 }
 
-// Decode looks up the factory for typ and decodes prim into the concrete Query.
-func (f *Factories) Decode(typ string, md toml.MetaData, prim toml.Primitive) (Query, error) {
+// Decode looks up the factory for typ and decodes prim into the concrete Query,
+// installing the [[query]]-level meta (emits/trigger).
+func (f *Factories) Decode(typ string, meta Meta, md toml.MetaData, prim toml.Primitive) (Query, error) {
 	fn, ok := f.m[typ]
 	if !ok {
 		return nil, fmt.Errorf("unknown query type %q (known: %s)", typ, f.known())
 	}
-	return fn(md, prim)
+	return fn(meta, md, prim)
 }
 
 func (f *Factories) known() string {
@@ -72,6 +83,8 @@ func derefQuery(q Query) Query {
 	case *GitHubIssues:
 		return *v
 	case *JiraIssues:
+		return *v
+	case *EventQuery:
 		return *v
 	}
 	return q

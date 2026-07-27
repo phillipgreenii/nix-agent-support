@@ -1,14 +1,17 @@
-// Package roles is pr-pool's role model: an ordered RoleSet of typed roles. A role
-// carries a query and a type-specific config block (ccpool or command). RoleKind is
-// gone — behavior is declared by config enums. This package does NOT import config
-// (config imports roles to build the RoleSet), keeping the import DAG acyclic.
+// Package roles is pr-pool's role model: an ordered RoleSet of typed roles. Under
+// the event model (design 2026-06-25) a role no longer embeds its query; it BINDS
+// to one-or-more event TYPES (Observer subscription) and responds to ANY of them.
+// A role carries its Binds, an optional opt-in correlation (Aggregator, Q2), and a
+// type-specific config block (ccpool or command). This package does NOT import
+// config (config imports roles to build the RoleSet), keeping the import DAG
+// acyclic.
 package roles
 
 import (
 	"text/template"
 
 	"github.com/phillipgreenii/pr-pool/internal/budget"
-	"github.com/phillipgreenii/pr-pool/internal/query"
+	"github.com/phillipgreenii/pr-pool/internal/event"
 )
 
 // RoleSet is the ordered list of roles a drain dispatches (config order).
@@ -19,9 +22,16 @@ type Role struct {
 	Type    string // "ccpool" | "command"
 	Cap     int
 	Enabled bool
-	Query   query.Query
-	CCPool  *CCPoolConfig  // set iff Type == "ccpool"
-	Command *CommandConfig // set iff Type == "command"
+	// Binds is the event TYPES this role consumes (Observer subscription). It
+	// replaces the former embedded Query: a role and a query are wired only
+	// through a shared event-type string. A role responds to ANY of its Binds.
+	Binds []string
+	// Correlation is the OPT-IN Aggregator (EIP, Q2) declaration: when non-nil,
+	// the role collects correlated events by CorrelationID and fires once the
+	// Completeness condition is met. nil => the simple ANY path (built-ins).
+	Correlation *event.CorrelationSpec
+	CCPool      *CCPoolConfig  // set iff Type == "ccpool"
+	Command     *CommandConfig // set iff Type == "command"
 }
 
 // CCPoolConfig is the ccpool role type's behavior + launch config.

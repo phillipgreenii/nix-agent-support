@@ -12,12 +12,30 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/config"
 	"github.com/phillipgreenii/pr-pool/internal/discover"
 	"github.com/phillipgreenii/pr-pool/internal/dtest"
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/item"
+	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
 )
 
+// evOf wraps a dispatch context's role+item into the self-contained event
+// RunOne now consumes (design Q-meta). Test-only shim so the existing
+// DispatchContext-shaped fixtures drive the event-taking RunOne unchanged.
+func evOf(d discover.DispatchContext) event.Event {
+	return event.NewItemEvent("test.event", "test", d.Item)
+}
+
+// runOne is the test shim for the event-taking RunOne(ctx, role, event).
+func runOne(o *Orchestrator, ctx context.Context, d discover.DispatchContext) error {
+	return o.RunOne(ctx, d.Role, evOf(d))
+}
+
 func newOrch(cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config) *Orchestrator {
+	// The event-model drive loop produces via cfg.Queries; Default()/fastCfg() do
+	// not populate it (only config.Load does), so wire the built-in producer set
+	// here — the queries paired with testRoleSet's built-in roles.
+	cfg.Queries = testQuerySet(cfg)
 	o := &Orchestrator{CC: cc, BD: bd, Reg: testRoleSet(cfg), Cfg: cfg}
 	clk := &dtest.ManualClock{T: time.Unix(0, 0)}
 	o.now = clk.Now
@@ -34,14 +52,24 @@ func newOrch(cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config) *Orchestra
 // caps/budget derived from cfg — so the workerRole/feedbackRole helpers resolve the
 // same roles the orchestrator drains.
 func testRoleSet(cfg config.Config) roles.RoleSet {
-	return roles.BuiltinRoleSet(roles.BuiltinParams{
+	return roles.BuiltinRoleSet(builtinParams(cfg))
+}
+
+// testQuerySet is the producer set paired with testRoleSet (built-in queries).
+func testQuerySet(cfg config.Config) query.SourceSet {
+	return roles.BuiltinQuerySet(builtinParams(cfg))
+}
+
+func builtinParams(cfg config.Config) roles.BuiltinParams {
+	return roles.BuiltinParams{
 		WorktreeDir:   cfg.WorktreeDir,
 		SkillMD:       cfg.SkillMD,
 		WorkerSkillMD: cfg.WorkerSkillMD,
 		MaxFeedback:   cfg.MaxFeedback,
 		MaxWorker:     cfg.MaxWorker,
 		WorkerBudget:  cfg.WorkerBudget(),
-	})
+		PollInterval:  cfg.PollInterval,
+	}
 }
 
 func roleByName(o *Orchestrator, name string) roles.Role {
@@ -83,6 +111,42 @@ func writeTemp(t *testing.T) (string, func()) {
 		t.Fatal(err)
 	}
 	return p, func() {}
+}
+
+// TestParity_discoverViaBusMatchesCoupled is the behavior-parity smoke (design
+// acceptance): with only PeriodTrigger + ANY bindings — exactly the built-in
+// configuration — the event-model producer→bus→lease drive yields the SAME
+// dispatches the old coupled discover→drain produced: each enabled role gets up
+// to its Cap items from the query bound to it, in config order (feedback, worker,
+// review). The feedback query returns the process-feedback cycle; the worker
+// query returns worker-ready beads (capped to 1); the review query filters the
+// default ready list to review-pr beads (none here).
+func TestParity_discoverViaBusMatchesCoupled(t *testing.T) {
+	cfg := fastCfg() // MaxFeedback=1, MaxWorker=1
+	bd := &dtest.ScriptBD{Ready: map[string]string{
+		"feedback": `[{"id":"zr-c","issue_type":"task","title":"process-feedback: x"}]`,
+		"worker":   `[{"id":"zr-w1"},{"id":"zr-w2"}]`,
+	}}
+	o := newOrch(&dtest.FakeCC{}, bd, cfg)
+
+	got, err := o.discoverViaBus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type pair struct{ role, item string }
+	var pairs []pair
+	for _, d := range got {
+		pairs = append(pairs, pair{d.Role.Name, d.Item.ID})
+	}
+	want := []pair{{"feedback", "zr-c"}, {"worker", "zr-w1"}}
+	if len(pairs) != len(want) {
+		t.Fatalf("parity: got %d dispatches %+v, want %d %+v", len(pairs), pairs, len(want), want)
+	}
+	for i := range want {
+		if pairs[i] != want[i] {
+			t.Fatalf("parity dispatch[%d] = %+v, want %+v (full: %+v)", i, pairs[i], want[i], pairs)
+		}
+	}
 }
 
 // --- DrainOnce scenarios (ports bats: drain_once cases) ---
@@ -285,7 +349,7 @@ func TestRunOne_feedbackClosesSession(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateWorking}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.RunOne(context.Background(), d); err != nil {
+	if err := runOne(o, context.Background(), d); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 	if !dtest.Contains(cc.Ensured, ext) {
@@ -303,7 +367,7 @@ func TestRunOne_doneWithoutCloseFlagsAndCloses(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateIdle}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	if err := o.RunOne(context.Background(), d); err == nil {
+	if err := runOne(o, context.Background(), d); err == nil {
 		t.Fatal("idle-without-close should fail")
 	}
 	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
@@ -545,7 +609,7 @@ func TestRunOne_preservesNeedsInputSession(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: ext, Live: true, State: ccpool.StateNeedsInput}}}}
 	o := newOrch(cc, bd, fastCfg())
 	d := discover.DispatchContext{Role: feedbackRole(o), Item: item.Item{ID: "zr-c"}}
-	_ = o.RunOne(context.Background(), d) // ends in needs_input (never completes)
+	_ = runOne(o, context.Background(), d) // ends in needs_input (never completes)
 	if dtest.Contains(cc.Closed, ext) {
 		t.Errorf("RunOne must PRESERVE a needs_input session (no close) so the operator can attach; closed=%v", cc.Closed)
 	}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/pr-pool/internal/event"
 	"github.com/phillipgreenii/pr-pool/internal/item"
 )
 
@@ -34,6 +35,7 @@ const jiraListLimit = 100
 // GitHubIssues lists OPEN issues in Repo via `gh issue list`, optionally narrowed to
 // issues carrying ALL of Labels (gh treats repeated --label as AND).
 type GitHubIssues struct {
+	Meta   `toml:"-"`
 	Repo   string   `toml:"repo"`
 	Labels []string `toml:"labels"`
 }
@@ -55,7 +57,7 @@ type ghIssue struct {
 	} `json:"labels"`
 }
 
-func (q GitHubIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
+func (q GitHubIssues) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	argv := []string{
 		"gh", "issue", "list",
 		"--repo", q.Repo,
@@ -96,7 +98,7 @@ func (q GitHubIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 		})
 	}
 	warnIfTruncated("github-issues", q.Repo, len(items))
-	return items, nil
+	return eventsFromItems(items, firstEmit(q), ""), nil
 }
 
 // --- jira-issues ---
@@ -106,6 +108,7 @@ func (q GitHubIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 // JQL takes precedence when set; otherwise a default JQL is built from Project (+ Labels).
 // The CLI's own config supplies the tenant URL and credentials.
 type JiraIssues struct {
+	Meta    `toml:"-"`
 	Project string   `toml:"project"`
 	JQL     string   `toml:"jql"`
 	Labels  []string `toml:"labels"`
@@ -152,7 +155,7 @@ type jiraSearchEnvelope struct {
 	Truncated bool             `json:"truncated"`
 }
 
-func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
+func (q JiraIssues) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	argv := []string{
 		"pg-pr-issues-jira-zr", "search",
 		"--jql", q.jql(),
@@ -192,7 +195,7 @@ func (q JiraIssues) Run(ctx context.Context, env Env) ([]item.Item, error) {
 		slog.Warn("jira-issues query truncated; backlog exceeds one page",
 			"project", q.Project, "limit", jiraListLimit)
 	}
-	return items, nil
+	return eventsFromItems(items, firstEmit(q), ""), nil
 }
 
 // --- shared helpers ---

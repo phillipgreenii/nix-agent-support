@@ -35,13 +35,53 @@ func TestBuiltinRoleSet_shape(t *testing.T) {
 	if rv.CCPool.Completion != CloseOrHandback || rv.CCPool.AuthorshipGuard {
 		t.Fatalf("review behavior wrong (authorship guard must be false): %+v", rv.CCPool)
 	}
-	// review must select ONLY the review-pr beads.
-	brq, ok := rv.Query.(query.BeadsReady)
-	if !ok || brq.TitlePrefix != "review-pr: " || brq.ItemType != "task" {
-		t.Fatalf("review query must filter to review-pr task beads: %+v", rv.Query)
+	// M3: roles BIND to event types instead of embedding a query.
+	if len(fb.Binds) != 1 || fb.Binds[0] != EventFeedbackReady {
+		t.Fatalf("feedback must bind %q, got %+v", EventFeedbackReady, fb.Binds)
+	}
+	if len(wk.Binds) != 1 || wk.Binds[0] != EventWorkReady {
+		t.Fatalf("worker must bind %q, got %+v", EventWorkReady, wk.Binds)
+	}
+	if len(rv.Binds) != 1 || rv.Binds[0] != EventReviewReady {
+		t.Fatalf("review must bind %q, got %+v", EventReviewReady, rv.Binds)
 	}
 	if fb.CCPool.Actor != "pgii-pool__process-feedback" || wk.CCPool.Actor != "pgii-pool__worker" || rv.CCPool.Actor != "pgii-pool__review" {
 		t.Fatalf("actors wrong")
+	}
+}
+
+// TestBuiltinQuerySet_pairsWithRoles verifies the built-in producers emit exactly
+// the event types the built-in roles bind, with the review query preserving the
+// review-pr filter it used to embed — the M3 decoupling reproduces today's
+// pairing through the shared event-type string.
+func TestBuiltinQuerySet_pairsWithRoles(t *testing.T) {
+	qs := BuiltinQuerySet(BuiltinParams{MaxFeedback: 1, MaxWorker: 1})
+	if len(qs) != 3 {
+		t.Fatalf("want 3 built-in queries, got %d", len(qs))
+	}
+	byEmit := map[string]query.BeadsReady{}
+	for _, s := range qs {
+		br, ok := s.Query.(query.BeadsReady)
+		if !ok {
+			t.Fatalf("built-in query %q must be beads-ready, got %T", s.Name, s.Query)
+		}
+		if len(br.Emits()) != 1 {
+			t.Fatalf("query %q must emit exactly one type, got %+v", s.Name, br.Emits())
+		}
+		if !query.IsPeriod(br.Trigger()) {
+			t.Fatalf("built-in query %q must use a PeriodTrigger, got %#v", s.Name, br.Trigger())
+		}
+		byEmit[br.Emits()[0]] = br
+	}
+	if _, ok := byEmit[EventFeedbackReady]; !ok {
+		t.Fatalf("no query emits %q", EventFeedbackReady)
+	}
+	if _, ok := byEmit[EventWorkReady]; !ok {
+		t.Fatalf("no query emits %q", EventWorkReady)
+	}
+	rv := byEmit[EventReviewReady]
+	if rv.TitlePrefix != "review-pr: " || rv.ItemType != "task" {
+		t.Fatalf("review query must filter to review-pr task beads: %+v", rv)
 	}
 }
 
