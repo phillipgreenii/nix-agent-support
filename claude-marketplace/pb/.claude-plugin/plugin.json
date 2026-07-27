@@ -1,6 +1,6 @@
 {
   "name": "pb",
-  "description": "Teaches the pn:applied gate lifecycle: gate a follow-up bead on a change until `pn workspace apply` applies it (commit → bd create --defer → pb gate create → un-defer).",
+  "description": "pn:applied gate lifecycle (pb gate create) plus the /drain-beads autonomous queue-draining command; gate a follow-up bead until `pn workspace apply` applies the change, and drain ready beads while gating post-deploy verification instead of over-using the `human` label.",
   "version": "1.0.0",
-  "defaultEnabled": false
+  "defaultEnabled": true
 }

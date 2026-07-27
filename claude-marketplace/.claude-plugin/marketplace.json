@@ -47,7 +47,7 @@
     {
       "name": "pb",
       "source": "./pb",
-      "description": "Teaches the pn:applied gate lifecycle (pb gate create) for agents finishing gated follow-up work"
+      "description": "pn:applied gate lifecycle (pb gate create) and the /drain-beads autonomous queue-draining command (gates post-deploy verification instead of over-using the `human` label)"
     },
     {
       "name": "integrate-branch",
