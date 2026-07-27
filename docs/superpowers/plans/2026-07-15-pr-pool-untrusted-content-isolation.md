@@ -8,7 +8,7 @@
 
 **Bead:** `pg2-jpfw.9` — "pr-pool review executor: verify+enforce sandbox isolation for
 untrusted PR content" (P1, security driver; label `pr-pool`).
-**Companion ADR:** [`docs/adr/0028-pr-pool-review-untrusted-content-execution-model.md`](../../adr/0028-pr-pool-review-untrusted-content-execution-model.md)
+**Companion ADR:** [`docs/adr/0035-pr-pool-review-untrusted-content-execution-model.md`](../../adr/0035-pr-pool-review-untrusted-content-execution-model.md)
 **Date:** 2026-07-15
 **Author:** Phillip Green II
 
@@ -600,13 +600,13 @@ role allowlist, §4.2). Both require sign-off.
 - **SEC-SIGN-1** No branch implementing this design MAY merge until a human has signed off
   on BOTH allowlist literals (the pool-wide default `config.go:109` and the new review-role
   list §4.2).
-- **SEC-SIGN-2** Sign-off MUST be recorded by (a) setting ADR 0028 `Status: Accepted` with
+- **SEC-SIGN-2** Sign-off MUST be recorded by (a) setting ADR 0035 `Status: Accepted` with
   the deciding human named, and (b) replacing the `config.go:100` comment with a reference,
   e.g.:
 
 ```go
 // SECURITY-SENSITIVE allowlist. Signed off: <name>, <YYYY-MM-DD>. See
-// docs/adr/0028-pr-pool-review-untrusted-content-execution-model.md and
+// docs/adr/0035-pr-pool-review-untrusted-content-execution-model.md and
 // docs/superpowers/plans/2026-07-15-pr-pool-untrusted-content-isolation.md.
 ```
 
@@ -695,7 +695,7 @@ Each phase is independently landable and independently reduces risk.
 
 #### Phase 5 — record sign-off (docs + config comment)
 
-- On human approval: ADR 0028 → `Accepted`; replace the `config.go:100` comment
+- On human approval: ADR 0035 → `Accepted`; replace the `config.go:100` comment
   (SEC-SIGN-2).
 
 #### (Deferred) dedicated unprivileged user — §7 OQ-1
