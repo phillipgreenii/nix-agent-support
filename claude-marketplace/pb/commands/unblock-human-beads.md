@@ -4,10 +4,10 @@ description: >-
   human-queue counterpart to /drain-beads. Loops: atomically claim one parked
   `human` bead under a distinct `-unblock` actor id, do ONLY enough to lift the
   human blocker (any kind of action, reusing drain's parked worktree/set), then
-  RELEASE it back to the drain pool. It does NOT complete, land, or close beads
-  (except operator-confirmed obsolete, or an in-session-resolved substrate bead).
-  Assumes `pn workspace apply` ran before invocation. Parallel-safe via atomic
-  claims; accepts optional narrowing $ARGUMENTS.
+  RELEASE it back to the drain pool. It does NOT complete or land beads (narrow
+  carve-outs below for close/substrate). Assumes `pn workspace apply` ran before
+  invocation. Parallel-safe via atomic claims; accepts optional narrowing
+  $ARGUMENTS.
 argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
 ---
 
@@ -20,8 +20,9 @@ directory). This is the counterpart to `/drain-beads`: those sessions skip every
 until a person clears them. Your job is to **remove the human blocker** on each ready
 `human` bead so a separately-running `/drain-beads` can then finish the work.
 
-Work autonomously until the ready `human` queue (within any `$ARGUMENTS` scope) is empty.
-Use `bd` for ALL task tracking.
+Work through the queue autonomously, ENGAGING the operator — the person running this
+session — only where a bead genuinely needs human input, until the ready `human` queue
+(within any `$ARGUMENTS` scope) is empty. Use `bd` for ALL task tracking.
 
 **You do ONLY enough to lift the human blocker — you do NOT complete the bead.** The
 observed failure mode of a naive unblocker is that it "keeps trying to complete the bead";
@@ -48,10 +49,10 @@ ordinary work — defeating the `human` guard. Refer to your id below as ID, and
 
 Claim work ONLY via `bd ready --claim --label human`. `bd ready` already excludes
 `in_progress`, `blocked`, `deferred`, and `hooked` issues, so deferred and in-flight beads
-can never be processed. **Future editors:** do NOT switch the work source to
+can never be processed. **Maintainer note:** do NOT switch the work source to
 `bd list --label human` (it would surface deferred/blocked/in-progress beads) and do NOT
-add `--include-deferred`. The "never touch a deferred bead" rule holds by construction,
-not by a guard — keep it that way.
+add `--include-deferred` — the "never touch a deferred bead" rule holds by construction,
+not by a guard.
 
 ## Goal / termination
 
@@ -61,10 +62,11 @@ You are DONE when a SUCCESSFUL claim returns no ready `human` bead in scope:
 bd ready --claim --label human --actor "ID" --json
 ```
 
-If that SUCCEEDS (exit 0) and is empty, STOP. If a claim returns a bead whose id is already
-in your session **skip-set** (a bead you DEFERred earlier this run that resurfaced), also
-STOP. If the command ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly and
-retry; never exit on an error.
+If that SUCCEEDS (exit 0) and is empty, STOP. If a claim ever returns a bead whose id is
+already in your session **skip-set**, also STOP: a correctly DEFERred bead cannot reappear
+this run, so a reappearance means the loop is stuck — this is a defensive guard. If the
+command ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly and retry; never
+exit on an error.
 
 ## Startup / resume (survives compaction)
 
@@ -99,9 +101,11 @@ retry; never exit on an error.
    (drain records it as `branch drain/<id>` in the repo at its worktree path).
 
 3. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
-   match wins) and do ONLY enough to lift the human blocker. Engage the operator only when
-   human input is genuinely required. Any change that produces committed code/docs happens
-   in the REUSED parked isolation (see "Isolation"). Obey the stop predicate.
+   match wins) and do ONLY enough to lift the human blocker. **To ENGAGE means: pause the
+   loop, present the specific decision/question to the operator in this session, and WAIT
+   for their answer before acting** — this is the one point where autonomy yields to
+   interaction. Any change that produces committed code/docs happens in the REUSED parked
+   isolation (see "Isolation"). Obey the stop predicate.
 
 4. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
    "Terminal actions" below. Then go to 1.
@@ -131,15 +135,18 @@ reappears next run — self-correcting, not dangerous.
 run `pn workspace workforest remove` / delete `.worktrees/*` unattended, releasing such a
 bead could destroy another session's in-flight isolation. So for class 1: ENGAGE the
 operator and either (a) resolve it in-session WITH the operator, serially and carefully,
-then CLOSE it; or (b) DEFER it; or (c) leave it `human` and move on. Never RELEASE it, and
+then CLOSE it; or (b) DEFER it (when the operator can't act now). Never RELEASE it, and
 never run a substrate-mutating action autonomously.
 
 ## Terminal actions (exactly one per claimed bead — there is no automatic "re-park")
 
 - **RELEASE** (default) — the human blocker is lifted and drain can make progress on what
-  remains. First commit any work in the reused isolation, then `bd comment <id>` recording
-  what unblocked it (and the worktree pointer, if any). Then hand it to the drain pool with
-  a SINGLE atomic update:
+  remains. If lifting the blocker produced an artifact, commit ONLY that artifact — the
+  thing that IS the blocker-lift (e.g. the operator's decision captured as an ADR/spec/
+  config the drain subagent will build on) — never implementation progress; if no
+  committed artifact was needed, RELEASE without committing. Then `bd comment <id>`
+  recording what unblocked it (and the worktree pointer, if any). Then hand it to the
+  drain pool with a SINGLE atomic update:
 
   ```bash
   bd update <id> --remove-label human --status open --assignee "" --actor "ID"
@@ -158,20 +165,20 @@ never run a substrate-mutating action autonomously.
   ```
 
   If a worktree/set was left behind, do NOT orphan it and do NOT feed drain a substrate
-  task — file a follow-up instead:
+  task — file a follow-up instead (note `--labels`, not `--add-label`, on `bd create`):
 
   ```bash
   bd create "worktree-review: reconcile leftover isolation for <id>" \
-    --add-label human --defer +7d --actor "ID"
+    --labels human --defer +7d --deps "discovered-from:<id>" --actor "ID"
   ```
 
-- **DEFER** (operator-initiated, or a substrate/human-only-action bead that can't be done
-  now) — the operator decides it can't be resolved right now. Comment why, then remove it
-  from the ready queue while KEEPING the `human` label, and record it so the loop can't
-  re-nag:
+- **DEFER** (operator-initiated, or a substrate / human-only-action bead that can't be done
+  now) — either the operator decides it can't be resolved right now, or the only remaining
+  work is a human-only action drain cannot perform. Comment why, then remove it from the
+  ready queue while KEEPING the `human` label, and record it so the loop can't re-nag:
 
   ```bash
-  bd comment <id> "deferred by /unblock-human-beads: <why the operator can't resolve now>" --actor "ID"
+  bd comment <id> "deferred by /unblock-human-beads: <operator's reason, or: only remaining work is a human-only action>" --actor "ID"
   bd update <id> --defer +7d --status open --assignee "" --actor "ID"   # keep human; window MUST outlive the session (>= +1d)
   ```
 
@@ -201,7 +208,8 @@ This command MAY be invoked with additional context (`$ARGUMENTS`) that further
 a specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
 filters on the CLAIM query. Honor a specific bead id via the safe path: first confirm the
 id appears in `bd ready --label human [scope] --json` (ready, in-scope, `human`, not
-deferred), then claim that id directly.
+deferred), then claim it with `bd update <id> --claim --actor "ID"` (the single-id claim —
+`bd ready --claim` cannot target a chosen id, it claims the first filter match).
 
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST NOT remove the
 safety filters — `--label human` and the default deferred-exclusion always remain. With no
@@ -215,13 +223,13 @@ arguments, drain the whole ready `human` queue.
   `bd ready --label human` set.
 - **Minimality + stop predicate.** MUST stop and RELEASE the instant the bead no longer
   needs a human to proceed as ordinary drain work; MUST NOT drive the bead to completion
-  (except the substrate carve-out), land, merge, or push.
+  (except the substrate carve-out), land, merge, or push. A commit made while unblocking
+  MUST be only the blocker-lift artifact, never implementation progress.
 - **RELEASE only when drain can progress.** A bead MUST be RELEASEd only when drain can
-  make progress on what remains; a human-only-action-only bead is DEFERred or left `human`
-  (apply-waiting exempt).
+  make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
+  exempt).
 - **Substrate guard.** A substrate-mutating bead MUST NOT be RELEASEd to drain and MUST NOT
-  be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER, or leave
-  `human`.
+  be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER.
 - **Atomic release ordering.** On RELEASE the `human`-label removal, `status=open`, and
   `assignee=""` MUST be a SINGLE `bd update`, after the explanatory `bd comment` (and any
   commit) has landed.
@@ -235,11 +243,39 @@ arguments, drain the whole ready `human` queue.
   actor (the `-unblock` suffix).
 - **Close guard.** MUST NOT close a bead without explicit operator confirmation (or an
   in-session-resolved substrate bead); if a worktree is left, MUST file a `worktree-review`
-  follow-up (`--add-label human --defer`) rather than orphan it.
+  follow-up (`bd create … --labels human --defer +7d --deps "discovered-from:<id>"`) rather
+  than orphan it.
 - **Arguments narrow-only.** `$ARGUMENTS` MUST only restrict the claim query and MUST NOT
   remove safety filters or broaden scope.
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
   contention) are NOT terminal — back off and retry.
+
+## Loop overview
+
+```mermaid
+flowchart TD
+    A[Start: set actor ID = session-unblock; bd prime; parse $ARGUMENTS; empty skip-set] --> R{Own an unfinished<br/>in_progress human bead?}
+    R -- yes --> U
+    R -- no --> C["CLAIM: bd ready --claim --label human<br/>[+narrowing] --actor ID --json"]
+    C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
+    C -->|id already in skip-set| DONE
+    C -->|transient bd/dolt error| C
+    C -->|got bead| U["UNDERSTAND: bd show;<br/>read stuck: comment + parked isolation"]
+    U --> T{TRIAGE rubric<br/>first match wins}
+    T -->|1 substrate-mutating| SUB[ENGAGE operator;<br/>NEVER release to drain]
+    T -->|2 apply-waiting| REL
+    T -->|3 mislabeled / normal work| REL
+    T -->|4 genuine decision/input| ENG[ENGAGE operator<br/>pause loop, ask, wait]
+    T -->|5 uncertain| ENG
+    SUB -->|resolved in-session| CLO
+    SUB -->|can't now| DEF
+    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment →<br/>bd update --remove-label human --status open --assignee '' (one call)"]
+    ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>bd create --labels human --defer, if a worktree is left)"]
+    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human);<br/>add id to skip-set"]
+    REL --> C
+    CLO --> C
+    DEF --> C
+```
 
 ## Running several at once
 
@@ -262,30 +298,3 @@ the drain pool; the two operate on disjoint claim sets (`--label human` vs
   operator's apply round-trips harmlessly (self-correcting churn) — see above.
 - **in_progress human beads untouched.** `bd ready` excludes `in_progress`, so a human bead
   already owned/in-flight is never claimed.
-
-## Loop overview
-
-```mermaid
-flowchart TD
-    A[Start: set actor ID = session-unblock; bd prime; parse $ARGUMENTS; empty skip-set] --> R{Own an unfinished<br/>in_progress human bead?}
-    R -- yes --> U
-    R -- no --> C["CLAIM: bd ready --claim --label human<br/>[+narrowing] --actor ID --json"]
-    C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
-    C -->|id already in skip-set| DONE
-    C -->|transient bd/dolt error| C
-    C -->|got bead| U["UNDERSTAND: bd show;<br/>read stuck: comment + parked isolation"]
-    U --> T{TRIAGE rubric<br/>first match wins}
-    T -->|1 substrate-mutating| SUB[ENGAGE operator;<br/>NEVER release to drain]
-    T -->|2 apply-waiting| REL
-    T -->|3 mislabeled / normal work| REL
-    T -->|4 genuine decision/input| ENG[ENGAGE operator<br/>only enough]
-    T -->|5 uncertain| ENG
-    SUB -->|resolved in-session| CLO
-    SUB -->|can't now| DEF
-    ENG -->|now drain-doable| REL["RELEASE (atomic): commit in reused isolation →<br/>bd comment →<br/>bd update --remove-label human --status open --assignee '' (one call)"]
-    ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>--add-label human --defer, if a worktree is left)"]
-    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human);<br/>add id to skip-set"]
-    REL --> C
-    CLO --> C
-    DEF --> C
-```

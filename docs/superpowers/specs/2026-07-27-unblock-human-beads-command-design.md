@@ -118,7 +118,7 @@ flowchart TD
     SUB -->|resolved in-session| CLO
     SUB -->|can't now| DEF
     ENG -->|now drain-doable| REL["RELEASE (atomic):<br/>commit in reused isolation → bd comment →<br/>bd update --remove-label human --status open --assignee '' (one call)"]
-    ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>--add-label human --defer, if a worktree is left)"]
+    ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>--labels human --defer, if a worktree is left)"]
     ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +window --status open --assignee '' (keep human);<br/>add id to skip-set"]
     REL --> C
     CLO --> C
@@ -169,13 +169,13 @@ resolves something that genuinely needed a person. **Order matters** — a bead 
 matches more than one class is handled by the first it matches (so substrate-mutating
 dominates).
 
-| #   | Class                        | How to recognize                                                                                                                                                                                                                         | Action                                                                                                                                                                |
-| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **substrate-mutating**       | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on (drain's "unscoped claims" warning) | **ENGAGE; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). Resolve in-session **with** the operator, serially → CLOSE; or DEFER; or leave `human`. |
-| 2   | **apply-waiting**            | "verify/act after apply", deploy-gated content                                                                                                                                                                                           | **RELEASE.** The command assumes `pn workspace apply` was run before it — see below.                                                                                  |
-| 3   | **mislabeled / normal work** | the label's reason is provably moot (referenced worktree already gone, decision already recorded later, transient infra passed) and no human input is needed                                                                             | **RELEASE** — no operator prompt.                                                                                                                                     |
-| 4   | **genuine decision/input**   | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                 | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER.                                                                                               |
-| 5   | **uncertain**                | cannot confidently place the bead above                                                                                                                                                                                                  | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                            |
+| #   | Class                        | How to recognize                                                                                                                                                                                                                         | Action                                                                                                                                              |
+| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **substrate-mutating**       | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on (drain's "unscoped claims" warning) | **ENGAGE; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). Resolve in-session **with** the operator, serially → CLOSE; or DEFER. |
+| 2   | **apply-waiting**            | "verify/act after apply", deploy-gated content                                                                                                                                                                                           | **RELEASE.** The command assumes `pn workspace apply` was run before it — see below.                                                                |
+| 3   | **mislabeled / normal work** | the label's reason is provably moot (referenced worktree already gone, decision already recorded later, transient infra passed) and no human input is needed                                                                             | **RELEASE** — no operator prompt.                                                                                                                   |
+| 4   | **genuine decision/input**   | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                                                                 | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER.                                                                             |
+| 5   | **uncertain**                | cannot confidently place the bead above                                                                                                                                                                                                  | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                          |
 
 **apply-waiting = trust, always.** This command **expects `pn workspace apply` to have
 been run before it is invoked.** Every apply-waiting bead is RELEASEd on that premise; the
@@ -217,8 +217,9 @@ additional context). This is the sole change to `drain-beads.md`.
   `-n/--limit`) are applied there. "Run for one bead" is a loop limit (process one, stop).
 - **Specific bead id (safe path):** because `bd ready --claim` claims the _first_ match,
   a chosen id is honored by (1) confirming that id appears in `bd ready --label human
-[scope] --json` (ready, in-scope, `human`, not deferred), then (2) claiming that id
-  directly. This preserves the Sourcing invariant (a non-`human`/deferred id is rejected);
+[scope] --json` (ready, in-scope, `human`, not deferred), then (2) claiming it with
+  `bd update <id> --claim --actor "ID"` (the single-id claim). This preserves the Sourcing
+  invariant (a non-`human`/deferred id is rejected);
   the residual check-then-claim TOCTOU is acceptable because the claim is idempotent for
   the owning actor.
 - Frontmatter gains an `argument-hint` documenting the accepted restrictions.
@@ -258,8 +259,9 @@ additional context). This is the sole change to `drain-beads.md`.
   label-unfiltered resume cannot recover this command's in-progress `human` beads.
 - **Close guard.** The command **MUST NOT** close a bead without explicit operator
   confirmation (or an in-session-resolved substrate bead); if a worktree is left, it
-  **MUST** file a `worktree-review` follow-up bead with `--add-label human --defer
-+window` rather than orphan it or feed drain a substrate task.
+  **MUST** file a `worktree-review` follow-up bead
+  (`bd create … --labels human --defer +window --deps "discovered-from:<id>"`) rather than
+  orphan it or feed drain a substrate task.
 - **Arguments narrow-only.** `$ARGUMENTS` **MUST** only restrict the claim query and
   **MUST NOT** remove safety filters or broaden scope (both commands).
 - **Actor discipline.** Every `bd` claim/unclaim/comment/close/defer **MUST** carry the

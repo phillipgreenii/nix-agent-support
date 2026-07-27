@@ -254,16 +254,20 @@ ff-race); a post-deploy gate could not be attached; repeated failed attempts.
 
 ## Optional scope arguments
 
-This command MAY be invoked with additional context (`$ARGUMENTS`) that further
-**restricts** the work it claims — e.g. an extra label, a priority, a parent/epic, a type,
-a specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
-filters on the CLAIM query, and honor a specific bead id via the safe path: confirm the id
-appears in `bd ready --exclude-label human [scope] --json` (ready, in-scope, not deferred,
-not `human`), then claim that id.
+This command MAY be invoked with additional context (`$ARGUMENTS`) that
+further **restricts** the work it claims — e.g. an extra label, a
+priority, a parent/epic, a type, a specific bead id, or a one-bead /
+N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
+CLAIM query. Honor a specific bead id via the safe path: confirm the id
+appears in `bd ready --exclude-label human [scope] --json` (ready,
+in-scope, not deferred, not `human`), then claim it with
+`bd update <id> --claim --actor "ID"` (`bd ready --claim` cannot target a
+chosen id — it claims the first filter match).
 
-Arguments may only NARROW the query. They MUST NOT broaden scope and MUST NOT remove the
-safety filters — `--exclude-label human` and the default deferred-exclusion always remain.
-With no arguments, behavior is unchanged.
+Arguments may only NARROW the query. They MUST NOT broaden scope and MUST
+NOT remove the safety filters — `--exclude-label human` and the default
+deferred-exclusion always remain. With no arguments, behavior is
+unchanged.
 
 ## Rules
 
