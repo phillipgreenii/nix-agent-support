@@ -6,6 +6,7 @@ description: >-
   sessions via atomic claims. Post-deploy verification is handled by a
   `pn:applied` gate on a verification child bead — NOT the `human` label, which
   is reserved as a last resort.
+argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
 ---
 
 # /drain-beads
@@ -72,7 +73,10 @@ resurface after the next `pn workspace apply` (whose post-hook runs
 
    Atomically claims the highest-priority ready bead (assignee=ID,
    status=in_progress) and returns it. No other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → STOP. A transient error → retry.
+   SUCCESSFUL empty result → Goal met → STOP. A transient error → retry. If the
+   invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
+   (see "Optional scope arguments"); they never remove `--exclude-label human` or the
+   deferred exclusion.
 
 2. **UNDERSTAND** (brief — keep it light to save context): `bd show <id>` to learn
    the target repo(s) and the acceptance criteria. Note whether any acceptance
@@ -247,6 +251,19 @@ ff-race); a post-deploy gate could not be attached; repeated failed attempts.
    ```
 
 5. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
+
+## Optional scope arguments
+
+This command MAY be invoked with additional context (`$ARGUMENTS`) that further
+**restricts** the work it claims — e.g. an extra label, a priority, a parent/epic, a type,
+a specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
+filters on the CLAIM query, and honor a specific bead id via the safe path: confirm the id
+appears in `bd ready --exclude-label human [scope] --json` (ready, in-scope, not deferred,
+not `human`), then claim that id.
+
+Arguments may only NARROW the query. They MUST NOT broaden scope and MUST NOT remove the
+safety filters — `--exclude-label human` and the default deferred-exclusion always remain.
+With no arguments, behavior is unchanged.
 
 ## Rules
 
