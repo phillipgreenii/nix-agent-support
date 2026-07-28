@@ -165,6 +165,43 @@ func TestSplitCompound_BareAmpersand(t *testing.T) {
 	}
 }
 
+// TestParse_CommentAfterSeparatorNotDropped is the regression guard for a
+// fuzz-found leaf-drop bypass (FuzzSplitCompound, pg2-t4uyx class): a `#`
+// immediately after a command separator with no space (`;#`, `&#`) is a bash
+// comment, and an unterminated quote inside that comment MUST NOT swallow the
+// newline and glue the NEXT line's command into the dropped comment segment.
+// Before the splitCompound fix, `echo hi;#"x\nrm -rf /etc` parsed to ONLY the
+// `echo` leaf — the `rm -rf /etc`, which a real shell runs on the next line,
+// silently escaped evaluation and the whole command was auto-approved.
+func TestParse_CommentAfterSeparatorNotDropped(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantExecs []string
+	}{
+		{"semicolon then hash-quote then next line", "echo hi;#\"x\nrm -rf /etc", []string{"echo", "rm"}},
+		{"ampersand then hash-quote then next line", "git status &#\"y\nrm -rf ~", []string{"git", "rm"}},
+		{"pipe then hash-quote then next line", "echo hi |#\"z\nrm -rf /etc", []string{"echo", "rm"}},
+		// A `#` glued to a non-separator is NOT a comment (e.g. a nix flake ref);
+		// the fix must not over-trigger on a mid-word '#'.
+		{"nix flake ref hash not a comment", "nix build .#pkg", []string{"nix"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.input)
+			gotExecs := make([]string, 0, len(got))
+			for _, pc := range got {
+				if pc.Executable != "" {
+					gotExecs = append(gotExecs, pc.Executable)
+				}
+			}
+			if !reflect.DeepEqual(gotExecs, tt.wantExecs) {
+				t.Errorf("Parse(%q) execs = %v, want %v (a leaf must not silently escape)", tt.input, gotExecs, tt.wantExecs)
+			}
+		})
+	}
+}
+
 func TestParse_SimpleCommand(t *testing.T) {
 	got := Parse("git status")
 	if len(got) != 1 {

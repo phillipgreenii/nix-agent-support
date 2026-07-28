@@ -726,10 +726,17 @@ func splitCompound(s string) []string {
 		case inSingle || inDouble || inBacktick || parenDepth > 0:
 			buf.WriteByte(c)
 		default:
-			// Comment detection: unquoted # preceded by whitespace or at start of input.
+			// Comment detection: unquoted # at the start of a word — the start of
+			// input, after whitespace, OR at the start of a segment (buf empty) so a
+			// `#` immediately after a command separator (`;#`, `&#`, `|#`, `\n#`, or a
+			// closed subshell) is a comment, exactly as bash treats the start of a word
+			// after an operator. Missing the buf-empty case let an unterminated quote in
+			// the comment (`;#"x`) swallow the newline, gluing the NEXT line's command
+			// into the comment segment where StripComment then dropped it — a leaf that
+			// silently escaped evaluation (fuzz-found bypass, pg2-t4uyx class).
 			// Consume the rest of the line into the buffer WITHOUT updating quote state,
 			// so that quote-like characters inside comments (e.g. "it's") don't desync tracking.
-			if c == '#' && (i == 0 || unicode.IsSpace(rune(s[i-1]))) {
+			if c == '#' && (i == 0 || buf.Len() == 0 || unicode.IsSpace(rune(s[i-1]))) {
 				for i < len(s) && s[i] != '\n' {
 					buf.WriteByte(s[i])
 					i++

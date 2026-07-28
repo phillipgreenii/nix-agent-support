@@ -61,6 +61,29 @@ func TestConfigRules_ApprovedCommandWithEnvVars_Abstains(t *testing.T) {
 	}
 }
 
+// TestConfigRules_SegmentScan_BlockedInLaterSegment is the named regression for
+// bypass #8 (config-rules segment scan). Evaluate parses the command and scans
+// EVERY leaf, so a blocked command hidden behind an approved/unknown first segment
+// of a compound is still caught (Reject) — it does not stop at the first leaf.
+// Guards against a regression to checking only parsed[0] (pg2-t4uyx).
+func TestConfigRules_SegmentScan_BlockedInLaterSegment(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool"}, BlockedCommands: []string{"my-self-apply"}})
+	r := NewFromFile(filepath.Join(dir, "rules.json"))
+	// Blocked command as the SECOND segment behind an unknown first command.
+	blocked := []string{
+		"git status && my-self-apply",
+		"echo hi ; my-self-apply",
+		"echo hi | my-self-apply",
+	}
+	for _, cmd := range blocked {
+		got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})})
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s, want reject (segment scan must reach the later blocked leaf)", cmd, got.Decision)
+		}
+	}
+}
+
 func TestConfigRules_AbstainForUnknown(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool"}, BlockedCommands: []string{"my-self-apply"}})

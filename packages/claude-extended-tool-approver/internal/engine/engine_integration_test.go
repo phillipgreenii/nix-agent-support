@@ -101,6 +101,11 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 		{"env wrapper danger", "env rm -rf /etc"},
 		{"env assignment wrapper danger", "env FOO=bar rm -rf /etc"},
 		{"command wrapper danger", "command rm -rf /etc"},
+		// Fuzz-found leaf-drop: `#` right after `;`/`&` (no space) is a bash comment;
+		// an unterminated quote in it must not swallow the newline and drop the
+		// next-line command (FuzzSplitCompound, fixed in splitCompound).
+		{"comment-after-separator hides next line", "echo hi;#\"x\nrm -rf /etc"},
+		{"comment-after-ampersand hides next line", "git status &#\"y\nrm -rf ~/important"},
 	}
 	for _, tt := range bypasses {
 		t.Run("bypass/"+tt.name, func(t *testing.T) {
