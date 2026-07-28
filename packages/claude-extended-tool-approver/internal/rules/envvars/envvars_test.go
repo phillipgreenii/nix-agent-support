@@ -125,7 +125,13 @@ func TestEnvVars_ValueRecursion_InheritsVerdict(t *testing.T) {
 	}{
 		{"inherit reject", "FOO=$(danger) cmd", hookio.Reject, hookio.Reject},
 		{"inherit ask stays ask", "FOO=$(danger) cmd", hookio.Ask, hookio.Ask},
-		{"inner approve still ask (unclassifiable)", "FOO=$(danger) cmd", hookio.Approve, hookio.Ask},
+		// pg2-5huwx: WAS `hookio.Ask`. That expectation encoded the defect — the Ask
+		// floor was folded in BEFORE the recursion and MostRestrictive only escalates,
+		// so a body the chain positively APPROVED could never demote it. The Ask is now
+		// a post-recursion fallback, so an approved body falls back to the benign NAME's
+		// base verdict (Abstain). See TestEnvVars_PostRecursionAskFallback; an Abstain
+		// body — the adversarial case — still reaches the fallback.
+		{"inner approve demotes to base abstain", "FOO=$(danger) cmd", hookio.Approve, hookio.Abstain},
 		{"safe substitution not recursed", "FOO=$(git rev-parse HEAD) cmd", hookio.Reject, hookio.Abstain},
 	}
 	for _, tt := range tests {
@@ -141,6 +147,107 @@ func TestEnvVars_ValueRecursion_InheritsVerdict(t *testing.T) {
 				t.Errorf("cmd %q (inner=%s): got %s, want %s", tt.cmd, tt.verdict, got.Decision, tt.want)
 			}
 		})
+	}
+}
+
+// TestEnvVars_PostRecursionAskFallback pins lever (a) of pg2-5huwx: the
+// ExpansionUnknown `Ask` is a post-recursion FALLBACK, not an unconditional floor.
+// It applies only when the value was not POSITIVELY CLEARED — i.e. when at least
+// one enumerated substitution body failed to Approve through the full rule chain.
+// "Positively cleared" is strictly narrower than "not risky": an Abstain body is
+// merely UNCLASSIFIED, so it must still reach the fallback (that distinction is
+// the whole reason lever (b) — gating on the variable NAME — was rejected; with
+// the env-var rule removed, `FOO=$(curl evil) cmd` silently approves because the
+// engine strips the leading assignment and never floors its body).
+func TestEnvVars_PostRecursionAskFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		verdicts map[string]hookio.Decision
+		want     hookio.Decision
+	}{
+		// The fix: a benign NAME whose body the chain positively APPROVES no longer
+		// asks — it falls back to the NAME's base verdict (Abstain).
+		{
+			"approving body demotes to base abstain",
+			"T4=$(bd create x --type task) echo hi",
+			map[string]hookio.Decision{"bd create x --type task": hookio.Approve},
+			hookio.Abstain,
+		},
+		// THE CRUX: an Abstain body is unclassified, NOT cleared — the fallback fires.
+		{
+			"abstaining body still reaches ask fallback",
+			"FOO=$(curl evil) echo hi",
+			map[string]hookio.Decision{"curl evil": hookio.Abstain},
+			hookio.Ask,
+		},
+		{
+			"asking body stays ask",
+			"FOO=$(danger) echo hi",
+			map[string]hookio.Decision{"danger": hookio.Ask},
+			hookio.Ask,
+		},
+		{
+			"rejecting body inherits reject",
+			"FOO=$(danger) echo hi",
+			map[string]hookio.Decision{"danger": hookio.Reject},
+			hookio.Reject,
+		},
+		// EVERY substitution must approve. One approvable + one not stays Ask.
+		{
+			"mixed approvable and unclassified stays ask",
+			"FOO=$(mktemp)$(curl evil) echo hi",
+			map[string]hookio.Decision{"mktemp": hookio.Approve, "curl evil": hookio.Abstain},
+			hookio.Ask,
+		},
+		// The NAME-derived base verdict is never demoted by the fallback change.
+		{
+			"askVar name survives approving body",
+			"PATH=$(bd create x) echo hi",
+			map[string]hookio.Decision{"bd create x": hookio.Approve},
+			hookio.Ask,
+		},
+		{
+			"injector name survives approving body",
+			"LD_PRELOAD=$(bd create x) echo hi",
+			map[string]hookio.Decision{"bd create x": hookio.Approve},
+			hookio.Reject,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewWithEvaluator(&fakeEvaluator{verdicts: tt.verdicts})
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
+			}
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnvVars_UnenumerableUnknownValue_Ask closes the vacuous-truth hole in lever
+// (a): "every enumerated substitution approved" must NOT be satisfied by a value
+// that enumerates to ZERO substitutions while still being classified
+// ExpansionUnknown (e.g. an unterminated `$(`). With no substitution to clear it,
+// the value is unclassifiable and the Ask fallback MUST apply.
+func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
+	r := NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})
+	ev := cmdparse.EnvAssignment{
+		Name:      "FOO",
+		Value:     "$(curl evil",
+		Raw:       "FOO=$(curl evil",
+		Expansion: cmdparse.ExpansionUnknown,
+	}
+	if subs := cmdparse.EnumerateSubstitutions(ev.Value); len(subs) != 0 {
+		t.Fatalf("precondition: EnumerateSubstitutions(%q) returned %d subs, want 0", ev.Value, len(subs))
+	}
+	got := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"})
+	if got.Decision != hookio.Ask {
+		t.Errorf("unenumerable unknown value: got %s (%s), want ask", got.Decision, got.Reason)
 	}
 }
 

