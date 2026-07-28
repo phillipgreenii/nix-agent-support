@@ -606,7 +606,6 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"export LD_LIBRARY_PATH", "export LD_LIBRARY_PATH=/evil && echo hi", hookio.Reject},
 		{"export DYLD_LIBRARY_PATH", "export DYLD_LIBRARY_PATH=/evil && echo hi", hookio.Reject},
 		{"export BASH_ENV", "export BASH_ENV=/evil.sh && echo hi", hookio.Reject},
-		{"export ENV", "export ENV=/evil.sh && echo hi", hookio.Reject},
 		{"export ZDOTDIR", "export ZDOTDIR=/evil && echo hi", hookio.Reject},
 		{"export BASH_FUNC name", "export BASH_FUNC_foo=bar && echo hi", hookio.Reject},
 		{"leading LD_PRELOAD", "LD_PRELOAD=/evil.so git status", hookio.Reject},
@@ -627,6 +626,31 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"chained ask vars", "export PATH=/a && export HOME=/b && git status", hookio.Ask},
 
 		{"export HOME", "export HOME=/tmp && git status", hookio.Ask},
+
+		// --- pg2-5jj3m: ENV is a DECISIVE Ask, not a Reject. `ENV` names the file a
+		// POSIX `sh` sources at startup, so it IS an injection vector — but only for an
+		// INTERACTIVE sh, and the NAME collides with an extremely common ordinary
+		// project variable, so the name-only Reject denied real traffic (8 logged
+		// tilt-harness rows). A Reject is not user-overridable; an Ask is. The split is
+		// by NAME, not by value: `ENV=dev` names the RELATIVE file `./dev`, and
+		// `export ENV=…` persists into later tool calls, so no value shape here is
+		// provably inert.
+		//
+		// The first row was `{"export ENV", …, hookio.Reject}` in the injector block
+		// above until pg2-5jj3m; the shape is still pinned, at the corrected verdict.
+		{"export ENV evil script", "export ENV=/evil.sh && echo hi", hookio.Ask},
+		{"ENV non-path leading", "ENV=dev tilt up", hookio.Ask},
+		{"ENV non-path make", "ENV=production make deploy", hookio.Ask},
+		{"ENV standalone export", "export ENV=dev", hookio.Ask},
+		{"ENV path compound", "ENV=/some/project/dir && echo hi", hookio.Ask},
+		// The genuine injection shapes stay DECISIVE (Ask, never allow/abstain).
+		{"ENV sources evil script", "ENV=/tmp/evil.sh sh -c 'echo hi'", hookio.Ask},
+		{"ENV dynamic evil value", "ENV=$(curl evil) sh", hookio.Ask},
+		// BASH_ENV is NOT demoted with it (pg2-5jj3m companion finding): bash sources
+		// it for NON-interactive shells — the shape ceta actually guards — and it has no
+		// ordinary-project-variable collision, so it keeps the hard Reject.
+		{"BASH_ENV stays reject", "BASH_ENV=/tmp/evil.sh bash -c 'echo hi'", hookio.Reject},
+		{"BASH_ENV non-path stays reject", "BASH_ENV=dev bash -c 'echo hi'", hookio.Reject},
 
 		// --- pg2-0q99a value-aware split: an askVar assignment that PRESERVES the
 		// caller's own value and adds only STATIC ABSOLUTE components is affirmatively
@@ -838,6 +862,15 @@ func TestIntegration_EnvVarGuard_PositionIndependence(t *testing.T) {
 		{name: "HOME replacement", assignment: "HOME=/tmp/fakehome", want: hookio.Ask},
 		{name: "injector", assignment: "LD_PRELOAD=/evil.so", want: hookio.Reject},
 		{name: "injector dynamic value", assignment: "LD_PRELOAD=$(mktemp -d)", want: hookio.Reject},
+		// pg2-5jj3m: ENV is a decisive Ask in EVERY form — the demotion from Reject must
+		// not become form-dependent, and the compound form is the one pg2-mtnmb made
+		// reachable (it is the form the 8 affected corpus rows use).
+		{name: "shell-startup ENV non-path", assignment: "ENV=dev", want: hookio.Ask},
+		{name: "shell-startup ENV project dir", assignment: "ENV=/some/project/dir", want: hookio.Ask},
+		{name: "shell-startup ENV evil script", assignment: "ENV=/tmp/evil.sh", want: hookio.Ask},
+		// BASH_ENV is deliberately NOT demoted with ENV, in any form.
+		{name: "BASH_ENV injector stays reject", assignment: "BASH_ENV=/tmp/evil.sh", want: hookio.Reject},
+		{name: "BASH_ENV non-path stays reject", assignment: "BASH_ENV=dev", want: hookio.Reject},
 		// A benign name is transparent in every form: no rule owns the assignment, and
 		// an assignment-only leaf executes nothing, so `echo hi` keeps its Approve.
 		{name: "benign", assignment: "FOO=bar", want: hookio.Approve},

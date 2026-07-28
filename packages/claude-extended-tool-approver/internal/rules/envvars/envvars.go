@@ -56,14 +56,49 @@ func sanitizeReasonName(name string) string {
 // otherwise let the safe-commands rule approve a bare `export` and green-light
 // the injection (pg2-gkd5e). BASH_FUNC_* (exported shell functions) is handled
 // by prefix.
+//
+// BASH_ENV stays here deliberately (pg2-5jj3m reviewed it alongside ENV and did NOT
+// demote it). It is the strongest member of the family: bash sources it for
+// NON-interactive shells — `bash script.sh` / `bash -c …`, i.e. the shape ceta
+// actually guards — and it resolves a slash-less value through PATH exactly as `.`
+// does, so no value shape is inert either. It also has no ordinary-project-variable
+// collision: a BASH_ENV value always names a startup file to source, so the rule
+// fires on its target behavior rather than on a name clash the way ENV did.
 var injectorVars = map[string]bool{
 	"LD_PRELOAD":            true,
 	"DYLD_INSERT_LIBRARIES": true,
 	"LD_LIBRARY_PATH":       true,
 	"DYLD_LIBRARY_PATH":     true,
 	"BASH_ENV":              true,
-	"ENV":                   true,
 	"ZDOTDIR":               true,
+}
+
+// injectorAskVars are shell-startup injection vectors — same family as
+// injectorVars — whose NAME also collides with an extremely common ordinary
+// project variable, so a name-only Reject denies legitimate traffic. They get a
+// DECISIVE Ask instead: still never auto-approved, but USER-OVERRIDABLE.
+//
+// `ENV` is the only member (pg2-5jj3m). In POSIX `sh` it names a file sourced at
+// shell startup, so `ENV=/evil.sh` is a real vector — but `ENV=dev` /
+// `ENV=<project dir>` is also everyday developer traffic, and 8 logged rows of a
+// legitimate tilt harness were hard-DENIED by it. A Reject cannot be waved through
+// the way an Ask can, which makes it the failure mode most likely to get the whole
+// guard disabled — a worse security outcome than the false positive.
+//
+// Why the split is by NAME and not by VALUE (the narrowing this bead rejected): a
+// value with no slash is NOT provably inert. `ENV=dev` names the RELATIVE file
+// `./dev`, so an attacker who can plant `./dev` gets it sourced; and `export ENV=…`
+// PERSISTS, so a shell started by a LATER tool call can honour it — neither fact is
+// knowable from the single assignment in front of the rule. Conditioning on the
+// invoked shell fails for the same persistence reason.
+//
+// Why Ask and not Abstain, even though `ENV` only fires for an INTERACTIVE `sh` in
+// every mainstream modern shell (bash-as-sh, dash, mksh and ksh93 all gate it on
+// interactivity; ksh88-lineage shells do not): interactive shells DO get started, and
+// Abstain cannot enforce "never auto-approve" — safe-commands approves a bare
+// `export` and first-match-wins would let that win (fbbf3ade / pg2-gkd5e).
+var injectorAskVars = map[string]bool{
+	"ENV": true,
 }
 
 // askVars are dangerous but NOT guaranteed unsafe for a given value (a legitimate
@@ -95,8 +130,9 @@ var askVars = map[string]bool{
 // invariant). The rule returns Approve for EXACTLY ONE shape, and all three
 // conditions must hold:
 //
-//  1. the NAME is an askVar (PATH/HOME) — never an injector, never a benign name
-//     (a benign assignment stays Abstain: the rule has no opinion to offer);
+//  1. the NAME is an askVar (PATH/HOME) — never an injector, never an
+//     injectorAskVar, never a benign name (a benign assignment stays Abstain: the
+//     rule has no opinion to offer);
 //  2. the VALUE satisfies preservesCallerValue — it demonstrably preserves the
 //     caller's own value and adds only static absolute path components; and
 //  3. the assignment IS the whole leaf (assignmentIsWholeLeaf) — a command-less
@@ -312,7 +348,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 }
 
 // evaluateAssignment returns the sub-verdict for a single NAME=VALUE assignment.
-// The NAME gives the base verdict (injector→Reject, PATH/HOME→Ask, else→Abstain)
+// The NAME gives the base verdict (injector→Reject, injectorAskVar→Ask,
+// PATH/HOME→Ask-unless-verified-safe, else→Abstain)
 // and a VALUE that embeds an unclassifiable substitution escalates decisively
 // (never auto-approve) and inherits a stronger verdict from recursing the body.
 func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput) hookio.RuleResult {
@@ -325,6 +362,17 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		result = hookio.RuleResult{
 			Decision: hookio.Reject,
 			Reason:   "refusing to set code-injection env var: " + sanitizeReasonName(ev.Name),
+			Module:   name,
+		}
+	case injectorAskVars[ev.Name]:
+		// Same injection family, but the NAME collides with an ordinary project
+		// variable, so the verdict is a DECISIVE Ask rather than a Reject (pg2-5jj3m).
+		// Unconditional on the VALUE — see injectorAskVars for why no value shape here
+		// is provably inert — and deliberately NOT routed through the askVars
+		// value-aware split, so `ENV="$ENV:/x"` cannot reach an Approve.
+		result = hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason:   "setting shell-startup env var requires confirmation: " + sanitizeReasonName(ev.Name),
 			Module:   name,
 		}
 	case askVars[ev.Name]:
