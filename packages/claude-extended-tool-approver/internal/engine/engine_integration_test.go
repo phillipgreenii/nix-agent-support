@@ -2,8 +2,10 @@ package engine
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
@@ -141,6 +143,47 @@ func TestIntegration_HookBypassRegression(t *testing.T) {
 				t.Errorf("command %q got %v (%s: %s); want Approve", tt.command, got.Decision, got.Module, got.Reason)
 			}
 		})
+	}
+}
+
+// TestIntegration_QuotedParenSubstitutionLeafDrop is the pg2-3ggxm bypass-shape
+// regression, and the reason that bead's layer 2 is REQUIRED rather than optional.
+//
+// A dropped leaf on its own is fail-safe: no rule sees it, the engine Abstains,
+// and per the bypass table above "Abstain re-engages Claude's own prompt". The
+// escalation is the COMBINATION with single-leaf approval — see
+// "compound cd+export+exe" below: a fold is Approve iff EVERY surviving leaf
+// approves, so if the scanner desync leaves exactly ONE surviving leaf and that
+// leaf is approvable, the dropped leaves can never demote the compound and the
+// deny-capable rules (git/pathsafety/secrets) are bypassed outright.
+//
+// Here the single-quoted jq filter's `select(` ... `)` used to close the $(...)
+// early; the filter's closing quote then opened a single-quoted region that
+// swallowed `; rm -rf /etc`, and the assignment-only remainder was dropped — so
+// `git status` was the ONLY leaf and the whole compound was APPROVED.
+//
+// (The corpus row-167529 reproducer abstains only by luck: its lone survivor is
+// Executable=="then", which no rule approves. This is the adversarial variant.)
+func TestIntegration_QuotedParenSubstitutionLeafDrop(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	const cmd = "git status && count=$(jq -r 'select(.a)' data.json) ; rm -rf /etc"
+
+	leaves := cmdparse.Parse(cmd)
+	execs := make([]string, len(leaves))
+	for i, pc := range leaves {
+		execs[i] = pc.Executable
+	}
+	if !slices.Contains(execs, "rm") {
+		t.Errorf("dangerous leaf `rm` was DROPPED from Parse(%q): leaves=%v", cmd, execs)
+	}
+
+	in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+	if got := eng.EvaluateHook(in); got.Decision == hookio.Approve {
+		t.Errorf("compound hiding `rm -rf /etc` behind a quoted-paren substitution was APPROVED (%s: %s); want != Approve",
+			got.Module, got.Reason)
 	}
 }
 

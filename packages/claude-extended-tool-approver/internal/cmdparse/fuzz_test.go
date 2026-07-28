@@ -78,6 +78,17 @@ var fuzzSeeds = []string{
 	// the next line's command (pg2-t4uyx class; fixed in splitCompound).
 	"echo hi;#\"x\nrm -rf /etc",
 	"git status &#\"y\nrm -rf ~",
+	// pg2-3ggxm command-substitution paren desync: a single-quoted region inside
+	// $(...) whose contents carry parens (a jq/awk filter). Quote tracking used to
+	// be disabled inside $(...) and any ')' decremented the substitution depth, so
+	// `select(` closed it early and the scanner split MID-substitution — inventing
+	// phantom NAME=VALUE env vars and DROPPING the trailing command from the parse.
+	"x=$(jq -r 'select(.a)' f) ; rm -rf /etc",
+	"git status && x=$(jq -r 'select(.a)' f) ; rm -rf /etc",
+	"echo $(awk 'BEGIN { print (1+2) }') ; rm -rf /etc",
+	`echo $(grep -c "(" f) ; rm -rf /etc`,
+	`echo "$(date)" ; rm -rf /etc`,
+	"fb=$(bd list --json | jq -r '[.[] | select(.t==\"x\")] | length')\nrm -rf /etc",
 }
 
 // nonBlankSegments counts the segments that carry a non-whitespace command; a

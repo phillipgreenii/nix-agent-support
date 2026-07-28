@@ -2,6 +2,7 @@ package cmdparse
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -439,6 +440,195 @@ func nilIfEmpty(s []string) []string {
 		return nil
 	}
 	return s
+}
+
+// row167529Command is corpus row 167529, pinned VERBATIM (all three lines, both
+// single-quoted jq filters intact). It is the reproducer for the
+// command-substitution paren desync (pg2-3ggxm, triaged as pg2-8cp08): quote
+// tracking used to be disabled inside $(...) and ANY ')' decremented the
+// substitution depth, so the jq filter's `select(` ... `)` closed the
+// substitution early, the following '|' split the segment mid-substitution, and
+// the resulting COMMAND FRAGMENT was lifted into EnvVars as a phantom
+// NAME=VALUE — while the real `bd`/`echo` commands were dropped from the parse.
+const row167529Command = "fb=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd list --limit=1000 --json 2>/dev/null | jq -r '[.[] | select(.issue_type==\"feedback\")] | length')\n" +
+	"kv=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show gc-6kv --json 2>/dev/null | jq -r 'if type==\"array\" then .[0] else . end | .status')\n" +
+	"echo \"feedback_beads=$fb  gc-6kv=$kv\""
+
+// TestParse_Row167529_NoPhantomEnvVars asserts the row-167529 command yields NO
+// env assignments at all: it contains none, so every EnvVars slice must be empty.
+// A non-empty one is a command fragment masquerading as NAME=VALUE, which the
+// env-var rule then escalates to Ask and echoes into the user-facing reason.
+func TestParse_Row167529_NoPhantomEnvVars(t *testing.T) {
+	for i, pc := range Parse(row167529Command) {
+		if len(pc.EnvVars) != 0 {
+			t.Errorf("Parse(row167529)[%d] (exec %q): EnvVars = %v, want empty (the command has no env assignment)",
+				i, pc.Executable, envPairs(pc.EnvVars))
+		}
+	}
+}
+
+// reachableExecutables lists every executable a rule can actually reach in cmd:
+// the executable of each leaf of each top-level segment, plus (recursively) the
+// executables inside each top-level command/process substitution, which the engine
+// re-evaluates via EnumerateSubstitutions. A command present in cmd but absent
+// here is INVISIBLE to every rule — the silent-bypass class of pg2-3ggxm.
+func reachableExecutables(cmd string) []string {
+	var out []string
+	for _, seg := range splitCompound(cmd) {
+		for _, sub := range EnumerateSubstitutions(seg) {
+			out = append(out, reachableExecutables(sub.Body)...)
+		}
+		for _, pc := range Parse(seg) {
+			out = append(out, pc.Executable)
+		}
+	}
+	return out
+}
+
+// TestSplitCompound_Row167529_NoCommandDropped is the layer-2 regression: the
+// paren desync did not merely invent a phantom env var, it ERASED real command
+// leaves from evaluation (the whole 3-line script collapsed to ONE leaf named
+// "then", so the two `bd` calls and the `echo` were never evaluated by any rule).
+// Assert the compound splits into exactly one segment per line and that every
+// executable in the script — including the two `bd` calls inside the substituted
+// jq pipelines — is reachable.
+func TestSplitCompound_Row167529_NoCommandDropped(t *testing.T) {
+	segs := splitCompound(row167529Command)
+	if len(segs) != 3 {
+		t.Errorf("splitCompound(row167529): got %d segments, want 3 (one per line):\n%#v", len(segs), segs)
+	}
+	want := []string{"bd", "jq", "bd", "jq", "echo"}
+	if got := reachableExecutables(row167529Command); !reflect.DeepEqual(got, want) {
+		t.Errorf("reachableExecutables(row167529) = %v, want %v (a missing executable is a command no rule ever sees)", got, want)
+	}
+}
+
+// TestSplitCompound_QuotedParensInSubstitution asserts the scanner keeps a
+// single-quoted region inside $(...) inert (so its parens, pipes, semicolons and
+// newlines cannot close or split the substitution) while still closing the
+// substitution at the right ')' — the shape that let a compound's trailing command
+// be swallowed whole.
+func TestSplitCompound_QuotedParensInSubstitution(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "single-quoted paren does not close the substitution",
+			input: "x=$(jq -r 'select(.a)' f) ; rm -rf /etc",
+			want:  []string{"rm"},
+		},
+		{
+			name:  "approvable leaf must not be the only survivor",
+			input: "git status && x=$(jq -r 'select(.a)' f) ; rm -rf /etc",
+			want:  []string{"jq", "rm"},
+		},
+		{
+			name:  "double-quoted substitution still closes",
+			input: `echo "$(date)" ; rm -rf /etc`,
+			want:  []string{"date", "echo", "rm"},
+		},
+		{
+			name:  "literal paren inside double quotes inside a substitution",
+			input: `echo $(grep -c "(" f) ; rm -rf /etc`,
+			want:  []string{"grep", "echo", "rm"},
+		},
+		{
+			name:  "bare paren group inside a substitution",
+			input: "echo $(awk 'BEGIN { print (1+2) }') ; rm -rf /etc",
+			want:  []string{"awk", "echo", "rm"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := reachableExecutables(tt.input)
+			for _, w := range tt.want {
+				if !slices.Contains(got, w) {
+					t.Errorf("reachableExecutables(%q) = %v, missing %q (that command escapes evaluation)", tt.input, got, w)
+				}
+			}
+		})
+	}
+}
+
+// TestTokenize_QuotedParensInSubstitution asserts tokenize keeps a $(...) whose
+// single-quoted body contains parens glued into ONE token. The same desync lived
+// in tokenize, where it split the token stream MID-substitution, so
+// extractExecAndArgs picked a command fragment as the executable (or as a
+// NAME=VALUE) instead of the real one.
+func TestTokenize_QuotedParensInSubstitution(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "substitution with quoted parens stays one token",
+			input: "x=$(jq -r 'select(.a)' f)",
+			want:  []string{"x=$(jq -r 'select(.a)' f)"},
+		},
+		{
+			name:  "trailing arg after a substitution with quoted parens",
+			input: "echo $(awk 'BEGIN { print (1+2) }') tail",
+			want:  []string{"echo", "$(awk 'BEGIN { print (1+2) }')", "tail"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, _ := tokenize(tt.input)
+			if !reflect.DeepEqual(tokens, tt.want) {
+				t.Errorf("tokenize(%q) = %#v, want %#v", tt.input, tokens, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsEnvAssign_NameValidity pins the name-validity guard (pg2-3ggxm layer 1):
+// a NAME=VALUE candidate is an env assignment only when NAME is a valid shell
+// identifier ^[A-Za-z_][A-Za-z0-9_]*$ (tolerating the trailing '+' of the bash
+// append form NAME+=VALUE, which newEnvAssignment normalizes away). The reject
+// rows are the 7 phantom names actually observed in the decision corpus
+// (pg2-8cp08); a real assignment always has a valid identifier, so the guard can
+// never mask one.
+func TestIsEnvAssign_NameValidity(t *testing.T) {
+	tests := []struct {
+		name      string
+		candidate string
+		want      bool
+	}{
+		// --- legitimate assignments that MUST still be accepted ---
+		{"simple", "FOO=bar", true},
+		{"path with var ref", "PATH=/x:$PATH", true},
+		{"lowercase with digit", "foo_1=x", true},
+		{"append form", "LD_PRELOAD+=/x", true},
+		{"leading underscore, empty value", "_x1=", true},
+		// --- the 7 phantom names observed in the corpus (pg2-8cp08) ---
+		{"phantom jq length", "length')=x", false},
+		{"phantom quoted tail", `" 2>/dev/null | tail -1)=x`, false},
+		{"phantom cache file", `' "$CACHE_FILE")=x`, false},
+		{"phantom pn grep", `[A-Za-z0-9._-]*' "$PN" 2>/dev/null | grep -vE '/bin/pn$' | head -1)=x`, false},
+		{"phantom checking", "^checking'); a1=x", false},
+		{"phantom keys done", `keys[]?' "$f" 2>/dev/null; done | sort | uniq -c | sort -rn=x`, false},
+		{"phantom result", `result").=x`, false},
+		// --- the observed multi-line phantom, embedded newline and all ---
+		{"phantom with embedded newline", "length')\nkv=$(env -u BEADS_DIR bd show x --json | jq -r 'if", false},
+		// --- other non-assignments ---
+		{"flag with equals", "-x=1", false},
+		{"no equals", "FOO", false},
+		{"leading equals", "=bar", false},
+		{"digit-leading name", "1FOO=bar", false},
+		{"dashed name", "a-b=c", false},
+		{"dotted name", "a.b=c", false},
+		{"append only", "+=x", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isEnvAssign(tt.candidate); got != tt.want {
+				t.Errorf("isEnvAssign(%q) = %v, want %v", tt.candidate, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestParse_RespectsQuotingInSplitters(t *testing.T) {

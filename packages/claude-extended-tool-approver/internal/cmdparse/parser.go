@@ -318,6 +318,12 @@ func StripLeadingEnvAssignments(raw string) string {
 // begins — i.e. after any leading NAME=VALUE env-assignment tokens. It scans
 // quote/paren-aware so a value with spaces inside $(...) or quotes stays one
 // token. Returns len(raw) when raw is entirely env assignments.
+//
+// This scan deliberately does NOT use the shared shellScanner: unlike the four
+// callers of that scanner, it must also glue a TOP-LEVEL bare paren group into one
+// token (the `FOO=(a b) cmd` bash-array form), which the shared scanner hands back
+// to its caller. Its case order already matches the shared scanner's discipline
+// (single quotes first, symmetric parens), so it never had the pg2-3ggxm desync.
 func commandStartOffset(raw string) int {
 	inSingle, inDouble := false, false
 	parenDepth := 0
@@ -569,67 +575,145 @@ type ParsedCommand struct {
 	Comment              string
 }
 
+// shellScanner is the SINGLE byte-level shell-context scanner shared by every
+// quote-aware scan in this package: ExtractComment, StripComment, splitCompound
+// and tokenize. Those four each carried their own hand-written copy of this state
+// machine, and the copies had drifted: splitCompound and tokenize gated quote
+// tracking on `parenDepth == 0` while decrementing that depth on ANY ')'. A
+// single-quoted `jq` filter inside a $(...) therefore closed the substitution at
+// its own `select(` ... `)`, after which the scanner split MID-substitution — the
+// pg2-3ggxm desync, which both invented phantom NAME=VALUE env assignments out of
+// command fragments AND silently erased real command leaves from evaluation.
+//
+// Nesting is a STACK of frames, not flat booleans, because a command substitution
+// starts a FRESH quoting context: a '"' inside $(...) opens a double-quoted region
+// that ends inside the substitution, while a $(...) inside '"' opens a substitution
+// whose own ')' closes it. One flat inDouble flag cannot express both — whichever
+// way it is resolved, the other form desyncs.
+type shellScanner struct {
+	// frames is never empty. frames[0] is the top-level command context; every
+	// unescaped `$(` pushes a nested one, and its matching ')' pops it.
+	frames []scanFrame
+	// escapeUnquoted selects the backslash rule, the one place the four callers
+	// legitimately differ. true: a backslash escapes the next byte in BARE as well
+	// as double-quoted context (splitCompound, which must not read find's `\(` as a
+	// subshell). false: only inside double quotes (tokenize and the comment
+	// scanners, which keep a bare backslash as a plain byte of the token).
+	// Single-quoted regions never honor a backslash, matching bash.
+	escapeUnquoted bool
+}
+
+// scanFrame is one command context's quoting state plus the nesting depth of bare
+// `(` groups opened within it.
+type scanFrame struct {
+	inSingle   bool
+	inDouble   bool
+	inBacktick bool
+	bareParens int
+}
+
+func newShellScanner(escapeUnquoted bool) *shellScanner {
+	return &shellScanner{frames: []scanFrame{{}}, escapeUnquoted: escapeUnquoted}
+}
+
+// advance consumes the bytes at s[i] that merely change scanning state or that are
+// INERT in the current context (inside quotes, inside a command substitution, or
+// inside a bare paren group), and returns how many bytes it consumed. It returns 0
+// — consuming nothing — exactly when s[i] is a LIVE top-level shell byte the
+// caller must interpret itself: a separator, a '#', whitespace, a subshell '(', a
+// process substitution's '<'/'>'.
+//
+// Callers that build output copy s[i:i+n] VERBATIM; advance never rewrites bytes.
+func (sc *shellScanner) advance(s string, i int) int {
+	f := &sc.frames[len(sc.frames)-1]
+	c := s[i]
+	switch {
+	case f.inSingle:
+		// A single-quoted region is literal — ONLY its closing quote is special.
+		// Evaluated first (as matchParen and commandStartOffset already do) so that
+		// quoted parens, pipes, newlines and backslashes cannot desync the scan,
+		// whatever the substitution depth.
+		if c == '\'' {
+			f.inSingle = false
+		}
+		return 1
+	case c == '\\' && i+1 < len(s) && (sc.escapeUnquoted || f.inDouble):
+		return 2 // escaped pair: the next byte carries no syntax
+	case c == '\'' && !f.inDouble && !f.inBacktick:
+		f.inSingle = true
+		return 1
+	case c == '"' && !f.inBacktick:
+		f.inDouble = !f.inDouble
+		return 1
+	case c == '`':
+		f.inBacktick = !f.inBacktick
+		return 1
+	case c == '$' && i+1 < len(s) && s[i+1] == '(':
+		sc.frames = append(sc.frames, scanFrame{})
+		return 2
+	case c == ')' && len(sc.frames) > 1 && f.bareParens == 0 && !f.inDouble:
+		sc.frames = sc.frames[:len(sc.frames)-1]
+		return 1
+	case sc.nested():
+		// Inert byte. Bare parens are counted SYMMETRICALLY (and only outside
+		// quotes, matching matchParen) so an inner group's ')' — jq's `select(...)`,
+		// awk's `print (1+2)` — cannot be mistaken for the ')' closing the
+		// substitution.
+		if !f.inDouble && !f.inBacktick {
+			switch {
+			case c == '(':
+				f.bareParens++
+			case c == ')' && f.bareParens > 0:
+				f.bareParens--
+			}
+		}
+		return 1
+	}
+	return 0
+}
+
+// nested reports whether the scanner is inside a quoted region or a command
+// substitution — i.e. whether the current byte is inert rather than live top-level
+// shell syntax. advance returns 0 only when this is false.
+func (sc *shellScanner) nested() bool {
+	if len(sc.frames) > 1 {
+		return true
+	}
+	f := sc.frames[0]
+	return f.inSingle || f.inDouble || f.inBacktick
+}
+
 // ExtractComment returns the text of a bash-style inline comment (after the
 // first unquoted '#'), trimmed. Returns "" if none.
 func ExtractComment(cmd string) string {
-	inSingle, inDouble := false, false
-	inBacktick := false
-	parenDepth := 0
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		switch {
-		case c == '\'' && !inDouble && !inBacktick && parenDepth == 0:
-			inSingle = !inSingle
-		case c == '"' && !inSingle && !inBacktick && parenDepth == 0:
-			inDouble = !inDouble
-		case c == '\\' && inDouble && i+1 < len(cmd):
-			i++ // skip next char (it's escaped)
-		case c == '`' && !inSingle:
-			inBacktick = !inBacktick
-		case c == '$' && !inSingle && i+1 < len(cmd) && cmd[i+1] == '(':
-			parenDepth++
-			i++
-		case c == ')' && !inSingle && parenDepth > 0:
-			parenDepth--
-		case c == '#' && !inSingle && !inDouble && !inBacktick && parenDepth == 0:
-			if i == 0 || unicode.IsSpace(rune(cmd[i-1])) {
-				return strings.TrimSpace(cmd[i+1:])
-			}
-		default:
-			// continue
+	sc := newShellScanner(false)
+	i := 0
+	for i < len(cmd) {
+		if n := sc.advance(cmd, i); n > 0 {
+			i += n
+			continue
 		}
+		if cmd[i] == '#' && (i == 0 || unicode.IsSpace(rune(cmd[i-1]))) {
+			return strings.TrimSpace(cmd[i+1:])
+		}
+		i++
 	}
 	return ""
 }
 
 // StripComment returns cmd with any bash-style inline comment removed, trimmed.
 func StripComment(cmd string) string {
-	inSingle, inDouble := false, false
-	inBacktick := false
-	parenDepth := 0
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		switch {
-		case c == '\'' && !inDouble && !inBacktick && parenDepth == 0:
-			inSingle = !inSingle
-		case c == '"' && !inSingle && !inBacktick && parenDepth == 0:
-			inDouble = !inDouble
-		case c == '\\' && inDouble && i+1 < len(cmd):
-			i++ // skip next char (it's escaped)
-		case c == '`' && !inSingle:
-			inBacktick = !inBacktick
-		case c == '$' && !inSingle && i+1 < len(cmd) && cmd[i+1] == '(':
-			parenDepth++
-			i++
-		case c == ')' && !inSingle && parenDepth > 0:
-			parenDepth--
-		case c == '#' && !inSingle && !inDouble && !inBacktick && parenDepth == 0:
-			if i == 0 || unicode.IsSpace(rune(cmd[i-1])) {
-				return strings.TrimSpace(cmd[:i])
-			}
-		default:
-			// continue
+	sc := newShellScanner(false)
+	i := 0
+	for i < len(cmd) {
+		if n := sc.advance(cmd, i); n > 0 {
+			i += n
+			continue
 		}
+		if cmd[i] == '#' && (i == 0 || unicode.IsSpace(rune(cmd[i-1]))) {
+			return strings.TrimSpace(cmd[:i])
+		}
+		i++
 	}
 	return strings.TrimSpace(cmd)
 }
@@ -693,126 +777,97 @@ func Parse(command string) []ParsedCommand {
 func splitCompound(s string) []string {
 	var result []string
 	var buf strings.Builder
-	inSingle, inDouble := false, false
-	inBacktick := false
-	parenDepth := 0
+	// escapeUnquoted: a bare `\(` must not be read as a subshell start (find \( … \)).
+	sc := newShellScanner(true)
+	flush := func() {
+		if buf.Len() > 0 {
+			result = append(result, buf.String())
+			buf.Reset()
+		}
+	}
 	i := 0
 	for i < len(s) {
+		// Quoting / command-substitution bytes are inert here: copy them verbatim and
+		// let the shared scanner own the state. Only a byte it declines (a LIVE
+		// top-level byte) reaches the separator logic below.
+		if n := sc.advance(s, i); n > 0 {
+			_, _ = buf.WriteString(s[i : i+n])
+			i += n
+			continue
+		}
 		c := s[i]
-		switch {
-		case c == '\'' && !inDouble && !inBacktick && parenDepth == 0:
-			inSingle = !inSingle
-			buf.WriteByte(c)
-		case c == '"' && !inSingle && !inBacktick && parenDepth == 0:
-			inDouble = !inDouble
-			buf.WriteByte(c)
-		case c == '\\' && !inSingle && i+1 < len(s):
-			// Backslash escaping: in bare or double-quote context, consume the next char.
-			// Prevents \( from being treated as subshell start (e.g. find \( ... \)).
-			buf.WriteByte(c)
-			i++
-			buf.WriteByte(s[i])
-		case c == '`' && !inSingle:
-			inBacktick = !inBacktick
-			buf.WriteByte(c)
-		case c == '$' && !inSingle && i+1 < len(s) && s[i+1] == '(':
-			parenDepth++
-			buf.WriteByte(c)
-			buf.WriteByte(s[i+1])
-			i++
-		case c == ')' && !inSingle && parenDepth > 0:
-			parenDepth--
-			buf.WriteByte(c)
-		case inSingle || inDouble || inBacktick || parenDepth > 0:
-			buf.WriteByte(c)
-		default:
-			// Comment detection: unquoted # at the start of a word — the start of
-			// input, after whitespace, OR at the start of a segment (buf empty) so a
-			// `#` immediately after a command separator (`;#`, `&#`, `|#`, `\n#`, or a
-			// closed subshell) is a comment, exactly as bash treats the start of a word
-			// after an operator. Missing the buf-empty case let an unterminated quote in
-			// the comment (`;#"x`) swallow the newline, gluing the NEXT line's command
-			// into the comment segment where StripComment then dropped it — a leaf that
-			// silently escaped evaluation (fuzz-found bypass, pg2-t4uyx class).
-			// Consume the rest of the line into the buffer WITHOUT updating quote state,
-			// so that quote-like characters inside comments (e.g. "it's") don't desync tracking.
-			if c == '#' && (i == 0 || buf.Len() == 0 || unicode.IsSpace(rune(s[i-1]))) {
-				for i < len(s) && s[i] != '\n' {
-					buf.WriteByte(s[i])
-					i++
-				}
-				// i now points to \n or past end; let the outer loop handle \n as a splitter
-				continue
+		// Comment detection: unquoted # at the start of a word — the start of
+		// input, after whitespace, OR at the start of a segment (buf empty) so a
+		// `#` immediately after a command separator (`;#`, `&#`, `|#`, `\n#`, or a
+		// closed subshell) is a comment, exactly as bash treats the start of a word
+		// after an operator. Missing the buf-empty case let an unterminated quote in
+		// the comment (`;#"x`) swallow the newline, gluing the NEXT line's command
+		// into the comment segment where StripComment then dropped it — a leaf that
+		// silently escaped evaluation (fuzz-found bypass, pg2-t4uyx class).
+		// Consume the rest of the line into the buffer WITHOUT updating quote state,
+		// so that quote-like characters inside comments (e.g. "it's") don't desync tracking.
+		if c == '#' && (i == 0 || buf.Len() == 0 || unicode.IsSpace(rune(s[i-1]))) {
+			for i < len(s) && s[i] != '\n' {
+				buf.WriteByte(s[i])
+				i++
 			}
-			// Bare subshell grouping: ( cmd1; cmd2 )
-			// Must not be preceded by $, <, or > (those are command/process substitution).
-			if c == '(' {
-				preceded := i > 0 && (s[i-1] == '$' || s[i-1] == '<' || s[i-1] == '>')
-				if !preceded {
-					depth := 1
-					start := i + 1
-					j := start
-					for j < len(s) && depth > 0 {
-						switch s[j] {
-						case '(':
-							depth++
-						case ')':
-							depth--
-						}
-						j++
+			// i now points to \n or past end; let the outer loop handle \n as a splitter
+			continue
+		}
+		// Bare subshell grouping: ( cmd1; cmd2 )
+		// Must not be preceded by < or > (process substitution); a `$(` never reaches
+		// here at all, the scanner consumes both bytes and pushes a frame.
+		if c == '(' {
+			preceded := i > 0 && (s[i-1] == '$' || s[i-1] == '<' || s[i-1] == '>')
+			if !preceded {
+				depth := 1
+				start := i + 1
+				j := start
+				for j < len(s) && depth > 0 {
+					switch s[j] {
+					case '(':
+						depth++
+					case ')':
+						depth--
 					}
-					if depth == 0 {
-						if buf.Len() > 0 {
-							result = append(result, buf.String())
-							buf.Reset()
-						}
-						inner := s[start : j-1]
-						// Recursively split inner content (it may contain &&, ||, ;, etc.)
-						result = append(result, splitCompound(inner)...)
-						i = j
-						continue
-					}
+					j++
 				}
-			}
-			if i+1 < len(s) {
-				two := s[i : i+2]
-				if two == "&&" || two == "||" {
-					if buf.Len() > 0 {
-						result = append(result, buf.String())
-						buf.Reset()
-					}
-					i++
-					i++
+				if depth == 0 {
+					flush()
+					inner := s[start : j-1]
+					// Recursively split inner content (it may contain &&, ||, ;, etc.)
+					result = append(result, splitCompound(inner)...)
+					i = j
 					continue
 				}
 			}
-			// Bare '&' is a background-job separator. '&&' is already consumed by
-			// the two-char block above, so this only fires on a lone '&'. Guard
-			// the redirect / fd-dup forms splitCompound sees before redirection
-			// tokenization: '&>' (redirect-all) and '>&' / '2>&1' / '>&2' (fd dup).
-			if c == '&' && (i+1 >= len(s) || s[i+1] != '>') && (i == 0 || s[i-1] != '>') {
-				if buf.Len() > 0 {
-					result = append(result, buf.String())
-					buf.Reset()
-				}
-				i++
-				continue
-			}
-			if c == ';' || c == '|' || c == '\n' {
-				if buf.Len() > 0 {
-					result = append(result, buf.String())
-					buf.Reset()
-				}
-				i++
-				continue
-			}
-			buf.WriteByte(c)
 		}
+		if i+1 < len(s) {
+			two := s[i : i+2]
+			if two == "&&" || two == "||" {
+				flush()
+				i += 2
+				continue
+			}
+		}
+		// Bare '&' is a background-job separator. '&&' is already consumed by
+		// the two-char block above, so this only fires on a lone '&'. Guard
+		// the redirect / fd-dup forms splitCompound sees before redirection
+		// tokenization: '&>' (redirect-all) and '>&' / '2>&1' / '>&2' (fd dup).
+		if c == '&' && (i+1 >= len(s) || s[i+1] != '>') && (i == 0 || s[i-1] != '>') {
+			flush()
+			i++
+			continue
+		}
+		if c == ';' || c == '|' || c == '\n' {
+			flush()
+			i++
+			continue
+		}
+		buf.WriteByte(c)
 		i++
 	}
-	if buf.Len() > 0 {
-		result = append(result, buf.String())
-	}
+	flush()
 	return result
 }
 
@@ -923,37 +978,23 @@ func tokenize(s string) ([]string, []string) {
 	var tokens []string
 	var procSubs []string
 	var buf strings.Builder
-	inSingle, inDouble := false, false
-	inBacktick := false
-	parenDepth := 0
+	// escapeUnquoted=false: outside double quotes a backslash stays a plain byte of
+	// the token (tokenize has never collapsed `\(`/`\ ` in bare context).
+	sc := newShellScanner(false)
 	i := 0
 	for i < len(s) {
+		// Quoting / command-substitution bytes are inert here: copy them verbatim and
+		// let the shared scanner own the state, so a quoted `(`/`)`/space inside a
+		// $(...) cannot break the token apart (pg2-3ggxm).
+		if n := sc.advance(s, i); n > 0 {
+			_, _ = buf.WriteString(s[i : i+n])
+			i += n
+			continue
+		}
 		c := s[i]
-		switch {
-		case c == '\'' && !inDouble && !inBacktick && parenDepth == 0:
-			inSingle = !inSingle
-			buf.WriteByte(c)
-		case c == '"' && !inSingle && !inBacktick && parenDepth == 0:
-			inDouble = !inDouble
-			buf.WriteByte(c)
-		case c == '\\' && inDouble && i+1 < len(s):
-			buf.WriteByte(c)
-			i++
-			buf.WriteByte(s[i])
-		case c == '`' && !inSingle:
-			inBacktick = !inBacktick
-			buf.WriteByte(c)
-		case c == '$' && !inSingle && i+1 < len(s) && s[i+1] == '(':
-			parenDepth++
-			buf.WriteByte(c)
-			buf.WriteByte(s[i+1])
-			i++
-		case c == ')' && !inSingle && parenDepth > 0:
-			parenDepth--
-			buf.WriteByte(c)
-		case !inSingle && !inDouble && !inBacktick && parenDepth == 0 &&
-			(c == '<' || c == '>') && i+1 < len(s) && s[i+1] == '(':
-			// Process substitution: <(cmd) or >(cmd)
+		// Process substitution: <(cmd) or >(cmd) — top level only, which is exactly
+		// where the scanner declines the '<'/'>'.
+		if (c == '<' || c == '>') && i+1 < len(s) && s[i+1] == '(' {
 			depth := 1
 			start := i + 2
 			j := start
@@ -969,20 +1010,22 @@ func tokenize(s string) ([]string, []string) {
 			if depth == 0 {
 				procSubs = append(procSubs, s[start:j-1])
 				_, _ = buf.WriteString("/dev/fd/63")
-				i = j - 1 // loop will i++
-			} else {
-				buf.WriteByte(c) // malformed, pass through
+				i = j
+				continue
 			}
-		case inSingle || inDouble || inBacktick || parenDepth > 0:
-			buf.WriteByte(c)
-		case c == ' ' || c == '\t':
+			buf.WriteByte(c) // malformed, pass through
+			i++
+			continue
+		}
+		if c == ' ' || c == '\t' {
 			if buf.Len() > 0 {
 				tokens = append(tokens, unquote(buf.String()))
 				buf.Reset()
 			}
-		default:
-			buf.WriteByte(c)
+			i++
+			continue
 		}
+		buf.WriteByte(c)
 		i++
 	}
 	if buf.Len() > 0 {
@@ -1241,12 +1284,46 @@ func HasUnsafeCommandSubstitution(s string) bool {
 	return false
 }
 
+// isEnvAssign reports whether s is a NAME=VALUE environment assignment. It is the
+// single gate in front of newEnvAssignment (which indexes raw[:eq] with no bounds
+// check), so all four call sites — commandStartOffset, liftAssignmentArgs and
+// extractExecAndArgs — share one definition of "assignment".
+//
+// The NAME must be a valid shell identifier. Without that check ANY token
+// containing an '=' was accepted, so a command FRAGMENT produced by a scanner
+// desync (pg2-3ggxm) was lifted into EnvVars as a phantom assignment whose "name"
+// was raw shell text — escalated to Ask by the env-var rule and echoed into the
+// user-facing prompt. This is defense-in-depth behind the quote-aware scanners:
+// a real assignment always has a valid identifier, so the guard can never mask a
+// legitimate one. It also subsumes the former leading-'-' check, since '-' is not
+// a valid identifier start.
 func isEnvAssign(s string) bool {
-	if strings.HasPrefix(s, "-") {
+	eq := strings.Index(s, "=")
+	if eq <= 0 {
 		return false
 	}
-	eq := strings.Index(s, "=")
-	return eq > 0
+	return isValidEnvName(s[:eq])
+}
+
+// isValidEnvName reports whether name matches ^[A-Za-z_][A-Za-z0-9_]*$, tolerating
+// the single trailing '+' of the bash append form NAME+=VALUE (newEnvAssignment
+// normalizes that suffix away, so the guard must accept it or `export
+// LD_PRELOAD+=…` would stop being seen as an assignment).
+func isValidEnvName(name string) bool {
+	name = strings.TrimSuffix(name, "+")
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'):
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func NormalizeExecutable(executable, projectRoot, cwd string) string {

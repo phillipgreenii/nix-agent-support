@@ -1,11 +1,50 @@
 package envvars
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
+
+// maxReasonNameLen bounds the rendered length of a variable NAME echoed into a
+// user-facing permissionDecisionReason.
+const maxReasonNameLen = 64
+
+// sanitizeReasonName renders an env var NAME safe to embed in a
+// permissionDecisionReason: control characters are escaped and the result is
+// truncated. Reason strings are shown to the user as a single-line permission
+// prompt, so an embedded newline (or an ANSI escape) in the NAME would corrupt or
+// spoof that prompt — and the pg2-3ggxm parser desync produced exactly that: a
+// phantom "name" that was a multi-line command fragment, emitted verbatim by the
+// live hook. This is defense-in-depth: a real variable name is a short identifier
+// and passes through unchanged, so no legitimate reason string is altered, and no
+// future parse defect can render a command fragment into a prompt.
+func sanitizeReasonName(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if b.Len() >= maxReasonNameLen {
+			_, _ = b.WriteString("...")
+			break
+		}
+		switch {
+		case r == '\n':
+			_, _ = b.WriteString(`\n`)
+		case r == '\r':
+			_, _ = b.WriteString(`\r`)
+		case r == '\t':
+			_, _ = b.WriteString(`\t`)
+		case !unicode.IsPrint(r):
+			_, _ = fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			_, _ = b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 // injectorVars are environment variables whose assignment is GUARANTEED to be a
 // code-injection / library-preload vector regardless of value: setting one
@@ -99,13 +138,13 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	case injectorVars[ev.Name] || strings.HasPrefix(ev.Name, "BASH_FUNC_"):
 		result = hookio.RuleResult{
 			Decision: hookio.Reject,
-			Reason:   "refusing to set code-injection env var: " + ev.Name,
+			Reason:   "refusing to set code-injection env var: " + sanitizeReasonName(ev.Name),
 			Module:   name,
 		}
 	case askVars[ev.Name]:
 		result = hookio.RuleResult{
 			Decision: hookio.Ask,
-			Reason:   "setting sensitive env var requires confirmation: " + ev.Name,
+			Reason:   "setting sensitive env var requires confirmation: " + sanitizeReasonName(ev.Name),
 			Module:   name,
 		}
 	}
@@ -123,7 +162,7 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 	if ev.Expansion == cmdparse.ExpansionUnknown {
 		result = hookio.MostRestrictive(result, hookio.RuleResult{
 			Decision: hookio.Ask,
-			Reason:   "env var value contains an unevaluated/unsafe expression: " + ev.Name,
+			Reason:   "env var value contains an unevaluated/unsafe expression: " + sanitizeReasonName(ev.Name),
 			Module:   name,
 		})
 		if r.exprEval != nil {
