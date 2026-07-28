@@ -87,22 +87,34 @@ sqlite3 "$DB" -header -column \
 
 ## Rule Modules
 
-Rules are evaluated in order; first non-ABSTAIN wins:
+Rules are evaluated in order; first non-ABSTAIN wins (Bash compounds fold most-restrictive-wins):
 
-1. **secrets** -- prompts (ASK) before any tool touches a well-known credential/secret path (`.credentials`, `auth.json`, `secrets/**`, `.ssh/**`, `.env`, `*token*.json`) so such reads are never silently approved
-2. **envvars** -- dangerous environment variables
-3. **webfetch** -- WebFetch to allowed hosts
-4. **claudetools** -- AskQuestion, Glob, Grep, etc.
-5. **pathsafety** -- file operations with path-based policies
-6. **mcp** -- MCP tool allowlist + read-only-verb approval (search/get/list/read/fetch/check); mutating verbs (create/edit/update/delete/…) abstain
-7. **primary-commit** -- Reject a `git commit` on the canonical clone's primary branch in an auto-approving (`bypassPermissions`) session; Abstain otherwise.
-8. **git** -- git subcommands
-9. **gh** -- GitHub CLI; `gh pr merge` (immediate) → Reject, `gh pr merge --auto` → Abstain
-10. **monorepo** -- monorepo bin commands
-11. **safecmds** -- safe commands with path checks
-12. **curl** -- read-only curl to allowed domains
-13. **kubectl** -- Kubernetes operations
-14. **buildtools** -- gradle, pre-commit, bats, etc.
+1. **config-rules** -- consumer `rules.json` basename allow/block
+2. **git-directory** -- Reject any read/write inside a `.git/` directory (Bash + file/search tools)
+3. **dangerous-commands** -- blanket Reject of inherently dangerous commands (`sudo`, `su`, `doas`, `dd`, `mkfs*`, `fdisk`, `parted`, `mount`, `umount`, `reboot`, `shutdown`, `halt`, `poweroff`, `wget`, `nc`/`ncat`/`netcat`, `telnet`, `sftp`)
+4. **path-traversal** -- Ask (human-in-the-loop) on a Bash command containing a `../..` traversal escape
+5. **secrets** -- prompts (ASK) before any tool touches a well-known credential/secret path (`.credentials`, `auth.json`, `secrets/**`, `.ssh/**`, `.env`, `*token*.json`) so such reads are never silently approved
+6. **envvars** -- dangerous environment variables
+7. **assume** -- Reject AWS `assume` (assume-role)
+8. **webfetch** -- WebFetch to allowed hosts
+9. **claudetools** -- AskQuestion, Glob, Grep, BashOutput (read-only approve), etc.
+10. **killshell** -- KillShell: approve terminating an agent-owned tracked background shell, else Ask
+11. **pathsafety** -- file operations with path-based policies
+12. **mcp** -- MCP tool allowlist + read-only-verb approval (search/get/list/read/fetch/check); mutating verbs (create/edit/update/delete/…) abstain
+13. **primary-commit** -- Reject a `git commit` on the canonical clone's primary branch in an auto-approving (`bypassPermissions`) session; Abstain otherwise.
+14. **git** -- git subcommands
+15. **gh** -- GitHub CLI; `gh pr merge` (immediate) → Reject, `gh pr merge --auto` → Abstain
+16. **monorepo** -- monorepo bin commands
+17. **nix** / **docker** -- nix and docker policies (mount-aware inner eval)
+18. **safecmds** -- safe commands with path checks
+19. **curl** -- read-only curl to allowed domains
+20. **ssh** -- config-driven ssh/scp classification (user allowlist / read-only / secret-path / password-auth); Abstains until configured (WS3 supplies data)
+21. **vault** -- config-driven Vault read/write verb split (read → approve, write → ask); Abstains until configured (WS3 supplies data)
+22. **kubectl** -- Kubernetes operations
+23. **buildtools** -- gradle, pre-commit, bats, etc.
+24. **sqlite3** -- sqlite3 read/write/DDL classification
+
+Background-shell tracking: on **PostToolUse** of a `run_in_background` Bash call, the resulting shell id is recorded (SQLite `background_shells` table, `internal/asklog`) so the **killshell** rule can verify ownership.
 
 ## Dependencies
 

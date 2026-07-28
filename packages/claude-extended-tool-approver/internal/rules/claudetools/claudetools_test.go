@@ -20,6 +20,8 @@ func TestClaudeTools_ApprovedTools(t *testing.T) {
 		// First-party agent-control / read-only tools (pg2-9cist)
 		"Monitor", "StructuredOutput", "ScheduleWakeup", "TaskStop", "SendMessage",
 		"EnterWorktree", "TaskList", "Workflow", "TaskGet", "ReportFindings",
+		// BashOutput is read-only (retrieves background-shell output) — approved.
+		"BashOutput",
 	}
 	r := New()
 	for _, tool := range approved {

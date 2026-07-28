@@ -425,6 +425,27 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version: 6,
+		up: func(tx *sql.Tx) error {
+			// background_shells tracks agent-spawned background shells so the
+			// KillShell rule can verify ownership (hook-support parity). A row is
+			// inserted on PostToolUse of a `run_in_background` Bash call; the
+			// killshell rule reads creator back on a KillShell PreToolUse. creator
+			// is always 'agent' today (ceta only ever records shells IT saw the
+			// agent spawn), but the column keeps the shape open for future
+			// user/unknown classification.
+			_, err := tx.Exec(`
+			CREATE TABLE background_shells (
+				shell_id    TEXT PRIMARY KEY,
+				session_id  TEXT,
+				creator     TEXT NOT NULL DEFAULT 'agent',
+				created_at  TEXT NOT NULL
+			);
+			`)
+			return err
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {

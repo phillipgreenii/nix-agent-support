@@ -10,25 +10,45 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/claudetools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/dangerouscmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gitdir"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/kubectl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/mcp"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathtraversal"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
+	sshrule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/ssh"
+	vaultrule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/vault"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
 )
 
 // NewEngineForCWD constructs a fully-configured engine for the given CWD.
-// Used by both the hook handler and the evaluate subcommand.
+// Used by the evaluate subcommand (offline replay) and by the hook handler when
+// no persistent shell store is available. The killshell rule then has no
+// ownership store and fails secure (Ask).
 func NewEngineForCWD(cwd string) *engine.Engine {
+	return newEngineForCWD(cwd, nil)
+}
+
+// NewEngineForCWDWithShellStore is like NewEngineForCWD but injects a persistent
+// shell-ownership store into the killshell rule, so KillShell of an
+// agent-tracked background shell is auto-approved. The live PreToolUse handler
+// uses this once it has opened the ask-log store.
+func NewEngineForCWDWithShellStore(cwd string, shells killshell.ShellStore) *engine.Engine {
+	return newEngineForCWD(cwd, shells)
+}
+
+func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 	projectRoot := patheval.DetectProjectRoot(cwd)
 	pe := patheval.NewWithCWD(projectRoot, cwd)
 
@@ -51,6 +71,14 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 
 	eng.RegisterRules(
 		configrules.NewFromConfig(cfg),
+		// Generic security validators run in an early band — after the consumer
+		// configrules (so an explicit consumer decision still wins) but before the
+		// generic path/command approvers, so a `.git`/dangerous/traversal command
+		// is never silently approved by pathsafety or safe-commands (hook-support
+		// parity). first-match-wins makes ordering the override.
+		gitdir.New(),
+		dangerouscmds.New(),
+		pathtraversal.New(),
 		// secrets runs early (after consumer configrules, before the generic
 		// path/command approvers) so a credential/secret-path reference is
 		// prompted (Ask) instead of being silently approved by pathsafety or
@@ -64,6 +92,11 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		assume.New(),
 		new(webfetch.Rule),
 		claudetools.New(),
+		// killshell gates the (non-Bash) KillShell tool by shell ownership. It is
+		// harmless for every other tool (Abstain), and claudetools already Abstains
+		// on KillShell, so ordering here is safe. shells may be nil (offline replay
+		// / no store) — the rule then fails secure (Ask).
+		killshell.New(shells),
 		pathsafety.New(pe),
 		mcp.New(),
 		primarycommit.New(primarycommit.NewFileResolver()),
@@ -74,6 +107,13 @@ func NewEngineForCWD(cwd string) *engine.Engine {
 		dockerRule,
 		safecmds.New(pe),
 		curl.New(),
+		// ssh and vault are config-driven MECHANISMS (kubectl/buildtools template).
+		// They Abstain on an empty config, so with no injected data they defer.
+		// WS3: wire the rules.json-loaded ssh/vault policy data into these New()
+		// calls (e.g. sshrule.New(cfg.Ssh) / vaultrule.New(cfg.Vault)); this bead
+		// deliberately ships only the mechanism with a safe Abstain default.
+		sshrule.New(sshrule.Config{}),
+		vaultrule.New(vaultrule.Config{}),
 		kubectl.New(eng, pe, cfg.Kubectl),
 		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),

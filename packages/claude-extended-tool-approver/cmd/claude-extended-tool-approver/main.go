@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/inputproc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/sandboxdetect"
@@ -151,7 +152,24 @@ func projectDirForDetect(input *hookio.HookInput) string {
 }
 
 func handlePreToolUse(input *hookio.HookInput) {
-	eng := setup.NewEngineForCWD(input.CWD)
+	// Open the ask-log store first so it can double as the killshell rule's
+	// shell-ownership store. If it fails to open, fall back to a storeless engine
+	// (killshell then fails secure → Ask).
+	var store *asklog.Store
+	if s, err := asklog.NewStore(asklog.DefaultDBPath()); err == nil {
+		store = s
+		defer func() { _ = store.Close() }()
+		store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
+	} else {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
+	}
+
+	var eng *engine.Engine
+	if store != nil {
+		eng = setup.NewEngineForCWDWithShellStore(input.CWD, store)
+	} else {
+		eng = setup.NewEngineForCWD(input.CWD)
+	}
 	result := eng.EvaluateHook(input)
 
 	var updatedInput map[string]interface{}
@@ -166,14 +184,10 @@ func handlePreToolUse(input *hookio.HookInput) {
 		}
 	}
 
-	if store, err := asklog.NewStore(asklog.DefaultDBPath()); err == nil {
-		defer func() { _ = store.Close() }()
-		store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
+	if store != nil {
 		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 		}
-	} else {
-		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
 	}
 
 	output := hookio.FormatOutput(result, updatedInput)
@@ -212,6 +226,12 @@ func handlePostToolUse(input *hookio.HookInput) {
 	defer func() { _ = store.Close() }()
 
 	if err := asklog.ResolveApproved(store, input, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+	}
+	// Track agent-spawned background shells (Bash run_in_background) so the
+	// killshell rule can later verify ownership (hook-support parity). No-op for
+	// any non-background / non-Bash event.
+	if err := asklog.RegisterBackgroundShellFromPost(store, input); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 	}
 	fmt.Println("{}")
