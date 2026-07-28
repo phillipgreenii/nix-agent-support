@@ -1,3 +1,23 @@
+// Package curl is a config-driven MECHANISM for approving read-only (and
+// explicitly whitelisted) curl requests. It follows the kubectl/buildtools
+// template: the classification logic lives here in ceta-core, and the
+// consumer-specific domain DATA (allowed domain suffixes + per-domain HTTP
+// methods) arrives via an injected configrules.CurlConfig — the rules.json
+// `curl` block, wired in by internal/setup/factory.go.
+//
+// The rule only ever Approves or Abstains; a non-matching request Abstains
+// (defers to Claude). A request is Approved when EVERY URL it targets is
+// allowed for its effective HTTP method:
+//   - a base generic host (localhost/loopback, well-known GitHub read hosts) or
+//     a configured AllowedDomainSuffixes domain, with a read-only method
+//     (GET/HEAD); OR
+//   - a configured DomainMethods domain whose Methods include the effective
+//     method (the mechanism for allowing, e.g., a POST to an internal API).
+//
+// SAFE DEFAULT: with an empty config only the base generic hosts are approved
+// (read-only). Before this wiring the consumer domain list was an empty
+// hardcoded slice with no loading path — the live bug this rule fixes: consumer
+// domains now flow in from rules.json instead of being unreachable.
 package curl
 
 import (
@@ -7,44 +27,83 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
-// allowedDomainSuffixes lists domain suffixes whose endpoints may be fetched
-// without user confirmation. Matched as hostname suffix (with leading dot to
-// avoid partial-label matches). Consumer-specific domains belong in
-// $XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json.
-var allowedDomainSuffixes = []string{}
-
-// allowedExactHosts lists hostnames that are allowed via exact match
-// (not suffix match), such as localhost and loopback addresses.
-var allowedExactHosts = []string{
-	"localhost",
-	"127.0.0.1",
-	"github.com",
-	"raw.githubusercontent.com",
-	"api.github.com",
+// baseExactHosts lists hostnames allowed via exact match (not suffix match) for
+// read-only requests. These are generic developer defaults (loopback + the
+// well-known GitHub read endpoints), NOT consumer-specific — consumer domains
+// belong in the rules.json `curl` block.
+var baseExactHosts = map[string]bool{
+	"localhost":                 true,
+	"127.0.0.1":                 true,
+	"github.com":                true,
+	"raw.githubusercontent.com": true,
+	"api.github.com":            true,
 }
 
-// allowedHostSuffixes lists hostname suffixes for localhost-like domains.
-var allowedHostSuffixes = []string{
+// baseHostSuffixes lists hostname suffixes for localhost-like domains, allowed
+// for read-only requests.
+var baseHostSuffixes = []string{
 	".localhost",
 }
 
-// writeFlagSet contains curl flags that imply a non-read-only request (POST,
-// PUT, PATCH, DELETE, or upload). The presence of any of these causes the rule
-// to abstain so the user is prompted.
-var writeFlagSet = map[string]bool{
-	"-d": true, "--data": true, "--data-raw": true,
-	"--data-binary": true, "--data-urlencode": true,
-	"-F": true, "--form": true, "--form-string": true,
-	"-T": true, "--upload-file": true,
-	"--json": true,
+// shortBodyFlags are curl short flags that carry a request body / upload (-d
+// data, -F form, -T upload-file). Their value may be a separate token (`-d x`)
+// or glued to the flag (`-dx`), so they are matched by PREFIX, not exact token
+// equality — an earlier exact-only match let glued forms (`-Tfile`, `-dhello`,
+// `-Ffield=val`) slip through as GET and get approved to an allowlisted domain.
+// This closes that write-method bypass now that WS3 makes the domain list live.
+var shortBodyFlags = []string{"-d", "-F", "-T"}
+
+// longBodyFlags are curl long options that carry a request body / upload. Their
+// value may be a separate token (`--data x`) or attached with `=`
+// (`--data=x`) — the `=` form is likewise matched after stripping the value.
+var longBodyFlags = map[string]bool{
+	"--data": true, "--data-raw": true, "--data-binary": true,
+	"--data-urlencode": true, "--form": true, "--form-string": true,
+	"--upload-file": true, "--json": true,
 }
 
-type Rule struct{}
+// isBodyFlag reports whether tok is a body/upload flag in any of curl's accepted
+// spellings (short spaced/glued, or long spaced/`=`).
+func isBodyFlag(tok string) bool {
+	for _, f := range shortBodyFlags {
+		if strings.HasPrefix(tok, f) {
+			return true
+		}
+	}
+	name := tok
+	if i := strings.IndexByte(tok, '='); i >= 0 {
+		name = tok[:i]
+	}
+	return longBodyFlags[name]
+}
 
-func New() *Rule {
-	return &Rule{}
+type domainMethods struct {
+	suffix  string
+	methods map[string]bool
+}
+
+type Rule struct {
+	allowedDomainSuffixes []string
+	domainMethods         []domainMethods
+}
+
+// New constructs the curl rule from cfg (the rules.json `curl` block). A zero
+// cfg yields the base generic hosts only.
+func New(cfg configrules.CurlConfig) *Rule {
+	r := &Rule{
+		allowedDomainSuffixes: cfg.AllowedDomainSuffixes,
+	}
+	for _, dm := range cfg.DomainMethods {
+		methods := make(map[string]bool, len(dm.Methods))
+		for _, m := range dm.Methods {
+			methods[strings.ToUpper(m)] = true
+		}
+		r.domainMethods = append(r.domainMethods, domainMethods{suffix: dm.DomainSuffix, methods: methods})
+	}
+	return r
 }
 
 func (r *Rule) Name() string {
@@ -67,10 +126,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			continue
 		}
 		foundCurl = true
-		if !isReadOnly(pc.Args) {
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
-		}
-		if !allURLsAllowed(pc.Args) {
+		if !r.allURLsAllowed(pc.Args) {
 			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 		}
 	}
@@ -79,41 +135,45 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	}
 	return hookio.RuleResult{
 		Decision: hookio.Approve,
-		Reason:   "curl: read-only request to allowed domain",
+		Reason:   "curl: allowed request to allowed domain",
 		Module:   r.Name(),
 	}
 }
 
-// isReadOnly returns false if any arg signals a write operation.
-func isReadOnly(args []string) bool {
+// effectiveMethod returns the uppercase HTTP method curl would use: an explicit
+// method (-X/--request, spaced `-X POST`, glued `-XPOST`, or `--request=POST`)
+// wins; otherwise a request-body/upload flag (in any spelling) implies POST;
+// otherwise GET.
+func effectiveMethod(args []string) string {
+	hasBody := false
 	for i, a := range args {
-		if writeFlagSet[a] {
-			return false
-		}
-		// -X POST / --request DELETE etc.
 		if a == "-X" || a == "--request" {
 			if i+1 < len(args) {
-				method := strings.ToUpper(args[i+1])
-				if method != "GET" && method != "HEAD" {
-					return false
-				}
+				return strings.ToUpper(args[i+1])
 			}
 		}
-		// combined form: -XPOST
+		if m, ok := strings.CutPrefix(a, "--request="); ok {
+			return strings.ToUpper(m)
+		}
 		if strings.HasPrefix(a, "-X") && len(a) > 2 {
-			method := strings.ToUpper(a[2:])
-			if method != "GET" && method != "HEAD" {
-				return false
-			}
+			return strings.ToUpper(a[2:])
+		}
+		if isBodyFlag(a) {
+			hasBody = true
 		}
 	}
-	return true
+	if hasBody {
+		return "POST"
+	}
+	return "GET"
 }
 
-// allURLsAllowed returns true when every URL argument targets an allowed domain.
-// Returns false if a URL targets a non-allowed domain, or if no URL is found
-// (safety: don't approve a curl with no recognisable URL).
-func allURLsAllowed(args []string) bool {
+// allURLsAllowed returns true when at least one URL argument is present and
+// every URL argument is allowed for the command's effective method. Returns
+// false if no URL is found (safety: don't approve a curl with no recognisable
+// URL).
+func (r *Rule) allURLsAllowed(args []string) bool {
+	method := effectiveMethod(args)
 	found := false
 	for _, a := range args {
 		if !strings.HasPrefix(a, "http://") && !strings.HasPrefix(a, "https://") {
@@ -124,29 +184,56 @@ func allURLsAllowed(args []string) bool {
 		if err != nil {
 			return false
 		}
-		if !isDomainAllowed(u.Hostname()) {
+		if !r.hostAllowed(u.Hostname(), method) {
 			return false
 		}
 	}
 	return found
 }
 
-func isDomainAllowed(host string) bool {
+// hostAllowed reports whether host may be requested with the given uppercase
+// HTTP method.
+func (r *Rule) hostAllowed(host, method string) bool {
 	host = strings.ToLower(host)
-	for _, exact := range allowedExactHosts {
-		if host == exact {
+	readOnly := method == "GET" || method == "HEAD"
+
+	if readOnly {
+		if baseExactHosts[host] {
 			return true
 		}
-	}
-	for _, suffix := range allowedDomainSuffixes {
-		if strings.HasSuffix(host, suffix) {
-			return true
+		for _, suffix := range baseHostSuffixes {
+			if strings.HasSuffix(host, suffix) {
+				return true
+			}
+		}
+		for _, dom := range r.allowedDomainSuffixes {
+			if matchesDomain(host, dom) {
+				return true
+			}
 		}
 	}
-	for _, suffix := range allowedHostSuffixes {
-		if strings.HasSuffix(host, suffix) {
+	// Per-domain method grants apply to ANY method (including read-only, which is
+	// why an all-read-only DomainMethods entry is a valid, if redundant, way to
+	// spell an allowed read domain).
+	for _, dm := range r.domainMethods {
+		if matchesDomain(host, dm.suffix) && dm.methods[method] {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesDomain reports whether host matches a configured domain entry. An entry
+// WITHOUT a leading dot (e.g. "nixos.org") matches the apex itself AND its
+// subdomains; an entry WITH a leading dot (e.g. ".internal.example") matches
+// subdomains ONLY. The leading-dot form is what prevents a partial-label match
+// (e.g. "notnixos.org" must not match "nixos.org").
+func matchesDomain(host, entry string) bool {
+	if entry == "" {
+		return false
+	}
+	if strings.HasPrefix(entry, ".") {
+		return strings.HasSuffix(host, entry)
+	}
+	return host == entry || strings.HasSuffix(host, "."+entry)
 }

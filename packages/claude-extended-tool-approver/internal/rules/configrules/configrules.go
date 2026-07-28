@@ -14,15 +14,101 @@ import (
 //
 // It is the single, auditable home for every consumer-specific (non-generic)
 // rule extension. The flat approvedCommands/blockedCommands drive the
-// config-rules Rule itself; the structured Kubectl and Buildtools sub-configs
-// are loaded once and INJECTED (dependency injection) into the kubectl and
-// build-tools rules by internal/setup/factory.go, so those rules stay generic
-// in the base and become consumer-aware only via this config (ADR 0033).
+// config-rules Rule itself; the structured Kubectl, Buildtools, Ssh, Vault,
+// Curl, and Monorepo sub-configs are loaded once and INJECTED (dependency
+// injection) into their respective rules by internal/setup/factory.go, so those
+// rules stay generic in the base and become consumer-aware only via this config
+// (ADR 0033). Every structured block is DATA only — the classification MECHANISM
+// lives in the rule package; an absent/empty block leaves the rule at its safe
+// base default (Abstain for the command-aware ssh/vault/curl/monorepo rules).
 type Config struct {
 	ApprovedCommands []string         `json:"approvedCommands"`
 	BlockedCommands  []string         `json:"blockedCommands"`
 	Kubectl          KubectlConfig    `json:"kubectl"`
 	Buildtools       BuildtoolsConfig `json:"buildtools"`
+	Ssh              SshConfig        `json:"ssh"`
+	Vault            VaultConfig      `json:"vault"`
+	Curl             CurlConfig       `json:"curl"`
+	Monorepo         MonorepoConfig   `json:"monorepo"`
+}
+
+// SshConfig carries the consumer-specific ssh/scp policy DATA injected into the
+// ssh rule. Every field is data-only; the classification MECHANISM lives in the
+// ssh rule. An empty SshConfig makes the ssh rule Abstain on every command (the
+// safe base default) — a consumer must supply data for the rule to classify.
+type SshConfig struct {
+	// AllowedUsers are the ssh/scp login users that may be targeted (e.g.
+	// "deploy"). An explicit user outside this set is Rejected.
+	AllowedUsers []string `json:"allowedUsers"`
+	// ReadonlyCommands are remote executable basenames considered read-only
+	// (e.g. "ls", "cat", "systemctl").
+	ReadonlyCommands []string `json:"readonlyCommands"`
+	// ReadonlySubcommands restricts a read-only command to specific first
+	// subcommands (e.g. "systemctl" -> ["status","is-active"]). A command absent
+	// from this map is read-only for any subcommand.
+	ReadonlySubcommands map[string][]string `json:"readonlySubcommands"`
+	// SecretPathPatterns are substrings that mark a referenced remote path as
+	// secret (e.g. "/etc/shadow", "id_rsa", ".env"); a match forces Ask.
+	SecretPathPatterns []string `json:"secretPathPatterns"`
+	// PasswordFlagPatterns are lowercased `key=value` substrings that mark an
+	// -o option as enabling password auth (e.g. "passwordauthentication=yes");
+	// a match forces Reject.
+	PasswordFlagPatterns []string `json:"passwordFlagPatterns"`
+}
+
+// VaultConfig carries the consumer-specific HashiCorp Vault verb DATA injected
+// into the vault rule. An empty VaultConfig makes the vault rule Abstain on
+// every command (the safe base default).
+type VaultConfig struct {
+	// ReadVerbs are vault subcommands (single token like "read", or an
+	// "a b" compound like "kv get") approved as read-only.
+	ReadVerbs []string `json:"readVerbs"`
+	// WriteVerbs are vault subcommands (single token or compound) that require
+	// approval (Ask).
+	WriteVerbs []string `json:"writeVerbs"`
+}
+
+// CurlConfig carries the consumer-specific curl domain DATA injected into the
+// curl rule. An empty CurlConfig leaves only the base generic hosts
+// (localhost/loopback and the well-known GitHub read hosts) approved for
+// read-only requests. The curl rule only ever Approves or Abstains — it never
+// Rejects/Asks; a non-matching request Abstains (defers to Claude).
+type CurlConfig struct {
+	// AllowedDomainSuffixes name domains whose endpoints may be fetched with a
+	// read-only method (GET/HEAD) without confirmation. An entry without a
+	// leading dot (e.g. "nixos.org") matches the domain itself AND its
+	// subdomains; an entry WITH a leading dot (e.g. ".internal.example") matches
+	// subdomains ONLY (never the bare apex).
+	AllowedDomainSuffixes []string `json:"allowedDomainSuffixes"`
+	// DomainMethods grant additional (possibly non-read-only) HTTP methods to
+	// specific domains — the mechanism for allowing, e.g., a POST to an internal
+	// API. A request whose host matches a DomainSuffix and whose method is in
+	// that entry's Methods is Approved.
+	DomainMethods []CurlDomainMethods `json:"domainMethods"`
+}
+
+// CurlDomainMethods approves the listed HTTP Methods for hosts matching
+// DomainSuffix. DomainSuffix uses the same matching rule as
+// CurlConfig.AllowedDomainSuffixes (leading dot => subdomains only). Methods are
+// case-insensitive HTTP verbs (e.g. "GET", "POST").
+type CurlDomainMethods struct {
+	DomainSuffix string   `json:"domainSuffix"`
+	Methods      []string `json:"methods"`
+}
+
+// MonorepoConfig carries the consumer-specific monorepo command-boundary DATA
+// injected into the monorepo rule. An empty MonorepoConfig makes the monorepo
+// rule Abstain on every command (the safe base default).
+type MonorepoConfig struct {
+	// ApprovedCommands are monorepo command/script basenames approved
+	// unconditionally (after normalizing the executable relative to the project
+	// root), e.g. "tc", "uv".
+	ApprovedCommands []string `json:"approvedCommands"`
+	// DangerousEnvByWrapper maps an approved command basename to a set of env
+	// var names that, when present as an inline assignment, cause the approval to
+	// be withheld (Abstain, deferred to Claude) — e.g. a wrapper that honors a
+	// dangerous override var.
+	DangerousEnvByWrapper map[string][]string `json:"dangerousEnvByWrapper"`
 }
 
 // KubectlConfig carries consumer-specific kc/kubectl extensions injected into

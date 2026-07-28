@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
 func mustJSON(cmd string) json.RawMessage {
@@ -13,7 +14,7 @@ func mustJSON(cmd string) json.RawMessage {
 }
 
 func TestSSH_EmptyConfigAbstains(t *testing.T) {
-	r := New(Config{})
+	r := New(configrules.SshConfig{})
 	// Even a command that a configured rule would DENY must Abstain when the rule
 	// is unconfigured (safe WS2 default; WS3 supplies the data).
 	for _, cmd := range []string{
@@ -35,8 +36,8 @@ func TestSSH_EmptyConfigAbstains(t *testing.T) {
 }
 
 func TestSSH_Configured(t *testing.T) {
-	cfg := Config{
-		AllowedUsers:     []string{"tcadmin"},
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"deploy"},
 		ReadonlyCommands: []string{"ls", "cat", "systemctl"},
 		ReadonlySubcommands: map[string][]string{
 			"systemctl": {"status", "is-active"},
@@ -51,7 +52,7 @@ func TestSSH_Configured(t *testing.T) {
 		want    hookio.Decision
 	}{
 		{"readonly ssh approved", "ssh host ls -la", hookio.Approve},
-		{"allowed user approved", "ssh tcadmin@host cat /tmp/log", hookio.Approve},
+		{"allowed user approved", "ssh deploy@host cat /tmp/log", hookio.Approve},
 		{"readonly subcommand approved", "ssh host systemctl status sshd", hookio.Approve},
 		{"non-allowlisted subcommand asks", "ssh host systemctl restart sshd", hookio.Ask},
 		{"disallowed user rejected", "ssh root@host ls", hookio.Reject},

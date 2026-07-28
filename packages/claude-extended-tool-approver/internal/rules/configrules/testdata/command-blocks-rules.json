@@ -1,0 +1,28 @@
+{
+  "ssh": {
+    "allowedUsers": ["deploy"],
+    "readonlyCommands": ["ls", "cat", "systemctl"],
+    "readonlySubcommands": {
+      "systemctl": ["status", "is-active"]
+    },
+    "secretPathPatterns": ["/etc/shadow", "id_rsa", ".env"],
+    "passwordFlagPatterns": [
+      "passwordauthentication=yes",
+      "preferredauthentications=password"
+    ]
+  },
+  "vault": {
+    "readVerbs": ["read", "status", "kv get", "kv list"],
+    "writeVerbs": ["write", "delete", "kv put"]
+  },
+  "curl": {
+    "allowedDomainSuffixes": [".internal.example", "example.org"],
+    "domainMethods": [
+      { "domainSuffix": ".internal.example", "methods": ["GET", "POST"] }
+    ]
+  },
+  "monorepo": {
+    "approvedCommands": ["tc", "uv"],
+    "dangerousEnvByWrapper": { "tc": ["TC_DANGER"] }
+  }
+}

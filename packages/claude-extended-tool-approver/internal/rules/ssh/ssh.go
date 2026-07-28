@@ -2,12 +2,13 @@
 // hook-support parity capability; SshCommandEvaluator). It follows the
 // kubectl/buildtools template: the evaluation logic lives here in ceta-core,
 // and all policy DATA (allowed users, read-only command allowlist, secret-path
-// patterns, password-auth flag patterns) arrives via an injected Config.
+// patterns, password-auth flag patterns) arrives via an injected
+// configrules.SshConfig — the rules.json `ssh` block, wired in by
+// internal/setup/factory.go.
 //
-// SAFE DEFAULT (WS2/WS3 seam): an empty Config makes the rule Abstain on every
-// command. Until WS3 wires the rules.json-loaded data in (see the `// WS3:`
-// marker in internal/setup/factory.go), the rule therefore never auto-approves
-// or blocks — it defers. Only once a consumer supplies data does the mechanism
+// SAFE DEFAULT: an empty config makes the rule Abstain on every command, so a
+// consumer that ships no `ssh` block never has ssh auto-approved or blocked by
+// this rule — it defers. Only once a consumer supplies data does the mechanism
 // classify.
 //
 // Mechanism (when configured):
@@ -29,26 +30,8 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
-
-// Config carries the consumer-specific ssh/scp policy DATA. Every field is
-// data-only; the MECHANISM lives in this package. A zero Config yields
-// Abstain-on-everything (the safe WS2 default).
-type Config struct {
-	// AllowedUsers are the ssh/scp users that may be targeted (e.g. "tcadmin").
-	// An explicit user outside this set is Rejected.
-	AllowedUsers []string
-	// ReadonlyCommands are remote executable basenames considered read-only.
-	ReadonlyCommands []string
-	// ReadonlySubcommands restricts a read-only command to specific first
-	// subcommands (e.g. "systemctl" -> {"status","is-active"}).
-	ReadonlySubcommands map[string][]string
-	// SecretPathPatterns are substrings that mark a remote path as secret.
-	SecretPathPatterns []string
-	// PasswordFlagPatterns are lowercased `key=value` substrings that mark an
-	// -o option as enabling password auth (e.g. "passwordauthentication=yes").
-	PasswordFlagPatterns []string
-}
 
 // sshValueFlags are ssh/scp short flags that consume the following token as
 // their value (so it is not mistaken for the host/positional).
@@ -68,9 +51,9 @@ type Rule struct {
 	passwordFlagPatterns []string
 }
 
-// New constructs the ssh rule from cfg. A zero cfg makes the rule Abstain on
-// every command (safe WS2 default).
-func New(cfg Config) *Rule {
+// New constructs the ssh rule from cfg (the rules.json `ssh` block). A zero cfg
+// makes the rule Abstain on every command (the safe base default).
+func New(cfg configrules.SshConfig) *Rule {
 	r := &Rule{
 		allowedUsers:         toSet(cfg.AllowedUsers),
 		readonlyCommands:     toSet(cfg.ReadonlyCommands),

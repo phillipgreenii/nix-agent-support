@@ -4,10 +4,11 @@
 // evaluation logic lives here in ceta-core, and the verb DATA (which
 // subcommands are reads vs writes) arrives via an injected Config.
 //
-// SAFE DEFAULT (WS2/WS3 seam): an empty Config makes the rule Abstain on every
-// command. Until WS3 wires the rules.json-loaded verbs in (see the `// WS3:`
-// marker in internal/setup/factory.go), the rule defers. Only once a consumer
-// supplies verbs does the mechanism classify:
+// SAFE DEFAULT: an empty config makes the rule Abstain on every command, so a
+// consumer that ships no `vault` block has vault deferred entirely. The verb
+// DATA arrives via an injected configrules.VaultConfig — the rules.json `vault`
+// block, wired in by internal/setup/factory.go. Only once a consumer supplies
+// verbs does the mechanism classify:
 //   - a read verb (e.g. read/status/version, "kv get") -> Approve;
 //   - a write verb (e.g. write/delete, "kv put") -> Ask;
 //   - any other/unknown subcommand -> Abstain (defer to mode/settings).
@@ -22,17 +23,8 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
-
-// Config carries the consumer-specific vault verb DATA. A zero Config yields
-// Abstain-on-everything (the safe WS2 default).
-type Config struct {
-	// ReadVerbs are vault subcommands (single token or "a b" compound) approved
-	// as read-only.
-	ReadVerbs []string
-	// WriteVerbs are vault subcommands that require approval (Ask).
-	WriteVerbs []string
-}
 
 type Rule struct {
 	configured bool
@@ -40,9 +32,9 @@ type Rule struct {
 	writeVerbs map[string]bool
 }
 
-// New constructs the vault rule from cfg. A zero cfg makes the rule Abstain on
-// every command (safe WS2 default).
-func New(cfg Config) *Rule {
+// New constructs the vault rule from cfg (the rules.json `vault` block). A zero
+// cfg makes the rule Abstain on every command (the safe base default).
+func New(cfg configrules.VaultConfig) *Rule {
 	return &Rule{
 		configured: len(cfg.ReadVerbs) > 0 || len(cfg.WriteVerbs) > 0,
 		readVerbs:  toSet(cfg.ReadVerbs),

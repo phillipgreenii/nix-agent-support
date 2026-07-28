@@ -104,15 +104,77 @@ Rules are evaluated in order; first non-ABSTAIN wins (Bash compounds fold most-r
 13. **primary-commit** -- Reject a `git commit` on the canonical clone's primary branch in an auto-approving (`bypassPermissions`) session; Abstain otherwise.
 14. **git** -- git subcommands
 15. **gh** -- GitHub CLI; `gh pr merge` (immediate) → Reject, `gh pr merge --auto` → Abstain
-16. **monorepo** -- monorepo bin commands
+16. **monorepo** -- config-driven monorepo command/script boundary (`monorepo` block: `approvedCommands` + `dangerousEnvByWrapper`); Abstains until configured
 17. **nix** / **docker** -- nix and docker policies (mount-aware inner eval)
-18. **safecmds** -- safe commands with path checks
-19. **curl** -- read-only curl to allowed domains
-20. **ssh** -- config-driven ssh/scp classification (user allowlist / read-only / secret-path / password-auth); Abstains until configured (WS3 supplies data)
-21. **vault** -- config-driven Vault read/write verb split (read → approve, write → ask); Abstains until configured (WS3 supplies data)
-22. **kubectl** -- Kubernetes operations
-23. **buildtools** -- gradle, pre-commit, bats, etc.
+18. **curl** -- config-driven curl approval (`curl` block: `allowedDomainSuffixes` read-only + per-domain `domainMethods`); base generic hosts (localhost/loopback, GitHub read hosts) approved read-only even with no config; only ever Approves or Abstains
+19. **ssh** -- config-driven ssh/scp classification (`ssh` block: user allowlist / read-only commands / secret-path / password-auth); Abstains until configured
+20. **vault** -- config-driven Vault read/write verb split (`vault` block: `readVerbs` → approve, `writeVerbs` → ask); Abstains until configured
+21. **safecmds** -- safe commands with path checks (runs AFTER curl/ssh/vault so a configured command-aware leaf is decided by its dedicated rule)
+22. **kubectl** -- Kubernetes operations (`kubectl` block extensions)
+23. **buildtools** -- gradle, pre-commit, bats, etc. (`buildtools` block extensions)
 24. **sqlite3** -- sqlite3 read/write/DDL classification
+
+### Consumer configuration (`rules.json`)
+
+Consumer-specific policy DATA lives in a single file at
+`$XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json` and is loaded once,
+then dependency-injected into the generic rules (ADR 0033). The base binary
+carries no consumer literals; every structured block is data-only, and an absent
+or empty block leaves its rule at the safe base default (the command-aware
+`ssh`/`vault`/`curl`/`monorepo` rules Abstain, deferring to Claude). Schema:
+
+```jsonc
+{
+  "approvedCommands": ["..."], // flat basename allow (config-rules rule)
+  "blockedCommands": ["..."], // flat basename block (Reject)
+  "kubectl": {
+    /* aliases, plugin verbs, dev-workspace scope */
+  },
+  "buildtools": {
+    "approvedTools": [],
+    "approvedScripts": [],
+    "verbScopedApprovals": [],
+  },
+
+  "ssh": {
+    "allowedUsers": ["deploy"],
+    "readonlyCommands": ["ls", "cat", "systemctl"],
+    "readonlySubcommands": { "systemctl": ["status", "is-active"] },
+    "secretPathPatterns": ["/etc/shadow", "id_rsa", ".env"],
+    "passwordFlagPatterns": ["passwordauthentication=yes"],
+  },
+  "vault": {
+    "readVerbs": ["read", "status", "kv get"],
+    "writeVerbs": ["write", "delete", "kv put"],
+  },
+  "curl": {
+    // domain WITHOUT leading dot => apex + subdomains; WITH leading dot => subdomains only.
+    "allowedDomainSuffixes": ["nixos.org", ".internal.example"],
+    // grant extra (possibly non-read-only) HTTP methods to specific domains.
+    "domainMethods": [
+      { "domainSuffix": ".internal.example", "methods": ["GET", "POST"] },
+    ],
+  },
+  "monorepo": {
+    "approvedCommands": ["tc", "uv"],
+    "dangerousEnvByWrapper": { "tc": ["TC_DANGER"] },
+  },
+}
+```
+
+- **ssh**: password-auth patterns / `sshpass` → Reject; a login user outside
+  `allowedUsers` → Reject; an interactive session, an unrecognized remote
+  command, a redirect/`tee`, or a `secretPathPatterns` match → Ask; a remote
+  command whose every segment is a `readonlyCommands` basename (honoring
+  `readonlySubcommands`) on a non-secret path → Approve.
+- **vault**: `readVerbs` → Approve, `writeVerbs` → Ask (single token or `"a b"`
+  compound, compound matched first); anything else → Abstain.
+- **curl**: a read-only method (GET/HEAD) to a base host or an
+  `allowedDomainSuffixes` domain → Approve; a `domainMethods` domain whose list
+  includes the request method → Approve; everything else → Abstain.
+- **monorepo**: an `approvedCommands` basename (after normalizing the executable
+  relative to the project root) → Approve, unless it carries an inline
+  assignment of one of its `dangerousEnvByWrapper` vars (→ Abstain).
 
 Background-shell tracking: on **PostToolUse** of a `run_in_background` Bash call, the resulting shell id is recorded (SQLite `background_shells` table, `internal/asklog`) so the **killshell** rule can verify ownership.
 

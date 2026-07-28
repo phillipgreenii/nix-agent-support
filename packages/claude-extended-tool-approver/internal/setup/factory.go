@@ -62,8 +62,9 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 	}
 
 	// Load the consumer config ONCE and inject its structured sub-configs into
-	// the kubectl and build-tools rules (DI, ADR 0033), so the base binary stays
-	// generic and all consumer specifics live in rules.json.
+	// the kubectl, build-tools, ssh, vault, curl, and monorepo rules (DI, ADR
+	// 0033), so the base binary stays generic and all consumer specifics live in
+	// rules.json.
 	cfg := configrules.Load(configrules.DefaultPath())
 
 	nixRule := nix.NewWithEvaluator(eng)
@@ -102,18 +103,21 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 		primarycommit.New(primarycommit.NewFileResolver()),
 		git.New(pe),
 		gh.New(gh.NewExecResolver()),
-		monorepo.New(pe),
+		monorepo.New(pe, cfg.Monorepo),
 		nixRule,
 		dockerRule,
-		safecmds.New(pe),
-		curl.New(),
-		// ssh and vault are config-driven MECHANISMS (kubectl/buildtools template).
+		// Command-aware classifiers (curl/ssh/vault) are config-driven MECHANISMS
+		// (kubectl/buildtools template) fed the rules.json ssh/vault/curl blocks.
 		// They Abstain on an empty config, so with no injected data they defer.
-		// WS3: wire the rules.json-loaded ssh/vault policy data into these New()
-		// calls (e.g. sshrule.New(cfg.Ssh) / vaultrule.New(cfg.Vault)); this bead
-		// deliberately ships only the mechanism with a safe Abstain default.
-		sshrule.New(sshrule.Config{}),
-		vaultrule.New(vaultrule.Config{}),
+		// They MUST precede safe-commands: once a consumer supplies data, a
+		// configured ssh/vault/curl leaf has to be decided by its dedicated rule,
+		// not pre-approved by safe-commands as a bare "safe command". safe-commands
+		// currently Abstains on these executables anyway, but ordering them first
+		// makes that guarantee explicit and robust against future safe-list drift.
+		curl.New(cfg.Curl),
+		sshrule.New(cfg.Ssh),
+		vaultrule.New(cfg.Vault),
+		safecmds.New(pe),
 		kubectl.New(eng, pe, cfg.Kubectl),
 		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),

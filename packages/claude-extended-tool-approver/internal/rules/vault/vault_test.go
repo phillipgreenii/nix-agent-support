@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
 )
 
 func mustJSON(cmd string) json.RawMessage {
@@ -13,7 +14,7 @@ func mustJSON(cmd string) json.RawMessage {
 }
 
 func TestVault_EmptyConfigAbstains(t *testing.T) {
-	r := New(Config{})
+	r := New(configrules.VaultConfig{})
 	for _, cmd := range []string{
 		"vault read secret/foo",
 		"vault write secret/foo x=1",
@@ -28,7 +29,7 @@ func TestVault_EmptyConfigAbstains(t *testing.T) {
 }
 
 func TestVault_Configured(t *testing.T) {
-	cfg := Config{
+	cfg := configrules.VaultConfig{
 		ReadVerbs:  []string{"read", "status", "version", "kv get", "kv list"},
 		WriteVerbs: []string{"write", "delete", "kv put", "kv delete"},
 	}

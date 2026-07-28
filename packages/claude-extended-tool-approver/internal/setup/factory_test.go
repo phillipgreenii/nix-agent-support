@@ -17,6 +17,8 @@ import (
 
 const zrFixture = "../rules/configrules/testdata/zr-rules.json"
 
+const commandBlocksFixture = "../rules/configrules/testdata/command-blocks-rules.json"
+
 // withXDGConfig points XDG_CONFIG_HOME at a temp dir; if fixture != "" it copies
 // that rules.json into place, else the config is absent (base behavior).
 func withXDGConfig(t *testing.T, fixture string) {
@@ -81,6 +83,84 @@ func TestFactory_ConfigDriven_ZRConfigLoaded(t *testing.T) {
 				t.Errorf("%s: got %s (%s: %s) want %s", tc.name, got.Decision, got.Module, got.Reason, tc.want)
 			}
 		})
+	}
+}
+
+// TestFactory_CommandAwareBlocks_Configured proves the WS3 ssh/vault/curl/
+// monorepo blocks drive real decisions end-to-end through the factory-built
+// engine, using neutral example data (no consumer-specific strings in
+// ceta-core). It also proves the safe-commands ordering fix: a configured
+// ssh/vault leaf is DECIDED by its dedicated rule, not pre-approved by
+// safe-commands.
+func TestFactory_CommandAwareBlocks_Configured(t *testing.T) {
+	withXDGConfig(t, commandBlocksFixture)
+	cwd := t.TempDir()
+	eng := NewEngineForCWD(cwd)
+
+	// NOTE on module attribution: EvaluateHook folds a Bash command's leaves. On
+	// the APPROVE path it wraps the result as module "engine" ("all sub-commands
+	// approved"), so the deciding rule's name is only observable on the decisive
+	// Reject/Ask leaves. The Reject/Ask cases below therefore carry wantModule to
+	// prove the SSH/VAULT rule (not safe-commands) is the decider — the
+	// safe-commands ordering guarantee. The Approve cases assert the decision only
+	// (the reordering is what lets the dedicated rule reach the leaf first;
+	// safe-commands Abstains on these executables).
+	cases := []struct {
+		name       string
+		command    string
+		wantDec    hookio.Decision
+		wantModule string // asserted only when non-empty (Reject/Ask decisive leaves)
+	}{
+		// ssh: decided by the ssh rule, NOT pre-approved by safe-commands.
+		{"ssh readonly approved", "ssh host ls -la", hookio.Approve, ""},
+		{"ssh disallowed user rejected by ssh rule", "ssh root@host ls", hookio.Reject, "ssh"},
+		{"ssh -o password auth rejected by ssh rule", "ssh -oPasswordAuthentication=yes host ls", hookio.Reject, "ssh"},
+		{"ssh secret path asked by ssh rule", "ssh host cat /etc/shadow", hookio.Ask, "ssh"},
+		{"ssh interactive asked by ssh rule", "ssh host", hookio.Ask, "ssh"},
+		// vault: decided by the vault rule.
+		{"vault read approved", "vault read secret/foo", hookio.Approve, ""},
+		{"vault write asked by vault rule", "vault write secret/foo x=1", hookio.Ask, "vault"},
+		// curl: configured domain + per-domain method.
+		{"curl allowed domain GET approved", "curl https://api.internal.example/health", hookio.Approve, ""},
+		{"curl per-domain POST approved", "curl -X POST https://api.internal.example/submit", hookio.Approve, ""},
+		{"curl elsewhere abstains", "curl https://evil.example.test/x", hookio.Abstain, ""},
+		// monorepo: approved command + dangerous-env deferral.
+		{"monorepo approved command", "tc build", hookio.Approve, ""},
+		{"monorepo dangerous env defers", "TC_DANGER=1 tc build", hookio.Abstain, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := eng.EvaluateHook(bashHook(cwd, tc.command))
+			if got.Decision != tc.wantDec {
+				t.Errorf("%s: got %s (%s: %s), want %s", tc.name, got.Decision, got.Module, got.Reason, tc.wantDec)
+			}
+			if tc.wantModule != "" && got.Module != tc.wantModule {
+				t.Errorf("%s: decided by module %q, want %q (%s)", tc.name, got.Module, tc.wantModule, got.Reason)
+			}
+		})
+	}
+}
+
+// TestFactory_CommandAwareBlocks_NoConfig: with NO rules.json the WS3 rules ship
+// only the mechanism — ssh/vault/curl(consumer)/monorepo all Abstain, so nothing
+// is auto-approved without consumer data.
+func TestFactory_CommandAwareBlocks_NoConfig(t *testing.T) {
+	withXDGConfig(t, "") // absent config
+	cwd := t.TempDir()
+	eng := NewEngineForCWD(cwd)
+
+	for _, cmd := range []string{
+		"ssh host ls",
+		"ssh root@host rm -rf /",
+		"vault read secret/foo",
+		"vault write secret/foo x=1",
+		"curl https://api.internal.example/health",
+		"tc build",
+	} {
+		got := eng.EvaluateHook(bashHook(cwd, cmd))
+		if got.Decision == hookio.Approve {
+			t.Errorf("cmd %q with no config: got Approve (%s: %s); WS3 rules must defer without consumer data", cmd, got.Module, got.Reason)
+		}
 	}
 }
 

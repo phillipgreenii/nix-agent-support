@@ -180,6 +180,45 @@ func TestLoad_ParsesVerbScopedApprovals(t *testing.T) {
 	}
 }
 
+// TestLoad_ParsesCommandAwareBlocks proves the loader parses the structured
+// ssh/vault/curl/monorepo sub-configs (WS3) — the schema the ssh, vault, curl,
+// and monorepo rules consume via DI (ADR 0033).
+func TestLoad_ParsesCommandAwareBlocks(t *testing.T) {
+	cfg := Load("testdata/command-blocks-rules.json")
+
+	if len(cfg.Ssh.AllowedUsers) != 1 || cfg.Ssh.AllowedUsers[0] != "deploy" {
+		t.Errorf("ssh.AllowedUsers = %v, want [deploy]", cfg.Ssh.AllowedUsers)
+	}
+	if len(cfg.Ssh.ReadonlyCommands) != 3 {
+		t.Errorf("ssh.ReadonlyCommands = %v, want 3", cfg.Ssh.ReadonlyCommands)
+	}
+	if subs := cfg.Ssh.ReadonlySubcommands["systemctl"]; len(subs) != 2 {
+		t.Errorf("ssh.ReadonlySubcommands[systemctl] = %v, want 2", subs)
+	}
+	if len(cfg.Ssh.SecretPathPatterns) != 3 || len(cfg.Ssh.PasswordFlagPatterns) != 2 {
+		t.Errorf("ssh secret=%v passwd=%v; want 3 and 2", cfg.Ssh.SecretPathPatterns, cfg.Ssh.PasswordFlagPatterns)
+	}
+
+	if len(cfg.Vault.ReadVerbs) != 4 || len(cfg.Vault.WriteVerbs) != 3 {
+		t.Errorf("vault read=%v write=%v; want 4 and 3", cfg.Vault.ReadVerbs, cfg.Vault.WriteVerbs)
+	}
+
+	if len(cfg.Curl.AllowedDomainSuffixes) != 2 {
+		t.Errorf("curl.AllowedDomainSuffixes = %v, want 2", cfg.Curl.AllowedDomainSuffixes)
+	}
+	if len(cfg.Curl.DomainMethods) != 1 || cfg.Curl.DomainMethods[0].DomainSuffix != ".internal.example" ||
+		len(cfg.Curl.DomainMethods[0].Methods) != 2 {
+		t.Errorf("curl.DomainMethods = %+v, want one .internal.example with 2 methods", cfg.Curl.DomainMethods)
+	}
+
+	if len(cfg.Monorepo.ApprovedCommands) != 2 {
+		t.Errorf("monorepo.ApprovedCommands = %v, want 2", cfg.Monorepo.ApprovedCommands)
+	}
+	if vars := cfg.Monorepo.DangerousEnvByWrapper["tc"]; len(vars) != 1 || vars[0] != "TC_DANGER" {
+		t.Errorf("monorepo.DangerousEnvByWrapper[tc] = %v, want [TC_DANGER]", vars)
+	}
+}
+
 // TestLoad_AbsentAndMalformed returns a zero Config (base behavior) safely.
 func TestLoad_AbsentAndMalformed(t *testing.T) {
 	if cfg := Load("/nonexistent/rules.json"); cfg == nil || len(cfg.Kubectl.ExecutableAliases) != 0 {
