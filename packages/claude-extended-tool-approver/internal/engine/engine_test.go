@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -256,6 +257,150 @@ func TestEngine_EvaluateExpression_AbstainDemotesApprove(t *testing.T) {
 	got2 := e.EvaluateExpression("git status && git log", nil, origin)
 	if got2.Decision != hookio.Approve {
 		t.Errorf("Decision = %v, want Approve (all leaves approve)", got2.Decision)
+	}
+}
+
+// envAssignmentMockRule stands in for the env-var rule: it Rejects any leaf that
+// assigns rejectVar, Approves any leaf assigning approveVar, and Abstains
+// otherwise. It also records every command text the chain handed it.
+type envAssignmentMockRule struct {
+	rejectVar  string
+	approveVar string
+	seen       []string
+}
+
+func (m *envAssignmentMockRule) Name() string { return "env-assignment-mock" }
+func (m *envAssignmentMockRule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+	cmd, err := input.BashCommand()
+	if err != nil {
+		return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+	}
+	m.seen = append(m.seen, cmd)
+	for _, pc := range cmdparse.Parse(cmd) {
+		for _, ev := range pc.EnvVars {
+			if m.rejectVar != "" && ev.Name == m.rejectVar {
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "injector", Module: m.Name()}
+			}
+			if m.approveVar != "" && ev.Name == m.approveVar {
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "verified safe", Module: m.Name()}
+			}
+		}
+	}
+	return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+}
+
+// TestEngine_EvaluateExpression_AssignmentOnlyLeafReachesRuleChain is the pg2-mtnmb
+// engine half. An assignment-only compound segment parses to a COMMAND-LESS leaf
+// (Executable == "", EnvVars set). The command-less branch used to evaluate only
+// redirections and `continue`, so the assignments never reached any rule and the
+// fold — Approve iff EVERY leaf approves — returned the sibling's verdict alone:
+// `LD_PRELOAD=/evil.so && echo hi` auto-approved.
+func TestEngine_EvaluateExpression_AssignmentOnlyLeafReachesRuleChain(t *testing.T) {
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+
+	// A decisive verdict on the assignment-only leaf must reach the fold.
+	for _, cmd := range []string{
+		"LD_PRELOAD=/evil.so && echo hi",
+		"LD_PRELOAD=/evil.so ; echo hi",
+		"LD_PRELOAD=/evil.so\necho hi",
+		"echo hi && LD_PRELOAD=/evil.so",
+		"LD_PRELOAD=/evil.so",
+	} {
+		envRule := &envAssignmentMockRule{rejectVar: "LD_PRELOAD"}
+		e := New(envRule, &conditionalMockRule{approvePrefix: "echo"})
+		got := e.EvaluateExpression(cmd, nil, origin)
+		if got.Decision != hookio.Reject {
+			t.Errorf("EvaluateExpression(%q) = %v (%s), want Reject (assignment-only leaf must reach the rule chain)",
+				cmd, got.Decision, got.Reason)
+		}
+		if !slices.Contains(envRule.seen, "LD_PRELOAD=/evil.so") {
+			t.Errorf("EvaluateExpression(%q): rule chain never saw the assignment-only leaf; saw %q", cmd, envRule.seen)
+		}
+	}
+
+	// An Approve on the assignment-only leaf is honored (the pg2-0q99a
+	// verified-safe-preserve verdict for a command-less leaf).
+	envRule := &envAssignmentMockRule{approveVar: "PATH"}
+	e := New(envRule, &conditionalMockRule{approvePrefix: "echo"})
+	if got := e.EvaluateExpression(`PATH="$PATH:/x" && echo hi`, nil, origin); got.Decision != hookio.Approve {
+		t.Errorf(`EvaluateExpression("PATH=... && echo hi") = %v (%s), want Approve`, got.Decision, got.Reason)
+	}
+}
+
+// TestEngine_EvaluateExpression_AssignmentOnlyLeafIsNeutralWhenNoRuleObjects pins
+// the other half of the pg2-mtnmb contract, and it is what keeps the fix from being
+// a mass over-ask: an assignment-only leaf EXECUTES NOTHING, so when no rule has a
+// decisive opinion about its assignments the leaf must contribute NOTHING to the
+// fold — exactly as evaluateRedirections returns Approve for a leaf with no
+// redirections. Folding the chain's Abstain instead would demote every
+// `count=$(...) && cmd` / `A=1 && cmd` in the corpus from allow to abstain.
+func TestEngine_EvaluateExpression_AssignmentOnlyLeafIsNeutralWhenNoRuleObjects(t *testing.T) {
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+	e := New(&envAssignmentMockRule{rejectVar: "LD_PRELOAD"}, &conditionalMockRule{approvePrefix: "echo"})
+
+	for _, cmd := range []string{
+		"A=1 && echo hi",
+		"A=1 ; echo hi",
+		"echo hi && A=1",
+		"A=1 B=2 && echo hi",
+	} {
+		if got := e.EvaluateExpression(cmd, nil, origin); got.Decision != hookio.Approve {
+			t.Errorf("EvaluateExpression(%q) = %v (%s), want Approve (a benign assignment-only leaf must not demote its sibling)",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// The neutrality is scoped to the assignments: a genuinely unowned COMMAND leaf
+	// still demotes (the pg2-t4uyx invariant is untouched).
+	if got := e.EvaluateExpression("A=1 && rm -rf /important", nil, origin); got.Decision != hookio.Abstain {
+		t.Errorf("EvaluateExpression(%q) = %v, want Abstain (unowned command leaf must still demote)", "A=1 && rm -rf /important", got.Decision)
+	}
+}
+
+// TestEngine_EvaluateExpression_UnownedAssignmentsOnlyAbstain pins the FLOOR on the
+// neutrality above: an expression whose leaves are ALL assignments that no rule owns
+// executes nothing and was judged by nobody, so there is no Approve to give — it
+// Abstains, exactly as it did when Parse dropped such segments and the expression
+// reached zero leaves (pg2-mtnmb must not move anything toward allow).
+//
+// This is load-bearing beyond tidiness. A parser desync of the pg2-3ggxm class turns
+// a real command into a PHANTOM NAME=VALUE (corpus row 142386: the engine's per-line
+// comment stripping mangles a multi-line single-quoted value containing `#`, whose
+// now-unterminated quote swallows the real `bd update` leaf). Without this floor the
+// mangled remnant is a lone unowned assignment leaf and the neutrality promotion
+// turns it into `allow` — a parse failure manufacturing an auto-approval. Measured:
+// that row moved abstain -> approve before this floor, and is the ONLY row in the
+// 204,219-row Bash corpus that did.
+func TestEngine_EvaluateExpression_UnownedAssignmentsOnlyAbstain(t *testing.T) {
+	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
+	e := New(&envAssignmentMockRule{rejectVar: "LD_PRELOAD", approveVar: "PATH"}, &conditionalMockRule{approvePrefix: "echo"})
+
+	for _, cmd := range []string{
+		"A=1",
+		"A=1 B=2",
+		"A=1 && B=2",
+		"SUMMARY='mangled remnant that swallowed the real command",
+	} {
+		if got := e.EvaluateExpression(cmd, nil, origin); got.Decision != hookio.Abstain {
+			t.Errorf("EvaluateExpression(%q) = %v (%s), want Abstain (nothing executes and no rule judged it)",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// A rule that IS decisive about the assignment still owns the verdict — this is
+	// what keeps the standalone form's verdict equal to its export/leading/env forms.
+	for _, tc := range []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		{`PATH="$PATH:/x"`, hookio.Approve},
+		{"LD_PRELOAD=/evil.so", hookio.Reject},
+		{`A=1 && PATH="$PATH:/x"`, hookio.Approve},
+	} {
+		if got := e.EvaluateExpression(tc.cmd, nil, origin); got.Decision != tc.want {
+			t.Errorf("EvaluateExpression(%q) = %v (%s), want %v (a decisive rule verdict survives the floor)",
+				tc.cmd, got.Decision, got.Reason, tc.want)
+		}
 	}
 }
 

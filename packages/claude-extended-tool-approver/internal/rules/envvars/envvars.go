@@ -148,12 +148,13 @@ func (r *Rule) Name() string {
 // the Approve of the value-aware split (condition 3 of the Rule contract): with no
 // command to pre-empt, a decisive Approve cannot mask another rule's verdict.
 //
-// True for a command-less leaf — the shape cmdparse.Parse currently DISCARDS for an
-// assignment-only compound segment (`PATH="$PATH:/x" && cmd`) and that pg2-mtnmb
-// will make rule-visible; Approving it is what keeps the compound form's verdict
-// equal to the leading/export/env forms (the pg2-gkd5e position-independence
-// invariant) — and for the three assignment/read-only-env builtins, which carry
-// their assignments in EnvVars and have no inner command of their own:
+// True for a command-less leaf — the shape cmdparse.Parse produces for an
+// assignment-only compound segment (`PATH="$PATH:/x" && cmd`), which pg2-mtnmb made
+// rule-visible (it was DISCARDED before, and that was a live auto-approve bypass).
+// Approving it is what keeps the compound form's verdict equal to the
+// leading/export/env forms (the pg2-gkd5e position-independence invariant) — and
+// true for the three assignment/read-only-env builtins, which carry their
+// assignments in EnvVars and have no inner command of their own:
 //
 //   - `export` (cmdparse lifts each NAME=VALUE arg into EnvVars);
 //   - `env` / `command` with no inner executable (a bare env query — when an inner

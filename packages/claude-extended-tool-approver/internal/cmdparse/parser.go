@@ -461,14 +461,16 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	base := filepath.Base(pc.Executable)
 	// `export VAR=VALUE ...` is an assignment builtin: lift each NAME=VALUE arg
 	// into EnvVars so the env-var guard sees the assignment regardless of position
-	// (leading / export / env-prefix), while keeping the leaf rule-visible with
-	// Executable=="export". Keeping Executable non-empty matters: a leaf with an
-	// empty Executable is handled by the engine's command-less-leaf branch and
-	// never reaches the env-var rule (pg2-gkd5e). Non-assignment args (a bare name
-	// to export, `-f`, ...) stay as args so a bare `export`/`export NAME` remains a
-	// read-only query the safe-commands rule can approve; the env-var rule is
-	// DECISIVE for flagged vars and runs first, so it prevents auto-approval of a
-	// dangerous `export VAR=VALUE` before safe-commands is consulted.
+	// (leading / export / env-prefix / its own compound segment), while keeping the
+	// leaf rule-visible with Executable=="export" so a bare `export`/`export NAME`
+	// stays a read-only query the safe-commands rule can approve. Non-assignment
+	// args (a bare name to export, `-f`, ...) therefore stay as args. The env-var
+	// rule is DECISIVE for flagged vars and runs first, so it prevents auto-approval
+	// of a dangerous `export VAR=VALUE` before safe-commands is consulted.
+	//
+	// A leaf with an EMPTY Executable is now equally rule-visible: the engine's
+	// command-less-leaf branch runs the rule chain on its EnvVars (pg2-mtnmb). It did
+	// not before, which is why an assignment-only compound segment auto-approved.
 	if base == "export" {
 		return liftAssignmentArgs(pc)
 	}
@@ -754,9 +756,22 @@ func Parse(command string) []ParsedCommand {
 		}
 		exec, args, envVars := extractExecAndArgs(tokens)
 		if exec == "" {
-			// Env-assignment-only segment; keep any redirections/heredoc it carries.
-			if len(redirs) > 0 || hasHeredoc {
-				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
+			// Env-assignment-only segment (`LD_PRELOAD=/evil.so && cmd`, or a whole
+			// command that is nothing but assignments). Keep it as a command-less leaf
+			// carrying its EnvVars — the same shape used above for a
+			// redirection/heredoc-only segment, and the shape the engine's
+			// command-less-leaf branch evaluates.
+			//
+			// Dropping the segment was a live auto-approve BYPASS (pg2-mtnmb, P1
+			// SECURITY): the assignments never became rule-visible, and
+			// engine.EvaluateExpression is Approve iff EVERY surviving leaf approves, so
+			// `LD_PRELOAD=/evil.so && echo hi` folded to the verdict of `echo hi` alone
+			// and the hook answered `allow`. This is the env-assignment half of the same
+			// class c1aedd14 fixed for redirections; only the redirection half was fixed
+			// then. There is no executable to unwrapCommand, so the leaf is appended
+			// as-is.
+			if len(envVars) > 0 || len(redirs) > 0 || hasHeredoc {
+				result = append(result, ParsedCommand{EnvVars: envVars, Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
 			}
 			continue
 		}

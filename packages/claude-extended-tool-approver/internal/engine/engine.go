@@ -155,21 +155,38 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		basePE = e.pathEval
 	}
 
+	// judgedLeaf records that at least one leaf's own content was actually judged: it
+	// ran a command, it carried a redirection/heredoc, or a rule was decisive about
+	// its env assignments. An expression where NO leaf qualifies is nothing but
+	// assignments nobody owns — it executes nothing and was judged by nobody, so the
+	// Approve seed is not a verdict anyone earned and must not be returned (see the
+	// floor after the loop).
+	judgedLeaf := false
+
 	for _, pc := range parsed {
 		if pc.Executable == "" {
-			// Command-less leaf: no executable, but it may carry redirections or a
-			// heredoc (e.g. the trailing "> /etc/passwd" of a subshell) that MUST
-			// still be evaluated — otherwise a write to a protected path is
-			// silently approved.
+			// Command-less leaf: no executable, but it may carry env assignments
+			// (`LD_PRELOAD=/evil.so && cmd`, pg2-mtnmb) or redirections/a heredoc (the
+			// trailing "> /etc/passwd" of a subshell) that MUST still be evaluated —
+			// otherwise the injection, or the write to a protected path, is silently
+			// approved.
 			if pc.HasHeredoc {
 				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
 			}
-			redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
-			if redirResult.Decision > mostRestrictive.Decision {
-				mostRestrictive = redirResult
+			leafResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
+			if len(pc.Redirections) > 0 {
+				judgedLeaf = true
+			}
+			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, origin); judged {
+				leafResult = hookio.MostRestrictive(leafResult, assignResult)
+				judgedLeaf = true
+			}
+			if leafResult.Decision > mostRestrictive.Decision {
+				mostRestrictive = leafResult
 			}
 			continue
 		}
+		judgedLeaf = true
 
 		// Heredoc detected — Abstain
 		if pc.HasHeredoc {
@@ -250,7 +267,87 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		}
 	}
 
+	// Floor for an expression that is NOTHING BUT env assignments no rule owns
+	// (pg2-mtnmb): it executes nothing and nobody judged it, so ceta has no verdict —
+	// Abstain, exactly as it did when Parse dropped these segments and the expression
+	// reached zero leaves above. Without this, `A=1` alone would newly auto-approve,
+	// and — the real hazard — a parser desync of the pg2-3ggxm class that turns a real
+	// command into a PHANTOM NAME=VALUE would manufacture an `allow` out of a parse
+	// failure (measured on corpus row 142386, where the engine's per-line comment
+	// stripping mangles a multi-line quoted value and its unterminated quote swallows
+	// the real `bd update` leaf). A DECISIVE rule verdict on the assignments sets
+	// judgedLeaf and is returned untouched, so the standalone form still agrees with
+	// the leading / export / env forms.
+	if !judgedLeaf && mostRestrictive.Decision == hookio.Approve {
+		return hookio.RuleResult{
+			Decision: hookio.Abstain,
+			Reason:   "env assignments only, no rule has an opinion (nothing is executed)",
+			Module:   "engine",
+		}
+	}
+
 	return mostRestrictive
+}
+
+// evaluateAssignmentOnlyLeaf returns the verdict for the ENV ASSIGNMENTS carried by
+// a command-less leaf — an assignment-only segment such as the `LD_PRELOAD=/evil.so`
+// of `LD_PRELOAD=/evil.so && echo hi`, or a whole command that is nothing but
+// assignments (pg2-mtnmb).
+//
+// Such a leaf used to be dropped by cmdparse.Parse outright, so its assignments
+// reached no rule at all; the fold is Approve iff EVERY surviving leaf approves, so
+// the compound folded to the sibling's verdict alone and the hook answered `allow`
+// — a live auto-approve bypass of the pg2-gkd5e env-assignment guard, in the
+// deployed binary. Parse now retains the leaf, and this runs the rule chain on it so
+// the env-var rule (and any other rule with an opinion about the raw text) is
+// consulted. Routing through the same synthetic-HookInput + e.Evaluate path the
+// executable-bearing leaves use is what makes the compound form reach the SAME
+// verdict as the leading / `export` / `env` forms of the same assignment.
+//
+// judged reports whether a rule actually had an opinion. It is false both when the
+// leaf carries no assignments at all and when the chain Abstained on them — see the
+// NEUTRAL discussion below and the caller's judgedLeaf floor.
+func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
+	if len(pc.EnvVars) == 0 {
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no env assignments to evaluate", Module: "engine"}, false
+	}
+	syntheticInput := &hookio.HookInput{
+		SessionID:      origin.SessionID,
+		CWD:            cwd,
+		ToolName:       "Bash",
+		ToolInput:      mustBashJSON(pc.Raw),
+		PermissionMode: origin.PermissionMode,
+		HookEventName:  origin.HookEventName,
+		PathEval:       origin.PathEval,
+	}
+	if chainResult := e.Evaluate(syntheticInput); chainResult.Decision != hookio.Abstain {
+		return chainResult, true
+	}
+	// NEUTRAL when no rule has a decisive opinion. An assignment-only leaf EXECUTES
+	// NOTHING — it binds shell variables — so with nothing to object to it must
+	// contribute nothing to the fold, exactly as evaluateRedirections returns Approve
+	// for a leaf with no redirections. Folding the chain's Abstain instead would
+	// demote every ordinary `count=$(...) && cmd` / `A=1 && cmd` from allow to
+	// abstain: a mass over-ask (~2041 corpus rows) with no security gain, since the
+	// risk an assignment-only leaf DOES carry is judged above —
+	//
+	//   - the variable NAME: the env-var rule is decisive for injectors (Reject) and
+	//     for PATH/HOME (Ask unless the value is the verified-safe preserve shape);
+	//   - the VALUE's command substitutions: the env-var rule recurses each body
+	//     through the full chain and applies its own Ask fallback when the body is not
+	//     positively cleared (pg2-5huwx);
+	//   - redirections and heredocs on the same leaf: handled by the caller.
+	//
+	// KNOWN GAP, form-independent and pre-existing: cmdparse.classifyExpansion keys on
+	// `$`/backtick, so a PROCESS substitution in a value (`A=<(evil)`) classifies as
+	// ExpansionNone and no recursion happens. That value already auto-approves in the
+	// leading, `export` and `env` forms today, so this does not widen it — but it is a
+	// real hole in classifyExpansion and wants its own fix.
+	return hookio.RuleResult{
+		Decision: hookio.Approve,
+		Reason:   "env assignments only, no rule objects (nothing is executed)",
+		Module:   "engine",
+	}, false
 }
 
 func normalizeExpression(expr string) string {
