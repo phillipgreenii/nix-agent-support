@@ -22,10 +22,38 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 | `config --print-defaults` | print the built-in default `config.toml` (a copy-paste start)                                                |
 | `config --show`           | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget) |
 | `sessions`                | list this pool's sessions (bead/role) from session metadata                                                  |
+| `push-inject <json>`      | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                   |
 | `version`                 | print the version and exit                                                                                   |
 | `help`                    | print help and exit                                                                                          |
 
 `<role>` is the role's configured `name`.
+
+### `push-inject` — operator event injection
+
+```
+pr-pool push-inject [--json] [--socket <path>] [--token <tok>] '<event-json>'
+```
+
+`push-inject` is the **operator-facing front door to the push-ingest path**: it validates the
+event against the `cli.push-inject` message schema, locates the running core, and performs the
+**same core-side enqueue** as the `ingest-event` manager callback — durable via the queue,
+delivered at-least-once and deduped (`INV-EVT-*`). It is **distinct from** `ingest-event` (a
+manager→core callback) and from `run-role` (a smoke test that tears down). Primarily for
+manual/test injection.
+
+It locates the core via `--socket`/`--token`, else `PR_POOL_SOCKET`/`PR_POOL_TOKEN`, else the
+discovery record under the log dir, and **forwards the event over that socket** — the core owns
+the durable queue in another process, so nothing is enqueued locally. With **no core running it
+fails** with a "no running core" error and **exit 1**; it never starts one
+([ADR 0036](../../docs/adr/0036-pr-pool-cli-never-auto-starts-a-core.md)).
+
+Exit codes are `0` accepted and `1` for everything else, **including a usage error**: push-inject
+reaches the core over the `ingest-event` transport, whose coarse exit space reserves `2` for the
+common contract's pre-accept **busy**.
+
+The success report says the core **accepted** the event, never "enqueued": a still-retained
+duplicate id is also accepted (`INV-EVT-3`) and the reply has no field that separates a fresh
+append from an absorbed re-emit. The auth **token is never printed**, in either output mode.
 
 ### Manager → core callback subcommands
 

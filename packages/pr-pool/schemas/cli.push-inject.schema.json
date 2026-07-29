@@ -1,6 +1,6 @@
 {
   "$id": "cli.push-inject",
-  "title": "INTF-CLI push-inject input (operator-supplied event, pr-pool-emit)",
+  "title": "INTF-CLI push-inject input (operator-supplied event)",
   "description": "The arbitrary operator-supplied event injected into the live core; same enqueue path as ingest-event (interfaces.md).",
   "$ref": "event"
 }

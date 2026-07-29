@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | ingest-event [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | ingest-event [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -25,6 +25,11 @@ Subcommands:
   config --show           print the resolved config path, role set, and worker dispatch scalars (permission-mode / allowed-tools / autonomous / budget)
   sessions                list this pool's sessions (bead/role) from session metadata (read-only)
   reconcile               report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads 'pg-pr pr list'; mutates beads; exit-0-on-partial)
+  push-inject <json>      inject one operator-supplied event into the RUNNING core (the same core-side
+                          enqueue as the ingest-event callback, operator-initiated). Text by default,
+                          JSON with --json. Locates the core via --socket/--token, else
+                          PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under the log dir. It NEVER
+                          starts a core: with none running it fails with "no running core" (exit 1).
   version                 print the version and exit
   help                    print this help and exit
 
@@ -76,6 +81,7 @@ const (
 	routeSessions                     // list this pool's sessions from metadata (read-only)
 	routeReconcile                    // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
 	routeIngestEvent                  // manager->core callback: forward events on stdin to the running core (.rest)
+	routePushInject                   // operator: inject one event into the running core (.rest)
 )
 
 type routeResult struct {
@@ -125,6 +131,11 @@ func route(argv []string) routeResult {
 		// here: its exit codes follow the callback contract (2 == busy), so it must
 		// not be routed through routeUsageErr, which exits 2 for a usage error.
 		return routeResult{kind: routeIngestEvent, rest: args[1:]}
+	case "push-inject":
+		// Same reason as ingest-event: push-inject reaches the core over that same
+		// ingest-event transport, where 2 means BUSY, so its usage errors must exit 1
+		// rather than go through routeUsageErr. It parses its own flags in its handler.
+		return routeResult{kind: routePushInject, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}

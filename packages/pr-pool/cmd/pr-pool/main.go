@@ -31,6 +31,8 @@ func main() {
 		os.Exit(runReconcile())
 	case routeIngestEvent:
 		os.Exit(runIngestEvent(r.rest))
+	case routePushInject:
+		os.Exit(runPushInject(r.rest))
 	}
 }
 

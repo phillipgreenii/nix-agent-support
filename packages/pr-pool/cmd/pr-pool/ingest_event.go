@@ -60,7 +60,7 @@ func runIngestEvent(args []string) int {
 
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
-		reportNoCore(os.Stderr, err)
+		reportNoCore(os.Stderr, core.SubcommandIngestEvent, err)
 		return conformance.ExitError
 	}
 	request, err := io.ReadAll(os.Stdin)
@@ -72,15 +72,11 @@ func runIngestEvent(args []string) int {
 }
 
 // locateCore resolves the running core the way interfaces.md's "Locating the core"
-// describes: an INJECTED socket (flag, then env) wins; otherwise discover the
-// running socket service under the log dir. Never auto-starts (ADR 0036).
+// describes: an INJECTED socket (flag, then env — injectedRef) wins; otherwise
+// discover the running socket service under the log dir. Never auto-starts
+// (ADR 0036).
 func locateCore(socket, token string) (core.Ref, error) {
-	if socket == "" {
-		socket = os.Getenv(envSocket)
-		if socket != "" && token == "" {
-			token = os.Getenv(envToken)
-		}
-	}
+	socket, token = injectedRef(socket, token)
 	if socket != "" {
 		return core.Ref{Socket: socket, Token: token}, nil
 	}
@@ -92,7 +88,7 @@ func locateCore(socket, token string) (core.Ref, error) {
 func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request []byte) int {
 	client, err := core.Dial(ref)
 	if err != nil {
-		reportNoCore(stderr, err)
+		reportNoCore(stderr, subcommand, err)
 		return conformance.ExitError
 	}
 	defer func() { _ = client.Close() }()
@@ -107,12 +103,17 @@ func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request
 	return code
 }
 
-// reportNoCore renders a locate failure. A "no running core" is reported with the
+// reportNoCore renders a failure from any subcommand that has to reach the core,
+// prefixed with that subcommand's name. A "no running core" is reported with the
 // remedy (start one) precisely because the CLI will not start one itself — that is
-// what keeps "is a core running?" answerable from the exit code.
-func reportNoCore(stderr io.Writer, err error) {
-	fmt.Fprintln(stderr, "ingest-event:", err)
+// what keeps "is a core running?" answerable from the exit code (ADR 0036).
+//
+// It is shared by the callback front door (`ingest-event`) and the operator front
+// door (`push-inject`) so the one diagnostic an operator acts on cannot drift
+// between them.
+func reportNoCore(stderr io.Writer, subcommand string, err error) {
+	fmt.Fprintf(stderr, "%s: %v\n", subcommand, err)
 	if errors.Is(err, core.ErrNoRunningCore) {
-		fmt.Fprintln(stderr, "ingest-event: start the core's socket service first, or pass --socket/--token from a core-issued callback")
+		fmt.Fprintf(stderr, "%s: start the core's socket service first, or pass --socket/--token to name a running core\n", subcommand)
 	}
 }
