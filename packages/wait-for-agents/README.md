@@ -38,11 +38,24 @@ wait-for-agents-to-finish --help
 
 ## Exit Codes
 
-| Code | Meaning                                |
-| ---- | -------------------------------------- |
-| 0    | All agents finished (or none running)  |
-| 1    | Timeout reached (agents still working) |
-| 2    | Error (invalid arguments, etc.)        |
+| Code | Meaning                                         |
+| ---- | ----------------------------------------------- |
+| 0    | Idle reached (no agent actively running a turn) |
+| 1    | Timeout reached (agents still working)          |
+| 2    | Error (invalid arguments, etc.)                 |
+
+### Exit 0 means "idle reached", not "work finished"
+
+This wrapper delegates to `pa-monitor`, whose busy notion counts only sessions with
+`status == working` (see `docs/adr/0024-pa-monitor-session-status-blocker-model.md` R3 and
+`packages/pa-monitor/README.md` § "Busy/idle gates"). A session that is **`blocked`** — notably
+blocked on the 5h/weekly usage limit, with work still pending — counts as **idle** here and does
+**not** hold this wait open; it will resume on its own at the window reset.
+
+Callers MUST therefore treat exit 0 as "nothing is actively progressing", not "all work is done". A
+caller that MUST NOT proceed until pending work is genuinely finished MUST NOT rely on exit 0 alone;
+it SHOULD additionally check the `blocked` count in `pa-monitor status` and re-wait after the usage
+window resets. This is declared intent (ADR 0024 R3), not a defect in this wrapper.
 
 ## Dependencies
 

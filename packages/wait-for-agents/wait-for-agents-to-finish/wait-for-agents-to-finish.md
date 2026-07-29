@@ -1,7 +1,8 @@
 # wait-for-agents-to-finish
 
-> Wait until all AI agents finish working.
+> Wait until no AI agent is actively working.
 > Keeps Mac awake while waiting and provides progress updates.
+> Exit 0 means "idle reached", not "work finished": a session blocked on a usage limit counts as idle.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-support-apps>.
 
 - Wait with default settings (2 hour timeout):

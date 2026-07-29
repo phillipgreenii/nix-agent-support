@@ -100,10 +100,22 @@ func formatUsageLine(label, id string, costUSD, capUSD float64, authPct *float64
 
 // runAgentsBusyCheck implements the `agents-busy-check` subcommand.
 //
+// "Busy" is the ADR 0024 R3 notion: the daemon's IsAnyBusy sums WorkingN only
+// (`server.go`), so a `blocked` session — notably `blocker = usage_limit`, i.e. a
+// session that still has work but is waiting out the 5h/weekly usage window — is
+// NOT busy and is reported here as `all idle` with exit 1.
+//
+// Callers MUST therefore read exit 1 as "no session is running a turn right now",
+// NOT as "no work is pending". A caller that must not proceed until pending work
+// is genuinely done MUST additionally check for blocked sessions (e.g. the
+// `sessions: N working, N blocked, N idle` line from `pa-monitor status`). This is
+// declared intent, not a defect: ADR 0024 R3 stands until a superseding decision,
+// so do NOT "fix" it here.
+//
 // Exit codes:
 //
-//	0 = daemon up AND ≥1 agent busy
-//	1 = daemon up AND no agents busy
+//	0 = daemon up AND ≥1 agent busy (status == working)
+//	1 = daemon up AND no agents busy (blocked sessions count as not-busy)
 //	2 = daemon unreachable (without --consider-daemon-down-as-busy)
 //	0 = daemon unreachable (with --consider-daemon-down-as-busy)
 func runAgentsBusyCheck(args []string) {

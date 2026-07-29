@@ -21,10 +21,12 @@ pa-monitor tui
 # Dump daemon state
 pa-monitor status
 
-# Block-style "is anything running right now?"
+# Block-style "is any agent actively running a turn right now?"
+# (NOT "is any work pending" — see Busy/idle gates below)
 if pa-monitor agents-busy-check; then echo "busy"; fi
 
-# Block-style "wait for everything to settle"
+# Block-style "wait until nothing is actively running"
+# (exit 0 = "idle reached", NOT "work finished" — see Busy/idle gates below)
 pa-monitor wait-until-agents-finished
 
 # Toggle caffeinate (persists across daemon restarts)
@@ -55,12 +57,51 @@ pa-monitor config show
 | `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy.                                |
-| `wait-until-agents-finished`                         | Block until all agents idle.                                 |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy (see caveat).                   |
+| `wait-until-agents-finished`                         | Block until nothing is working (see caveat).                 |
 | `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
 | `config show`                                        | Print loaded config (read-only).                             |
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
+
+### Busy/idle gates: a blocked session counts as idle
+
+`agents-busy-check` and `wait-until-agents-finished` both answer **"is any session actively
+progressing right now?"** — not "is all work finished?". Per
+`docs/adr/0024-pa-monitor-session-status-blocker-model.md` R3, the daemon's `IsAnyBusy` sums only
+sessions with `status == working`. A **`blocked`** session — including `blocker = usage_limit`, i.e.
+a session that still has work but is waiting out the 5h/weekly usage window — is **not** counted as
+busy and is indistinguishable from `idle` at these two gates.
+
+The exit-code contract is therefore:
+
+| Exit | `agents-busy-check`                                          | `wait-until-agents-finished`                               |
+| ---- | ------------------------------------------------------------ | ---------------------------------------------------------- |
+| 0    | daemon up and ≥1 session `working`                           | **idle reached** — no session `working` for N ticks        |
+| 1    | daemon up and no session `working` (prints `all idle`)       | timeout (`--maximum-wait` elapsed)                         |
+| 2    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) | daemon unavailable past `--reconnect-grace`; invalid flags |
+
+(`wait-until-agents-finished`'s doc comment lists `3 = invalid args`, but its `flag.ExitOnError`
+flag set exits **2** on an unparseable flag before that code can be reached — so 3 is not observable
+today. Callers MUST NOT distinguish "bad flags" from "no daemon" by exit code.)
+
+Callers MUST read these codes as statements about **activity**, not about **completion**:
+
+- `agents-busy-check` exit 1 (`all idle`) MUST NOT be read as "no work is pending". It is reported
+  while sessions are blocked on a usage window with work still queued.
+- `wait-until-agents-finished` exit 0 means "idle reached" and MUST NOT be read as "work finished".
+  It is returned after `--consecutive-idle-checks` ticks with zero `working` sessions, even when
+  every session is blocked on a usage window and will resume on its own at the window reset
+  (auto-resume).
+- A caller that MUST NOT proceed until pending work is genuinely done MUST NOT rely on these gates
+  alone. It SHOULD additionally check for `blocked` sessions — `pa-monitor status` prints a
+  `sessions: N working, N blocked, N idle` line — and re-wait after the window resets.
+- The same caveat applies to the packaged `wait-for-agents-to-finish` wrapper, which delegates here.
+
+This is declared intent, not a defect: ADR 0024 R3 deliberately defines `busy` as `status == working`
+only, because a `blocked` session is not "actively progressing". It stands until a superseding
+decision; whether a `usage_limit`-blocked session SHOULD hold these gates open is an open question
+for pa-monitor's behavior docs, not something to change here.
 
 ## Nudge delivery
 

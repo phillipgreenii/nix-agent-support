@@ -15,12 +15,27 @@ import (
 // subcommand. Streams WatchState and exits 0 when all agents have been
 // idle for N consecutive ticks.
 //
+// "Idle" here is the ADR 0024 R3 busy notion: only `status == working` counts as
+// busy (the loop below sums WorkingN, exactly as the daemon's IsAnyBusy does). A
+// `blocked` session — notably `blocker = usage_limit`, i.e. a session that still
+// has work but is waiting out the 5h/weekly usage window — does NOT hold this
+// gate open and is indistinguishable from idle here.
+//
+// Callers MUST therefore read exit 0 as "idle reached", NOT as "work finished":
+// it can be returned mid-window with blocked work pending that auto-resume will
+// pick up at the window reset. A caller that must not proceed until pending work
+// is genuinely done MUST additionally check for blocked sessions (e.g. the
+// `sessions: N working, N blocked, N idle` line from `pa-monitor status`) rather
+// than relying on this exit code alone. This is declared intent, not a defect:
+// ADR 0024 R3 stands until a superseding decision, so do NOT "fix" it here.
+//
 // Exit codes:
 //
-//	0 = idle reached
+//	0 = idle reached (no session `working` for N ticks; blocked counts as idle)
 //	1 = timeout
-//	2 = daemon unavailable past reconnect-grace
-//	3 = invalid args
+//	2 = daemon unavailable past reconnect-grace; also bad flags (see below)
+//	3 = invalid args — NOT reachable today: the flag.ExitOnError flag set
+//	    below exits 2 itself, so fs.Parse never returns an error
 func runWaitUntilAgentsFinished(args []string) {
 	fs := flag.NewFlagSet("wait-until-agents-finished", flag.ExitOnError)
 	maxWaitS := fs.Int("maximum-wait", 7200, "Maximum total wait in seconds")
@@ -100,6 +115,9 @@ func runWaitUntilAgentsFinished(args []string) {
 				if st == nil {
 					continue
 				}
+				// WorkingN only, per ADR 0024 R3 — a `blocked` session
+				// (e.g. blocker = usage_limit) does not hold this gate
+				// open. See the exit-code contract above.
 				anyBusy := false
 				for _, d := range st.GetDirs() {
 					if d.GetWorkingN() > 0 {
