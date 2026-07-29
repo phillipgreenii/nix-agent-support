@@ -2,6 +2,7 @@ package eventqueue
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -66,6 +67,75 @@ func TestDecodeEvent_MalformedJSON(t *testing.T) {
 	}
 	if _, err := DecodeEvent([]byte(`{`)); err == nil {
 		t.Fatal("DecodeEvent accepted truncated JSON")
+	}
+}
+
+// EncodeEvent is the exact INVERSE of DecodeEvent: every field survives a
+// wire → core → wire → core round trip. This is the pin that lets a front door
+// forward an already-decoded event to a core in another process without the
+// forwarded bytes drifting from what that core's decoder accepts.
+func TestEncodeEvent_RoundTripsThroughDecode(t *testing.T) {
+	raw := `{"schemaVersion":"1","id":"evt-1","type":"review-requested","ttl":"15m","at":"2026-07-16T12:00:00Z","payload":{"pr":42}}`
+	first, err := DecodeEvent([]byte(raw))
+	if err != nil {
+		t.Fatalf("DecodeEvent: %v", err)
+	}
+	wire, err := EncodeEvent(first)
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	second, err := DecodeEvent(wire)
+	if err != nil {
+		t.Fatalf("DecodeEvent(EncodeEvent(...)) = %v; encoded %s", err, wire)
+	}
+	if second.SchemaVersion != first.SchemaVersion || second.ID != first.ID || second.Type != first.Type {
+		t.Fatalf("envelope drifted: %+v -> %+v", first, second)
+	}
+	if second.TTL != first.TTL {
+		t.Fatalf("ttl drifted: %s -> %s", first.TTL, second.TTL)
+	}
+	if !second.At.Equal(first.At) {
+		t.Fatalf("at drifted: %s -> %s", first.At, second.At)
+	}
+	if second.Payload["pr"] != first.Payload["pr"] {
+		t.Fatalf("payload drifted: %v -> %v", first.Payload, second.Payload)
+	}
+}
+
+// The OPTIONAL fields are OMITTED, not emitted empty: event.schema.json closes the
+// object and types `at` as a string and `payload` as an object, so `"at":""` or
+// `"payload":null` would be a malformed event at the receiving core.
+func TestEncodeEvent_OmitsAbsentOptionalFields(t *testing.T) {
+	wire, err := EncodeEvent(Event{ID: "e", Type: "t", TTL: 5 * time.Minute})
+	if err != nil {
+		t.Fatalf("EncodeEvent: %v", err)
+	}
+	for _, field := range []string{"at", "payload", "schemaVersion"} {
+		if strings.Contains(string(wire), `"`+field+`"`) {
+			t.Fatalf("encoded %s carries an absent optional field %q", wire, field)
+		}
+	}
+	for _, field := range []string{"id", "type", "ttl"} {
+		if !strings.Contains(string(wire), `"`+field+`"`) {
+			t.Fatalf("encoded %s is missing the required field %q", wire, field)
+		}
+	}
+}
+
+// An Event with no valid wire form is reported at the encoder, not shipped to a
+// core to come back as an opaque "malformed" rejection.
+func TestEncodeEvent_RejectsInvalidEvent(t *testing.T) {
+	cases := map[string]Event{
+		"missing id":       {Type: "t", TTL: time.Minute},
+		"missing type":     {ID: "e", TTL: time.Minute},
+		"non-positive ttl": {ID: "e", Type: "t"},
+	}
+	for desc, evt := range cases {
+		t.Run(desc, func(t *testing.T) {
+			if _, err := EncodeEvent(evt); !errors.Is(err, ErrInvalidEvent) {
+				t.Fatalf("err = %v, want ErrInvalidEvent", err)
+			}
+		})
 	}
 }
 

@@ -1,14 +1,25 @@
-// Package emit implements the operator push-inject command source — the
-// pr-pool-emit / `push-inject` INTF-CLI subcommand (interfaces.md). It is the
-// operator-facing front door to the push-ingest path: it parses an
-// operator-supplied event JSON, validates it against the push-inject message
-// schema, locates the running core exactly as other INTF-CLI operator
-// subcommands do (an injected socket/token, else discovery), and performs the
-// SAME core-side enqueue as the ingest-event manager callback — durable via the
-// #2 queue, delivered at-least-once and deduped (INV-EVT-*).
+// Package emit implements the operator command source behind the `push-inject`
+// INTF-CLI subcommand (interfaces.md). It is the operator-facing front door to
+// the push-ingest path: it parses an operator-supplied event JSON, validates it
+// against the push-inject message schema, locates the running core exactly as
+// other INTF-CLI operator subcommands do (an injected socket/token, else
+// discovery), and performs the SAME core-side enqueue as the ingest-event manager
+// callback — durable via the queue, delivered at-least-once and deduped
+// (INV-EVT-*).
 //
-// This is bead pg2-hvlyj.17 (plan item 5.5). Its statement coverage is gated at
-// >=85% by the `pr-pool-go-tests` flake check (bead pg2-hvlyj.19).
+// The subcommand's name is `push-inject`. There is no `pr-pool-emit` subcommand;
+// the package name is historical.
+//
+// # The located core decides the enqueuer
+//
+// A located core may be THIS process or another one, and the two need different
+// transports. That choice belongs to the CoreRef, not to whoever wired the call:
+// see Enqueuer, QueueEnqueuer (in-process) and SocketEnqueuer (over the socket),
+// each of which refuses a ref it cannot reach.
+//
+// This is bead pg2-hvlyj.17 (plan item 5.5), extended with the socket transport by
+// bead pg2-f3mcb.3. Its statement coverage is gated at >=85% by the
+// `pr-pool-go-tests` flake check (bead pg2-hvlyj.19).
 package emit
 
 import (
@@ -27,12 +38,27 @@ const pushInjectSchema = "cli.push-inject"
 // discovery available).
 var ErrNoCore = errors.New("emit: no running core located (no injected socket, no discovery)")
 
+// ErrWrongEnqueuer is returned when an Enqueuer is handed a CoreRef it cannot
+// possibly reach: QueueEnqueuer given a core in ANOTHER process, or
+// SocketEnqueuer given the in-process core. It exists because the failure it
+// replaces was SILENT — see QueueEnqueuer.Enqueue.
+var ErrWrongEnqueuer = errors.New("emit: this enqueuer cannot reach the located core")
+
 // CoreRef identifies a located running core: its socket path and auth token, and
 // whether it was injected (env/arg) or discovered.
+//
+// Local is what distinguishes "the core is THIS process" from "the core is over
+// there". It is an EXPLICIT flag rather than "an empty Socket means local"
+// precisely so a zero-value CoreRef — the thing a half-written locate path
+// returns — names no core at all and is refused by every Enqueuer, instead of
+// defaulting to a local enqueue that goes nowhere the operator can see.
 type CoreRef struct {
 	Socket     string
 	Token      string
 	Discovered bool
+	// Local marks the IN-PROCESS core: this process owns the durable queue, so
+	// there is no socket to cross. It is the ONLY ref QueueEnqueuer accepts.
+	Local bool
 }
 
 // Locator resolves the running core the same way as the other INTF-CLI operator
@@ -59,20 +85,49 @@ func (l Locator) Locate() (CoreRef, error) {
 	return CoreRef{}, ErrNoCore
 }
 
+// LocalLocator locates the IN-PROCESS core: the caller IS the core and owns the
+// durable queue, so nothing is injected and nothing is discovered. It is the only
+// locator whose result QueueEnqueuer accepts, and it exists so that path has to be
+// stated rather than fallen into.
+func LocalLocator() Locator {
+	return Locator{Discover: func() (CoreRef, error) { return CoreRef{Local: true}, nil }}
+}
+
 // Enqueuer performs the core-side enqueue against a located core — the same
-// enqueue the ingest-event callback target performs. The in-process
-// implementation (QueueEnqueuer) enqueues directly into the durable queue; a
-// deployment MAY forward it over the located socket instead.
+// enqueue the ingest-event callback target performs. There are exactly two
+// implementations, and WHICH ONE IS CORRECT IS DECIDED BY THE CoreRef, never by
+// the caller's preference:
+//
+//   - QueueEnqueuer — the core is THIS process; append straight to its queue.
+//   - SocketEnqueuer — the core is another process; forward over its socket.
+//
+// Both REFUSE a ref they cannot reach (ErrWrongEnqueuer). An Enqueuer that
+// quietly accepted the wrong ref would report success for an event that was never
+// delivered, which is the one failure mode this boundary must not have.
 type Enqueuer interface {
 	Enqueue(core CoreRef, evt eventqueue.Event) (eventqueue.EnqueueResult, error)
 }
 
-// QueueEnqueuer enqueues directly into a durable queue (the in-process front
-// door). It ignores the CoreRef because the queue is local.
+// QueueEnqueuer enqueues directly into a durable queue — the IN-PROCESS front
+// door, usable only by a caller that is itself the core.
 type QueueEnqueuer struct{ Q *eventqueue.Queue }
 
-// Enqueue appends evt to the durable queue.
-func (q QueueEnqueuer) Enqueue(_ CoreRef, evt eventqueue.Event) (eventqueue.EnqueueResult, error) {
+// Enqueue appends evt to the LOCAL durable queue, and REFUSES any CoreRef that
+// names a core in another process.
+//
+// The refusal is the point. This method used to ignore the CoreRef outright, with
+// the comment "the queue is local" — so wiring an operator front door through it
+// against a DISCOVERED core reported success while appending to a queue that died
+// with the CLI process. The event was never delivered and nothing surfaced the
+// loss. A located-but-unreachable core is now an error at the boundary that knows
+// it cannot reach it, which is the only place it can still be reported honestly.
+func (q QueueEnqueuer) Enqueue(core CoreRef, evt eventqueue.Event) (eventqueue.EnqueueResult, error) {
+	if !core.Local {
+		return eventqueue.Enqueued, fmt.Errorf(
+			"%w: QueueEnqueuer only reaches the in-process queue, but the located core is remote (socket %q, discovered=%t); forward over the socket instead (SocketEnqueuer)",
+			ErrWrongEnqueuer, core.Socket, core.Discovered,
+		)
+	}
 	return q.Q.Enqueue(evt)
 }
 

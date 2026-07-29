@@ -105,7 +105,9 @@ func TestEmit_EntersQueueAndDelivers(t *testing.T) {
 	q := newQueue(t)
 	l := &acceptListener{}
 	q.Register(l)
-	res, err := Emit([]byte(validEvent), injected(), QueueEnqueuer{Q: q})
+	// LocalLocator, not injected(): QueueEnqueuer reaches only THIS process's queue,
+	// so it refuses a ref naming a core elsewhere.
+	res, err := Emit([]byte(validEvent), LocalLocator(), QueueEnqueuer{Q: q})
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -159,15 +161,75 @@ func TestEmit_AbsentAtIsZeroTime(t *testing.T) {
 
 func TestEmit_DedupesReEmitWithinTTL(t *testing.T) {
 	q := newQueue(t)
-	if _, err := Emit([]byte(validEvent), injected(), QueueEnqueuer{Q: q}); err != nil {
+	if _, err := Emit([]byte(validEvent), LocalLocator(), QueueEnqueuer{Q: q}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Emit([]byte(validEvent), injected(), QueueEnqueuer{Q: q})
+	res, err := Emit([]byte(validEvent), LocalLocator(), QueueEnqueuer{Q: q})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Status != eventqueue.Deduped {
 		t.Fatalf("re-emit status = %v, want Deduped", res.Status)
+	}
+}
+
+// --- the trap: QueueEnqueuer must REFUSE a core it cannot reach --------------
+//
+// QueueEnqueuer used to IGNORE the CoreRef ("the queue is local"), so an operator
+// front door wired through it against a DISCOVERED core reported SUCCESS while
+// appending to a queue that died with the CLI process. These tests pin the refusal
+// that makes that impossible.
+
+func TestQueueEnqueuer_RefusesDiscoveredCore(t *testing.T) {
+	q := newQueue(t)
+	ref := CoreRef{Socket: "/tmp/core.sock", Token: "tok", Discovered: true}
+	if _, err := (QueueEnqueuer{Q: q}).Enqueue(ref, eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute}); !errors.Is(err, ErrWrongEnqueuer) {
+		t.Fatalf("enqueue against a discovered core = %v, want ErrWrongEnqueuer", err)
+	}
+	if d := q.DepthByType()["t"]; d != 0 {
+		t.Fatalf("queue depth = %d, want 0 — a refused enqueue must not append locally", d)
+	}
+}
+
+func TestQueueEnqueuer_RefusesInjectedCore(t *testing.T) {
+	if _, err := (QueueEnqueuer{Q: newQueue(t)}).Enqueue(
+		CoreRef{Socket: "/tmp/core.sock", Token: "tok"},
+		eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute},
+	); !errors.Is(err, ErrWrongEnqueuer) {
+		t.Fatalf("enqueue against an injected core = %v, want ErrWrongEnqueuer", err)
+	}
+}
+
+// A ZERO-VALUE ref names no core at all (the thing a half-written locate path
+// returns). It must be refused too, rather than default to a local enqueue.
+func TestQueueEnqueuer_RefusesZeroValueRef(t *testing.T) {
+	if _, err := (QueueEnqueuer{Q: newQueue(t)}).Enqueue(CoreRef{}, eventqueue.Event{ID: "e", Type: "t", TTL: time.Minute}); !errors.Is(err, ErrWrongEnqueuer) {
+		t.Fatalf("enqueue against a zero-value ref = %v, want ErrWrongEnqueuer", err)
+	}
+}
+
+// Emit through a discovered core and QueueEnqueuer must FAIL, not silently report
+// a successful injection.
+func TestEmit_QueueEnqueuerAgainstDiscoveredCoreFails(t *testing.T) {
+	q := newQueue(t)
+	loc := Locator{Discover: func() (CoreRef, error) {
+		return CoreRef{Socket: "/tmp/core.sock", Token: "tok", Discovered: true}, nil
+	}}
+	if _, err := Emit([]byte(validEvent), loc, QueueEnqueuer{Q: q}); !errors.Is(err, ErrWrongEnqueuer) {
+		t.Fatalf("emit into a discovered core via QueueEnqueuer = %v, want ErrWrongEnqueuer", err)
+	}
+	if d := q.DepthByType()["review-requested"]; d != 0 {
+		t.Fatalf("local queue depth = %d, want 0 — the event must not land in a throwaway local queue", d)
+	}
+}
+
+func TestLocalLocator_LocatesTheInProcessCore(t *testing.T) {
+	got, err := LocalLocator().Locate()
+	if err != nil {
+		t.Fatalf("LocalLocator: %v", err)
+	}
+	if !got.Local || got.Socket != "" || got.Discovered {
+		t.Fatalf("local ref = %+v, want Local with no socket", got)
 	}
 }
 
