@@ -67,6 +67,119 @@ func TestEnumerateSubstitutions(t *testing.T) {
 	}
 }
 
+// TestScanSubstitutions_Unparseable pins the pg2-wguam contract: the scan REPORTS
+// when it lost track of the text, instead of handing back a short list that reads
+// as "nothing here".
+//
+// The distinction is the whole fix. EnumerateSubstitutions returns []Substitution,
+// and the engine's fold is Approve iff nothing objects — so an empty list from a
+// DESYNCED scan was an auto-approve of everything the scan skipped. One apostrophe
+// of prose is enough to desync it: matchParen tracks quotes, so an unbalanced one
+// inside a `$( )` means its closing paren is never found and the extent (with
+// whatever it contains) is never enumerated.
+func TestScanSubstitutions_Unparseable(t *testing.T) {
+	tests := []struct {
+		name            string
+		in              string
+		wantUnparseable bool
+		wantBodies      []string
+	}{
+		// --- clean text: parseable, complete ---
+		{"no substitutions", "echo hi", false, nil},
+		{"balanced quotes around a sub", `echo "$(date)"`, false, []string{"date"}},
+		{"apostrophe safely inside double quotes", `echo "the agent's note"`, false, nil},
+		{"single-quoted region containing a double quote", `echo 'it"s'`, false, nil},
+		{"escaped quote is not a quote", `echo \'`, false, nil},
+		{"jq filter with parens inside single quotes", `echo "$(jq -r 'select(.a)' f)"`, false, []string{"jq -r 'select(.a)' f"}},
+
+		// --- the reproduction: an apostrophe inside a $( ) body ---
+		{"apostrophe inside a command substitution", "echo \"$(echo the agent's note)\"", true, nil},
+		{"stray double quote inside a command substitution", "echo \"$(echo he said \"hi)\"", true, nil},
+		// The killer detail: the SECOND, genuinely dangerous substitution is
+		// discarded too, because the scan stops at the first desync.
+		{"desync discards a later substitution", "echo \"$(echo don't)\" \"$(rm -rf .git/objects)\"", true, nil},
+
+		// --- unterminated forms ---
+		{"unterminated command substitution", "echo $(oops", true, nil},
+		{"unterminated backtick", "echo `oops", true, nil},
+		{"unterminated backtick discards a later sub", "echo `oops $(rm -rf ~)", true, nil},
+
+		// --- a quote left open at end of input ---
+		{"top-level unbalanced single quote", "echo don't ; rm -rf .git/objects", true, nil},
+		{"top-level unbalanced double quote", `echo "hi`, true, nil},
+		// A complete substitution BEFORE the desync is still reported; the flag is
+		// what tells the caller the list is a prefix.
+		{"substitution before the desync is kept", `echo "$(date)" 'oops`, true, []string{"date"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ScanSubstitutions(tt.in)
+			if got.Unparseable != tt.wantUnparseable {
+				t.Errorf("ScanSubstitutions(%q).Unparseable = %v, want %v (reason %q)",
+					tt.in, got.Unparseable, tt.wantUnparseable, got.Reason)
+			}
+			if got.Unparseable && got.Reason == "" {
+				t.Errorf("ScanSubstitutions(%q) is Unparseable with an empty Reason", tt.in)
+			}
+			if gotBodies := bodies(got.Substitutions); len(gotBodies) > 0 || len(tt.wantBodies) > 0 {
+				if !reflect.DeepEqual(gotBodies, tt.wantBodies) {
+					t.Errorf("ScanSubstitutions(%q) bodies = %v, want %v", tt.in, gotBodies, tt.wantBodies)
+				}
+			}
+			// EnumerateSubstitutions keeps its old signature and its old bodies; it
+			// simply drops the flag. Callers whose "no substitutions" branch is an
+			// approval must use ScanSubstitutions instead.
+			if !reflect.DeepEqual(EnumerateSubstitutions(tt.in), got.Substitutions) {
+				t.Errorf("EnumerateSubstitutions(%q) diverged from ScanSubstitutions(%q).Substitutions", tt.in, tt.in)
+			}
+		})
+	}
+}
+
+// TestScanSubstitutionsInHeredocBody_QuotesAreData pins the BODY expansion model
+// (pg2-wguam): inside an unquoted heredoc body bash performs expansion but no
+// quote removal, so a `'` is one literal apostrophe and must not open a quoted
+// region that hides the rest of the body.
+//
+// Before this, the shell-text scan was used on bodies too, which made the verdict
+// depend on where in the body the apostrophe sat — the order-dependent-verdict
+// class heredocFloor's fold exists to eliminate.
+func TestScanSubstitutionsInHeredocBody_QuotesAreData(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            string
+		wantBodies      []string
+		wantUnparseable bool
+	}{
+		{"apostrophe before the substitution", "don't\n$(rm -rf .git/objects)\n", []string{"rm -rf .git/objects"}, false},
+		{"apostrophe after the substitution", "$(rm -rf .git/objects)\ndon't\n", []string{"rm -rf .git/objects"}, false},
+		{"stray double quote before the substitution", "he said \"hi\n$(rm -rf .git/objects)\n", []string{"rm -rf .git/objects"}, false},
+		// Quotes are data, so a "single-quoted" span in a body does NOT make its
+		// substitution inert — bash still expands it.
+		{"apparent single-quoted span still expands", "'$(rm -rf .git/objects)'\n", []string{"rm -rf .git/objects"}, false},
+		{"no substitution, prose only", "the agent's note\n", nil, false},
+		// Backslash escaping IS honored in a body: `\$(x)` is literal text.
+		{"escaped dollar is literal", "\\$(rm -rf .git/objects)\n", nil, false},
+		// An unterminated `$(` or backtick still leaves the extent unknown.
+		{"unterminated substitution in a body", "$(oops\n", nil, true},
+		{"unterminated backtick in a body", "`oops\n", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ScanSubstitutionsInHeredocBody(tt.body)
+			if got.Unparseable != tt.wantUnparseable {
+				t.Errorf("ScanSubstitutionsInHeredocBody(%q).Unparseable = %v, want %v",
+					tt.body, got.Unparseable, tt.wantUnparseable)
+			}
+			if gotBodies := bodies(got.Substitutions); len(gotBodies) > 0 || len(tt.wantBodies) > 0 {
+				if !reflect.DeepEqual(gotBodies, tt.wantBodies) {
+					t.Errorf("ScanSubstitutionsInHeredocBody(%q) bodies = %v, want %v", tt.body, gotBodies, tt.wantBodies)
+				}
+			}
+		})
+	}
+}
+
 func TestEnumerateSubstitutions_Kinds(t *testing.T) {
 	got := EnumerateSubstitutions("a $(cmd) `bt` <(pin) >(pout)")
 	want := []Substitution{
@@ -136,6 +249,13 @@ func TestIsSafeSubstitutionBody_NestedRejected(t *testing.T) {
 		{"git log", false},
 		// rm is not a safe substitution command.
 		{"rm -rf ~/x", false},
+		// An UNPARSEABLE body is never statically safe (pg2-wguam). Reachable via a
+		// backtick body, whose extent scan is not quote-aware: the body below still
+		// reduces to one safe-looking `echo` leaf, so without the unparseable check
+		// the static-allowlist floor would clear text nobody enumerated.
+		{"echo don't", false},
+		{`echo "unterminated`, false},
+		{"echo `oops", false},
 	}
 	for _, tt := range tests {
 		if got := IsSafeSubstitutionBody(tt.body); got != tt.safe {

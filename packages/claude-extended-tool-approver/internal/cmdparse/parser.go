@@ -131,7 +131,14 @@ func IsSafeSubstitutionBody(cmdStr string) bool {
 	// A body that itself embeds a command/process substitution is opaque to the
 	// static allowlist — the nested command is never inspected here. Reject it;
 	// the engine's full-engine recursion evaluates the inner command instead.
-	if len(EnumerateSubstitutions(cmdStr)) > 0 {
+	//
+	// An UNPARSEABLE body is rejected for the same reason and then some: if the
+	// scan desynced, "no substitution found" is not evidence there is none, so
+	// clearing the body would clear text nobody enumerated. A backtick body is the
+	// reachable case — indexUnescapedBacktick is not quote-aware, so `` `echo don't` ``
+	// yields a quote-unbalanced body that Parse still reduces to one safe-looking
+	// `echo` leaf (pg2-wguam).
+	if scan := ScanSubstitutions(cmdStr); scan.Unparseable || len(scan.Substitutions) > 0 {
 		return false
 	}
 	leaves := Parse(cmdStr)
@@ -171,11 +178,46 @@ func (s Substitution) IsCommandSubstitution() bool {
 	return s.Kind == SubstCommand || s.Kind == SubstBacktick
 }
 
+// SubstitutionScan is the result of scanning text for substitutions: the
+// TOP-LEVEL bodies found, plus whether the scan actually managed to model the
+// text it was given.
+//
+// Unparseable is the security-load-bearing half (pg2-wguam). The bodies alone
+// cannot distinguish "this text contains no substitution" from "the scan lost
+// track and stopped looking", and the engine's fold is Approve iff no leaf
+// objects — so an empty result read as the former is an AUTO-APPROVE of whatever
+// the scan skipped. A caller making a security decision MUST floor an
+// Unparseable scan at Abstain and MUST NOT treat its Substitutions as complete.
+type SubstitutionScan struct {
+	// Substitutions are the top-level bodies found before the scan stopped. When
+	// Unparseable is set this list is a PREFIX, not an inventory.
+	Substitutions []Substitution
+	// Unparseable reports that the scan could not model the text: an unterminated
+	// `$(`/backtick, a `$( )` whose extent does not balance, or (shell-text mode)
+	// a quote left open at end of input.
+	Unparseable bool
+	// Reason names the specific desync, for the deferring caller's reason string.
+	Reason string
+}
+
 // EnumerateSubstitutions scans raw shell text and returns every TOP-LEVEL
 // command/process substitution body: $(...), `...`, <(...) and >(...). It is the
 // single shared substitution enumerator (pg2-1q5i3) used by the engine's
 // substitution-body recursion and reusable by sibling env-value recursion
 // (pg2-gkd5e).
+//
+// It DISCARDS the scan's Unparseable flag, so it is only appropriate where a
+// truncated list is conservative in the caller's own direction (gitdir's
+// direction inference defaults to write when a variable's use is unseen; envvars
+// refuses to clear a value that enumerates to zero substitutions). Any caller
+// whose "no substitutions" branch is an approval MUST use ScanSubstitutions and
+// honor Unparseable instead.
+func EnumerateSubstitutions(s string) []Substitution {
+	return ScanSubstitutions(s).Substitutions
+}
+
+// ScanSubstitutions scans SHELL TEXT — a command line or a substitution body,
+// where quote characters are syntax.
 //
 // Semantics:
 //   - Single-quoted spans are literal — bash performs NO substitution there — so
@@ -190,10 +232,53 @@ func (s Substitution) IsCommandSubstitution() bool {
 //   - Paren matching counts every '(' (bare, $(, <(, >() so a process sub nested
 //     inside a command sub — the `$(cat <(rm -rf ~))` depth-counter gotcha — is
 //     NOT truncated.
-//   - An unterminated substitution stops the scan (best-effort, safe default).
-func EnumerateSubstitutions(s string) []Substitution {
+//   - An unterminated substitution, or a quote still open at end of input, stops
+//     the scan and sets Unparseable.
+func ScanSubstitutions(s string) SubstitutionScan {
+	return scanSubstitutions(s, true)
+}
+
+// ScanSubstitutionsInHeredocBody scans an UNQUOTED heredoc BODY, where quote
+// characters are DATA rather than syntax.
+//
+// bash expands an unquoted heredoc body — parameter expansion, command
+// substitution, arithmetic — but performs no word splitting and no quote
+// removal: a `'` in the body is one literal apostrophe, not the start of a
+// quoted region. Scanning a body with ScanSubstitutions therefore mis-models it
+// twice over (pg2-wguam): an apostrophe in prose opened a phantom single-quoted
+// region that swallowed every following `$( )`, so
+//
+//	cat <<EOF        ->  Reject (the substitution is seen)
+//	$(rm -rf .git/objects)
+//	don't
+//	EOF
+//
+//	cat <<EOF        ->  the substitution is NEVER enumerated
+//	don't
+//	$(rm -rf .git/objects)
+//	EOF
+//
+// reached different verdicts for the same body — the order-dependent-verdict
+// class heredocFloor's fold exists to eliminate. Only the delimiter's quoting
+// decides whether a body expands at all, and that discriminator is upstream:
+// ParsedCommand.UnquotedHeredocBodies never hands a `<<'EOF'` body to this.
+//
+// Backslash pairs are still skipped, matching bash: `\$(x)` in a body is literal
+// text and must not be enumerated.
+func ScanSubstitutionsInHeredocBody(body string) SubstitutionScan {
+	return scanSubstitutions(body, false)
+}
+
+// scanSubstitutions is the shared scan. quotesAreSyntax distinguishes shell text
+// (quotes delimit literal/expanding regions, and an unclosed one is a desync)
+// from an unquoted heredoc body (quotes are ordinary bytes, so no quote state
+// exists to be unbalanced).
+func scanSubstitutions(s string, quotesAreSyntax bool) SubstitutionScan {
 	var out []Substitution
 	inSingle, inDouble := false, false
+	stop := func(reason string) SubstitutionScan {
+		return SubstitutionScan{Substitutions: out, Unparseable: true, Reason: reason}
+	}
 	i, n := 0, len(s)
 	for i < n {
 		c := s[i]
@@ -207,23 +292,27 @@ func EnumerateSubstitutions(s string) []Substitution {
 			// Escaped char (bare or double-quote context): the next byte is
 			// literal, so \$ / \` cannot begin a substitution.
 			i += 2
-		case c == '\'' && !inDouble:
+		case quotesAreSyntax && c == '\'' && !inDouble:
 			inSingle = true
 			i++
-		case c == '"':
+		case quotesAreSyntax && c == '"':
 			inDouble = !inDouble
 			i++
 		case c == '`':
 			end := indexUnescapedBacktick(s, i+1)
 			if end < 0 {
-				return out // unterminated backtick — stop
+				return stop("unterminated backtick command substitution")
 			}
 			out = append(out, Substitution{Kind: SubstBacktick, Body: s[i+1 : end]})
 			i = end + 1
 		case c == '$' && i+1 < n && s[i+1] == '(':
 			rel := matchParen(s[i+1:]) // s[i+1] == '('
 			if rel < 0 {
-				return out // unterminated — stop
+				// Either genuinely unterminated, or the body holds an unbalanced quote
+				// that makes matchParen's own quote tracking never see the closing ')'.
+				// Both leave the substitution's EXTENT unknown, so nothing inside it has
+				// been enumerated.
+				return stop("unterminated or quote-unbalanced $( ) command substitution")
 			}
 			closeAbs := i + 1 + rel
 			if i+2 < n && s[i+2] == '(' {
@@ -250,7 +339,14 @@ func EnumerateSubstitutions(s string) []Substitution {
 			i++
 		}
 	}
-	return out
+	if inSingle || inDouble {
+		// A quote left open at end of input means every byte after it was read as
+		// inert quoted text. bash would reject the command outright, but ceta must
+		// not: the scan's own model is what failed, so it cannot certify that the
+		// skipped tail held no substitution.
+		return stop("unbalanced quote")
+	}
+	return SubstitutionScan{Substitutions: out}
 }
 
 // matchParen returns the index within s of the ')' that closes the '(' assumed
