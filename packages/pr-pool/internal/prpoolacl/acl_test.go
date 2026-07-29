@@ -325,37 +325,111 @@ func TestReconcile_LegacyClosedNoHeadSHANotResurrected(t *testing.T) {
 	}
 }
 
-// TestReconcile_TeamDraftSkipped (I2): a teammate PR still in draft is not
-// reviewed (selection parity with pg-pr's beadsbridge).
-func TestReconcile_TeamDraftSkipped(t *testing.T) {
-	f := &fakeBD{responses: map[string]string{
-		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
-		"list task":          `{"data":[]}`,
-		"gate list":          `{"data":[]}`,
-	}}
-	prs := []PR{{Repo: "o/r", Number: 7, State: "draft", Ownership: "team"}}
-	ids, errs := Reconcile(context.Background(), f, prs)
-	if len(errs) != 0 || len(ids) != 0 {
-		t.Fatalf("team draft PR: expected skip, got ids=%v errs=%v", ids, errs)
-	}
-	if f.countCalls("create") != 0 {
-		t.Errorf("teammate draft PR must not be reviewed")
-	}
-}
-
-// TestReconcile_MineDraftReviewed (I2): my own PR is reviewed even while a draft.
-func TestReconcile_MineDraftReviewed(t *testing.T) {
-	f := &fakeBD{responses: map[string]string{
+// birthFake is a fakeBD scripted for the review-pr BIRTH path of o/r#7: an open
+// MR bead, no existing review-pr, and a create that returns zr-rv7.
+func birthFake() *fakeBD {
+	return &fakeBD{responses: map[string]string{
 		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
 		"list task":          `{"data":[]}`,
 		"create":             "zr-rv7\n",
 		"gate create":        `{"data":{"id":"g7"}}`,
 		"gate list":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, State: "draft", Ownership: "mine"}}
-	ids, _ := Reconcile(context.Background(), f, prs)
+}
+
+// TestReconcile_DraftSelectionMatrix (I2) is the FULL (ownership x draft) truth
+// table for the draft gate. It must match pg-pr's beadsbridge predicate
+// (packages/pg-pr/internal/beadsbridge/bridge.go:111-112):
+//
+//	mine := p.Ownership != "team" // mine OR co-owned
+//	if !h.suppressDraftReviews && (mine || !p.Draft) {
+//
+// i.e. every combination is reviewed EXCEPT a team PR still in draft. The
+// co-owned+draft row is the parity break pg2-42uap fixed: the old
+// `pr.Ownership != "mine"` gate silently dropped co-owned drafts forever.
+func TestReconcile_DraftSelectionMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ownership string
+		state     string
+		reviewed  bool
+	}{
+		{"mine/not-draft", ownershipMine, "open", true},
+		{"mine/draft", ownershipMine, "draft", true},
+		{"co-owned/not-draft", ownershipCoOwned, "open", true},
+		{"co-owned/draft", ownershipCoOwned, "draft", true},
+		{"team/not-draft", ownershipTeam, "open", true},
+		{"team/draft", ownershipTeam, "draft", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := birthFake()
+			prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Ownership: tc.ownership}}
+
+			ids, errs := Reconcile(context.Background(), f, prs)
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errs: %v", errs)
+			}
+			if tc.reviewed {
+				if len(ids) != 1 || ids[0] != "zr-rv7" {
+					t.Fatalf("ownership=%s state=%s must be reviewed, got ids=%v", tc.ownership, tc.state, ids)
+				}
+				if f.countCalls("create", "--type=task", "review-pr: o/r#7") != 1 {
+					t.Errorf("expected exactly one review-pr create; calls=%v", f.calls)
+				}
+				return
+			}
+			if len(ids) != 0 {
+				t.Fatalf("ownership=%s state=%s must be skipped, got ids=%v", tc.ownership, tc.state, ids)
+			}
+			if f.countCalls("create") != 0 {
+				t.Errorf("a team draft PR must not be reviewed; calls=%v", f.calls)
+			}
+		})
+	}
+}
+
+// TestReconcile_CoOwnedDraftReviewed is the regression for pg2-42uap: a co-owned
+// PR still in GitHub draft MUST yield a review-pr bead (child of the MR, with its
+// active-pr gate), because pg-pr's beadsbridge counts co-owned as mine
+// (`mine := p.Ownership != "team"`, bridge.go:111-112) and reviews mine while draft.
+func TestReconcile_CoOwnedDraftReviewed(t *testing.T) {
+	f := birthFake()
+	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "draft", Ownership: ownershipCoOwned}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
 	if len(ids) != 1 || ids[0] != "zr-rv7" {
-		t.Errorf("my draft PR must be reviewed (parity), got %v", ids)
+		t.Fatalf("a co-owned draft PR must yield a review-pr bead, got ids=%v", ids)
+	}
+	if f.countCalls("create", "--type=task", "review-pr: o/r#7") != 1 {
+		t.Errorf("expected exactly one review-pr create; calls=%v", f.calls)
+	}
+	if f.countCalls("dep", "add", "zr-rv7", "zr-mr7") != 1 {
+		t.Errorf("expected the review-pr linked as a child of the MR bead; calls=%v", f.calls)
+	}
+	if f.countCalls("gate", "create", "--type=pg-pr:active-pr") != 1 {
+		t.Errorf("expected an active-pr gate created at birth; calls=%v", f.calls)
+	}
+}
+
+// TestActsAsMineParity pins pr-pool's copied predicate to pg-pr's two
+// formulations over the CLOSED 3-value ownership set — ownership.ActsAsMine's
+// `o == Mine || o == CoOwned` (internal/ownership/ownership.go:46) and
+// beadsbridge's `p.Ownership != "team"` (internal/beadsbridge/bridge.go:111) —
+// so the duplication cannot silently drift. An out-of-band value degrades to
+// team-style selection by design (conservative: a draft is skipped, not reviewed).
+func TestActsAsMineParity(t *testing.T) {
+	for _, o := range []string{ownershipMine, ownershipCoOwned, ownershipTeam} {
+		if got, want := actsAsMine(o), o != ownershipTeam; got != want {
+			t.Errorf("actsAsMine(%q)=%v; pg-pr's `Ownership != %q` says %v", o, got, ownershipTeam, want)
+		}
+	}
+	for _, o := range []string{"", "unknown"} {
+		if actsAsMine(o) {
+			t.Errorf("actsAsMine(%q) must be false (out-of-band degrades to team-style)", o)
+		}
 	}
 }
 

@@ -32,6 +32,38 @@ type PR struct {
 	Ownership string `json:"ownership"`
 }
 
+// The ownership values pg-pr emits on the seam. The set is CLOSED at three
+// values, mirroring pg-pr's ownership package
+// (packages/pg-pr/internal/ownership/ownership.go:11-13).
+const (
+	ownershipMine    = "mine"
+	ownershipCoOwned = "co-owned"
+	ownershipTeam    = "team"
+)
+
+// actsAsMine reports whether a PR's ownership makes the ACL treat it like my own
+// for SELECTION (reviewed even while a GitHub draft). It is the pr-pool-side copy
+// of pg-pr's ownership.Ownership.ActsAsMine — `o == Mine || o == CoOwned`
+// (packages/pg-pr/internal/ownership/ownership.go:46) — which over the closed
+// 3-value set is exactly pg-pr's beadsbridge formulation `p.Ownership != "team"`
+// (packages/pg-pr/internal/beadsbridge/bridge.go:111).
+//
+// The predicate is DUPLICATED, not shared, and cannot be shared today: pr-pool is
+// a separate Go module (github.com/phillipgreenii/pr-pool) and pg-pr's ownership
+// package sits under pg-pr's internal/, which Go refuses to import across the
+// module boundary ("use of internal package ... not allowed"). Nor should it be
+// shared: prpoolacl is an anti-corruption layer over the `pg-pr pr list --json`
+// CLI seam and deliberately owns its own copy of pg-pr's vocabulary (see PR
+// above) instead of compiling against pg-pr's types. TestActsAsMineParity pins
+// the two formulations together over the closed set so they cannot drift again.
+//
+// An out-of-band value (including "", the field absent from the seam) is
+// deliberately NOT acts-as-mine: it degrades to team-style selection, the
+// conservative direction (such a draft is skipped, never auto-reviewed).
+func actsAsMine(ownership string) bool {
+	return ownership == ownershipMine || ownership == ownershipCoOwned
+}
+
 func prKey(pr PR) string { return fmt.Sprintf("%s#%d", pr.Repo, pr.Number) }
 
 // Reconcile ensures a review-pr work bead for each open PR and resolves its
@@ -90,13 +122,25 @@ func Reconcile(ctx context.Context, r beads.Runner, prs []PR) (reviewIDs []strin
 // snapshot, then ensures a review-pr child bead carrying the PR coords. Returns
 // the review-pr id (an existing OPEN bead; a REOPENED closed bead whose PR head
 // advanced past the reviewed sha; or a newly created one), or "" when the PR is
-// skipped: a teammate PR still in draft, no MR bead yet, a closed MR, or a
-// completed (closed) review whose head has NOT advanced (not resurrected). On the
-// birth path it also creates the active-pr gate exactly once (Phase 2 resolves).
+// skipped: a team PR still in draft (co-owned counts as mine), no MR bead yet, a
+// closed MR, or a completed (closed) review whose head has NOT advanced (not
+// resurrected). On the birth path it also creates the active-pr gate exactly once
+// (Phase 2 resolves).
 func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []beads.Issue) (string, error) {
-	// Selection parity with pg-pr's beadsbridge (draftreview): review my PRs even
-	// while a GitHub draft; review teammate PRs only once they leave draft.
-	if pr.Ownership != "mine" && pr.State == "draft" {
+	// Selection parity with pg-pr's beadsbridge (draftreview): a PR that acts as
+	// mine (mine OR co-owned) is reviewed even while a GitHub draft; a team PR is
+	// reviewed only once it leaves draft. pg-pr's predicate lives in Handler.Handle's
+	// pr.opened/pr.updated arm (packages/pg-pr/internal/beadsbridge/bridge.go:111-112):
+	//
+	//	mine := p.Ownership != "team" // mine OR co-owned
+	//	if !h.suppressDraftReviews && (mine || !p.Draft) {
+	//
+	// pr.State == "draft" is the SAME fact as pg-pr's p.Draft — the seam derives
+	// Draft as `pr.State == "draft"` (packages/pg-pr/cmd/pg-pr/pr_list.go:99). See
+	// actsAsMine for why the predicate is copied rather than imported. (pg-pr's
+	// suppressDraftReviews review kill switch has no pr-pool counterpart; it is not
+	// part of this ownership/draft predicate.)
+	if !actsAsMine(pr.Ownership) && pr.State == "draft" {
 		return "", nil
 	}
 
