@@ -61,9 +61,12 @@ const (
 // actsAsMine reports whether a PR's ownership makes the ACL treat it like my own
 // for SELECTION (reviewed even while a GitHub draft). It is the pr-pool-side copy
 // of pg-pr's ownership.Ownership.ActsAsMine — `o == Mine || o == CoOwned`
-// (packages/pg-pr/internal/ownership/ownership.go:46) — which over the closed
-// 3-value set is exactly pg-pr's beadsbridge formulation `p.Ownership != "team"`
-// (packages/pg-pr/internal/beadsbridge/bridge.go:111).
+// (packages/pg-pr/internal/ownership/ownership.go:46), which every pg-pr consumer
+// now calls, including the beadsbridge draft-review selection
+// (packages/pg-pr/internal/beadsbridge/bridge.go). That site used to hand-roll
+// `p.Ownership != "team"`; pg2-q2drf replaced it with the shared predicate, so
+// there is a single formulation on the pg-pr side and this copy mirrors it
+// exactly — on the closed 3-value set AND on out-of-band values.
 //
 // The predicate is DUPLICATED, not shared, and cannot be shared today: pr-pool is
 // a separate Go module (github.com/phillipgreenii/pr-pool) and pg-pr's ownership
@@ -72,7 +75,8 @@ const (
 // shared: prpoolacl is an anti-corruption layer over the `pg-pr pr list --json`
 // CLI seam and deliberately owns its own copy of pg-pr's vocabulary (see PR
 // above) instead of compiling against pg-pr's types. TestActsAsMineParity pins
-// the two formulations together over the closed set so they cannot drift again.
+// this copy to pg-pr's predicate over the closed set AND on out-of-band values,
+// so the duplication cannot drift.
 //
 // An out-of-band value (including "", the field absent from the seam) is
 // deliberately NOT acts-as-mine: it degrades to team-style selection, the

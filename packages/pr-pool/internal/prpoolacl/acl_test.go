@@ -429,21 +429,30 @@ func TestReconcile_CoOwnedDraftReviewed(t *testing.T) {
 	}
 }
 
-// TestActsAsMineParity pins pr-pool's copied predicate to pg-pr's two
-// formulations over the CLOSED 3-value ownership set — ownership.ActsAsMine's
-// `o == Mine || o == CoOwned` (internal/ownership/ownership.go:46) and
-// beadsbridge's `p.Ownership != "team"` (internal/beadsbridge/bridge.go:111) —
-// so the duplication cannot silently drift. An out-of-band value degrades to
-// team-style selection by design (conservative: a draft is skipped, not reviewed).
+// TestActsAsMineParity pins pr-pool's copied predicate to pg-pr's SINGLE
+// formulation — ownership.Ownership.ActsAsMine, `o == Mine || o == CoOwned`
+// (internal/ownership/ownership.go:46) — so the duplication cannot silently
+// drift. pg-pr's beadsbridge draft-review selection used to hand-roll
+// `p.Ownership != "team"`, which agreed on the closed 3-value set below but
+// disagreed on out-of-band values; pg2-q2drf made that site call ActsAsMine too,
+// so the out-of-band row now pins pg-pr's real behaviour rather than only
+// pr-pool's stricter reading. An out-of-band value (including "", the field
+// absent from the seam) degrades to team-style selection on BOTH sides by design
+// (conservative: such a draft is skipped, never auto-reviewed).
 func TestActsAsMineParity(t *testing.T) {
-	for _, o := range []string{ownershipMine, ownershipCoOwned, ownershipTeam} {
-		if got, want := actsAsMine(o), o != ownershipTeam; got != want {
-			t.Errorf("actsAsMine(%q)=%v; pg-pr's `Ownership != %q` says %v", o, got, ownershipTeam, want)
-		}
-	}
-	for _, o := range []string{"", "unknown"} {
-		if actsAsMine(o) {
-			t.Errorf("actsAsMine(%q) must be false (out-of-band degrades to team-style)", o)
+	for _, tc := range []struct {
+		ownership string
+		want      bool
+	}{
+		{ownershipMine, true},    // ActsAsMine: o == Mine
+		{ownershipCoOwned, true}, // ActsAsMine: o == CoOwned
+		{ownershipTeam, false},   // neither
+		{"", false},              // out-of-band: field absent from the seam
+		{"unknown", false},       // out-of-band: unrecognised value
+		{"Mine", false},          // out-of-band: pg-pr's values are lowercase
+	} {
+		if got := actsAsMine(tc.ownership); got != tc.want {
+			t.Errorf("actsAsMine(%q)=%v; pg-pr's ownership.ActsAsMine says %v", tc.ownership, got, tc.want)
 		}
 	}
 }

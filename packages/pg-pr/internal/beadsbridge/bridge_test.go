@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 )
@@ -542,7 +543,7 @@ func TestPRUpdatedTeamDraftToReadyCreatesDraftReview(t *testing.T) {
 }
 
 // TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels asserts a co-owned PR
-// projects a mine-style draft-review (mine=true, per "ownership != team") and
+// projects a mine-style draft-review (mine=true, per ownership.ActsAsMine) and
 // additionally triggers the team->co-owned relabel call, so a pre-existing
 // team-style draft-review bead flips to mine on the transition.
 func TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels(t *testing.T) {
@@ -569,6 +570,57 @@ func TestHandle_CoOwnedCreatesMineDraftReviewAndRelabels(t *testing.T) {
 	}
 	if !c.lastCoOwned {
 		t.Fatalf("expected SetMergeRequestCoOwned(true) for a co-owned PR, got false")
+	}
+}
+
+// TestHandle_OutOfBandOwnershipIsTeamStyle pins the draft-review selection's
+// acts-as-mine test at an OUT-OF-BAND ownership value: "" (the field absent from
+// a pr.* payload an older binary left in the durable outbox) and an unrecognised
+// string. The site delegates to the shared ownership.ActsAsMine (mine OR
+// co-owned), so such a value degrades to TEAM-style selection — a draft is
+// SKIPPED rather than auto-reviewed, and a ready PR gets a mine=false review
+// bead. The superseded local formulation `p.Ownership != "team"` called these
+// acts-as-mine, which is exactly why the case is pinned: the two formulations
+// must not silently disagree again (pg2-q2drf). Direction matches pr-pool's copy
+// of the predicate (TestActsAsMineParity) — fail closed, never auto-review.
+func TestHandle_OutOfBandOwnershipIsTeamStyle(t *testing.T) {
+	for _, tc := range []struct{ name, own string }{
+		{"empty (field absent from an older payload)", ""},
+		{"unrecognised value", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The shared predicate this site delegates to must agree.
+			if ownership.Ownership(tc.own).ActsAsMine() {
+				t.Fatalf("ownership.Ownership(%q).ActsAsMine() = true; an out-of-band value must be team-like", tc.own)
+			}
+			// Draft → team-style means no review bead yet.
+			c := &draftReviewClient{}
+			draftPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: tc.own, Draft: true})
+			if err := New(c).Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: draftPayload}); err != nil {
+				t.Fatalf("Handle (draft): %v", err)
+			}
+			if c.drCalls != 0 {
+				t.Errorf("ownership %q on a GitHub draft must be team-style (skipped), got %d draft-review ensures", tc.own, c.drCalls)
+			}
+			if c.relabelCalls != 0 {
+				t.Errorf("relabel must not fire for ownership %q, got %d calls", tc.own, c.relabelCalls)
+			}
+			if c.lastCoOwned {
+				t.Errorf("expected SetMergeRequestCoOwned(false) for ownership %q, got true", tc.own)
+			}
+			// Ready → review bead created, but team-style (mine=false).
+			c = &draftReviewClient{}
+			readyPayload, _ := json.Marshal(store.PRPayload{Repo: "o/r", Number: 7, Ownership: tc.own, Draft: false})
+			if err := New(c).Handle(context.Background(), store.Event{Type: store.EventPROpened, Payload: readyPayload}); err != nil {
+				t.Fatalf("Handle (ready): %v", err)
+			}
+			if c.drCalls != 1 {
+				t.Fatalf("expected 1 draft-review ensure for a ready PR with ownership %q, got %d", tc.own, c.drCalls)
+			}
+			if c.lastMine {
+				t.Errorf("expected mine=false (team-style) for ownership %q", tc.own)
+			}
+		})
 	}
 }
 

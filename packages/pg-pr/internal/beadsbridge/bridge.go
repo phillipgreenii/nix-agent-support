@@ -108,7 +108,15 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 		// is idempotent. When the review kill switch is on
 		// (suppressDraftReviews), production is skipped entirely — the
 		// merge-request bead above is still ensured.
-		mine := p.Ownership != "team" // mine OR co-owned
+		//
+		// The acts-as-mine test goes through the SHARED predicate
+		// ownership.ActsAsMine (mine OR co-owned), the same one replyposter,
+		// snapshot.builder, sync.ingest and nudged below use — never a local
+		// `!= "team"`. Over the closed 3-value set the two agree; they diverge on
+		// an out-of-band/empty value, where ActsAsMine degrades to team-style
+		// selection (a draft is skipped, not auto-reviewed) — the conservative
+		// direction, matching pr-pool's copy of the predicate. (pg2-q2drf)
+		mine := ownership.Ownership(p.Ownership).ActsAsMine()
 		if !h.suppressDraftReviews && (mine || !p.Draft) {
 			drID, err := h.client.EnsureDraftReviewBead(ctx, mrID, fmt.Sprintf("%s#%d", p.Repo, p.Number), mine)
 			if err != nil {
