@@ -11,8 +11,15 @@ may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 
 **Verified against:** `main` @ `9ac29c26` (2026-07-09); §2.2 / JR5 re-verified
 2026-07-15 for the `review.enabled` default flip (pg2-3ho1r); §3 / JR2 re-verified
-2026-07-29 for multi-line review comments (pg2-3c8mo). Re-verify the cited
-`file:line` anchors when review-flow code changes.
+2026-07-29 for multi-line review comments (pg2-3c8mo); all code citations
+re-anchored from pinned line ranges to symbol names 2026-07-29 (pg2-p1s8q).
+
+**Citation form:** code is cited by **symbol** — a file path plus the
+function/type/constant name in parentheses, e.g.
+`packages/pg-pr/internal/store/feedback.go` (`HasBlockingFeedback`). Resolve a
+citation by grepping the symbol at that path. Pinned line ranges are
+deliberately **NOT** used: they drift on every edit to the referenced file and
+then point silently at unrelated code.
 
 > Scope note: this repository is a standalone, **public** flake. This doc stays
 > deployment-agnostic — mechanisms and code defaults only, never a specific
@@ -30,7 +37,7 @@ may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
   own repo). A change to intended review behavior starts **there**; this reference is
   then re-derived to show how the code realizes it.
 - This reference **MAY** carry implementation detail the behavior docs deliberately
-  exclude: `file:line` anchors, test names, tool names, and current-vs-transitional
+  exclude: symbol anchors, test names, tool names, and current-vs-transitional
   state.
 - If observed code and a behavior doc disagree, that is a defect in the code (or a
   gap to close) — this reference does not override the behavior doc.
@@ -81,10 +88,10 @@ The code contains **two** review implementations. The repo's built-in defaults
 now select a **single owner** — **(B) `pr-pool`** — with **(A) `pg-pr`'s review
 hook off by default**:
 
-| Implementation                                         | What it is                                                                                                                                                          | Gating                                                                                                                                                     |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(A) `pg-pr` in-daemon review** (legacy, non-owner)   | draft-review beads → `reviewHookCycle` → mine/team sinks (self-review feedback + GitHub PENDING with skip-if-present) → `reopenStaleReviews` → 3-strike dead-letter | `review.enabled` — **defaults `false`** (`packages/pg-pr/internal/config/config.go:83-100`); enabling the legacy path is explicit opt-in                   |
-| **(B) `pr-pool` review workflow** (the intended owner) | reconcile ACL → `review-pr` beads → ccpool `review` role → post back via `pg-pr review submit`                                                                      | the review role ships **enabled by default** in the built-in role set (`packages/pr-pool/internal/roles/builtin.go:83-101`; `Cap = MaxWorker` default `1`) |
+| Implementation                                         | What it is                                                                                                                                                          | Gating                                                                                                                                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **(A) `pg-pr` in-daemon review** (legacy, non-owner)   | draft-review beads → `reviewHookCycle` → mine/team sinks (self-review feedback + GitHub PENDING with skip-if-present) → `reopenStaleReviews` → 3-strike dead-letter | `review.enabled` — **defaults `false`** (`packages/pg-pr/internal/config/config.go` (`ReviewConfig`, `ReviewEnabled`)); enabling the legacy path is explicit opt-in                        |
+| **(B) `pr-pool` review workflow** (the intended owner) | reconcile ACL → `review-pr` beads → ccpool `review` role → post back via `pg-pr review submit`                                                                      | the review role ships **enabled by default** in the built-in role set (`packages/pr-pool/internal/roles/builtin.go` (`BuiltinRoleSet`, its `review` entry); `Cap = MaxWorker` default `1`) |
 
 **In this repo's built-in defaults, only (B) is on** — a resting-safe single
 owner (pg2-3ho1r). A bare consumer that materializes no `pg-pr` config gets the
@@ -103,8 +110,9 @@ architecture**.
   is the opt-in switch that re-enables the legacy path.
 - Kill-switch mechanics: `review.enabled=false` disables the entire `pg-pr` chain —
   draft-review bead production and the review consumer both
-  (`packages/pg-pr/cmd/pg-pr/sync.go:95-118`, `:187-204`;
-  `packages/pg-pr/internal/sync/reviewhook.go:103-106`). What stays active
+  (`packages/pg-pr/cmd/pg-pr/sync.go` (`newBeadsBridgeHandler`; the
+  `SetReviewHook` wiring in `syncCmd`);
+  `packages/pg-pr/internal/sync/reviewhook.go` (`reviewHookEnabled`)). What stays active
   regardless: PR-data sync, and the read/write CLI surface `(B)` calls.
 - The **teammate-attention** signal (`snapshot.NeedsAttention`, feeding both the
   dashboard `needs_attention` bit and the `attention:` bead) **MUST NOT** consume any
@@ -148,29 +156,29 @@ sequenceDiagram
 
 ## 3. Components & ownership
 
-| Concern                                           | Owner     | Entry point(s)                                                          |
-| ------------------------------------------------- | --------- | ----------------------------------------------------------------------- |
-| PR data sync / roster detection                   | `pg-pr`   | `packages/pg-pr/internal/sync/detector.go:94-146`                       |
-| Read verb `pr list --json`                        | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/pr_list.go:40-108`                            |
-| Write surface (`review submit/post`, `comment`)   | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/review.go:84-343`                             |
-| Review-input JSON schema (agents → verb)          | `pg-pr`   | `packages/pg-pr/internal/reviewinput/reviewinput.go`                    |
-| GitHub PENDING semantics + 422 anchor             | `pg-pr`   | `packages/pg-pr/pkg/provider/vcs/github/github.go:771-842`              |
-| Reconcile (pre-drain ACL)                         | `pr-pool` | `packages/pr-pool/cmd/pr-pool/main.go:30-31` → `reconcile_cmd.go:15-81` |
-| `review-pr` bead + gate ensure / re-review cursor | `pr-pool` | `packages/pr-pool/internal/prpoolacl/acl.go:42-163`                     |
-| ccpool `review` role                              | `pr-pool` | `packages/pr-pool/internal/roles/builtin.go:83-101`                     |
-| Per-bead scratch worktree                         | `pr-pool` | `packages/pr-pool/internal/worktree/worktree.go:31-47`                  |
+| Concern                                           | Owner     | Entry point(s)                                                                                                                  |
+| ------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| PR data sync / roster detection                   | `pg-pr`   | `packages/pg-pr/internal/sync/detector.go` (`buildTeamQueries`, `mergeRosters`)                                                 |
+| Read verb `pr list --json`                        | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/pr_list.go` (`prListCmd`, `listOpenPRItems`)                                                          |
+| Write surface (`review submit/post`, `comment`)   | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/review.go` (`reviewCmd`, `reviewPostCmd`, `reviewSubmitCmd`, `commentAddCmd`)                         |
+| Review-input JSON schema (agents → verb)          | `pg-pr`   | `packages/pg-pr/internal/reviewinput/reviewinput.go`                                                                            |
+| GitHub PENDING semantics + 422 anchor             | `pg-pr`   | `packages/pg-pr/pkg/provider/vcs/github/github.go` (`PostReview`, `reviewComment`)                                              |
+| Reconcile (pre-drain ACL)                         | `pr-pool` | `packages/pr-pool/cmd/pr-pool/main.go` (`main`, its `routeReconcile` arm) → `reconcile_cmd.go` (`runReconcile`, `reconcileACL`) |
+| `review-pr` bead + gate ensure / re-review cursor | `pr-pool` | `packages/pr-pool/internal/prpoolacl/acl.go` (`Reconcile`, `ensureReview`)                                                      |
+| ccpool `review` role                              | `pr-pool` | `packages/pr-pool/internal/roles/builtin.go` (`BuiltinRoleSet`, its `review` entry)                                             |
+| Per-bead scratch worktree                         | `pr-pool` | `packages/pr-pool/internal/worktree/worktree.go` (`Ensure`)                                                                     |
 
 ### 3.1 Bead & metadata contract (reconcile → review role)
 
-| Bead / gate   | Type / title                                  | Sole creator                                                                          | Metadata keys                                                                                                                   |
-| ------------- | --------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| merge-request | `merge-request`                               | **`pg-pr`** (`pr_write.go:343-352`); reconcile only find-or-reuses (`acl.go:104-107`) | `repo`, `pr_number`, `branch`, `base`, `author`, `url`, `draft`                                                                 |
-| review-pr     | `task`, title prefix `review-pr: `            | `pr-pool` reconcile (`beads/create.go:15`)                                            | `repo`, `pr_number`, `branch`, `head_sha` (`acl.go:140-145`)                                                                    |
-| gate          | `pg-pr:active-pr`, await-id `<repo>#<number>` | `pr-pool` reconcile (`acl.go:20-23`)                                                  | blocks the `review-pr` bead until reconcile confirms the PR is still open; no `bd` auto-resolver — reconcile resolves each pass |
+| Bead / gate   | Type / title                                  | Sole creator                                                                                                                                        | Metadata keys                                                                                                                   |
+| ------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| merge-request | `merge-request`                               | **`pg-pr`** (`pr_write.go` (`runPRCreate` → `EnsureMergeRequest`)); reconcile only find-or-reuses (`acl.go` (`ensureReview` → `MatchMergeRequest`)) | `repo`, `pr_number`, `branch`, `base`, `author`, `url`, `draft`                                                                 |
+| review-pr     | `task`, title prefix `review-pr: `            | `pr-pool` reconcile (`beads/create.go` (`ReviewPRTitlePrefix`, `Create`))                                                                           | `repo`, `pr_number`, `branch`, `head_sha` (`acl.go` (`ensureReview`, its birth path))                                           |
+| gate          | `pg-pr:active-pr`, await-id `<repo>#<number>` | `pr-pool` reconcile (`acl.go` (`activePRGate`))                                                                                                     | blocks the `review-pr` bead until reconcile confirms the PR is still open; no `bd` auto-resolver — reconcile resolves each pass |
 
 The review role reads `repo` / `pr_number` / `branch` / `head_sha` from the
-`review-pr` bead metadata (`builtin.go:35-46`); the worktree is keyed on the bead
-ID (`executor/ccpool.go:46`).
+`review-pr` bead metadata (`builtin.go` (`reviewPromptBody`)); the worktree is
+keyed on the bead ID (`executor/ccpool.go` (`run` → `worktree.Ensure`)).
 
 **Review-input schema.** Every producer of a review payload — the
 `pg-pr-review-*` agent assets, the `pr-pool` review-role prompt, a human piping
@@ -225,18 +233,20 @@ flowchart TD
     findings).
   - While blocking feedback is undispositioned the PR **MUST** be treated as
     not-ready-to-merge.
-- **Code paths:** `packages/pg-pr/internal/reviewsink/minesink.go:44-139`;
-  `packages/pg-pr/internal/store/feedback.go:241-279` (`HasBlockingFeedback`),
-  `:281-300` (`SetDisposition`);
+- **Code paths:** `packages/pg-pr/internal/reviewsink/minesink.go`
+  (`IngestSelfReview`);
+  `packages/pg-pr/internal/store/feedback.go` (`HasBlockingFeedback`,
+  `blockingFeedbackKinds`, `SetDisposition`);
   `packages/pg-pr/internal/feedbackclassify/` (head-scoped fingerprint);
-  `packages/pr-pool/internal/prpoolacl/acl.go:99-101`.
+  `packages/pr-pool/internal/prpoolacl/acl.go` (`actsAsMine`, `ensureReview`).
 - **Coverage:** `minesink_test.go` (`TestIngestSelfReview_*`),
   `blocking_feedback_test.go`
   (`TestHasBlockingFeedback_SelfReviewGatesUntilDispositioned`, …),
-  `self_review_fingerprint_test.go`, `acl_test.go:347`
-  (`TestReconcile_MineDraftReviewed`).
+  `self_review_fingerprint_test.go`, `acl_test.go`
+  (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_CoOwnedDraftReviewed`).
 - **Known gap:** the "block" is an **advisory predicate only** — `HasBlockingFeedback`
-  is not consulted by any Go merge-decision point (`feedback.go:254-261`);
+  is not consulted by any Go merge-decision point
+  (`packages/pg-pr/internal/store/feedback.go` (`HasBlockingFeedback`));
   enforcement is delegated to the process-feedback **skill** layer. **Coverage
   goal:** if a Go-level merge gate is ever wanted, it needs a new enforcing check
   - test.
@@ -266,12 +276,14 @@ flowchart TD
     single-line finding **MUST NOT** send `start_line` at all.
   - Re-running the review **SHOULD NOT** create a duplicate PENDING review for the
     same reviewer.
-- **Code paths:** `packages/pg-pr/internal/reviewsink/teamsink.go:71-144`
-  (`HasPendingReviewByViewer` skip — path A only);
+- **Code paths:** `packages/pg-pr/internal/reviewsink/teamsink.go`
+  (`ApplyPendingReview`; the `HasPendingReviewByViewer` skip — path A only);
   `packages/pg-pr/pkg/provider/vcs/github/pending.go`;
-  `packages/pg-pr/pkg/provider/vcs/github/github.go:771-842` (`PostReview`);
-  `packages/pg-pr/cmd/pg-pr/review.go:129-227` (the `review submit` path B uses);
-  `packages/pr-pool/internal/roles/builtin.go:44`.
+  `packages/pg-pr/pkg/provider/vcs/github/github.go` (`PostReview`,
+  `reviewComment`);
+  `packages/pg-pr/cmd/pg-pr/review.go` (`reviewSubmitCmd` → `postStaged` — the
+  `review submit` path B uses);
+  `packages/pr-pool/internal/roles/builtin.go` (`reviewPromptBody`).
 - **Coverage:** `teamsink_test.go`, `pending_test.go`, `review_test.go`
   (`TestReviewSubmit_ForwardsHeadSHAAsCommitID`); multi-line spans in
   `github_test.go` (`TestPostReview_MultiLineCommentSendsStartLine`,
@@ -286,7 +298,8 @@ flowchart TD
     this path.
   - **Post-back access (resolved for now).** The review role's only completion
     action is `pg-pr review submit`, so under `dontAsk` the pool-wide default
-    `AllowedTools` (`config.go:103`) now allow-lists `Bash(pg-pr:*)` — without it
+    `AllowedTools` (`packages/pr-pool/internal/config/config.go` (`Default` →
+    `AllowedTools`)) now allow-lists `Bash(pg-pr:*)` — without it
     the post-back was auto-denied (`pg2-vmbn7`, resolved). This is a broad,
     pool-wide, full-`pg-pr` grant chosen deliberately "for now" to exercise the
     flow end-to-end; scoping tool access **per role** (a read-only review vs a
@@ -319,11 +332,12 @@ network-free from the store.
     cannot support). The refusal is **per PR**, is logged (refuse-and-record), and
     keeps the pass at exit `0`; it self-heals on the next pass once pg-pr's sync
     catches up.
-- **Code paths:** `packages/pg-pr/internal/sync/detector.go:94-146`
+- **Code paths:** `packages/pg-pr/internal/sync/detector.go`
   (`buildTeamQueries` union; `FingerprintPRs` per bucket; `mergeRosters`);
-  `packages/pg-pr/internal/sync/refresh.go:11-15` (`reviewRequestedOfSelf`);
-  `packages/pg-pr/internal/config/config.go:127` (`WatchLabels`);
-  `packages/pg-pr/internal/snapshot/builder.go:45-128` (reason-tagged; reasonless
+  `packages/pg-pr/internal/sync/refresh.go` (`reviewRequestedOfSelf`);
+  `packages/pg-pr/internal/config/config.go` (`RepoConfig.WatchLabels`);
+  `packages/pg-pr/internal/snapshot/builder.go` (`matchReasons`, `Build` —
+  reason-tagged; reasonless
   non-mine excluded); `packages/pg-pr/cmd/pg-pr/pr_list.go`;
   `packages/pg-pr/internal/freshness/freshness.go` (the one staleness policy,
   shared by this seam and the dashboard payload);
@@ -370,8 +384,9 @@ flowchart TD
     assignee cleared (so a fresh worker reviews the new commit).
   - A closed `review-pr` with no recorded `head_sha` **MUST NOT** be resurrected
     (never review an unknown commit).
-- **Code paths:** `packages/pr-pool/internal/prpoolacl/acl.go:112-136`;
-  `packages/pr-pool/internal/beads/issue.go:85-102` (`ReopenReview`).
+- **Code paths:** `packages/pr-pool/internal/prpoolacl/acl.go` (`ensureReview` —
+  its closed-`review-pr` head-advance branch);
+  `packages/pr-pool/internal/beads/issue.go` (`ReopenReview`).
 - **Coverage:** `acl_test.go` (`TestReconcile_HeadAdvancedReopensClosedReview`,
   `_HeadUnchangedNotResurrected`, `_LegacyClosedNoHeadSHANotResurrected`,
   `_ClosedReviewNotResurrected`), `reopen_test.go`.
@@ -404,12 +419,15 @@ from `pg-pr` facts and never strands the following drain.
     default (`review.enabled` defaults `false`, pg2-3ho1r), so re-enabling the
     legacy `pg-pr` hook against a store `pr-pool` also drains is the hazard to
     avoid, not the default.
-- **Code paths:** `packages/pr-pool/cmd/pr-pool/main.go:30-31`,
-  `reconcile_cmd.go:15-81` (exit-0-on-partial `:57-81`);
-  `packages/pr-pool/internal/prpoolacl/acl.go:42-163`;
-  `packages/pr-pool/internal/beads/gate.go:44-97`;
-  `packages/pr-pool/internal/roles/builtin.go:97` (`OnFailure=AddHuman`);
-  `packages/pr-pool/internal/executor/ccpool.go:114-127`, `:171-182`.
+- **Code paths:** `packages/pr-pool/cmd/pr-pool/main.go` (`main`, its
+  `routeReconcile` arm), `reconcile_cmd.go` (`runReconcile`; exit-0-on-partial in
+  `reconcileACL`);
+  `packages/pr-pool/internal/prpoolacl/acl.go` (`Reconcile`, `ensureReview`);
+  `packages/pr-pool/internal/beads/gate.go` (`CreateGate`, `ResolveGate`);
+  `packages/pr-pool/internal/roles/builtin.go` (`BuiltinRoleSet`, its `review`
+  entry — `OnFailure: AddHuman`);
+  `packages/pr-pool/internal/executor/ccpool.go` (`waitFailureResult`,
+  `escalateLaunchFailure`).
 - **Coverage:** `reconcile_acl_test.go`
   (`TestReconcileACL_PgPrUnreachableExitsZero`, `_EmptyExitsZero`),
   `reconcile_cmd_test.go`, `reconcile_test.go` (`TestStrandedSelfCycles_*`),
@@ -419,7 +437,8 @@ from `pg-pr` facts and never strands the following drain.
   reconcile/review path — reconcile never parks a bead, and a failing review
   escalates via a `human` label. The 3-strike `blocked` + needs-human dead-letter
   exists only in the kill-switched `pg-pr` hook
-  (`packages/pg-pr/internal/sync/reviewhook.go:316-342`). Legacy old-schema held
+  (`packages/pg-pr/internal/sync/reviewhook.go` (`handleProductionFailure`,
+  `maxReviewFailures`)). Legacy old-schema held
   dead-letter beads are reconciled separately at cutover (deferred — §10).
 
 ---
@@ -433,10 +452,10 @@ These are review-role acceptance criteria; the current posture was audited
 
 | Dimension           | Requirement (RFC 2119)                                                                           | Current posture                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Worktree isolation  | Untrusted PR content **MUST** be checked out in a scratch worktree, never the canonical checkout | **SATISFIED** — per-bead worktree off `repoRoot` HEAD at `$XDG_STATE_HOME/pr-pool/worktrees` (`worktree.go:31-47`; `executor/ccpool.go:42-61`). Caveat: shares the monorepo `.git` + bead store; worktree reused, not torn down.                                                                                                                                                                                                      |
-| Permission mode     | The session **MUST** be deny-by-default and **MUST NOT** stall on human prompts                  | **SATISFIED** — `dontAsk` default (`config.go:99`); `--autonomous` denies `AskUserQuestion` (`ccpool hook.go:237-238`).                                                                                                                                                                                                                                                                                                               |
+| Worktree isolation  | Untrusted PR content **MUST** be checked out in a scratch worktree, never the canonical checkout | **SATISFIED** — per-bead worktree off `repoRoot` HEAD at `$XDG_STATE_HOME/pr-pool/worktrees` (`packages/pr-pool/internal/worktree/worktree.go` (`Ensure`); `executor/ccpool.go` (`run`)). Caveat: shares the monorepo `.git` + bead store; worktree reused, not torn down.                                                                                                                                                            |
+| Permission mode     | The session **MUST** be deny-by-default and **MUST NOT** stall on human prompts                  | **SATISFIED** — `dontAsk` default (`packages/pr-pool/internal/config/config.go` (`Default` → `PermissionMode`)); `--autonomous` denies `AskUserQuestion` (`packages/ccpool/cmd/ccpool/hook.go` (`handleAskHook`, `askDenyReason`)).                                                                                                                                                                                                   |
 | Allowlist           | The tool allowlist **MUST** be least-privilege for a read-only review of untrusted code          | **PARTIAL** — enforced pool-wide but not per-role; now grants `Bash(pg-pr:*)` so the review post-back works (`pg2-vmbn7` resolved), but that is a broad full-`pg-pr` grant and the list still allows `Edit`/`Write` + code-executing verbs (`go build/test`, `nix flake check`, `prek`) that would execute attacker-controlled code after checkout; per-role least-privilege + the pending human sign-off are deferred (`pg2-f9vcg`). |
-| Budget watchdog     | A runaway session **MUST** be bounded                                                            | **SATISFIED** (wall-clock) — finite time budget + hard-stop (`builtin.go:99`; `watchdog.go:123-127`). Token/cost unlimited by default.                                                                                                                                                                                                                                                                                                |
+| Budget watchdog     | A runaway session **MUST** be bounded                                                            | **SATISFIED** (wall-clock) — finite time budget + hard-stop (`builtin.go` (`BuiltinRoleSet` → `BuiltinParams.WorkerBudget`); `watchdog.go` (`Run`, its `budget.Hard` branch → `terminal`)). Token/cost unlimited by default.                                                                                                                                                                                                          |
 | Credential exposure | The session **MUST NOT** inherit ambient credentials / internal-service reach                    | **MISSING** — the session inherits the full ambient env (`SSH_AUTH_SOCK`, `GH_TOKEN`, cloud creds) with no scrub, on the same OS user (no sandbox/unprivileged execution).                                                                                                                                                                                                                                                            |
 
 The "PARTIAL" allowlist (broad, pool-wide, still grants code-executing verbs on
@@ -448,13 +467,13 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 
 ## 6. Verification & coverage goals
 
-| Journey | Covering tests (exist)                                                   | Coverage goal (gap)                                                    |
-| ------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test:347`                | Go-level merge gate (only if enforcement is moved off the skill layer) |
-| JR2     | `teamsink_test`, `pending_test`, `review_test`                           | submit-path skip-if-present; review-role allowlist permits `pg-pr`     |
-| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`   | —                                                                      |
-| JR4     | `acl_test` (head-advance suite), `reopen_test`                           | —                                                                      |
-| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test` | —                                                                      |
+| Journey | Covering tests (exist)                                                                       | Coverage goal (gap)                                                    |
+| ------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test` (`TestReconcile_DraftSelectionMatrix`) | Go-level merge gate (only if enforcement is moved off the skill layer) |
+| JR2     | `teamsink_test`, `pending_test`, `review_test`                                               | submit-path skip-if-present; review-role allowlist permits `pg-pr`     |
+| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                       | —                                                                      |
+| JR4     | `acl_test` (head-advance suite), `reopen_test`                                               | —                                                                      |
+| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                     | —                                                                      |
 
 **Live end-to-end** verification (one PR I own + one teammate PR through path B,
 plus re-review-on-head-advance) against these journeys is **deploy-gated** — it
