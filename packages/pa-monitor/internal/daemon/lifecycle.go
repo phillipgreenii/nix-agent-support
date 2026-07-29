@@ -1354,16 +1354,33 @@ func blockToStoreBlock(b *usage.Block, capUSD float64, now time.Time) store.Bloc
 	return sb
 }
 
-// blockToStoreBlockWithLimits is blockToStoreBlock plus the tree's authoritative
-// status-line rate_limits windows (ADR 0021 §5/§6), so the persisted block carries
-// them and the store->tree GetState path reflects the current reading. Unknown
-// values (nil pointer / zero time on the tree) persist as nil — never 0 / 1970. The
-// store's COALESCE-on-conflict then preserves the last known value when a later tick
-// carries an unknown reading.
+// blockToStoreBlockWithLimits is blockToStoreBlock plus the two window concepts
+// the tree carries, so the persisted block carries them and the store->tree
+// (GetState) path reflects the current reading:
+//
+//   - the daemon-pause usage window (tree.WindowResetsAt -> RateLimitResetsAt);
+//   - the authoritative status-line rate_limits windows (ADR 0021 §5/§6).
+//
+// Unknown values (nil pointer / zero time on the tree) persist as nil — never
+// 0 / 1970. The two concepts then use DIFFERENT on-conflict merge policies in
+// the store (see internal/store/sqlite/block_store.go): the status-line columns
+// COALESCE-preserve, because a nil reading there means "unknown/stale"; the
+// pause window is last-write-wins, because a zero tree aggregate there means
+// the known fact "no session is paused".
 func blockToStoreBlockWithLimits(b *usage.Block, capUSD float64, now time.Time, tree *aggregate.Tree) store.Block {
 	sb := blockToStoreBlock(b, capUSD, now)
 	if tree == nil {
 		return sb
+	}
+	// The daemon-pause usage window. aggregate.Build is the single place that
+	// computes it (max RateLimitResetsAt across sessions); the per-session values
+	// are not persisted, so this column is the ONLY carrier of the window on the
+	// DB path. Without this write the served DaemonState.window_resets_at was
+	// permanently unset and every operator-facing surface (TUI paused state,
+	// "resuming in N:NN" banner, cmux sidebar) reported no window — pg2-tdzkq.
+	if !tree.WindowResetsAt.IsZero() {
+		t := tree.WindowResetsAt
+		sb.RateLimitResetsAt = &t
 	}
 	sb.FiveHourPct = tree.FiveHourPct
 	sb.SevenDayPct = tree.SevenDayPct

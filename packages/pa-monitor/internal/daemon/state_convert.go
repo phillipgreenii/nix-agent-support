@@ -71,8 +71,12 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 		return tree.Dirs[i].Path < tree.Dirs[j].Path
 	})
 
-	// Fix #1: prefer the block-level RateLimitResetsAt over per-session
-	// aggregation. The block column is authoritative for the global window.
+	// The block column is authoritative for the global daemon-pause window: it is
+	// the persisted carrier of the live tree's WindowResetsAt aggregate, written by
+	// blockToStoreBlockWithLimits. Per-session RateLimitResetsAt is NOT persisted
+	// (no sessions.rate_limit_resets_at column), so there is nothing to aggregate
+	// from st.Dirs here — aggregate.Build remains the single place that computes
+	// the max-across-sessions.
 	if st.Block != nil && st.Block.RateLimitResetsAt != nil {
 		tree.WindowResetsAt = *st.Block.RateLimitResetsAt
 	}

@@ -36,7 +36,13 @@ func (s *BlockStore) Upsert(ctx context.Context, b store.Block) (int64, error) {
 			plan_cap_usd = excluded.plan_cap_usd,
 			total_cost_usd = excluded.total_cost_usd,
 			total_tokens = COALESCE(NULLIF(excluded.total_tokens, 0), blocks.total_tokens),
-			rate_limit_resets_at = COALESCE(excluded.rate_limit_resets_at, blocks.rate_limit_resets_at),
+			-- Daemon-pause usage window: last-write-wins, deliberately NOT the
+			-- COALESCE-preserve policy the status-line columns below use. This
+			-- column mirrors the live tree's WindowResetsAt aggregate, so a NULL
+			-- write is the KNOWN fact "no session is paused" (not "unknown
+			-- reading") and MUST clear a window that has since lifted. Preserving
+			-- it would latch the block as paused for the rest of its 5h life.
+			rate_limit_resets_at = excluded.rate_limit_resets_at,
 			cap_hit_at = COALESCE(blocks.cap_hit_at, excluded.cap_hit_at),
 			last_processed_at = excluded.last_processed_at,
 			updated_at = excluded.updated_at,

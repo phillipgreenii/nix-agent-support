@@ -22,8 +22,9 @@ type Session struct {
 	Status       string
 	// Blocker is the ADR 0024 blocker string ("human_input" | "human_authn" |
 	// "usage_limit" | "error"); empty when Status != "blocked". Persisted so the
-	// DB-path bucketer can render usage_limit even though the DB does not store
-	// RateLimitResetsAt (R9).
+	// DB-path bucketer can render usage_limit even though the DB does not store a
+	// per-session RateLimitResetsAt (R9) — only the account-global aggregate, on
+	// Block.RateLimitResetsAt.
 	Blocker               string
 	FirstPrompt           string
 	Labels                map[string]string
