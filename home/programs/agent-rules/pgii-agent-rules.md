@@ -315,6 +315,88 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   cached across a later land, a peer session, or a hand-off — the next reader MUST re-run the probe
   rather than trust a recorded count.
 
+### Blocker Modeling: Dependency vs Human
+
+> The two agent queues are keyed on ONE label. `/drain-beads` claims with
+> `--exclude-label human`; `/unblock-human-beads` claims with `--label human`. So `human` does not
+> mean "blocked" — it means **A PERSON IS THE BLOCKER**. Applied to "another issue must finish
+> first" it does two wrong things at once: it hides the issue from the agent queue that would
+> eventually work it, AND it puts a non-question in front of the operator, who is the one serial
+> resource. Observed 2026-07-27: `pg2-l3vdz` was labeled `human` while needing no human input of
+> its own — 6 of its 8 sub-issues had landed and it was waiting purely on two that needed
+> decisions. Re-modeled as two `blocks` edges it left the human queue and stayed `status=open`,
+> yet correctly absent from `bd ready`. Verified 2026-07-29: `bd show pg2-l3vdz` reports
+> `status open` with `labels ["behavior-docs"]` and no `human`, `bd dep list pg2-l3vdz` echoes
+> both blockers as `(open) via blocks`, and the id is absent from `bd ready`. The difference that
+> matters is not tidiness. A label is a stored flag somebody must remember to remove, whereas
+> readiness is DERIVED from the dependency graph — so the edge clears ITSELF when the last blocker
+> closes, and the work flows back to the agent queue with no human touch at all.
+
+- **D-1** Before applying `human`, an agent MUST classify each blocker by what would clear it:
+  ANOTHER ISSUE that must finish first (⇒ a dependency), or a PERSON whose decision, input,
+  approval, or out-of-band action is required (⇒ `human`). `human` MUST NOT be used as a generic
+  "not workable right now" park, and MUST NOT be applied without that determination being made.
+- **D-2** A blocker that is another issue MUST be modeled as a blocking dependency and MUST NOT be
+  labeled `human`. The FIRST id is the BLOCKED issue and the SECOND is the BLOCKER — per
+  `bd dep add --help`, "`issue-123` depends on (is blocked by) the specified issue":
+
+  ```bash
+  bd dep add <blocked-id> --blocked-by <blocker-id>
+  bd dep list <blocked-id>   # CONFIRM: each blocker echoes back "(open) via blocks"
+  ```
+
+  The `--blocked-by` / `--depends-on` flag form SHOULD be preferred over the equivalent bare
+  positional `bd dep add <blocked-id> <blocker-id>`, which reads identically whichever way round
+  it is written and is therefore the form a reversal hides in. A reversed edge blocks the WRONG
+  issue, silently. The `bd dep list` read-back is the cheap proof of direction and MUST be run.
+
+- **D-3** The edge MUST be left at its default `blocks` type. `discovered-from`, `related`,
+  `relates-to` and `supersedes` edges do NOT gate readiness — verified 2026-07-29: `pg2-dt9et`
+  carries `discovered-from` to `pg2-l3vdz`, which is OPEN at P0, and `pg2-dt9et` was claimed as
+  ready anyway. So the `--deps "discovered-from:<id>"` form — correct for recording PROVENANCE on
+  `bd create` — MUST NOT be used to express "must finish first".
+- **D-4** An agent MUST NOT pass `--no-cycle-check` when wiring a single edge. A cycle makes BOTH
+  issues permanently unready, absent from every queue, which is this defect in its worst form. A
+  bulk wiring that did skip the check MUST be followed by `bd dep cycles`.
+- **D-5** ORDERING IS LOAD-BEARING: every dependency edge MUST be added BEFORE the claim is
+  released. While the issue is `in_progress` and owned, `bd ready` excludes it, so the edges land
+  in a window no peer can observe. Released first, the issue is momentarily `open`, unlabeled AND
+  unblocked — long enough for a peer agent to claim work that is genuinely blocked. `bd dep add`
+  and `bd update` are separate commands and cannot be made atomic, so the ORDER is the only guard
+  (the same reasoning as **W-6**).
+- **D-6** The release MUST set `--status open` and MUST clear the assignee in the SAME call
+  (**B-2**, **B-3**):
+
+  ```bash
+  bd dep add <id> --blocked-by <blocker-id>   # once per blocker, FIRST
+  bd update <id> --remove-label human --status open --assignee "" --actor "ID"
+  ```
+
+  `open` is correct and `blocked` is not: readiness is derived from the graph, so the issue is
+  already out of `bd ready`, while a stored `blocked` status is a value nothing recomputes when the
+  last blocker closes — it would strand the issue after the dependency resolved. The
+  `--remove-label human` clause belongs in that same call whenever the issue already carried it.
+
+- **D-7** A MIXED blocker — part issue, part person — MUST get BOTH treatments; neither half may be
+  dropped, and the `human` label MUST sit on the issue that actually HOLDS the question. The agent
+  MUST record the consequence, because it is not obvious: `bd ready` excludes blocked issues, so an
+  issue carrying `human` AND an open blocker is absent from BOTH queues until the blockers clear,
+  and only then resurfaces in `bd ready --label human`. Verified 2026-07-29 — `pg2-4dz88`,
+  `pg2-wr6lm.9`, `pg2-qhhil` and `pg2-r1f1j.9` each carry `human` with one open blocker, and none
+  of the four appears in `bd ready --label human`. That is CORRECT when the question is only
+  answerable after the blocker lands. When the question is answerable NOW and independent of the
+  blocker, the agent MUST NOT bury it behind the edge: it MUST file the question as its own
+  `human` issue with no blockers and make this issue depend on THAT, so the operator sees the
+  question immediately while this issue carries no label of its own.
+- **D-8** THE REVERSE CONVERSION IS MANDATORY TOO, AND IT NEEDS NO PERSON. An issue already labeled
+  `human` whose only live blockers are other issues is MISLABELED, not blocked on a person.
+  Whoever finds it MUST convert the label into dependencies per **D-2**/**D-5**/**D-6**, and MUST
+  NOT engage a person to authorize that conversion: there is no question to ask, so a prompt spends
+  the one serial resource to discover there was never one. A blocker that probes `closed`
+  (**F-3** `sibling-open?`) is not a blocker at all and MUST NOT be given an edge — that issue's
+  label reason simply died. A dependency MUST NOT be substituted by a DEFER window either: a defer
+  is a TIMER that expires whether or not the blocker cleared, while an edge IS the state.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.

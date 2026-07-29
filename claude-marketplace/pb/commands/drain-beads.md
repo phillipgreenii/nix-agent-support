@@ -5,7 +5,8 @@ description: >-
   (local ff-merge) → close, cooperating with other concurrent /drain-beads
   sessions via atomic claims. Post-deploy verification is handled by a
   `pn:applied` gate on a verification child bead — NOT the `human` label, which
-  is reserved as a last resort.
+  is reserved as a last resort for a blocker only a PERSON can clear (a blocker
+  that is another bead is modeled with `bd dep`, never with the label).
 argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
 ---
 
@@ -262,18 +263,23 @@ never auto-resolve.
 
 ## STUCK — cannot complete a claimed bead (LAST RESORT: escalate to a human)
 
-`human` is the LAST RESORT, for work a person must move forward. Do NOT use it
-merely because final acceptance needs the change deployed — that is the
-POST-DEPLOY VERIFICATION GATE's job.
+`human` means A PERSON IS THE BLOCKER. It is the LAST RESORT, for work a person
+must move forward — never a generic "not workable right now" park. Do NOT use it
+merely because final acceptance needs the change deployed (that is the POST-DEPLOY
+VERIFICATION GATE's job), and do NOT use it because ANOTHER BEAD must finish first
+(that is a DEPENDENCY — step 3).
 
 Triggers: underspecified / needs a human decision; the pre-apply gates cannot be
 made to pass; landing returns a GENUINE `stopped:<reason>` (not a transient
 ff-race); a post-deploy gate could not be attached; repeated failed attempts.
+NOT a trigger: "another bead has to land first".
 
 Step 1 only PRESERVES the work; the park that goes in front of a human is the
-COMMENT + `human` label in steps 5–6. Step 2 stands between the two deliberately:
-a bead whose premise the probes prove MOOT exits via **CLOSE-AS-MOOT** and never
-becomes a park at all.
+COMMENT + `human` label in steps 6–7. Steps 2 and 3 stand between the two
+deliberately, and each has its OWN exit that is not a park: a bead whose premise
+the probes prove MOOT leaves via **CLOSE-AS-MOOT**, and a bead whose live blockers
+are all OTHER BEADS leaves via **CONVERT-TO-DEPENDENCY**. Reaching step 4 means a
+person really is the blocker.
 
 1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
    clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
@@ -295,7 +301,7 @@ becomes a park at all.
      plan-ready" MUST NOT stand in for running the probes.
    - An unresolvable probe (`exit 128`, missing repo, referent too vague to probe) reads
      as STILL LIVE, never as moot (F-4).
-   - Premise STILL LIVE → continue to step 3, and carry this line into the step-5
+   - Premise STILL LIVE → continue to step 3, and carry this line into the step-6
      comment so the next reader inherits the check:
      `FRESHNESS: <ISO date> — <probe>=<decisive output>; <probe>=<decisive output> ⇒ premise LIVE`
      If the bead names no external referent, record that instead (F-5):
@@ -303,7 +309,34 @@ becomes a park at all.
    - Premise PROVABLY MOOT → this bead is answered, not blocked. Do NOT park it and do
      NOT label it `human`: go to **CLOSE-AS-MOOT** below.
 
-3. NAME THE PRECONDITION — only when the park is blocked on something that must
+3. CLASSIFY THE BLOCKER — is a PERSON the blocker, or is it ANOTHER BEAD? This is the
+   branch BEFORE the escalation, not a check inside it: drain claims with
+   `--exclude-label human` and `/unblock-human-beads` claims with `--label human`, so
+   the label simultaneously hides the bead from the queue that would work it AND puts
+   it in front of the operator. If you are waiting on another bead, the operator has
+   nothing to answer and the tracker can express the wait exactly. Full contract: the
+   always-on `Blocker Modeling` rules (**D-1..D-8**).
+   - Name every live blocker, then ask of each: could a PERSON clear this now with a
+     decision, an input, an approval, or an out-of-band action? Or must ANOTHER BEAD
+     finish first? Step 2's `sibling-open?` probe already answers the second half for
+     every bead this one names — REUSE those readings rather than inventing a parallel
+     check: `bd show <sib> --json | jq -r '.data[0].status'`. `open` / `in_progress` /
+     `blocked` ⇒ a live blocker. `closed` ⇒ NOT a blocker at all, so it MUST NOT get an
+     edge; if every named bead reads `closed`, the reason you were stuck has already
+     died — go back to step 2 and re-read the premise.
+   - A bead you WISH existed is not a dependency. If the blocking work has no bead, the
+     bead you hold is underspecified or needs a decision — that is a HUMAN blocker. MUST
+     NOT invent a placeholder bead to depend on (**D-1**).
+   - EVERY live blocker is a bead → go to **CONVERT-TO-DEPENDENCY**. Do NOT write a
+     PRECONDITION block, do NOT touch the repeat counter, and do NOT apply `human`:
+     steps 4–9 are the human-escalation path and you are not on it. A prose
+     PRECONDITION is for a condition the tracker CANNOT express; this one it can, and
+     prose about it would rot exactly as **P-1** describes while the graph would not.
+   - ANY live blocker needs a PERSON → continue to step 4. If some blockers are ALSO
+     beads, this is the MIXED case: do CONVERT-TO-DEPENDENCY's step 1 for the bead half
+     first, then come back here and finish the escalation (**D-7**).
+
+4. NAME THE PRECONDITION — only when the park is blocked on something that must
    become TRUE before the bead is workable (skip it for an underspecified /
    decision-needed park). What you write here becomes an INSTRUCTION to a later
    agent and keeps being obeyed long after the implementation it describes has been
@@ -315,14 +348,14 @@ becomes a park at all.
      concludes "not applied yet" and re-parks forever.
    - `PRECONDITION-KEY:` MUST be a short kebab slug naming that OUTCOME, not this
      attempt — `nb-opens-gradle-root`, never `nb-check-2` — so a later park blocked
-     on the SAME thing produces the SAME key. Step 4 counts these.
+     on the SAME thing produces the SAME key. Step 5 counts these.
    - `DERIVED-FROM:` MUST cite the commit and the file(s) you actually read to write
      the line (`<repo>@<sha> — <path>`), so a later reader can re-derive it and see
      the drift.
    - The failure branch MUST be bounded. MUST NOT write "if not yet applied, re-park
-     or wait" with no limit — step 4 IS the limit.
+     or wait" with no limit — step 5 IS the limit.
 
-4. DETECT A REPEAT — before commenting, check whether this bead was already parked
+5. DETECT A REPEAT — before commenting, check whether this bead was already parked
    on the same precondition:
 
    ```bash
@@ -331,19 +364,19 @@ becomes a park at all.
 
    (`comments` is `null` on a bead with none, hence the `// []`; empty output — `rg`
    exit 1 — means no prior key, NOT a failure.)
-   - The key you are about to write is ABSENT → ordinary park (step 5a).
+   - The key you are about to write is ABSENT → ordinary park (step 6a).
    - The key is ALREADY PRESENT — this would be the SECOND park on the same unmet
      precondition → the precondition itself is the suspect, not the world: escalate
-     it as stale (step 5b + step 6b). There is NO third park on one key.
+     it as stale (step 6b + step 7b). There is NO third park on one key.
    - The bead ALREADY carries the `stale-precondition` label → an earlier staleness
      escalation was released without resolving it. Write NO precondition block at
-     all: comment plainly what you observed, re-apply `human` (step 6a), and leave
+     all: comment plainly what you observed, re-apply `human` (step 7a), and leave
      `stale-precondition` in place so it stays visible as unresolved.
 
-5. COMMENT what you tried, why you couldn't finish, and where the work is parked so
+6. COMMENT what you tried, why you couldn't finish, and where the work is parked so
    a human can resume. Either form MUST carry the step-2 `FRESHNESS:` line.
 
-   **5a — ordinary park**, carrying the step-3 block when there is a precondition:
+   **6a — ordinary park**, carrying the step-4 block when there is a precondition:
 
    ```bash
    bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>.
@@ -353,7 +386,7 @@ becomes a park at all.
    DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
    ```
 
-   **5b — staleness escalation** (step 4 found the key). Say it is a repeat, point at
+   **6b — staleness escalation** (step 5 found the key). Say it is a repeat, point at
    the provenance to re-derive, and record what you ACTUALLY observed — do NOT
    restate the old precondition as though it were fresh:
 
@@ -361,30 +394,31 @@ becomes a park at all.
    bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
    ```
 
-6. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
-   termination query, which use `--exclude-label human`):
+7. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
+   termination query, which use `--exclude-label human`). Reaching here means step 3
+   found a PERSON in the way — if it did not, you are on the wrong path:
 
-   **6a — ordinary park:**
+   **7a — ordinary park:**
 
    ```bash
    bd update <id> --add-label human --actor "ID"
    ```
 
-   **6b — after a 5b staleness escalation** — both labels in ONE call, so the
+   **7b — after a 6b staleness escalation** — both labels in ONE call, so the
    unblocker recognizes the class mechanically instead of re-reading the churn:
 
    ```bash
    bd update <id> --add-label human,stale-precondition --actor "ID"
    ```
 
-7. UNCLAIM — do this LAST, only after the label is applied, so no other session
-   can grab it in an unlabeled `open` window:
+8. UNCLAIM — do this LAST, only after the label (and any step-3 dependency edge) is
+   applied, so no other session can grab it in an unlabeled, unblocked `open` window:
 
    ```bash
    bd update <id> --assignee "" --status open --actor "ID"
    ```
 
-8. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
+9. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
 
 ## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)
 
@@ -445,6 +479,82 @@ throws that away (F-7). EXTRACT first, close second.
 
 5. Return to the MAIN LOOP's step 1 (CLAIM).
 
+## CONVERT-TO-DEPENDENCY (STUCK step 3 found the blocker is another bead)
+
+Reached when EVERY live blocker is another bead. The bead is not waiting on a person, so
+it MUST NOT be labeled `human`: the tracker can express this wait exactly, and unlike a
+label a dependency edge clears ITSELF. Full contract: the always-on `Blocker Modeling`
+rules (**D-1..D-8**).
+
+1. WIRE one edge per live blocker, FIRST — while the bead is still `in_progress` and
+   owned by you, so `bd ready` excludes it and the write lands in a window no peer can
+   observe (**D-5**). Prefer the FLAG form: the first id is the BLOCKED bead, the second
+   is the BLOCKER, and the bare positional form reads identically written either way
+   round, so it is where a reversal hides:
+
+   ```bash
+   bd dep add <id> --blocked-by <blocker-id>   # once per blocker; <id> depends on <blocker-id>
+   bd dep list <id>                            # CONFIRM each blocker echoes back "(open) via blocks"
+   ```
+
+   Leave the type at its default `blocks`. `discovered-from` does NOT gate readiness
+   (**D-3**), so the `--deps "discovered-from:<id>"` form used elsewhere in this command
+   is the WRONG tool here — it would leave the bead drain-claimable while genuinely
+   blocked. Do NOT pass `--no-cycle-check`: a cycle makes BOTH beads permanently unready
+   (**D-4**).
+
+2. COMMENT what you found, carrying the step-2 `FRESHNESS:` line. Write NO `PRECONDITION`
+   block — the graph IS the precondition, and prose restating it would rot exactly as
+   **P-1** describes:
+
+   ```bash
+   bd comment <id> "not stuck on a person: blocked on <blocker-id>[, <blocker-id>…], now wired as bd dependencies instead of a human park. No human input is needed to move this — it returns to the drain queue by itself when the last blocker closes. Work parked on branch drain/<id> in <repo> at <worktree-path>.
+   FRESHNESS: <ISO date> — sibling-open?=<status per blocker> ⇒ premise LIVE
+   BLOCKED-BY-BEADS: <blocker-id>[, <blocker-id>…]" --actor "ID"
+   ```
+
+3. RELEASE in ONE call — no `human` label, `status=open`, assignee cleared (**B-2**,
+   **B-3**, **D-6**). Add `--remove-label human` in this same call if an earlier park had
+   already applied it:
+
+   ```bash
+   bd update <id> --status open --assignee "" --actor "ID"
+   ```
+
+   `open`, NOT `blocked`: readiness is DERIVED from the graph, so the bead is already
+   absent from `bd ready` with no stored flag needed — and when the last blocker closes it
+   re-enters drain's queue on its own, with nobody having to remember to re-open it. A
+   stored `blocked` status is a value nothing recomputes, so it would strand the bead
+   after the dependency resolved.
+
+4. Do NOT clean up the parked worktree/branch — the work resumes there once the blockers
+   clear. Return to the MAIN LOOP's step 1 (CLAIM).
+
+**MIXED blocker (a bead AND a person) — both apply; do not let either fall through**
+(**D-7**). Do step 1 above for the bead half, then go BACK to STUCK step 4 and finish the
+human escalation, because a person genuinely holds part of the answer. Which of two shapes
+you have decides where the `human` label goes, and the label MUST sit on the bead that
+actually HOLDS the question:
+
+- **The question is only answerable AFTER the blocker lands** → keep `human` on THIS bead
+  (steps 4–8). State the consequence in the step-6 comment, because it is not obvious:
+  `bd ready` excludes blocked beads, so the bead is now absent from BOTH queues until its
+  blockers clear, and only then resurfaces in `bd ready --label human`. That is CORRECT —
+  the question was not yet answerable — and it is why the comment must name the question,
+  so the unblocker inherits it rather than re-deriving it.
+- **The question is answerable NOW and independent of the blocker** → do NOT bury it
+  behind the edge. File it as its OWN `human` bead with no blockers and depend on THAT, so
+  the operator sees it immediately; THIS bead then takes the pure conversion path above and
+  carries no label of its own (this is the `pg2-l3vdz` shape — the driver held the deps, the
+  sub-beads held the questions):
+
+  ```bash
+  bd create "<the decision or input a person must supply>" --labels human \
+    --deps "discovered-from:<id>" --actor "ID" --json
+  # capture the new id as <question>, then wire it as a blocker like any other:
+  bd dep add <id> --blocked-by <question>
+  ```
+
 ## Optional scope arguments
 
 This command MAY be invoked with additional context (`$ARGUMENTS`) that
@@ -472,18 +582,31 @@ unchanged.
 - Post-deploy-only verification uses a `pn:applied` gate on a verification child
   bead, NOT the `human` label. Reserve `human` for work that genuinely needs a
   person.
+- `human` means A PERSON IS THE BLOCKER, never "not workable right now". Before applying it
+  the agent MUST classify every live blocker (STUCK step 3): a blocker that is ANOTHER BEAD
+  MUST be modeled with `bd dep add <id> --blocked-by <blocker>` — default `blocks` type, the
+  FIRST id being the BLOCKED bead — and MUST NOT be labeled `human`; only a blocker a person
+  can clear earns the label. `discovered-from` edges do NOT gate readiness, so that form MUST
+  NOT be used to mean "must finish first", and `--no-cycle-check` MUST NOT be passed (a cycle
+  makes both beads permanently unready). A MIXED blocker gets BOTH treatments and the label
+  MUST sit on the bead that HOLDS the question. Full contract: the always-on
+  `Blocker Modeling` rules (**D-1..D-8**).
 - Ordering is load-bearing: for a gate, create the child DEFERRED → attach ALL
   gates (confirm success) → only then un-defer; when STUCK, apply the `human`
-  label BEFORE unclaiming.
+  label BEFORE unclaiming; and when converting to a dependency, add ALL `bd dep add` edges
+  BEFORE releasing the claim — `bd ready` hides the bead only while it is `in_progress`, so
+  releasing first opens a window in which a peer claims genuinely blocked work.
 - Park preconditions MUST be OUTCOME-shaped: a park comment's `PRECONDITION` MUST
   state an observable outcome, MUST carry a stable `PRECONDITION-KEY` naming that
   outcome (not the attempt), and MUST cite `DERIVED-FROM: <repo>@<sha> — <path>`. A
   MECHANISM-shaped precondition ("is a shell function", "lives in this file") rots
   into a permanent, unfalsifiable "not applied yet".
 - Re-parking MUST be bounded: the SECOND park on the same `PRECONDITION-KEY` MUST
-  escalate as `stale-precondition` (STUCK 5b/6b) instead of re-parking on that key
+  escalate as `stale-precondition` (STUCK 6b/7b) instead of re-parking on that key
   again. An agent MUST NOT trust a precondition it did not re-derive from current
-  source.
+  source. A PRECONDITION block MUST NOT be written for a blocker that is another BEAD —
+  that is a dependency, and prose about a condition the tracker can express itself is
+  exactly the rot **P-1** describes.
 - A park or re-park MUST be preceded by a RECORDED FRESHNESS CHECK (STUCK step 2): every
   external referent the bead names — commits, external tickets, files/modules/symbols,
   sibling beads, recorded "next free" ids — MUST be re-verified with the matching named
@@ -534,7 +657,7 @@ flowchart TD
     I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
-    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP,<br/>then re-verify the PREMISE before writing anything"]
+    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP, re-verify the<br/>PREMISE, then decide WHO or WHAT is the blocker"]
     V -- "done / done-pending-apply-verification" --> L["LAND (local ff-merge, no push)"]
     L -->|transient ff-race| L
     L -->|genuine stopped:reason| S
@@ -547,10 +670,13 @@ flowchart TD
     X --> C
     S --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
     FC -- "provably moot" --> CM["CLOSE-AS-MOOT (no park, no human label):<br/>read the stale work → bd create extracted prediction<br/>--deps discovered-from → bd comment FRESHNESS: probe output →<br/>bd close --reason 'moot on re-verification'"]
-    FC -- "live, or any probe unresolvable" --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
+    FC -- "live, or any probe unresolvable" --> BK{"CLASSIFY THE BLOCKER (D-1):<br/>a PERSON, or ANOTHER BEAD?<br/>reuse step 2's sibling-open? readings"}
+    BK -- "every live blocker is a BEAD" --> CD["CONVERT-TO-DEPENDENCY (no human label):<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment FRESHNESS + BLOCKED-BY-BEADS →<br/>bd update --status open --assignee '' (release LAST)"]
+    BK -- "a PERSON must clear it, wire any bead half as deps too" --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
     RK -- no --> PK["bd comment stuck: + FRESHNESS + PRECONDITION block →<br/>bd update --add-label human →<br/>unclaim LAST"]
     RK -- "yes (2nd time)" --> SP["SUSPECTED STALE, no 3rd park:<br/>bd comment 'do NOT re-park on this key' →<br/>bd update --add-label human,stale-precondition →<br/>unclaim LAST"]
     CM --> C
+    CD --> C
     PK --> C
     SP --> C
 ```
@@ -562,7 +688,9 @@ pn-workspace, and run `/drain-beads` in each. Every session self-assigns a
 distinct actor id; the atomic `bd ready --claim` guarantees no two sessions ever
 get the same bead. Each session stops on its own when a successful
 `bd ready --exclude-label human -n 10` is empty. A parked (`human`-labeled) bead,
-or a stale-converted gate, stays out of the queue until a human reviews it.
+or a stale-converted gate, stays out of the queue until a human reviews it. A bead
+routed through CONVERT-TO-DEPENDENCY is different in kind: it needs NO review, and
+re-enters this queue by itself as soon as its last blocker closes.
 
 ## Known limitations (accepted trade-offs)
 
