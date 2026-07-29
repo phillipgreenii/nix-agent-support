@@ -446,6 +446,54 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version: 7,
+		up: func(tx *sql.Tx) error {
+			// Backfill the outcome split (see outcomes.go). Historically all three
+			// of "the hook refused", "somebody declined" and "nobody ever resolved
+			// it" were written as outcome='denied', so 'denied' carried three
+			// meanings and a bulk SessionEnd sweep was indistinguishable from a
+			// user saying no.
+			//
+			// This is NOT a heuristic — it inverts the three writers, each of which
+			// leaves a unique, already-stored fingerprint:
+			//
+			//	RecordPreToolDecision (hook Reject) sets the outcome at INSERT time
+			//	  together with hook_decision='deny'. Such a row is never 'pending',
+			//	  so it can never have been swept -> hook_decision='deny' is
+			//	  sufficient and exclusive.  => 'rejected'
+			//	RecordPermissionDenied is the only writer that sets outcome_notes on
+			//	  a denial (always prefixed 'auto_mode_classifier: '), and it only
+			//	  ever updates a still-'pending' row, so it can never collide with
+			//	  the above.  => stays 'denied'
+			//	ResolveUnresolvedAll (formerly ResolveDeniedAll) sets neither
+			//	  outcome_notes nor hook_decision.  => 'unresolved'
+			//
+			// Corroborated on the 11,435 'denied' rows of the author's corpus: all
+			// 82 hook_decision='deny' rows have resolved_at - created_at <= 2s (an
+			// INSERT-time resolution); all 80 outcome_notes rows resolve within an
+			// hour of the call; and 10,616 of the remaining 11,273 share their
+			// resolved_at with at least one sibling in the same session — the
+			// signature of a one-statement bulk sweep.
+			//
+			// Idempotent: each statement's predicate requires outcome='denied', which
+			// no longer holds for the rows it just rewrote. Reversible: the
+			// predicates stay true after the rewrite, so the exact inverse UPDATE
+			// restores the prior state.
+			_, err := tx.Exec(`
+			UPDATE tool_decisions
+			   SET outcome = 'rejected'
+			 WHERE outcome = 'denied' AND hook_decision = 'deny';
+
+			UPDATE tool_decisions
+			   SET outcome = 'unresolved'
+			 WHERE outcome = 'denied'
+			   AND outcome_notes IS NULL
+			   AND (hook_decision IS NULL OR hook_decision <> 'deny');
+			`)
+			return err
+		},
+	},
 }
 
 func migrate(db *sql.DB) error {

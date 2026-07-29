@@ -15,8 +15,8 @@ Each row in the output array has the following fields:
 | `hook_decision`   | string         | The decision the hook returned at log time: `allow`, `ask`, `deny`, or `abstain` (or empty for a built-in ASK with no CETA row).                                     |
 | `replay_result`   | string         | The decision the current rule engine returns when replaying this row.                                                                                                |
 | `settings_result` | string         | (Only with `--settings=<path>`) The decision `settings.local.json` would have returned.                                                                              |
-| `category`        | string         | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, or `stale-cwd`.                                                                               |
-| `outcome`         | string         | The user's actual decision — ground truth (`approved`, `denied`, `pending`).                                                                                         |
+| `category`        | string         | `correct`, `miss-uncaught`, `miss-caught-by-settings`, `needs-review`, `unresolved`, or `stale-cwd`.                                                                 |
+| `outcome`         | string         | What actually happened to the call — ground truth (`approved`, `denied`, `rejected`, `unresolved`, `pending`). See [Outcomes](#outcomes).                            |
 | `sandbox_enabled` | int or null    | `1`, `0`, or `null`. See [sandbox-enabled.md](sandbox-enabled.md).                                                                                                   |
 | `approval_source` | string         | Derived approval-MECHANISM bucket. One of `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. See below.                                                        |
 | `permission_mode` | string or null | Raw Claude Code permission mode at log time, stored VERBATIM (e.g. `default`, `plan`, `acceptEdits`, `dontAsk`, `auto`, `bypassPermissions`). `null` on pre-v5 rows. |
@@ -42,7 +42,30 @@ From `cmd_evaluate.go`:
 - `miss-uncaught` — hook abstained / wrong, no settings rule covers it either.
 - `miss-caught-by-settings` — hook abstained / wrong, but `settings.local.json` would have decided correctly.
 - `needs-review` — ground truth missing or ambiguous.
+- `unresolved` — the call was never resolved, so there is no ground truth at all. NEVER a miss and never `correct`; excluded from `--misses-only`. See [Outcomes](#outcomes).
 - `stale-cwd` — row's working directory is no longer relevant.
+
+## Outcomes
+
+`outcome` is the ground truth hook correctness is graded against, so each value
+names exactly ONE provenance. Three of the five are refusal-shaped and MUST NOT
+be conflated:
+
+| `outcome`    | Meaning                                                                                                        | Gradeable? |
+| ------------ | -------------------------------------------------------------------------------------------------------------- | ---------- |
+| `pending`    | Logged at PreToolUse, not resolved yet. Live sessions only.                                                    | no         |
+| `approved`   | PostToolUse fired — the tool actually ran.                                                                     | yes        |
+| `denied`     | A decline **judgement** was rendered, by the user or the auto-mode classifier. Always carries `outcome_notes`. | yes        |
+| `rejected`   | CETA itself returned Reject — nobody was asked. Always has `hook_decision == "deny"`.                          | yes        |
+| `unresolved` | Never resolved at all (interrupted, abandoned, session died). Swept in bulk at SessionEnd.                     | **no**     |
+
+**Do not treat `unresolved` as a denial.** Before this split all three refusal
+shapes were stored as `denied`, so a bulk SessionEnd sweep — hundreds of rows in
+one session sharing one `resolved_at`, days after `created_at`, with empty
+`outcome_notes` — read as "the user denied it but the hook allows it". That
+manufactured a phantom false-allow population that dominated the apparent
+false-allow set. A `denied` row now always carries a real decline reason in
+`outcome_notes`.
 
 ## `approval_source`
 

@@ -35,10 +35,14 @@ func hookDecisionString(d hookio.Decision) string {
 
 func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.RuleResult) error {
 	hookDec := hookDecisionString(result.Decision)
-	outcome := "pending"
+	outcome := OutcomePending
 	var resolvedAt *string
 	if result.Decision == hookio.Reject {
-		outcome = "denied"
+		// The hook refused the call itself, so it is already resolved — but it
+		// is NOT a denial: no user was ever asked. OutcomeRejected keeps this
+		// distinct from a decline judgement (OutcomeDenied) and from a call that
+		// was never resolved at all (OutcomeUnresolved).
+		outcome = OutcomeRejected
 		now := nowISO()
 		resolvedAt = &now
 	}
@@ -205,17 +209,39 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	return err
 }
 
-func ResolveDeniedAll(s *Store, sessionID string) error {
+// ResolveUnresolvedAll closes out a session at SessionEnd: every row still
+// 'pending' is flipped to OutcomeUnresolved, NOT to OutcomeDenied.
+//
+// A row is still pending at SessionEnd precisely because nothing ever resolved
+// it — the call was interrupted, abandoned, the session died, or the agent moved
+// on. Recording that as 'denied' (the pre-pg2-ac3b9 behavior) claimed a user
+// decision that never happened, and because a whole session's leftovers are
+// swept in one statement it stamped hundreds of rows with one identical
+// resolved_at. Downstream that read as "the user denied this but the hook allows
+// it" — a phantom false-allow indistinguishable from a real one without
+// per-row provenance archaeology.
+//
+// This is a bulk UPDATE with no per-row correlation: it MUST therefore only ever
+// write the non-committal outcome. Real declines arrive through
+// RecordPermissionDenied, which correlates by tool_use_id/hash.
+func ResolveUnresolvedAll(s *Store, sessionID string) error {
 	_, err := s.db.Exec(
 		`
 		UPDATE tool_decisions
-		SET outcome = 'denied', resolved_at = ?
+		SET outcome = 'unresolved', resolved_at = ?
 		WHERE session_id = ? AND outcome = 'pending'`,
 		nowISO(), sessionID,
 	)
 	return err
 }
 
+// RecordPermissionDenied records the PermissionDenied hook event: a decline
+// JUDGEMENT was rendered against this specific call, by the user or by the
+// auto-mode classifier.
+//
+// This is the ONLY writer of OutcomeDenied, and it always sets outcome_notes.
+// Those two facts together are what make 'denied' mean exactly one thing: a
+// hook Reject is OutcomeRejected and a SessionEnd sweep is OutcomeUnresolved.
 func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	now := nowISO()
 	notes := "auto_mode_classifier: " + input.Reason

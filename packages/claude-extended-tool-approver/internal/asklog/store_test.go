@@ -109,8 +109,8 @@ func TestNewStore_SchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 6 {
-		t.Errorf("schema_version = %d, want 6", version)
+	if version != 7 {
+		t.Errorf("schema_version = %d, want 7", version)
 	}
 }
 
@@ -208,6 +208,113 @@ func TestNewStore_Migration5_NewColumns(t *testing.T) {
 	}
 }
 
+// TestNewStore_Migration7_SplitsDeniedByProvenance pins the backfill in BOTH
+// directions: the two provenances that were never a decline judgement are
+// rewritten (hook Reject -> 'rejected', SessionEnd sweep -> 'unresolved'), and
+// a real decline plus every non-'denied' outcome are left completely alone.
+func TestNewStore_Migration7_SplitsDeniedByProvenance(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Build a v6 database and seed it with the pre-split shape: every refusal
+	// written as 'denied', discriminated only by hook_decision / outcome_notes.
+	seed := func() {
+		s, err := NewStore(dbPath)
+		if err != nil {
+			t.Fatalf("NewStore v6: %v", err)
+		}
+		defer func() { _ = s.Close() }()
+		// Force the store back to v6 so migration 7 re-runs over the seed rows.
+		if _, err := s.db.Exec("DELETE FROM schema_version WHERE version >= 7"); err != nil {
+			t.Fatalf("reset schema_version: %v", err)
+		}
+		_, err = s.db.Exec(`INSERT INTO tool_decisions
+			(session_id, cwd, tool_name, tool_use_id, tool_input_hash, tool_input_json,
+			 hook_decision, outcome, outcome_notes, created_at, resolved_at)
+			VALUES
+			 -- hook Reject: resolved at insert time, hook_decision='deny', no notes.
+			 ('s','/tmp','Bash','reject','h1','{}','deny','denied',NULL,
+			  '2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'),
+			 -- real decline: the only writer that sets outcome_notes.
+			 ('s','/tmp','Bash','decline','h2','{}','abstain','denied',
+			  'auto_mode_classifier: blocked','2026-01-01T00:00:00Z','2026-01-01T00:00:30Z'),
+			 -- SessionEnd sweep: no notes, hook_decision anything but 'deny'.
+			 ('s','/tmp','Bash','sweep-abstain','h3','{}','abstain','denied',NULL,
+			  '2026-01-01T00:00:00Z','2026-01-10T00:00:00Z'),
+			 ('s','/tmp','Bash','sweep-allow','h4','{}','allow','denied',NULL,
+			  '2026-01-01T00:00:00Z','2026-01-10T00:00:00Z'),
+			 -- sweep of a built-in ASK row: hook_decision IS NULL.
+			 ('s','/tmp','Bash','sweep-null','h5','{}',NULL,'denied',NULL,
+			  '2026-01-01T00:00:00Z','2026-01-10T00:00:00Z'),
+			 -- untouchable: not 'denied' at all.
+			 ('s','/tmp','Bash','approved','h6','{}','ask','approved',NULL,
+			  '2026-01-01T00:00:00Z','2026-01-01T00:00:05Z'),
+			 ('s','/tmp','Bash','pending','h7','{}','ask','pending',NULL,
+			  '2026-01-01T00:00:00Z',NULL)`)
+		if err != nil {
+			t.Fatalf("seed pre-split rows: %v", err)
+		}
+	}
+	seed()
+
+	// Re-open: migration 7 runs.
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore upgrade to v7: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	want := map[string]string{
+		"reject":        OutcomeRejected,
+		"decline":       OutcomeDenied,
+		"sweep-abstain": OutcomeUnresolved,
+		"sweep-allow":   OutcomeUnresolved,
+		"sweep-null":    OutcomeUnresolved,
+		"approved":      OutcomeApproved,
+		"pending":       OutcomePending,
+	}
+	for id, wantOutcome := range want {
+		var got string
+		if err := s.db.QueryRow(
+			"SELECT outcome FROM tool_decisions WHERE tool_use_id = ?", id,
+		).Scan(&got); err != nil {
+			t.Fatalf("read outcome for %s: %v", id, err)
+		}
+		if got != wantOutcome {
+			t.Errorf("%s outcome = %q, want %q", id, got, wantOutcome)
+		}
+	}
+
+	// Exactly one row may still say 'denied' — the one somebody actually declined.
+	var denied int
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions WHERE outcome = 'denied'").Scan(&denied)
+	if denied != 1 {
+		t.Errorf("remaining 'denied' rows = %d, want 1 (only the real decline)", denied)
+	}
+
+	// Idempotent: re-running the migration must be a no-op.
+	if _, err := s.db.Exec("DELETE FROM schema_version WHERE version >= 7"); err != nil {
+		t.Fatalf("reset schema_version: %v", err)
+	}
+	_ = s.Close()
+	s2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore re-run: %v", err)
+	}
+	defer func() { _ = s2.Close() }()
+	for id, wantOutcome := range want {
+		var got string
+		if err := s2.db.QueryRow(
+			"SELECT outcome FROM tool_decisions WHERE tool_use_id = ?", id,
+		).Scan(&got); err != nil {
+			t.Fatalf("re-read outcome for %s: %v", id, err)
+		}
+		if got != wantOutcome {
+			t.Errorf("after re-running migration 7, %s outcome = %q, want %q", id, got, wantOutcome)
+		}
+	}
+}
+
 func TestNewStore_Migration2_ExcludedDefaultsToZero(t *testing.T) {
 	dir := t.TempDir()
 	s, err := NewStore(filepath.Join(dir, "test.db"))
@@ -268,8 +375,8 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 	// Verify schema version is now 3
 	var version int
 	_ = s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
-	if version != 6 {
-		t.Errorf("schema_version = %d, want 6", version)
+	if version != 7 {
+		t.Errorf("schema_version = %d, want 7", version)
 	}
 
 	// Verify old row has excluded = 0 (default)
@@ -323,8 +430,8 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 6 {
-		t.Errorf("schema_version = %d, want 6", version)
+	if version != 7 {
+		t.Errorf("schema_version = %d, want 7", version)
 	}
 }
 
@@ -346,8 +453,8 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 
 	var count int
 	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
-	if count != 6 {
-		t.Errorf("schema_version rows = %d, want 6", count)
+	if count != 7 {
+		t.Errorf("schema_version rows = %d, want 7", count)
 	}
 }
 

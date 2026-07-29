@@ -37,8 +37,32 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Isolate the ask-log for the WHOLE package. The hook-mode tests below run
+	// the real binary, which opens asklog.DefaultDBPath() and INSERTS a row per
+	// invocation. Without this, every `go test` run wrote synthetic rows into the
+	// developer's real ~/.local/share/claude-extended-tool-approver/asks.db —
+	// permanently polluting the corpus that `evaluate` treats as ground truth,
+	// and running schema migrations against it as a side effect of testing.
+	//
+	// Setting it here (rather than in each test) makes isolation the default, so
+	// a newly added hook-mode test cannot reintroduce the leak. Individual tests
+	// that need their own store still override it with t.Setenv, which wins.
+	dataHome, err := os.MkdirTemp("", "claude-extended-tool-approver-xdg-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = os.Remove(cliBinary)
+		os.Exit(1)
+	}
+	if err := os.Setenv("XDG_DATA_HOME", dataHome); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		_ = os.Remove(cliBinary)
+		_ = os.RemoveAll(dataHome)
+		os.Exit(1)
+	}
+
 	code := m.Run()
 	_ = os.Remove(cliBinary)
+	_ = os.RemoveAll(dataHome)
 	os.Exit(code)
 }
 

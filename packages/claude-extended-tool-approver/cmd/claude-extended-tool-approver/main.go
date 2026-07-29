@@ -262,7 +262,7 @@ func handleSessionEnd(input *hookio.HookInput) {
 	}
 	defer func() { _ = store.Close() }()
 
-	if err := asklog.ResolveDeniedAll(store, input.SessionID); err != nil {
+	if err := asklog.ResolveUnresolvedAll(store, input.SessionID); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 	}
 	fmt.Println("{}")

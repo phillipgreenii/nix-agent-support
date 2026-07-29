@@ -30,8 +30,12 @@ Grouping by "command" keys on the full normalized command class (see
 CommandClass): compound commands are bucketed by their real constituent
 commands rather than a newline-truncated summary, so "cd foo && work" and
 "cd foo\nwork" fall in the same bucket. Optionally filter to only show miss
-categories (where hook disagreed with user outcome) and restrict the time
-window.`,
+categories (where hook disagreed with the recorded outcome) and restrict the
+time window.
+
+--misses-only skips rows whose outcome records no decision at all ("pending"
+and "unresolved"): with nothing having decided the call, the hook cannot have
+disagreed with anything.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runReport(groupBy, missesOnly, format, days, since)
@@ -74,6 +78,14 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 	counts := map[string]int{}
 	for _, row := range rows {
 		if *missesOnly {
+			// A row nobody ever decided (pending / unresolved) can be neither
+			// correct nor a miss: there is no recorded decision to disagree with.
+			// Counting it also made the miss set depend on nothing but timing —
+			// the SAME row is 'pending' before SessionEnd and 'unresolved' after,
+			// so it would drift in and out of the miss set as sessions closed.
+			if !asklog.OutcomeIsDecision(row.Outcome) {
+				continue
+			}
 			hookDec := ""
 			if row.HookDecision != nil {
 				hookDec = *row.HookDecision

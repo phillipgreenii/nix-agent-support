@@ -43,7 +43,11 @@ func newEvaluateCmd() *cobra.Command {
 		Short: "Replay logged decisions and categorize them as correct or miss",
 		Long: `Replay every logged decision through the current rule engine and
 categorize each as correct, miss-caught-by-settings, miss-uncaught,
-needs-review, or stale-cwd.
+needs-review, unresolved, or stale-cwd.
+
+A row whose outcome is "unresolved" (never resolved — interrupted, abandoned,
+or swept at SessionEnd) carries no ground truth, so it is categorized
+"unresolved" and is never counted as correct or as a miss.
 
 Use --settings to additionally evaluate each decision against a
 Claude Code settings file so misses can be attributed to settings
@@ -107,6 +111,7 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		"miss-uncaught":           0,
 		"needs-review":            0,
 		"stale-cwd":               0,
+		"unresolved":              0,
 	}
 
 	// sandboxCounts tallies rows by sandbox state ("on"/"off"/"unknown").
@@ -172,7 +177,10 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		r.Category = categorize(r, row)
 
 		counts[r.Category]++
-		if *missesOnly && r.Category == "correct" {
+		// "unresolved" is excluded from --misses-only for the same reason
+		// "stale-cwd" is: it carries no ground truth, so it is not a miss and
+		// must not inflate the miss dataset downstream analysis ranks.
+		if *missesOnly && (r.Category == "correct" || r.Category == "unresolved") {
 			continue
 		}
 		results = append(results, r)
@@ -194,13 +202,16 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		fmt.Printf("Misses (settings):   %5d\n", counts["miss-caught-by-settings"])
 		fmt.Printf("Misses (uncaught):   %5d\n", counts["miss-uncaught"])
 		fmt.Printf("Needs review:        %5d\n", counts["needs-review"])
+		fmt.Printf("Unresolved:          %5d\n", counts["unresolved"])
 		fmt.Printf("By sandbox:          on=%d off=%d unknown=%d\n",
 			sandboxCounts["on"], sandboxCounts["off"], sandboxCounts["unknown"])
 	}
 }
 
 func categorize(r evalResult, row asklog.DecisionRow) string {
-	// If correct_hook_decision is set, compare against that
+	// If correct_hook_decision is set, compare against that. An explicit human
+	// annotation is real ground truth, so it outranks even a never-resolved
+	// outcome.
 	if row.CorrectDec != nil {
 		if r.ReplayResult == *row.CorrectDec {
 			return "correct"
@@ -211,20 +222,31 @@ func categorize(r evalResult, row asklog.DecisionRow) string {
 		return "miss-uncaught"
 	}
 
-	// Infer from outcome
-	expectedDecision := outcomeToExpectedDecision(row.Outcome)
-	if expectedDecision == "" {
+	// Nobody ever decided this call, so there is no ground truth to grade
+	// against. 'unresolved' gets its own terminal category — never "correct",
+	// never a "miss-*" — so a SessionEnd sweep can no longer masquerade as a
+	// user denial (and can no longer be credited as a correct deny either).
+	if !asklog.OutcomeIsDecision(row.Outcome) {
+		if row.Outcome == asklog.OutcomeUnresolved {
+			return "unresolved"
+		}
 		return "needs-review"
 	}
+
+	expectedDecision := outcomeToExpectedDecision(row.Outcome)
 
 	if r.ReplayResult == expectedDecision {
 		return "correct"
 	}
 
-	// Hook allows but user denied — ambiguous. The user may have redirected
-	// (provided text feedback) rather than truly rejecting the tool. Since we
-	// can't distinguish denial from correction, classify as needs-review.
-	if r.ReplayResult == "allow" && row.Outcome == "denied" {
+	// Hook allows but the call was DECLINED — ambiguous. The user may have
+	// redirected (provided text feedback) rather than truly rejecting the tool.
+	// Since we can't distinguish denial from correction, classify as
+	// needs-review. This carve-out is deliberately scoped to OutcomeDenied: a
+	// hook Reject (OutcomeRejected) involved no user, so there is no redirection
+	// to confuse it with — a Reject that now replays to allow is a real engine
+	// change and MUST stay visible as a miss.
+	if r.ReplayResult == "allow" && row.Outcome == asklog.OutcomeDenied {
 		return "needs-review"
 	}
 
@@ -235,11 +257,18 @@ func categorize(r evalResult, row asklog.DecisionRow) string {
 	return "miss-uncaught"
 }
 
+// outcomeToExpectedDecision maps a recorded outcome to the hook decision that
+// would have been RIGHT for it. It returns "" for the outcomes that record no
+// decision at all (pending, unresolved) — those have no expected decision, and
+// asklog.OutcomeIsDecision MUST be consulted before grading against them.
 func outcomeToExpectedDecision(outcome string) string {
 	switch outcome {
-	case "approved":
+	case asklog.OutcomeApproved:
 		return "allow"
-	case "denied":
+	case asklog.OutcomeDenied, asklog.OutcomeRejected:
+		// Both are a refusal of the call, so a replayed "deny" is correct for
+		// either: OutcomeDenied is somebody declining it, OutcomeRejected is the
+		// hook refusing it itself (a self-consistency check on the engine).
 		return "deny"
 	default:
 		return ""

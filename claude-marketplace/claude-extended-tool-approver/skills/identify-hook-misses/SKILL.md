@@ -14,8 +14,8 @@ Analyze the decision database to find patterns where the hook makes wrong decisi
 ## Terminology
 
 - `hook_decision` — the decision the hook returned (`allow`/`ask`/`deny`/`abstain`); from the `hook_decision` field of `evaluate`/`show` output.
-- `category` — `miss-uncaught`, `miss-caught-by-settings`, `correct`, `needs-review`, `stale-cwd`; from the `category` field of `evaluate`.
-- `outcome` — the user's actual decision (ground truth: `approved`/`denied`/`pending`); from the `outcome` field.
+- `category` — `miss-uncaught`, `miss-caught-by-settings`, `correct`, `needs-review`, `unresolved`, `stale-cwd`; from the `category` field of `evaluate`.
+- `outcome` — what actually happened to the call (ground truth): `approved`, `denied` (somebody declined it — always carries a reason in `outcome_notes`), `rejected` (CETA itself refused it; nobody was asked), `unresolved` (never resolved — interrupted/abandoned/session died; **NOT a denial** and never a miss), `pending`; from the `outcome` field. Full table: [../references/database-schema.md](../references/database-schema.md#outcomes).
 - `sandbox_enabled` — `0` or `1` (or `null`) indicating whether the OS bash sandbox was active for this invocation; from the `sandbox_enabled` field.
 - `command_class` — stable, non-truncated grouping key; the field to bucket "same command" on.
 - `replay_result` — the decision the _current_ rule engine returns when replaying the row (`allow`/`ask`/`deny`/`abstain`, or empty for rows the engine did not replay, e.g. `stale-cwd`).
@@ -30,7 +30,7 @@ Derived analytic terms used by the calibration steps (Steps 4-6 below):
 - **APPROVE candidate** — a row where CETA `abstain`ed but the invocation was `approved` (a command CETA could learn to APPROVE). Base filter: `.hook_decision=="abstain" and .outcome=="approved"`.
 - **Human (PRIMARY) tier** — APPROVE candidates the HUMAN endorsed on the MAIN agent: `approval_source=="user"` (a prompt fired and the human approved) with `agent_type==null`. This is the strongest evidence for a new APPROVE rule.
 - **Weaker tier** — APPROVE candidates approved by a MACHINE or inside a SUBAGENT: `approval_source in (auto,bypass)` OR `agent_type != null`. NOT counted as human endorsement. `subagent` is NOT an `approval_source` value — segment this tier by `approval_source × agent_type`.
-- **False-denial** — CETA `abstain`ed and the `auto_mode_classifier` DENIED the call (`outcome=="denied"` with `auto_mode_classifier:` in `outcome_notes`). Candidate to teach CETA to APPROVE (if the denial was wrong) — read the mined reason first.
+- **False-denial** — CETA `abstain`ed and the `auto_mode_classifier` DENIED the call (`outcome=="denied"` with `auto_mode_classifier:` in `outcome_notes`). Candidate to teach CETA to APPROVE (if the denial was wrong) — read the mined reason first. A row whose `outcome` is `unresolved` is NOT a false-denial: nobody denied it.
 - **False-approval / over-approval** — a command CETA (or auto/bypass mode) let run that is "actually risky". Candidate to teach CETA to ASK/DENY.
 - **"Actually risky"** — DEFINED as: the current engine's `replay_result` for the row is `deny` or `ask` (self-consistent; no curated list).
 - **"Errored" / "approved-but-errored"** — DEFINED as: `tool_response.is_error == true`. A missing/`null` `tool_response` is treated as "unknown / not errored".

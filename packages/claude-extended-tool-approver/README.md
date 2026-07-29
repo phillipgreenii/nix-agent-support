@@ -8,16 +8,38 @@ Evaluates tool invocations against an ordered chain of rule modules (envvars, gi
 
 ## Hook Events
 
-| Event             | Purpose                                              |
-| ----------------- | ---------------------------------------------------- |
-| PreToolUse        | Rule engine evaluation + log ask/deny decisions      |
-| PermissionRequest | Log all permission dialogs (including built-in ASKs) |
-| PostToolUse       | Resolve pending ASKs as approved                     |
-| SessionEnd        | Resolve remaining pending ASKs as denied             |
+| Event             | Purpose                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| PreToolUse        | Rule engine evaluation + log ask/deny decisions               |
+| PermissionRequest | Log all permission dialogs (including built-in ASKs)          |
+| PostToolUse       | Resolve pending ASKs as approved                              |
+| PermissionDenied  | Resolve as denied — the call was actually declined            |
+| SessionEnd        | Resolve remaining pending ASKs as **unresolved** (not denied) |
 
 ## Decision Database
 
 Stored at `~/.local/share/claude-extended-tool-approver/asks.db` (or `$XDG_DATA_HOME/claude-extended-tool-approver/asks.db`).
+
+### Outcome values
+
+`outcome` is the ground truth `evaluate` grades hook correctness against, so each
+value names exactly ONE provenance. Three of the five are refusal-shaped and MUST
+NOT be conflated — a bulk `SessionEnd` sweep is not a user saying no.
+
+| `outcome`    | Meaning                                                                                                        | Written by               | Gradeable? |
+| ------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------ | ---------- |
+| `pending`    | Logged at PreToolUse, not resolved yet. Live sessions only.                                                    | `RecordPreToolDecision`  | no         |
+| `approved`   | PostToolUse fired — the tool actually ran.                                                                     | `ResolveApproved`        | yes        |
+| `denied`     | A decline **judgement** was rendered, by the user or the auto-mode classifier. Always carries `outcome_notes`. | `RecordPermissionDenied` | yes        |
+| `rejected`   | CETA itself returned Reject. Nobody was asked; `hook_decision='deny'` and `resolved_at == created_at`.         | `RecordPreToolDecision`  | yes        |
+| `unresolved` | Never resolved at all — interrupted, abandoned, session died, agent moved on. Swept in bulk at SessionEnd.     | `ResolveUnresolvedAll`   | **no**     |
+
+`unresolved` rows carry no decision, so `evaluate`, `compare` and `report
+--misses-only` never count them as correct or as a miss (`evaluate` reports them
+under its own `unresolved` category). Before this split all three refusal shapes
+were stored as `denied`, which made every SessionEnd sweep look like "the user
+denied it but the hook allows it" — a phantom false-allow. Schema migration 7
+backfills historical rows by inverting the three writers' fingerprints.
 
 ### Example Queries
 
@@ -42,10 +64,18 @@ sqlite3 "$DB" \
    WHERE hook_decision='deny'
    GROUP BY tool_summary, hook_reason ORDER BY n DESC LIMIT 20"
 
-# All denied ASKs (things you said no to)
+# All declined ASKs (things you said no to). outcome='denied' now means exactly
+# that, so no hook_decision filter is needed — a hook Reject is 'rejected' and a
+# never-answered call is 'unresolved'.
 sqlite3 "$DB" \
   "SELECT created_at, cwd, tool_name, tool_summary FROM tool_decisions
-   WHERE outcome='denied' AND hook_decision!='deny'
+   WHERE outcome='denied'
+   ORDER BY created_at DESC LIMIT 20"
+
+# Calls that were never resolved (NOT denials) — abandoned/interrupted work.
+sqlite3 "$DB" \
+  "SELECT created_at, cwd, tool_name, tool_summary FROM tool_decisions
+   WHERE outcome='unresolved'
    ORDER BY created_at DESC LIMIT 20"
 
 # Which agent types trigger the most ASKs?

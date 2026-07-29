@@ -113,8 +113,12 @@ func TestRecordPreToolDecision_Deny(t *testing.T) {
 		t.Fatalf("RecordPreToolDecision: %v", err)
 	}
 
-	if n := countRows(t, s, "outcome='denied'"); n != 1 {
-		t.Errorf("denied rows = %d, want 1", n)
+	// A hook Reject is 'rejected', NOT 'denied': nobody was asked.
+	if n := countRows(t, s, "outcome='rejected'"); n != 1 {
+		t.Errorf("rejected rows = %d, want 1", n)
+	}
+	if n := countRows(t, s, "outcome='denied'"); n != 0 {
+		t.Errorf("denied rows = %d, want 0 (a hook Reject is not a denial)", n)
 	}
 
 	var hookDec, reason string
@@ -203,16 +207,16 @@ func TestFullLifecycle_Abstain_ThenApproved(t *testing.T) {
 	}
 }
 
-func TestFullLifecycle_Abstain_ThenDenied(t *testing.T) {
+func TestFullLifecycle_Abstain_ThenNeverResolved(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-abs3", json.RawMessage(`{"command":"unknown-cmd"}`))
 	result := hookio.RuleResult{Decision: hookio.Abstain}
 
 	_ = RecordPreToolDecision(s, input, result)
-	_ = ResolveDeniedAll(s, "sess1")
+	_ = ResolveUnresolvedAll(s, "sess1")
 
-	if o := getOutcome(t, s, "sess1"); o != "denied" {
-		t.Errorf("outcome = %q, want denied", o)
+	if o := getOutcome(t, s, "sess1"); o != "unresolved" {
+		t.Errorf("outcome = %q, want unresolved", o)
 	}
 }
 
@@ -305,7 +309,7 @@ func TestResolveApproved_NoPendingRow(t *testing.T) {
 	}
 }
 
-func TestResolveDeniedAll(t *testing.T) {
+func TestResolveUnresolvedAll(t *testing.T) {
 	s := testStore(t)
 	input1 := testInput("sess1", "Bash", "tool-a", json.RawMessage(`{"command":"cmd1"}`))
 	input2 := testInput("sess1", "Bash", "tool-b", json.RawMessage(`{"command":"cmd2"}`))
@@ -316,24 +320,183 @@ func TestResolveDeniedAll(t *testing.T) {
 	_ = RecordPreToolDecision(s, input2, result)
 	_ = RecordPreToolDecision(s, input3, result)
 
-	err := ResolveDeniedAll(s, "sess1")
+	err := ResolveUnresolvedAll(s, "sess1")
 	if err != nil {
-		t.Fatalf("ResolveDeniedAll: %v", err)
+		t.Fatalf("ResolveUnresolvedAll: %v", err)
 	}
 
-	if n := countRows(t, s, "session_id='sess1' AND outcome='denied'"); n != 2 {
-		t.Errorf("sess1 denied = %d, want 2", n)
+	if n := countRows(t, s, "session_id='sess1' AND outcome='unresolved'"); n != 2 {
+		t.Errorf("sess1 unresolved = %d, want 2", n)
+	}
+	// The sweep MUST NOT claim a denial that never happened.
+	if n := countRows(t, s, "outcome='denied'"); n != 0 {
+		t.Errorf("denied rows = %d, want 0 (the sweep is not a denial)", n)
 	}
 	if n := countRows(t, s, "session_id='sess2' AND outcome='pending'"); n != 1 {
 		t.Errorf("sess2 should still be pending, got %d", n)
 	}
 }
 
-func TestResolveDeniedAll_NoPendingRows(t *testing.T) {
+func TestResolveUnresolvedAll_NoPendingRows(t *testing.T) {
 	s := testStore(t)
-	err := ResolveDeniedAll(s, "nonexistent-session")
+	err := ResolveUnresolvedAll(s, "nonexistent-session")
 	if err != nil {
-		t.Fatalf("ResolveDeniedAll should not error on empty: %v", err)
+		t.Fatalf("ResolveUnresolvedAll should not error on empty: %v", err)
+	}
+}
+
+// TestResolveUnresolvedAll_LeavesAlreadyResolvedRowsAlone pins the sweep's other
+// direction: it is a bulk statement with no per-row correlation, so it MUST only
+// ever touch rows still 'pending'. A real decline, a hook Reject and a completed
+// call all keep their own outcome.
+func TestResolveUnresolvedAll_LeavesAlreadyResolvedRowsAlone(t *testing.T) {
+	s := testStore(t)
+
+	// A hook Reject -> 'rejected' at insert time.
+	rejected := testInput("sess1", "Bash", "tool-rej", json.RawMessage(`{"command":"sudo rm -rf /"}`))
+	_ = RecordPreToolDecision(s, rejected, hookio.RuleResult{Decision: hookio.Reject, Reason: "no"})
+
+	// An actual decline -> 'denied'.
+	declined := testInput("sess1", "Bash", "tool-den", json.RawMessage(`{"command":"declined-cmd"}`))
+	_ = RecordPreToolDecision(s, declined, hookio.RuleResult{Decision: hookio.Abstain})
+	declined.Reason = "user said no"
+	_ = RecordPermissionDenied(s, declined)
+
+	// A completed call -> 'approved'.
+	approved := testInput("sess1", "Bash", "tool-app", json.RawMessage(`{"command":"ls"}`))
+	_ = RecordPreToolDecision(s, approved, hookio.RuleResult{Decision: hookio.Ask})
+	_ = ResolveApproved(s, approved, "")
+
+	// One genuinely abandoned call -> 'unresolved'.
+	abandoned := testInput("sess1", "Bash", "tool-aba", json.RawMessage(`{"command":"abandoned-cmd"}`))
+	_ = RecordPreToolDecision(s, abandoned, hookio.RuleResult{Decision: hookio.Ask})
+
+	if err := ResolveUnresolvedAll(s, "sess1"); err != nil {
+		t.Fatalf("ResolveUnresolvedAll: %v", err)
+	}
+
+	for _, tc := range []struct{ toolUseID, want string }{
+		{"tool-rej", "rejected"},
+		{"tool-den", "denied"},
+		{"tool-app", "approved"},
+		{"tool-aba", "unresolved"},
+	} {
+		var got string
+		if err := s.db.QueryRow(
+			"SELECT outcome FROM tool_decisions WHERE tool_use_id=?", tc.toolUseID,
+		).Scan(&got); err != nil {
+			t.Fatalf("read outcome for %s: %v", tc.toolUseID, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s outcome = %q, want %q", tc.toolUseID, got, tc.want)
+		}
+	}
+}
+
+// TestOutcomeThreeWayDistinction pins the invariant this whole vocabulary
+// exists for, in BOTH directions: each of the three refusal-shaped provenances
+// gets its OWN outcome value, and none of them is ever written as any of the
+// other two.
+//
+//	a real decline    -> 'denied'
+//	a hook Reject     -> 'rejected'
+//	never resolved    -> 'unresolved'
+func TestOutcomeThreeWayDistinction(t *testing.T) {
+	cases := []struct {
+		name    string
+		session string
+		record  func(t *testing.T, s *Store, in *hookio.HookInput)
+		want    string
+	}{
+		{
+			name:    "real decline via PermissionDenied",
+			session: "decline",
+			record: func(t *testing.T, s *Store, in *hookio.HookInput) {
+				t.Helper()
+				if err := RecordPreToolDecision(s, in, hookio.RuleResult{Decision: hookio.Abstain}); err != nil {
+					t.Fatalf("RecordPreToolDecision: %v", err)
+				}
+				in.Reason = "user declined"
+				if err := RecordPermissionDenied(s, in); err != nil {
+					t.Fatalf("RecordPermissionDenied: %v", err)
+				}
+			},
+			want: OutcomeDenied,
+		},
+		{
+			name:    "hook Reject",
+			session: "reject",
+			record: func(t *testing.T, s *Store, in *hookio.HookInput) {
+				t.Helper()
+				if err := RecordPreToolDecision(s, in, hookio.RuleResult{Decision: hookio.Reject, Reason: "blocked"}); err != nil {
+					t.Fatalf("RecordPreToolDecision: %v", err)
+				}
+			},
+			want: OutcomeRejected,
+		},
+		{
+			name:    "never resolved, swept at SessionEnd",
+			session: "sweep",
+			record: func(t *testing.T, s *Store, in *hookio.HookInput) {
+				t.Helper()
+				if err := RecordPreToolDecision(s, in, hookio.RuleResult{Decision: hookio.Ask}); err != nil {
+					t.Fatalf("RecordPreToolDecision: %v", err)
+				}
+				if err := ResolveUnresolvedAll(s, in.SessionID); err != nil {
+					t.Fatalf("ResolveUnresolvedAll: %v", err)
+				}
+			},
+			want: OutcomeUnresolved,
+		},
+	}
+
+	// Every value the three cases collectively must stay distinct across.
+	all := []string{OutcomeDenied, OutcomeRejected, OutcomeUnresolved}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			in := testInput(tc.session, "Bash", "tool-"+tc.session, json.RawMessage(`{"command":"some-cmd"}`))
+			tc.record(t, s, in)
+
+			// Positive direction: it IS the expected value.
+			if got := getOutcome(t, s, tc.session); got != tc.want {
+				t.Errorf("outcome = %q, want %q", got, tc.want)
+			}
+			// Negative direction: it is NOT either of the other two.
+			for _, other := range all {
+				if other == tc.want {
+					continue
+				}
+				if n := countRows(t, s, "outcome='"+other+"'"); n != 0 {
+					t.Errorf("%d row(s) written as %q; the three provenances MUST stay distinct", n, other)
+				}
+			}
+			// Only 'denied' means "somebody rendered a judgement", so only it
+			// counts as gradeable ground truth.
+			wantDecision := tc.want != OutcomeUnresolved
+			if got := OutcomeIsDecision(tc.want); got != wantDecision {
+				t.Errorf("OutcomeIsDecision(%q) = %v, want %v", tc.want, got, wantDecision)
+			}
+		})
+	}
+}
+
+func TestOutcomeIsDecision(t *testing.T) {
+	for _, tc := range []struct {
+		outcome string
+		want    bool
+	}{
+		{OutcomeApproved, true},
+		{OutcomeDenied, true},
+		{OutcomeRejected, true},
+		{OutcomePending, false},
+		{OutcomeUnresolved, false},
+		{"some-future-value", false},
+	} {
+		if got := OutcomeIsDecision(tc.outcome); got != tc.want {
+			t.Errorf("OutcomeIsDecision(%q) = %v, want %v", tc.outcome, got, tc.want)
+		}
 	}
 }
 
@@ -354,14 +517,36 @@ func TestFullLifecycle_Approved(t *testing.T) {
 	}
 }
 
-func TestFullLifecycle_Denied(t *testing.T) {
+// TestFullLifecycle_PromptedThenNeverAnswered covers the ask-dialog-shown-but-
+// never-answered path: PreToolUse ASK, the permission dialog is recorded, and
+// then the session simply ends. Nobody answered, so the row is 'unresolved'.
+func TestFullLifecycle_PromptedThenNeverAnswered(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-lc2", json.RawMessage(`{"command":"rm -rf /"}`))
 	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "dangerous command"}
 
 	_ = RecordPreToolDecision(s, input, result)
 	_ = RecordPermissionRequest(s, input, "")
-	_ = ResolveDeniedAll(s, "sess1")
+	_ = ResolveUnresolvedAll(s, "sess1")
+
+	if o := getOutcome(t, s, "sess1"); o != "unresolved" {
+		t.Errorf("outcome = %q, want unresolved", o)
+	}
+}
+
+// TestFullLifecycle_PromptedThenDeclined is the counterpart: the same ASK, but
+// the user actually answered "no". That MUST be 'denied', not 'unresolved'.
+func TestFullLifecycle_PromptedThenDeclined(t *testing.T) {
+	s := testStore(t)
+	input := testInput("sess1", "Bash", "tool-lc2b", json.RawMessage(`{"command":"rm -rf /"}`))
+	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "dangerous command"}
+
+	_ = RecordPreToolDecision(s, input, result)
+	_ = RecordPermissionRequest(s, input, "")
+	input.Reason = "user declined"
+	_ = RecordPermissionDenied(s, input)
+	// The SessionEnd sweep still runs afterwards and must not overwrite it.
+	_ = ResolveUnresolvedAll(s, "sess1")
 
 	if o := getOutcome(t, s, "sess1"); o != "denied" {
 		t.Errorf("outcome = %q, want denied", o)
