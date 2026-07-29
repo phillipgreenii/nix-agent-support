@@ -1005,6 +1005,52 @@ func TestIntegration_EnvVarGuard_PositionIndependence(t *testing.T) {
 	}
 }
 
+// TestIntegration_TildeHomeWritePath is the tc-sfpto regression guard: a write
+// command targeting a BARE `~` must resolve to the home directory and be treated
+// exactly like `~/` and the literal home path — home is not a read-write root, so
+// the write Abstains (deferred to Claude Code) instead of being auto-approved.
+//
+// HOME is pinned so `~` expands to a known, non-zone path, and WORKSPACE_ROOT is
+// set to `<home>/workspace` so that sub-path is a genuine read-write root — this
+// pins the "breadth" invariants (`~/workspace` stays Approve, `~/.ssh` stays Ask)
+// so a future change that narrows the rw-root or drops the secret guard is caught.
+func TestIntegration_TildeHomeWritePath(t *testing.T) {
+	home := "/Users/testuser"
+	t.Setenv("HOME", home)
+	t.Setenv("WORKSPACE_ROOT", home+"/workspace")
+	projectRoot := home + "/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The bug: a bare `~` write target must Abstain like its equivalents, not
+		// be silently auto-approved.
+		{"rm bare tilde", "rm -rf ~", hookio.Abstain},
+		// Equivalents that already Abstained (home is not a rw-root) — unchanged.
+		{"rm tilde slash", "rm -rf ~/", hookio.Abstain},
+		{"rm literal home", "rm -rf " + home, hookio.Abstain},
+		// Secret-path guard (secrets rule runs before safe-commands) — unchanged.
+		{"rm tilde ssh", "rm -rf ~/.ssh", hookio.Ask},
+		// A real read-write root under home MUST stay approvable (breadth guard).
+		{"rm tilde workspace", "rm -rf ~/workspace", hookio.Approve},
+		// Unexpanded $HOME is caught by the dynamic-expansion guard — unchanged.
+		{"rm dollar HOME", "rm -rf $HOME", hookio.Abstain},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != tc.want {
+				t.Errorf("%s: %q got %s (%s: %s) want %s", tc.name, tc.command, got.Decision, got.Module, got.Reason, tc.want)
+			}
+		})
+	}
+}
+
 func makeFileJSON(path string) json.RawMessage {
 	b, _ := json.Marshal(hookio.FileToolInput{FilePath: path})
 	return b

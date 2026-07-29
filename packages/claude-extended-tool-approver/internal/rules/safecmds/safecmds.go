@@ -423,7 +423,11 @@ func startsWithLetter(s string) bool {
 }
 
 func looksLikePath(arg string) bool {
-	return strings.HasPrefix(arg, "/") ||
+	// A bare "~" is the home directory just as much as "~/": the path Evaluator's
+	// cleanPath expands both to $HOME. Without matching it here, a bare "~" arg
+	// (e.g. `rm -rf ~`) is never classified and slips through as safe (tc-sfpto).
+	return arg == "~" ||
+		strings.HasPrefix(arg, "/") ||
 		strings.HasPrefix(arg, "./") ||
 		strings.HasPrefix(arg, "../") ||
 		strings.HasPrefix(arg, "~/")
