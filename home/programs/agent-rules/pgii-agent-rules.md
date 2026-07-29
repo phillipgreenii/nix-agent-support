@@ -39,6 +39,30 @@ MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing 
 
 MUST be isolated; if they modify files directly, the test MUST generate the scenario in a temp directory.
 
+### Beads Claim Hygiene
+
+> `bd` has NO `unclaim` verb. A release MUST be synthesised, and the `--assignee ""` half is
+> the one that gets forgotten. A bead left `status=open` with a non-empty `assignee` is
+> **stranded**: `bd ready --claim` correctly skips it (it is claimed), `bd update <id> --claim`
+> rejects it ("issue already claimed by …"), and no stale-`in_progress` sweep can see it —
+> so it sits at the top of the queue, unclaimable and invisible.
+
+- **B-1** Whatever claims a bead MUST release it. Every exit path — success, hand-back, park,
+  escalate, defer, give up, out of context — MUST end with the bead either `closed` or
+  released. MUST NOT end a session still holding a claim.
+- **B-2** A release MUST clear the assignee, not just the status:
+  `bd update <id> --status open --assignee ""`. `--status open` alone is NOT a release.
+- **B-3** The status change and the assignee clear MUST be a SINGLE `bd update` call. Two
+  calls leave a window in which the bead is `open` but still claimed.
+- **B-4** Any transition out of `in_progress` that is not a `bd close` MUST clear the assignee
+  — including `blocked`, `deferred`, and re-`open`. A `bd close` MAY leave the assignee (it
+  records who did the work), so anything that later RE-OPENS a closed bead MUST clear it then.
+- **B-5** MUST prefer an explicit `--actor "<session-id>"` on every claim. Without it the
+  assignee resolves to the human's display name, which makes an abandoned claim look like the
+  operator deliberately took the bead.
+- **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
+  rather than silently steal or clear it — it is this defect, and the operator decides.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.

@@ -295,7 +295,13 @@ flowchart TD
 ```
 
 - **Owner:** `pr-pool` ACL (active). `pg-pr`'s `reopenStaleReviews` +
-  `reviewed_by_agent_at` still exist but are kill-switched with path A.
+  `reviewed_by_agent_at` still exist but are kill-switched with path A. The
+  clear-the-assignee half of the invariant below binds **both** implementations:
+  path A's `ReopenDraftReview`/`UnclaimDraftReview`/`DeadLetterDraftReview`
+  (`packages/pg-pr/pkg/beads/reviewclaim.go`) previously set `--status open`
+  without clearing the assignee, stranding the bead as `open` + assignee — which
+  `bd ready --claim` skips and the next `--claim` rejects ("already claimed"), so
+  the PR was never re-reviewed (bd `pg2-jcljm`).
 - **Acceptance criteria:**
   - A closed `review-pr` bead **MUST** be reopened **only** when the PR `head_sha`
     differs from the bead's recorded `head_sha` and **both** are non-empty.

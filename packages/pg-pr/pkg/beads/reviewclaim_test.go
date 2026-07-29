@@ -41,6 +41,30 @@ func (r *claimRunner) sawArgs(want ...string) bool {
 	return false
 }
 
+// sawOneCallWith reports whether a SINGLE bd invocation carried every given
+// token. Release paths must clear status and assignee in one atomic `bd update`
+// — two separate calls would leave a window in which the bead is `open` but
+// still claimed, so a per-call check is required, not a global one.
+func (r *claimRunner) sawOneCallWith(want ...string) bool {
+	for _, call := range r.calls {
+		have := make(map[string]struct{}, len(call))
+		for _, a := range call {
+			have[a] = struct{}{}
+		}
+		ok := true
+		for _, w := range want {
+			if _, found := have[w]; !found {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
 func TestClaimDraftReview_CallsUpdateClaim(t *testing.T) {
 	r := &claimRunner{}
 	c := NewClientWithRunner(r)
@@ -61,6 +85,22 @@ func TestUnclaimDraftReview_ReopensToReady(t *testing.T) {
 	// It must set status back to open so the bead re-appears in `bd ready`.
 	if !r.sawArgs("update", "pg2-a.1", "--status", "open") {
 		t.Fatalf("expected status=open, calls=%v", r.calls)
+	}
+}
+
+// TestUnclaimDraftReview_ClearsAssigneeAtomically is the pg2-jcljm regression
+// guard. Setting status=open WITHOUT clearing the assignee strands the bead:
+// `bd ready --claim` correctly skips an already-claimed bead, and the next
+// ClaimDraftReview's `bd update --claim` fails "issue already claimed by <name>"
+// — while a stale-`in_progress` sweep never sees it, because it is `open`.
+func TestUnclaimDraftReview_ClearsAssigneeAtomically(t *testing.T) {
+	r := &claimRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.UnclaimDraftReview(context.Background(), "pg2-a.1"); err != nil {
+		t.Fatalf("UnclaimDraftReview: %v", err)
+	}
+	if !r.sawOneCallWith("update", "pg2-a.1", "--status", "open", "--assignee=") {
+		t.Fatalf("release must clear status AND assignee in ONE bd update, calls=%v", r.calls)
 	}
 }
 
@@ -96,6 +136,21 @@ func TestReopenDraftReview_SetsStatusOpen(t *testing.T) {
 	}
 }
 
+// TestReopenDraftReview_ClearsAssignee pins the JR4 invariant stated in
+// docs/pr-review-flow.md ("on reopen ... the assignee cleared"). bd's close does
+// not drop the assignee, so reopening without clearing it yields the stranded
+// `open`+assignee state and the next claim fails (pg2-jcljm).
+func TestReopenDraftReview_ClearsAssignee(t *testing.T) {
+	r := &claimRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.ReopenDraftReview(context.Background(), "pg2-a.1"); err != nil {
+		t.Fatalf("ReopenDraftReview: %v", err)
+	}
+	if !r.sawOneCallWith("update", "pg2-a.1", "--status", "open", "--assignee=") {
+		t.Fatalf("reopen must clear status AND assignee in ONE bd update, calls=%v", r.calls)
+	}
+}
+
 func TestDeadLetterDraftReview_BlocksAndLabels(t *testing.T) {
 	r := &claimRunner{}
 	c := NewClientWithRunner(r)
@@ -111,6 +166,20 @@ func TestDeadLetterDraftReview_BlocksAndLabels(t *testing.T) {
 	}
 	if !strings.Contains(joined, "needs-human") {
 		t.Fatalf("expected needs-human label, calls=%v", r.calls)
+	}
+}
+
+// TestDeadLetterDraftReview_ClearsAssignee — dead-lettering is a release, so it
+// must not leave the daemon's claim behind: a human who later un-blocks the bead
+// to `open` would otherwise land directly in the stranded state (pg2-jcljm).
+func TestDeadLetterDraftReview_ClearsAssignee(t *testing.T) {
+	r := &claimRunner{}
+	c := NewClientWithRunner(r)
+	if err := c.DeadLetterDraftReview(context.Background(), "pg2-a.1"); err != nil {
+		t.Fatalf("DeadLetterDraftReview: %v", err)
+	}
+	if !r.sawOneCallWith("update", "pg2-a.1", "--status", "blocked", needsHumanLabel, "--assignee=") {
+		t.Fatalf("dead-letter must park AND clear assignee in ONE bd update, calls=%v", r.calls)
 	}
 }
 

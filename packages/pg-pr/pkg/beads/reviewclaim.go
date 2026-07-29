@@ -30,14 +30,29 @@ func (c *Client) ClaimDraftReview(ctx context.Context, id string) error {
 }
 
 // UnclaimDraftReview returns a claimed-but-unproduced bead to `bd ready` by
-// resetting its status to open (bd has no explicit --unclaim; --claim set
-// status=in_progress, so open restores readiness). Called on graceful
+// resetting its status to open AND clearing its assignee. Called on graceful
 // production failure so a later tick retries.
+//
+// Both halves are required. bd has no `unclaim` verb, so a release must be
+// synthesised: `--claim` sets status=in_progress *and* assignee, and `--status
+// open` alone reverts only the status. A bead left `open` with a non-empty
+// assignee is the worst of both worlds (pg2-jcljm) — it is stranded:
+//
+//   - `bd ready --claim` skips it (correctly: it is already claimed), and
+//   - the next ClaimDraftReview's `bd update <id> --claim` FAILS with
+//     "issue already claimed by <assignee>", so reviewHookCycle bails at the
+//     claim and the PR is never re-reviewed;
+//   - yet it is invisible to any stale-`in_progress` sweep, because its status
+//     is `open`.
+//
+// Clearing status and assignee in ONE `bd update` is deliberate: two calls would
+// open a window in which the bead is `open` but still claimed. Mirrors
+// pr-pool's `internal/beads.Unclaim`.
 func (c *Client) UnclaimDraftReview(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("draft-review: id required")
 	}
-	if _, err := c.Runner.Run(ctx, "update", id, "--status", "open"); err != nil {
+	if _, err := c.Runner.Run(ctx, "update", id, "--status", "open", "--assignee="); err != nil {
 		return fmt.Errorf("unclaim draft-review %s: %w", id, err)
 	}
 	return nil
@@ -63,25 +78,36 @@ func (c *Client) CloseDraftReview(ctx context.Context, id, reason string) error 
 }
 
 // ReopenDraftReview re-opens a previously-closed draft-review bead so it
-// becomes claimable again (re-review-on-head-advance, design §2.3.3).
+// becomes claimable again (re-review-on-head-advance, design §2.3.3). The
+// assignee is cleared for the same reason as UnclaimDraftReview: the bead was
+// claimed by whoever produced the previous review, and bd's close does not drop
+// the assignee, so reopening WITHOUT clearing it yields `open` + assignee — the
+// stranded state that makes the very next ClaimDraftReview fail "already
+// claimed" (pg2-jcljm). This is the invariant `docs/pr-review-flow.md` JR4
+// already states ("on reopen ... the assignee cleared"), which pr-pool's
+// `internal/beads.ReopenReview` honours and this legacy path did not.
 func (c *Client) ReopenDraftReview(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("draft-review: id required")
 	}
-	if _, err := c.Runner.Run(ctx, "update", id, "--status", "open"); err != nil {
+	if _, err := c.Runner.Run(ctx, "update", id, "--status", "open", "--assignee="); err != nil {
 		return fmt.Errorf("reopen draft-review %s: %w", id, err)
 	}
 	return nil
 }
 
 // DeadLetterDraftReview parks a poison bead: status=blocked (drops it out of
-// `bd ready`) plus a needs-human label for manual triage (design §2.3.4).
+// `bd ready`) plus a needs-human label for manual triage (design §2.3.4). The
+// assignee is cleared too — dead-lettering is a RELEASE (the daemon has given up
+// on the bead), so holding the claim is a lie, and it plants a landmine: the
+// human who later un-blocks the bead back to `open` would land straight in the
+// stranded `open`+assignee state (pg2-jcljm).
 func (c *Client) DeadLetterDraftReview(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("draft-review: id required")
 	}
 	if _, err := c.Runner.Run(ctx, "update", id,
-		"--status", "blocked", "--add-label", needsHumanLabel); err != nil {
+		"--status", "blocked", "--add-label", needsHumanLabel, "--assignee="); err != nil {
 		return fmt.Errorf("dead-letter draft-review %s: %w", id, err)
 	}
 	return nil
