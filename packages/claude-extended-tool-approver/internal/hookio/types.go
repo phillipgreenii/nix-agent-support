@@ -100,6 +100,25 @@ type HookInput struct {
 	// this input. Set by the docker rule when delegating inner expression
 	// evaluation to provide mount-aware container semantics. Not serialized.
 	PathEval *patheval.PathEvaluator `json:"-"`
+
+	// RootExpression carries the FULL text of the expression a synthetic
+	// per-leaf input was split out of. engine.EvaluateExpression sets it on every
+	// leaf it evaluates (including the command-less assignment-only leaves), so a
+	// rule that needs EXPRESSION scope rather than leaf scope can reach the
+	// sibling leaves — the only place some facts exist at all.
+	//
+	// The motivating fact (gitdir/pg2-3hk7t): a leaf that merely BINDS a path,
+	// `f="$r/.git/info/exclude"`, is byte-for-byte identical whether the sibling
+	// that consumes `"$f"` is a read (`cat`) or a write (`sed -i`). Leaf scope
+	// cannot tell those apart, so a leaf-local rule must fail safe and hard-deny
+	// both. With the expression in hand the direction is decidable and only the
+	// real write is rejected.
+	//
+	// Empty when a rule is invoked outside EvaluateExpression (non-Bash tools,
+	// direct unit-test calls); a consumer MUST then fall back to leaf scope.
+	// `json:"-"` is load-bearing: this is engine-derived provenance, never
+	// something a hook payload may assert.
+	RootExpression string `json:"-"`
 }
 
 type BashToolInput struct {

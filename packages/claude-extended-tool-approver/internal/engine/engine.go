@@ -192,7 +192,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			if len(pc.Redirections) > 0 {
 				judgedLeaf = true
 			}
-			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, origin); judged {
+			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, cleaned, origin); judged {
 				leafResult = hookio.MostRestrictive(leafResult, assignResult)
 				judgedLeaf = true
 			}
@@ -218,6 +218,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			PermissionMode: origin.PermissionMode,
 			HookEventName:  origin.HookEventName,
 			PathEval:       currentPathEval,
+			RootExpression: cleaned,
 		}
 
 		// Evaluate through rule chain
@@ -322,7 +323,13 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 // judged reports whether a rule actually had an opinion. It is false both when the
 // leaf carries no assignments at all and when the chain Abstained on them — see the
 // NEUTRAL discussion below and the caller's judgedLeaf floor.
-func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
+//
+// rootExpr is the whole expression this leaf was split out of, forwarded as
+// hookio.HookInput.RootExpression so a rule needing EXPRESSION scope can reach the
+// sibling leaves. It matters most for exactly this shape: an assignment-only leaf
+// binds a path and accesses nothing, so whether that path is later read or written
+// is knowable only from the siblings (pg2-3hk7t).
+func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, rootExpr string, origin *hookio.HookInput) (result hookio.RuleResult, judged bool) {
 	if len(pc.EnvVars) == 0 {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "no env assignments to evaluate", Module: "engine"}, false
 	}
@@ -334,6 +341,7 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd strin
 		PermissionMode: origin.PermissionMode,
 		HookEventName:  origin.HookEventName,
 		PathEval:       origin.PathEval,
+		RootExpression: rootExpr,
 	}
 	if chainResult := e.Evaluate(syntheticInput); chainResult.Decision != hookio.Abstain {
 		return chainResult, true

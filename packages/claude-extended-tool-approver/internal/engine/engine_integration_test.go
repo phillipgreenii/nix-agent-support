@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gitdir"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/kubectl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/mcp"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
@@ -43,6 +44,11 @@ func buildFullEngine(projectRoot, cwd string) *Engine {
 	dockerRule := docker.New(eng, pe)
 
 	eng.RegisterRules(
+		// gitdir sits in the factory's early generic-validator band, ahead of the
+		// path/command approvers. The fixture omitted it, so no integration case
+		// exercised it; registering it here keeps this engine faithful to
+		// setup.newEngineForCWD and lets the pg2-3hk7t cases below run end-to-end.
+		gitdir.New(),
 		secrets.New(pe),
 		envvars.NewWithEvaluator(eng),
 		assume.New(),
@@ -1045,6 +1051,123 @@ func TestIntegration_ExtraReadOnlyRoots(t *testing.T) {
 			got := eng.EvaluateHook(input)
 			if got.Decision != tt.want {
 				t.Errorf("%s: got %v (%s: %s), want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
+// TestIntegration_GitDirDirectionAndRole pins pg2-3hk7t through the real rule
+// chain, in BOTH directions, for all three false-positive classes the `gitdir`
+// rule shipped with. Each was a NON-OVERRIDABLE hard deny, the failure mode most
+// likely to get the whole guard switched off — the rule reproduced against the
+// orchestrator mid-triage twice and blocked read-only `sqlite3`/`grep` calls
+// during the very run that found it.
+//
+// The defect: gitdir Rejected on the mere PRESENCE of a git-metadata token
+// anywhere in the command TEXT, with no regard for whether the token was a path
+// being ACCESSED and no distinction between a READ and a WRITE.
+//
+// The invariant asserted here is EXACT equality against want, so it fails if the
+// guard either widens (prose or an exclusion regains a verdict) or narrows (a real
+// write stops rejecting):
+//
+//	a WRITE to git metadata Rejects; a READ is a decisive Ask (never Approve, and
+//	never a hard deny); a token that is PROSE, an EXCLUSION, or an argument to
+//	`git` itself is not an access at all.
+func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- Class 3, WRITE half: the hard block is preserved ---
+		{"redirect into a hook", "echo x > .git/hooks/pre-commit", hookio.Reject},
+		{"rm the object store", "rm -rf .git/objects", hookio.Reject},
+		{"sed -i the config", "sed -i 's/a/b/' .git/config", hookio.Reject},
+		{"chmod a hook", "chmod +x .git/hooks/pre-commit", hookio.Reject},
+		{"cp onto the config", "cp /tmp/evil .git/config", hookio.Reject},
+		// A rename is destructive on its SOURCE too: moving git metadata away
+		// destroys it. `mv` was grouped with cp/ln/install, which read the source as
+		// a mere read and downgraded this to an overridable Ask.
+		{"mv gitmeta away", "mv .git/HEAD /tmp/x", hookio.Reject},
+		{"mv onto gitmeta", "mv /tmp/x .git/HEAD", hookio.Reject},
+		{"find -delete under .git", "find .git/objects -type f -delete", hookio.Reject},
+		{"dd of= into gitmeta", "dd of=.git/HEAD if=/dev/zero", hookio.Reject},
+		// Row 244438's shape: the path is BOUND, then `sed -i`'d through the
+		// variable. A confirmed true positive that MUST keep rejecting — and the
+		// reason expression scope exists, since the binding leaf alone is identical
+		// to the read-only shape two cases below.
+		{"row 244438: bound path is sed -i'd", "f=\"$r/.git/info/exclude\"\ncat \"$f\"\nsed -i '' '/^x$/d' \"$f\"", hookio.Reject},
+		{"bound path written by redirection", "f=/repo/.git/config\necho x > \"$f\"", hookio.Reject},
+
+		// --- Class 3, READ half: decisive Ask, no longer a hard deny ---
+		{"cat the config", "cat .git/config", hookio.Ask},
+		{"ls the hooks dir", "ls -la .git/hooks", hookio.Ask},
+		{"stat a ref", "stat .git/refs/heads/main", hookio.Ask},
+		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Ask},
+		// The contrast to `mv` above: copying FROM git metadata does not modify the
+		// source, so it must stay Ask. Without this the mv fix would be indexed as
+		// "any two-operand command is a write" and the Class-3 fix would regress.
+		{"cp FROM gitmeta stays a read", "cp .git/config /tmp/backup", hookio.Ask},
+		// Row 167117's shape: a rebase-merge path bound then only inspected.
+		{"row 167117: bound path only read", "RM=/repo/.git/worktrees/slot-c/rebase-merge\nls -la \"$RM\"\ncat \"$RM/done\"", hookio.Ask},
+		// Row 163591's shape: the read happens INSIDE a command substitution, which
+		// cmdparse.Parse leaves glued into the outer leaf's token.
+		{"row 163591: bound hooks path read in a substitution", "h=\"$r/.git/hooks\"\necho \"active -> $(grep -m1 prek \"$h/pre-commit\")\"", hookio.Ask},
+
+		// --- Class 1: PROSE mentioning a path is not an access ---
+		// Row 126856's shape: a notification payload whose bead title named
+		// `.git/index`. Zero filesystem access, yet hard-DENIED. It settles at Ask
+		// rather than Approve because the env-var rule cannot positively clear a
+		// value whose substitution body is an (unevaluable) heredoc — that Ask is
+		// pre-existing and NOT gitdir's; what matters here is that the hard deny is
+		// gone.
+		{"row 126856: heredoc payload naming a path", "PAYLOAD=$(cat <<'EOF'\n{\"title\": \"repo .git/index is 0 bytes\"}\nEOF\n)\necho \"$PAYLOAD\"", hookio.Ask},
+		// A TOP-LEVEL multi-line heredoc never reaches any rule: cmdparse flags the
+		// leaf HasHeredoc and EvaluateExpression Abstains for the whole expression
+		// before the chain runs. Pinned so that early return is not silently
+		// removed — it is what keeps a shredded heredoc BODY line (splitCompound
+		// splits the body on its newlines) from being judged as a command.
+		{"top-level heredoc body naming a path", "cat <<'EOF'\nthe .git/index is 0 bytes\nEOF", hookio.Abstain},
+		{"commit message naming a path", "git commit -m 'stop reading .git/config directly'", hookio.Approve},
+
+		// --- Class 2: an EXCLUSION proves the command does not touch metadata ---
+		{"negated ripgrep glob", "rg -c mkBashScript /repo -g '!**/.git/**'", hookio.Abstain},
+		{"grep -v filters it out", "grep -rn foo /repo | grep -v \"/.git/\"", hookio.Abstain},
+		// Approve, not Abstain: with gitdir correctly silent, safe-commands owns this
+		// read-only walk. That IS the correct verdict for a command that provably
+		// prunes git metadata out of its traversal.
+		{"find -path … -prune", "find . -path ./.git -prune -o -type f -print", hookio.Approve},
+		// Asklog rows 322369 / 322539 / 322452: the exact shapes the deployed binary
+		// hard-denied for THREE concurrent sessions while this bead was being
+		// implemented — the guard actively obstructing work on its own repo.
+		{"asklog row 322369: prune walk for go files", "find . -path ./.git -prune -o -name '*.go' -print | head -100", hookio.Approve},
+		{"asklog row 322452: negated path walk", "find . -name CLAUDE.md -not -path './.git/*' | head -20", hookio.Approve},
+		// Self-contradiction the old rule shipped with: it demanded metadata be
+		// modified "through git commands only", then rejected a git command.
+		{"git config -f reads through git", "git config -f /repo/.git/config --get core.fsmonitor", hookio.Approve},
+
+		// --- The role model MUST NOT open a hole ---
+		// A redirection on a `git` leaf is the SHELL writing, not git; skipping
+		// git's operands must not skip its redirections.
+		{"git porcelain with a redirect into .git", "git status > .git/stolen", hookio.Reject},
+		{"unknown command fails safe to write", "frobnicate .git/config", hookio.Reject},
+		{"gitignore is not metadata", "cat .gitignore", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustBashJSON(tt.command),
+				CWD:       cwd,
+			}
+			if got := eng.EvaluateHook(input).Decision; got != tt.want {
+				t.Errorf("EvaluateHook(%q) = %v, want %v", tt.command, got, tt.want)
 			}
 		})
 	}
