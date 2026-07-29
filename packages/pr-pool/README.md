@@ -27,6 +27,22 @@ cap, waits for completion, then tears down every `pr-pool-*` tmux session. Bare
 
 `<role>` is the role's configured `name`.
 
+### Manager → core callback subcommands
+
+The core also carries the **manager→core callback** subcommands. These are **not** operator
+commands: the core hands a registered participant one command string with `--socket` and `--token`
+already baked in, and the participant appends its arguments and runs it (see the behavior docs'
+`INTF-CLI`).
+
+| Command        | Description                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ingest-event` | deliver one or more events to the **running** core: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error) |
+
+`ingest-event` locates the core via `--socket`/`--token`, else `PR_POOL_SOCKET`/`PR_POOL_TOKEN`,
+else the discovery record under the log dir. With **no core running it fails** with a
+"no running core" error and exit 1 — it never starts one
+([ADR 0036](../../docs/adr/0036-pr-pool-cli-never-auto-starts-a-core.md)).
+
 At dispatch, pr-pool stamps each ccpool session with metadata under the `prpool.*`
 namespace (`prpool.bead`, `prpool.role`, `prpool.pool`) via `ccpool new --meta`, so a
 session's bead/role/owner are first-class and queryable. `pr-pool sessions` reads them

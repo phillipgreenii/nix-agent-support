@@ -29,6 +29,8 @@ func main() {
 		os.Exit(runSessions())
 	case routeReconcile:
 		os.Exit(runReconcile())
+	case routeIngestEvent:
+		os.Exit(runIngestEvent(r.rest))
 	}
 }
 

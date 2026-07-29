@@ -255,8 +255,10 @@ it while it runs (`INV-LIFE-1`).
 
 Both modes keep the socket available. The operator inspects a running core with `status` (resolved
 config + live handler-sessions + queue depths) and `config` (the resolved configuration); every
-subcommand emits text by default and `--json` for machines (`INTF-CLI`). Whether the CLI
-**auto-starts** a core when it finds none is undecided (`OQ-AUTOSTART`).
+subcommand emits text by default and `--json` for machines (`INTF-CLI`). A command that finds **no
+running core** MUST **fail with a "no running core" error** — the CLI never **auto-starts** one, so
+"is a core running?" stays answerable from a caller's exit code (`INTF-CLI` "Locating the core",
+`ADR 0036`).
 
 ```mermaid
 flowchart TD
@@ -507,10 +509,6 @@ Each states the gap, its owner, a resolution path, and where it blocks.
   but which instant starts the clock is unsettled. _Owner_: author. _Path_: decide `at` vs. ingest
   when settling the queue's realization. _Blocks_: exact dedup/expiry timing (`INV-EVT-1`,
   `INV-EVT-3`); the queue implementation.
-- **`OQ-AUTOSTART`** <!-- uuid: f0cc2ca2-9f58-4c57-bfff-d81d003370fb --> — whether the **CLI auto-starts** a core when it finds none running, versus
-  requiring an explicit `run`. _Gap_: the locate-then-act behavior is undecided. _Owner_: operator/
-  author. _Path_: decide auto-start vs. fail-with-hint. _Blocks_: `INTF-CLI` locate behavior;
-  `JOURNEY-RUN`.
 - **`OQ-CONC-MARK`** <!-- uuid: 427e52f7-223f-428e-b8c7-e8140d557f8e --> — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
   mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
   per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;

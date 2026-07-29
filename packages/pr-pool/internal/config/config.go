@@ -285,6 +285,18 @@ func (c Config) WorkerBudget() budget.Budget {
 	}
 }
 
+// LogDir resolves ONLY the log/state directory — Default() overlaid with
+// PR_POOL_LOG_DIR — without loading, parsing or validating config.toml.
+//
+// It exists for the entry points that need nothing but the state directory and
+// must not be able to fail on unrelated config: the core's socket + discovery
+// record live under LogDir, so a manager→core callback (`ingest-event`) has to be
+// able to FIND a running core even when the repo-local config.toml is missing or
+// broken. Load() remains the full resolution for everything else.
+func LogDir() string {
+	return envStr("PR_POOL_LOG_DIR", Default().LogDir)
+}
+
 func stateHome() string {
 	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
 		return v

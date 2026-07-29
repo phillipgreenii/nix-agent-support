@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile]"
+const usageLine = "usage: pr-pool [--version | --help] [drain | run-query <role> | run-role <role> <bead> | config (--print-defaults | --show) | sessions | reconcile | ingest-event [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -27,6 +27,14 @@ Subcommands:
   reconcile               report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads 'pg-pr pr list'; mutates beads; exit-0-on-partial)
   version                 print the version and exit
   help                    print this help and exit
+
+Manager -> core callback subcommand (NOT for operators; the core hands a
+participant this command with --socket/--token already baked in, and the
+participant runs it):
+  ingest-event            deliver events to the RUNNING core. Request JSON on stdin, reply JSON on
+                          stdout; exit 0 ok / 1 error / 2 busy. Locates the core via --socket/--token,
+                          else PR_POOL_SOCKET/PR_POOL_TOKEN, else discovery under the log dir. It NEVER
+                          starts a core: with none running it fails with "no running core" (exit 1).
 
 Roles are configured in <RepoRoot>/.pr-pool/config.toml (override the path with
 PR_POOL_CONFIG). With no config file, pr-pool uses the built-in feedback + worker
@@ -58,15 +66,16 @@ prompt in config.toml instead.`
 type routeKind int
 
 const (
-	routeDrain     routeKind = iota // run a drain with .rest as the subcommand args
-	routeVersion                    // print the version and exit 0
-	routeHelp                       // print usage and exit 0
-	routeUsageErr                   // print .msg + usage to stderr and exit 2
-	routeRunRole                    // dispatch one bead through a role (.role, .bead)
-	routeRunQuery                   // run a role's discovery query read-only (.role)
-	routeConfig                     // print/show config (.configMode)
-	routeSessions                   // list this pool's sessions from metadata (read-only)
-	routeReconcile                  // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
+	routeDrain       routeKind = iota // run a drain with .rest as the subcommand args
+	routeVersion                      // print the version and exit 0
+	routeHelp                         // print usage and exit 0
+	routeUsageErr                     // print .msg + usage to stderr and exit 2
+	routeRunRole                      // dispatch one bead through a role (.role, .bead)
+	routeRunQuery                     // run a role's discovery query read-only (.role)
+	routeConfig                       // print/show config (.configMode)
+	routeSessions                     // list this pool's sessions from metadata (read-only)
+	routeReconcile                    // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
+	routeIngestEvent                  // manager->core callback: forward events on stdin to the running core (.rest)
 )
 
 type routeResult struct {
@@ -111,6 +120,11 @@ func route(argv []string) routeResult {
 		return parseSessionsArgs(args[1:])
 	case "reconcile":
 		return parseReconcileArgs(args[1:])
+	case "ingest-event":
+		// The callback subcommand parses its OWN flags in its handler rather than
+		// here: its exit codes follow the callback contract (2 == busy), so it must
+		// not be routed through routeUsageErr, which exits 2 for a usage error.
+		return routeResult{kind: routeIngestEvent, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}

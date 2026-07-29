@@ -18,9 +18,14 @@
 # gate "wires the enforcer first and is extended as each package appears"). Only
 # packages that exist are listed here so the tree stays green at every commit.
 
+# The socket service (bead pg2-f3mcb.1) joins the same regime at >= 85%: it is the
+# core's only network boundary (auth, discovery, the ingest-event callback), so an
+# untested branch there is an untested trust boundary.
+
 # --- active rules (uncommented as each gated package lands) ---
 internal/eventqueue 90
 schemas 85
 conformance 85
 internal/emit 85
 internal/metrics 80
+internal/core 85

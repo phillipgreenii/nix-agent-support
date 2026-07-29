@@ -12,10 +12,8 @@
 package emit
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/phillipgreenii/pr-pool/conformance"
 	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
@@ -39,8 +37,9 @@ type CoreRef struct {
 
 // Locator resolves the running core the same way as the other INTF-CLI operator
 // subcommands: an INJECTED socket/token (env or arg) wins; otherwise it falls
-// back to discovering the running socket service. (Whether it auto-starts a core
-// when none is found is OQ-AUTOSTART — out of scope here.)
+// back to discovering the running socket service. When neither locates a core the
+// result is ErrNoCore — the CLI NEVER auto-starts one (ADR 0036; the former
+// OQ-AUTOSTART, resolved 2026-07-28 as "error, do not spawn").
 type Locator struct {
 	InjectedSocket string
 	InjectedToken  string
@@ -112,53 +111,15 @@ func Emit(jsonArg []byte, loc Locator, enq Enqueuer) (Result, error) {
 	return Result{Core: core, Event: evt, Status: status}, nil
 }
 
-// wireEvent is the on-the-wire event shape (ttl as a duration string, at as an
-// RFC3339 timestamp string — event.schema.json).
-type wireEvent struct {
-	SchemaVersion string         `json:"schemaVersion"`
-	ID            string         `json:"id"`
-	Type          string         `json:"type"`
-	TTL           string         `json:"ttl"`
-	At            string         `json:"at"`
-	Payload       map[string]any `json:"payload"`
-}
-
-// parseEvent decodes the validated JSON into a core event, converting the ttl
-// string to a duration and the optional at string to a time.
+// parseEvent decodes the validated JSON into a core event. The wire→core
+// conversion (ttl duration string, optional RFC3339 at) is delegated to the
+// SHARED decoder eventqueue.DecodeEvent, which the `ingest-event` manager
+// callback (internal/core) uses too — the operator front door and the callback
+// front door MUST agree on how a wire event becomes an Event.
 func parseEvent(data []byte) (eventqueue.Event, error) {
-	var w wireEvent
-	if err := json.Unmarshal(data, &w); err != nil {
-		return eventqueue.Event{}, fmt.Errorf("emit: parse event: %w", err)
-	}
-	ttl, err := eventqueue.ParseTTL(w.TTL)
+	evt, err := eventqueue.DecodeEvent(data)
 	if err != nil {
 		return eventqueue.Event{}, fmt.Errorf("emit: %w", err)
 	}
-	at, err := parseAt(w.At)
-	if err != nil {
-		return eventqueue.Event{}, fmt.Errorf("emit: %w", err)
-	}
-	return eventqueue.Event{
-		SchemaVersion: w.SchemaVersion,
-		ID:            w.ID,
-		Type:          w.Type,
-		TTL:           ttl,
-		At:            at,
-		Payload:       w.Payload,
-	}, nil
-}
-
-// parseAt reads the optional wire `at` source-stamp (RFC3339, event.schema.json).
-// `at` MAY be absent (empty), in which case Event.At is the zero time — the core
-// treats At as optional (OQ-EVT-TTL-ORIGIN); a present-but-unparseable value is a
-// malformed event, classified like ParseTTL's rejection.
-func parseAt(s string) (time.Time, error) {
-	if s == "" {
-		return time.Time{}, nil
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: unparseable at %q: %v", eventqueue.ErrInvalidEvent, s, err)
-	}
-	return t, nil
+	return evt, nil
 }

@@ -368,8 +368,11 @@ sequenceDiagram
   any push event (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a
   manager→core callback) and from `run-role` (a one-shot smoke test that tears down).
 - **Locating the core.** The CLI finds the running core via an injected socket path (env/arg) or by
-  discovering the running socket service. (Whether it **auto-starts** a core when none is found is
-  an open question, `OQ-AUTOSTART`.)
+  discovering the running socket service. When neither locates a **running** core, the CLI **MUST
+  fail with a "no running core" error** and a **non-zero exit code**; it **MUST NOT start one**.
+  Locating means being able to **reach** a core, not merely finding a trace that one once existed — a
+  trace left behind by a core that has died is the same outcome as no trace at all. This holds on
+  every locate path: the manager callbacks and the operator subcommands alike (`ADR 0036`).
 - **Output.** Every operator subcommand emits **human-readable text by default** and **JSON with
   `--json`** for machine consumption. Coarse exit codes follow the common contract (`0` ok, non-zero
   on error; a usage error is distinct from a runtime error).
@@ -548,7 +551,6 @@ The **full configuration schema** is not yet pinned; it is tracked as an open qu
   by a verbatim peer cross-check: an implementer **cites** this contract and states only its own
   side, and a counterparty with no set leans on the same suite as its sole reconciliation. Each
   interface here **is** the authoritative contract its implementations adhere to.
-- **Open questions** (tracked in [journeys](journeys.md)): `OQ-AUTOSTART` (auto-start a core when
-  none is found), `OQ-EVT-TTL-ORIGIN` (TTL clock origin: event `at` vs ingest), `OQ-WORKFLOW`
-  (pre-runtime wiring validation of the bindings), and `OQ-CONFIG` (the full configuration
-  schema).
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-EVT-TTL-ORIGIN` (TTL clock origin:
+  event `at` vs ingest), `OQ-WORKFLOW` (pre-runtime wiring validation of the bindings), and
+  `OQ-CONFIG` (the full configuration schema).

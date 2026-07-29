@@ -1,0 +1,395 @@
+// Package core is pr-pool's socket service: the long-lived process the behavior
+// docs call "the core" (INV-LIFE-1, interfaces.md). It owns
+//
+//   - the LISTENER — a unix-domain socket under Config.LogDir, its auth token, and
+//     the discovery record a CLI reads to find it (socket.go);
+//   - the SERVICE state — the durable event queue plus the participant registry
+//     (this file, registry.go);
+//   - the CALLBACK targets — the INTF-CLI subcommands the core hands out with the
+//     socket and token already baked in. Exactly one exists today:
+//     `ingest-event` (ingest.go).
+//
+// # Transport
+//
+// Service implements conformance.Participant, the SAME (subcommand, stdin,
+// stdout) → exit-code boundary the CLI transport and the conformance suite use.
+// The socket is only a carrier for that boundary: Accept reads a transport frame,
+// hands the payload to Serve, and returns what Serve wrote. interfaces.md allows
+// exactly this ("a participant MAY instead speak a gRPC or in-code transport
+// contract over the socket and still conform, so long as it carries the same
+// message schema"), and it means every message is schema-checked in ONE place, no
+// matter which transport delivered it.
+//
+// # Two decisions recorded in code here
+//
+// AUTO-START (the former OQ-AUTOSTART, resolved 2026-07-28, ADR 0036): a callback
+// or operator command that finds no running core FAILS with ErrNoRunningCore. The
+// CLI never spawns a core. Rationale is on ErrNoRunningCore in socket.go.
+//
+// `session-status` IS DROPPED (2026-07-28): the core exposes no per-session status
+// callback, because nothing in pr-pool consumes a post-accept outcome. Acceptance
+// arrives in the dispatch REPLY — an inline outcome, or `{"deferred": true}`
+// (interfaces.md) — not on a callback. See Serve's default branch. This is
+// distinct from SELF-status, which survives; see SelfStatus in registry.go.
+package core
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/phillipgreenii/pr-pool/conformance"
+	"github.com/phillipgreenii/pr-pool/internal/eventqueue"
+)
+
+// Service is a running core: the socket listener plus the state behind it.
+var _ conformance.Participant = (*Service)(nil)
+
+// DefaultCommand is the command name used when assembling the callback strings
+// the core hands to participants.
+const DefaultCommand = "pr-pool"
+
+// Options configures Listen.
+type Options struct {
+	// LogDir is where the socket and discovery record live — pr-pool's existing
+	// runtime state directory (Config.LogDir / PR_POOL_LOG_DIR). Required.
+	LogDir string
+	// Queue is the durable event queue the core routes through. Required: the
+	// queue IS the core's delivery guarantee (INV-EVT-1), so a core without one
+	// could accept an event it cannot keep.
+	Queue *eventqueue.Queue
+	// Command is the program name baked into the callback strings handed to
+	// participants (default DefaultCommand). Injectable so a test — or a
+	// deployment that installs the binary under another name — hands out a command
+	// that actually resolves.
+	Command string
+	// Now is the clock seam for the registry and the discovery record.
+	Now func() time.Time
+}
+
+// Service holds the core's live state.
+type Service struct {
+	mu       sync.Mutex
+	state    conformance.Lifecycle
+	closing  bool
+	q        *eventqueue.Queue
+	reg      *Registry
+	ln       net.Listener
+	ref      Ref
+	logDir   string
+	command  string
+	inflight sync.WaitGroup
+}
+
+// Listen binds the core's socket under opts.LogDir, mints its auth token, and
+// publishes the discovery record — everything a CLI needs to find the core. The
+// returned Service is in `starting`: the socket exists and connections queue in
+// the listen backlog, but nothing is served until Accept runs (INV-INTF-1:
+// messages cross only in `started`).
+//
+// A live core already answering on the socket is ErrAlreadyRunning; a stale socket
+// file left by a crashed core is removed and re-bound.
+func Listen(opts Options) (*Service, error) {
+	if opts.LogDir == "" {
+		return nil, errors.New("core: Listen requires a LogDir")
+	}
+	if opts.Queue == nil {
+		return nil, errors.New("core: Listen requires a Queue (the core's delivery guarantee)")
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	command := opts.Command
+	if command == "" {
+		command = DefaultCommand
+	}
+	if err := os.MkdirAll(opts.LogDir, 0o755); err != nil {
+		return nil, fmt.Errorf("core: create log dir: %w", err)
+	}
+	sock := SocketPath(opts.LogDir)
+	if len(sock) > maxSocketPathLen {
+		return nil, fmt.Errorf("core: socket path %s is %d bytes, over the platform limit of %d; set PR_POOL_LOG_DIR to a shorter directory",
+			sock, len(sock), maxSocketPathLen)
+	}
+	if err := clearStaleSocket(sock); err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		return nil, fmt.Errorf("core: listen on %s: %w", sock, err)
+	}
+	token, err := newToken()
+	if err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	ref := Ref{Socket: sock, Token: token}
+	rec := record{
+		SchemaVersion: "1",
+		Socket:        sock,
+		Token:         token,
+		PID:           os.Getpid(),
+		StartedAt:     now(),
+	}
+	if err := writeRecord(RecordPath(opts.LogDir), rec); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	return &Service{
+		state:   conformance.Starting,
+		q:       opts.Queue,
+		reg:     NewRegistry(now),
+		ln:      ln,
+		ref:     ref,
+		logDir:  opts.LogDir,
+		command: command,
+	}, nil
+}
+
+// clearStaleSocket removes a leftover socket file so Listen can re-bind, but only
+// after proving nothing answers on it — unlinking a LIVE core's socket would
+// leave two cores fighting over one discovery record.
+func clearStaleSocket(sock string) error {
+	if _, err := os.Stat(sock); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("core: stat socket %s: %w", sock, err)
+	}
+	if err := probe(sock); err == nil {
+		return fmt.Errorf("%w: %s", ErrAlreadyRunning, sock)
+	}
+	if err := os.Remove(sock); err != nil {
+		return fmt.Errorf("core: remove stale socket %s: %w", sock, err)
+	}
+	slog.Info("core: removed stale socket left by a previous core", "socket", sock)
+	return nil
+}
+
+// Ref returns the socket + token a CLI needs to reach this core.
+func (s *Service) Ref() Ref { return s.ref }
+
+// Queue returns the durable event queue the core routes through.
+func (s *Service) Queue() *eventqueue.Queue { return s.q }
+
+// Registry returns the participant registry.
+func (s *Service) Registry() *Registry { return s.reg }
+
+// State returns the core's own lifecycle state.
+func (s *Service) State() conformance.Lifecycle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+// CallbackCommand assembles the single callback command string for one
+// subcommand, with the socket and token already baked in — what interfaces.md
+// requires the core to hand out so "the participant appends its own arguments and
+// runs it; it never assembles the socket or token itself".
+func (s *Service) CallbackCommand(subcommand string) string {
+	return fmt.Sprintf("%s %s --socket %s --token %s",
+		s.command, subcommand, shellQuote(s.ref.Socket), shellQuote(s.ref.Token))
+}
+
+// Register adds a participant to the registry and hands it the callback command
+// for its kind (interfaces.md: registering is what "makes its callback
+// reachable").
+func (s *Service) Register(id string, kind Kind) (Registration, error) {
+	return s.reg.Register(id, kind, s.callbackFor(kind))
+}
+
+// callbackFor returns the ONE callback command a participant of this kind gets.
+//
+// Only a SOURCE has a callback target: `ingest-event`. A HANDLER has none —
+// `session-status` was dropped (see the package doc), and a handler's acceptance
+// already arrives in its dispatch reply (an inline outcome, or
+// `{"deferred": true}`), so there is nothing left for a handler to call back
+// about. A monitoring sink pulls or is pushed to over INTF-MON, and storage is
+// core-initiated; neither calls back.
+func (s *Service) callbackFor(kind Kind) string {
+	if kind == KindSource {
+		return s.CallbackCommand(SubcommandIngestEvent)
+	}
+	return ""
+}
+
+// Accept serves the socket until ctx is cancelled or Close is called: it enters
+// `started` (messages may now cross, INV-INTF-1), then handles each connection in
+// its own goroutine. It returns nil on an orderly shutdown, having waited for
+// in-flight requests to finish, and the accept error otherwise.
+func (s *Service) Accept(ctx context.Context) error {
+	s.setState(conformance.Started)
+	stopped := make(chan struct{})
+	defer close(stopped)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = s.Close() // cancelling ctx is an orderly shutdown request
+		case <-stopped:
+		}
+	}()
+	for {
+		conn, err := s.ln.Accept()
+		if err != nil {
+			if s.isClosing() {
+				s.inflight.Wait() // drain: `stopping` completes only once nothing is in flight
+				s.setState(conformance.Stopped)
+				return nil
+			}
+			return fmt.Errorf("core: accept on %s: %w", s.ref.Socket, err)
+		}
+		s.inflight.Add(1)
+		go func() {
+			defer s.inflight.Done()
+			s.handleConn(conn)
+		}()
+	}
+}
+
+// Close begins an orderly shutdown: `stopping`, then the listener and the
+// discovery artifacts go away so no new caller can find or reach the core. It is
+// idempotent — ctx cancellation and an explicit Close can both fire.
+func (s *Service) Close() error {
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closing = true
+	s.state = conformance.Stopping
+	s.mu.Unlock()
+
+	// Unpublish BEFORE closing the listener: a CLI that reads the record must not
+	// be handed a socket that is about to vanish.
+	var errs []error
+	if err := os.Remove(RecordPath(s.logDir)); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("core: remove discovery record: %w", err))
+	}
+	if err := s.ln.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("core: close listener: %w", err))
+	}
+	// Go's unix listener unlinks the socket on Close; tolerate it being gone.
+	if err := os.Remove(s.ref.Socket); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("core: remove socket: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) setState(state conformance.Lifecycle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Never walk backwards out of shutdown: a late Accept must not reopen a
+	// closing core.
+	if s.closing && state == conformance.Started {
+		return
+	}
+	s.state = state
+}
+
+func (s *Service) isClosing() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closing
+}
+
+// handleConn serves one transport frame: authenticate, run the subcommand through
+// the participant boundary, return the reply and coarse exit code.
+func (s *Service) handleConn(conn net.Conn) {
+	defer func() { _ = conn.Close() }()
+	// A socket deadline is WALL-clock, so it deliberately uses time.Now rather than
+	// the injectable clock seam (which stamps domain timestamps): a mock clock must
+	// not be able to make a real connection hang forever.
+	if err := conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
+		slog.Warn("core: set connection deadline failed", "err", err)
+		return
+	}
+	var req wireRequest
+	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+		// A clean EOF with nothing sent is a LIVENESS PROBE, not a fault: Discover
+		// connects and closes to prove a core is reachable (and so does any port
+		// scanner). Answering it would write to an already-closed peer, so this
+		// path must stay silent at WARN or every discovery would log twice.
+		if errors.Is(err, io.EOF) {
+			slog.Debug("core: connection closed without a request (liveness probe)")
+			return
+		}
+		slog.Warn("core: malformed transport frame", "err", err)
+		s.respond(conn, conformance.ExitError, errorReply("malformed transport frame: "+err.Error()))
+		return
+	}
+	if !authorized(req.Token, s.ref.Token) {
+		// Do not log the presented token: it is attacker-controlled input that
+		// would land verbatim in the log.
+		slog.Warn("core: rejected socket request with a bad token", "subcommand", req.Subcommand)
+		s.respond(conn, conformance.ExitError, errorReply("unauthorized"))
+		return
+	}
+	var out bytes.Buffer
+	code := s.Serve(req.Subcommand, bytes.NewReader(req.Payload), &out)
+	s.respond(conn, code, out.Bytes())
+}
+
+// respond writes one transport reply frame.
+func (s *Service) respond(w io.Writer, code int, reply []byte) {
+	body := json.RawMessage(reply)
+	if len(body) == 0 {
+		body = jsonNull // a body-less reply (the legal busy case) is null, not invalid JSON
+	}
+	if err := json.NewEncoder(w).Encode(wireResponse{ExitCode: code, Reply: body}); err != nil {
+		slog.Warn("core: write reply failed", "err", err)
+	}
+}
+
+// Serve is the participant boundary (conformance.Participant): it runs one
+// subcommand over the JSON-in / JSON-out contract and returns a coarse exit code
+// (0 ok / 1 error / 2 busy). Every transport funnels through here, so the message
+// schema is enforced exactly once.
+//
+// Messages are accepted ONLY while the core is `started` (INV-INTF-1); before or
+// after that the request is refused with the protocol error envelope rather than
+// silently dropped, so the caller's exit code tells it what happened.
+func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
+	if st := s.State(); st != conformance.Started {
+		writeBody(stdout, errorReply(fmt.Sprintf("not accepting: core is %s", st)))
+		return conformance.ExitError
+	}
+	switch subcommand {
+	case SubcommandIngestEvent:
+		return s.handleIngestEvent(stdin, stdout)
+	default:
+		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
+		// dropped 2026-07-28: pr-pool consumes no post-accept session outcome, so the
+		// callback had no consumer left. Acceptance arrives in the dispatch reply
+		// (inline outcome or `{"deferred": true}`), and a participant's own health
+		// travels on the self-status channel (SelfStatus, registry.go). Do not add it
+		// back without a consumer.
+		writeBody(stdout, errorReply(fmt.Sprintf("unknown subcommand %q", subcommand)))
+		return conformance.ExitError
+	}
+}
+
+// writeBody writes a reply body, logging rather than failing on a write error —
+// there is nothing else to do with it, and the exit code already carries the
+// coarse outcome.
+func writeBody(w io.Writer, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		slog.Warn("core: write reply body failed", "err", err)
+	}
+}
+
+// shellQuote single-quotes a value for the callback command string, so a socket
+// path containing a space (or any shell metacharacter) survives the participant
+// running the command through a shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}

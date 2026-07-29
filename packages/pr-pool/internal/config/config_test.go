@@ -542,3 +542,30 @@ prompt_file = "x.md"
 		t.Fatal("prompt AND prompt_file must error (XOR)")
 	}
 }
+
+// LogDir() resolves the state directory ALONE — no config.toml load — so a
+// manager→core callback can find a running core's socket even when the
+// repo-local config is missing or broken. It must agree with Load()'s LogDir.
+func TestLogDir_resolvesWithoutLoadingConfig(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/xdg/state")
+	if got, want := LogDir(), "/xdg/state/pr-pool"; got != want {
+		t.Errorf("LogDir() = %q, want %q", got, want)
+	}
+	t.Setenv("PR_POOL_LOG_DIR", "/override/dir")
+	if got, want := LogDir(), "/override/dir"; got != want {
+		t.Errorf("LogDir() with PR_POOL_LOG_DIR = %q, want %q", got, want)
+	}
+	// It must not depend on a readable/valid config file: point PR_POOL_CONFIG at a
+	// deliberately broken one and prove LogDir() still answers while Load() fails.
+	bad := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(bad, []byte("this is not = valid = toml ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PR_POOL_CONFIG", bad)
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() succeeded on a broken config; the premise of this test is wrong")
+	}
+	if got, want := LogDir(), "/override/dir"; got != want {
+		t.Errorf("LogDir() with a broken config = %q, want %q", got, want)
+	}
+}

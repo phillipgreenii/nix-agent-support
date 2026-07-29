@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 
 	"github.com/phillipgreenii/pr-pool/schemas"
@@ -19,6 +20,26 @@ const (
 	Stopped
 	Crashing
 )
+
+// String returns the lifecycle state's DOC-declared name (interfaces.md
+// "Lifecycle": starting / started / stopping / stopped / crashing), so a
+// diagnostic or a registry view reports the same names the behavior docs use
+// rather than an opaque integer.
+func (l Lifecycle) String() string {
+	switch l {
+	case Starting:
+		return "starting"
+	case Started:
+		return "started"
+	case Stopping:
+		return "stopping"
+	case Stopped:
+		return "stopped"
+	case Crashing:
+		return "crashing"
+	}
+	return fmt.Sprintf("Lifecycle(%d)", int(l))
+}
 
 // Coarse exit codes for the CLI transport (interfaces.md common contract).
 const (

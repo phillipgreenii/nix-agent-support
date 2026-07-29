@@ -355,3 +355,23 @@ func TestMessageTypesNonEmpty(t *testing.T) {
 		t.Fatalf("MessageTypes missing entries: %v", MessageTypes())
 	}
 }
+
+// Lifecycle.String reports the DOC-declared state names (interfaces.md
+// "Lifecycle"), so a diagnostic or a registry view never prints an opaque integer.
+func TestLifecycleNames(t *testing.T) {
+	cases := map[Lifecycle]string{
+		Starting: "starting",
+		Started:  "started",
+		Stopping: "stopping",
+		Stopped:  "stopped",
+		Crashing: "crashing",
+	}
+	for state, want := range cases {
+		if got := state.String(); got != want {
+			t.Fatalf("Lifecycle(%d).String() = %q, want %q", int(state), got, want)
+		}
+	}
+	if got := Lifecycle(99).String(); !strings.Contains(got, "99") {
+		t.Fatalf("String of an out-of-range Lifecycle = %q, want it to name the value", got)
+	}
+}
