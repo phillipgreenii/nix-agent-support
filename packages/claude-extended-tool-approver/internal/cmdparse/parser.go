@@ -6,7 +6,9 @@ package cmdparse
 //     cmd1 & cmd2 (bare '&' background separator; '&>', '>&', '2>&1' preserved)
 //   - Quoting: double quotes (with backslash escapes), single quotes (literal)
 //   - Environment prefixes: FOO=bar cmd
-//   - Redirections: <, >, >>, 2>, 2>>, &>, heredocs (<<, <<<)
+//   - Redirections: <, >, >>, 2>, 2>>, &>, herestrings (<<<)
+//   - Heredocs (<<, <<-, quoted or unquoted delimiter): the BODY is an opaque extent
+//     lifted out before splitting, never leaves and never args — see heredoc.go
 //   - Command substitution: $(cmd), `cmd`
 //   - Process substitution: <(cmd), >(cmd)
 //   - Subshell grouping: ( cmd1; cmd2 )
@@ -483,6 +485,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 				Redirections:         pc.Redirections,
 				ProcessSubstitutions: pc.ProcessSubstitutions,
 				HasHeredoc:           pc.HasHeredoc,
+				Heredocs:             pc.Heredocs,
 				Raw:                  pc.Raw,
 				Comment:              pc.Comment,
 			})
@@ -513,6 +516,7 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 			Redirections:         pc.Redirections,
 			ProcessSubstitutions: pc.ProcessSubstitutions,
 			HasHeredoc:           pc.HasHeredoc,
+			Heredocs:             pc.Heredocs,
 			Raw:                  pc.Raw,
 			Comment:              pc.Comment,
 		}
@@ -573,8 +577,13 @@ type ParsedCommand struct {
 	Redirections         []hookio.Redirection
 	ProcessSubstitutions []string // inner commands from <(cmd) and >(cmd)
 	HasHeredoc           bool
-	Raw                  string
-	Comment              string
+	// Heredocs are this leaf's heredoc EXTENTS: delimiter, quoting, and the body
+	// text that stripHeredocBodies lifted out of the command before splitCompound
+	// could shred it into pseudo-leaves (pg2-r2rf3). Empty for a `<<<` herestring,
+	// which carries its word inline and has no body.
+	Heredocs []Heredoc
+	Raw      string
+	Comment  string
 }
 
 // shellScanner is the SINGLE byte-level shell-context scanner shared by every
@@ -725,14 +734,38 @@ func Parse(command string) []ParsedCommand {
 	if command == "" {
 		return nil
 	}
+	// Heredoc extents FIRST (pg2-r2rf3): every top-level heredoc body is lifted out
+	// of the text before splitCompound can split it on its newlines, so body lines
+	// never become pseudo-leaves and body words never become pseudo-args. The
+	// `<<DELIM` operator token stays behind, so extractRedirections still flags the
+	// leaf heredoc-bearing.
+	command, heredocs := stripHeredocBodies(command)
 	segments := splitCompound(command)
 	segments = resolveLoops(segments)
 	result := make([]ParsedCommand, 0, len(segments))
+	// carried holds the heredocs claimed by segments walked so far but not yet
+	// attached to a leaf. Normally it is emptied onto the very next leaf. It also
+	// makes the hand-out LOSSLESS if a claiming segment is dropped (resolveLoops can
+	// discard keyword segments): the extent still reaches a leaf rather than
+	// vanishing, so an unquoted body's substitutions are never silently unevaluated.
+	var carried []Heredoc
+	claim := func(seg string) {
+		k := countHeredocOperators(seg)
+		if k > len(heredocs) {
+			k = len(heredocs)
+		}
+		if k == 0 {
+			return
+		}
+		carried = append(carried, heredocs[:k]...)
+		heredocs = heredocs[k:]
+	}
 	for _, seg := range segments {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue
 		}
+		claim(seg)
 		comment := ExtractComment(seg)
 		seg = StripComment(seg)
 		if seg == "" {
@@ -743,6 +776,12 @@ func Parse(command string) []ParsedCommand {
 			continue
 		}
 		tokens, redirs, hasHeredoc := extractRedirections(tokens)
+		leafHeredocs := carried
+		carried = nil
+		// A recorded extent is itself proof of a heredoc, which also closes the
+		// fd-prefixed form (`2<<EOF`) that extractRedirections' token-prefix match
+		// never flagged.
+		hasHeredoc = hasHeredoc || len(leafHeredocs) > 0
 		if len(tokens) == 0 {
 			// A segment that reduces to redirections/heredoc only — e.g. the
 			// trailing "> /etc/passwd" of "(cmd) > /etc/passwd", which
@@ -750,7 +789,7 @@ func Parse(command string) []ParsedCommand {
 			// leaf so the engine still evaluates the redirection; dropping it
 			// silently loses a write to a protected path.
 			if len(redirs) > 0 || hasHeredoc {
-				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
+				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg})
 			}
 			continue
 		}
@@ -771,7 +810,7 @@ func Parse(command string) []ParsedCommand {
 			// then. There is no executable to unwrapCommand, so the leaf is appended
 			// as-is.
 			if len(envVars) > 0 || len(redirs) > 0 || hasHeredoc {
-				result = append(result, ParsedCommand{EnvVars: envVars, Redirections: redirs, HasHeredoc: hasHeredoc, Raw: seg})
+				result = append(result, ParsedCommand{EnvVars: envVars, Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg})
 			}
 			continue
 		}
@@ -782,9 +821,35 @@ func Parse(command string) []ParsedCommand {
 			Redirections:         redirs,
 			ProcessSubstitutions: procSubs,
 			HasHeredoc:           hasHeredoc,
+			Heredocs:             leafHeredocs,
 			Raw:                  seg,
 			Comment:              comment,
 		}))
+	}
+	// Any extent left unclaimed still has to reach a leaf, or an unquoted body's
+	// substitutions would go unevaluated. Attach the remainder to the last leaf, or
+	// synthesize a command-less heredoc leaf when there is none. Worst case this floors a
+	// leaf at Abstain that did not need it — never the reverse.
+	//
+	// Three ways an extent goes unclaimed: resolveLoops DISCARDS the segment that held
+	// the operator (`while read c; do …; done <<'EOF'` — the operator rides the `done`
+	// keyword, the commonest real instance), resolveLoops reorders segments so a loop
+	// condition precedes the body, or the extent pass and splitCompound disagree about
+	// where a comment starts. Attribution is then imprecise; losslessness is not.
+	//
+	// The synthesized leaf carries an EMPTY Raw on purpose: the whole command is not a
+	// single leaf, and handing it back as one would break the atomicity contract the
+	// engine relies on (re-parsing a leaf's Raw must not reveal further commands).
+	// Nothing downstream needs Raw here — the leaf has no executable, no assignments
+	// and no redirections, only the extent.
+	if leftover := append(carried, heredocs...); len(leftover) > 0 {
+		if len(result) == 0 {
+			result = append(result, ParsedCommand{HasHeredoc: true, Heredocs: leftover})
+		} else {
+			last := &result[len(result)-1]
+			last.Heredocs = append(last.Heredocs, leftover...)
+			last.HasHeredoc = true
+		}
 	}
 	return result
 }

