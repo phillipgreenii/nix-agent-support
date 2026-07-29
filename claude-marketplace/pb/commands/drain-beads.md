@@ -224,12 +224,40 @@ Triggers: underspecified / needs a human decision; the pre-apply gates cannot be
 made to pass; landing returns a GENUINE `stopped:<reason>` (not a transient
 ff-race); a post-deploy gate could not be attached; repeated failed attempts.
 
+Step 1 only PRESERVES the work; the park that goes in front of a human is the
+COMMENT + `human` label in steps 5–6. Step 2 stands between the two deliberately:
+a bead whose premise the probes prove MOOT exits via **CLOSE-AS-MOOT** and never
+becomes a park at all.
+
 1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
    clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
    it on branch `drain/<id>` with a `WIP (parked): <id> <why>` message; if
    pre-commit hooks block the commit, leave the changes uncommitted in the retained
    worktree (do NOT use `--no-verify`).
-2. NAME THE PRECONDITION — only when the park is blocked on something that must
+2. FRESHNESS CHECK — re-verify the bead's PREMISE against CURRENT reality BEFORE you
+   write any park comment or apply any label. The bead body is a snapshot from FILING
+   time and the reason you are stuck may already be answered: in one pass over the
+   parked queue, 5 of 9 beads were already resolved or void. Follow the always-on
+   `Premise Freshness` rules (F-1..F-8) and run the NAMED PROBES from F-3 — one per
+   external referent this bead names — keeping each decisive output verbatim:
+   - `landed?` / `pushed?` / `patch-identical?` for commits and parked branches;
+     `path-exists?` / `symbol-shape?` for the files, modules, and symbols the bead's
+     steps or design edit; `ticket-open?` for external tickets; `sibling-open?` for
+     referenced beads; `next-free-id?` for any "next free" number the bead recorded.
+   - An earlier REVIEW of this bead's plan is NOT a freshness signal (F-6). A reviewed
+     snapshot ages exactly as fast as the snapshot, so "already reviewed" / "looks
+     plan-ready" MUST NOT stand in for running the probes.
+   - An unresolvable probe (`exit 128`, missing repo, referent too vague to probe) reads
+     as STILL LIVE, never as moot (F-4).
+   - Premise STILL LIVE → continue to step 3, and carry this line into the step-5
+     comment so the next reader inherits the check:
+     `FRESHNESS: <ISO date> — <probe>=<decisive output>; <probe>=<decisive output> ⇒ premise LIVE`
+     If the bead names no external referent, record that instead (F-5):
+     `FRESHNESS: <ISO date> — no external referent named ⇒ nothing to re-verify`
+   - Premise PROVABLY MOOT → this bead is answered, not blocked. Do NOT park it and do
+     NOT label it `human`: go to **CLOSE-AS-MOOT** below.
+
+3. NAME THE PRECONDITION — only when the park is blocked on something that must
    become TRUE before the bead is workable (skip it for an underspecified /
    decision-needed park). What you write here becomes an INSTRUCTION to a later
    agent and keeps being obeyed long after the implementation it describes has been
@@ -241,14 +269,14 @@ ff-race); a post-deploy gate could not be attached; repeated failed attempts.
      concludes "not applied yet" and re-parks forever.
    - `PRECONDITION-KEY:` MUST be a short kebab slug naming that OUTCOME, not this
      attempt — `nb-opens-gradle-root`, never `nb-check-2` — so a later park blocked
-     on the SAME thing produces the SAME key. Step 3 counts these.
+     on the SAME thing produces the SAME key. Step 4 counts these.
    - `DERIVED-FROM:` MUST cite the commit and the file(s) you actually read to write
      the line (`<repo>@<sha> — <path>`), so a later reader can re-derive it and see
      the drift.
    - The failure branch MUST be bounded. MUST NOT write "if not yet applied, re-park
-     or wait" with no limit — step 3 IS the limit.
+     or wait" with no limit — step 4 IS the limit.
 
-3. DETECT A REPEAT — before commenting, check whether this bead was already parked
+4. DETECT A REPEAT — before commenting, check whether this bead was already parked
    on the same precondition:
 
    ```bash
@@ -257,59 +285,106 @@ ff-race); a post-deploy gate could not be attached; repeated failed attempts.
 
    (`comments` is `null` on a bead with none, hence the `// []`; empty output — `rg`
    exit 1 — means no prior key, NOT a failure.)
-   - The key you are about to write is ABSENT → ordinary park (step 4a).
+   - The key you are about to write is ABSENT → ordinary park (step 5a).
    - The key is ALREADY PRESENT — this would be the SECOND park on the same unmet
      precondition → the precondition itself is the suspect, not the world: escalate
-     it as stale (step 4b + step 5b). There is NO third park on one key.
+     it as stale (step 5b + step 6b). There is NO third park on one key.
    - The bead ALREADY carries the `stale-precondition` label → an earlier staleness
      escalation was released without resolving it. Write NO precondition block at
-     all: comment plainly what you observed, re-apply `human` (step 5a), and leave
+     all: comment plainly what you observed, re-apply `human` (step 6a), and leave
      `stale-precondition` in place so it stays visible as unresolved.
 
-4. COMMENT what you tried, why you couldn't finish, and where the work is parked so
-   a human can resume.
+5. COMMENT what you tried, why you couldn't finish, and where the work is parked so
+   a human can resume. Either form MUST carry the step-2 `FRESHNESS:` line.
 
-   **4a — ordinary park**, carrying the step-2 block when there is a precondition:
+   **5a — ordinary park**, carrying the step-3 block when there is a precondition:
 
    ```bash
    bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
    PRECONDITION: <observable outcome that must hold before this is workable>
    PRECONDITION-KEY: <stable-outcome-slug>
    DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
    ```
 
-   **4b — staleness escalation** (step 3 found the key). Say it is a repeat, point at
+   **5b — staleness escalation** (step 4 found the key). Say it is a repeat, point at
    the provenance to re-derive, and record what you ACTUALLY observed — do NOT
    restate the old precondition as though it were fresh:
 
    ```bash
-   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
+   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
    ```
 
-5. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
+6. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
    termination query, which use `--exclude-label human`):
 
-   **5a — ordinary park:**
+   **6a — ordinary park:**
 
    ```bash
    bd update <id> --add-label human --actor "ID"
    ```
 
-   **5b — after a 4b staleness escalation** — both labels in ONE call, so the
+   **6b — after a 5b staleness escalation** — both labels in ONE call, so the
    unblocker recognizes the class mechanically instead of re-reading the churn:
 
    ```bash
    bd update <id> --add-label human,stale-precondition --actor "ID"
    ```
 
-6. UNCLAIM — do this LAST, only after the label is applied, so no other session
+7. UNCLAIM — do this LAST, only after the label is applied, so no other session
    can grab it in an unlabeled `open` window:
 
    ```bash
    bd update <id> --assignee "" --status open --actor "ID"
    ```
 
-7. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
+8. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
+
+## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)
+
+Reached ONLY from a FRESHNESS CHECK whose probes decisively answered the bead's own
+question. The bead is not blocked — it is ANSWERED, so parking it would put a
+non-question in front of the operator. Close it instead. But a moot bead is not
+worthless: stale work often contains a PREDICTION about the code, and a blind close
+throws that away (F-7). EXTRACT first, close second.
+
+1. READ the stale work before discarding it — the bead's description/design, its
+   comments, and any WIP commit on `drain/<id>`. You are looking for a claim it makes
+   that CURRENT source VIOLATES: a defect it predicted, or a decision it called
+   load-bearing that the shipped version skipped. Blind-closing is forbidden.
+
+2. EXTRACT any such claim as its own bead BEFORE closing, so the link survives:
+
+   ```bash
+   bd create "<the prediction, restated as the defect it predicts>" \
+     -d "Extracted from <id> while closing it as moot. The stale work claimed <X>; CURRENT source violates it: <probe>=<decisive output> / <path:line>." \
+     --deps "discovered-from:<id>" --actor "ID" --json
+   # capture the new id as <extracted>
+   ```
+
+3. RECORD the check on the bead, then CLOSE — the recorded probe output IS the
+   justification, so it MUST be verbatim, not paraphrased:
+
+   ```bash
+   bd comment <id> "FRESHNESS: <ISO date> — <probe>=<decisive output verbatim> ⇒ premise MOOT. Superseded by <what superseded it>. Extracted: <extracted> (or: nothing extractable)." --actor "ID"
+   bd close <id> --reason "moot on re-verification: <probe>=<decisive output>; superseded by <what>; extracted <extracted>" --actor "ID"
+   ```
+
+4. The isolation — do NOT delete unlanded work. Check whether anything would be lost:
+
+   ```bash
+   git -C <worktree-path> status --porcelain; git -C <repo> cherry -v main drain/<id>
+   ```
+
+   BOTH empty → nothing to lose → CLEANUP as in the `done` path. EITHER non-empty →
+   LEAVE the worktree/branch in place and file the follow-up rather than orphan it:
+
+   ```bash
+   bd create "worktree-review: reconcile leftover isolation for <id> (closed as moot)" \
+     --labels human --defer +7d --deps "discovered-from:<id>" --actor "ID"
+   ```
+
+5. Return to the MAIN LOOP's step 1 (CLAIM).
 
 ## Optional scope arguments
 
@@ -347,9 +422,22 @@ unchanged.
   MECHANISM-shaped precondition ("is a shell function", "lives in this file") rots
   into a permanent, unfalsifiable "not applied yet".
 - Re-parking MUST be bounded: the SECOND park on the same `PRECONDITION-KEY` MUST
-  escalate as `stale-precondition` (STUCK 4b/5b) instead of re-parking on that key
+  escalate as `stale-precondition` (STUCK 5b/6b) instead of re-parking on that key
   again. An agent MUST NOT trust a precondition it did not re-derive from current
   source.
+- A park or re-park MUST be preceded by a RECORDED FRESHNESS CHECK (STUCK step 2): every
+  external referent the bead names — commits, external tickets, files/modules/symbols,
+  sibling beads, recorded "next free" ids — MUST be re-verified with the matching named
+  probe from the always-on `Premise Freshness` rules (F-3), and its decisive output MUST
+  be recorded verbatim as a `FRESHNESS:` line in the park comment. A bead MUST NOT be
+  parked or re-parked on an unverified premise. An earlier REVIEW of the bead's plan is
+  NOT a freshness signal — a reviewed snapshot ages exactly as fast as the snapshot.
+- A premise the probes prove MOOT MUST route to CLOSE-AS-MOOT, never to a park: a bead
+  whose own question is already answered MUST NOT be handed to the operator. An
+  unresolvable or ambiguous probe MUST be read as STILL LIVE, never as moot.
+- CLOSE-AS-MOOT MUST EXTRACT before it closes: read the stale work, file any claim that
+  CURRENT source violates as its own bead (`--deps "discovered-from:<id>"`), and name
+  that id in the close reason. A blind close is forbidden.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT
   and report — do not reset/stash/work around it.
 - Transient infra failures (bd/dolt server blip, git `index.lock` contention, a
@@ -372,7 +460,7 @@ flowchart TD
     I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
-    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP,<br/>name the PRECONDITION as an OUTCOME<br/>+ PRECONDITION-KEY + DERIVED-FROM"]
+    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP,<br/>then re-verify the PREMISE before writing anything"]
     V -- "done / done-pending-apply-verification" --> L["LAND (local ff-merge, no push)"]
     L -->|transient ff-race| L
     L -->|genuine stopped:reason| S
@@ -383,9 +471,12 @@ flowchart TD
     PB -->|gated + un-deferred| CL
     CL --> X["bd close impl id --reason ... --actor ID"]
     X --> C
-    S --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
-    RK -- no --> PK["bd comment stuck: + PRECONDITION block →<br/>bd update --add-label human →<br/>unclaim LAST"]
+    S --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
+    FC -- "provably moot" --> CM["CLOSE-AS-MOOT (no park, no human label):<br/>read the stale work → bd create extracted prediction<br/>--deps discovered-from → bd comment FRESHNESS: probe output →<br/>bd close --reason 'moot on re-verification'"]
+    FC -- "live, or any probe unresolvable" --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
+    RK -- no --> PK["bd comment stuck: + FRESHNESS + PRECONDITION block →<br/>bd update --add-label human →<br/>unclaim LAST"]
     RK -- "yes (2nd time)" --> SP["SUSPECTED STALE, no 3rd park:<br/>bd comment 'do NOT re-park on this key' →<br/>bd update --add-label human,stale-precondition →<br/>unclaim LAST"]
+    CM --> C
     PK --> C
     SP --> C
 ```

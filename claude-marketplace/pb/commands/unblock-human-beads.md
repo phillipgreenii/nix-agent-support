@@ -77,7 +77,7 @@ exit on an error.
    bd list --status in_progress --assignee "ID" --label human --json
    ```
 
-   If one exists, resume it (UNDERSTAND → TRIAGE → terminal action) before claiming new
+   If one exists, resume it (UNDERSTAND → FRESHNESS CHECK → TRIAGE → terminal action) before claiming new
    work.
 
 3. Start with an empty session skip-set.
@@ -100,19 +100,64 @@ exit on an error.
    the blocker, and — if `/drain-beads` parked one — note the worktree/branch/set location
    (drain records it as `branch drain/<id>` in the repo at its worktree path).
 
-3. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
+3. **FRESHNESS CHECK** (MANDATORY, and BEFORE triage) — the bead was parked at some earlier
+   time and its body reads as though it were current. Re-verify its PREMISE against CURRENT
+   reality with the named probes before you classify it. This is the step that stops the
+   operator being handed a non-question. See "Freshness check" below. A premise the probes
+   prove MOOT skips the rubric entirely and goes to CLOSE-AS-MOOT — with ONE exception: a
+   class-1 substrate-mutating bead is still ENGAGEd, because that guard is unconditional.
+
+4. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
    match wins) and do ONLY enough to lift the human blocker. **To ENGAGE means: pause the
    loop, present the specific decision/question to the operator in this session, and WAIT
    for their answer before acting** — this is the one point where autonomy yields to
    interaction. Any change that produces committed code/docs happens in the REUSED parked
    isolation (see "Isolation"). Obey the stop predicate.
 
-4. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
+5. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
    "Terminal actions" below. Then go to 1.
 
 While a bead is claimed (`in_progress` + owned by ID), it is invisible to every
 `/drain-beads` and peer unblock session (`bd ready` excludes `in_progress`), so all of
-step 3–4 happens with no race. The bead re-enters a queue only at the terminal action.
+step 3–5 happens with no race. The bead re-enters a queue only at the terminal action.
+
+## Freshness check (before TRIAGE — MANDATORY)
+
+The `human` queue's dominant failure is not a wrong decision — it is a decision on a DEAD
+question. Observed 2026-07-27: of the 9 human beads processed in one run, 5 were already
+resolved or void. Commits had landed. Jira issues were `Closed`. An ADR draft's two target
+module trees had been DELETED and unified elsewhere — one approval away from landing an
+"Accepted" ADR prescribing edits to modules that do not exist. `git ls-tree` on the two paths
+it named was the whole check.
+
+Follow the always-on `Premise Freshness` rules (F-1..F-8) and run the NAMED PROBES from F-3 —
+one per external referent the bead OR its `stuck:` comment names — keeping each decisive
+output verbatim:
+
+- `landed?` / `pushed?` / `patch-identical?` for commits and the parked `drain/<id>` branch;
+  `path-exists?` / `symbol-shape?` for every file, module, or symbol the bead's design or
+  steps EDIT; `ticket-open?` for external tickets; `sibling-open?` for referenced beads;
+  `next-free-id?` for any "next free" number the bead recorded.
+- **An earlier review is NOT a freshness signal** (F-6). The ADR above had been adversarially
+  reviewed — verdict REVISE, two findings fixed, field tables checked against live source —
+  and was stale anyway, because a thorough review of a snapshot ages exactly as fast as the
+  snapshot. "It was already reviewed", "it looks plan-ready", and an approving review verdict
+  MUST NOT stand in for running the probes.
+- **Ambiguity is not mootness** (F-4). An unresolvable probe — `exit 128`, a missing repo, a
+  referent too vague to probe — reads as STILL LIVE.
+- **Premise STILL LIVE** → proceed to TRIAGE, and put the recorded line in whatever comment
+  your terminal action writes, so the next reader inherits the check:
+  `FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE`
+  (or, when the bead names no external referent, `… ⇒ nothing to re-verify` — F-5).
+- **Premise PROVABLY MOOT** → **CLOSE-AS-MOOT** (see "Terminal actions"). The bead is
+  answered, not blocked: it MUST NOT be RELEASEd (drain would just re-park it) and MUST NOT be
+  DEFERred (it returns unchanged next window).
+- This check is also what class 2 (`stale-precondition`) means by "re-derive from
+  `DERIVED-FROM`", aimed at one citation: run the probe matching what the citation names —
+  `path-exists?` / `symbol-shape?` for a path, `landed?` for a commit.
+- It does NOT extend to applied-ness. There is no reliable applied-vs-not signal, which is why
+  apply-waiting is a TRUST rule (below) and not a probe. The probes answer only what the bead
+  RECORDED: commits, tickets, paths, symbols, sibling beads, derived ids.
 
 ## Triage rubric (evaluate in order; first match wins)
 
@@ -124,6 +169,14 @@ step 3–4 happens with no race. The bead re-enters a queue only at the terminal
 | 4   | **mislabeled / normal work**     | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed) and no human input is needed                            | **RELEASE** — no operator prompt.                                                                                                                              |
 | 5   | **genuine decision / input**     | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                             | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome.                                                                            |
 | 6   | **uncertain**                    | you cannot confidently place the bead in a class above                                                                                                                                               | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                     |
+
+**The FRESHNESS CHECK runs BEFORE this rubric, not as a row in it.** A bead whose premise the
+probes proved moot needs no class — it is already resolved, so it goes straight to
+CLOSE-AS-MOOT. The single exception is class 1: a substrate-mutating bead is ENGAGEd even when
+moot (hand the operator the probe output instead of a question), because that guard is
+unconditional. Do not confuse a moot PREMISE with class 4's moot LABEL REASON: class 4 means
+the reason for the `human` label died but the work is still real, so it RELEASEs to drain;
+CLOSE-AS-MOOT means the WORK ITSELF is answered, so there is nothing to release.
 
 **`stale-precondition` outranks apply-waiting.** A stale precondition presents EXACTLY as
 apply-waiting ("verify after apply"), so the apply-trust rule below would RELEASE it, drain
@@ -178,8 +231,9 @@ never run a substrate-mutating action autonomously.
   only remaining work is a human-only action drain cannot perform, DEFER instead
   (apply-waiting is exempt — it is released on the pre-apply premise).
 
-- **CLOSE** — the bead is already satisfied/obsolete (confirm WITH the operator first), or a
-  substrate-mutating bead was resolved in-session. Nothing left for drain:
+- **CLOSE** — the bead is already satisfied/obsolete (confirm WITH the operator first, unless
+  it is the CLOSE-AS-MOOT variant below), or a substrate-mutating bead was resolved
+  in-session. Nothing left for drain:
 
   ```bash
   bd close <id> --reason "<why obsolete / what was resolved>" --actor "ID"
@@ -192,6 +246,33 @@ never run a substrate-mutating action autonomously.
   bd create "worktree-review: reconcile leftover isolation for <id>" \
     --labels human --defer +7d --deps "discovered-from:<id>" --actor "ID"
   ```
+
+  - **CLOSE-AS-MOOT** — the variant the freshness check produces. The close guard's operator
+    confirmation is satisfied by the RECORDED PROBE OUTPUT: a decisive output is the proof
+    this close needs, and re-asking the operator is precisely the non-question the check
+    exists to remove. It is NOT satisfied by your judgement that the bead "looks done", by an
+    approving review verdict on its content, or by an ambiguous probe. Two requirements:
+    1. **EXTRACT before you close** (F-7) — read the stale work (description/design, comments,
+       any WIP commit on the parked branch) for a claim that CURRENT source VIOLATES: a defect
+       it predicted, or a decision it called load-bearing that the shipped version skipped.
+       File that FIRST, so the link survives the close:
+
+       ```bash
+       bd create "<the prediction, restated as the defect it predicts>" \
+         -d "Extracted from <id> while closing it as moot. The stale work claimed <X>; CURRENT source violates it: <probe>=<decisive output> / <path:line>." \
+         --deps "discovered-from:<id>" --actor "ID" --json
+       ```
+
+    2. **RECORD the probe verbatim, then close** — paraphrase is not evidence:
+
+       ```bash
+       bd comment <id> "FRESHNESS: <ISO date> — <probe>=<decisive output verbatim> ⇒ premise MOOT. Superseded by <what>. Extracted: <extracted-id> (or: nothing extractable)." --actor "ID"
+       bd close <id> --reason "moot on re-verification: <probe>=<decisive output>; superseded by <what>; extracted <extracted-id>" --actor "ID"
+       ```
+
+    A leftover worktree still gets the `worktree-review` follow-up above. A class-1
+    substrate-mutating bead is exempt from this variant — ENGAGE the operator as class 1
+    requires, and hand them the probe output rather than a question.
 
 - **DEFER** (operator-initiated, or a substrate / human-only-action bead that can't be done
   now) — either the operator decides it can't be resolved right now, or the only remaining
@@ -250,7 +331,21 @@ arguments, drain the whole ready `human` queue.
   make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
   exempt).
 - **Substrate guard.** A substrate-mutating bead MUST NOT be RELEASEd to drain and MUST NOT
-  be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER.
+  be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER. This guard is
+  unconditional: it holds even when the freshness check proves the bead's premise moot.
+- **Freshness guard.** Before TRIAGE, the bead's premise MUST be re-verified against CURRENT
+  reality with the matching named probes from the always-on `Premise Freshness` rules (F-3) —
+  one per external referent the bead or its `stuck:` comment names (commits, external tickets,
+  files/modules/symbols, sibling beads, recorded "next free" ids) — and each decisive output
+  MUST be recorded verbatim as a `FRESHNESS:` line in whatever comment the terminal action
+  writes. A bead whose premise is provably moot MUST be CLOSEd-AS-MOOT: it MUST NOT be
+  RELEASEd (drain would re-park it) and MUST NOT be DEFERred (it returns unchanged). An
+  ambiguous or unresolvable probe MUST be read as STILL LIVE. Prior review of the bead's
+  content MUST NOT be treated as evidence of freshness.
+- **Extract before close-as-moot.** A CLOSE-AS-MOOT MUST first read the stale work and, if it
+  makes a claim CURRENT source violates, MUST file that as its own bead
+  (`bd create … --deps "discovered-from:<id>"`) and MUST name the new id in the close reason.
+  A blind close is forbidden.
 - **Stale-precondition guard.** A bead labeled `stale-precondition` MUST NOT be RELEASEd on
   the apply-waiting premise. Its precondition MUST be re-derived from the park comment's
   `DERIVED-FROM` citation against current source; a RELEASE MUST both record the precondition
@@ -267,10 +362,12 @@ arguments, drain the whole ready `human` queue.
   terminate the run.
 - **Distinct actor.** The actor id MUST be distinct from any concurrent `/drain-beads`
   actor (the `-unblock` suffix).
-- **Close guard.** MUST NOT close a bead without explicit operator confirmation (or an
-  in-session-resolved substrate bead); if a worktree is left, MUST file a `worktree-review`
-  follow-up (`bd create … --labels human --defer +7d --deps "discovered-from:<id>"`) rather
-  than orphan it.
+- **Close guard.** MUST NOT close a bead without explicit operator confirmation — except an
+  in-session-resolved substrate bead, or a CLOSE-AS-MOOT whose decisive probe output is
+  recorded verbatim on the bead (the recorded evidence IS the confirmation). If a worktree is
+  left, MUST file a `worktree-review` follow-up
+  (`bd create … --labels human --defer +7d --deps "discovered-from:<id>"`) rather than orphan
+  it.
 - **Arguments narrow-only.** `$ARGUMENTS` MUST only restrict the claim query and MUST NOT
   remove safety filters or broaden scope.
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
@@ -287,7 +384,10 @@ flowchart TD
     C -->|id already in skip-set| DONE
     C -->|transient bd/dolt error| C
     C -->|got bead| U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
-    U --> T{TRIAGE rubric<br/>first match wins}
+    U --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
+    FC -- "provably moot (non-substrate)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
+    FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
+    CLOM --> C
     T -->|1 substrate-mutating| SUB["ENGAGE operator,<br/>NEVER release to drain"]
     T -->|2 stale-precondition label| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
     T -->|3 apply-waiting| REL
