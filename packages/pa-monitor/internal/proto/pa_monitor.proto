@@ -130,8 +130,11 @@ message DaemonState {
   // distinguishable from a real 0% reading (unknown/stale != 0). The reset /
   // captured timestamps are google.protobuf.Timestamp messages, which are nil
   // when unset and MUST NOT decode as 1970 (see timeFromTS). Phase 0 observed
-  // seven_day absent on this account, so these are commonly unset. No consumer
-  // reads them yet — this is persistence + wire plumbing only.
+  // seven_day absent on this account, so these are commonly unset. Wire
+  // consumers: cmd/pa-monitor reads them straight off DaemonState (runStatus's
+  // usage line, snapshotForWorkspace's cmux window progress + 5h color), and
+  // from_proto.go (ToTree) hands them to internal/render (BlockRow) and
+  // internal/tui (windowProgress).
   optional double five_hour_pct = 20;                    // 5h used_percentage [0,100]; unset = unknown
   optional double seven_day_pct = 21;                    // 7d used_percentage [0,100]; unset = unknown
   google.protobuf.Timestamp seven_day_resets_at = 22;    // 7d window reset; unset = unknown (never 1970)

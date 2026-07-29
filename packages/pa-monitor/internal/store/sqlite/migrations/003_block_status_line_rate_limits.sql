@@ -10,8 +10,11 @@
 --
 -- Phase 0 observed seven_day entirely absent on this grandfathered-enterprise
 -- account, so seven_day_pct / seven_day_resets_at MUST tolerate being
--- long-lived NULL (the common case, not an edge case). No consumer reads these
--- yet — this migration is persistence plumbing only.
+-- long-lived NULL (the common case, not an edge case). These columns are read
+-- back by the sqlite block store and carried onto aggregate.Tree by
+-- convertStateToAggregateTree, where internal/render (BlockRow), internal/tui
+-- (windowProgress) and the daemon's limit triggers / limit-pause nudge consume
+-- them.
 
 ALTER TABLE blocks ADD COLUMN five_hour_pct REAL;
 ALTER TABLE blocks ADD COLUMN seven_day_pct REAL;

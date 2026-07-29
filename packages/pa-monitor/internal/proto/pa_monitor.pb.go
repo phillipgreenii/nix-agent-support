@@ -280,8 +280,11 @@ type DaemonState struct {
 	// distinguishable from a real 0% reading (unknown/stale != 0). The reset /
 	// captured timestamps are google.protobuf.Timestamp messages, which are nil
 	// when unset and MUST NOT decode as 1970 (see timeFromTS). Phase 0 observed
-	// seven_day absent on this account, so these are commonly unset. No consumer
-	// reads them yet — this is persistence + wire plumbing only.
+	// seven_day absent on this account, so these are commonly unset. Wire
+	// consumers: cmd/pa-monitor reads them straight off DaemonState (runStatus's
+	// usage line, snapshotForWorkspace's cmux window progress + 5h color), and
+	// from_proto.go (ToTree) hands them to internal/render (BlockRow) and
+	// internal/tui (windowProgress).
 	FiveHourPct      *float64               `protobuf:"fixed64,20,opt,name=five_hour_pct,json=fiveHourPct,proto3,oneof" json:"five_hour_pct,omitempty"`          // 5h used_percentage [0,100]; unset = unknown
 	SevenDayPct      *float64               `protobuf:"fixed64,21,opt,name=seven_day_pct,json=sevenDayPct,proto3,oneof" json:"seven_day_pct,omitempty"`          // 7d used_percentage [0,100]; unset = unknown
 	SevenDayResetsAt *timestamppb.Timestamp `protobuf:"bytes,22,opt,name=seven_day_resets_at,json=sevenDayResetsAt,proto3" json:"seven_day_resets_at,omitempty"` // 7d window reset; unset = unknown (never 1970)

@@ -260,7 +260,8 @@ head so a later head advance does not 422.
 ```mermaid
 flowchart TD
     a["review role reviews teammate PR"] --> b["pg-pr review submit"]
-    b --> c["PostReview: event unset => PENDING<br/>commit_id = reviewed head (avoids 422)"]
+    b --> s["postStaged: skip if viewer already has a PENDING review"]
+    s --> c["PostReview: event unset => PENDING<br/>commit_id = reviewed head (avoids 422)"]
     c --> d["comment-level dedup (postStaged)"]
 ```
 
@@ -277,12 +278,13 @@ flowchart TD
   - Re-running the review **SHOULD NOT** create a duplicate PENDING review for the
     same reviewer.
 - **Code paths:** `packages/pg-pr/internal/reviewsink/teamsink.go`
-  (`ApplyPendingReview`; the `HasPendingReviewByViewer` skip — path A only);
+  (`ApplyPendingReview` — the path-A sink's own `HasPendingReviewByViewer` skip);
   `packages/pg-pr/pkg/provider/vcs/github/pending.go`;
   `packages/pg-pr/pkg/provider/vcs/github/github.go` (`PostReview`,
   `reviewComment`);
   `packages/pg-pr/cmd/pg-pr/review.go` (`reviewSubmitCmd` → `postStaged` — the
-  `review submit` path B uses);
+  `review submit` path B uses; `postStaged` also owns path B's viewer-pending
+  skip via `skipExistingPendingReview` / `pendingReviewChecker`);
   `packages/pr-pool/internal/roles/builtin.go` (`reviewPromptBody`).
 - **Coverage:** `teamsink_test.go`, `pending_test.go`, `review_test.go`
   (`TestReviewSubmit_ForwardsHeadSHAAsCommitID`); multi-line spans in
@@ -290,12 +292,16 @@ flowchart TD
   `TestPostReview_DegenerateStartLineIsDropped`) and `review_input_test.go`
   (`TestReviewSubmit_MultiLineFindingPostsAsMultiLineComment`).
 - **Known gaps:**
-  - **Skip-if-present is NOT on the `pg-pr review submit` path** the `pr-pool`
-    review role uses — `HasPendingReviewByViewer` lives only in the kill-switched
-    team sink. On path B, duplicate PENDING reviews are mitigated **only** by
-    comment-level dedup. **Coverage goal / fix:** add a viewer-pending skip to the
-    submit path (tracked — §10). The `commit_id` 422 anchoring **is** present on
-    this path.
+  - **Skip-if-present on the submit path (resolved).** It is **now** on the
+    `pg-pr review submit` path the `pr-pool` review role uses:
+    `packages/pg-pr/cmd/pg-pr/review.go` (`postStaged` →
+    `skipExistingPendingReview`, probing the provider for the optional
+    `pendingReviewChecker` capability). The guard sits at the shared choke-point
+    both `review post` and `reviewSubmitCmd` funnel through, so a re-run — and a
+    `draft`→`post`→re-`draft`→`post` sequence — does not stack a second PENDING
+    review; detection failure is **fail-closed**, matching the path-A team sink.
+    Path B therefore has both the viewer-pending skip and comment-level dedup, on
+    top of the `commit_id` 422 anchoring (`pg2-3fo3c`, resolved).
   - **Post-back access (resolved for now).** The review role's only completion
     action is `pg-pr review submit`, so under `dontAsk` the pool-wide default
     `AllowedTools` (`packages/pr-pool/internal/config/config.go` (`Default` →
@@ -467,13 +473,13 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 
 ## 6. Verification & coverage goals
 
-| Journey | Covering tests (exist)                                                                       | Coverage goal (gap)                                                    |
-| ------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test` (`TestReconcile_DraftSelectionMatrix`) | Go-level merge gate (only if enforcement is moved off the skill layer) |
-| JR2     | `teamsink_test`, `pending_test`, `review_test`                                               | submit-path skip-if-present; review-role allowlist permits `pg-pr`     |
-| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                       | —                                                                      |
-| JR4     | `acl_test` (head-advance suite), `reopen_test`                                               | —                                                                      |
-| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                     | —                                                                      |
+| Journey | Covering tests (exist)                                                                       | Coverage goal (gap)                                                     |
+| ------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test` (`TestReconcile_DraftSelectionMatrix`) | Go-level merge gate (only if enforcement is moved off the skill layer)  |
+| JR2     | `teamsink_test`, `pending_test`, `review_test`                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved) |
+| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                       | —                                                                       |
+| JR4     | `acl_test` (head-advance suite), `reopen_test`                                               | —                                                                       |
+| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                     | —                                                                       |
 
 **Live end-to-end** verification (one PR I own + one teammate PR through path B,
 plus re-review-on-head-advance) against these journeys is **deploy-gated** — it
@@ -518,7 +524,9 @@ issue tracker (bead IDs kept here rather than in the body):
 - **Post-back denied by default allowlist** (JR2 functional blocker) — RESOLVED:
   `Bash(pg-pr:*)` added to the default allowlist — `pg2-vmbn7`.
 - **Skip-if-present missing on the submit path** (JR2 duplicate-PENDING risk) —
-  `pg2-3fo3c`.
+  RESOLVED: `postStaged` owns a fail-closed viewer-pending skip
+  (`skipExistingPendingReview`) at the shared choke-point both `review post` and
+  `review submit` funnel through — `pg2-3fo3c`.
 - **Both review paths on by default** (double-write hazard; safe-default decision) —
   RESOLVED: `review.enabled` now defaults `false`, so the built-in defaults ship a
   single review owner (`pr-pool`); `pg2-3ho1r`.

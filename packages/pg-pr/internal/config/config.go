@@ -67,12 +67,15 @@ type Config struct {
 	Jira *JiraConfig `yaml:"jira,omitempty" json:"jira,omitempty"`
 
 	// Review gates the daemon's draft-review machinery (bead pg2-ynhr.11 kill
-	// switch). When review.enabled is false, the daemon neither wires the review
-	// CONSUMER (SetReviewHook is skipped, so reviewHookEnabled() is false) nor
-	// PRODUCES draft-review beads on pr.updated (beadsbridge skips
-	// EnsureDraftReviewBead). Merge-request / attention / process-feedback
-	// production, and PR-data sync, are unaffected. Absent → disabled: the legacy
-	// pg-pr review path is the NON-owner in the pg-pr↔pr-pool split, so the
+	// switch). When review.enabled is false, the daemon runs neither the review
+	// CONSUMER nor draft-review bead PRODUCTION on pr.updated (beadsbridge skips
+	// EnsureDraftReviewBead). The consumer's deps are wired UNCONDITIONALLY at
+	// startup (SetReviewHook in cmd/pg-pr/syncCmd); the gate is per poll —
+	// reviewHookEnabled() re-reads this LIVE value each cycle, so a flip takes
+	// effect on the next poll without a daemon restart (bead pg2-bw30).
+	// Merge-request / attention / process-feedback production, and PR-data sync,
+	// are unaffected. Absent → disabled: the legacy pg-pr
+	// review path is the NON-owner in the pg-pr↔pr-pool split, so the
 	// resting-safe built-in default is off (pr-pool owns reviews); see
 	// ReviewEnabled and pg2-3ho1r.
 	Review ReviewConfig `yaml:"review,omitempty" json:"review,omitempty"`

@@ -124,8 +124,12 @@ switch, and the legacy code strip is deferred.
   - **Producer:** the beadsbridge stops producing `draft-review` beads on `pr.opened`/`updated`
     (`packages/pg-pr/cmd/pg-pr/sync.go` → `beadsbridge.WithoutDraftReviews()`); `merge-request` /
     attention / process-feedback beads are still produced.
-  - **Consumer:** the review hook is not wired, so `reviewHookEnabled()` stays false and no
-    `reviewHookCycle` runs (`packages/pg-pr/cmd/pg-pr/sync.go`; `packages/pg-pr/internal/sync/reviewhook.go`).
+  - **Consumer:** the hook's deps are wired **unconditionally** at startup
+    (`SetReviewHook` in `packages/pg-pr/cmd/pg-pr/sync.go` `syncCmd`); the gate is a **live-config
+    check per poll** — `reviewHookEnabled()` re-reads `review.enabled` each cycle
+    (`packages/pg-pr/internal/sync/reviewhook.go` `reviewHookEnabled`), so it stays false and no
+    `reviewHookCycle` runs while the switch is off, and a flip takes effect on the next poll
+    without a daemon restart (`pg2-bw30`).
 - What **MUST** stay active regardless of the switch: PR-data sync and the read/write CLI
   surface that `pr-pool` depends on. The kill switch gates **only** the legacy review
   workflow, never the PR-data interface.
@@ -161,9 +165,12 @@ switch, and the legacy code strip is deferred.
 - Reviewed-state is tracked in **two unsynchronized stores** during the transition — `pg-pr`
   on the SQLite revision (`reviewed_by_agent_at`) and `pr-pool` on the bead `head_sha`; only
   the **active** owner's cursor is authoritative.
-- Known parity gaps carried by path B: skip-if-present is not yet on the `pg-pr review submit`
-  path (duplicate-PENDING risk, `pg2-3fo3c`); there is no classic dead-letter in the
-  `pr-pool` review path (failures escalate via `human` label instead).
+- Known parity gaps carried by path B: there is no classic dead-letter in the `pr-pool` review
+  path (failures escalate via `human` label instead). Skip-if-present is **no longer** a gap —
+  `postStaged` (`packages/pg-pr/cmd/pg-pr/review.go`) now owns the viewer-pending guard
+  (`skipExistingPendingReview`, fail-closed) at the choke-point both `review post` and
+  `reviewSubmitCmd` funnel through, so a re-run does not stack a second PENDING review
+  (`pg2-3fo3c`, closed).
 - Review-executor **isolation** is only partially satisfied — the tool allowlist is
   pool-wide (not per-role) and still permits code-executing verbs on untrusted checked-out
   content, and the session inherits ambient credentials with no scrub (`pg2-f9vcg`,

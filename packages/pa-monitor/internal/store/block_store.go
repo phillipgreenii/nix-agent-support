@@ -27,7 +27,12 @@ type Block struct {
 	// A nil pointer means "unknown / stale" — explicitly distinct from a value
 	// of 0 (a real "unused" reading) and MUST never read back as 1970. Phase 0
 	// observed SevenDay* absent on this account, so those may be long-lived
-	// nil. No consumer reads these yet — Phase 1 is persistence + proto plumbing.
+	// nil. Consumers read these off aggregate.Tree after the store->tree
+	// conversion in internal/daemon (convertStateToAggregateTree):
+	// internal/render (BlockRow), internal/tui (windowProgress),
+	// cmd/pa-monitor (runStatus, snapshotForWorkspace), internal/daemon
+	// (lifecycle.go blockLimitTrigger/weekLimitTrigger) and
+	// internal/daemon/nudger (LimitPauseProducer.Reconcile).
 	FiveHourPct      *float64   // 5h window used_percentage, [0,100]; nil = unknown
 	SevenDayPct      *float64   // 7d window used_percentage, [0,100]; nil = unknown
 	FiveHourResetsAt *time.Time // 5h window reset instant; nil = unknown

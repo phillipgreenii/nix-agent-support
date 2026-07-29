@@ -38,8 +38,11 @@ func convertStateToAggregateTree(st *service.State) *aggregate.Tree {
 		// Carry the authoritative status-line rate_limits windows (ADR 0021 §6)
 		// from the persisted block onto the tree. These are account-global and
 		// distinct from the daemon-pause WindowResetsAt below. A nil pointer /
-		// zero time stays unknown — never 0, never 1970. No consumer reads them
-		// yet; this is the store->tree plumbing for Phase 1.
+		// zero time stays unknown — never 0, never 1970. This is the store->tree
+		// plumbing that feeds the real consumers: internal/render (BlockRow),
+		// internal/tui (windowProgress), the daemon's own limit triggers
+		// (lifecycle.go blockLimitTrigger/weekLimitTrigger) and the limit-pause
+		// nudge (nudger.LimitPauseProducer.Reconcile).
 		tree.FiveHourPct = st.Block.FiveHourPct
 		tree.SevenDayPct = st.Block.SevenDayPct
 		if st.Block.FiveHourResetsAt != nil {
