@@ -36,18 +36,36 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 3. Review the diffs and identify problems (correctness, security,
    performance, readability, missing tests).
 4. Output JSON of the form:
+
    ```json
    {
      "comments": [
        {
          "path": "src/main.go",
-         "lines": [42],
-         "message": "...",
-         "severity": "error|warning|suggestion"
+         "line": 42,
+         "severity": "error",
+         "body": "Unchecked error return: the err from json.Unmarshal is discarded, so a malformed payload is treated as valid."
        }
      ]
    }
    ```
+
+   These `comments` elements are exactly the comment shape
+   `pg-pr review draft` accepts, so the orchestrator concatenates them
+   verbatim. Run `pg-pr review --help` for the authoritative schema. Key
+   rules:
+   - `path` — file path relative to the repo root, or `null` for a finding
+     that is not about one file.
+   - `line` — the 1-based line number in the **new** file, or `null` when
+     the finding is not tied to a single line. One line per comment: emit
+     a separate comment per line, never a list.
+   - `body` — **REQUIRED**, non-empty; the finding text.
+   - `severity` — one of the three literal values `error`, `warning`,
+     `suggestion` (emit one value, not the enumeration).
+
+   Emit **no other keys**. `pg-pr review draft` rejects a payload carrying
+   a key it cannot map — non-zero exit naming the key — instead of
+   silently dropping the content.
 
 If no issues are found, output `{"comments": []}`.
 
@@ -77,5 +95,5 @@ reviews time out, so search accordingly:
   tracing a caller of a changed exported symbol), and prefer `git grep -n
 "<symbol>"` (indexed, fast) even then.
 
-**Do NOT include the 🤖 marker in `message`.** The `pg-pr review draft`
+**Do NOT include the 🤖 marker in `body`.** The `pg-pr review draft`
 / `pg-pr review post` pipeline adds the marker automatically.

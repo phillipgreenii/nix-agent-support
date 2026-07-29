@@ -62,16 +62,41 @@ You receive a PR identifier as your task, which can be:
    Pass each subagent: the base ref (e.g., `origin/main`), PR number,
    and worktree path.
 
-3. **Combine results** — each subagent returns a JSON object with a
-   `comments` array. Concatenate the arrays. If a subagent returned an
-   error, surface it under `warnings` and continue (don't abort the
-   review).
+3. **Combine results** — each subagent returns a JSON object whose
+   `comments` elements are already in the schema `pg-pr review draft`
+   accepts. Build exactly this payload and nothing more:
+   - `comments` — the subagents' `comments` arrays concatenated,
+     element for element unchanged. Do NOT rewrite, renumber or reword
+     them.
+   - `body` — you MUST supply a one-paragraph overall summary of the
+     review (the same prose you report in step 7). No subagent produces
+     one and `pg-pr` does not invent one, so omitting it posts a review
+     with no summary.
+   - `warnings` — one string per subagent that did NOT complete (e.g. the
+     JIRA agent's `error`). Continue the review; don't abort. `pg-pr`
+     renders these into the review body, so a failed reviewer is visible
+     rather than silently missing.
+   - `head_sha` — the worktree's HEAD commit
+     (`git -C <worktree_path> rev-parse HEAD`, the same value you print in
+     step 5), so inline comments anchor to the reviewed commit.
+
+   Forward **no other top-level keys**. In particular, a subagent's own
+   envelope keys (`error`, `tickets_found`, `tickets_accessible`) are NOT
+   part of this payload — fold `error` into `warnings` and drop the rest.
+   `pg-pr review draft` rejects any key it cannot map with a non-zero exit
+   naming the key, rather than silently dropping review content. Run
+   `pg-pr review --help` for the authoritative schema and a complete
+   example.
 
 4. **Stage the review draft locally**:
 
    ```bash
    cat <combined-json> | pg-pr review draft <PR>
    ```
+
+   If this exits non-zero, it is telling you which key of your payload is
+   wrong. Fix the payload against `pg-pr review --help` and re-run — do
+   NOT drop findings to make it pass.
 
    This persists the review under
    `$XDG_STATE_HOME/pg-pr/reviews/<repo-slug>-<PR>.json` for human

@@ -484,6 +484,98 @@
                     touch $out
                   '';
 
+              # Schema-agreement gate for the review-input shape (bead pg2-cns7a
+              # AC2). internal/reviewinput is the authoritative schema and its Go
+              # tests pin it, but the pg-pr reviewer AGENT assets are markdown
+              # OUTSIDE the Go module's src (pg-pr-go-tests only sees
+              # ./packages/pg-pr), so nothing else can catch the assets drifting
+              # away from the verb — which is exactly how the original bug stayed
+              # invisible. Feed every documented JSON example from the three
+              # reviewer assets to the BUILT pg-pr and assert each finding
+              # round-trips into the staged draft with a non-empty body and its
+              # documented path/line. Red on the pre-fix tree (bodies decode
+              # empty), and red on a drifted asset key, a blank-body example, or a
+              # severity that is not one of the three literal values.
+              test-pg-pr-review-input-assets =
+                pkgs.runCommand "test-pg-pr-review-input-assets"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.pg-pr
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    export HOME="$PWD"
+                    export PG_PR_STATE_HOME="$PWD/state"
+                    pr=0
+                    verified=0
+
+                    for asset in \
+                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-code-changes.md} \
+                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-pr-structure.md} \
+                      ${./claude-marketplace/pg-pr/agents/pg-pr-review-jira-alignment.md}; do
+                      name="$(basename "$asset")"
+                      rm -f block-*.json
+
+                      # Split out every fenced ```json example (fences may be
+                      # list-indented; a ```bash fence never matches the opener).
+                      awk '
+                        /^[ \t]*```json[ \t]*$/ { n++; f = "block-" n ".json"; inb = 1; next }
+                        /^[ \t]*```[ \t]*$/     { inb = 0; next }
+                        inb                     { print > f }
+                      ' "$asset"
+
+                      test -e block-1.json || {
+                        echo "FAIL: $name documents no fenced json example" >&2
+                        exit 1
+                      }
+
+                      for block in block-*.json; do
+                        jq -e . "$block" >/dev/null || {
+                          echo "FAIL: $name: $block is not valid JSON" >&2
+                          exit 1
+                        }
+                        # Only the review-payload examples are in scope; a
+                        # subagent envelope without `comments` is not one.
+                        jq -e 'has("comments")' "$block" >/dev/null || continue
+
+                        pr=$((pr + 1))
+                        if ! jq -c '{comments: .comments}' "$block" |
+                          pg-pr review draft "$pr" --repo test/repo >/dev/null; then
+                          echo "FAIL: $name: $block is REJECTED by 'pg-pr review draft'" >&2
+                          echo "      the asset and internal/reviewinput disagree on the schema" >&2
+                          exit 1
+                        fi
+
+                        draft="$PG_PR_STATE_HOME/reviews/test-repo-$pr.json"
+                        want="$(jq -cS '[.comments[]? | {path: (.path // ""), line: ((.line // .lines[0]?) // 0)}]' "$block")"
+                        got="$(jq -cS '[.comments[]? | {path: (.path // ""), line: (.line // 0)}]' "$draft")"
+                        if [ "$want" != "$got" ]; then
+                          echo "FAIL: $name: $block path/line did not round-trip" >&2
+                          echo "      documented: $want" >&2
+                          echo "      staged:     $got" >&2
+                          exit 1
+                        fi
+
+                        if ! jq -e 'all(.comments[]?; ((.body // "") | length) > 0)' "$draft" >/dev/null; then
+                          echo "FAIL: $name: $block staged a comment with an EMPTY body" >&2
+                          echo "      (the pg2-cns7a defect: the finding text was dropped)" >&2
+                          exit 1
+                        fi
+                        verified=$((verified + $(jq '.comments | length' "$block")))
+                      done
+                    done
+
+                    # Guard against the gate passing because it extracted nothing:
+                    # one finding per reviewer asset is the documented minimum.
+                    if [ "$verified" -lt 3 ]; then
+                      echo "FAIL: only $verified documented comment(s) verified, expected >= 3" >&2
+                      exit 1
+                    fi
+                    echo "ok: $verified documented agent finding(s) round-trip through 'pg-pr review draft'"
+                    touch $out
+                  '';
+
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
               # resolver's real-git contract test (builds fixtures only; the

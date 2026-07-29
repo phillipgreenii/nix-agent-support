@@ -54,17 +54,35 @@ Inputs are passed in the prompt by the orchestrator. Expect:
 
 3. **Compare**. For each gap (missing AC coverage, scope mismatch,
    undocumented additional work), emit a PR-level comment with
-   `path: null, lines: null`.
+   `path: null, line: null`.
 
 4. Output JSON:
+
    ```json
    {
      "comments": [
-       { "path": null, "lines": null, "message": "...", "severity": "warning" }
+       {
+         "path": null,
+         "line": null,
+         "severity": "warning",
+         "body": "DE-123 acceptance criterion 2 (retry on 429) has no corresponding change or test."
+       }
      ],
      "tickets_found": ["DE-123"],
      "tickets_accessible": true
    }
    ```
 
-**Do NOT include the 🤖 marker in `message`.**
+The `comments` elements are exactly the comment shape
+`pg-pr review draft` accepts (`path`, `line`, `body`, `severity` — `body`
+REQUIRED and non-empty, `severity` one of the three literal values
+`error`, `warning`, `suggestion`; no other keys). Run
+`pg-pr review --help` for the authoritative schema.
+
+`error`, `tickets_found` and `tickets_accessible` are **for the
+orchestrator only**. They are NOT part of the `pg-pr review draft`
+payload; the orchestrator folds a non-empty `error` into that payload's
+`warnings` and drops the rest. Forwarding them to the CLI is rejected
+with a non-zero exit naming the key.
+
+**Do NOT include the 🤖 marker in `body`.**

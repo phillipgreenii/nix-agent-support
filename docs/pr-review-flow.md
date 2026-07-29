@@ -139,6 +139,7 @@ sequenceDiagram
 | PR data sync / roster detection                   | `pg-pr`   | `packages/pg-pr/internal/sync/detector.go:94-146`                       |
 | Read verb `pr list --json`                        | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/pr_list.go:40-108`                            |
 | Write surface (`review submit/post`, `comment`)   | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/review.go:84-343`                             |
+| Review-input JSON schema (agents → verb)          | `pg-pr`   | `packages/pg-pr/internal/reviewinput/reviewinput.go`                    |
 | GitHub PENDING semantics + 422 anchor             | `pg-pr`   | `packages/pg-pr/pkg/provider/vcs/github/github.go:763-822`              |
 | Reconcile (pre-drain ACL)                         | `pr-pool` | `packages/pr-pool/cmd/pr-pool/main.go:30-31` → `reconcile_cmd.go:15-81` |
 | `review-pr` bead + gate ensure / re-review cursor | `pr-pool` | `packages/pr-pool/internal/prpoolacl/acl.go:42-163`                     |
@@ -156,6 +157,20 @@ sequenceDiagram
 The review role reads `repo` / `pr_number` / `branch` / `head_sha` from the
 `review-pr` bead metadata (`builtin.go:35-46`); the worktree is keyed on the bead
 ID (`executor/ccpool.go:46`).
+
+**Review-input schema.** Every producer of a review payload — the
+`pg-pr-review-*` agent assets, the `pr-pool` review-role prompt, a human piping
+JSON — targets ONE schema, owned by `internal/reviewinput` and rendered verbatim
+into `pg-pr review --help` (both prompts deep-link to that help text).
+`reviewinput.Decode` is the only adapter from it to `reviewstage.Draft`; it
+rejects any key it cannot map instead of dropping it, because
+`encoding/json`'s silent unknown-field drop previously blanked every agent
+finding (`{Path: "…", Line: 0, Body: ""}`) with no error anywhere. Two gates hold
+the schema and its producers together: `reviewinput`'s Go tests plus the
+`cmd/pg-pr` golden test, and the `test-pg-pr-review-input-assets` flake check,
+which feeds each agent asset's documented example to the built binary (the assets
+are markdown outside the Go module's src, so only a repo-level check can see
+them drift).
 
 ---
 

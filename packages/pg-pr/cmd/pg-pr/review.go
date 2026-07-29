@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/marker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewinput"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
@@ -41,7 +42,13 @@ type reviewFlags struct {
 
 var rvF reviewFlags
 
-// readDraftInput loads a Draft body from --from-file or stdin.
+// readDraftInput loads a Draft from --from-file or stdin.
+//
+// Decoding goes through reviewinput.Decode — the single authoritative
+// review-input schema — NOT a bare json.Unmarshal into reviewstage.Draft. A bare
+// unmarshal silently dropped every key the agent assets actually emit
+// (`message`, `lines`, `severity`, `warnings`), so each finding decoded to
+// {Path: "…", Line: 0, Body: ""} and the review posted blank (pg2-cns7a).
 func readDraftInput(cmd *cobra.Command, fromFile string) (*reviewstage.Draft, error) {
 	var raw []byte
 	var err error
@@ -60,17 +67,17 @@ func readDraftInput(cmd *cobra.Command, fromFile string) (*reviewstage.Draft, er
 	if len(raw) == 0 {
 		return nil, errors.New("no review payload provided on stdin or --from-file")
 	}
-	var d reviewstage.Draft
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("parse review JSON: %w", err)
-	}
-	return &d, nil
+	return reviewinput.Decode(raw)
 }
 
 // ----------------------------------------------------------------------
 // Cobra wiring
 // ----------------------------------------------------------------------
 
+// reviewCmd's Long embeds reviewinput.SchemaDoc: the reviewer agent assets and
+// the pr-pool review-role prompt both instruct their agent to "see `pg-pr review
+// --help`" for the payload schema, so this text is the schema's only
+// user-visible documentation (pg2-cns7a AC4).
 var reviewCmd = &cobra.Command{
 	Use:   "review",
 	Short: "Author and post PR reviews",
@@ -78,7 +85,9 @@ var reviewCmd = &cobra.Command{
 
 Comments and review bodies are automatically tagged with the agent
 marker before posting. Existing review comments are deduplicated by
-(path, line, body-prefix) to make re-runs idempotent.`,
+(path, line, body-prefix) to make re-runs idempotent.
+
+` + reviewinput.SchemaDoc,
 }
 
 var reviewDraftCmd = &cobra.Command{
@@ -87,7 +96,9 @@ var reviewDraftCmd = &cobra.Command{
 	Long: `Read a review JSON payload from stdin (or --from-file) and
 persist it under $XDG_STATE_HOME/pg-pr/reviews/<repo-slug>-<pr>.json.
 
-Re-runs replace any existing staged draft for the (repo, pr) pair.`,
+Re-runs replace any existing staged draft for the (repo, pr) pair.
+
+Run 'pg-pr review --help' for the payload schema and an example.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		num, err := parsePR(args[0])
@@ -133,6 +144,16 @@ Re-runs replace any existing staged draft for the (repo, pr) pair.`,
 // Callers MUST honor skipped: `review post` suppresses its Clear so the
 // freshly-staged draft survives the skip.
 func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emitJSON bool) (skipped bool, err error) {
+	// Refuse to post a blank comment. `review submit` came through
+	// reviewinput.Decode, which already rejects an empty body; `review post`
+	// reads the staged FILE, which may have been written by a pre-pg2-cns7a
+	// pg-pr (every comment blank) or hand-edited. Posting it would stamp the
+	// marker onto nothing and publish marker-only comments upstream, so fail
+	// loudly and let the reviewer re-stage.
+	if err := errOnBlankComments(draft); err != nil {
+		return false, err
+	}
+
 	provider := vcsProviderFor(draft.Repo)
 
 	// Skip if this reviewer already has a PENDING review on the PR, so a re-run
@@ -224,7 +245,9 @@ var reviewSubmitCmd = &cobra.Command{
 	Short: "Submit a review in one step (no staging)",
 	Long: `Read a review JSON payload from stdin (or --from-file),
 deduplicate against existing PR comments, apply the agent marker, and
-post immediately. No state is persisted.`,
+post immediately. No state is persisted.
+
+Run 'pg-pr review --help' for the payload schema and an example.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		num, err := parsePR(args[0])
@@ -403,6 +426,23 @@ var commentResolveCmd = &cobra.Command{
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok Resolved thread %s\n", args[0])
 		return err
 	},
+}
+
+// errOnBlankComments reports the indexes of draft comments carrying no text.
+// A blank comment is never legitimate: it posts as a bare attribution marker.
+func errOnBlankComments(draft *reviewstage.Draft) error {
+	var blank []int
+	for i, c := range draft.Comments {
+		if strings.TrimSpace(marker.Strip(c.Body)) == "" {
+			blank = append(blank, i)
+		}
+	}
+	if len(blank) == 0 {
+		return nil
+	}
+	return fmt.Errorf("staged draft for %s PR #%d has %d comment(s) with no text (comments%v); "+
+		"re-stage with 'pg-pr review draft' — see 'pg-pr review --help' for the payload schema",
+		draft.Repo, draft.PR, len(blank), blank)
 }
 
 // loadCommentBody resolves the comment body from the most-specific source.
