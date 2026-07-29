@@ -32,6 +32,21 @@ func isSafeRedirectTarget(path string) bool {
 	return devFdPattern.MatchString(path)
 }
 
+// isDynamicRedirectTarget reports whether a redirection target contains a shell
+// expansion ($VAR, ${VAR}, $(...), backtick) that resolves only at runtime,
+// hiding its real target from path evaluation. The hook process does not have
+// the target shell's variables, so patheval.cleanPath's os.ExpandEnv erases
+// `$TARGET` to "" BEFORE its unexpandedVarPattern guard can see it; the empty or
+// partial remainder is then joined against the CWD and lands inside the project
+// root as PathReadWrite. `> "$TARGET"` therefore auto-approved a write that the
+// static `> /etc/hosts` correctly rejects (pg2-2u5jf). Mirrors the same refusal
+// safecmds.argsHaveDynamicExpansion already applies to write-command path args.
+// Checked AFTER isSafeRedirectTarget, which matches only literal device paths
+// containing no `$` or backtick, so the two never interact.
+func isDynamicRedirectTarget(path string) bool {
+	return strings.ContainsAny(path, "$`")
+}
+
 type Engine struct {
 	rules    []hookio.RuleModule
 	pathEval *patheval.PathEvaluator
@@ -372,11 +387,32 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 	if pe == nil {
 		return hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
 	}
+	// dynamic holds the first unresolvable target's Abstain. It is NOT returned
+	// early: the remaining redirections must still be evaluated so a STATIC
+	// read-only target later in the same command (`> "$T" > /etc/hosts`) still
+	// produces its Reject instead of being masked by this Abstain.
+	var dynamic *hookio.RuleResult
 	for _, r := range redirs {
 		// Standard special device files are always-safe redirect targets; skip
 		// them before consulting the PathEvaluator, which would otherwise report
 		// PathUnknown and wrongly demote/reject the command (pg2-9ctmb).
 		if isSafeRedirectTarget(r.Path) {
+			continue
+		}
+		// A dynamically-expanded target is unresolvable here and MUST NOT be
+		// path-evaluated: patheval would silently collapse it into the CWD and
+		// classify the write read-write (pg2-2u5jf). Applied to the read
+		// direction (`<`) too — an unresolvable source is no more knowable than
+		// an unresolvable sink — and before the PathEvaluator so no verdict is
+		// ever derived from the collapsed path.
+		if isDynamicRedirectTarget(r.Path) {
+			if dynamic == nil {
+				dynamic = &hookio.RuleResult{
+					Decision: hookio.Abstain,
+					Reason:   "redirection: dynamically-expanded target " + r.Path + " (deferred to claude-code)",
+					Module:   "engine",
+				}
+			}
 			continue
 		}
 		access := pe.Evaluate(r.Path)
@@ -393,6 +429,9 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
 			}
 		}
+	}
+	if dynamic != nil {
+		return *dynamic
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "redirections: all paths safe", Module: "engine"}
 }

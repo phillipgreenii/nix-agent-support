@@ -187,6 +187,97 @@ func TestIntegration_QuotedParenSubstitutionLeafDrop(t *testing.T) {
 	}
 }
 
+// TestIntegration_RedirectTargetApproveOnlyWhenStaticallyResolvable pins pg2-2u5jf
+// in BOTH directions through the real rule chain.
+//
+// The defect: `echo pwned > /etc/hosts` correctly REJECTED, but every dynamic
+// spelling of the same write auto-APPROVED. patheval.cleanPath runs os.ExpandEnv
+// before its unexpandedVarPattern guard, and the hook process does not have the
+// target shell's variables — so `$TARGET` expanded to "", the guard had nothing
+// left to match, and the empty/partial remainder was joined against the CWD,
+// landing inside the project root as PathReadWrite. Confirmed at the patheval
+// layer: `$TARGET` -> <cwd>, `$f.graphql` -> <cwd>/.graphql,
+// `$(echo /etc/hosts)` -> <cwd>/$(echo /etc/hosts), all classified read-write.
+//
+// The invariant asserted here is EXACT equality against want, so it fails if the
+// abstention either narrows (a dynamic target regains Approve) or widens (a
+// statically-resolvable target loses its verdict):
+//
+//	a redirection target containing `$` or a backtick is UNRESOLVABLE and MUST
+//	Abstain — read direction (`<`) as well as write — while every statically
+//	resolvable target keeps exactly the verdict it had before.
+func TestIntegration_RedirectTargetApproveOnlyWhenStaticallyResolvable(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- DYNAMIC targets: unresolvable, MUST Abstain (the fix) ---
+		{"bare var", `echo pwned > "$TARGET"`, hookio.Abstain},
+		{"braced var", `echo pwned > "${TARGET}"`, hookio.Abstain},
+		{"unquoted var", "echo pwned > $TARGET", hookio.Abstain},
+		{"command substitution", "echo pwned > $(echo /etc/hosts)", hookio.Abstain},
+		{"backtick substitution", "echo pwned > `echo /etc/hosts`", hookio.Abstain},
+		// Pre-fix this one already abstained ($TARGET -> "" left an absolute
+		// /sub/x, PathUnknown) — pinned so it cannot drift up to Approve.
+		{"var with static suffix", `echo pwned > "$TARGET/sub/x"`, hookio.Abstain},
+		// The nastiest shape: the expansion is only a PREFIX of the basename, so
+		// pre-fix it collapsed to <cwd>/.graphql — inside the project root, and
+		// therefore approved.
+		{"var prefix of basename", "echo pwned > $f.graphql", hookio.Abstain},
+		{"append operator", `echo pwned >> "$TARGET"`, hookio.Abstain},
+		{"stderr redirect", `cmd 2> "$TARGET"`, hookio.Abstain},
+		// Arithmetic expansion IN THE TARGET is dynamic too; abstaining is
+		// intentional (the target is not knowable here).
+		{"arithmetic in target", "echo hi > out$((n)).txt", hookio.Abstain},
+		// READ direction: an unresolvable source is no more knowable than an
+		// unresolvable sink.
+		{"stdin from var", `cat < "$SRC"`, hookio.Abstain},
+		{"stdin from substitution", "cat < $(echo /etc/hosts)", hookio.Abstain},
+
+		// --- The dynamic Abstain MUST NOT mask a static Reject ---
+		// The unresolvable target is recorded but does not short-circuit the
+		// redirection loop, so a read-only target later in the SAME command still
+		// Rejects. An early return here would have downgraded these to Abstain.
+		{"dynamic target then static read-only target still rejects", `echo pwned > "$TARGET" 2> /etc/hosts`, hookio.Reject},
+		{"static read-only target then dynamic target still rejects", `echo pwned > /etc/hosts 2> "$TARGET"`, hookio.Reject},
+
+		// --- STATIC targets: unchanged, verdict preserved in both directions ---
+		{"static write to read-only path still rejects", "echo pwned > /etc/hosts", hookio.Reject},
+		// Not a Reject: in this fixture /etc/passwd is PathUnknown rather than
+		// PathReadOnly, so the non-writable branch Abstains. Verified to be the
+		// verdict on the unfixed base too — pinned as pre-existing, not as a
+		// consequence of this change.
+		{"static write to unknown syspath still abstains", "echo pwned > /etc/passwd", hookio.Abstain},
+		{"static in-project write still approves", "echo hi > /Users/testuser/workspace/my-project/out.txt", hookio.Approve},
+		{"static relative in-project write still approves", "echo hi > out.txt", hookio.Approve},
+		{"static read still approves", "cat < /etc/hosts", hookio.Approve},
+		// /dev/* short-circuit (pg2-9ctmb) intact: no `$`, no backtick, so the
+		// new check never sees these.
+		{"dev-null stderr redirect unaffected", "ls 2>/dev/null", hookio.Approve},
+		{"dev-null plus fd dup unaffected", "ls >/dev/null 2>&1", hookio.Approve},
+		{"dev-fd redirect unaffected", "echo hi > /dev/fd/3", hookio.Approve},
+		// Arithmetic expansion in an ARGUMENT (not the target) is untouched — the
+		// check is scoped to redirection targets only.
+		{"arithmetic in argument unaffected", "echo $((1+2)) > out.txt", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != tt.want {
+				t.Errorf("command %q got %v (%s: %s); want %v",
+					tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 func TestIntegration_RegressionSuite(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 
