@@ -3,6 +3,10 @@
 // work bead (child of the pg-pr-owned merge-request bead) per open PR, gated on
 // pg-pr:active-pr. It runs as a PRE-DRAIN step (not a role-query: query<->role
 // are coupled), writing beads the downstream review role discovers via bd ready.
+//
+// The seam is network-free, so its rows are only as current as pg-pr's last sync.
+// The ACL therefore reads each row's freshness (last_synced_at + stale) and
+// REFUSES to act on a row past its bound — see staleForAction / actionablePRs.
 package prpoolacl
 
 import (
@@ -13,6 +17,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 )
@@ -22,7 +27,8 @@ import (
 // pg-pr:* gate types have no bd auto-resolver, so the ACL resolves them itself.
 const activePRGate = "pg-pr:active-pr"
 
-// PR is the subset of `pg-pr pr list --json` the ACL consumes (base fields).
+// PR is the subset of `pg-pr pr list --json` the ACL consumes (base fields plus
+// the row's freshness).
 type PR struct {
 	Repo      string `json:"repo"`
 	Number    int    `json:"number"`
@@ -30,6 +36,17 @@ type PR struct {
 	Branch    string `json:"branch"`
 	State     string `json:"state"`
 	Ownership string `json:"ownership"`
+	// LastSyncedAt is pg-pr's AS-OF time for this row (RFC3339 UTC, the store's
+	// pull_request.last_synced_at column emitted verbatim). The base seam is
+	// network-free, so every field above is only as true as this timestamp.
+	LastSyncedAt string `json:"last_synced_at"`
+	// Stale is pg-pr's OWN verdict that LastSyncedAt has aged past its freshness
+	// bound. The bound is deliberately NOT re-derived here: pg-pr owns the sync
+	// cadence the bound is measured against (internal/freshness), and unlike
+	// actsAsMine there is no way to pin a duplicated constant across the module
+	// boundary with a parity test — so the ACL consumes the VERDICT and keeps
+	// only the "is there a usable as-of time at all" check for itself.
+	Stale bool `json:"stale"`
 }
 
 // The ownership values pg-pr emits on the seam. The set is CLOSED at three
@@ -66,12 +83,69 @@ func actsAsMine(ownership string) bool {
 
 func prKey(pr PR) string { return fmt.Sprintf("%s#%d", pr.Repo, pr.Number) }
 
-// Reconcile ensures a review-pr work bead for each open PR and resolves its
-// active-pr gate from the fact that the PR is still open. It is idempotent
-// (re-run = no dupes) and exit-0-on-partial: per-PR failures are collected and
-// returned, never aborting the pass — a non-zero abort would strand the
-// following drain's other roles (H6). Returns the ensured review-pr bead ids.
+// staleForAction reports whether pr's freshness forbids ACTING on it this pass.
+// It is the ACL's answer to "don't act on stale truth" (the deployment's
+// INV-FRESH-1): a readiness signal derived from data past its bound MUST NOT be
+// presented as current, and resolving the pg-pr:active-pr gate is exactly such a
+// signal — it asserts "pg-pr reports PR open/active", which a stale row cannot
+// support.
+//
+// Two ways a PR is unusable:
+//
+//   - pg-pr FLAGGED it stale (its sync daemon is behind or stopped, so state /
+//     head_sha / ownership may no longer be true); or
+//   - the seam carries NO usable as-of time — the field is absent (an older
+//     pg-pr that predates the freshness fields, decoding to ""), empty, or
+//     unparseable. An unknown as-of is treated as stale, never as fresh: this is
+//     the same fail-closed direction the ACL already takes for an out-of-band
+//     ownership value (degrades to team-style selection) and for a closed
+//     review-pr with no reviewed sha (not resurrected). The failure mode is a
+//     loud no-op pass, which the ACL already tolerates — a `pg-pr pr list` that
+//     cannot be read at all is likewise treated as zero PRs (reconcileACL, H6).
+func staleForAction(pr PR) bool {
+	if pr.Stale {
+		return true
+	}
+	_, err := time.Parse(time.RFC3339, pr.LastSyncedAt)
+	return err != nil
+}
+
+// actionablePRs partitions prs into the ones fresh enough to act on, RECORDING
+// (WARN) every refusal with the as-of time that caused it — refuse-and-record,
+// matching the ACL's existing skip channel (see the no-merge-request-bead skip).
+// Filtering ONCE up front covers both of Reconcile's phases: a stale PR gets
+// neither a review-pr bead nor an active-pr gate resolution.
+//
+// The filter is PER PR, not whole-pass: a repo mid-refresh can hold rows of
+// different ages, and there is no reason to withhold action on a freshly synced
+// PR because a different one is behind.
+func actionablePRs(prs []PR) []PR {
+	out := make([]PR, 0, len(prs))
+	for _, pr := range prs {
+		if staleForAction(pr) {
+			slog.Warn("acl: pg-pr facts past their freshness bound; refusing to act on this PR",
+				"pr", prKey(pr), "last_synced_at", pr.LastSyncedAt, "pg_pr_stale_flag", pr.Stale)
+			continue
+		}
+		out = append(out, pr)
+	}
+	return out
+}
+
+// Reconcile ensures a review-pr work bead for each open PR whose pg-pr facts are
+// FRESH, and resolves its active-pr gate from the fact that the PR is still open.
+// It is idempotent (re-run = no dupes) and exit-0-on-partial: per-PR failures are
+// collected and returned, never aborting the pass — a non-zero abort would strand
+// the following drain's other roles (H6). Returns the ensured review-pr bead ids.
+//
+// PRs whose facts are past their freshness bound are dropped up front (see
+// actionablePRs): they are neither projected into beads nor used to resolve a
+// gate, and each refusal is logged. A stale row self-heals — the next pass, after
+// pg-pr's sync catches up, acts on it normally.
 func Reconcile(ctx context.Context, r beads.Runner, prs []PR) (reviewIDs []string, errs []error) {
+	// Freshness gate FIRST, so neither phase below can act on stale truth.
+	prs = actionablePRs(prs)
+
 	// Snapshot the merge-request and review-pr (task) beads ONCE — including
 	// closed (--all) so a completed review-pr is not resurrected, and so we
 	// don't spawn a `bd list` per PR. A snapshot failure is fatal for the pass
@@ -209,6 +283,10 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 // ReadPRList shells `pg-pr pr list --json` with cwd=repoRoot so pg-pr
 // auto-detects the repo from the monorepo's git remote. Base fields only (no
 // --reviewers): the cheap, network-free read seam.
+//
+// Because it is network-free, the rows it returns are exactly as current as
+// pg-pr's last sync — which is why each row carries LastSyncedAt + Stale, and why
+// Reconcile refuses to act on the rows that are past their bound.
 func ReadPRList(ctx context.Context, repoRoot string) ([]PR, error) {
 	cmd := exec.CommandContext(ctx, "pg-pr", "pr", "list", "--json")
 	cmd.Dir = repoRoot

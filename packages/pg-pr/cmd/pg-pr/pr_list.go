@@ -6,8 +6,10 @@ import (
 	"os"
 	"strconv"
 	"text/tabwriter"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -19,17 +21,41 @@ import (
 // It is the read seam the pr-pool ACL consumes: the base fields (repo, number,
 // head_sha, ownership, draft, state, branch) come from the store; reviewer
 // roster + labels are added best-effort from a live provider round-trip.
+//
+// Freshness is PER ITEM, not payload-level, deliberately: the top-level JSON is a
+// bare array and wrapping it in an envelope would break every existing consumer,
+// whereas the store already records a PER-ROW as-of time (last_synced_at), which
+// is strictly more informative than one payload-wide stamp — a repo mid-refresh
+// can hold rows of different ages. Both halves of the freshness contract
+// (pr-pool INV-FRESH-1) therefore ride on each item: LastSyncedAt is the as-of
+// time, Stale is the verdict against pg-pr's own bound.
 type prListItem struct {
-	Repo      string           `json:"repo"`
-	Number    int              `json:"number"`
-	State     string           `json:"state"`
-	Ownership string           `json:"ownership"`
-	Draft     bool             `json:"draft"`
-	Branch    string           `json:"branch"`
-	HeadSHA   string           `json:"head_sha"`
+	Repo      string `json:"repo"`
+	Number    int    `json:"number"`
+	State     string `json:"state"`
+	Ownership string `json:"ownership"`
+	Draft     bool   `json:"draft"`
+	Branch    string `json:"branch"`
+	HeadSHA   string `json:"head_sha"`
+	// LastSyncedAt is this row's AS-OF time: the store's own
+	// pull_request.last_synced_at column, emitted VERBATIM (RFC3339 UTC, written
+	// by the sync engine on every observation). It answers "how old are these
+	// facts?" — which the base listing otherwise could not, since it makes no
+	// network call and the row may predate the current tick by any amount.
+	LastSyncedAt string `json:"last_synced_at"`
+	// Stale is the freshness FLAG: LastSyncedAt has aged past
+	// freshness.BoundSeconds, so these facts MUST NOT be treated as current. A
+	// consumer that acts on the seam (the pr-pool ACL) reads THIS rather than
+	// re-deriving the bound, keeping the staleness POLICY owned by pg-pr, which
+	// owns the sync cadence it is measured against.
+	Stale     bool             `json:"stale"`
 	Labels    []string         `json:"labels"`
 	Reviewers []prListReviewer `json:"reviewers"`
 }
+
+// prListNow is the clock the freshness stamp is computed against; overridable in
+// tests. Mirrors the store's own nowRFC3339 clock seam.
+var prListNow = func() time.Time { return time.Now().UTC() }
 
 // prListReviewer is one classified reviewer in a prListItem's roster.
 type prListReviewer struct {
@@ -46,6 +72,13 @@ var prListCmd = &cobra.Command{
 Base fields (repo, number, head_sha, ownership, draft, state, branch) are read
 from the local store — this is the cheap default the pr-pool ACL polls, and it
 makes no network calls.
+
+Because those facts come from the store rather than the network, each PR also
+carries its own freshness: last_synced_at (the store's as-of time for that row,
+RFC3339 UTC) and stale (true once that as-of time has aged past twice pg-pr's
+default sync interval). A consumer MUST NOT act on a PR whose stale flag is set —
+the sync daemon is behind or stopped, so the row's state, head_sha and ownership
+may no longer be true. A row with no usable as-of time is reported stale.
 
 With --reviewers, each PR is additionally augmented with its labels and a
 classified reviewer roster from a live provider round-trip. When the provider
@@ -90,8 +123,16 @@ func listOpenPRItems(ctx context.Context, repo string, augment bool) ([]prListIt
 	if err != nil {
 		return nil, err
 	}
+	// One clock read + one bound for the whole listing, so every item in a single
+	// payload is judged against the same instant. The bound falls back to pg-pr's
+	// default cadence: a one-shot CLI read cannot ask the running daemon what
+	// interval it ticks at (freshness.DefaultSyncIntervalSeconds, pinned to
+	// sync.DefaultDaemonInterval).
+	now := prListNow()
+	bound := freshness.BoundSeconds(0)
 	items := make([]prListItem, 0, len(prs))
 	for _, pr := range prs {
+		asOf := freshness.ParseAsOf(pr.LastSyncedAt)
 		items = append(items, prListItem{
 			Repo:      pr.Repo,
 			Number:    pr.Number,
@@ -100,8 +141,15 @@ func listOpenPRItems(ctx context.Context, repo string, augment bool) ([]prListIt
 			Draft:     pr.State == "draft",
 			Branch:    pr.Branch,
 			HeadSHA:   pr.HeadSHA,
-			Labels:    []string{},
-			Reviewers: []prListReviewer{},
+			// Verbatim column pass-through: the seam reports what the store
+			// recorded, un-reformatted, so a consumer can reconcile the two.
+			// An empty or malformed column parses to the zero time and is
+			// therefore flagged Stale (fail closed), rather than silently
+			// reading as freshly synced.
+			LastSyncedAt: pr.LastSyncedAt,
+			Stale:        freshness.IsStale(asOf, now, bound),
+			Labels:       []string{},
+			Reviewers:    []prListReviewer{},
 		})
 	}
 	if augment {
@@ -246,13 +294,18 @@ func nonNilStrings(s []string) []string {
 	return s
 }
 
+// renderPRList writes the human-readable table. The SYNCED column carries the
+// same freshness the JSON seam does — the table is itself a surface an operator
+// acts on, so it must not present store-derived state without saying how old it
+// is (pr-pool INV-FRESH-1).
 func renderPRList(w io.Writer, items []prListItem) error {
 	if len(items) == 0 {
 		_, err := io.WriteString(w, "(no open PRs)\n")
 		return err
 	}
+	now := prListNow()
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := io.WriteString(tw, "PR\tOWNER\tSTATE\tBRANCH\tHEAD\n"); err != nil {
+	if _, err := io.WriteString(tw, "PR\tOWNER\tSTATE\tBRANCH\tHEAD\tSYNCED\n"); err != nil {
 		return err
 	}
 	for _, it := range items {
@@ -264,11 +317,26 @@ func renderPRList(w io.Writer, items []prListItem) error {
 		if len(head) > 12 {
 			head = head[:12]
 		}
-		if _, err := io.WriteString(tw, "#"+strconv.Itoa(it.Number)+"\t"+it.Ownership+"\t"+state+"\t"+it.Branch+"\t"+head+"\n"); err != nil {
+		if _, err := io.WriteString(tw, "#"+strconv.Itoa(it.Number)+"\t"+it.Ownership+"\t"+state+"\t"+it.Branch+"\t"+head+"\t"+syncedCell(it, now)+"\n"); err != nil {
 			return err
 		}
 	}
 	return tw.Flush()
+}
+
+// syncedCell renders one PR's freshness for the human table: its age in seconds,
+// suffixed STALE when the item's stale flag is set, or "unknown STALE" when the
+// row carries no usable as-of time (whose age cannot be stated).
+func syncedCell(it prListItem, now time.Time) string {
+	asOf := freshness.ParseAsOf(it.LastSyncedAt)
+	if asOf.IsZero() {
+		return "unknown STALE"
+	}
+	cell := strconv.Itoa(freshness.AgeSeconds(asOf, now)) + "s ago"
+	if it.Stale {
+		cell += " STALE"
+	}
+	return cell
 }
 
 func init() {

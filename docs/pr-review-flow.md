@@ -131,7 +131,8 @@ sequenceDiagram
 
     Op->>ACL: pr-pool reconcile (pre-drain)
     ACL->>PGPR: pg-pr pr list --json (network-free, from store)
-    PGPR-->>ACL: open PRs {repo, number, ownership, draft, head_sha, branch}
+    PGPR-->>ACL: open PRs {repo, number, ownership, draft, head_sha, branch, last_synced_at, stale}
+    ACL->>ACL: drop rows flagged stale (refuse to act, WARN)
     ACL->>BD: ensure review-pr bead + pg-pr:active-pr gate (idempotent)
     Op->>Role: pr-pool drain
     Role->>BD: claim ready review-pr bead
@@ -293,15 +294,35 @@ network-free from the store.
     (team-author / requested / label).
   - `pg-pr pr list --json` (base, no `--reviewers`) **MUST** read from the store
     with **no** network call and **no** store side-effect.
+  - Because that read is network-free, each item **MUST** carry its own
+    freshness: `last_synced_at` (the store's `pull_request.last_synced_at` column
+    verbatim, RFC3339 UTC) and `stale` (that as-of time has aged past
+    `freshness.BoundSeconds` — two sync intervals). A row with no usable as-of
+    time **MUST** be reported `stale`. The human table carries the same signal in
+    its `SYNCED` column.
+  - The ACL **MUST NOT** act on an item flagged `stale`: it creates no
+    `review-pr` bead for it and **MUST NOT** resolve its `pg-pr:active-pr` gate
+    (that gate asserts "pg-pr reports PR open/active", which past-bound data
+    cannot support). The refusal is **per PR**, is logged (refuse-and-record), and
+    keeps the pass at exit `0`; it self-heals on the next pass once pg-pr's sync
+    catches up.
 - **Code paths:** `packages/pg-pr/internal/sync/detector.go:94-146`
   (`buildTeamQueries` union; `FingerprintPRs` per bucket; `mergeRosters`);
   `packages/pg-pr/internal/sync/refresh.go:11-15` (`reviewRequestedOfSelf`);
   `packages/pg-pr/internal/config/config.go:127` (`WatchLabels`);
   `packages/pg-pr/internal/snapshot/builder.go:45-128` (reason-tagged; reasonless
-  non-mine excluded); `packages/pg-pr/cmd/pg-pr/pr_list.go:40-108`;
-  `packages/pr-pool/internal/prpoolacl/acl.go:165-181` (`ReadPRList`).
+  non-mine excluded); `packages/pg-pr/cmd/pg-pr/pr_list.go`;
+  `packages/pg-pr/internal/freshness/freshness.go` (the one staleness policy,
+  shared by this seam and the dashboard payload);
+  `packages/pr-pool/internal/prpoolacl/acl.go` (`ReadPRList`, `staleForAction`,
+  `actionablePRs`).
 - **Coverage:** `broaden_test.go`, `reviewrequested_test.go`, `pr_list_test.go`,
-  `fingerprint_test.go`, `builder_test.go`.
+  `fingerprint_test.go`, `builder_test.go`,
+  `packages/pg-pr/internal/freshness/freshness_test.go`,
+  `packages/pr-pool/internal/prpoolacl/acl_test.go`
+  (`TestStaleForAction`, `TestReconcile_StalePRRefusedNoBeadNoGate`,
+  `TestReconcile_MissingAsOfRefused`, `TestReconcile_FreshnessGateIsPerPR`,
+  `TestReconcile_StaleRowSelfHeals`).
 - **Terminology note:** the **`FingerprintProvider`** decides **which PRs** enter
   the to-review roster in the sync daemon. That is distinct from the reviewer
   roster shown by `pr list --json --reviewers`, which comes from `ListReviews` +

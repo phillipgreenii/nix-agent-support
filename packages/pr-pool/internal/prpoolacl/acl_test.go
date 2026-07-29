@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pr-pool/internal/beads"
 )
@@ -74,6 +75,20 @@ func (f *fakeBD) countCalls(match ...string) int {
 
 var _ beads.Runner = (*fakeBD)(nil)
 
+// fresh stamps each fixture PR with an as-of time INSIDE pg-pr's freshness bound.
+// Every fixture whose subject is not freshness must go through it: the ACL
+// refuses to act on a row with no usable as-of time (staleForAction), so a bare
+// PR literal would simply be skipped and the fixture would prove nothing.
+func fresh(prs ...PR) []PR {
+	now := time.Now().UTC().Format(time.RFC3339)
+	out := make([]PR, 0, len(prs))
+	for _, pr := range prs {
+		pr.LastSyncedAt = now
+		out = append(out, pr)
+	}
+	return out
+}
+
 func mrJSON(id, repo string, num int, status string) string {
 	return `{"id":"` + id + `","issue_type":"merge-request","status":"` + status +
 		`","metadata":{"repo":"` + repo + `","pr_number":` + strconv.Itoa(num) + `}}`
@@ -108,7 +123,7 @@ func TestReconcile_EnsuresReviewChildGateAndResolves(t *testing.T) {
 		"gate create":        `{"data":{"id":"g7"}}`,
 		"gate list":          `{"data":[{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"}]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open", Ownership: "mine"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open", Ownership: "mine"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -139,7 +154,7 @@ func TestReconcile_Idempotent(t *testing.T) {
 		"list task":          `{"data":[` + reviewJSON("zr-rv7", "o/r", 7) + `]}`,
 		"gate list":          `{"data":[]}`, // already resolved
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -163,7 +178,7 @@ func TestReconcile_NoMergeRequestSkips(t *testing.T) {
 		"list merge-request": `{"data":[]}`,
 		"list task":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, State: "open"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, State: "open"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -183,7 +198,7 @@ func TestReconcile_MergeRequestClosedSkips(t *testing.T) {
 		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "closed") + `]}`,
 		"list task":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, State: "open"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, State: "open"})
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 || len(ids) != 0 {
 		t.Fatalf("closed MR: expected no ids/errs, got ids=%v errs=%v", ids, errs)
@@ -207,10 +222,10 @@ func TestReconcile_ExitZeroOnPartial(t *testing.T) {
 		},
 		errSubstr: map[string]error{"review-pr: o/r#7": errors.New("boom create 7")},
 	}
-	prs := []PR{
-		{Repo: "o/r", Number: 7, State: "open"},
-		{Repo: "o/r", Number: 9, State: "open"},
-	}
+	prs := fresh(
+		PR{Repo: "o/r", Number: 7, State: "open"},
+		PR{Repo: "o/r", Number: 9, State: "open"},
+	)
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) == 0 {
 		t.Fatalf("expected the failing PR to be collected as an error")
@@ -229,7 +244,7 @@ func TestReconcile_ClosedReviewNotResurrected(t *testing.T) {
 		"list task":          `{"data":[{"id":"zr-rv7","issue_type":"task","status":"closed","title":"review-pr: o/r#7","metadata":{"repo":"o/r","pr_number":7}}]}`,
 		"gate list":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, State: "open"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, State: "open"})
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errs: %v", errs)
@@ -253,7 +268,7 @@ func TestReconcile_HeadAdvancedReopensClosedReview(t *testing.T) {
 		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "oldsha") + `]}`,
 		"gate list":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -283,7 +298,7 @@ func TestReconcile_HeadUnchangedNotResurrected(t *testing.T) {
 		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "samesha") + `]}`,
 		"gate list":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "samesha", Branch: "feat/x", State: "open", Ownership: "team"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "samesha", Branch: "feat/x", State: "open", Ownership: "team"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -311,7 +326,7 @@ func TestReconcile_LegacyClosedNoHeadSHANotResurrected(t *testing.T) {
 		"list task":          `{"data":[` + closedReviewJSON("zr-rv7", "o/r", 7, "") + `]}`,
 		"gate list":          `{"data":[]}`,
 	}}
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "newsha", Branch: "feat/x", State: "open", Ownership: "team"})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -363,7 +378,7 @@ func TestReconcile_DraftSelectionMatrix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := birthFake()
-			prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Ownership: tc.ownership}}
+			prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: tc.state, Ownership: tc.ownership})
 
 			ids, errs := Reconcile(context.Background(), f, prs)
 			if len(errs) != 0 {
@@ -394,7 +409,7 @@ func TestReconcile_DraftSelectionMatrix(t *testing.T) {
 // (`mine := p.Ownership != "team"`, bridge.go:111-112) and reviews mine while draft.
 func TestReconcile_CoOwnedDraftReviewed(t *testing.T) {
 	f := birthFake()
-	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "draft", Ownership: ownershipCoOwned}}
+	prs := fresh(PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "draft", Ownership: ownershipCoOwned})
 
 	ids, errs := Reconcile(context.Background(), f, prs)
 	if len(errs) != 0 {
@@ -435,8 +450,8 @@ func TestActsAsMineParity(t *testing.T) {
 
 func TestParsePRList(t *testing.T) {
 	prs, err := parsePRList([]byte(`[
-		{"repo":"o/r","number":7,"state":"open","ownership":"mine","draft":false,"branch":"feat/x","head_sha":"abc123"},
-		{"repo":"o/r","number":9,"state":"draft","ownership":"team","draft":true,"branch":"feat/y","head_sha":"def456"}
+		{"repo":"o/r","number":7,"state":"open","ownership":"mine","draft":false,"branch":"feat/x","head_sha":"abc123","last_synced_at":"2026-07-29T11:59:30Z","stale":false},
+		{"repo":"o/r","number":9,"state":"draft","ownership":"team","draft":true,"branch":"feat/y","head_sha":"def456","last_synced_at":"2026-07-29T10:00:00Z","stale":true}
 	]`))
 	if err != nil {
 		t.Fatalf("parsePRList: %v", err)
@@ -449,5 +464,177 @@ func TestParsePRList(t *testing.T) {
 	}
 	if prs[1].Number != 9 || prs[1].Ownership != "team" {
 		t.Errorf("PR1 parsed wrong: %+v", prs[1])
+	}
+	// The freshness fields must decode under pg-pr's exact wire names, or the
+	// ACL would silently see every row as "as-of unknown".
+	if prs[0].LastSyncedAt != "2026-07-29T11:59:30Z" || prs[0].Stale {
+		t.Errorf("PR0 freshness parsed wrong: last_synced_at=%q stale=%v", prs[0].LastSyncedAt, prs[0].Stale)
+	}
+	if prs[1].LastSyncedAt != "2026-07-29T10:00:00Z" || !prs[1].Stale {
+		t.Errorf("PR1 freshness parsed wrong: last_synced_at=%q stale=%v", prs[1].LastSyncedAt, prs[1].Stale)
+	}
+}
+
+// TestStaleForAction is the truth table for the freshness gate. "Fresh" means
+// BOTH: pg-pr did not flag the row stale, AND the row carries a parseable as-of
+// time. Anything else refuses action (fail closed).
+func TestStaleForAction(t *testing.T) {
+	rfc := time.Now().UTC().Format(time.RFC3339)
+	for _, tc := range []struct {
+		name string
+		pr   PR
+		want bool
+	}{
+		{"fresh row with an as-of time", PR{LastSyncedAt: rfc, Stale: false}, false},
+		{"pg-pr flagged it stale", PR{LastSyncedAt: rfc, Stale: true}, true},
+		{"as-of absent from the seam (older pg-pr)", PR{}, true},
+		{"as-of empty", PR{LastSyncedAt: ""}, true},
+		{"as-of unparseable", PR{LastSyncedAt: "yesterday"}, true},
+		{"as-of not RFC3339 (bare date)", PR{LastSyncedAt: "2026-07-29"}, true},
+		{"stale flag wins even with a valid as-of", PR{LastSyncedAt: rfc, Stale: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := staleForAction(tc.pr); got != tc.want {
+				t.Errorf("staleForAction(%+v) = %v, want %v", tc.pr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReconcile_StalePRRefusedNoBeadNoGate is the INV-FRESH-1 behaviour: a PR
+// pg-pr flagged stale must NOT be acted on — no review-pr bead is created (phase
+// 1) and its active-pr gate is NOT resolved (phase 2). Resolving that gate would
+// assert "pg-pr reports PR open/active" on the strength of data pg-pr itself says
+// is past its bound.
+func TestReconcile_StalePRRefusedNoBeadNoGate(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
+		"list task":          `{"data":[]}`,
+		"create":             "zr-rv7\n",
+		"gate create":        `{"data":{"id":"g7"}}`,
+		"gate list":          `{"data":[{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"}]}`,
+	}}
+	prs := []PR{{
+		Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open",
+		Ownership: "mine",
+		// Synced an hour ago and flagged by pg-pr: the daemon is behind/stopped.
+		LastSyncedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+		Stale:        true,
+	}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("a stale PR is an expected refusal, not an error: %v", errs)
+	}
+	if len(ids) != 0 {
+		t.Errorf("must not emit review work from stale facts, got %v", ids)
+	}
+	if f.countCalls("create") != 0 {
+		t.Errorf("must not create a review-pr bead from stale facts; calls=%v", f.calls)
+	}
+	if f.countCalls("gate", "resolve") != 0 {
+		t.Errorf("must not resolve the active-pr gate from stale facts; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_MissingAsOfRefused: an older pg-pr that predates the freshness
+// fields emits no last_synced_at, which decodes to "". An unknown as-of is
+// treated as stale, never as fresh — the whole point of the fail-closed
+// direction. The pass is a loud no-op, not a silent act-on-unknown-age.
+func TestReconcile_MissingAsOfRefused(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `]}`,
+		"list task":          `{"data":[]}`,
+		"create":             "zr-rv7\n",
+		"gate create":        `{"data":{"id":"g7"}}`,
+		"gate list":          `{"data":[{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"}]}`,
+	}}
+	// No LastSyncedAt, no Stale flag — exactly what an older pg-pr's payload
+	// decodes to.
+	prs := []PR{{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open", Ownership: "mine"}}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("an unknown as-of is an expected refusal, not an error: %v", errs)
+	}
+	if len(ids) != 0 || f.countCalls("create") != 0 || f.countCalls("gate", "resolve") != 0 {
+		t.Errorf("a row with no usable as-of must not be acted on; ids=%v calls=%v", ids, f.calls)
+	}
+}
+
+// TestReconcile_FreshnessGateIsPerPR: the refusal is per PR, not whole-pass. One
+// stale row must not withhold action on a freshly synced one — a repo mid-refresh
+// legitimately holds rows of different ages.
+func TestReconcile_FreshnessGateIsPerPR(t *testing.T) {
+	f := &fakeBD{responses: map[string]string{
+		"list merge-request": `{"data":[` + mrJSON("zr-mr7", "o/r", 7, "open") + `,` + mrJSON("zr-mr9", "o/r", 9, "open") + `]}`,
+		"list task":          `{"data":[]}`,
+		"create":             "zr-rv9\n",
+		"gate create":        `{"data":{"id":"g9"}}`,
+		"gate list": `{"data":[` +
+			`{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"},` +
+			`{"id":"g9","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#9"}]}`,
+	}}
+	now := time.Now().UTC()
+	prs := []PR{
+		{
+			Repo: "o/r", Number: 7, State: "open", Ownership: "mine",
+			LastSyncedAt: now.Add(-time.Hour).Format(time.RFC3339), Stale: true,
+		},
+		{
+			Repo: "o/r", Number: 9, State: "open", Ownership: "mine",
+			LastSyncedAt: now.Format(time.RFC3339),
+		},
+	}
+
+	ids, errs := Reconcile(context.Background(), f, prs)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(ids) != 1 || ids[0] != "zr-rv9" {
+		t.Fatalf("the FRESH PR must still be processed, got ids=%v", ids)
+	}
+	if f.countCalls("create", "review-pr: o/r#9") != 1 {
+		t.Errorf("expected the fresh PR's review-pr create; calls=%v", f.calls)
+	}
+	if f.countCalls("create", "review-pr: o/r#7") != 0 {
+		t.Errorf("the stale PR must not be created; calls=%v", f.calls)
+	}
+	// Only the fresh PR's gate is resolved; the stale PR's gate stays open, so its
+	// review-pr bead (from an earlier pass) remains held out of `bd ready`.
+	if f.countCalls("gate", "resolve", "g9") != 1 {
+		t.Errorf("expected the fresh PR's gate resolved; calls=%v", f.calls)
+	}
+	if f.countCalls("gate", "resolve", "g7") != 0 {
+		t.Errorf("the stale PR's gate must stay unresolved; calls=%v", f.calls)
+	}
+}
+
+// TestReconcile_StaleRowSelfHeals: the refusal is not sticky. The SAME PR, once
+// pg-pr's sync catches up (fresh as-of, flag cleared), is acted on normally on the
+// next pass — no operator intervention, no bead surgery.
+func TestReconcile_StaleRowSelfHeals(t *testing.T) {
+	pr := PR{Repo: "o/r", Number: 7, HeadSHA: "abc123", Branch: "feat/x", State: "open", Ownership: "mine"}
+
+	stalePass := birthFake()
+	stalePass.responses["gate list"] = `{"data":[{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"}]}`
+	stale := pr
+	stale.LastSyncedAt = time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	stale.Stale = true
+	if ids, _ := Reconcile(context.Background(), stalePass, []PR{stale}); len(ids) != 0 {
+		t.Fatalf("stale pass must emit nothing, got %v", ids)
+	}
+
+	freshPass := birthFake()
+	freshPass.responses["gate list"] = `{"data":[{"id":"g7","issue_type":"gate","await_type":"pg-pr:active-pr","await_id":"o/r#7"}]}`
+	ids, errs := Reconcile(context.Background(), freshPass, fresh(pr))
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs on the recovered pass: %v", errs)
+	}
+	if len(ids) != 1 || ids[0] != "zr-rv7" {
+		t.Fatalf("once pg-pr catches up the PR must be acted on, got %v", ids)
+	}
+	if freshPass.countCalls("gate", "resolve", "g7") != 1 {
+		t.Errorf("the recovered pass must resolve the active-pr gate; calls=%v", freshPass.calls)
 	}
 }

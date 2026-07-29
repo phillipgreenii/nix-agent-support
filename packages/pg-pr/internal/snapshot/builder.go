@@ -5,6 +5,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/cirollup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
@@ -86,8 +87,13 @@ func Build(in BuilderInput) *Snapshot {
 	out := &Snapshot{
 		GeneratedAt:         in.GeneratedAt,
 		SyncIntervalSeconds: in.SyncIntervalSeconds,
-		Mine:                []MineRow{},
-		Team:                []TeamRow{},
+		// The freshness BOUND is a build-time property (it derives from the
+		// declared cadence); the age/stale VERDICT against it is stamped at serve
+		// time by Snapshot.WithFreshness, because a just-built snapshot is by
+		// construction never stale.
+		StaleAfterSeconds: freshness.BoundSeconds(in.SyncIntervalSeconds),
+		Mine:              []MineRow{},
+		Team:              []TeamRow{},
 	}
 	teamSet := make(map[string]struct{}, len(in.TeamMembers))
 	for _, m := range in.TeamMembers {

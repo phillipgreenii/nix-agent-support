@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/agentregistry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/config"
@@ -542,6 +543,135 @@ func TestPRList_ReviewersBulkErrorFallsBackToPerPR(t *testing.T) {
 	}
 	if len(byNum[11].Reviewers) != 1 || byNum[11].Reviewers[0].Login != "bob" {
 		t.Errorf("PR 11 roster wrong on bulk-error fallback: %+v", byNum[11].Reviewers)
+	}
+}
+
+// fixedPRListNow pins the freshness clock for the duration of the test so the
+// stale verdict is deterministic, restoring the real clock afterwards.
+func fixedPRListNow(t *testing.T, now time.Time) {
+	t.Helper()
+	prev := prListNow
+	t.Cleanup(func() { prListNow = prev })
+	prListNow = func() time.Time { return now }
+}
+
+// TestPRList_JSONCarriesStoreLastSyncedAt is the round-trip proof for the
+// freshness as-of half of the seam: the store's pull_request.last_synced_at
+// column is emitted VERBATIM as the item's last_synced_at, and a row synced
+// inside the bound is NOT flagged stale.
+func TestPRList_JSONCarriesStoreLastSyncedAt(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	wireListFakes(t, &fakeListVCS{}, nil)
+
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	fixedPRListNow(t, now)
+	// 30s old: well inside the bound (2 x 60s default cadence).
+	synced := now.Add(-30 * time.Second).Format(time.RFC3339)
+	seedListStore(t, store.PullRequest{
+		Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+		Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+		LastSyncedAt: synced,
+	})
+
+	got := runPRList(t, "--repo", "foo/bar")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 PR, got %d: %+v", len(got), got)
+	}
+	if got[0].LastSyncedAt != synced {
+		t.Errorf("last_synced_at must round-trip the store column verbatim: got %q want %q",
+			got[0].LastSyncedAt, synced)
+	}
+	if got[0].Stale {
+		t.Errorf("a row synced 30s ago must not be flagged stale: %+v", got[0])
+	}
+	// The fields must actually be on the wire (not merely on the decoded struct),
+	// under exactly these JSON keys — the pr-pool ACL binds to them by name.
+	raw := runPRListRaw(t, "--repo", "foo/bar", "--json")
+	if !strings.Contains(raw, `"last_synced_at": "`+synced+`"`) {
+		t.Errorf("last_synced_at missing from the emitted JSON:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"stale": false`) {
+		t.Errorf("stale flag missing from the emitted JSON:\n%s", raw)
+	}
+}
+
+// TestPRList_StaleFlagPastBound is the freshness-flag half: an as-of time aged
+// past the bound sets stale, one inside it does not, and a row with NO usable
+// as-of time is stale (fail closed — a surface that cannot say how old its data
+// is must not present it as current).
+func TestPRList_StaleFlagPastBound(t *testing.T) {
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name      string
+		syncedAt  string
+		wantStale bool
+	}{
+		{"synced this tick", now.Add(-5 * time.Second).Format(time.RFC3339), false},
+		{"one tick behind, still inside the bound", now.Add(-90 * time.Second).Format(time.RFC3339), false},
+		{"past the bound (daemon behind or stopped)", now.Add(-10 * time.Minute).Format(time.RFC3339), true},
+		{"no as-of time recorded at all", "", true},
+		{"unparseable as-of time", "not-a-timestamp", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetPRFlags()
+			setListStateHome(t)
+			wireListFakes(t, &fakeListVCS{}, nil)
+			fixedPRListNow(t, now)
+			seedListStore(t, store.PullRequest{
+				Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+				Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+				LastSyncedAt: tc.syncedAt,
+			})
+
+			got := runPRList(t, "--repo", "foo/bar")
+			if len(got) != 1 {
+				t.Fatalf("expected 1 PR, got %d: %+v", len(got), got)
+			}
+			if got[0].Stale != tc.wantStale {
+				t.Errorf("stale = %v, want %v for last_synced_at=%q (age judged at %v)",
+					got[0].Stale, tc.wantStale, tc.syncedAt, now)
+			}
+			// A stale row still reports its base fields — the seam degrades by
+			// FLAGGING, never by hiding the PR.
+			if got[0].HeadSHA != "aaa111" || got[0].Branch != "feat/a" {
+				t.Errorf("base fields must survive the freshness stamp: %+v", got[0])
+			}
+		})
+	}
+}
+
+// TestPRList_HumanOutputCarriesFreshness: the operator-facing table also shows
+// the as-of age and marks a past-bound row STALE.
+func TestPRList_HumanOutputCarriesFreshness(t *testing.T) {
+	resetPRFlags()
+	setListStateHome(t)
+	wireListFakes(t, &fakeListVCS{}, nil)
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	fixedPRListNow(t, now)
+	seedListStore(
+		t,
+		store.PullRequest{
+			Repo: "foo/bar", Number: 10, Ownership: "mine", State: "open",
+			Author: "phillipg", Branch: "feat/a", Base: "main", HeadSHA: "aaa111",
+			LastSyncedAt: now.Add(-30 * time.Second).Format(time.RFC3339),
+		},
+		store.PullRequest{
+			Repo: "foo/bar", Number: 11, Ownership: "team", State: "open",
+			Author: "octocat", Branch: "feat/b", Base: "main", HeadSHA: "bbb222",
+			LastSyncedAt: now.Add(-1 * time.Hour).Format(time.RFC3339),
+		},
+	)
+
+	out := runPRListRaw(t, "--repo", "foo/bar")
+	if !strings.Contains(out, "SYNCED") {
+		t.Errorf("human table must carry a SYNCED (as-of) column:\n%s", out)
+	}
+	if !strings.Contains(out, "30s ago") {
+		t.Errorf("human table must show the fresh row's age:\n%s", out)
+	}
+	if !strings.Contains(out, "3600s ago STALE") {
+		t.Errorf("human table must mark the past-bound row STALE:\n%s", out)
 	}
 }
 
