@@ -113,7 +113,8 @@ submit`, and closes the bead. A failing review **MUST** escalate via a `human` l
 ### Transition: the `review.enabled` kill switch, and the deferred strip
 
 The two implementations coexist during migration; the transition is governed by a single kill
-switch, and the legacy code strip is deferred.
+switch **on the legacy `pg-pr` side only** (scope below), and the legacy code strip is
+deferred.
 
 - `review.enabled` is a **tri-state pointer** whose resting default is **`false`**
   (`packages/pg-pr/internal/config/config.go` `ReviewConfig`/`ReviewEnabled`): a `nil` config, an absent
@@ -133,6 +134,20 @@ switch, and the legacy code strip is deferred.
 - What **MUST** stay active regardless of the switch: PR-data sync and the read/write CLI
   surface that `pr-pool` depends on. The kill switch gates **only** the legacy review
   workflow, never the PR-data interface.
+- **Scope: `review.enabled` is `pg-pr`-scoped, NOT system-wide.** It gates `pg-pr`'s own
+  review chain and nothing else. `pr-pool`'s reconcile ACL
+  (`packages/pr-pool/cmd/pr-pool/reconcile_cmd.go` `reconcileACL` →
+  `packages/pr-pool/internal/prpoolacl/acl.go` `Reconcile`) is an **independent producer** of
+  review work (`review-pr` beads) that this switch deliberately **MUST NOT** gate:
+  `review.enabled=false` is precisely the state in which `pr-pool` is the intended **sole**
+  review owner, so gating the ACL on it would leave **zero** review owners at the resting
+  default and invert the single-owner property this transition exists to establish.
+- **Mechanism: `pr-pool` does not learn the switch state, and MUST NOT.** The only seam
+  between the two tools is the `pg-pr pr list --json` CLI
+  (`packages/pg-pr/cmd/pg-pr/pr_list.go` `prListCmd` →
+  `packages/pr-pool/internal/prpoolacl/acl.go` `ReadPRList`). It carries PR **facts** only
+  (`prpoolacl.PR`) and **MUST NOT** be extended to carry `pg-pr` configuration state — that
+  would recouple the two owners the split separated.
 - **Cutover rule:** the `pg-pr` review hook **MUST** be off (`review.enabled=false`) **before**
   `pr-pool` drains against the same shared bead store. As of `pg2-3ho1r` this is the built-in
   default, so the hazard to avoid is **re-enabling** the legacy path against a store `pr-pool`
@@ -162,6 +177,20 @@ switch, and the legacy code strip is deferred.
 
 - Two review implementations exist simultaneously until the strip (`pg2-ynhr.5`), so the
   kill switch and its cutover discipline are a standing operational hazard if misconfigured.
+- **There is no single switch that stops all review work.** Because the switch is
+  `pg-pr`-scoped (above), `review.enabled=false` silences `pg-pr` only; `pr-pool` keeps
+  producing `review-pr` beads. An operator who wants **no** review work produced must
+  additionally stop `pr-pool`: stop invoking `pr-pool reconcile` (the ACL runs **only** inside
+  that verb — `packages/pr-pool/cmd/pr-pool/main.go` `main`; the verb takes no flags
+  (`packages/pr-pool/cmd/pr-pool/args.go` `parseReconcileArgs`) and there is no config key
+  that disables the ACL), and declare the `review` role with `enabled = false` in
+  `<RepoRoot>/.pr-pool/config.toml` so already-emitted `review-pr` beads are not drained
+  (`packages/pr-pool/internal/config/registry.go` `buildRole`;
+  `packages/pr-pool/internal/roles/builtin.go` `BuiltinRoleSet` — start from
+  `pr-pool config --print-defaults`, since a config file's `[[role]]` array **replaces** the
+  built-in set rather than overlaying it). That is two levers in two
+  tools, by design — unifying them is out of scope for a transition switch that disappears at
+  the strip.
 - Reviewed-state is tracked in **two unsynchronized stores** during the transition — `pg-pr`
   on the SQLite revision (`reviewed_by_agent_at`) and `pr-pool` on the bead `head_sha`; only
   the **active** owner's cursor is authoritative.

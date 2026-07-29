@@ -60,6 +60,16 @@ func runReconcile() int {
 // logged; both still return exitOK so a following drain's discovery is not
 // aborted. pr-pool's own preconditions (config/self) remain hard failures in the
 // caller.
+//
+// DELIBERATELY UNGATED by pg-pr's review.enabled (ADR 0034; bead pg2-hsap5).
+// That flag is a pg-pr-SCOPED kill switch for pg-pr's own legacy review chain,
+// not a system-wide one: review.enabled=false is exactly the state in which
+// pr-pool is the intended SOLE review owner, so gating this ACL on it would
+// leave ZERO review owners at the shipped default. pr-pool therefore does not
+// read pg-pr's config at all — the only seam is the `pg-pr pr list --json` CLI
+// (prpoolacl.ReadPRList), which carries PR facts only, and it MUST NOT be
+// extended to carry pg-pr configuration state. An operator stops this producer
+// by not invoking `pr-pool reconcile` (there is no flag or config key for it).
 func reconcileACL(
 	ctx context.Context,
 	w io.Writer,

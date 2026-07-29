@@ -12,7 +12,9 @@ may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 **Verified against:** `main` @ `9ac29c26` (2026-07-09); §2.2 / JR5 re-verified
 2026-07-15 for the `review.enabled` default flip (pg2-3ho1r); §3 / JR2 re-verified
 2026-07-29 for multi-line review comments (pg2-3c8mo); all code citations
-re-anchored from pinned line ranges to symbol names 2026-07-29 (pg2-p1s8q).
+re-anchored from pinned line ranges to symbol names 2026-07-29 (pg2-p1s8q);
+§2.2 gained the explicit `review.enabled` SCOPE + operator-path record
+2026-07-29 (pg2-hsap5).
 
 **Citation form:** code is cited by **symbol** — a file path plus the
 function/type/constant name in parentheses, e.g.
@@ -114,6 +116,28 @@ architecture**.
   `SetReviewHook` wiring in `syncCmd`);
   `packages/pg-pr/internal/sync/reviewhook.go` (`reviewHookEnabled`)). What stays active
   regardless: PR-data sync, and the read/write CLI surface `(B)` calls.
+- **Kill-switch SCOPE — `pg-pr` only, not the system.** `review.enabled` gates `(A)` and
+  nothing else. `(B)`'s reconcile ACL is an **independent producer** of `review-pr` beads
+  (`packages/pr-pool/cmd/pr-pool/reconcile_cmd.go` (`reconcileACL`);
+  `packages/pr-pool/internal/prpoolacl/acl.go` (`Reconcile`)) and is deliberately **NOT**
+  gated on it — `review.enabled=false` is exactly the state in which `(B)` is meant to be the
+  sole owner, so gating the ACL too would leave **zero** owners at the shipped default.
+  `pr-pool` therefore does **not** learn the switch state and **MUST NOT**: the only seam is
+  the `pg-pr pr list --json` CLI (`packages/pg-pr/cmd/pg-pr/pr_list.go` (`prListCmd`) →
+  `packages/pr-pool/internal/prpoolacl/acl.go` (`ReadPRList`, `PR`)), which carries PR facts
+  only and carries no `pg-pr` configuration state by design.
+- **Operator consequence — no single switch stops all review work.** `review.enabled=false`
+  silences `(A)` only. To stop review work entirely an operator needs two more levers, both in
+  `pr-pool`: (1) stop invoking `pr-pool reconcile` — the ACL runs only inside that verb
+  (`packages/pr-pool/cmd/pr-pool/main.go` (`main`)), which takes no flags
+  (`packages/pr-pool/cmd/pr-pool/args.go` (`parseReconcileArgs`)) and has no config key that
+  disables it; and (2) declare the `review` role with `enabled = false` in
+  `<RepoRoot>/.pr-pool/config.toml` so already-emitted `review-pr` beads are not drained
+  (`packages/pr-pool/internal/config/registry.go` (`buildRole`);
+  `packages/pr-pool/internal/roles/builtin.go` (`BuiltinRoleSet`)) — start from
+  `pr-pool config --print-defaults`, because a config file's `[[role]]` array **replaces**
+  the built-in set rather than overlaying it. This repo schedules neither verb; how
+  `reconcile` is triggered is a deployment concern.
 - The **teammate-attention** signal (`snapshot.NeedsAttention`, feeding both the
   dashboard `needs_attention` bit and the `attention:` bead) **MUST NOT** consume any
   artifact the kill switch gates. It is derived purely from `pg-pr`'s own PR data —

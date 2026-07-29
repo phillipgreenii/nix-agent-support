@@ -78,6 +78,17 @@ type Config struct {
 	// review path is the NON-owner in the pg-pr↔pr-pool split, so the
 	// resting-safe built-in default is off (pr-pool owns reviews); see
 	// ReviewEnabled and pg2-3ho1r.
+	//
+	// SCOPE — pg-pr ONLY, not system-wide (ADR 0034; bead pg2-hsap5). This switch
+	// gates pg-pr's own review chain and nothing else. pr-pool's reconcile ACL
+	// (pr-pool's cmd/pr-pool/reconcile_cmd.go reconcileACL → internal/prpoolacl
+	// Reconcile) is an INDEPENDENT producer of review-pr beads and is deliberately
+	// NOT gated on this flag: review.enabled=false is exactly the state in which
+	// pr-pool is the intended SOLE review owner, so gating the ACL too would leave
+	// ZERO review owners at the shipped default. pr-pool does not learn this value
+	// and MUST NOT — the only seam is the `pg-pr pr list --json` CLI, which carries
+	// PR facts only and no pg-pr configuration state. Consequence: there is no
+	// single switch that stops all review work; see ReviewEnabled.
 	Review ReviewConfig `yaml:"review,omitempty" json:"review,omitempty"`
 }
 
@@ -95,6 +106,14 @@ type ReviewConfig struct {
 // the double-write hazard of running both paths against one shared bead store
 // (design hazard H1; bead pg2-3ho1r). The full pg-pr review strip is deferred
 // (pg2-ynhr.5); until then this flag is the kill switch.
+//
+// It is a pg-pr-SCOPED kill switch, NOT a system-wide one (see Review's doc and
+// ADR 0034 §Transition). False here does not mean "no review work exists" — it
+// means "pg-pr produces and consumes none", which is the resting state in which
+// pr-pool produces it instead. Stopping ALL review work takes two further levers
+// in pr-pool: stop invoking `pr-pool reconcile` (the only caller of its ACL; the
+// verb takes no flags and has no disable key), and declare the `review` role with
+// enabled = false in <RepoRoot>/.pr-pool/config.toml.
 func (c *Config) ReviewEnabled() bool {
 	if c == nil || c.Review.Enabled == nil {
 		return false
