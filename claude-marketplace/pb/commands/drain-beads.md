@@ -229,28 +229,87 @@ ff-race); a post-deploy gate could not be attached; repeated failed attempts.
    it on branch `drain/<id>` with a `WIP (parked): <id> <why>` message; if
    pre-commit hooks block the commit, leave the changes uncommitted in the retained
    worktree (do NOT use `--no-verify`).
-2. COMMENT what you tried, why you couldn't finish, and where the work is parked so
-   a human can resume:
+2. NAME THE PRECONDITION — only when the park is blocked on something that must
+   become TRUE before the bead is workable (skip it for an underspecified /
+   decision-needed park). What you write here becomes an INSTRUCTION to a later
+   agent and keeps being obeyed long after the implementation it describes has been
+   refactored, so it MUST be drift-detectable:
+   - `PRECONDITION:` MUST state an OBSERVABLE OUTCOME — something a reader can run
+     and see ("`nb` run from a subdirectory opens the Gradle ROOT project"). It MUST
+     NOT state a MECHANISM ("`nb` is a function defined in `~/.zshrc`"): the next
+     refactor makes a mechanism claim permanently false, and every later reader then
+     concludes "not applied yet" and re-parks forever.
+   - `PRECONDITION-KEY:` MUST be a short kebab slug naming that OUTCOME, not this
+     attempt — `nb-opens-gradle-root`, never `nb-check-2` — so a later park blocked
+     on the SAME thing produces the SAME key. Step 3 counts these.
+   - `DERIVED-FROM:` MUST cite the commit and the file(s) you actually read to write
+     the line (`<repo>@<sha> — <path>`), so a later reader can re-derive it and see
+     the drift.
+   - The failure branch MUST be bounded. MUST NOT write "if not yet applied, re-park
+     or wait" with no limit — step 3 IS the limit.
+
+3. DETECT A REPEAT — before commenting, check whether this bead was already parked
+   on the same precondition:
 
    ```bash
-   bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
+   bd show <id> --json | jq -r '(.data[0].comments // [])[].text' | rg -o 'PRECONDITION-KEY: .*'
    ```
 
-3. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
+   (`comments` is `null` on a bead with none, hence the `// []`; empty output — `rg`
+   exit 1 — means no prior key, NOT a failure.)
+   - The key you are about to write is ABSENT → ordinary park (step 4a).
+   - The key is ALREADY PRESENT — this would be the SECOND park on the same unmet
+     precondition → the precondition itself is the suspect, not the world: escalate
+     it as stale (step 4b + step 5b). There is NO third park on one key.
+   - The bead ALREADY carries the `stale-precondition` label → an earlier staleness
+     escalation was released without resolving it. Write NO precondition block at
+     all: comment plainly what you observed, re-apply `human` (step 5a), and leave
+     `stale-precondition` in place so it stays visible as unresolved.
+
+4. COMMENT what you tried, why you couldn't finish, and where the work is parked so
+   a human can resume.
+
+   **4a — ordinary park**, carrying the step-2 block when there is a precondition:
+
+   ```bash
+   bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   PRECONDITION: <observable outcome that must hold before this is workable>
+   PRECONDITION-KEY: <stable-outcome-slug>
+   DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
+   ```
+
+   **4b — staleness escalation** (step 3 found the key). Say it is a repeat, point at
+   the provenance to re-derive, and record what you ACTUALLY observed — do NOT
+   restate the old precondition as though it were fresh:
+
+   ```bash
+   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
+   ```
+
+5. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
    termination query, which use `--exclude-label human`):
+
+   **5a — ordinary park:**
 
    ```bash
    bd update <id> --add-label human --actor "ID"
    ```
 
-4. UNCLAIM — do this LAST, only after the label is applied, so no other session
+   **5b — after a 4b staleness escalation** — both labels in ONE call, so the
+   unblocker recognizes the class mechanically instead of re-reading the churn:
+
+   ```bash
+   bd update <id> --add-label human,stale-precondition --actor "ID"
+   ```
+
+6. UNCLAIM — do this LAST, only after the label is applied, so no other session
    can grab it in an unlabeled `open` window:
 
    ```bash
    bd update <id> --assignee "" --status open --actor "ID"
    ```
 
-5. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
+7. Do NOT clean up the parked worktree/branch. Return to step 1 (CLAIM).
 
 ## Optional scope arguments
 
@@ -282,6 +341,15 @@ unchanged.
 - Ordering is load-bearing: for a gate, create the child DEFERRED → attach ALL
   gates (confirm success) → only then un-defer; when STUCK, apply the `human`
   label BEFORE unclaiming.
+- Park preconditions MUST be OUTCOME-shaped: a park comment's `PRECONDITION` MUST
+  state an observable outcome, MUST carry a stable `PRECONDITION-KEY` naming that
+  outcome (not the attempt), and MUST cite `DERIVED-FROM: <repo>@<sha> — <path>`. A
+  MECHANISM-shaped precondition ("is a shell function", "lives in this file") rots
+  into a permanent, unfalsifiable "not applied yet".
+- Re-parking MUST be bounded: the SECOND park on the same `PRECONDITION-KEY` MUST
+  escalate as `stale-precondition` (STUCK 4b/5b) instead of re-parking on that key
+  again. An agent MUST NOT trust a precondition it did not re-derive from current
+  source.
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT
   and report — do not reset/stash/work around it.
 - Transient infra failures (bd/dolt server blip, git `index.lock` contention, a
@@ -304,7 +372,7 @@ flowchart TD
     I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
-    V -- "stuck / gates fail" --> S["STUCK (last resort):<br/>park + label human + unclaim LAST"]
+    V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP,<br/>name the PRECONDITION as an OUTCOME<br/>+ PRECONDITION-KEY + DERIVED-FROM"]
     V -- "done / done-pending-apply-verification" --> L["LAND (local ff-merge, no push)"]
     L -->|transient ff-race| L
     L -->|genuine stopped:reason| S
@@ -315,7 +383,11 @@ flowchart TD
     PB -->|gated + un-deferred| CL
     CL --> X["bd close impl id --reason ... --actor ID"]
     X --> C
-    S --> C
+    S --> RK{"Same PRECONDITION-KEY<br/>already parked on this bead?"}
+    RK -- no --> PK["bd comment stuck: + PRECONDITION block →<br/>bd update --add-label human →<br/>unclaim LAST"]
+    RK -- "yes (2nd time)" --> SP["SUSPECTED STALE, no 3rd park:<br/>bd comment 'do NOT re-park on this key' →<br/>bd update --add-label human,stale-precondition →<br/>unclaim LAST"]
+    PK --> C
+    SP --> C
 ```
 
 ## Running several at once

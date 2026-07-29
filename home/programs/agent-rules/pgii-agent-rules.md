@@ -63,6 +63,30 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
   rather than silently steal or clear it — it is this defect, and the operator decides.
 
+### Handoff Preconditions
+
+> A precondition written at time T against implementation I persists as an INSTRUCTION while
+> I changes. Phrased against the MECHANISM ("is it a shell function?", "is it in this file?")
+> it rots silently at the next refactor: the mechanism is gone, so the check can NEVER pass,
+> and every later reader concludes "not applied yet". If its failure branch says "wait / try
+> again later", the rot becomes a NON-TERMINATING LOOP instead of a visible failure.
+
+- **P-1** A precondition or verification step written for a LATER reader (park/handoff
+  comment, issue note, runbook step) MUST be stated as an OBSERVABLE OUTCOME — what a reader
+  can run and see. It MUST NOT be stated as an implementation MECHANISM (which file defines
+  it, function vs. `PATH` command, which module it lives in).
+- **P-2** It MUST cite the provenance it was derived from — commit plus the file path(s)
+  actually read — so a later reader can re-derive it and detect the drift.
+- **P-3** A reader MUST re-derive a precondition from CURRENT source before acting on it and
+  MUST NOT trust the text's mechanism claim. If the cited mechanism no longer exists, the
+  precondition is UNSATISFIABLE, not unmet: the agent MUST report it as suspected-stale
+  rather than treat it as "not ready yet".
+- **P-4** "Precondition unmet" MUST NOT be a non-terminating outcome. Guidance whose failure
+  branch is "wait / retry / re-park" MUST bound the repeats and MUST name the escalation.
+- **P-5** The SECOND time the SAME precondition blocks the SAME unit of work, the
+  precondition itself MUST be escalated as suspected-stale; the agent MUST NOT block on it a
+  third time.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.

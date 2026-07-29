@@ -116,13 +116,30 @@ step 3–4 happens with no race. The bead re-enters a queue only at the terminal
 
 ## Triage rubric (evaluate in order; first match wins)
 
-| #   | Class                        | How to recognize                                                                                                                                                                                     | Action                                                                                                    |
-| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| 1   | **substrate-mutating**       | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.     |
-| 2   | **apply-waiting**            | "verify/act after apply", deploy-gated content                                                                                                                                                       | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below. |
-| 3   | **mislabeled / normal work** | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed) and no human input is needed                            | **RELEASE** — no operator prompt.                                                                         |
-| 4   | **genuine decision / input** | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                             | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome.                       |
-| 5   | **uncertain**                | you cannot confidently place the bead in a class above                                                                                                                                               | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                |
+| #   | Class                            | How to recognize                                                                                                                                                                                     | Action                                                                                                                                                         |
+| --- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **substrate-mutating**           | carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                          |
+| 2   | **suspected stale precondition** | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                               | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below. |
+| 3   | **apply-waiting**                | "verify/act after apply", deploy-gated content                                                                                                                                                       | **RELEASE.** Trust that `pn workspace apply` ran before this command — see "apply-waiting = trust" below.                                                      |
+| 4   | **mislabeled / normal work**     | the label's reason is provably moot (referenced worktree already gone, decision already recorded in a later comment, transient infra passed) and no human input is needed                            | **RELEASE** — no operator prompt.                                                                                                                              |
+| 5   | **genuine decision / input**     | needs a design/architectural decision, is underspecified, or otherwise needs a person to move it forward                                                                                             | **ENGAGE** (only enough) → RELEASE if now drain-doable / CLOSE / DEFER per outcome.                                                                            |
+| 6   | **uncertain**                    | you cannot confidently place the bead in a class above                                                                                                                                               | treat as genuine → **ENGAGE** (conservative; never silently auto-resolve).                                                                                     |
+
+**`stale-precondition` outranks apply-waiting.** A stale precondition presents EXACTLY as
+apply-waiting ("verify after apply"), so the apply-trust rule below would RELEASE it, drain
+would park it again on the same `PRECONDITION-KEY`, and the bead would churn between the two
+queues indefinitely. The label means drain already parked it TWICE on that key, so the
+PREMISE — not the deploy state — is the suspect. Therefore:
+
+- Re-derive the precondition from the `DERIVED-FROM: <repo>@<sha> — <path>` citation in the
+  park comment, against CURRENT source. A precondition phrased against a MECHANISM that the
+  cited commit has since removed is UNSATISFIABLE, not unmet.
+- If the stated OBSERVABLE OUTCOME already holds, the bead is satisfied → **CLOSE**
+  (operator-confirmed, per the close guard).
+- If the outcome genuinely does not hold, **ENGAGE** the operator, rewrite the precondition
+  as an observable outcome with a fresh `DERIVED-FROM`, and only then **RELEASE** — removing
+  `stale-precondition` in the same atomic update. Releasing it with the old precondition, or
+  with the label still attached, just restarts the loop.
 
 **apply-waiting = trust, always.** This command EXPECTS `pn workspace apply` to have been
 run before it is invoked. Every apply-waiting bead is RELEASEd on that premise; do NOT try
@@ -153,7 +170,11 @@ never run a substrate-mutating action autonomously.
   ```
 
   One call — so there is no crash window leaving a label-less `in_progress` orphan that
-  neither resume query recovers. RELEASE only when drain can actually make progress; if the
+  neither resume query recovers. If the bead carries `stale-precondition`, drop BOTH labels
+  in that same single call — `--remove-label human,stale-precondition` — and only after the
+  precondition has been rewritten as an observable outcome (class 2). A lingering
+  `stale-precondition` label makes drain treat the NEXT, legitimately-fresh park as an
+  already-escalated one. RELEASE only when drain can actually make progress; if the
   only remaining work is a human-only action drain cannot perform, DEFER instead
   (apply-waiting is exempt — it is released on the pre-apply premise).
 
@@ -230,6 +251,11 @@ arguments, drain the whole ready `human` queue.
   exempt).
 - **Substrate guard.** A substrate-mutating bead MUST NOT be RELEASEd to drain and MUST NOT
   be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER.
+- **Stale-precondition guard.** A bead labeled `stale-precondition` MUST NOT be RELEASEd on
+  the apply-waiting premise. Its precondition MUST be re-derived from the park comment's
+  `DERIVED-FROM` citation against current source; a RELEASE MUST both record the precondition
+  rewritten as an observable OUTCOME and remove `stale-precondition` in the same atomic
+  update. An unsatisfiable precondition means the bead is satisfied or void → CLOSE.
 - **Atomic release ordering.** On RELEASE the `human`-label removal, `status=open`, and
   `assignee=""` MUST be a SINGLE `bd update`, after the explanatory `bd comment` (and any
   commit) has landed.
@@ -263,13 +289,16 @@ flowchart TD
     C -->|got bead| U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
     U --> T{TRIAGE rubric<br/>first match wins}
     T -->|1 substrate-mutating| SUB["ENGAGE operator,<br/>NEVER release to drain"]
-    T -->|2 apply-waiting| REL
-    T -->|3 mislabeled / normal work| REL
-    T -->|4 genuine decision/input| ENG[ENGAGE operator<br/>pause loop, ask, wait]
-    T -->|5 uncertain| ENG
+    T -->|2 stale-precondition label| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
+    T -->|3 apply-waiting| REL
+    T -->|4 mislabeled / normal work| REL
+    T -->|5 genuine decision/input| ENG[ENGAGE operator<br/>pause loop, ask, wait]
+    T -->|6 uncertain| ENG
     SUB -->|resolved in-session| CLO
     SUB -->|can't now| DEF
-    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment →<br/>bd update --remove-label human --status open --assignee '' (one call)"]
+    STL -- "outcome holds or is unsatisfiable" --> CLO
+    STL -- "outcome genuinely unmet" --> ENG
+    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human (+stale-precondition) --status open --assignee '' (one call)"]
     ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>bd create --labels human --defer, if a worktree is left)"]
     ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human),<br/>add id to skip-set"]
     REL --> C
