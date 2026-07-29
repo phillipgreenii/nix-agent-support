@@ -194,7 +194,7 @@ Rules for writing a citation into code, comments, or docs in this repo (RFC 2119
    | `0047` | phillipgreenii option namespace and platform conventions | Preserve-by-default merge policy for `settings.local.json` |
    | `0049` | launchd stable-path indirection                          | `nix`: enforce `pn-workspace.toml` keys                    |
 
-   This repo's own series currently runs `0000`-`0040`, so today every `ADR 0041`+ reference in
+   This repo's own series currently runs `0000`-`0041`, so today every `ADR 0042`+ reference in
    this repo is necessarily cross-repo. Write `` `phillipgreenii-nix-personal` ADR 0047 `` (the
    style already used for `` `phillipg-nix-repo-base` ADR 0008 `` above), never a bare `ADR-0047`.
 
