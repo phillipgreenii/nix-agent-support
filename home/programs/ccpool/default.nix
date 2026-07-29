@@ -50,9 +50,23 @@ in
       }
     );
 
-    # Pre-trust default_cwd in ~/.claude.json (spec §8.1.1/§14 step 6): the
-    # primary, non-racy trust path (vs. the runtime `ensure` fallback). Best
-    # effort — a trust-write failure must not break activation; runtime covers it.
+    # Pre-trust default_cwd in ~/.claude.json — set
+    # `.projects["<resolved default_cwd>"].hasTrustDialogAccepted = true` before
+    # any launch. An untrusted cwd stalls `claude` on the interactive
+    # folder-trust prompt, which BLOCKS the REPL from starting, so SessionStart
+    # never fires and ccpool's waiter hangs forever; trust is therefore
+    # guaranteed before launch, never detected after.
+    #
+    # This activation is the PRIMARY, non-racy trust path. ccpool's runtime
+    # `ensure` fallback (`packages/ccpool/internal/trust`) exists only for ad-hoc
+    # `--cwd` values and is deliberately kept near-zero-frequency: ~/.claude.json
+    # is Claude-owned, is rewritten on Claude's own schedule, and does NOT honour
+    # ccpool's flock, so its read-merge-rename has an unavoidable lost-update
+    # window and a lost write degrades right back to the trust-prompt hang.
+    #
+    # Best effort — a trust-write failure must not break activation; the runtime
+    # path covers it. Rationale for the cwd being a trust-boundary input at all:
+    # ADR 0038's Context.
     home.activation = lib.mkIf (defaultCwd != "") {
       ccpoolTrust = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         $DRY_RUN_CMD ${cfg.package}/bin/ccpool trust ${lib.escapeShellArg defaultCwd} || true

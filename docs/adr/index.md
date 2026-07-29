@@ -1,5 +1,11 @@
 # Architecture Decision Records
 
+> **This table is the ONLY series a bare `ADR-NNNN` in this repo may refer to.** ADR numbers are
+> per-repo and they collide across this pn-workspace — `ADR 0047` and `ADR 0049` each name two
+> different decisions in `phillipgreenii-nix-personal` vs. `phillipg-nix-ziprecruiter`. A citation
+> whose number is not in this table MUST name its owning repo. See `CLAUDE.md`
+> "Architecture Decision Records" → "Citation conventions" for the full rules.
+
 | ADR                                                                 | Title                                                                                          | Status                                                                          | Date       |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ---------- |
 | [0000](0000-use-architecture-decision-records.md)                   | Use Architecture Decision Records                                                              | Accepted                                                                        | 2026-05-01 |

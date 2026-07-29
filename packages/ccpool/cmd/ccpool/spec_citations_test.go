@@ -51,6 +51,28 @@ const sectionSign = string(rune(0x00a7))
 // of the same dangling references, and every one of them is caught by the rune.
 // In-repo ADRs are cited by number and heading name in this codebase, never with
 // a section sign, so nothing legitimate is excluded.
+//
+// SCOPE BOUNDARY — this test guards the Go MODULE; a companion nix check guards
+// the rest of the ccpool surface (bead pg2-qkk8n).
+//
+// ccpoolModuleRoot walks up to go.mod, and the nix src for this module is rooted
+// at `packages/` with modRoot=ccpool (Pattern B), so ccpool's nix modules —
+// `home/programs/ccpool/`, `darwin/modules/ccpool/`, `nixos/modules/ccpool/` —
+// are outside BOTH this walk and the build sandbox's tree. They are structurally
+// unreachable from here, and one of them (`home/programs/ccpool/default.nix`) was
+// in fact still carrying a `spec <section-sign>8.1.1/<section-sign>14 step 6`
+// citation of exactly this class after pg2-oxrha landed. That half is now guarded
+// by `checks.<system>.test-ccpool-surface-spec-citations` in flake.nix, which runs
+// the same ban from the repo root; a new ccpool-surface directory must be added to
+// that check's fileset. Do not try to reach outside the module from here — the
+// sandbox has no repo root to find.
+//
+// The union of the two guards is the ccpool SURFACE, and that is DELIBERATELY not
+// the whole repo: repo-wide the glyph appears 534 times across 146 files (ADR
+// prose, historical docs/superpowers/plans/, other packages' own in-repo
+// citations), nearly all legitimate, so a repo-wide ban would need an allowlist
+// longer than the rule. Elsewhere the convention is documented, not tested — see
+// CLAUDE.md "Citation conventions".
 func TestNoEphemeralSpecCitationsUnderCcpool(t *testing.T) {
 	root := ccpoolModuleRoot(t)
 

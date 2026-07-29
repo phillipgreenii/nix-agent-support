@@ -131,7 +131,10 @@ reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these package
 
 All options use the `phillipgreenii.*` namespace.
 
-Per ADR-0047 §"Policy: wrap everything", all machine-flake-facing options live under `phillipgreenii.*`.
+Per `phillipgreenii-nix-personal` ADR 0047's "Policy: wrap everything", all machine-flake-facing
+options live under `phillipgreenii.*`. That ADR is in **another repo** — see
+"Architecture Decision Records" → "Citation conventions" below for why the owning repo must always
+be named.
 
 ## AI Agent Package Sourcing
 
@@ -176,6 +179,48 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 ADRs live in `docs/adr/` (`index.md` lists them). Read relevant ADRs before changing the area they
 cover; see `docs/adr/0000-use-architecture-decision-records.md` for the process.
+
+### Citation conventions
+
+Rules for writing a citation into code, comments, or docs in this repo (RFC 2119):
+
+1. **A citation MUST name its owning repo unless the target is in this repo's `docs/adr/`.**
+   ADR numbers are per-repo and they **COLLIDE across this pn-workspace**, so a bare `ADR-NNNN`
+   written here is not a unique reference. Live examples of the same number meaning two different
+   decisions:
+
+   | Number | `phillipgreenii-nix-personal`                            | `phillipg-nix-ziprecruiter`                                |
+   | ------ | -------------------------------------------------------- | ---------------------------------------------------------- |
+   | `0047` | phillipgreenii option namespace and platform conventions | Preserve-by-default merge policy for `settings.local.json` |
+   | `0049` | launchd stable-path indirection                          | `nix`: enforce `pn-workspace.toml` keys                    |
+
+   This repo's own series currently runs `0000`-`0038`, so today every `ADR 0039`+ reference in
+   this repo is necessarily cross-repo. Write `` `phillipgreenii-nix-personal` ADR 0047 `` (the
+   style already used for `` `phillipg-nix-repo-base` ADR 0008 `` above), never a bare `ADR-0047`.
+
+2. **A citation MUST name the target section by its PROSE heading, never by a section number or a
+   section sign (`§`).** Write `ADR 0038's Context`, not `ADR 0038 §7`. Heading names survive
+   edits; section numbers renumber silently.
+
+3. **Code MUST NOT cite the ephemeral design specs under the pn-workspace root's
+   `docs/superpowers/specs/`.** Those files are in **no repository**, are extraction sources used
+   once and then abandoned, and are slated for deletion — so every reference to them is guaranteed
+   to dangle. State the rule in the code itself, or cite a durable in-repo ADR.
+
+Rule 3 is enforced **mechanically over the ccpool surface only** (bead `pg2-oxrha`, widened by
+`pg2-qkk8n`), by two guards that between them ban the section sign outright:
+
+- `packages/ccpool/cmd/ccpool/spec_citations_test.go` — the ccpool **Go module**
+  (`packages/ccpool/**`, every file type, tests included).
+- `checks.<system>.test-ccpool-surface-spec-citations` in `flake.nix` — the ccpool surface
+  **outside** that module (`home/programs/ccpool/`, `darwin/modules/ccpool/`,
+  `nixos/modules/ccpool/`), which the Go test structurally cannot reach. A new ccpool-surface
+  directory MUST be added to that check's fileset.
+
+The guarded scope is **deliberately the ccpool surface, not the repo**: repo-wide the section sign
+appears 534 times across 146 files (ADR prose, historical `docs/superpowers/plans/`, other
+packages' own in-repo citations), nearly all of it legitimate, so a repo-wide ban would need an
+allowlist longer than the rule. Everywhere else rules 1-3 are convention, not a test.
 
 ---
 

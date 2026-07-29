@@ -579,6 +579,82 @@
                     touch $out
                   '';
 
+              # Durable-citation guard for the ccpool surface OUTSIDE the Go
+              # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
+              #
+              # packages/ccpool/cmd/ccpool/spec_citations_test.go bans the section
+              # sign across the ccpool Go MODULE, but it walks up to go.mod and the
+              # module's nix src is rooted at ./packages (Pattern B) — so ccpool's
+              # nix modules under home/, darwin/, and nixos/ are outside BOTH that
+              # walk and the build sandbox tree, and are unreachable from Go. Same
+              # structural gap as test-pg-pr-review-input-assets above; this check
+              # closes it from the repo root. It found and retired
+              # home/programs/ccpool/default.nix's `spec <sign>8.1.1/<sign>14 step 6`.
+              #
+              # Scope is DELIBERATELY the ccpool surface, not the repo: repo-wide
+              # the glyph appears 534 times across 146 files (ADR prose, historical
+              # docs/superpowers/plans, other packages' own in-repo citations),
+              # nearly all legitimate, so a repo-wide ban would need an allowlist
+              # longer than the rule. See CLAUDE.md "Citation conventions".
+              #
+              # A NEW ccpool-surface directory MUST be added to `surface` below.
+              test-ccpool-surface-spec-citations =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./home/programs/ccpool
+                      ./darwin/modules/ccpool
+                      ./nixos/modules/ccpool
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-ccpool-surface-spec-citations" { } ''
+                  # Build the glyph from its UTF-8 bytes so THIS file never
+                  # contains the character it forbids (the discipline the Go guard
+                  # gets from `string(rune(0x00a7))`), and so the match is
+                  # locale-independent in the sandbox (no UTF-8 locale there).
+                  sign="$(printf '\302\247')"
+
+                  # Liveness self-check, run FIRST: the expected violation count is
+                  # zero, so "found nothing" cannot double as proof the scan ran.
+                  # Assert the files this invariant exists for are really present —
+                  # a rename that moved one out from under the fileset must FAIL
+                  # loudly, not silently reduce coverage to nothing.
+                  for want in \
+                    home/programs/ccpool/default.nix \
+                    darwin/modules/ccpool/default.nix \
+                    nixos/modules/ccpool/default.nix; do
+                    if [ ! -f "${surface}/$want" ]; then
+                      echo "FAIL: guard never scanned $want — it was renamed or moved" >&2
+                      echo "      out from under this check; update the fileset in flake.nix" >&2
+                      exit 1
+                    fi
+                  done
+
+                  scanned="$(find ${surface} -type f | wc -l)"
+                  if [ "$scanned" -lt 3 ]; then
+                    echo "FAIL: guard scanned only $scanned file(s); the ccpool surface" >&2
+                    echo "      outside the Go module has at least 3" >&2
+                    exit 1
+                  fi
+
+                  hits="$(cd ${surface} && grep -rn -- "$sign" . || true)"
+                  if [ -n "$hits" ]; then
+                    echo "FAIL: forbidden section-sign citation on the ccpool surface:" >&2
+                    echo "$hits" >&2
+                    echo "ccpool's design specs live OUTSIDE this repo (the pn-workspace root's" >&2
+                    echo "docs/superpowers/specs/), are used once and abandoned, and are not a" >&2
+                    echo "durable record — so a section-number reference into them dangles." >&2
+                    echo "State the rule in the comment itself, or cite a durable in-repo owner" >&2
+                    echo "by number and PROSE heading name (e.g. \"ADR 0038's Context\")." >&2
+                    exit 1
+                  fi
+
+                  echo "ok: $scanned file(s) scanned on the ccpool surface outside the Go module; no section-sign citations"
+                  touch $out
+                '';
+
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
               # resolver's real-git contract test (builds fixtures only; the
