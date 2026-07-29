@@ -133,9 +133,24 @@ func (q QueueEnqueuer) Enqueue(core CoreRef, evt eventqueue.Event) (eventqueue.E
 
 // Result reports the outcome of an Emit.
 type Result struct {
-	Core   CoreRef
-	Event  eventqueue.Event
-	Status eventqueue.EnqueueResult // Enqueued or Deduped
+	Core  CoreRef
+	Event eventqueue.Event
+	// Status is the enqueue outcome, but HOW MUCH IT CAN RESOLVE depends on which
+	// Enqueuer ran — it is not a uniform property of Emit:
+	//
+	//   - QueueEnqueuer (in-process) passes the durable queue's own EnqueueResult
+	//     through, so a re-emit of a still-retained id genuinely reports Deduped
+	//     (INV-EVT-3).
+	//   - SocketEnqueuer (over the wire) can only ever report Enqueued, and it means
+	//     "the core accepted it", NOT "freshly appended". See SocketEnqueuer's
+	//     "What it cannot tell you" for why the reply cannot carry the distinction,
+	//     and for the wording an operator-facing caller must use.
+	//
+	// So Deduped is reachable in-process and UNOBSERVABLE over the socket. A caller
+	// that does not know which Enqueuer ran MUST NOT read Enqueued as "freshly
+	// appended"; only a caller holding a QueueEnqueuer may treat the two values as a
+	// real distinction.
+	Status eventqueue.EnqueueResult
 }
 
 // Emit parses operator-supplied JSON, validates it against the push-inject

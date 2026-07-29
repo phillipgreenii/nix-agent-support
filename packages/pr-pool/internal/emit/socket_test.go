@@ -125,14 +125,25 @@ func TestEmit_SocketEnqueuer_DeliversToInjectedCore(t *testing.T) {
 // A re-emit within the ttl is absorbed by the core's de-duplication (INV-EVT-3) and
 // is still reported as ACCEPTED — the wire reply folds dedupe into `accepted`, so
 // this must not surface as a failure.
+//
+// It also pins the STATUS side of that fold: every emit over the socket reports
+// Enqueued, INCLUDING the absorbed re-emit that the in-process path reports as
+// Deduped (TestEmit_DedupesReEmitWithinTTL). This is the counterpart to that test
+// and to Result.Status's doc: Deduped is unobservable over the wire, so a future
+// SocketEnqueuer must not start GUESSING it from an unchanged reply schema — the
+// reply has no field to derive it from.
 func TestEmit_SocketEnqueuer_ReEmitIsAcceptedNotAnError(t *testing.T) {
 	dir := shortDir(t)
 	svc := startCore(t, dir, eventqueue.NewMemStore())
 	loc := Locator{Discover: Discoverer(dir)}
 
 	for i := range 2 {
-		if _, err := Emit([]byte(validEvent), loc, SocketEnqueuer{}); err != nil {
+		res, err := Emit([]byte(validEvent), loc, SocketEnqueuer{})
+		if err != nil {
 			t.Fatalf("emit #%d: %v", i+1, err)
+		}
+		if res.Status != eventqueue.Enqueued {
+			t.Fatalf("emit #%d status = %v, want Enqueued (the wire reply cannot express Deduped)", i+1, res.Status)
 		}
 	}
 	if depth := svc.Queue().DepthByType()["review-requested"]; depth != 1 {

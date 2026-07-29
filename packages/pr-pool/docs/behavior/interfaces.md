@@ -437,6 +437,11 @@ Reply (stdout, exit `0`):
 { "schemaVersion": "1", "id": "trk-9f2c", "accepted": 1, "rejected": [] }
 ```
 
+`accepted` counts the events the core **took**, which is broader than "freshly appended": a
+still-retained **duplicate** `id` is accepted too, because de-duplication is the core doing its job
+(`INV-EVT-3`). The reply carries **no field** separating a fresh append from an absorbed re-emit, so
+`accepted` is not a fresh-append count and a caller cannot distinguish the two over this interface.
+
 Under the durable queue an event whose `type` matches no binding is **still accepted** (exit `0`,
 counted in `accepted`) — it is enqueued and **expires unconsumed** at its `ttl`; visibility comes from
 the **config-time warning** (`JOURNEY-VALIDATE`) and the **unconsumed-expired** metric, not from a
