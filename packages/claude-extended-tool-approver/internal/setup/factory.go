@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathtraversal"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
@@ -99,6 +100,10 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 	nixRule := nix.NewWithEvaluator(eng)
 	dockerRule := docker.New(eng, pe)
 
+	// primary-commit and primary-push share one on-disk resolver (canonical/primary/
+	// current-branch detection) so the commit-side and push-side R-6/R-8 guards agree.
+	primaryResolver := primarycommit.NewFileResolver()
+
 	return []hookio.RuleModule{
 		configrules.NewFromConfig(cfg),
 		// Generic security validators run in an early band — after the consumer
@@ -129,7 +134,12 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		killshell.New(shells),
 		pathsafety.New(pe),
 		mcp.New(),
-		primarycommit.New(primarycommit.NewFileResolver()),
+		primarycommit.New(primaryResolver),
+		// primary-push mirrors primary-commit for `git push` advancing the canonical
+		// primary. It MUST precede the generic git rule (first-match-wins): git treats a
+		// non-force push as an approved subcommand, so primary-push has to hard-deny an
+		// auto-approving push-to-primary before git can approve it.
+		primarypush.New(primaryResolver),
 		git.New(pe),
 		gh.New(gh.NewExecResolver()),
 		monorepo.New(pe, cfg.Monorepo),

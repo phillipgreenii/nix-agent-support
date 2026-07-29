@@ -1,0 +1,221 @@
+// Package primarypush gates a `git push` that would ADVANCE the PRIMARY branch of
+// the CANONICAL clone (the main working tree — the real .git directory, never a
+// linked worktree) on the shared remote. It is the push-side sibling of the
+// primary-commit rule and reuses primary-commit's PrimaryResolver so the two rules
+// share canonical/primary/current-branch detection.
+//
+// It returns Reject only when the session is in an AUTO-ACCEPTING permission mode —
+// the set {bypassPermissions, auto, dontAsk} — because such a session would silently
+// accept an Ask, so a hard deny is the only thing that stops it. Interactive modes
+// (default/plan/acceptEdits/empty) get Abstain — no every-push prompt; a human
+// directing a push to primary is permitted (R-6) and left to the normal flow.
+//
+// A push is judged to advance primary when any of:
+//   - a refspec's REMOTE side names the primary branch — `origin HEAD:main`,
+//     `origin feat:main`, `origin main`, `origin :main`, `+HEAD:main`,
+//     `HEAD:refs/heads/main`;
+//   - a same-name `HEAD`/`@` source (`git push origin HEAD`) while the canonical
+//     clone is currently ON primary (the remote branch is then the current branch);
+//   - a refspec's remote side is DYNAMIC (`$…`/backtick) — unprovable, so it fails
+//     safe (denied in an auto-approving session);
+//   - `--all` / `--mirror` (push every local branch, primary included);
+//   - no refspec (bare `git push` / `git push origin`) while the canonical clone is
+//     ON primary, OR with an injected `-c push.default=matching` (which pushes all
+//     same-name branches, primary included, regardless of the current branch).
+//
+// A push of a FEATURE branch (remote side != primary) stays Approve; pushes from a
+// linked worktree, non-push git, and any resolver error all Abstain (fail-open; the
+// worktree discipline is the primary control — R-2/R-8).
+//
+// Known limitations (documented, not fixed here): an AMBIENT push.default=matching
+// in ~/.gitconfig is invisible to the file-based resolver; and a subcommand hidden
+// behind a git alias (`git -c alias.p='push …' p`) is not recognized as a push —
+// both are shared with primary-commit and inherent to static, subprocess-free parsing.
+package primarypush
+
+import (
+	"path/filepath"
+	"strings"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
+)
+
+// autoApprovingModes is the set of permission modes that silently accept an Ask, so a
+// push advancing the canonical primary under one of these MUST be hard-denied. Kept in
+// lockstep with primarycommit's identical set (both encode the same R-6/R-8 posture).
+var autoApprovingModes = map[string]bool{
+	"bypassPermissions": true,
+	"auto":              true,
+	"dontAsk":           true,
+}
+
+// pushValueFlags are `git push` options that CONSUME the following token as their
+// value, so that token must not be mistaken for a refspec (e.g. `--push-option main`).
+var pushValueFlags = map[string]bool{
+	"-o": true, "--push-option": true, "--repo": true,
+	"--receive-pack": true, "--exec": true,
+}
+
+type Rule struct{ resolver primarycommit.PrimaryResolver }
+
+func New(resolver primarycommit.PrimaryResolver) *Rule { return &Rule{resolver: resolver} }
+
+func (r *Rule) Name() string { return "primary-push" }
+
+func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+	abstain := hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	if input.ToolName != "Bash" {
+		return abstain
+	}
+	cmdStr, err := input.BashCommand()
+	if err != nil {
+		return abstain
+	}
+	for _, pc := range cmdparse.Parse(cmdStr) {
+		if !isGit(pc.Executable) {
+			continue
+		}
+		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
+		if subcmd != "push" {
+			continue
+		}
+		if r.resolver == nil {
+			return abstain
+		}
+		dir := effectiveDir(input.CWD, chdirs)
+		canonical, err := r.resolver.IsCanonical(dir)
+		if err != nil || !canonical {
+			return abstain
+		}
+		primary, err := r.resolver.PrimaryBranch(dir)
+		if err != nil || primary == "" {
+			return abstain
+		}
+		cur, err := r.resolver.CurrentBranch(dir)
+		if err != nil {
+			return abstain
+		}
+		// `-c push.default=matching` is consumed by GitInvocation before `rest`, so
+		// detect it from the full arg list.
+		matching := hasMatchingPushDefault(pc.Args)
+		if !pushTargetsPrimary(rest, primary, cur, matching) {
+			return abstain
+		}
+		// Push advances the canonical primary. Block only an auto-approving session
+		// (which would otherwise silently accept); trust interactive/default sessions (R-6).
+		if autoApprovingModes[input.PermissionMode] {
+			return hookio.RuleResult{
+				Decision: hookio.Reject,
+				Reason:   "primary-push: refusing a push that advances the primary branch (" + primary + ") of the canonical clone in an auto-approving session — advancing shared primary requires explicit human direction / PR flow (R-6/R-8); push a feature branch instead.",
+				Module:   r.Name(),
+			}
+		}
+		return abstain
+	}
+	return abstain
+}
+
+// pushTargetsPrimary reports whether a `git push` whose args are `rest` (everything
+// after the "push" subcommand) would advance the `primary` branch on the shared
+// remote. `cur` is the canonical clone's current branch (consulted for the no-refspec
+// and same-name `HEAD` cases); `matchingPushDefault` is true when the invocation
+// injected `-c push.default=matching`.
+func pushTargetsPrimary(rest []string, primary, cur string, matchingPushDefault bool) bool {
+	// --all / --mirror push every local branch (primary included) regardless of the
+	// current branch or any refspec.
+	for _, a := range rest {
+		if a == "--all" || a == "--mirror" {
+			return true
+		}
+	}
+	// Collect positional (non-flag) args, skipping the VALUE of value-consuming push
+	// options so e.g. `--push-option main` is not read as a `main` refspec.
+	var positional []string
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if pushValueFlags[a] {
+			i++ // skip this flag's value token
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		positional = append(positional, a)
+	}
+	// positional is [remote?] [refspec...]; positional[0] is a remote name when it
+	// has no ":".
+	refspecs := positional
+	if len(positional) > 0 && !strings.Contains(positional[0], ":") {
+		refspecs = positional[1:]
+	}
+	if len(refspecs) == 0 {
+		// bare `git push` / `git push origin`. push.default=matching pushes ALL
+		// same-name branches, so primary advances regardless of `cur`; otherwise the
+		// default push advances primary iff currently ON primary.
+		if matchingPushDefault {
+			return true
+		}
+		return cur != "" && cur == primary
+	}
+	for _, rs := range refspecs {
+		if refspecTargetsPrimary(rs, primary, cur) {
+			return true
+		}
+	}
+	return false
+}
+
+// refspecTargetsPrimary reports whether a single push refspec advances `primary`.
+// It looks only at the REMOTE (destination) side, normalizing a leading "+" (force)
+// and any "refs/heads/"/"heads/" prefix. A same-name `HEAD`/`@` source resolves to
+// the current branch `cur`. A dynamic remote side ($…/backtick) cannot be proven safe,
+// so it is treated as targeting primary (fails safe under an auto-approving session).
+func refspecTargetsPrimary(refspec, primary, cur string) bool {
+	spec := strings.TrimPrefix(refspec, "+")
+	hasColon := strings.Contains(spec, ":")
+	remote := spec
+	if hasColon {
+		remote = spec[strings.Index(spec, ":")+1:]
+	}
+	if strings.ContainsAny(remote, "$`") {
+		return true // unresolved dynamic remote side — fail safe
+	}
+	remote = strings.TrimPrefix(remote, "refs/heads/")
+	remote = strings.TrimPrefix(remote, "heads/")
+	if !hasColon && (remote == "HEAD" || remote == "@") {
+		// `git push origin HEAD` pushes the CURRENT branch to its same-name remote.
+		return cur != "" && cur == primary
+	}
+	return remote == primary
+}
+
+// hasMatchingPushDefault reports whether the git args carry `-c push.default=matching`
+// (the value token "push.default=matching" survives in the arg list).
+func hasMatchingPushDefault(args []string) bool {
+	for _, a := range args {
+		if eq := strings.Index(a, "="); eq >= 0 {
+			key := strings.ToLower(strings.TrimSpace(a[:eq]))
+			val := strings.ToLower(strings.TrimSpace(a[eq+1:]))
+			if key == "push.default" && val == "matching" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isGit(exec string) bool { return exec == "git" || filepath.Base(exec) == "git" }
+
+func effectiveDir(cwd string, chdirs []string) string {
+	dir := cwd
+	for _, c := range chdirs {
+		if filepath.IsAbs(c) {
+			dir = c
+		} else {
+			dir = filepath.Join(dir, c)
+		}
+	}
+	return dir
+}
