@@ -231,6 +231,90 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   the operator, or a DEFER — never a RELEASE. A DEFER MUST keep BOTH the label and the promoted
   priority: the question is still open.
 
+### Unpushed Landing Debt
+
+> A local ff-merge makes work LANDED, not PUBLISHED. An agent loop that lands locally is correctly
+> forbidden from pushing, so every unit it lands adds commits to local `main` that no session is
+> accountable for publishing. Observed 2026-07-27: the only handle for a whole batch push was
+> `pg2-5subz` — a wrap-up P0 handoff bead whose description said the push was "covered by an
+> existing P0 front-door bead" that no longer existed. Closing it (its OWN 3 commits were verified
+> pushed) would have orphaned 11 unrelated unpushed commits. `pg2-dawg2` was filed to catch those
+> and was legitimately closed 2026-07-28 having pushed all 12 — its close reason reads "every repo
+> 0 ahead / 0 behind / clean, and `pn workspace doctor` reports no errors". By 2026-07-29 the same
+> workspace was 19 commits unpushed again (1 repo-base + 2 ziprecruiter + 15 agent-support +
+> 1 overlay) across 4 repos, with no handle at all. So the defect is not merely "a bead can be
+> closed while still true": the debt REGENERATES on every land, and a bead can only ever describe
+> ONE INSTANT of it. The truth is already in git. What was missing was never a RECORD — it was an
+> OBLIGATION TO LOOK.
+
+- **U-1** Unpushed landing debt MUST be treated as DERIVED STATE and re-derived from git at the
+  moment it matters. No bead, label, comment, or handoff doc is its handle.
+- **U-2** An agent MUST NOT create, maintain, or "restore" a standing push bead, a
+  `push-carryover` bead, or a handoff-doc section whose PURPOSE is to remember that locally landed
+  commits are unpushed. Such a record duplicates computable state, goes stale at the very next
+  land, and can be closed while the condition it names is still true — that IS this defect. A bead
+  for ONE push a person has already authorized as a discrete task is NOT this; making a bead the
+  standing accounting for the aggregate debt IS.
+- **U-3** In a `pn` workspace the probe is `pn workspace doctor` — it already computes
+  `origin/<branch>` vs local for EVERY repo, so an agent MUST reuse it rather than write another
+  per-repo `git rev-list --count origin/main..main` loop. Run it from anywhere inside the
+  workspace:
+
+  ```bash
+  pn workspace doctor
+  ```
+
+  Read it as follows. Both readings are verified against live output on 2026-07-29:
+  - **Debt present** — a `branch-synced` ERROR whose message carries the count. `ahead N` with
+    `N > 0` IS the unpushed debt; `behind M` alone is NOT (that is un-pulled remote work):
+
+    ```text
+    ERROR branch-synced   repo "phillipgreenii-nix-agent-support" local HEAD 2c838e0 != remote e9fed09 (ahead 15, behind 0) [fixable]
+    ```
+
+  - **No debt for a repo** — the repo emits NO section at all. Verified: `-nix-personal` and
+    `-nix-support-apps` both report `0` from `git rev-list --count origin/main..main` and are
+    absent from the doctor output entirely. Absence of a repo is a PASS, not a skip.
+  - **No debt anywhere** — the trailer reads `workspace doctor: 0 errors, 0 warnings.` with no
+    `branch-synced` line. (`pg2-dawg2`'s close reason records observing exactly this after its
+    push.) The trailer count alone is NOT sufficient: other checks (e.g. `tree-clean`) also raise
+    errors, so the agent MUST read the `branch-synced` lines specifically.
+  - Machine-readable form, when the count must be extracted rather than eyeballed — the count
+    lives in `.message`, not in its own field:
+
+    ```bash
+    pn workspace doctor --json |
+      jq -r '.findings[] | select(.check == "branch-synced")
+             | "\(.repo) ahead=\(.message | capture("ahead (?<a>[0-9]+)").a)"'
+    ```
+
+- **U-4** The probe MUST be run READ-ONLY. An agent MUST NOT pass `--fix`. Verified with
+  `pn workspace doctor --fix --dry-run`: the plan for `branch-synced` is
+  `git merge --ff-only origin/<branch>` executed in the CANONICAL clone, which cannot publish an
+  ahead-only divergence (so it does not clear the debt) and mutates the canonical clone, which
+  **R-3** forbids.
+- **U-5** Discharging the debt is OUTWARD-FACING and operator-authorized. An agent MUST NOT
+  `git push`, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT
+  invoke `/pn-workspace-sync` or `/pn-workspace-update`, on its own initiative to clear it.
+  REPORTING is in scope; PUBLISHING is not.
+- **U-6** A session that landed anything locally MUST run the U-3 probe before it terminates, and
+  when any `ahead N > 0` it MUST report to the operator, in its terminal report: the `branch-synced`
+  lines VERBATIM, the total with its per-repo addends shown, and the sanctioned remediation path.
+  Naming the path is mandatory — a bare count is an observation, not a handoff. The path, as
+  actually carried out by `pg2-dawg2` on 2026-07-28: rebase each repo onto its remote primary
+  branch, then `pn workspace update --siblings-only` (relocks sibling inputs and pushes), then
+  `pn workspace push` to confirm `Everything up-to-date`, then re-run `pn workspace doctor` and
+  expect no `branch-synced` errors. The `/pn-workspace-sync` skill does the same fetch + rebase +
+  validate + land + push in an isolated workforest.
+- **U-7** `pn workspace doctor` and the **F-3** `pushed?` probe are NOT interchangeable. Doctor is
+  the workspace-wide AGGREGATE ("does any repo hold unpublished commits right now"); `pushed?` is
+  the per-COMMIT refinement ("is THIS sha on a remote"). An agent MUST use doctor for the debt
+  question and `pushed?` when one commit's published-ness decides a premise, and MUST NOT
+  generalize a single `pushed?` reading to "that repo is pushed".
+- **U-8** A "no debt" reading is valid only for the instant it was taken (**F-1**). It MUST NOT be
+  cached across a later land, a peer session, or a hand-off — the next reader MUST re-run the probe
+  rather than trust a recorded count.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.

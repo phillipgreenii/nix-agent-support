@@ -182,7 +182,8 @@ reports that and does nothing.
 Read back each repo's outcome; it drives capture (phases 2/7) and cleanup (phase 6):
 
 - **`landed`** — local ff-merge completed; that repo's merged branch + standalone worktree are
-  already retired.
+  already retired. Landed is **not pushed** — the commits sit on that repo's LOCAL `main` and this
+  wrapup does not publish them. Phase 7 accounts for that.
 - **`pr-opened` / `pr-updated`** — the branch was pushed and the PR opened/updated (never
   merged); branch + worktree are kept.
 - **`stopped:<reason>`** — integration did not complete (e.g. a rebase conflict, or a canonical
@@ -256,6 +257,32 @@ entry point, exactly as the P0 bead would be — one front door, updated in plac
 than duplicated. Its "Outstanding / next" checklist holds the discovered/deferred items that would
 otherwise be non-P0 beads. See "Markdown handoff doc (no-beads repos)." Skip writing it only when
 nothing carries over at all.
+
+**Unpushed landing debt is re-derived here, never carried by the handoff.** Every repo that
+reported `landed` now holds commits on local `main` that nothing has published. That condition is
+DERIVED STATE, so it MUST be recomputed, not remembered:
+
+- Probe it READ-ONLY — never `pn workspace doctor --fix`, which ff-merges in the canonical clone
+  and cannot publish an ahead-only divergence anyway:
+
+  ```bash
+  pn workspace doctor            # pn workspace: covers every repo
+  git rev-list --count @{u}..HEAD  # standalone repo: run per in-scope repo
+  ```
+
+  A repo with no debt emits NO doctor section; debt is a `branch-synced` ERROR whose message
+  carries `(ahead N, behind M)`. `ahead N` with `N > 0` is the debt — `behind M` alone is not.
+
+- Report any `ahead N > 0` in the end-of-run summary, VERBATIM, with the total and the
+  operator-authorized remediation path: rebase each repo onto its remote primary branch, then
+  `pn workspace update --siblings-only` (relocks siblings and pushes), then `pn workspace push` to
+  confirm `Everything up-to-date`, then re-run the probe. Reporting is in scope; **pushing is not**.
+- MUST NOT put the debt in the P0 handoff bead, the handoff doc, or a standing push bead as the
+  thing that REMEMBERS it. `pg2-5subz` was exactly a phase-7 P0 handoff bead and became the
+  accidental handle for a whole batch push — closing it would have orphaned 11 unrelated commits.
+  Its replacement `pg2-dawg2` pushed all 12 and closed correctly, and the debt was back within a
+  day. A bead describes one instant; the probe describes now. Full contract: the always-on
+  `Unpushed Landing Debt` rules (U-1..U-8).
 
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
@@ -364,6 +391,11 @@ rather than file a second" rule for beads.
   branch/worktree and roll the reason into the handoff.
 - **Never `pn workspace push`/`rebase`** for a scoped wrapup — they hit every repo. Integrate
   per repo via `integrate-branch`.
+- **Landed is not pushed, and nothing remembers it for you.** A local ff-merge leaves commits on
+  local `main`. Phase 7 re-derives that debt read-only (`pn workspace doctor`) and reports it; it
+  never pushes, and never records it in the P0 handoff bead, the handoff doc, or a standing push
+  bead — a bead duplicating computable state is the defect this replaced (`Unpushed Landing Debt`,
+  U-1..U-8).
 - **Don't reconfigure beads to local.** Beads writes go to the shared remote automatically in
   server mode; if beads access fails, stop and surface it rather than switching to local
   (project rule).
@@ -381,6 +413,11 @@ Integrated (via `integrate-branch`):
 | homelab   | landed       | feat-x → main (ff-merge); worktree removed |
 | nix-personal | pr-updated | branch pushed, PR #42 updated (unmerged) |
 
+Unpushed landing debt (landed locally, NOT published — operator's call):
+  ERROR branch-synced  repo "homelab" local HEAD abc1234 != remote def5678 (ahead 3, behind 0) [fixable]
+  Total 3 commits (3 homelab) in 1 repo. No bead tracks this — re-run `pn workspace doctor`.
+  Remediate: rebase onto remote main → `pn workspace update --siblings-only` → `pn workspace push`.
+
 Beads: closed 3 (tc-12, tc-13, tc-15); filed 2 (tc-88 follow-up, tc-89 bug).
 Next session: P0 tc-90 — resume nix-personal PR #42 after review.
 
@@ -392,22 +429,27 @@ Left untouched (out of scope):
 For a no-beads repo, replace the Beads / Next-session lines with the handoff doc, e.g.
 `Handoff: HANDOFF.md updated — 2 outstanding items; resume brief for feat-x.`
 
+The unpushed-debt block is emitted whenever the phase-7 probe found any `ahead N > 0`, and omitted
+(with a one-line "nothing unpublished") when it did not. It is a REPORT, not a record — nothing
+persists it, so the next reader re-runs the probe.
+
 If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                            | command                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------ |
-| in-progress beads               | `bd list --status in_progress`                                                       |
-| PR-tracker beads                | `bd list --type=merge-request`                                                       |
-| close finished work             | `bd close <id> [<id>...] --reason="..."`                                             |
-| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                        |
-| dirty state                     | `git status` ; ahead of main: `git log main..`                                       |
-| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`          |
-| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree) |
-| set teardown / stash cleanup    | see `references/cleanup.md`                                                          |
-| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)   |
-| prune stale worktree admin      | `pn workspace workforest prune`                                                      |
-| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                 |
-| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")       |
-| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                   |
+| need                            | command                                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| in-progress beads               | `bd list --status in_progress`                                                                   |
+| PR-tracker beads                | `bd list --type=merge-request`                                                                   |
+| close finished work             | `bd close <id> [<id>...] --reason="..."`                                                         |
+| file discovered/unfinished      | `bd create --title=... --description=... --type=... -p <0-4>`                                    |
+| dirty state                     | `git status` ; ahead of main: `git log main..`                                                   |
+| unpushed landing debt           | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD` |
+| run gates (nix-\* repos)        | `prek run --all-files` (or `pre-commit run --all-files`); `nix flake check`                      |
+| integrate a repo's work         | invoke the `integrate-branch` skill (detects method, lands, retires branch/worktree)             |
+| set teardown / stash cleanup    | see `references/cleanup.md`                                                                      |
+| remove pn workforest set        | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)               |
+| prune stale worktree admin      | `pn workspace workforest prune`                                                                  |
+| next-session handoff            | one P0 `bd create` (see "Next-session handoff bead")                                             |
+| record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                   |
+| next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                               |
