@@ -11,8 +11,13 @@
 // needs_input is intentionally non-terminal: the executor keeps polling such a
 // session to MaxWait and alerts the operator once on the edge (executor.waitDone),
 // and teardownAll preserves needs_input sessions (does not close them) so a human
-// can still `ccpool attach` after the pass. A reaper TTL for preserved sessions
-// was considered and deferred (pg2-th35).
+// can still `ccpool attach` after the pass. The reap side of that carve-out — left
+// open by pg2-th35, which delivered the teardown half only — is now RESOLVED by
+// ADR 0037 (pg2-z3aya): ccpool's reaper spares a needs_input session in BOTH its
+// TTL and cap-eviction passes, so a session this pass preserves is no longer
+// closed minutes later by the reap timer. Preservation is deliberately UNBOUNDED
+// (no preserved-session reaper TTL); the accepted cost is a pool that may sit above
+// max_sessions until an operator attends or closes the session.
 package orchestrator
 
 import (
@@ -366,6 +371,11 @@ func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
 // here (pg2-th35, pg2-2yn2). Shared by teardownAll's per-session loop and run-role's
 // single-session teardown so the two paths can't drift. Returns true iff the session
 // was actually closed (purged).
+//
+// ccpool's reaper carries the peer predicate (session.preservedForHuman), spanning its
+// TTL and cap-eviction passes. Both realize ONE decision — ADR 0037 — which is itself
+// this repo's realization of the deployment set's INV-CCPOOL-6; change one only by
+// changing that ADR.
 func (o *Orchestrator) closeUnlessNeedsInput(ctx context.Context, externalID string, state ccpool.SessionState) bool {
 	if state == ccpool.StateNeedsInput {
 		slog.Info("teardown preserving needs_input session for operator attach",
