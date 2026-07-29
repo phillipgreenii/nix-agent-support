@@ -377,12 +377,25 @@ throws that away (F-7). EXTRACT first, close second.
    ```
 
    BOTH empty → nothing to lose → CLEANUP as in the `done` path. EITHER non-empty →
-   LEAVE the worktree/branch in place and file the follow-up rather than orphan it:
+   LEAVE the worktree/branch in place and file the follow-up rather than orphan it. This is
+   the ENTRY point for the `worktree-review` label, so it MUST carry that label ALONGSIDE
+   `human` — `/unblock-human-beads` triages on the label, and drain's own claim query excludes
+   only `human`, so a `worktree-review`-only bead would be drain-claimable and never reach the
+   operator (W-1). Record the entry marker at birth (W-2); `bd create` defaults to P2 and
+   promotes nothing, so use the no-promotion form:
 
    ```bash
    bd create "worktree-review: reconcile leftover isolation for <id> (closed as moot)" \
-     --labels human --defer +7d --deps "discovered-from:<id>" --actor "ID"
+     --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
+     --notes "[worktree-review $(date +%F)] Leftover isolation from <id>: worktree <worktree-path>, branch drain/<id> in <repo>. Unlanded: <git cherry output>. Dirty: <git status --porcelain output>. A person must rule on keep vs discard. No promotion (priority left at P2)." \
+     --actor "ID"
    ```
+
+   Whoever later adjudicates that isolation MUST remove the label and restore the recorded
+   priority in the same update that releases or closes the bead — the always-on
+   `Worktree-Review Label Lifecycle` rules (W-1..W-8) are the label's full contract, and
+   `/unblock-human-beads`' RELEASE / CLOSE steps are where it is carried out. Drain itself
+   never adjudicates isolation: such a bead is substrate-class and never enters drain's queue.
 
 5. Return to the MAIN LOOP's step 1 (CLAIM).
 
@@ -438,6 +451,13 @@ unchanged.
 - CLOSE-AS-MOOT MUST EXTRACT before it closes: read the stale work, file any claim that
   CURRENT source violates as its own bead (`--deps "discovered-from:<id>"`), and name
   that id in the close reason. A blind close is forbidden.
+- A leftover-isolation follow-up MUST be born with BOTH `human` and `worktree-review`, and MUST
+  carry the entry marker (`[worktree-review <date>] … No promotion (priority left at P2).`) in
+  `notes`. `worktree-review` MUST NOT be applied alone: drain excludes only `human`, so a
+  label-only bead is drain-claimable and bypasses the substrate guard. The label is a MARKER
+  with an exit condition, not a permanent property — a recorded verdict on the isolation
+  retires it, and the retiring update MUST also restore the priority the entry marker recorded.
+  Full contract: the always-on `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - If a skill reports the canonical clone is off its primary branch or dirty, HALT
   and report — do not reset/stash/work around it.
 - Transient infra failures (bd/dolt server blip, git `index.lock` contention, a
@@ -502,7 +522,13 @@ or a stale-converted gate, stays out of the queue until a human reviews it.
   `pn workspace workforest prune` or delete `.worktrees/*`) that can mutate the
   shared worktree substrate other sessions depend on. Review `bd ready --json`
   before a large unattended run and hand-label anything substrate-mutating `human`
-  first, or run those beads serially in a single session.
+  first, or run those beads serially in a single session. Follow-ups this command
+  FILES are covered by construction — they are born `human,worktree-review`, so the
+  `--exclude-label human` claim query skips them and `/unblock-human-beads` recognizes
+  them as class 1 mechanically. The residual exposure is a bead labeled
+  `worktree-review` WITHOUT `human` (W-1 forbids creating one, but pre-existing beads
+  such as `pg2-8u0ul` have that shape): drain does not filter on `worktree-review`, so
+  such a bead is still claimable.
 - **Impl closed before live-verify.** A `done-pending-apply-verification` bead is
   closed once landed + gated, so its dependents unblock immediately. That is safe
   for a code dependency (the code is in local main), but a dependent that

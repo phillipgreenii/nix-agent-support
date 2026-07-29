@@ -208,6 +208,38 @@ operator and either (a) resolve it in-session WITH the operator, serially and ca
 then CLOSE it; or (b) DEFER it (when the operator can't act now). Never RELEASE it, and
 never run a substrate-mutating action autonomously.
 
+## The `worktree-review` label has an EXIT — clear it when you adjudicate
+
+The class-1 trigger above is a MARKER ("an isolation artifact exists that only a person may
+rule on"), not a permanent property of the bead. Nothing used to remove it, so an
+already-adjudicated bead re-triggered this operator prompt on every later run and a later
+sweep re-promoted and re-parked it; and because the sweep records its promotion as
+`Promoted P<n>->P0` in `notes` and nothing undid that, adjudicated beads keep a P0 that no
+longer reflects urgency. Follow the always-on `Worktree-Review Label Lifecycle` rules
+(W-1..W-8). In this command that means:
+
+- **Read the promotion record BEFORE the terminal action** (W-3) — you need `<prior>`:
+
+  ```bash
+  bd show <id> --json | jq -r '.data[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
+  ```
+
+- **The exit condition is a RECORDED VERDICT** (W-4) — which of keep / fix-forward / discard /
+  tear-down applies, plus what was done and what remains. Your ENGAGE exchange produces it;
+  write it on the bead. "The operator looked at it" is not a verdict, and until one is recorded
+  the label MUST stay.
+- **This does NOT weaken the substrate guard** (W-8). The guard fires on the label OR on the
+  work itself, so the label is a SUFFICIENT trigger, never a necessary one — clearing the
+  marker cannot let a genuinely substrate-mutating bead escape class 1. If the verdict leaves
+  substrate work to do (a set still to tear down, worktrees still to prune), the label STAYS
+  and the terminal action is CLOSE-in-session or DEFER, never RELEASE.
+- **No promotion record** (W-7) — `rg` printed nothing: the pre-promotion priority is
+  unrecoverable from the bead (the live carriers `pg2-8u0ul`, `pg2-fijqu`, `pg2-kl0o4` are this
+  shape). Still remove the label, leave the priority UNCHANGED, record
+  `NO promotion record; priority left at P<n> — unverified.`, and ask the operator for the
+  right priority in the SAME class-1 exchange — you already have them. Do not guess, and do
+  not let it become a silent no-op.
+
 ## Terminal actions (exactly one per claimed bead — there is no automatic "re-park")
 
 - **RELEASE** (default) — the human blocker is lifted and drain can make progress on what
@@ -231,6 +263,21 @@ never run a substrate-mutating action autonomously.
   only remaining work is a human-only action drain cannot perform, DEFER instead
   (apply-waiting is exempt — it is released on the pre-apply premise).
 
+  If the bead carries `worktree-review` and the isolation has been ADJUDICATED (a verdict is
+  recorded and NO substrate work remains — otherwise class 1 forbids RELEASE, W-8), drop that
+  label and restore the promoted priority IN THAT SAME SINGLE CALL (W-5). A lingering
+  `worktree-review` label re-triggers class 1 for the operator on every later run and lets a
+  later sweep re-park the bead:
+
+  ```bash
+  bd update <id> --remove-label human,worktree-review --priority <prior> --status open --assignee "" \
+    --append-notes "[worktree-review-resolved $(date +%F)] <verdict>. Restored P0->P<prior>." --actor "ID"
+  ```
+
+  `<prior>` is the value from the `Promoted P<prior>->P0` read-back above; with no record,
+  OMIT `--priority` and append `NO promotion record; priority left at P<n> — unverified.`
+  instead (W-7).
+
 - **CLOSE** — the bead is already satisfied/obsolete (confirm WITH the operator first, unless
   it is the CLOSE-AS-MOOT variant below), or a substrate-mutating bead was resolved
   in-session. Nothing left for drain:
@@ -239,12 +286,33 @@ never run a substrate-mutating action autonomously.
   bd close <id> --reason "<why obsolete / what was resolved>" --actor "ID"
   ```
 
+  If the bead carries `worktree-review`, that label and the promoted priority MUST be cleared
+  BEFORE the close, as a separate `bd update` — `bd close` accepts neither `--remove-label` nor
+  `--priority`, so a close cannot do it atomically (W-6). This write MUST NOT drop `human`:
+
+  ```bash
+  bd update <id> --remove-label worktree-review --priority <prior> \
+    --append-notes "[worktree-review-resolved $(date +%F)] <verdict>. Restored P0->P<prior>." --actor "ID"
+  bd close <id> --reason "<verdict + isolation disposition>" --actor "ID"
+  ```
+
+  Cleanup-then-close, in that order: interrupted after the first write the bead is clean,
+  correctly prioritised, still open and still `human`, so it returns to THIS queue and the next
+  pass just closes it. The reverse order's interrupt leaves a CLOSED bead still carrying the
+  label at a promoted P0 — which no queue revisits, so the residue is permanent. That is the
+  observed defect (`pg2-8u0ul`, `pg2-fijqu`, `pg2-kl0o4`, `pg2-6laiy` are all closed carriers).
+
   If a worktree/set was left behind, do NOT orphan it and do NOT feed drain a substrate
-  task — file a follow-up instead (note `--labels`, not `--add-label`, on `bd create`):
+  task — file a follow-up instead. It carries `worktree-review` ALONGSIDE `human` so the next
+  unblock run recognizes it as class 1 mechanically (W-1), with the entry marker recorded at
+  birth (W-2; `bd create` defaults to P2 and promotes nothing, so the no-promotion form
+  applies). Note `--labels`, not `--add-label`, on `bd create`:
 
   ```bash
   bd create "worktree-review: reconcile leftover isolation for <id>" \
-    --labels human --defer +7d --deps "discovered-from:<id>" --actor "ID"
+    --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
+    --notes "[worktree-review $(date +%F)] Leftover isolation from <id> at <worktree-path> (branch drain/<id>). A person must rule on keep vs discard. No promotion (priority left at P2)." \
+    --actor "ID"
   ```
 
   - **CLOSE-AS-MOOT** — the variant the freshness check produces. The close guard's operator
@@ -286,7 +354,8 @@ never run a substrate-mutating action autonomously.
 
   Add `<id>` to your session skip-set. Deferred beads are excluded from `bd ready`, so the
   loop continues and terminates; the bead resurfaces in the `human` queue when the window
-  passes.
+  passes. A DEFER MUST KEEP `worktree-review` and MUST KEEP the promoted priority (W-8) — the
+  isolation question is still unanswered, so the bead must come back substrate-class.
 
 ## Isolation: reuse vs create
 
@@ -332,7 +401,22 @@ arguments, drain the whole ready `human` queue.
   exempt).
 - **Substrate guard.** A substrate-mutating bead MUST NOT be RELEASEd to drain and MUST NOT
   be auto-actioned; ENGAGE the operator (serial, in-session) → CLOSE, or DEFER. This guard is
-  unconditional: it holds even when the freshness check proves the bead's premise moot.
+  unconditional: it holds even when the freshness check proves the bead's premise moot. The
+  guard keys on the `worktree-review` label OR on the work itself, so the label is a
+  SUFFICIENT trigger and never a necessary one — clearing it per the rule below MUST NOT be
+  treated as licence to RELEASE a bead with substrate work still to do.
+- **Worktree-review exit.** A `worktree-review` bead MUST NOT be RELEASEd or CLOSEd with the
+  label still attached. The exit condition is a RECORDED VERDICT on the isolation (keep /
+  fix-forward / discard / tear-down, plus what was done and what remains) — the operator
+  merely having looked at it is NOT a verdict, and without one the label MUST stay. Once
+  recorded, the label removal and the restore of the priority recorded as
+  `Promoted P<prior>->P0` in `notes` MUST happen in the SAME update that releases the bead;
+  on the CLOSE path — where `bd close` accepts neither `--remove-label` nor `--priority` —
+  they MUST be a preceding `bd update` that does NOT drop `human`. With no promotion record
+  the priority MUST be left unchanged, the gap MUST be recorded explicitly, and the operator
+  MUST be asked in the same class-1 exchange; guessing and silent no-ops are both forbidden.
+  A DEFER MUST keep the label and the promoted priority. Full contract: the always-on
+  `Worktree-Review Label Lifecycle` rules (W-1..W-8).
 - **Freshness guard.** Before TRIAGE, the bead's premise MUST be re-verified against CURRENT
   reality with the matching named probes from the always-on `Premise Freshness` rules (F-3) —
   one per external referent the bead or its `stuck:` comment names (commits, external tickets,
@@ -366,8 +450,8 @@ arguments, drain the whole ready `human` queue.
   in-session-resolved substrate bead, or a CLOSE-AS-MOOT whose decisive probe output is
   recorded verbatim on the bead (the recorded evidence IS the confirmation). If a worktree is
   left, MUST file a `worktree-review` follow-up
-  (`bd create … --labels human --defer +7d --deps "discovered-from:<id>"`) rather than orphan
-  it.
+  (`bd create … --labels human,worktree-review --defer +7d --deps "discovered-from:<id>"`,
+  carrying the W-2 entry marker) rather than orphan it.
 - **Arguments narrow-only.** `$ARGUMENTS` MUST only restrict the claim query and MUST NOT
   remove safety filters or broaden scope.
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
@@ -388,7 +472,7 @@ flowchart TD
     FC -- "provably moot (non-substrate)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
     FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
     CLOM --> C
-    T -->|1 substrate-mutating| SUB["ENGAGE operator,<br/>NEVER release to drain"]
+    T -->|1 substrate-mutating| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
     T -->|2 stale-precondition label| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]
     T -->|3 apply-waiting| REL
     T -->|4 mislabeled / normal work| REL
@@ -398,9 +482,9 @@ flowchart TD
     SUB -->|can't now| DEF
     STL -- "outcome holds or is unsatisfiable" --> CLO
     STL -- "outcome genuinely unmet" --> ENG
-    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human (+stale-precondition) --status open --assignee '' (one call)"]
-    ENG -->|obsolete, confirmed| CLO["CLOSE (+ worktree-review follow-up<br/>bd create --labels human --defer, if a worktree is left)"]
-    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee '' (keep human),<br/>add id to skip-set"]
+    ENG -->|now drain-doable| REL["RELEASE (atomic): commit only the blocker-lift artifact →<br/>bd comment (precondition rewritten as an OUTCOME) →<br/>bd update --remove-label human (+stale-precondition,<br/>+worktree-review with --priority prior) --status open --assignee '' (one call)"]
+    ENG -->|obsolete, confirmed| CLO["CLOSE: if worktree-review, FIRST<br/>bd update --remove-label worktree-review --priority prior (keep human) →<br/>bd close (+ worktree-review follow-up bd create<br/>--labels human,worktree-review --defer, if a worktree is left)"]
+    ENG -->|operator can't now| DEF["DEFER: bd comment why →<br/>bd update --defer +7d --status open --assignee ''<br/>(keep human AND worktree-review AND the promoted priority),<br/>add id to skip-set"]
     REL --> C
     CLO --> C
     DEF --> C

@@ -143,6 +143,94 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
   "highest accepted is N") MUST be recomputed at land time and MUST NOT be trusted as
   recorded; between drafting and landing, someone else takes it.
 
+### Worktree-Review Label Lifecycle
+
+> `worktree-review` is a MARKER, not a property: it says "an isolation artifact exists whose
+> disposition only a person may rule on". It is also `/unblock-human-beads`' triage class-1
+> trigger, so while it is attached the bead is substrate-class and is never released to
+> `/drain-beads`. Observed 2026-07-27: NOTHING ever removed it. `pg2-zxql0`, `pg2-s5yat` and
+> `pg2-spwj9` had it stripped BY HAND after the operator ruled, precisely so the next sweep
+> would not re-park them; `pg2-8u0ul`, `pg2-fijqu`, `pg2-kl0o4` and `pg2-6laiy` were CLOSED
+> still carrying it. The label also has a priority side effect — those beads' notes read
+> `Promoted P2->P0` / `Promoted P3->P0` — and nothing undid that either, so `pg2-spwj9` holds
+> P0 for one dirty `flake.nix`. A marker with no exit condition guarantees both a repeat
+> operator prompt and a re-park on every later pass. There is NO committed sweep that applies
+> this label; every application so far came from an ad-hoc agent session, which is why its
+> contract lives HERE, in the always-on rules, and not in a script — these rules bind any
+> agent or future sweep that touches the label.
+
+- **W-1** `worktree-review` MUST be applied only when an ISOLATION ARTIFACT exists whose
+  keep-vs-discard a person must rule on: a dirty worktree, unlanded commits on a
+  `drain/<id>` branch, or a workforest set / `.worktrees/*` entry of unknown disposition. It
+  MUST NOT be used as a generic "needs a human" marker — `human` is that marker. It MUST be
+  applied TOGETHER with `human` in the same update: `/drain-beads` excludes only `human` from
+  its claim query, so a `worktree-review`-only bead (e.g. `pg2-8u0ul`) is drain-claimable and
+  the class-1 substrate guard never sees it.
+- **W-2** Applying the label MUST, in the SAME `bd update`, record an ENTRY MARKER in `notes`
+  naming the isolation, its location, and the question a person must answer — and MUST state
+  the priority effect in exactly one of two parseable forms: `Promoted P<prior>->P<new>.` or
+  `No promotion (priority left at P<n>).` An unrecorded promotion is unrestorable (W-7), and
+  an unrecorded absence is indistinguishable from a forgotten record.
+
+  ```bash
+  bd update <id> --add-label human,worktree-review --priority 0 \
+    --append-notes "[worktree-review $(date +%F)] <what isolation, where, and what a person must decide>. Promoted P<prior>->P0." \
+    --actor "ID"
+  ```
+
+- **W-3** A bead that ALREADY carries `worktree-review` MUST NOT be re-labeled or re-promoted
+  — so at most one unresolved promotion record ever exists and this read-back is unambiguous
+  (verified: prints `Promoted P3->P0` for `pg2-spwj9`, `Promoted P2->P0` for `pg2-6laiy`):
+
+  ```bash
+  bd show <id> --json | jq -r '.data[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
+  ```
+
+- **W-4** The label's EXIT CONDITION is a RECORDED VERDICT on the isolation — which of
+  keep / fix-forward / discard / tear-down applies, plus what was done and what remains. "A
+  person looked at it" is not a verdict; it MUST be written on the bead. Until a verdict is
+  recorded the label MUST stay.
+- **W-5** Once the verdict is recorded, the label MUST be removed AND the recorded priority
+  restored in the SAME update that releases the bead. `bd update` accepts `--remove-label`,
+  `--priority`, `--status`, `--assignee` and `--append-notes` together, so a RELEASE is ONE
+  call and leaves no window:
+
+  ```bash
+  bd update <id> --remove-label human,worktree-review --priority <prior> --status open --assignee "" \
+    --append-notes "[worktree-review-resolved $(date +%F)] <verdict>. Restored P0->P<prior>." --actor "ID"
+  ```
+
+- **W-6** `bd close` accepts NEITHER `--remove-label` NOR `--priority`, so a CLOSE cannot be
+  atomic. The cleanup MUST be written FIRST, as its own `bd update`, and that write MUST NOT
+  drop `human`:
+
+  ```bash
+  bd update <id> --remove-label worktree-review --priority <prior> \
+    --append-notes "[worktree-review-resolved $(date +%F)] <verdict>. Restored P0->P<prior>." --actor "ID"
+  bd close <id> --reason "<verdict + isolation disposition>" --actor "ID"
+  ```
+
+  The order is load-bearing. Interrupted after the first write, the bead is clean, correctly
+  prioritised, still open and still `human` — it returns to the human queue and the next pass
+  simply closes it. Interrupted in the reverse order it becomes exactly the observed defect: a
+  CLOSED bead carrying the label at a promoted priority, which no queue ever revisits, so the
+  residue is permanent.
+
+- **W-7** If the W-3 read-back finds NO `Promoted` token, the pre-promotion priority is
+  unrecoverable from the bead. The agent MUST NOT guess a value, MUST NOT silently leave the
+  promoted value unremarked, and MUST NOT withhold the label removal (withholding it re-creates
+  the very defect). It MUST remove the label, leave the priority UNCHANGED, record the gap in
+  that same update — `NO promotion record; priority left at P<n> — unverified.` — and, because
+  class 1 already puts the operator in the loop, ASK the operator for the correct priority in
+  that same exchange and use their answer. Only an operator who declines leaves it at P<n>.
+- **W-8** Clearing the label MUST NOT be used to make a bead drain-eligible while substrate
+  work REMAINS. The class-1 guard triggers on the label OR on the work itself, so the label is
+  a SUFFICIENT trigger and never a necessary one — removing the marker cannot let a genuinely
+  substrate-mutating bead escape the guard. If the verdict is that isolation must still be torn
+  down or pruned, the label MUST stay and the terminal action MUST be an in-session CLOSE with
+  the operator, or a DEFER — never a RELEASE. A DEFER MUST keep BOTH the label and the promoted
+  priority: the question is still open.
+
 ### General Guidelines
 
 - Before recommending paid/licensed software, confirm the cost with the user.
