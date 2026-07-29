@@ -29,6 +29,9 @@ func TestDangerousCommands(t *testing.T) {
 		{"fdisk", "fdisk -l", "Bash", hookio.Reject},
 		{"mount", "mount /dev/sdb /mnt", "Bash", hookio.Reject},
 		{"umount", "umount /mnt", "Bash", hookio.Reject},
+		// umount is NOT operand-gated: it always needs a target, so the bare form is
+		// a usage error, not a query worth recovering (pg2-2nm54 audit).
+		{"umount bare still rejects", "umount", "Bash", hookio.Reject},
 		{"reboot", "reboot", "Bash", hookio.Reject},
 		{"shutdown", "shutdown -h now", "Bash", hookio.Reject},
 		{"wget", "wget http://x/y", "Bash", hookio.Reject},
@@ -52,6 +55,75 @@ func TestDangerousCommands(t *testing.T) {
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.command)}
 			if got := r.Evaluate(input).Decision; got != tt.want {
 				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMountOperandGate pins BOTH directions of the pg2-2nm54 operand gate: the
+// operand-less `mount` listing is no longer hard-denied, and every form that can
+// actually mount — or that the rule cannot prove is a listing — still Rejects.
+func TestMountOperandGate(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- read-only listing forms: no longer dangerous ---
+		{"bare mount", "mount", hookio.Abstain},
+		{"bare mount piped", "mount | grep ziprecruiter", hookio.Abstain},
+		// Row 310193's exact shape: the listing reached the rule only as an
+		// assignment-only segment's command substitution (pg2-mtnmb made that
+		// position rule-visible), so the position is pinned explicitly.
+		{"row 310193 shape: VAR=$(mount | awk)", `DATA_DEV=$(mount | awk '/on \/System\/Volumes\/Data /{print $1; exit}')`, hookio.Abstain},
+		{"assignment substitution, plain", "X=$(mount)", hookio.Abstain},
+		{"listing inside a compound", `echo "--- mounts ---" && mount | head -5`, hookio.Abstain},
+		{"full path bare mount", "/sbin/mount", hookio.Abstain},
+		{"env-prefixed bare mount", "env mount", hookio.Abstain},
+		// --- informational flags: allowed ---
+		{"show-labels short", "mount -l", hookio.Abstain},
+		{"show-labels long", "mount --show-labels", hookio.Abstain},
+		{"verbose short", "mount -v", hookio.Abstain},
+		{"verbose long", "mount --verbose", hookio.Abstain},
+		{"version", "mount -V", hookio.Abstain},
+		{"help", "mount --help", hookio.Abstain},
+		{"type filter short", "mount -t apfs", hookio.Abstain},
+		{"type filter long", "mount --types nfs", hookio.Abstain},
+		{"type filter inline long", "mount --types=nfs", hookio.Abstain},
+		{"clustered informational shorts", "mount -lv", hookio.Abstain},
+		{"informational combination", "mount -l -v -t ext4", hookio.Abstain},
+		// --- operand-bearing / unprovable forms: still Reject ---
+		{"device and dir", "mount /dev/sdb /mnt", hookio.Reject},
+		{"single fstab operand", "mount /mnt", hookio.Reject},
+		{"type plus operands", "mount -t nfs server:/export /mnt", hookio.Reject},
+		{"mount all", "mount -a", hookio.Reject},
+		{"mount all long", "mount --all", hookio.Reject},
+		{"remount options", "mount -o remount,rw /", hookio.Reject},
+		{"bind", "mount --bind /src /dst", hookio.Reject},
+		{"target in flag form", "mount --target /mnt", hookio.Reject},
+		{"source in flag form", "mount --source /dev/sdb", hookio.Reject},
+		{"label selects device", "mount -L mydisk", hookio.Reject},
+		{"uuid selects device", "mount -U 1234-5678", hookio.Reject},
+		{"read-only flag is not informational", "mount -r /dev/sdb /mnt", hookio.Reject},
+		{"unresolved expansion operand", "mount $TARGET", hookio.Reject},
+		{"quoted expansion operand", `mount "$DEV" "$DIR"`, hookio.Reject},
+		{"end-of-options then operand", "mount -- /mnt", hookio.Reject},
+		{"bare end-of-options marker", "mount --", hookio.Reject},
+		{"type flag missing its value", "mount -t", hookio.Reject},
+		{"unknown flag", "mount --no-canonicalize", hookio.Reject},
+		{"cluster containing a value flag", "mount -lt", hookio.Reject},
+		{"cluster containing a mounting flag", "mount -av", hookio.Reject},
+		{"attached short type value", "mount -text4", hookio.Reject},
+		{"operand-bearing leaf in a compound", "mount | head -1 && mount /dev/sdb /mnt", hookio.Reject},
+		{"sudo prefix still rejects on sudo", "sudo mount", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("Evaluate(%q).Decision = %v (%s), want %v", tt.command, got.Decision, got.Reason, tt.want)
 			}
 		})
 	}

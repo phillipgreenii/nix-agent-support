@@ -1526,6 +1526,53 @@ func TestIntegration_DangerousCommandsPrecedence(t *testing.T) {
 	})
 }
 
+// TestIntegration_MountOperandGate pins the pg2-2nm54 operand gate THROUGH THE
+// CHAIN, which is the only altitude at which the reported failure is visible.
+//
+// Row 310193 reached the rule as `DATA_DEV=$(mount | awk …)`: an assignment-only
+// segment whose command substitution the ENGINE recurses. The rule alone sees that
+// leaf with an EMPTY executable, so a unit test of dangerouscmds cannot distinguish
+// the fix from the bug for this position — it Abstains either way. Only the engine
+// walks into the substitution and finds the `mount` leaf, so the position is pinned
+// here.
+//
+// The listing forms land on Abstain / Ask, never Approve: `mount` is not on
+// safe-commands' safe list, so nothing downstream approves it. Abstain emits `{}` —
+// no hook opinion, so Claude Code's own permission handling decides — and the
+// assignment positions floor at Ask because no leaf's own content was judged. Both
+// are user-overridable, which is the point of the bead: the hard, NON-OVERRIDABLE
+// Reject that blocked the script outright is gone. Promoting the listing to Approve
+// would be a safe-commands change, deliberately out of scope.
+func TestIntegration_MountOperandGate(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	runChainCases(t, eng, projectRoot, []chainCase{
+		// --- the read-only listing is no longer hard-denied ---
+		{"bare mount listing", "mount", hookio.Abstain, ""},
+		{"listing piped", "mount | grep -c apfs", hookio.Abstain, ""},
+		{"informational flags only", "mount -l -t apfs", hookio.Abstain, ""},
+		// Row 310193's exact position: the substitution the engine recurses into.
+		{
+			"row 310193 position: VAR=$(mount | awk)",
+			`DATA_DEV=$(mount | awk '/on \/System\/Volumes\/Data /{print $1; exit}')`,
+			hookio.Ask, "",
+		},
+		{"substitution position, plain", "X=$(mount)", hookio.Ask, ""},
+		{"substitution position, backticks", "X=`mount`", hookio.Ask, ""},
+
+		// --- operand-bearing forms keep the hard Reject, in every position ---
+		{"device and dir", "mount /dev/disk1s1 /mnt", hookio.Reject, "dangerous-commands"},
+		{"mount all", "mount -a", hookio.Reject, "dangerous-commands"},
+		{"remount", "mount -o remount,rw /", hookio.Reject, "dangerous-commands"},
+		{"operand-bearing inside a substitution", "X=$(mount /dev/disk1s1 /mnt)", hookio.Reject, ""},
+		{"operand-bearing leaf in a compound with a listing", "mount | head -1 && mount -a", hookio.Reject, ""},
+		// umount is NOT gated — the audit found it has no operand-less query form.
+		{"bare umount still rejects", "umount", hookio.Reject, "dangerous-commands"},
+	})
+}
+
 // TestIntegration_PathTraversalPrecedence exercises `path-traversal` through the
 // full chain. The rule was absent from this harness until pg2-v94d7.
 //
