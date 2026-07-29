@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/buildtools"
@@ -67,10 +68,38 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 	// rules.json.
 	cfg := configrules.Load(configrules.DefaultPath())
 
+	eng.RegisterRules(RuleChain(eng, pe, cfg, shells)...)
+
+	return eng
+}
+
+// RuleChain is the SINGLE SOURCE OF TRUTH for the production rule chain: which
+// rule modules ceta consults and — because engine.Evaluate is first-match-wins —
+// in what order. newEngineForCWD is its only production caller; the engine
+// integration suite's own harness (internal/engine, package engine_test) builds
+// its chain from this same function so the two CANNOT diverge (pg2-v94d7).
+//
+// Why that matters: a rule absent from the test harness is invisible to every
+// integration case, so its first-match-wins ORDERING against its neighbours is
+// untested — and ordering is load-bearing here (envvars' scoped Approve is only
+// safe because it runs early; an ungated Approve there was measured to become a
+// universal auto-approve prefix). Unit tests cannot catch that class of defect:
+// it lives in the COMPOSITION, not in any one rule. The `gitdir` rule shipped
+// hard, non-overridable Rejects with unit coverage only precisely because the
+// harness had hardcoded its own list and omitted it (pg2-3hk7t).
+//
+// Therefore: register new rules HERE and nowhere else. Do not reintroduce a
+// second, hand-maintained rule list in a test.
+//
+// eng is passed back in because the recursive rules (nix, kubectl, envvars,
+// docker) take the engine as their Evaluator so a nested command/substitution
+// body can be re-evaluated through the whole chain. shells MAY be nil — the
+// killshell rule then fails secure (Ask).
+func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.Config, shells killshell.ShellStore) []hookio.RuleModule {
 	nixRule := nix.NewWithEvaluator(eng)
 	dockerRule := docker.New(eng, pe)
 
-	eng.RegisterRules(
+	return []hookio.RuleModule{
 		configrules.NewFromConfig(cfg),
 		// Generic security validators run in an early band — after the consumer
 		// configrules (so an explicit consumer decision still wins) but before the
@@ -121,7 +150,5 @@ func newEngineForCWD(cwd string, shells killshell.ShellStore) *engine.Engine {
 		kubectl.New(eng, pe, cfg.Kubectl),
 		buildtools.New(cfg.Buildtools),
 		sqlite3rule.New(pe),
-	)
-
-	return eng
+	}
 }

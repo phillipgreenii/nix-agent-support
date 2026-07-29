@@ -1,4 +1,19 @@
-package engine
+// This is the ENGINE INTEGRATION SUITE, and it deliberately lives in the EXTERNAL
+// test package `engine_test` rather than in `package engine`.
+//
+// The reason is the drift guard (pg2-v94d7). This suite's whole value is that it
+// exercises the REAL composed rule chain, so its chain must BE production's, not a
+// hand-maintained copy of it — a copy silently rots, and a rule missing from it is
+// invisible to every case here (that is exactly how `gitdir` shipped hard,
+// non-overridable Rejects with unit coverage only). The single source of truth is
+// setup.RuleChain; importing `internal/setup` is only legal from an external test
+// package, because `setup` imports `engine` and an in-package test file may not
+// close that cycle.
+//
+// Consequence for anyone editing this file: it may use only the engine's EXPORTED
+// API. If you need an unexported engine internal, put that test in engine_test.go
+// (`package engine`) — do NOT re-hardcode a rule list here to avoid the import.
+package engine_test
 
 import (
 	"encoding/json"
@@ -6,68 +21,61 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/assume"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/buildtools"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/claudetools"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gitdir"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/kubectl"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/mcp"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
-	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/webfetch"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
 )
 
-func buildFullEngine(projectRoot, cwd string) *Engine {
-	// Inject the ZR consumer config fixture into the kubectl/build-tools rules so
-	// the kc/prove integration cases below exercise real ZR behavior — now fully
-	// config-driven (ADR 0033). The fixture mirrors the ZR machine config's inline
-	// rules.json block.
-	cfg := configrules.Load("../rules/configrules/testdata/zr-rules.json")
+// zrFixture is the ZR consumer config fixture, injected into the kubectl/
+// build-tools rules so the kc/prove integration cases exercise real ZR behavior —
+// fully config-driven (ADR 0033). It mirrors the ZR machine config's inline
+// rules.json block. It carries NO ssh/vault/curl/monorepo blocks, so those rules
+// sit at their safe base default (Abstain) in this engine; the
+// command-blocks fixture below supplies data for them.
+const zrFixture = "../rules/configrules/testdata/zr-rules.json"
+
+// commandBlocksFixture supplies the ssh/vault/curl/monorepo DATA blocks with
+// neutral example values, so the command-aware classifiers are decisive rather
+// than Abstaining.
+const commandBlocksFixture = "../rules/configrules/testdata/command-blocks-rules.json"
+
+// buildFullEngine assembles the FULL production rule chain over a synthetic
+// project root.
+//
+// The rule list is DERIVED from setup.RuleChain — the exact function
+// setup.newEngineForCWD uses — so a rule added to production is automatically
+// present, in production's position, in every integration case below. Only the
+// leaves that must be synthetic for a hermetic test are substituted: the path
+// evaluator is rooted at an in-memory projectRoot/cwd instead of
+// patheval.DetectProjectRoot, and the consumer config comes from a fixture
+// instead of $XDG_CONFIG_HOME. Nothing about WHICH rules run, or in WHAT ORDER,
+// is restated here.
+//
+// One consequence of deriving rather than restating: the gh and primary-commit
+// rules get production's REAL resolvers, which shell out to git/gh. That stays
+// hermetic only because no case below reaches a resolver-dependent branch
+// (`gh run rerun`, or a `git commit` in bypassPermissions mode). A new case that
+// does must build its own engine with a stub resolver rather than relax this one.
+func buildFullEngine(projectRoot, cwd string) *engine.Engine {
+	return buildFullEngineWithConfig(projectRoot, cwd, zrFixture)
+}
+
+// buildFullEngineWithConfig is buildFullEngine with an explicit consumer-config
+// fixture, for the rules whose behavior is config-gated (ssh/vault/curl/monorepo).
+func buildFullEngineWithConfig(projectRoot, cwd, fixture string) *engine.Engine {
+	cfg := configrules.Load(fixture)
 
 	pe := patheval.NewWithCWD(projectRoot, cwd)
-	eng := New()
+	eng := engine.New()
 	eng.SetPathEvaluator(pe)
-	nixRule := nix.NewWithEvaluator(eng)
-	dockerRule := docker.New(eng, pe)
-
-	eng.RegisterRules(
-		// gitdir sits in the factory's early generic-validator band, ahead of the
-		// path/command approvers. The fixture omitted it, so no integration case
-		// exercised it; registering it here keeps this engine faithful to
-		// setup.newEngineForCWD and lets the pg2-3hk7t cases below run end-to-end.
-		gitdir.New(),
-		secrets.New(pe),
-		envvars.NewWithEvaluator(eng),
-		assume.New(),
-		webfetch.New(),
-		claudetools.New(),
-		pathsafety.New(pe),
-		mcp.New(),
-		primarycommit.New(primarycommit.NewFileResolver()),
-		git.New(pe),
-		gh.New(nil),
-		monorepo.New(pe, cfg.Monorepo),
-		nixRule,
-		dockerRule,
-		curl.New(cfg.Curl),
-		safecmds.New(pe),
-		kubectl.New(eng, pe, cfg.Kubectl),
-		buildtools.New(cfg.Buildtools),
-		sqlite3rule.New(pe),
-	)
+	// shells is nil: no persistent shell-ownership store offline, so the killshell
+	// rule fails secure (Ask) — the same posture as offline replay.
+	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, nil)...)
 	return eng
 }
 
@@ -548,8 +556,8 @@ func (f fakePrimaryResolver) CurrentBranch(string) (string, error) { return f.cu
 // cases is asserted via Evaluate (first-match-wins), because EvaluateHook's
 // most-restrictive fold reports Module=="engine" on an all-approve expression.
 func TestPrecedence_PrimaryCommitBeatsGit(t *testing.T) {
-	mk := func(cur string) *Engine {
-		e := New()
+	mk := func(cur string) *engine.Engine {
+		e := engine.New()
 		e.RegisterRules(
 			primarycommit.New(fakePrimaryResolver{canonical: true, primary: "main", cur: cur}),
 			git.New(nil),
@@ -1163,11 +1171,387 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
-				ToolInput: mustBashJSON(tt.command),
+				ToolInput: makeBashJSON(tt.command),
 				CWD:       cwd,
 			}
 			if got := eng.EvaluateHook(input).Decision; got != tt.want {
 				t.Errorf("EvaluateHook(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// buildFullEngineWithShells is buildFullEngine with a shell-ownership store
+// injected into the killshell rule (the live PreToolUse handler's posture, versus
+// the nil-store offline-replay posture the other builders use).
+func buildFullEngineWithShells(projectRoot, cwd string, shells killshell.ShellStore) *engine.Engine {
+	cfg := configrules.Load(zrFixture)
+	pe := patheval.NewWithCWD(projectRoot, cwd)
+	eng := engine.New()
+	eng.SetPathEvaluator(pe)
+	eng.RegisterRules(setup.RuleChain(eng, pe, cfg, shells)...)
+	return eng
+}
+
+// chainCase is a whole-chain assertion with an optional ORDERING half.
+//
+// want is checked on EvaluateHook — the real PreToolUse decision path. wantModule,
+// when set, is checked on Evaluate, the first-match-wins chain: since the FIRST
+// non-Abstain rule wins, the identity of the deciding rule IS the observable proof
+// of registration order. Asserting it is what makes these cases test the
+// COMPOSITION rather than just "the rule fires somewhere".
+//
+// wantModule must be read off Evaluate, not EvaluateHook, because EvaluateHook
+// folds a Bash expression's leaves most-restrictive-wins and reports
+// Module=="engine" on an all-approve fold (same convention as
+// setup/factory_test.go).
+type chainCase struct {
+	name       string
+	command    string
+	want       hookio.Decision
+	wantModule string
+}
+
+func runChainCases(t *testing.T, eng *engine.Engine, cwd string, cases []chainCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			if got := eng.EvaluateHook(in); got.Decision != tc.want {
+				t.Errorf("EvaluateHook(%q) = %s (%s: %s), want %s",
+					tc.command, got.Decision, got.Module, got.Reason, tc.want)
+			}
+			if tc.wantModule != "" {
+				if got := eng.Evaluate(in); got.Module != tc.wantModule {
+					t.Errorf("Evaluate(%q) was decided by %q (%s: %s), want the deciding rule to be %q — registration order changed",
+						tc.command, got.Module, got.Decision, got.Reason, tc.wantModule)
+				}
+			}
+		})
+	}
+}
+
+// fakeShellStore is a killshell.ShellStore stub.
+type fakeShellStore struct {
+	owner string
+	known bool
+}
+
+func (f fakeShellStore) ShellOwner(string) (string, bool) { return f.owner, f.known }
+
+// TestIntegration_HarnessChainMatchesProduction is the pg2-v94d7 DRIFT GUARD.
+//
+// The bug this exists to prevent is not a wrong verdict — it is a MISSING RULE. The
+// integration harness used to hand-maintain its own rule list, and it had never
+// registered `gitdir`. So for the whole history of this suite no integration case
+// exercised a rule that issues non-overridable hard Rejects, and three
+// false-positive classes survived to production and hard-blocked real work
+// (pg2-3hk7t). The same hole hid five more rules: config-rules, dangerous-commands,
+// path-traversal, killshell, ssh and vault (pg2-v94d7).
+//
+// The primary fix is DERIVATION, not this test: buildFullEngine calls
+// setup.RuleChain, the same function setup.newEngineForCWD calls, so a rule added
+// to production is automatically registered here, in production's band, and every
+// case in this file starts exercising it immediately. Under derivation this
+// assertion is true by construction.
+//
+// It is kept anyway as the backstop for the one way derivation can be undone: a
+// future edit that re-hardcodes a rule list in this file (for instance to drop the
+// `internal/setup` import). That is precisely the change that caused the original
+// defect, and it would otherwise be invisible.
+func TestIntegration_HarnessChainMatchesProduction(t *testing.T) {
+	// Hermetic: NewEngineForCWD reads $XDG_CONFIG_HOME/…/rules.json, and the chain's
+	// rule NAMES must not depend on whether the developer running the suite happens
+	// to have a consumer config installed.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	production := setup.NewEngineForCWD(t.TempDir()).RuleNames()
+	harness := buildFullEngine("/Users/testuser/workspace/my-project", "/Users/testuser/workspace/my-project").RuleNames()
+
+	if len(production) == 0 {
+		t.Fatal("production chain is empty — setup.RuleChain registered nothing")
+	}
+	if !slices.Equal(production, harness) {
+		t.Errorf("integration harness chain has DRIFTED from production.\n production (setup.RuleChain): %v\n harness    (buildFullEngine): %v\n"+
+			"Every rule must be registered in setup.RuleChain and nowhere else, so the harness derives it. "+
+			"A rule present in production but missing here is exercised by NO integration case, and its "+
+			"first-match-wins ordering against its neighbours is untested.", production, harness)
+	}
+}
+
+// TestIntegration_ConfigRulesPrecedence exercises `config-rules` through the full
+// chain. The rule was absent from this harness until pg2-v94d7, so its precedence —
+// and it holds the FIRST slot in the chain, ahead of every generic validator — had
+// never been integration-tested.
+//
+// The ordering assertions are the point. config-rules' whole-leaf Approve
+// short-circuits first-match-wins, so it is consulted before git-directory,
+// dangerous-commands, path-traversal, secrets and env-vars. factory.go states that
+// precedence as deliberate ("after the consumer configrules, so an explicit
+// consumer decision still wins"). The A/B pairs below make its ARGUMENT-level reach
+// observable rather than implicit: `frobnicate .git/config` is a hard Reject while
+// the identical shape spelled with a consumer-approved executable is an Approve.
+// These rows PIN today's production behavior; they are not an endorsement of it.
+func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	runChainCases(t, eng, projectRoot, []chainCase{
+		// --- Baseline: the fixture's approvedCommands / blockedCommands decide. ---
+		{"approved consumer command", "grazr build", hookio.Approve, "config-rules"},
+		{"blocked consumer command", "zn-self-apply", hookio.Reject, "config-rules"},
+		// The block is reachable through the leaf fold, not only as a bare command —
+		// so it cannot be smuggled in behind an approvable sibling.
+		{"blocked command behind an approvable leaf", "git status && zn-self-apply", hookio.Reject, "config-rules"},
+
+		// --- ORDERING vs the early generic-validator band (config-rules is FIRST). ---
+		// Same shape, two executables. The unknown one falls through to git-directory's
+		// hard deny; the consumer-approved one is decided by config-rules before
+		// git-directory is ever consulted.
+		{"unknown executable touching git metadata is denied", "frobnicate .git/config", hookio.Reject, "git-directory"},
+		{"consumer-approved executable outranks git-directory", "grazr .git/config", hookio.Approve, "config-rules"},
+		// Likewise ahead of path-traversal (`../..` is a decisive Ask for any other
+		// executable — see TestIntegration_PathTraversalPrecedence).
+		{"consumer-approved executable outranks path-traversal", "grazr ../../x", hookio.Approve, "config-rules"},
+		// …and ahead of secrets, which would otherwise Ask on this path.
+		{"consumer-approved executable outranks secrets", "grazr /Users/testuser/.ssh/id_rsa", hookio.Approve, "config-rules"},
+
+		// --- The backstops that DO survive that precedence. They are per-leaf and
+		// engine-level, so config-rules' Approve is scoped to the leaf it matched. ---
+		// A redirection is the SHELL writing, not the approved command; the engine
+		// evaluates redirections separately from the chain, so the write to a read-only
+		// path still Rejects (deciding module here is "engine", not a rule).
+		{"redirection is still judged", "grazr > /etc/hosts", hookio.Reject, ""},
+		// A dangerous SIBLING leaf is still judged on its own and demotes the fold.
+		{"dangerous sibling leaf still demotes", "grazr && sudo rm -rf /", hookio.Reject, ""},
+		{"secret-touching sibling leaf still demotes", "grazr x && rm -rf $HOME/.ssh", hookio.Ask, ""},
+		// config-rules WITHHOLDS its approve when the leaf carries env assignments, so
+		// it cannot become an auto-approve prefix (the failure mode measured for an
+		// ungated env-vars Approve). Nothing later approves `grazr`, so this Abstains —
+		// this is exactly why ZR's scripts moved to buildtools.approvedScripts.
+		{"env-prefixed approved command is withheld", "FOO=bar grazr build", hookio.Abstain, ""},
+	})
+}
+
+// TestIntegration_DangerousCommandsPrecedence exercises `dangerous-commands`
+// through the full chain. The rule was absent from this harness until pg2-v94d7:
+// a blanket hard-Reject denylist with unit coverage only.
+//
+// Its band position is load-bearing in both directions. It runs BEFORE
+// path-traversal / secrets / path-safety / safe-commands, so a denylisted
+// executable can never be re-approved as an ordinary command; and it runs AFTER
+// git-directory, so a git-metadata write keeps its more specific attribution. It
+// also deliberately does NOT list `curl`, `ssh` or `scp`, which have dedicated
+// rules further down the chain — the pairs below pin that carve-out, since a
+// blanket Reject there would defeat those rules entirely.
+func TestIntegration_DangerousCommandsPrecedence(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	runChainCases(t, eng, projectRoot, []chainCase{
+		// --- The denylist is decisive through the whole chain. ---
+		{"sudo", "sudo rm -rf /", hookio.Reject, "dangerous-commands"},
+		{"netcat listener", "nc -l 1234", hookio.Reject, "dangerous-commands"},
+		{"telnet", "telnet host", hookio.Reject, "dangerous-commands"},
+		{"raw dd", "dd if=/dev/zero of=/tmp/x", hookio.Reject, "dangerous-commands"},
+		// A denylisted leaf anywhere in a compound demotes the whole expression.
+		{"denylisted leaf in a compound", "git status && sudo rm -rf /", hookio.Reject, ""},
+
+		// --- ORDERING: git-directory is EARLIER, so it keeps the attribution. ---
+		// Identical executable, two targets: `dd` into git metadata is git-directory's,
+		// `dd` anywhere else is dangerous-commands'. If these two bands were swapped
+		// this pair would report the same module twice.
+		{"dd into git metadata is git-directory's", "dd of=.git/HEAD if=/dev/zero", hookio.Reject, "git-directory"},
+
+		// --- ORDERING: path-traversal is LATER, so the hard Reject wins over its Ask. ---
+		{"denylisted executable outranks path-traversal", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
+
+		// --- ORDERING: the dedicated-rule carve-out. `wget` is denylisted, `curl` is
+		// not (it has its own allowlist rule), so the same read of the same URL splits.
+		{"wget is denylisted", "wget http://localhost:8080/health", hookio.Reject, "dangerous-commands"},
+		{"curl keeps its dedicated rule", "curl http://localhost:8080/health", hookio.Approve, "curl"},
+	})
+}
+
+// TestIntegration_PathTraversalPrecedence exercises `path-traversal` through the
+// full chain. The rule was absent from this harness until pg2-v94d7.
+//
+// It is a purely LEXICAL guard — a literal `../..` anywhere in the command text is
+// a decisive Ask — and it sits in the early band, ahead of secrets / path-safety /
+// safe-commands. That ordering is the entire reason it works: safe-commands would
+// otherwise Approve a read that resolves inside an allowed zone, and the Ask would
+// never be reached. The A/B pairs below assert exactly that, by holding the command
+// fixed and changing only the traversal depth or the spelling of the same path.
+//
+// Ask (never Reject) is deliberate: an agent in a git worktree reaches the
+// workspace root through exactly `../..`, so a hard deny would break routine
+// navigation. Ask cannot be a silent auto-approval, which is the property that
+// matters.
+func TestIntegration_PathTraversalPrecedence(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	runChainCases(t, eng, projectRoot, []chainCase{
+		// --- ORDERING vs safe-commands (LATER in the chain). One `../` is Abstain for
+		// this rule and safe-commands approves the read; two make it decisive. The only
+		// difference between these two rows is the traversal depth.
+		{"single level stays with safe-commands", "cat ../README.md", hookio.Approve, "safe-commands"},
+		{"double level is a decisive ask", "cat ../../README.md", hookio.Ask, "path-traversal"},
+		// The same sibling repo the suite already approves by ABSOLUTE path (see
+		// TestIntegration_RegressionSuite "ls sibling repo") is an Ask when spelled as a
+		// traversal. Same resolved target, different verdict — the guard is lexical by
+		// design, and this is the row that would break if it were ever silently
+		// converted to a resolve-and-check.
+		{"sibling repo via traversal asks", "ls ../../other-repo", hookio.Ask, "path-traversal"},
+		{"deeper escape asks", "cat ../../../etc/passwd", hookio.Ask, "path-traversal"},
+		// A cd-compound: the traversal is caught on the leaf that carries it, so a
+		// following approvable tail cannot green-light it.
+		{"cd traversal then approvable tail", "cd ../../other-repo && git status", hookio.Ask, "path-traversal"},
+
+		// --- ORDERING vs secrets (LATER). Both would Ask, so only the deciding module
+		// distinguishes them — which is the assertion.
+		{"traversal outranks secrets", "cat ../../.ssh/id_rsa", hookio.Ask, "path-traversal"},
+
+		// --- ORDERING vs the EARLIER bands, which outrank this Ask. ---
+		{"git-directory outranks traversal", "rm -rf ../../repo/.git/objects", hookio.Reject, "git-directory"},
+		{"dangerous-commands outranks traversal", "sudo cat ../../x", hookio.Reject, "dangerous-commands"},
+	})
+}
+
+// TestIntegration_KillShellThroughChain exercises `killshell` through the full
+// chain. The rule was absent from this harness until pg2-v94d7 — and it is the one
+// newly-registered rule that CANNOT be reached by a Bash command, so nothing in
+// this file could have covered it incidentally.
+//
+// Two composition claims are asserted, both of which factory.go asserts in prose:
+//
+//   - claude-tools is registered BEFORE killshell and "already Abstains on
+//     KillShell", which is what makes this placement safe. Observable only as the
+//     deciding module being "killshell" — if claude-tools ever started owning
+//     KillShell, ownership would stop being consulted and these rows would flip.
+//   - killshell is "harmless for every other tool (Abstain)", so it must not shadow
+//     path-safety, which is registered immediately AFTER it.
+func TestIntegration_KillShellThroughChain(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+
+	killShell := func(t *testing.T, eng *engine.Engine, toolInput string) hookio.RuleResult {
+		t.Helper()
+		return eng.Evaluate(&hookio.HookInput{
+			ToolName: "KillShell", CWD: projectRoot, ToolInput: json.RawMessage(toolInput),
+		})
+	}
+
+	// No store (offline replay / hook without an opened ask-log): fail secure.
+	t.Run("no store fails secure to ask", func(t *testing.T) {
+		got := killShell(t, buildFullEngine(projectRoot, projectRoot), `{"shell_id":"abc"}`)
+		if got.Decision != hookio.Ask || got.Module != "killshell" {
+			t.Errorf("got %s/%s (%s), want ask/killshell", got.Decision, got.Module, got.Reason)
+		}
+	})
+
+	// An agent-owned background shell is the ONE auto-approve this rule grants.
+	t.Run("agent-owned shell approves", func(t *testing.T) {
+		eng := buildFullEngineWithShells(projectRoot, projectRoot, fakeShellStore{owner: "agent", known: true})
+		got := killShell(t, eng, `{"shell_id":"abc"}`)
+		if got.Decision != hookio.Approve || got.Module != "killshell" {
+			t.Errorf("got %s/%s (%s), want approve/killshell", got.Decision, got.Module, got.Reason)
+		}
+	})
+
+	// Anything ceta did not record as agent-owned is confirmed with the human, even
+	// with a store present — so the approve above cannot generalize.
+	t.Run("non-agent-owned shell asks", func(t *testing.T) {
+		eng := buildFullEngineWithShells(projectRoot, projectRoot, fakeShellStore{owner: "user", known: true})
+		got := killShell(t, eng, `{"shell_id":"abc"}`)
+		if got.Decision != hookio.Ask || got.Module != "killshell" {
+			t.Errorf("got %s/%s (%s), want ask/killshell", got.Decision, got.Module, got.Reason)
+		}
+	})
+
+	t.Run("missing shell_id asks", func(t *testing.T) {
+		eng := buildFullEngineWithShells(projectRoot, projectRoot, fakeShellStore{owner: "agent", known: true})
+		got := killShell(t, eng, `{}`)
+		if got.Decision != hookio.Ask || got.Module != "killshell" {
+			t.Errorf("got %s/%s (%s), want ask/killshell", got.Decision, got.Module, got.Reason)
+		}
+	})
+
+	// ORDERING, the other direction: killshell precedes path-safety, and a non-Bash
+	// tool that path-safety owns must still reach it.
+	t.Run("does not shadow the later path-safety rule", func(t *testing.T) {
+		eng := buildFullEngineWithShells(projectRoot, projectRoot, fakeShellStore{owner: "agent", known: true})
+		got := eng.Evaluate(&hookio.HookInput{
+			ToolName: "Read", CWD: projectRoot,
+			ToolInput: makeFileJSON(projectRoot + "/README.md"),
+		})
+		if got.Decision != hookio.Approve || got.Module != "path-safety" {
+			t.Errorf("Read of a project file got %s/%s (%s), want approve/path-safety — killshell must Abstain on other tools",
+				got.Decision, got.Module, got.Reason)
+		}
+	})
+}
+
+// TestIntegration_SshVaultThroughChain exercises `ssh` and `vault` through the full
+// chain. Both were absent from this harness until pg2-v94d7.
+//
+// They are config-driven MECHANISMS: with no consumer data they Abstain, so the ZR
+// fixture this suite normally uses cannot exercise them at all — hence the
+// command-blocks fixture here. Both halves are asserted, because each pins a
+// different composition property:
+//
+//   - CONFIGURED: the leaf must be decided by the dedicated rule, proving it is
+//     reached before safe-commands (which is registered after it).
+//   - UNCONFIGURED: the same leaf must NOT be Approved. safe-commands happens to
+//     Abstain on these executables today, and this is the row that fails if that
+//     ever drifts — which is the stated reason ssh/vault/curl were ordered ahead of
+//     it rather than merely "somewhere in the list".
+func TestIntegration_SshVaultThroughChain(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	configured := buildFullEngineWithConfig(projectRoot, projectRoot, commandBlocksFixture)
+	unconfigured := buildFullEngine(projectRoot, projectRoot) // ZR fixture: no ssh/vault blocks
+
+	runChainCases(t, configured, projectRoot, []chainCase{
+		// --- ssh, configured: decided by the ssh rule, not pre-approved downstream. ---
+		{"readonly remote command approves", "ssh host ls -la", hookio.Approve, "ssh"},
+		{"disallowed login user rejects", "ssh root@host ls", hookio.Reject, "ssh"},
+		{"password auth rejects", "ssh -oPasswordAuthentication=yes host ls", hookio.Reject, "ssh"},
+		{"secret remote path asks", "ssh host cat /etc/shadow", hookio.Ask, "ssh"},
+		{"unknown remote command asks", "ssh host make install", hookio.Ask, "ssh"},
+		{"scp download approves", "scp host:/tmp/log.txt .", hookio.Approve, "ssh"},
+		{"scp upload asks", "scp ./local.txt host:/tmp/", hookio.Ask, "ssh"},
+
+		// --- vault, configured. ---
+		{"read verb approves", "vault read secret/foo", hookio.Approve, "vault"},
+		{"write verb asks", "vault write secret/foo x=1", hookio.Ask, "vault"},
+		{"compound write verb asks", "vault kv put secret/foo x=1", hookio.Ask, "vault"},
+		{"unknown verb defers", "vault lease renew abc", hookio.Abstain, ""},
+
+		// --- ORDERING vs the EARLIER dangerous-commands band. `sftp` is denylisted
+		// there while `ssh`/`scp` are deliberately exempt so this rule can own them.
+		// Both spellings transfer a file; only one has a dedicated rule.
+		{"sftp is denylisted, not ssh-rule territory", "sftp host", hookio.Reject, "dangerous-commands"},
+
+		// --- ORDERING vs curl, the immediately-preceding rule: each classifier owns
+		// only its own executables.
+		{"curl stays with the curl rule", "curl https://api.internal.example/health", hookio.Approve, "curl"},
+	})
+
+	// UNCONFIGURED: mechanism only, no data — nothing may be auto-approved, and in
+	// particular safe-commands (registered AFTER ssh/vault) must not pick these up.
+	for _, cmd := range []string{
+		"ssh host ls -la", "ssh root@host rm -rf /", "scp host:/tmp/log.txt .",
+		"vault read secret/foo", "vault write secret/foo x=1",
+	} {
+		t.Run("unconfigured/"+cmd, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
+			if got := unconfigured.EvaluateHook(in); got.Decision != hookio.Abstain {
+				t.Errorf("%q with no ssh/vault config got %s (%s: %s); want Abstain — the rule ships the mechanism, the consumer ships the data",
+					cmd, got.Decision, got.Module, got.Reason)
 			}
 		})
 	}

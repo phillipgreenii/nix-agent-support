@@ -117,7 +117,16 @@ sqlite3 "$DB" -header -column \
 
 ## Rule Modules
 
-Rules are evaluated in order; first non-ABSTAIN wins (Bash compounds fold most-restrictive-wins):
+Rules are evaluated in order; first non-ABSTAIN wins (Bash compounds fold most-restrictive-wins).
+
+`internal/setup.RuleChain` is the single source of truth for this list and its order.
+Register a new rule **there and nowhere else**: the engine integration suite
+(`internal/engine/engine_integration_test.go`) derives its chain from that same
+function, so a new rule is automatically exercised by every integration case in its
+production band. A rule registered only in a hand-maintained test list is invisible
+to the integration suite, which is how `git-directory` shipped non-overridable hard
+Rejects with unit coverage only. The list below is documentation and can lag; the code
+is authoritative.
 
 1. **config-rules** -- consumer `rules.json` basename allow/block
 2. **git-directory** -- Reject any read/write inside a `.git/` directory (Bash + file/search tools)

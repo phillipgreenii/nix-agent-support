@@ -62,6 +62,19 @@ func (e *Engine) RegisterRules(rules ...hookio.RuleModule) {
 	e.rules = rules
 }
 
+// RuleNames returns the registered rules' Name()s in EVALUATION order. Read-only
+// introspection: Evaluate is first-match-wins, so this sequence — not merely the
+// set — is the composed policy. Exists so a test can compare one chain against
+// another (the pg2-v94d7 drift guard: the integration harness's chain must equal
+// setup.RuleChain's) without reaching into the unexported rules slice.
+func (e *Engine) RuleNames() []string {
+	names := make([]string, len(e.rules))
+	for i, rule := range e.rules {
+		names[i] = rule.Name()
+	}
+	return names
+}
+
 // SetPathEvaluator sets the path evaluator for I/O redirection evaluation.
 func (e *Engine) SetPathEvaluator(pe *patheval.PathEvaluator) {
 	e.pathEval = pe
