@@ -548,10 +548,13 @@
                         fi
 
                         draft="$PG_PR_STATE_HOME/reviews/test-repo-$pr.json"
-                        want="$(jq -cS '[.comments[]? | {path: (.path // ""), line: ((.line // .lines[0]?) // 0)}]' "$block")"
-                        got="$(jq -cS '[.comments[]? | {path: (.path // ""), line: (.line // 0)}]' "$draft")"
+                        # A "lines" array anchors the comment at its LAST line
+                        # (its first becomes start_line), so the documented anchor
+                        # is max(.lines), not .lines[0] (pg2-3c8mo).
+                        want="$(jq -cS '[.comments[]? | {path: (.path // ""), line: ((.line // (if (.lines | type) == "array" then (.lines | max) else null end)) // 0), start_line: (.start_line // (if (.lines | type) == "array" and ((.lines | max) != (.lines | min)) then (.lines | min) else null end) // 0)}]' "$block")"
+                        got="$(jq -cS '[.comments[]? | {path: (.path // ""), line: (.line // 0), start_line: (.start_line // 0)}]' "$draft")"
                         if [ "$want" != "$got" ]; then
-                          echo "FAIL: $name: $block path/line did not round-trip" >&2
+                          echo "FAIL: $name: $block path/line/start_line did not round-trip" >&2
                           echo "      documented: $want" >&2
                           echo "      staged:     $got" >&2
                           exit 1

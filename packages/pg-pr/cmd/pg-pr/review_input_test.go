@@ -145,6 +145,86 @@ func TestReviewSubmit_GoldenAgentPayloadPostsRealComments(t *testing.T) {
 	}
 }
 
+// multiLineFindingPayload is a reviewer-agent finding that genuinely spans three
+// lines, in the `lines: [...]` ARRAY form the assets emit. Before pg2-3c8mo this
+// was un-postable BY DESIGN: pg2-cns7a's decoder rejected a multi-entry array
+// rather than truncate it to lines[0] and misplace the comment.
+const multiLineFindingPayload = `{
+  "comments": [
+    {
+      "path": "src/main.go",
+      "lines": [10, 11, 12],
+      "severity": "error",
+      "message": "This three-line retry block swallows the error on every attempt."
+    }
+  ]
+}`
+
+// TestReviewSubmit_MultiLineFindingPostsAsMultiLineComment is pg2-3c8mo AC4 down
+// the live CLI post path: a contiguous multi-line finding reaches the provider as
+// one comment spanning start_line 10..line 12 — neither rejected, nor truncated to
+// a single line, nor folded into the review body.
+func TestReviewSubmit_MultiLineFindingPostsAsMultiLineComment(t *testing.T) {
+	resetReviewFlags()
+	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
+	prev := vcsProviderFor
+	t.Cleanup(func() { vcsProviderFor = prev })
+	fake := &reviewFakeVCS{}
+	vcsProviderFor = func(string) vcs.Provider { return fake }
+
+	rootCmd.SetIn(strings.NewReader(multiLineFindingPayload))
+	var stdout, stderr bytes.Buffer
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&stderr)
+	rootCmd.SetArgs([]string{"review", "submit", "42", "--repo", "foo/bar"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("submit: %v (stderr=%s)", err, stderr.String())
+	}
+
+	if len(fake.postedComments) != 1 {
+		t.Fatalf("posted comments = %d, want 1", len(fake.postedComments))
+	}
+	got := fake.postedComments[0]
+	if got.StartLine != 10 || got.Line != 12 {
+		t.Errorf("posted span = start_line %d/line %d, want 10/12", got.StartLine, got.Line)
+	}
+	if got.Path != "src/main.go" {
+		t.Errorf("posted path = %q, want src/main.go", got.Path)
+	}
+	if !strings.Contains(got.Body, "swallows the error") {
+		t.Errorf("posted body = %q, want the finding text", got.Body)
+	}
+	if strings.Contains(fake.postedBody, "swallows the error") {
+		t.Errorf("the finding must post inline, not fold into the review body: %q", fake.postedBody)
+	}
+}
+
+// TestReviewDraft_RejectsNonContiguousLines: a gapped `lines` array has no GitHub
+// representation, so it stays a LOUD error (pg2-3c8mo AC3) — collapsing it to its
+// endpoints would claim lines the finding never named.
+func TestReviewDraft_RejectsNonContiguousLines(t *testing.T) {
+	resetReviewFlags()
+	dir := t.TempDir()
+	t.Setenv("PG_PR_STATE_HOME", dir)
+
+	rootCmd.SetIn(strings.NewReader(`{"comments":[{"path":"a.go","lines":[10,12],"body":"x"}]}`))
+	rootCmd.SetOut(io_discard)
+	rootCmd.SetErr(io_discard)
+	rootCmd.SetArgs([]string{"review", "draft", "42", "--repo", "foo/bar"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected a non-zero exit for a non-contiguous lines array")
+	}
+	if !strings.Contains(err.Error(), "contiguous") {
+		t.Errorf("error %q should say the range is not contiguous", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.json"))
+	if len(files) != 0 {
+		t.Errorf("a rejected payload must stage nothing, got %v", files)
+	}
+}
+
 // TestReviewDraft_RejectsUnmappableCommentKey is pg2-cns7a acceptance criterion
 // 3 for `review draft`: a payload carrying a comment key the schema cannot map
 // fails with a non-zero exit whose message names the key, and stages nothing.

@@ -504,6 +504,74 @@ func TestPostReview_PayloadShape(t *testing.T) {
 	if c0["path"] != "main.go" || c0["line"].(float64) != 12 || c0["side"] != "RIGHT" {
 		t.Errorf("inline comment shape wrong: %+v", c0)
 	}
+	// A single-line comment must carry NO span keys, so adding multi-line support
+	// left this payload byte-identical (pg2-3c8mo).
+	if strings.Contains(raw, "start_line") || strings.Contains(raw, "start_side") {
+		t.Errorf("a single-line comment must not send start_line/start_side: %s", raw)
+	}
+}
+
+// TestPostReview_MultiLineCommentSendsStartLine is pg2-3c8mo AC1/AC4: a finding
+// that spans several lines posts as a GitHub MULTI-line review comment
+// (start_line..line), rather than being truncated to one endpoint.
+func TestPostReview_MultiLineCommentSendsStartLine(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
+	p := NewWithRunner(gh)
+
+	if _, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef", "",
+		[]api.Comment{{Path: "main.go", StartLine: 10, Line: 12, Body: "this whole block leaks"}}); err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+
+	payload := decodeLastReviewPayload(t, gh)
+	raw := string(gh.stdins[len(gh.stdins)-1])
+	comments, _ := payload["comments"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("expected exactly 1 inline comment, got %d: %s", len(comments), raw)
+	}
+	c0 := comments[0].(map[string]any)
+	if c0["start_line"] == nil {
+		t.Fatalf("a multi-line finding must post as a multi-line comment (start_line), got %+v", c0)
+	}
+	if c0["start_line"].(float64) != 10 || c0["line"].(float64) != 12 {
+		t.Errorf("span = start_line %v/line %v, want 10/12", c0["start_line"], c0["line"])
+	}
+	if c0["side"] != "RIGHT" || c0["start_side"] != "RIGHT" {
+		t.Errorf("both sides must be RIGHT for a new-file span: %+v", c0)
+	}
+	// The body must not have been folded into the review body instead.
+	if body, _ := payload["body"].(string); strings.Contains(body, "leaks") {
+		t.Errorf("a multi-line comment must post inline, not fold into the body: %q", body)
+	}
+}
+
+// TestPostReview_DegenerateStartLineIsDropped: `review post` reads the staged
+// FILE with a plain json.Unmarshal, so a hand-edited draft can carry a span
+// GitHub would 422 (start_line not strictly before line). The provider drops the
+// span and still posts the comment, instead of failing the whole review.
+func TestPostReview_DegenerateStartLineIsDropped(t *testing.T) {
+	for name, c := range map[string]api.Comment{
+		"start_line equals line": {Path: "main.go", StartLine: 12, Line: 12, Body: "x"},
+		"start_line after line":  {Path: "main.go", StartLine: 20, Line: 12, Body: "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gh := newFakeGH()
+			gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
+			p := NewWithRunner(gh)
+			if _, err := p.PostReview(context.Background(), "foo/bar", 42, "", "", []api.Comment{c}); err != nil {
+				t.Fatalf("PostReview: %v", err)
+			}
+			raw := string(gh.stdins[len(gh.stdins)-1])
+			if strings.Contains(raw, "start_line") {
+				t.Errorf("a degenerate span must not reach the wire (422): %s", raw)
+			}
+			comments, _ := decodeLastReviewPayload(t, gh)["comments"].([]any)
+			if len(comments) != 1 {
+				t.Fatalf("the comment itself must still post, got %d: %s", len(comments), raw)
+			}
+		})
+	}
 }
 
 // TestPostReview_EmptyReviewSkipsPost: a review with neither body nor

@@ -752,12 +752,20 @@ func (p *Provider) ResolveThread(ctx context.Context, repo, threadID string) err
 }
 
 // reviewComment is the on-wire shape sent inside POST /reviews's `comments[]`.
+//
+// StartLine/StartSide describe a MULTI-line anchor: `start_line` is the first
+// line of the span and `line` its last. Both are omitempty, so a single-line
+// comment's payload carries neither (pg2-3c8mo). StartSide is sent alongside
+// StartLine rather than left to GitHub's documented "defaults to the value of
+// side" because that same field is also documented as required for multi-line
+// comments; sending it explicitly satisfies both readings.
 type reviewComment struct {
 	Path      string `json:"path"`
 	Body      string `json:"body"`
 	Line      int    `json:"line,omitempty"`
 	StartLine int    `json:"start_line,omitempty"`
 	Side      string `json:"side,omitempty"`
+	StartSide string `json:"start_side,omitempty"`
 }
 
 // PostReview creates a pending PR review with optional comments.
@@ -777,6 +785,9 @@ type reviewComment struct {
 // schema requires path+line; the previously-sent `subject_type:"file"` is not a
 // field of that endpoint and was rejected with 422 (pg2-pipw). The caller already
 // dedups against existing review-comments before calling.
+//
+// A comment carrying api.Comment.StartLine posts as a MULTI-line comment spanning
+// StartLine..Line (pg2-3c8mo).
 func (p *Provider) PostReview(ctx context.Context, repo string, number int, commitID, body string, comments []api.Comment) (*api.Review, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, err
@@ -799,7 +810,18 @@ func (p *Provider) PostReview(ctx context.Context, repo string, number int, comm
 			body += note
 			continue
 		}
-		rcs = append(rcs, reviewComment{Path: c.Path, Body: c.Body, Line: c.Line, Side: "RIGHT"})
+		rc := reviewComment{Path: c.Path, Body: c.Body, Line: c.Line, Side: "RIGHT"}
+		// Multi-line anchor. GitHub 422s a span whose start_line is not strictly
+		// before line, so an out-of-range StartLine degrades to the single-line
+		// comment it already is rather than failing the whole review. The input
+		// decoder (internal/reviewinput) already rejects such a span loudly; this
+		// guard covers `review post`, which reads the staged FILE with a plain
+		// json.Unmarshal and so can be hand-edited past that boundary.
+		if c.StartLine > 0 && c.StartLine < c.Line {
+			rc.StartLine = c.StartLine
+			rc.StartSide = "RIGHT"
+		}
+		rcs = append(rcs, rc)
 	}
 
 	// Empty guard: a PENDING review with neither a body nor comments is rejected

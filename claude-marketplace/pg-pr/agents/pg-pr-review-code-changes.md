@@ -57,8 +57,14 @@ Inputs are passed in the prompt by the orchestrator. Expect:
    - `path` — file path relative to the repo root, or `null` for a finding
      that is not about one file.
    - `line` — the 1-based line number in the **new** file, or `null` when
-     the finding is not tied to a single line. One line per comment: emit
-     a separate comment per line, never a list.
+     the finding is not tied to a line at all.
+   - `start_line` — optional; the **first** line of a finding that spans a
+     **contiguous** range, with `line` as its **last**. Omit it for a
+     single-line finding. A finding that spans lines 10-12 is one comment
+     with `"start_line": 10, "line": 12` — not three comments, and never a
+     gapped list: `"lines": [10, 12]` is rejected, because GitHub cannot
+     anchor a comment to a range with holes. Emit a separate comment per
+     range.
    - `body` — **REQUIRED**, non-empty; the finding text.
    - `severity` — one of the three literal values `error`, `warning`,
      `suggestion` (emit one value, not the enumeration).

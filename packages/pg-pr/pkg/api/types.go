@@ -14,6 +14,16 @@ type Comment struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	Resolved   bool   `json:"resolved"`
 
+	// StartLine is the FIRST line of a multi-line anchor, of which Line is then
+	// the LAST — GitHub's review-comment `start_line`/`line` pair (pg2-3c8mo).
+	//
+	// Zero means single-line, which is the only value a single-line finding can
+	// carry, so `omitempty` keeps a single-line comment's wire payload
+	// byte-identical to the pre-multi-line one. Write path only: GitHub's read
+	// paths (ListComments, the enrich GraphQL query) do not report it, so a
+	// comment read back from upstream always has StartLine == 0.
+	StartLine int `json:"start_line,omitempty"`
+
 	// CreatedAt is the comment's creation timestamp (GraphQL createdAt,
 	// RFC3339). Empty when the provider does not supply one. Flows through
 	// ingestion into code_comment_message.posted_at for message ordering.

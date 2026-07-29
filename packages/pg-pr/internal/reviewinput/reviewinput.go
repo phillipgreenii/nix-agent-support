@@ -16,12 +16,12 @@
 // # Why an adapter and not a shared struct
 //
 // Adapter pattern (agent-facing DTO → domain model). [api.Comment]'s
-// `body`/`path`/`line` mirrors GitHub's review-comment API, which is the right
-// shape at the VCS boundary, and `severity` — which agents genuinely reason in —
-// has no target field there. So a translation step must exist regardless of what
-// the assets emit; putting it here (rather than only fixing the assets) also
-// makes the verb loud for every OTHER caller that composes this JSON by hand:
-// the pr-pool review role, the daemon spawn path, and humans.
+// `body`/`path`/`line`/`start_line` mirrors GitHub's review-comment API, which is
+// the right shape at the VCS boundary, and `severity` — which agents genuinely
+// reason in — has no target field there. So a translation step must exist
+// regardless of what the assets emit; putting it here (rather than only fixing
+// the assets) also makes the verb loud for every OTHER caller that composes this
+// JSON by hand: the pr-pool review role, the daemon spawn path, and humans.
 //
 // # Fail loud, never drop
 //
@@ -30,6 +30,14 @@
 // defect (pg2-cns7a) was invisible precisely because encoding/json silently
 // discards unknown fields: every agent finding decoded to
 // `{Path: "…", Line: 0, Body: ""}` and the review posted blank.
+//
+// # Multi-line findings
+//
+// A finding spanning several lines is expressed as `start_line` + `line`, or as a
+// CONTIGUOUS `lines` run (`[10,11,12]` → start_line 10, line 12), and posts as a
+// GitHub multi-line review comment (bead pg2-3c8mo). A NON-contiguous run stays a
+// loud error: GitHub has no representation for a gapped range, so neither
+// collapsing it to its endpoints nor truncating it to one entry is honest.
 package reviewinput
 
 import (
@@ -38,6 +46,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
@@ -66,6 +75,13 @@ const ExampleJSON = `{
       "line": 42,
       "severity": "error",
       "body": "readDraftInput ignores the decode error, so a malformed payload stages an empty review."
+    },
+    {
+      "path": "packages/pg-pr/internal/reviewstage/reviewstage.go",
+      "start_line": 88,
+      "line": 90,
+      "severity": "warning",
+      "body": "This three-line span swallows the unmarshal error; the whole block needs the check."
     },
     {
       "path": null,
@@ -99,20 +115,26 @@ TOP-LEVEL KEYS
 COMMENT KEYS
   path       string|null  File path relative to the repo root. null or omitted
                           means a PR-level comment.
-  line       int|null     1-based line in the NEW file. null or omitted means a
+  line       int|null     1-based line in the NEW file — the LAST line when the
+                          finding spans several. null or omitted means a
                           file-level (or, with a null path, PR-level) comment.
                           Such comments are folded into the review body, because
                           GitHub's review-comments API requires path AND line.
+  start_line int|null     optional  FIRST line of a multi-line finding; "line" is
+                          then its last. Must be < "line". null or omitted for a
+                          single-line comment.
   body       string       REQUIRED, non-empty. The finding text. Do NOT include
                           the robot marker — pg-pr stamps it on post.
   severity   string       optional  error | warning | suggestion. Rendered as a
                           "**<severity>**: " prefix on the body.
 
-  Deprecated aliases, accepted and mapped: "message" -> body, "lines": [N] -> line.
+  Deprecated aliases, accepted and mapped: "message" -> body, "lines": [N] ->
+  line, "lines": [10,11,12] -> start_line 10 + line 12 (a CONTIGUOUS run only).
 
 ANY OTHER KEY IS REJECTED with a non-zero exit naming the key. pg-pr never
 silently discards review content: an unmappable key, an empty body, or a
-"lines" array with more than one entry is an error, not a blank comment.
+non-contiguous "lines" array (e.g. [10,12] — GitHub cannot express a gapped
+range) is an error, not a blank or misplaced comment.
 
 EXAMPLE
 ` + indentBlock(ExampleJSON, "  ")
@@ -160,10 +182,20 @@ type Comment struct {
 	Body     string  `json:"body"`
 	Severity string  `json:"severity"`
 
+	// StartLine, with Line, expresses a MULTI-line finding: StartLine is the
+	// first line of the span and Line its last (GitHub's review-comment
+	// `start_line`/`line` pair). Omitted or null means single-line (pg2-3c8mo).
+	// Also an accepted INPUT key so a staged draft file — whose comments are
+	// marshaled api.Comments — round-trips back through --from-file.
+	StartLine *int `json:"start_line"`
+
 	// Deprecated aliases. Kept accepted-and-mapped rather than rejected so an
 	// already-deployed agent instance emitting the older documented shape
 	// still produces a usable review instead of failing the whole run — the
 	// tolerance that makes the verb robust to asset drift.
+	//
+	// Lines doubles as the span form: a contiguous multi-entry run maps its
+	// minimum to StartLine and its maximum to Line.
 	Message string `json:"message"`
 	Lines   []int  `json:"lines"`
 
@@ -182,7 +214,7 @@ type Comment struct {
 // composed the payload itself can self-correct on retry without another round
 // trip through `--help`.
 const acceptedKeysHint = `accepted top-level keys: body, comments, warnings, head_sha, ownership, bead_id, verdict; ` +
-	`accepted comment keys: path, line, body, severity (deprecated aliases: message, lines). ` +
+	`accepted comment keys: path, line, start_line, body, severity (deprecated aliases: message, lines). ` +
 	`Run 'pg-pr review --help' for the full schema`
 
 // unknownFieldRe extracts the offending key from encoding/json's
@@ -268,7 +300,7 @@ func (c *Comment) toAPIComment() (api.Comment, error) {
 	if err != nil {
 		return api.Comment{}, err
 	}
-	line, err := c.resolveLine()
+	startLine, line, err := c.resolveLines()
 	if err != nil {
 		return api.Comment{}, err
 	}
@@ -283,7 +315,7 @@ func (c *Comment) toAPIComment() (api.Comment, error) {
 	if c.Path != nil {
 		path = *c.Path
 	}
-	return api.Comment{Path: path, Line: line, Body: body}, nil
+	return api.Comment{Path: path, Line: line, StartLine: startLine, Body: body}, nil
 }
 
 // resolveBody picks the comment text from "body" or its "message" alias.
@@ -303,30 +335,90 @@ func (c *Comment) resolveBody() (string, error) {
 	}
 }
 
-// resolveLine picks the anchor line from "line" or its "lines" alias. 0 means
-// "not anchored to a diff line" — a file-level or PR-level comment.
-func (c *Comment) resolveLine() (int, error) {
-	var fromLines *int
-	switch {
-	case len(c.Lines) > 1:
-		return 0, fmt.Errorf(`"lines" carries %d entries; pg-pr anchors one comment to one line — `+
-			`emit one comment per line, or use "line"`, len(c.Lines))
-	case len(c.Lines) == 1:
-		fromLines = &c.Lines[0]
+// resolveLines picks the anchor span from "line"/"start_line" or their "lines"
+// alias, returning (startLine, line).
+//
+// line == 0 means "not anchored to a diff line" — a file-level or PR-level
+// comment. startLine == 0 means single-line: (0, N) and (N, N) denote the same
+// anchor, so a one-line span normalizes to startLine 0 and a single-line finding
+// keeps producing an api.Comment whose omitempty StartLine never reaches the wire
+// (pg2-3c8mo).
+func (c *Comment) resolveLines() (startLine, line int, err error) {
+	spanStart, spanEnd, err := c.lineSpan()
+	if err != nil {
+		return 0, 0, err
 	}
-	line := 0
-	switch {
-	case c.Line != nil && fromLines != nil && *c.Line != *fromLines:
-		return 0, fmt.Errorf(`"line" (%d) and its alias "lines" (%d) disagree; set exactly one`, *c.Line, *fromLines)
-	case c.Line != nil:
-		line = *c.Line
-	case fromLines != nil:
-		line = *fromLines
+	if line, err = pickAnchor("line", c.Line, spanEnd); err != nil {
+		return 0, 0, err
+	}
+	if startLine, err = pickAnchor("start_line", c.StartLine, spanStart); err != nil {
+		return 0, 0, err
 	}
 	if line < 0 {
-		return 0, fmt.Errorf(`"line" must be >= 1, or null/omitted for a file- or PR-level comment; got %d`, line)
+		return 0, 0, fmt.Errorf(`"line" must be >= 1, or null/omitted for a file- or PR-level comment; got %d`, line)
 	}
-	return line, nil
+	if startLine < 0 {
+		return 0, 0, fmt.Errorf(`"start_line" must be >= 1, or null/omitted for a single-line comment; got %d`, startLine)
+	}
+	switch {
+	case startLine == 0 || startLine == line:
+		// Single-line (or un-anchored): never emit a span.
+		return 0, line, nil
+	case line == 0:
+		return 0, 0, errors.New(`"start_line" is set but "line" is not; a multi-line comment needs BOTH — ` +
+			`"start_line" is the first line of the span and "line" its last`)
+	case startLine > line:
+		return 0, 0, fmt.Errorf(`"start_line" (%d) is after "line" (%d); "start_line" must be the FIRST `+
+			`line of the span and "line" its last`, startLine, line)
+	}
+	return startLine, line, nil
+}
+
+// lineSpan reduces the "lines" alias to the (start, end) pair it describes:
+// absent or null -> (nil, nil); one entry -> (nil, &N), a single-line anchor with
+// no span; a contiguous run -> (&min, &max).
+//
+// CONTIGUOUS means: sorted ascending, every entry is its predecessor plus one —
+// no gap and no duplicate. GitHub's review-comment API can express only a
+// contiguous `start_line`..`line` span, so a gapped list has no faithful
+// representation: collapsing it to its endpoints would silently claim lines the
+// finding never named, and truncating it to one entry would misplace the comment.
+// Both are the silent-loss failure this package exists to prevent, so a
+// non-contiguous list is an error (pg2-cns7a, pg2-3c8mo).
+func (c *Comment) lineSpan() (start, end *int, err error) {
+	if len(c.Lines) == 0 {
+		return nil, nil, nil
+	}
+	sorted := slices.Clone(c.Lines)
+	slices.Sort(sorted)
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i] != sorted[i-1]+1 {
+			return nil, nil, fmt.Errorf(`"lines" %v is not a contiguous span (%d does not follow %d); `+
+				`GitHub anchors a comment to one line or one contiguous range — emit one comment per `+
+				`range, or use "start_line"/"line"`, c.Lines, sorted[i], sorted[i-1])
+		}
+	}
+	first, last := sorted[0], sorted[len(sorted)-1]
+	if first == last {
+		return nil, &last, nil
+	}
+	return &first, &last, nil
+}
+
+// pickAnchor reconciles an explicit anchor key with the value the "lines" alias
+// implies for it. Both set is fine only when they agree.
+func pickAnchor(key string, explicit, fromLines *int) (int, error) {
+	switch {
+	case explicit != nil && fromLines != nil && *explicit != *fromLines:
+		return 0, fmt.Errorf(`%q (%d) and its alias "lines" (%d) disagree; set exactly one`,
+			key, *explicit, *fromLines)
+	case explicit != nil:
+		return *explicit, nil
+	case fromLines != nil:
+		return *fromLines, nil
+	default:
+		return 0, nil
+	}
 }
 
 // normalizeSeverity lower-cases and validates severity. An unrecognised value is

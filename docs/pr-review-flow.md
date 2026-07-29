@@ -10,7 +10,8 @@ and tests. It is allowed to describe current, tool-specific, and transitional st
 may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 
 **Verified against:** `main` @ `9ac29c26` (2026-07-09); §2.2 / JR5 re-verified
-2026-07-15 for the `review.enabled` default flip (pg2-3ho1r). Re-verify the cited
+2026-07-15 for the `review.enabled` default flip (pg2-3ho1r); §3 / JR2 re-verified
+2026-07-29 for multi-line review comments (pg2-3c8mo). Re-verify the cited
 `file:line` anchors when review-flow code changes.
 
 > Scope note: this repository is a standalone, **public** flake. This doc stays
@@ -153,7 +154,7 @@ sequenceDiagram
 | Read verb `pr list --json`                        | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/pr_list.go:40-108`                            |
 | Write surface (`review submit/post`, `comment`)   | `pg-pr`   | `packages/pg-pr/cmd/pg-pr/review.go:84-343`                             |
 | Review-input JSON schema (agents → verb)          | `pg-pr`   | `packages/pg-pr/internal/reviewinput/reviewinput.go`                    |
-| GitHub PENDING semantics + 422 anchor             | `pg-pr`   | `packages/pg-pr/pkg/provider/vcs/github/github.go:763-822`              |
+| GitHub PENDING semantics + 422 anchor             | `pg-pr`   | `packages/pg-pr/pkg/provider/vcs/github/github.go:771-842`              |
 | Reconcile (pre-drain ACL)                         | `pr-pool` | `packages/pr-pool/cmd/pr-pool/main.go:30-31` → `reconcile_cmd.go:15-81` |
 | `review-pr` bead + gate ensure / re-review cursor | `pr-pool` | `packages/pr-pool/internal/prpoolacl/acl.go:42-163`                     |
 | ccpool `review` role                              | `pr-pool` | `packages/pr-pool/internal/roles/builtin.go:83-101`                     |
@@ -178,7 +179,13 @@ into `pg-pr review --help` (both prompts deep-link to that help text).
 `reviewinput.Decode` is the only adapter from it to `reviewstage.Draft`; it
 rejects any key it cannot map instead of dropping it, because
 `encoding/json`'s silent unknown-field drop previously blanked every agent
-finding (`{Path: "…", Line: 0, Body: ""}`) with no error anywhere. Two gates hold
+finding (`{Path: "…", Line: 0, Body: ""}`) with no error anywhere. A finding
+spanning several lines is expressed as `start_line` + `line` (or a contiguous
+`lines` run, whose minimum becomes `start_line` and maximum `line`) and reaches
+GitHub as one multi-line review comment; a **non-contiguous** run stays an error,
+because GitHub has no representation for a gapped range and both alternatives —
+collapsing to the endpoints, truncating to one entry — silently change the
+finding (`pg2-3c8mo`). Two gates hold
 the schema and its producers together: `reviewinput`'s Go tests plus the
 `cmd/pg-pr` golden test, and the `test-pg-pr-review-input-assets` flake check,
 which feeds each agent asset's documented example to the built binary (the assets
@@ -254,16 +261,22 @@ flowchart TD
     (event unspecified), via the `pg-pr` write surface.
   - Inline comments **MUST** anchor to the reviewed head SHA (`commit_id`) so a
     head advance does not 422.
+  - A finding covering a contiguous range of lines **MUST** post as ONE multi-line
+    review comment (`start_line`..`line`), never truncated to one endpoint; a
+    single-line finding **MUST NOT** send `start_line` at all.
   - Re-running the review **SHOULD NOT** create a duplicate PENDING review for the
     same reviewer.
 - **Code paths:** `packages/pg-pr/internal/reviewsink/teamsink.go:71-144`
   (`HasPendingReviewByViewer` skip — path A only);
   `packages/pg-pr/pkg/provider/vcs/github/pending.go`;
-  `packages/pg-pr/pkg/provider/vcs/github/github.go:763-822` (`PostReview`);
+  `packages/pg-pr/pkg/provider/vcs/github/github.go:771-842` (`PostReview`);
   `packages/pg-pr/cmd/pg-pr/review.go:129-227` (the `review submit` path B uses);
   `packages/pr-pool/internal/roles/builtin.go:44`.
 - **Coverage:** `teamsink_test.go`, `pending_test.go`, `review_test.go`
-  (`TestReviewSubmit_ForwardsHeadSHAAsCommitID`).
+  (`TestReviewSubmit_ForwardsHeadSHAAsCommitID`); multi-line spans in
+  `github_test.go` (`TestPostReview_MultiLineCommentSendsStartLine`,
+  `TestPostReview_DegenerateStartLineIsDropped`) and `review_input_test.go`
+  (`TestReviewSubmit_MultiLineFindingPostsAsMultiLineComment`).
 - **Known gaps:**
   - **Skip-if-present is NOT on the `pg-pr review submit` path** the `pr-pool`
     review role uses — `HasPendingReviewByViewer` lives only in the kill-switched

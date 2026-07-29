@@ -121,6 +121,12 @@ func Dedup(incoming, existing []api.Comment) (unique []api.Comment, skipped int)
 }
 
 func dedupKey(c api.Comment) string {
+	// StartLine is deliberately NOT part of the key. `existing` comes from the
+	// provider's READ path, which never reports start_line (api.Comment.StartLine
+	// is write-only), so keying on it would make a re-posted multi-line comment
+	// look new every time and stack duplicates upstream. Path + end line + body
+	// prefix already identifies the finding (pg2-3c8mo).
+	//
 	// Strip pg-pr attribution markup first so the key hinges on the actual
 	// comment content. Without this the constant visible attribution banner
 	// (added by marker.Stamp) dominates the fixed 100-char window, making
