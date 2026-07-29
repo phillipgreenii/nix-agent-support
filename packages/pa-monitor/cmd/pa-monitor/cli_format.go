@@ -62,13 +62,10 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 		if v != nil {
 			r.name = sessionLabel(v)
 			r.term = terminalAbbrev(v.GetTerminalHost())
-			if v.GetStatus() != "" {
-				r.status = v.GetStatus()
-				// ADR 0024: qualify a blocked session with its blocker
-				// ("blocked/usage_limit") so the reason is visible in the table.
-				if b := v.GetBlocker(); b != "" {
-					r.status = v.GetStatus() + "/" + b
-				}
+			// ADR 0024 D1: qualify a blocked session with its blocker
+			// ("blocked/usage_limit") so the reason is visible in the table.
+			if s := formatStatusWithBlocker(v); s != "" {
+				r.status = s
 			}
 		}
 		if le := sd.GetLastError(); le != nil && le.GetIsTerminal() {
@@ -102,6 +99,93 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 			errW, r.errKind,
 			r.nudge)
 	}
+	return sb.String()
+}
+
+// formatStatusWithBlocker renders a SessionView's ADR 0024 status qualified by
+// its blocker — "blocked/usage_limit", "blocked/human_input" — and the bare
+// status otherwise (a blocker is present ONLY when status == "blocked", D1).
+//
+// This is the single status/blocker word form for every CLI surface: the
+// `status` subcommand's session table and the `info session:` header both call
+// it, so the two can never drift. Returns "" when the view carries no status at
+// all, letting each caller supply its own placeholder.
+func formatStatusWithBlocker(v *pb.SessionView) string {
+	if v == nil {
+		return ""
+	}
+	st := v.GetStatus()
+	if st == "" {
+		return ""
+	}
+	if b := v.GetBlocker(); b != "" {
+		return st + "/" + b
+	}
+	return st
+}
+
+// dirSessionCounts returns the ADR 0024 {working, blocked, idle} rollup for one
+// wire Directory.
+//
+// The retired dormant_n (proto field 7, ADR 0024 R8) is FOLDED INTO IDLE and is
+// never reported on its own: it has no writer anywhere, so a current daemon
+// always sends 0, and an older daemon's dormant sessions are plain idle under
+// the new model. Reading it as a standalone count prints a permanent 0 and
+// hides the blocked sessions entirely (bead pg2-vsrxf).
+func dirSessionCounts(d *pb.Directory) (working, blocked, idle int) {
+	if d == nil {
+		return 0, 0, 0
+	}
+	return int(d.GetWorkingN()),
+		int(d.GetBlockedN()),
+		int(d.GetIdleN()) + int(d.GetDormantN())
+}
+
+// formatSessionCounts renders the ADR 0024 {working, blocked, idle} rollup in
+// the one word form shared by the `status` and `info path:` surfaces.
+func formatSessionCounts(working, blocked, idle int) string {
+	return fmt.Sprintf("%d working, %d blocked, %d idle", working, blocked, idle)
+}
+
+// formatPathRollup renders the whole `info path:` directory block. The session
+// line carries the ADR 0024 {working, blocked, idle} counts via
+// dirSessionCounts — never the retired dormant count.
+func formatPathRollup(d *pb.Directory) string {
+	if d == nil {
+		return ""
+	}
+	working, blocked, idle := dirSessionCounts(d)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "path:     %s\n", d.GetPath())
+	fmt.Fprintf(&sb, "branch:   %s\n", d.GetBranch())
+	fmt.Fprintf(&sb, "sessions: %s\n", formatSessionCounts(working, blocked, idle))
+	fmt.Fprintf(&sb, "tokens:   %d\n", d.GetTotalTokens())
+	fmt.Fprintf(&sb, "cost:     $%.2f\n", d.GetTotalCostUsd())
+	return sb.String()
+}
+
+// formatSessionInfoHeader renders the fixed header lines of `info session:`.
+// The status line uses formatStatusWithBlocker, so a blocked session shows the
+// blocker in the same form the `status` subcommand's table uses (ADR 0024 D1).
+// The trailing last_error / pending_nudge sections live in formatSessionInfo.
+func formatSessionInfoHeader(v *pb.SessionView) string {
+	if v == nil {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "session_id:     %s\n", v.GetSessionId())
+	fmt.Fprintf(&sb, "status:         %s\n", formatStatusWithBlocker(v))
+	fmt.Fprintf(&sb, "model:          %s\n", v.GetModel())
+	fmt.Fprintf(&sb, "cwd:            %s\n", v.GetCwd())
+	fmt.Fprintf(&sb, "branch:         %s\n", v.GetBranch())
+	// workspace.scope from the persisted label set (pg2-4xbrm); shown only when
+	// present so an unlabeled session has no empty line.
+	if scope := v.GetLabels()["workspace.scope"]; scope != "" {
+		fmt.Fprintf(&sb, "scope:          %s\n", scope)
+	}
+	fmt.Fprintf(&sb, "context_tokens: %d\n", v.GetContextTokens())
+	fmt.Fprintf(&sb, "subagents:      %d\n", v.GetSubagentCount())
+	fmt.Fprintf(&sb, "subshells:      %d\n", v.GetSubshellCount())
 	return sb.String()
 }
 

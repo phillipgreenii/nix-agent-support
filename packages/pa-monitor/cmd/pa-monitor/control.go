@@ -259,11 +259,7 @@ func runInfo(args []string) {
 			fmt.Fprintln(os.Stderr, "info: no directory matched")
 			os.Exit(1)
 		}
-		fmt.Printf("path:     %s\n", d.GetPath())
-		fmt.Printf("branch:   %s\n", d.GetBranch())
-		fmt.Printf("sessions: %d working, %d idle, %d dormant\n", d.GetWorkingN(), d.GetIdleN(), d.GetDormantN())
-		fmt.Printf("tokens:   %d\n", d.GetTotalTokens())
-		fmt.Printf("cost:     $%.2f\n", d.GetTotalCostUsd())
+		fmt.Print(formatPathRollup(d))
 		return
 	}
 
@@ -277,19 +273,7 @@ func runInfo(args []string) {
 		fmt.Fprintln(os.Stderr, "info: no session matched")
 		os.Exit(1)
 	}
-	fmt.Printf("session_id:     %s\n", v.GetSessionId())
-	fmt.Printf("status:         %s\n", v.GetStatus())
-	fmt.Printf("model:          %s\n", v.GetModel())
-	fmt.Printf("cwd:            %s\n", v.GetCwd())
-	fmt.Printf("branch:         %s\n", v.GetBranch())
-	// workspace.scope from the persisted label set (pg2-4xbrm); shown only when
-	// present so an unlabeled session has no empty line.
-	if scope := v.GetLabels()["workspace.scope"]; scope != "" {
-		fmt.Printf("scope:          %s\n", scope)
-	}
-	fmt.Printf("context_tokens: %d\n", v.GetContextTokens())
-	fmt.Printf("subagents:      %d\n", v.GetSubagentCount())
-	fmt.Printf("subshells:      %d\n", v.GetSubshellCount())
+	fmt.Print(formatSessionInfoHeader(v))
 	if len(resp.GetLabelPairs()) > 0 {
 		fmt.Println("labels:")
 		for _, kv := range resp.GetLabelPairs() {

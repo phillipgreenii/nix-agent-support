@@ -817,7 +817,11 @@ func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Del
 // id, the snapshot reflects the global aggregate so the sidebar still
 // shows something useful (e.g. caffeinate state).
 func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, staleAfter time.Duration) cmuxstatus.Snapshot {
-	var working, idle, dormant int
+	// ADR 0024 {working, blocked, idle} buckets, mirroring tui.aggregateState so
+	// the two cmux-sidebar producers agree. Legacy vocab still parses ("waiting"
+	// → blocked, "dormant" → idle) and an unknown status reads idle, not hidden
+	// (R8).
+	var working, blocked, idle int
 	matched := false
 	for _, d := range state.GetDirs() {
 		for _, sv := range d.GetSessions() {
@@ -828,18 +832,22 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 			switch sv.GetStatus() {
 			case "working":
 				working++
-			case "idle":
-				idle++
+			case "blocked", "waiting":
+				blocked++
 			default:
-				dormant++
+				idle++
 			}
 		}
 	}
 	if !matched {
 		for _, d := range state.GetDirs() {
-			working += int(d.GetWorkingN())
-			idle += int(d.GetIdleN())
-			dormant += int(d.GetDormantN())
+			// dirSessionCounts folds the retired dormant_n into idle; blocked_n was
+			// previously dropped here entirely, so a workspace whose sessions were
+			// all blocked rolled up as StateUnknown (bead pg2-vsrxf).
+			w, b, i := dirSessionCounts(d)
+			working += w
+			blocked += b
+			idle += i
 		}
 	}
 
@@ -850,10 +858,13 @@ func snapshotForWorkspace(state *pb.DaemonState, ws string, now time.Time, stale
 	switch {
 	case working > 0:
 		out.State = cmuxstatus.StateWorking
+	case blocked > 0:
+		// ADR 0024 R3: a blocked session maps to Paused (extending cmuxstatus's
+		// existing Paused notion) rather than being lost. Same mapping as
+		// tui.aggregateState; the reset time is unknown here, so it stays zero.
+		out.State = cmuxstatus.StatePaused
 	case idle > 0:
 		out.State = cmuxstatus.StateIdle
-	case dormant > 0:
-		out.State = cmuxstatus.StateDormant
 	default:
 		out.State = cmuxstatus.StateUnknown
 	}

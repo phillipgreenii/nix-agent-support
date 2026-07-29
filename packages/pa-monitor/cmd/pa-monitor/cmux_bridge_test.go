@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
@@ -492,5 +493,74 @@ func TestBridgeShutdownContextCancelsOnSignal(t *testing.T) {
 		// success: the signal cancelled the context
 	case <-time.After(2 * time.Second):
 		t.Fatal("context not cancelled within 2s of SIGHUP")
+	}
+}
+
+// TestSnapshotForWorkspaceStateBuckets pins the ADR 0024 rollup in
+// snapshotForWorkspace (bead pg2-vsrxf). Two defects lived in this function:
+// the no-match directory fallback read the retired dormant_n as a standalone
+// bucket while dropping blocked_n entirely (so an all-blocked rollup read
+// StateUnknown), and a "blocked" session fell through the per-session default
+// arm. Both paths now bucket {working, blocked, idle} with blocked → StatePaused,
+// mirroring tui.aggregateState (ADR 0024 R3), and legacy dormant folded into
+// idle (R8). WindowResetsAt is left unset in every case so the pause override
+// does not mask the bucket under test.
+func TestSnapshotForWorkspaceStateBuckets(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	const staleAfter = 10 * time.Minute
+	const ws = "workspace:1"
+
+	sess := func(status string) []*pb.Directory {
+		return []*pb.Directory{{Sessions: []*pb.SessionView{
+			{CmuxWorkspaceId: ws, Status: status, SessionId: "sid-a"},
+		}}}
+	}
+
+	for _, tc := range []struct {
+		name string
+		dirs []*pb.Directory
+		want cmuxstatus.State
+	}{
+		// Per-session path (a session carries the bridge's workspace id).
+		{"session working", sess("working"), cmuxstatus.StateWorking},
+		{"session blocked is paused not lost", sess("blocked"), cmuxstatus.StatePaused},
+		{"session legacy waiting is blocked", sess("waiting"), cmuxstatus.StatePaused},
+		{"session idle", sess("idle"), cmuxstatus.StateIdle},
+		{"session legacy dormant folds to idle", sess("dormant"), cmuxstatus.StateIdle},
+		{"session unknown status reads idle", sess("wat"), cmuxstatus.StateIdle},
+
+		// Directory-count fallback (no session matches the workspace).
+		{
+			name: "fallback all-blocked directory is paused not unknown",
+			dirs: []*pb.Directory{{BlockedN: 3}},
+			want: cmuxstatus.StatePaused,
+		},
+		{
+			name: "fallback legacy dormant_n folds into idle",
+			dirs: []*pb.Directory{{DormantN: 2}},
+			want: cmuxstatus.StateIdle,
+		},
+		{
+			name: "fallback working wins",
+			dirs: []*pb.Directory{{WorkingN: 1, BlockedN: 1, IdleN: 1}},
+			want: cmuxstatus.StateWorking,
+		},
+		{
+			name: "fallback blocked outranks idle",
+			dirs: []*pb.Directory{{BlockedN: 1, IdleN: 5}},
+			want: cmuxstatus.StatePaused,
+		},
+		{
+			name: "fallback empty is unknown",
+			dirs: []*pb.Directory{{}},
+			want: cmuxstatus.StateUnknown,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := snapshotForWorkspace(&pb.DaemonState{Dirs: tc.dirs}, ws, now, staleAfter)
+			if snap.State != tc.want {
+				t.Errorf("State = %v, want %v", snap.State, tc.want)
+			}
+		})
 	}
 }

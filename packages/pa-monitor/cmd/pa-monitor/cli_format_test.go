@@ -291,3 +291,157 @@ func TestAPIErrorIsEscalatedRateLimitNotEscalated(t *testing.T) {
 		t.Error("expected escalated=false for rate_limit kind (not inherently retryable)")
 	}
 }
+
+// --- ADR 0024 {working, blocked, idle} rollup on `info path:` (bead pg2-vsrxf) ---
+
+// TestFormatPathRollupReportsBlockedSessions pins the bug in bead pg2-vsrxf:
+// `info path:` printed "%d working, %d idle, %d dormant" from
+// WorkingN/IdleN/DormantN. The DB-path bucketer increments ONLY BlockedN for a
+// blocked session, and dormant_n is retired (permanently 0), so a directory
+// whose three sessions were all blocked on a usage limit rendered
+// "0 working, 0 idle, 0 dormant" — the sessions vanished from the rollup.
+func TestFormatPathRollupReportsBlockedSessions(t *testing.T) {
+	d := &pb.Directory{
+		Path:         "/w/repo",
+		Branch:       "main",
+		BlockedN:     3,
+		TotalTokens:  1234,
+		TotalCostUsd: 1.5,
+	}
+	got := formatPathRollup(d)
+	if want := "sessions: 0 working, 3 blocked, 0 idle\n"; !strings.Contains(got, want) {
+		t.Errorf("blocked sessions lost from the rollup:\ngot:\n%s\nwant line: %q", got, want)
+	}
+	if strings.Contains(got, "dormant") {
+		t.Errorf("`info path:` must not print the retired, always-zero dormant count:\n%s", got)
+	}
+	// The rest of the block must survive the refactor.
+	for _, want := range []string{"path:     /w/repo\n", "branch:   main\n", "tokens:   1234\n", "cost:     $1.50\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+// TestFormatPathRollupFoldsDormantIntoIdle covers version skew (ADR 0024 R8): an
+// older daemon still sends dormant_n, and those sessions are plain idle under
+// the new model, so dormant_n must be ADDED to idle — never reported on its own.
+func TestFormatPathRollupFoldsDormantIntoIdle(t *testing.T) {
+	d := &pb.Directory{WorkingN: 1, BlockedN: 2, IdleN: 3, DormantN: 4}
+	got := formatPathRollup(d)
+	if want := "sessions: 1 working, 2 blocked, 7 idle\n"; !strings.Contains(got, want) {
+		t.Errorf("legacy dormant_n not folded into idle:\ngot:\n%s\nwant line: %q", got, want)
+	}
+}
+
+// TestFormatPathRollupNilDirectory guards the defensive nil path.
+func TestFormatPathRollupNilDirectory(t *testing.T) {
+	if got := formatPathRollup(nil); got != "" {
+		t.Errorf("nil directory: got %q, want empty", got)
+	}
+}
+
+// TestDirSessionCounts locks the fold rule at the helper both `status` and
+// `info path:` share, including the nil case.
+func TestDirSessionCounts(t *testing.T) {
+	w, b, i := dirSessionCounts(&pb.Directory{WorkingN: 2, BlockedN: 3, IdleN: 4, DormantN: 5})
+	if w != 2 || b != 3 || i != 9 {
+		t.Errorf("counts = (%d, %d, %d), want (2, 3, 9) — idle must absorb dormant_n", w, b, i)
+	}
+	if w, b, i := dirSessionCounts(nil); w != 0 || b != 0 || i != 0 {
+		t.Errorf("nil directory counts = (%d, %d, %d), want all zero", w, b, i)
+	}
+}
+
+// --- ADR 0024 status/blocker form on `info session:` (bead pg2-vsrxf) ---
+
+// TestFormatStatusWithBlocker pins ADR 0024 D1: a blocked session is qualified
+// with its blocker; every other status is bare (blocker is present ONLY when
+// status == "blocked", with no `none` sentinel).
+func TestFormatStatusWithBlocker(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, blocker, want string
+	}{
+		{"usage limit", "blocked", "usage_limit", "blocked/usage_limit"},
+		{"human input", "blocked", "human_input", "blocked/human_input"},
+		{"human authn", "blocked", "human_authn", "blocked/human_authn"},
+		{"error", "blocked", "error", "blocked/error"},
+		{"working is bare", "working", "", "working"},
+		{"idle is bare", "idle", "", "idle"},
+		{"no status", "", "", ""},
+	} {
+		v := &pb.SessionView{Status: tc.status, Blocker: tc.blocker}
+		if got := formatStatusWithBlocker(v); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if got := formatStatusWithBlocker(nil); got != "" {
+		t.Errorf("nil view: got %q, want empty", got)
+	}
+}
+
+// TestInfoSessionPrintsBlockerInStatusSubcommandForm pins the second half of
+// bead pg2-vsrxf: `info session:` printed `status:` bare, so a session blocked
+// on a usage limit read just "blocked" with no reason — whereas the `status`
+// subcommand's table already qualified it. Both surfaces must render the SAME
+// status/blocker token for the same SessionView.
+func TestInfoSessionPrintsBlockerInStatusSubcommandForm(t *testing.T) {
+	v := &pb.SessionView{SessionId: "sid-1", Status: "blocked", Blocker: "usage_limit"}
+	sd := &pb.SessionDetail{
+		View:      v,
+		LastError: &pb.ApiError{Kind: "rate_limit", IsTerminal: true},
+	}
+
+	header := formatSessionInfoHeader(v)
+	if want := "status:         blocked/usage_limit\n"; !strings.Contains(header, want) {
+		t.Errorf("`info session:` dropped the blocker:\ngot:\n%s\nwant line: %q", header, want)
+	}
+
+	// Same token in the `status` subcommand's table — the shared form.
+	table := formatStatusSessions([]*pb.SessionDetail{sd})
+	if !strings.Contains(table, "blocked/usage_limit") {
+		t.Errorf("`status` table lost the shared status/blocker form:\n%s", table)
+	}
+}
+
+// TestFormatSessionInfoHeaderNonBlockedStaysBare confirms the header keeps the
+// bare status for non-blocked sessions and still renders the other fields.
+func TestFormatSessionInfoHeaderNonBlockedStaysBare(t *testing.T) {
+	v := &pb.SessionView{
+		SessionId:     "sid-2",
+		Status:        "working",
+		Model:         "opus",
+		Cwd:           "/w/repo",
+		Branch:        "main",
+		ContextTokens: 42,
+		Labels:        map[string]string{"workspace.scope": "personal"},
+	}
+	got := formatSessionInfoHeader(v)
+	for _, want := range []string{
+		"session_id:     sid-2\n",
+		"status:         working\n",
+		"model:          opus\n",
+		"cwd:            /w/repo\n",
+		"branch:         main\n",
+		"scope:          personal\n",
+		"context_tokens: 42\n",
+		"subagents:      0\n",
+		"subshells:      0\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if got := formatSessionInfoHeader(nil); got != "" {
+		t.Errorf("nil view: got %q, want empty", got)
+	}
+}
+
+// TestFormatSessionInfoHeaderOmitsScopeWhenUnset keeps the pg2-4xbrm behavior:
+// an unlabeled session has no empty scope line.
+func TestFormatSessionInfoHeaderOmitsScopeWhenUnset(t *testing.T) {
+	got := formatSessionInfoHeader(&pb.SessionView{SessionId: "sid-3", Status: "idle"})
+	if strings.Contains(got, "scope:") {
+		t.Errorf("unlabeled session must not get a scope line:\n%s", got)
+	}
+}
