@@ -2,6 +2,7 @@ package claudetranscript
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -259,9 +260,10 @@ func TestParseLimitResetTextHourOnly(t *testing.T) {
 // TestParseLimitResetTextDatePrefixed covers the weekly-limit variation observed
 // in real transcripts: "resets Apr 13, 11am (TZ)".
 func TestParseLimitResetTextDatePrefixed(t *testing.T) {
-	// Event 2026-04-06 12:00 UTC. "Apr 13, 11am (America/New_York)" →
-	// 2026-04-13 11:00 EDT = 2026-04-13 15:00 UTC.
-	ev := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	// Event 2026-04-07 12:00 UTC. "Apr 13, 11am (America/New_York)" →
+	// 2026-04-13 11:00 EDT = 2026-04-13 15:00 UTC. The event sits ~6d3h before
+	// the reset: inside MaxResetHorizon, as a real weekly limit always is.
+	ev := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
 	got, ok := parseLimitResetText("You've hit your limit · resets Apr 13, 11am (America/New_York)", ev)
 	if !ok {
 		t.Fatal("ok=false, want true")
@@ -275,7 +277,7 @@ func TestParseLimitResetTextDatePrefixed(t *testing.T) {
 // TestParseLimitResetTextDatePrefixedWithMinutes asserts the same prefix form
 // works when the time has minutes ("Apr 13, 11:30am").
 func TestParseLimitResetTextDatePrefixedWithMinutes(t *testing.T) {
-	ev := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
+	ev := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
 	got, ok := parseLimitResetText("resets Apr 13, 11:30am (America/New_York)", ev)
 	if !ok {
 		t.Fatal("ok=false, want true")
@@ -304,34 +306,177 @@ func TestParseLimitResetTextDatePrefixedYearRollover(t *testing.T) {
 
 // TestParseLimitResetTextDatePrefixedAllMonths verifies every month abbreviation
 // observed/expected resolves correctly.
+//
+// Each case gets its OWN event time, the day before its target date, so the
+// resolved reset stays inside MaxResetHorizon. A single shared January event (the
+// pre-bound shape of this test) put most months hundreds of days out — instants
+// the horizon now correctly rejects, and which no real weekly limit produces.
 func TestParseLimitResetTextDatePrefixedAllMonths(t *testing.T) {
-	ev := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	cases := []struct {
-		in       string
-		wantYear int
-		wantMon  time.Month
+	months := []struct {
+		abbr string
+		mon  time.Month
 	}{
-		{"resets Jan 15, 9am (UTC)", 2026, time.January},
-		{"resets Feb 1, 9am (UTC)", 2026, time.February},
-		{"resets Mar 1, 9am (UTC)", 2026, time.March},
-		{"resets Apr 1, 9am (UTC)", 2026, time.April},
-		{"resets May 1, 9am (UTC)", 2026, time.May},
-		{"resets Jun 1, 9am (UTC)", 2026, time.June},
-		{"resets Jul 1, 9am (UTC)", 2026, time.July},
-		{"resets Aug 1, 9am (UTC)", 2026, time.August},
-		{"resets Sep 1, 9am (UTC)", 2026, time.September},
-		{"resets Oct 1, 9am (UTC)", 2026, time.October},
-		{"resets Nov 1, 9am (UTC)", 2026, time.November},
-		{"resets Dec 1, 9am (UTC)", 2026, time.December},
+		{"Jan", time.January},
+		{"Feb", time.February},
+		{"Mar", time.March},
+		{"Apr", time.April},
+		{"May", time.May},
+		{"Jun", time.June},
+		{"Jul", time.July},
+		{"Aug", time.August},
+		{"Sep", time.September},
+		{"Oct", time.October},
+		{"Nov", time.November},
+		{"Dec", time.December},
 	}
-	for _, c := range cases {
-		got, ok := parseLimitResetText(c.in, ev)
+	for _, c := range months {
+		in := "resets " + c.abbr + " 15, 9am (UTC)"
+		ev := time.Date(2026, c.mon, 14, 0, 0, 0, 0, time.UTC)
+		got, ok := parseLimitResetText(in, ev)
 		if !ok {
-			t.Errorf("%q: ok=false, want true", c.in)
+			t.Errorf("%q: ok=false, want true", in)
 			continue
 		}
-		if got.Year() != c.wantYear || got.Month() != c.wantMon {
-			t.Errorf("%q: got %v-%v, want %d-%v", c.in, got.Year(), got.Month(), c.wantYear, c.wantMon)
+		want := time.Date(2026, c.mon, 15, 9, 0, 0, 0, time.UTC)
+		if !got.Equal(want) {
+			t.Errorf("%q: got %v, want %v", in, got.UTC(), want)
 		}
+	}
+}
+
+// --- MaxResetHorizon: upper bound at ingestion (bead pg2-yzs6a) ---------------
+
+// TestParseLimitResetTextRejectsBeyondHorizon proves the prose path DISCARDS a
+// resolved instant beyond MaxResetHorizon instead of returning it. Both
+// garbage-HIGH shapes the year-less weekly clause can produce are covered: a
+// far-future month+day in the event's own year, and the +1-YEAR rollover applied
+// to a date that already passed.
+func TestParseLimitResetTextRejectsBeyondHorizon(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		ev   time.Time
+	}{
+		{
+			name: "far-future date in the event year",
+			in:   "You've hit your limit · resets Aug 15, 11am (UTC)",
+			ev:   time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC), // ~45 days out
+		},
+		{
+			name: "year rollover on an already-passed date",
+			in:   "resets Feb 3, 9am (UTC)",
+			ev:   time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC), // rolls to 2027 → ~247 days out
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := parseLimitResetText(c.in, c.ev)
+			if ok {
+				t.Errorf("ok=true (got %v), want false — beyond MaxResetHorizon must be discarded", got.UTC())
+			}
+			if !got.IsZero() {
+				t.Errorf("got %v, want zero time (discarded, never clamped to the horizon)", got.UTC())
+			}
+		})
+	}
+}
+
+// TestParseLimitResetTextHorizonBoundary pins the accept/reject edge: exactly
+// MaxResetHorizon past the event is ACCEPTED (a real weekly limit reported the
+// instant the window opened), one minute beyond it is rejected.
+func TestParseLimitResetTextHorizonBoundary(t *testing.T) {
+	reset := time.Date(2026, 4, 13, 11, 0, 0, 0, time.UTC)
+
+	atEdge := reset.Add(-MaxResetHorizon)
+	got, ok := parseLimitResetText("resets Apr 13, 11am (UTC)", atEdge)
+	if !ok {
+		t.Fatalf("ok=false at exactly MaxResetHorizon (%v), want true", MaxResetHorizon)
+	}
+	if !got.Equal(reset) {
+		t.Errorf("got %v, want %v", got.UTC(), reset)
+	}
+
+	pastEdge := atEdge.Add(-time.Minute)
+	if got, ok := parseLimitResetText("resets Apr 13, 11am (UTC)", pastEdge); ok {
+		t.Errorf("ok=true (got %v) one minute beyond MaxResetHorizon, want false", got.UTC())
+	}
+}
+
+// TestRetryInMsResetsAt covers the legacy numeric path's bound, including the
+// overflow trap: a huge retryInMs must NOT be converted to a time.Duration first
+// (that wraps negative and reads as a plausible PAST instant).
+func TestRetryInMsResetsAt(t *testing.T) {
+	ev := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		retry   int64
+		wantOK  bool
+		wantAt  time.Time
+		explain string
+	}{
+		{name: "one minute", retry: 60000, wantOK: true, wantAt: ev.Add(time.Minute)},
+		{name: "exactly the horizon", retry: MaxRetryInMs, wantOK: true, wantAt: ev.Add(MaxResetHorizon)},
+		{name: "one ms beyond the horizon", retry: MaxRetryInMs + 1, wantOK: false},
+		{name: "zero", retry: 0, wantOK: false},
+		{name: "negative", retry: -1, wantOK: false},
+		// Would overflow time.Duration (ns) and wrap NEGATIVE if converted first.
+		{name: "max int64 (duration overflow)", retry: math.MaxInt64, wantOK: false},
+		// Seconds-vs-milliseconds confusion upstream: an epoch-sized number.
+		{name: "epoch-sized garbage", retry: 1782958200000, wantOK: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := RetryInMsResetsAt(ev, c.retry)
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v (got %v)", ok, c.wantOK, got.UTC())
+			}
+			if !c.wantOK {
+				if !got.IsZero() {
+					t.Errorf("got %v, want zero time on rejection", got.UTC())
+				}
+				return
+			}
+			if !got.Equal(c.wantAt) {
+				t.Errorf("got %v, want %v", got.UTC(), c.wantAt)
+			}
+		})
+	}
+}
+
+// TestRateLimitPauseRejectsOutOfHorizonRetryInMs proves the bound reaches
+// RateLimitPause: a lone out-of-horizon legacy event yields no reset at all.
+func TestRateLimitPauseRejectsOutOfHorizonRetryInMs(t *testing.T) {
+	ts := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	path := t.TempDir() + "/t.jsonl"
+	if err := writeTestFile(path, rateEvent(ts, MaxRetryInMs+1)+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("resetsAt = %v, want zero (retryInMs beyond MaxResetHorizon)", got)
+	}
+}
+
+// TestRateLimitPauseOutOfHorizonDoesNotSupersedeGoodReset proves the discarded
+// event does not become "the last rate-limit event": an earlier in-range reset
+// survives a later garbage one, so a malformed line cannot blank a known window.
+func TestRateLimitPauseOutOfHorizonDoesNotSupersedeGoodReset(t *testing.T) {
+	good := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	garbage := good.Add(time.Minute)
+	path := t.TempDir() + "/t.jsonl"
+	body := rateEvent(good, 3600000) + "\n" + rateEvent(garbage, math.MaxInt64) + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RateLimitPause(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := good.Add(time.Hour)
+	if !got.Equal(want) {
+		t.Errorf("resetsAt = %v, want %v (earlier in-range reset must survive)", got, want)
 	}
 }

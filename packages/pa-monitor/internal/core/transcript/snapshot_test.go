@@ -1,8 +1,11 @@
 package transcript
 
 import (
+	"math"
 	"testing"
 	"time"
+
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 func TestScanMatchesIndividualFunctions(t *testing.T) {
@@ -196,5 +199,90 @@ func TestScanSurfacesStreamIdleTimeout(t *testing.T) {
 	}
 	if snap.LastError.Kind != ErrUnknown || !snap.LastErrorRetryable || !snap.LastError.IsTerminal {
 		t.Errorf("LastError = %+v retryable=%v, want unknown/retryable/terminal", snap.LastError, snap.LastErrorRetryable)
+	}
+}
+
+// --- retryInMs upper bound at ingestion (bead pg2-yzs6a) ---------------------
+
+// TestScanRejectsOutOfHorizonRetryInMs proves the legacy NUMERIC path is bounded
+// in this scanner too, not only in claude-transcript's RateLimitPause: an
+// out-of-horizon delay yields no reset at all rather than a fabricated far-future
+// window.
+func TestScanRejectsOutOfHorizonRetryInMs(t *testing.T) {
+	ts := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		retry int64
+	}{
+		{"one ms beyond the horizon", ct.MaxRetryInMs + 1},
+		{"epoch-sized garbage (seconds/ms confusion)", 1782958200000},
+		{"max int64 (would overflow time.Duration to a PAST instant)", math.MaxInt64},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := t.TempDir() + "/rl.jsonl"
+			if err := writeTestFile(path, rateEvent(ts, c.retry)+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			snap, err := Scan(path)
+			if err != nil {
+				t.Fatalf("Scan: %v", err)
+			}
+			if !snap.RateLimitResetsAt.IsZero() {
+				t.Errorf("RateLimitResetsAt = %v, want zero (retryInMs beyond ct.MaxResetHorizon, discarded not clamped)",
+					snap.RateLimitResetsAt)
+			}
+			// The independent oracle must agree — the two implementations of this
+			// path are only safe while they bound it identically.
+			if rl, _ := RateLimitPause(path); !snap.RateLimitResetsAt.Equal(rl) {
+				t.Errorf("RateLimitResetsAt = %v, but RateLimitPause = %v (the two paths must agree)",
+					snap.RateLimitResetsAt, rl)
+			}
+		})
+	}
+}
+
+// TestScanOutOfHorizonRetryInMsDoesNotSupersedeGoodReset proves a discarded event
+// does not blank a known window: the earlier in-range reset survives, matching
+// RateLimitPause.
+func TestScanOutOfHorizonRetryInMsDoesNotSupersedeGoodReset(t *testing.T) {
+	good := time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC)
+	path := t.TempDir() + "/rl.jsonl"
+	body := rateEvent(good, 3600000) + "\n" + rateEvent(good.Add(time.Minute), math.MaxInt64) + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	want := good.Add(time.Hour)
+	if !snap.RateLimitResetsAt.Equal(want) {
+		t.Errorf("RateLimitResetsAt = %v, want %v (earlier in-range reset must survive)", snap.RateLimitResetsAt, want)
+	}
+	if rl, _ := RateLimitPause(path); !snap.RateLimitResetsAt.Equal(rl) {
+		t.Errorf("RateLimitResetsAt = %v, but RateLimitPause = %v (the two paths must agree)", snap.RateLimitResetsAt, rl)
+	}
+}
+
+// TestScanRejectsOutOfHorizonProseReset proves the PROSE path is bounded through
+// this scanner as well: the year-less weekly clause resolving to a far-future
+// instant leaves RateLimitResetsAt unknown, which is the state the nudger's
+// limit-pause producer already handles.
+func TestScanRejectsOutOfHorizonProseReset(t *testing.T) {
+	ts := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	path := t.TempDir() + "/synth.jsonl"
+	// "Feb 3" already passed in 2026, so the parser rolls it a whole YEAR forward.
+	body := `{"type":"assistant","timestamp":"` + ts.UTC().Format(time.RFC3339Nano) +
+		`","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets Feb 3, 9am (UTC)"}]},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}` + "\n"
+	if err := writeTestFile(path, body); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Scan(path)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if !snap.RateLimitResetsAt.IsZero() {
+		t.Errorf("RateLimitResetsAt = %v, want zero (prose reset beyond ct.MaxResetHorizon)", snap.RateLimitResetsAt)
 	}
 }

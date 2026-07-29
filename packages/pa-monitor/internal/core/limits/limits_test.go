@@ -1,6 +1,7 @@
 package limits
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -187,4 +188,152 @@ not json
 	if recs[0].TS == nil || *recs[0].TS != 1234 {
 		t.Errorf("kept record ts = %v, want 1234", recs[0].TS)
 	}
+}
+
+// --- reset-epoch upper bound at ingestion (bead pg2-yzs6a) -------------------
+
+// TestCurrentDiscardsFiveHourResetBeyondWindow is the criterion-1 test: a
+// far-future five_hour_resets_at is DISCARDED, not elected. Without the bound the
+// greatest-reset rule makes the garbage epoch the current window and drags its
+// percentage along with it, which is what poisons the nudger's once-per-window
+// latch.
+func TestCurrentDiscardsFiveHourResetBeyondWindow(t *testing.T) {
+	const ts = int64(1_700_000_000)
+	legit := ts + 3600                 // 1h out — inside the 5h window
+	garbage := ts + int64(365*24*3600) // a year out — upstream garbage
+	recs := []Record{
+		{TS: i64(ts), FiveHourPct: f(80), FiveHourResetsAt: i64(legit)},
+		{TS: i64(ts), FiveHourPct: f(99), FiveHourResetsAt: i64(garbage)},
+	}
+	l := Current(recs)
+	if l == nil {
+		t.Fatal("Current = nil, want a reading")
+	}
+	if !l.FiveHourResetsAt.Equal(at(legit)) {
+		t.Errorf("FiveHourResetsAt = %v, want %v (garbage epoch must be discarded, not latched)",
+			l.FiveHourResetsAt, at(legit))
+	}
+	// The rejected record's pct must not leak into the legitimate window either.
+	wantPct(t, "FiveHourPct", l.FiveHourPct, f(80))
+}
+
+// TestCurrentDiscardsOnlyRecordWithOutOfRangeReset proves rejection degrades to
+// "window unknown" rather than clamping to the horizon: with no in-range epoch at
+// all there is no window, and the pct falls back to the no-window path.
+func TestCurrentDiscardsOnlyRecordWithOutOfRangeReset(t *testing.T) {
+	const ts = int64(1_700_000_000)
+	recs := []Record{{TS: i64(ts), FiveHourPct: f(42), FiveHourResetsAt: i64(ts + int64(365*24*3600))}}
+	l := Current(recs)
+	if l == nil {
+		t.Fatal("Current = nil, want a reading")
+	}
+	if !l.FiveHourResetsAt.IsZero() {
+		t.Errorf("FiveHourResetsAt = %v, want zero (unknown — never clamped to the horizon)", l.FiveHourResetsAt)
+	}
+	wantPct(t, "FiveHourPct", l.FiveHourPct, f(42))
+}
+
+// TestBoundedResetHorizonEdges pins the accept/reject edge per window, plus the
+// two shapes that cannot be validated or would break the comparison.
+func TestBoundedResetHorizonEdges(t *testing.T) {
+	const ts = int64(1_700_000_000)
+	fiveSecs := int64(fiveHourWindow / time.Second)
+	sevenSecs := int64(sevenDayWindow / time.Second)
+
+	cases := []struct {
+		name   string
+		rec    Record
+		window time.Duration
+		want   *int64
+	}{
+		{
+			name:   "5h: exactly one window out is accepted",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts + fiveSecs)},
+			window: fiveHourWindow,
+			want:   i64(ts + fiveSecs),
+		},
+		{
+			name:   "5h: one second beyond is rejected",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts + fiveSecs + 1)},
+			window: fiveHourWindow,
+			want:   nil,
+		},
+		{
+			name:   "5h: a PAST reset is kept (stragglers are legitimate; no lower bound)",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts - fiveSecs)},
+			window: fiveHourWindow,
+			want:   i64(ts - fiveSecs),
+		},
+		{
+			name:   "7d: six days out is accepted",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts + 6*24*3600)},
+			window: sevenDayWindow,
+			want:   i64(ts + 6*24*3600),
+		},
+		{
+			name:   "7d: eight days out is rejected",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts + 8*24*3600)},
+			window: sevenDayWindow,
+			want:   nil,
+		},
+		{
+			name:   "7d: exactly one window out is accepted",
+			rec:    Record{TS: i64(ts), FiveHourResetsAt: i64(ts + sevenSecs)},
+			window: sevenDayWindow,
+			want:   i64(ts + sevenSecs),
+		},
+		{
+			name:   "no ts: nothing to validate against, so rejected",
+			rec:    Record{FiveHourResetsAt: i64(ts + 60)},
+			window: fiveHourWindow,
+			want:   nil,
+		},
+		{
+			name:   "no reset: absent stays absent",
+			rec:    Record{TS: i64(ts)},
+			window: fiveHourWindow,
+			want:   nil,
+		},
+		{
+			// The comparison must not overflow into ACCEPTANCE. ts near MaxInt64
+			// wraps the ts+horizon sum negative, which must reject.
+			name:   "overflowing ts fails safe (rejected)",
+			rec:    Record{TS: i64(math.MaxInt64 - 10), FiveHourResetsAt: i64(math.MaxInt64)},
+			window: fiveHourWindow,
+			want:   nil,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := boundedReset(c.rec, func(r Record) *int64 { return r.FiveHourResetsAt }, c.window)
+			switch {
+			case c.want == nil && got != nil:
+				t.Errorf("boundedReset = %d, want nil (rejected)", *got)
+			case c.want != nil && got == nil:
+				t.Errorf("boundedReset = nil, want %d", *c.want)
+			case c.want != nil && *got != *c.want:
+				t.Errorf("boundedReset = %d, want %d", *got, *c.want)
+			}
+		})
+	}
+}
+
+// TestCurrentDiscardsSevenDayResetBeyondWindow covers the 7d window's own bound,
+// so the two windows are not silently sharing the looser one.
+func TestCurrentDiscardsSevenDayResetBeyondWindow(t *testing.T) {
+	const ts = int64(1_700_000_000)
+	legit := ts + 6*24*3600
+	garbage := ts + 30*24*3600
+	recs := []Record{
+		{TS: i64(ts), SevenDayPct: f(60), SevenDayResetsAt: i64(legit)},
+		{TS: i64(ts), SevenDayPct: f(95), SevenDayResetsAt: i64(garbage)},
+	}
+	l := Current(recs)
+	if l == nil {
+		t.Fatal("Current = nil, want a reading")
+	}
+	if !l.SevenDayResetsAt.Equal(at(legit)) {
+		t.Errorf("SevenDayResetsAt = %v, want %v (garbage epoch discarded)", l.SevenDayResetsAt, at(legit))
+	}
+	wantPct(t, "SevenDayPct", l.SevenDayPct, f(60))
 }

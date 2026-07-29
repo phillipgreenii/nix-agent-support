@@ -107,9 +107,13 @@ type scanState struct {
 	openTasks  map[string]bool
 	pendingAUQ map[string]bool
 
-	// (a) rate-limit-reset mechanism (feeds RateLimitResetsAt).
-	lastAPIErrTime     time.Time
-	lastAPIErrRetry    int64
+	// (a) rate-limit-reset mechanism (feeds RateLimitResetsAt). lastResetsAt is the
+	// ABSOLUTE reset instant for BOTH recognised shapes — the synthetic prose shape
+	// resolves it via ct.ParseRateLimitReset, the legacy numeric shape via
+	// ct.RetryInMsResetsAt — so the upper bound those two helpers apply
+	// (ct.MaxResetHorizon) is the single ingestion gate on this field, and no
+	// consumer has to re-validate it.
+	lastResetsAt       time.Time
 	hasAPIErr          bool
 	resumedAfterAPIErr bool
 
@@ -181,8 +185,7 @@ func (st *scanState) feed(line []byte) {
 				}
 			}
 			if t, ok := ct.ParseRateLimitReset(text, ev.Timestamp); ok {
-				st.lastAPIErrTime = t
-				st.lastAPIErrRetry = 0 // sentinel: lastAPIErrTime is absolute
+				st.lastResetsAt = t
 				st.hasAPIErr = true
 				st.resumedAfterAPIErr = false
 			}
@@ -265,10 +268,17 @@ func (st *scanState) feed(line []byte) {
 	case "system":
 		if ev.Subtype == "api_error" &&
 			nestedErrType(ev.Error) == "rate_limit_error" && ev.RetryInMs > 0 {
-			st.lastAPIErrTime = ev.Timestamp
-			st.lastAPIErrRetry = ev.RetryInMs
-			st.hasAPIErr = true
-			st.resumedAfterAPIErr = false
+			// Legacy numeric shape, resolved to an absolute instant and bounded at
+			// ingestion by the shared helper. An out-of-horizon retryInMs is
+			// DISCARDED here, leaving any earlier in-range reset in place — which is
+			// exactly what claude-transcript's RateLimitPause does, and the two MUST
+			// agree (ScanIncremental is checked against RateLimitPause as an
+			// independent oracle in incremental_test.go).
+			if t, ok := ct.RetryInMsResetsAt(ev.Timestamp, ev.RetryInMs); ok {
+				st.lastResetsAt = t
+				st.hasAPIErr = true
+				st.resumedAfterAPIErr = false
+			}
 		}
 	}
 }
@@ -291,12 +301,8 @@ func (st *scanState) finalize() Snapshot {
 		snap.ModelTokens = mt
 	}
 	if st.hasAPIErr && !st.resumedAfterAPIErr {
-		if st.lastAPIErrRetry == 0 {
-			// Synthetic shape: lastAPIErrTime is already the absolute reset time.
-			snap.RateLimitResetsAt = st.lastAPIErrTime
-		} else {
-			snap.RateLimitResetsAt = st.lastAPIErrTime.Add(time.Duration(st.lastAPIErrRetry) * time.Millisecond)
-		}
+		// Both shapes already resolved and bounded lastResetsAt at feed time.
+		snap.RateLimitResetsAt = st.lastResetsAt
 	}
 	if st.hasLastErr {
 		snap.LastError = &ErrorRecord{

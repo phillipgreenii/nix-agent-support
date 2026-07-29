@@ -39,10 +39,14 @@ func (p *LimitPauseProducer) Reconcile(ctx TickContext, store *PendingStore) {
 	}
 	// Once-per-window guard using After (NOT Equal): FiveHourResetsAt is not
 	// guaranteed monotonic. After suppresses a spurious re-fire when a regressed
-	// / garbage-LOW reset value arrives at or below the latch. (A garbage-HIGH
-	// value could instead poison future windows by advancing the latch past
-	// legitimate later resets — the real fix for that is bounding the value at
-	// upstream ingestion, which is out of scope here.)
+	// / garbage-LOW reset value arrives at or below the latch. The opposite
+	// failure — a garbage-HIGH value poisoning future windows by advancing the
+	// latch past legitimate later resets — is NOT handled here either: it is
+	// prevented upstream, where an epoch further than one window length past the
+	// render that reported it is DISCARDED before it can be elected as the
+	// current window (internal/core/limits boundedReset; bead pg2-yzs6a). So this
+	// latch may assume FiveHourResetsAt is a plausible window boundary and only
+	// has to enforce once-per-window.
 	if !reset.After(ctx.Watermarks.LimitPauseFiredFor()) {
 		cancelAll()
 		return

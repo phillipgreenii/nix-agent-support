@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/limits"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
@@ -239,5 +240,69 @@ func TestLimitPauseProducerSkippedWindowFiresOnce(t *testing.T) {
 	}, store)
 	if got := len(store.List()); got != 1 {
 		t.Fatalf("len(intents) = %d, want 1 (fires once for skipped-to window R3)", got)
+	}
+}
+
+// Case 9 (bead pg2-yzs6a): the once-per-window latch cannot be advanced past a
+// legitimate later reset by an out-of-range value.
+//
+// This is a COMPOSITION test, because the latch itself has no defence: it stores
+// whatever Tree.FiveHourResetsAt holds and compares with After, so a garbage-HIGH
+// value stored once suppresses every real window until that instant passes. The
+// protection is the bound at ingestion — so the test drives the real fold
+// (limits.Current, the same call the daemon's LimitsSource makes) over a record set
+// that contains BOTH a legitimate window reset and a garbage-HIGH epoch, and then
+// runs the producer across the window boundary:
+//
+//	tick 1 — window R1 (the legitimate reset) fires and the dispatcher advances the
+//	         latch to Tree.FiveHourResetsAt;
+//	tick 2 — the next real window R2 (R1 + 5h) MUST still fire.
+//
+// Pre-bound, Current elected the garbage epoch (greatest-reset wins), the latch
+// absorbed it, and tick 2 was silently swallowed.
+func TestLimitPauseProducerOutOfRangeResetCannotPoisonLatch(t *testing.T) {
+	r1 := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	r2 := r1.Add(5 * time.Hour) // the next legitimate window
+	render := r1.Add(-time.Hour)
+
+	ts := render.Unix()
+	legit := r1.Unix()
+	garbage := render.Add(365 * 24 * time.Hour).Unix() // a year out — upstream garbage
+	pct80, pct99 := 80.0, 99.0
+	cur := limits.Current([]limits.Record{
+		{TS: &ts, FiveHourPct: &pct80, FiveHourResetsAt: &legit},
+		{TS: &ts, FiveHourPct: &pct99, FiveHourResetsAt: &garbage},
+	})
+	if cur == nil {
+		t.Fatal("limits.Current = nil, want a reading")
+	}
+	if !cur.FiveHourResetsAt.Equal(r1) {
+		t.Fatalf("FiveHourResetsAt = %v, want %v — the out-of-range epoch must be DISCARDED at ingestion, not latched",
+			cur.FiveHourResetsAt, r1)
+	}
+
+	// Tick 1: the legitimate window fires, and the dispatcher would advance the
+	// latch to exactly the (bounded) tree value.
+	p := &LimitPauseProducer{}
+	store := NewPendingStore()
+	p.Reconcile(TickContext{
+		Now: render, AutoResumeEnabled: true, AutoResumeMessage: "continue",
+		Tree:       treeWithFiveHour(cur.FiveHourResetsAt, qualifyingLimitPauseSV("sid-1", 1)),
+		Watermarks: wmStub{},
+	}, store)
+	if got := len(store.List()); got != 1 {
+		t.Fatalf("tick 1: len(intents) = %d, want 1 (first window fires)", got)
+	}
+	latch := cur.FiveHourResetsAt
+
+	// Tick 2: the next real window must still be able to advance past the latch.
+	store2 := NewPendingStore()
+	p.Reconcile(TickContext{
+		Now: r2.Add(-time.Hour), AutoResumeEnabled: true, AutoResumeMessage: "continue",
+		Tree:       treeWithFiveHour(r2, qualifyingLimitPauseSV("sid-1", 1)),
+		Watermarks: wmStub{lp: latch},
+	}, store2)
+	if got := len(store2.List()); got != 1 {
+		t.Fatalf("tick 2: len(intents) = %d, want 1 (legitimate later window R2 must not be swallowed by the latch)", got)
 	}
 }
