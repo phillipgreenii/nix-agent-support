@@ -2,7 +2,12 @@
 
 - **Bead**: pg2-1vme1 (P0, REVIEW+STRATEGY)
 - **Date**: 2026-07-29
-- **Status**: design, revised after adversarial review, pending ADR
+- **Status**: Accepted, recorded as ADR 0039 in this repo
+  (`docs/adr/0039-ceta-shell-parser-front-end.md`)
+
+> **The ADR is authoritative on policy; this spec carries the working detail.** Where they
+> differ, the ADR wins. This spec has been reconciled with it, but a reader acting on the
+> invariants SHOULD read the ADR's "Invariants" section as the binding statement.
 
 ## 1. Problem
 
@@ -65,7 +70,7 @@ shared scanner**:
   over `s[j]`, quote-blind. This **is** instance #4, and it sits inside a `shellScanner` loop.
 - `tokenize`'s process-substitution matcher, `parser.go:1177-1185` — same shape, same blindness.
 
-Plus six functions that model quotes independently: `scanSubstitutions` (`:276`),
+Plus six functions that scan independently of the shared scanner: `scanSubstitutions` (`:276`),
 `matchParen` (`:358`), `indexUnescapedBacktick` (`:390`), `commandStartOffset` (`:425`),
 `parseHeredocOperator` (`heredoc.go:95`), `readHeredocBody` (`heredoc.go:150`). Of these
 only `commandStartOffset` documents the opt-out (`parser.go:420-424`); `matchParen` simply
@@ -168,6 +173,14 @@ candidate side includes an AST-to-leaf lowering inside the timed region.
 re-measure the complete lowering, and that re-measurement is a **gate**: the conclusion
 "the candidate is not slower than what it replaces" is what the design rests on, and it is
 not yet proven for the complete lowering.
+
+**Gate pass criterion**, so it is evaluable rather than a matter of taste: measured over the
+same corpus and reported at every percentile above, the complete lowering MUST show **mean and
+p99 both no worse than the outgoing front end's** (15.139 µs and 92.792 µs). Regression in
+`max` alone MAY be accepted with a recorded reason — `max` is one pathological input and the
+outgoing parser's own is 75.756 ms — but a p99 regression MUST NOT be waived, because a hook
+runs on every tool call and p99 is what a user feels. If the gate fails, STOP and report; do
+not proceed to step 2 on the strength of the other arguments.
 
 Two further qualifications:
 
@@ -293,6 +306,12 @@ and be judged by the weaker rule set — a fast path around the security control
 The motivating cost does not exist: the candidate's p50 is 2.458 µs against the current
 front end's 7.167 µs, so parsing everything is already cheaper than the status quo.
 
+That last argument rests on a figure "Latency" calls a lower bound, so state plainly: **the
+rejection does not depend on it.** The other two arguments — that the classifier _is_ the
+parse, and that the failure geometry is strictly worse because a misclassification bypasses
+the parser entirely — are independent of any measurement. The rejection stands even if step 1's
+re-measurement erases the latency advantage completely.
+
 ### 5.2 Why shape-gated approval is deferred
 
 The sound version of the fast-path idea is to keep parsing everything and make `Approve`
@@ -401,65 +420,118 @@ RFC 2119. Each clause names the bead that established it.
   `len(pc.EnvVars) > 0` withhold in **`rules/configrules/configrules.go:259`** MUST hold.
   Together they bound the `config-rules` bypass. The withhold is a **rule-side** guard, so
   step 3 (which changes how a rule reaches `pc.EnvVars`) owes its test.
-- **I6 (this design)** Exactly ONE file MAY import `mvdan.cc/sh/v3/syntax`. No rule module
-  MAY import it.
+- **I6 (this design)** Only the seam file MAY import the module `mvdan.cc/sh/v3` — any package
+  within it, not just `.../syntax`. Every other file in the CETA module MUST NOT import it.
+  File granularity is deliberate: the seam shares `internal/cmdparse` with other files, so a
+  package-level rule would leave them unbound. Naming the whole module is also deliberate: a
+  rule importing `mvdan.cc/sh/v3/expand` would derive structure outside the seam while a
+  `syntax`-only guard passed green.
 - **I7 (this design)** Each **distinct source text** MUST be parsed at most once per
   `EvaluateHook`. Substitution and heredoc-body recursion MUST walk subtrees of an
   already-parsed `File` and MUST NOT re-parse body text. This is deliberately weaker than
   "one parse per command": `hookio.Evaluator.EvaluateExpression` takes a `string`
-  (`hookio/types.go:174-176`) and its callers construct text that exists nowhere in the
+  (`hookio/types.go:177`) and its callers construct text that exists nowhere in the
   source (`docker.go:152`, `:182`; `safecmds.go:128`; `envvars.go:441`), so a text entry
   point MUST remain and MUST parse.
+
+  The text entry point is **PERMANENT, not transitional**, and this needs saying because I13
+  removes the rationale just given: once no rule may construct command text, those four
+  callers cease to exist. It survives anyway because the OUTERMOST input is text — the hook
+  receives `{"command": "…"}` and nothing upstream has parsed it. After step 5 its only
+  legitimate caller is that hook boundary, and an implementer MUST NOT delete it as dead code.
+
 - **I8 (this design)** There MUST NOT be a fallback parser. Retaining the previous parser for
   inputs the new one rejects would reintroduce two scanners that can disagree.
 - **I9 (this design)** No file outside the seam MAY derive command structure from raw text.
   Enforced as stated in §9 guard 2.
-- **I10 (this design)** CETA MUST NOT `Approve` a command whose shell dialect it cannot
-  model. Where the parser attributes a failure to zsh, the reason SHOULD name the dialect;
-  where it does not, the reason MUST report the failure without guessing.
+- **I10 (this design)** CETA MUST NOT `Approve` a command the bash parser could not parse.
+  Where the parser attributes the failure to zsh, the reason SHOULD name the dialect; where it
+  does not, the reason MUST report the failure without guessing at a cause. The clause is
+  scoped to **parse failure**, NOT to "a dialect CETA cannot model": as "Shell dialect"
+  establishes, CETA receives no shell field and can never determine which dialect will run, so
+  the wider reading would forbid approving anything. A construct that parses cleanly in both
+  dialects with differing meaning is therefore OUTSIDE this clause — see "Risks".
 - **I11 (this design)** CETA's correctness MUST NOT depend on the agent shell being bash.
   Forcing bash is defence in depth, applied in another repository, and can drift.
 - **I12 (this design)** The seam MUST retain the source string alongside the AST. Identity
-  keys (cycle detection, `Raw`) MUST be exact source slices and MUST NOT be produced by
-  printing the AST.
+  keys — cycle detection and `Raw` — MUST be **derived from exact source slices** of the file
+  being evaluated, and MUST NOT be produced by printing the AST. "Derived from" rather than
+  "are": the cycle key passes through `normalizeExpression` (`engine.go:502-504`), which
+  collapses whitespace, so it is a function of a slice rather than a slice itself. For the
+  surviving text entry point of I7, whose input exists nowhere in any source, the slice is
+  taken from the file produced by parsing that text, and the key is scoped to it.
 - **I13 (this design)** No rule MAY construct or mutate command text for re-evaluation. A
   rule needing to delegate MUST do so through a **structural** entry point that passes a
   subtree. Without this, C is half a fix and instance #11 survives.
-- **I14 (pg2-qkecz, this design)** Every executed subexpression MUST reach exactly one leaf.
-  No pass MAY delete a segment. This is the coverage invariant that root cause 2.4 requires
-  and that the differential replay structurally cannot provide.
+- **I14 (pg2-qkecz, this design)** Every executed subexpression MUST reach **at least one**
+  leaf. No pass MAY delete a segment. This is the coverage invariant that root cause 2.4
+  requires and that the differential replay structurally cannot provide.
+
+  **Coverage, not partition** — a decision, not an imprecision. Overlap is harmless: leaf
+  verdicts fold through `MostRestrictive` over the total order
+  `Approve < Abstain < Ask < Reject`, so judging one subexpression under two leaves can only
+  hold a verdict at or above where one leaf alone would put it, never lower. Requiring exactly
+  one leaf would contradict I2, which deliberately permits imprecise per-leaf heredoc
+  attribution, and would forbid attributing a compound's heredoc floor to each leaf it
+  flattens into. The security property needed is that **nothing is dropped**; uniqueness buys
+  nothing and costs an invariant conflict.
+
+  **"Executed" needs a static surrogate**, since executedness is a runtime property
+  (`if false; then rm -rf /; fi`). The surrogate is: every `*syntax.CallExpr` in the parsed
+  `File`, plus every `Stmt` carrying `Redirs` or a heredoc, MUST be covered by at least one
+  leaf's source span — **including nodes in untaken branches**. That is the conservative
+  direction and the correct one: CETA cannot know which branch runs, so it MUST judge every
+  branch that could.
 
 ## 9. Enforcement
 
 1. **Import guard** — a test walks the import graph and fails if any file other than the
-   seam imports `mvdan.cc/sh/v3/syntax` (I6). Demonstrated by adding the import to a rule
-   module.
+   seam imports the module `mvdan.cc/sh/v3` (I6), any package within it. Demonstrated by
+   adding the import to a rule module.
 2. **Raw-text-structure guard** (I9) — the syntactic property "quote comparison inside a
    loop" is **not** usable: it lands red on `envvars.isStaticAbsolutePath`
    (`envvars.go:296-301`, a character denylist, not a scanner) and green on
-   `gitdir.containsVarRef` (`gitdir.go:281-297`, a genuine hand-rolled scanner with no quote
-   comparison). The enforceable form is **type-level**: raw command text gets a distinct
-   named type that only the seam can consume, so a function wanting to scan it cannot be
-   written without importing the seam. That is strategy C and needs no AST walk. A repo-wide
-   `go/ast` check with a reviewed allowlist is the fallback if the type change proves too
-   invasive. Scope MUST be the whole module, not just `internal/rules` and
-   `internal/cmdparse` — instance #11 was found _outside_ `cmdparse`, which is the lesson.
-   Required cases: fires on `splitOnShellOperators` and on `gitdir.containsVarRef`; does NOT
-   fire on `envvars.isStaticAbsolutePath`.
+   `gitdir.containsVarRef` (`gitdir.go:276-296`, a genuine hand-rolled scanner with no quote
+   comparison). Two candidate mechanisms, and **the choice is deliberately still open** —
+   step 5 MUST decide it and record which it chose and why:
+   - **Type-level**: raw command text gets a distinct named type only the seam can consume,
+     so a scanner over it cannot be written without importing the seam. Needs no AST walk.
+     **Known limitation**: this cannot catch `gitdir.containsVarRef`, whose only caller
+     `referencesVar` (`gitdir.go:259-260`) feeds it `pc.Executable`, args and `rd.Path` —
+     already-lowered `string` fields, not raw command text. A raw-text type leaves it
+     perfectly writable.
+   - **Repo-wide `go/ast` check** with a reviewed allowlist. Catches `containsVarRef`, at the
+     cost of an allowlist to maintain.
+
+   Scope MUST be the whole module, not just `internal/rules` and `internal/cmdparse` —
+   instance #11 was found _outside_ `cmdparse`, which is the lesson. Required cases: fires on
+   `splitOnShellOperators`; does NOT fire on `envvars.isStaticAbsolutePath`. Firing on
+   `gitdir.containsVarRef` is required of the AST mechanism only, and if the type-level
+   mechanism is chosen its inability to catch that shape MUST be recorded as accepted.
+
 3. **Parse-count guard** (I7) — counts parses **per distinct source string, per
    `EvaluateHook`**, and fails on a repeat. It MUST land **after** step 5's gitdir migration,
-   not with step 3: `gitdir.scopeLeaves` (`gitdir.go:227-236`) parses
+   not with step 3: `gitdir.scopeLeaves` (`gitdir.go:222-234`) parses
    `input.RootExpression` — the same string `engine.go:162` already parsed — and recurses to
-   depth 8 (`gitdir.go:63`), so the guard cannot go green before that is fixed.
-4. **Coverage check** (I14) — for every corpus row, assert that the union of leaf source
-   spans covers every executed subexpression of the `File`. This does not depend on
-   differential comparison and is the only mechanism that can see root cause 2.4.
-5. **Differential replay** — every migration step replays all 189,678 rows and publishes a
-   transition table. Gate: **no transition in the less-restrictive direction** under
+   `maxScopeDepth = 8` (`gitdir.go:61`), so the guard cannot go green before that is fixed.
+4. **Coverage check** (I14) — for every corpus row, assert that every `*syntax.CallExpr` in
+   the parsed `File`, plus every `Stmt` carrying `Redirs` or a heredoc, is covered by at
+   least one leaf's source span — **including nodes in untaken branches**, per I14's static
+   surrogate. This does not depend on differential comparison and is the only mechanism that
+   can see root cause 2.4. It needs **no cwd**, so it runs on all 189,678 rows.
+5. **Differential replay** — the obligation splits by what each check needs, because ~34% of
+   rows have a non-existent cwd and a verdict cannot be produced for them:
+   - **parse, lowering and coverage** checks MUST run on **all 189,678 rows** (no cwd needed);
+   - the **verdict** replay MUST run on the **cwd-resolvable subset**, with skips reported as
+     a count and never presented as the whole.
+
+   Every migration step publishes a transition table. Gate: **no transition in the
+   less-restrictive direction** under
    `Approve < Abstain < Ask < Reject`. Stated this way rather than "toward `allow`" so that
    `Reject → Abstain` (I1b's forfeiture) is caught rather than passing silently. The one
    permitted exception is a step whose stated purpose is to stop the parser breaking benign
    commands (the pg2-4h7ee class), where each transition MUST be justified individually.
+
 6. **Fuzz** — `FuzzParse` is retained and becomes meaningful via §7's `Raw` decision.
    `FuzzSplitCompound`, `FuzzTokenize` and `FuzzStripHeredocBodies` target functions step 2
    deletes; each MUST be **replaced** by a harness over the seam asserting the same property
@@ -494,15 +566,15 @@ replay shows no less-restrictive transition.
 
 Each row is an obligation on the lowering, not a footnote.
 
-| Construct                                 | AST support                                                 | Risk if lowered naively                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Herestring `<<<`**                      | `Redirect{Op: WordHdoc}`, **no `Hdoc`**                     | **Less restrictive.** `parser.go:1278` sets `hasHeredoc` for `<<<` and `Heredocs` is deliberately empty (`parser.go:678-679`); `engine.go:307` names the floor "heredoc- or herestring-bearing". Keying `HasHeredoc` off a non-empty `Hdoc` silently drops the Abstain floor for every herestring.                                                                                                                                                                                  |
-| **`ProcessSubstitutions` → `/dev/fd/63`** | `ProcSubst`; the string is fabricated                       | **Both directions.** `tokenize` writes the literal `/dev/fd/63` (`parser.go:1188`) and `engine.isSafeRedirectTarget`'s `devFdPattern` (`engine.go:17`, `:32`) is what stops it demoting the leaf. Emitting ProcSubst source text instead makes `isDynamicRedirectTarget` miss it → mass new Abstains; emitting nothing loses the operand. Also collides with a user-written `/dev/fd/63`.                                                                                           |
-| **`unquote` parity**                      | `expand.Literal`/`syntax.Quote` are stricter                | **Less restrictive.** `parser.go:1213-1241` unquotes only when the whole token is wrapped in one quote char, so `a'b'c`, `"a"'b'`, `$'x'` and bare `\a` keep their quotes. `envvars.literalValue` (`envvars.go:273-279`) and `isStaticAbsolutePath` (`:296-301`) reject any surviving quote — a true literal expansion makes mixed-quoted values **clear** the predicate that I4 exists to fence. Needs a new test; the existing one covers replace-vs-preserve, not mixed quoting. |
-| **`NormalizeCommand`**                    | trivially                                                   | **Off-target but real.** It is not a rule input; it is the persisted analysis grouping key via `asklog.CommandClass` (`asklog/summary.go:52`), the bucketing key for the hook-miss taxonomy. Any leaf-set change re-keys historical buckets. `NormalizeExecutable` has one rule caller (`monorepo.go:72`).                                                                                                                                                                          |
-| **`resolveLoops`**                        | `ForClause`/`WhileClause`/`UntilClause`/`Do` fully model it | **Preserves a live hole.** See §2.4 and pg2-qkecz. The lowering MUST lower loop word lists and every `Stmt.Redirs` on the compound, not discard them.                                                                                                                                                                                                                                                                                                                               |
-| **`unwrapExecPrefix`**                    | post-lowering `[]string` transform                          | A _leading_ `FOO=1 cmd` lands in `CallExpr.Assigns`, but `env FOO=1 cmd`'s lands in `Args` (`parser.go:503-539`). Conflating them breaks pg2-gkd5e's position-independence invariant. This is a correctness obligation, not a latency footnote.                                                                                                                                                                                                                                     |
-| **`SkipGrepPattern`/`SkipJqValueFlags`**  | pure `[]string` helpers (`argflags.go:58`, `:118`)          | Low risk **only** via `unquote` above: they consume lowered `Args`, so the lowering owes exact `unquote` parity. 6 callers.                                                                                                                                                                                                                                                                                                                                                         |
+| Construct                                 | AST support                                                 | Risk if lowered naively                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Herestring `<<<`**                      | `Redirect{Op: WordHdoc}`, **no `Hdoc`**                     | **Less restrictive.** `parser.go:1278` sets `hasHeredoc` for `<<<` and `Heredocs` is deliberately empty (`parser.go:678-679`); `engine.go:307` names the floor "heredoc- or herestring-bearing". Keying `HasHeredoc` off a non-empty `Hdoc` silently drops the Abstain floor for every herestring.                                                                                                                                                                                                   |
+| **`ProcessSubstitutions` → `/dev/fd/63`** | `ProcSubst`; the string is fabricated                       | **Both directions.** `tokenize` writes the literal `/dev/fd/63` (`parser.go:1188`) and `engine.isSafeRedirectTarget`'s `devFdPattern` (`engine.go:17`, `:32`) is what stops it demoting the leaf. Emitting ProcSubst source text instead makes `isDynamicRedirectTarget` miss it → mass new Abstains; emitting nothing loses the operand. Also collides with a user-written `/dev/fd/63`.                                                                                                            |
+| **`unquote` parity**                      | `expand.Literal`/`syntax.Quote` are stricter                | **Less restrictive.** `parser.go:1213-1241` unquotes only when the token's first and last bytes are the same quote character, so `a'b'c`, `"a"'b'`, `$'x'` and bare `\a` keep their quotes. `envvars.literalValue` (`envvars.go:273-279`) and `isStaticAbsolutePath` (`:296-301`) reject any surviving quote — a true literal expansion makes mixed-quoted values **clear** the predicate that I4 exists to fence. Needs a new test; the existing one covers replace-vs-preserve, not mixed quoting. |
+| **`NormalizeCommand`**                    | trivially                                                   | **Off-target but real.** It is not a rule input; it is the persisted analysis grouping key via `asklog.CommandClass` (`asklog/summary.go:52`), the bucketing key for the hook-miss taxonomy. Any leaf-set change re-keys historical buckets. `NormalizeExecutable` has one rule caller (`monorepo.go:72`).                                                                                                                                                                                           |
+| **`resolveLoops`**                        | `ForClause`/`WhileClause`/`UntilClause`/`Do` fully model it | **Preserves a live hole.** See §2.4 and pg2-qkecz. The lowering MUST lower loop word lists and every `Stmt.Redirs` on the compound, not discard them.                                                                                                                                                                                                                                                                                                                                                |
+| **`unwrapExecPrefix`**                    | post-lowering `[]string` transform                          | A _leading_ `FOO=1 cmd` lands in `CallExpr.Assigns`, but `env FOO=1 cmd`'s lands in `Args` (`parser.go:503-539`). Conflating them breaks pg2-gkd5e's position-independence invariant. This is a correctness obligation, not a latency footnote.                                                                                                                                                                                                                                                      |
+| **`SkipGrepPattern`/`SkipJqValueFlags`**  | pure `[]string` helpers (`argflags.go:58`, `:118`)          | Low risk **only** via `unquote` above: they consume lowered `Args`, so the lowering owes exact `unquote` parity. 6 callers.                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## 12. Migration plan
 
