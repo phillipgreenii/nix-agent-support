@@ -6,53 +6,49 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
 )
 
-// needsAttention is the ONE pure predicate consumed by BOTH the dashboard
+// NeedsAttention is the ONE pure predicate consumed by BOTH the dashboard
 // builder and the bead projector. Inputs are STORE-sourced revision facts plus
-// the draft-review-bead-closed signal. It implements the §2.7 state machine,
-// X3-correct (self approval never counts as "others approved").
+// the live merge-conflict flag — no bead artifact (pg2-kh1ar). It implements the
+// §2.7 state machine, X3-correct (self approval never counts as "others
+// approved").
 func TestNeedsAttention(t *testing.T) {
 	rev := func(seq int, head, myState string, othersApproved bool) store.Revision {
 		return store.Revision{Seq: seq, HeadSHA: head, MyReviewState: myState, OthersApproved: othersApproved}
 	}
 
 	tests := []struct {
-		name              string
-		revs              []store.Revision
-		draftReviewClosed bool
-		hasConflict       bool
-		wantNeed          bool
-		wantReason        string
+		name        string
+		revs        []store.Revision
+		hasConflict bool
+		wantNeed    bool
+		wantReason  string
 	}{
 		{
-			name:              "no revisions → no attention",
-			revs:              nil,
-			draftReviewClosed: true,
-			wantNeed:          false,
+			name:     "no revisions → no attention",
+			revs:     nil,
+			wantNeed: false,
 		},
 		{
-			name:              "draft review ready + nobody approved + I haven't reviewed → NEEDS",
-			revs:              []store.Revision{rev(1, "h1", "", false)},
-			draftReviewClosed: true,
-			wantNeed:          true,
-			wantReason:        "draft-review-ready-unapproved",
+			name:       "nobody approved + I have never reviewed → NEEDS a first review",
+			revs:       []store.Revision{rev(1, "h1", "", false)},
+			wantNeed:   true,
+			wantReason: "unreviewed-by-me",
 		},
 		{
-			name:              "draft review NOT ready + nothing else → no attention",
-			revs:              []store.Revision{rev(1, "h1", "", false)},
-			draftReviewClosed: false,
-			wantNeed:          false,
+			name:       "still unreviewed across several heads → NEEDS a first review",
+			revs:       []store.Revision{rev(1, "h1", "", false), rev(2, "h2", "", false)},
+			wantNeed:   true,
+			wantReason: "unreviewed-by-me",
 		},
 		{
-			name:              "teammate approved at head → NO attention (off the hook)",
-			revs:              []store.Revision{rev(1, "h1", "", true)},
-			draftReviewClosed: true, // even with review ready, teammate-approved wins
-			wantNeed:          false,
+			name:     "teammate approved at head → NO attention (off the hook)",
+			revs:     []store.Revision{rev(1, "h1", "", true)},
+			wantNeed: false,
 		},
 		{
-			name:              "I reviewed the current head → NO attention",
-			revs:              []store.Revision{rev(1, "h1", "approved", false)},
-			draftReviewClosed: true,
-			wantNeed:          false,
+			name:     "I reviewed the current head → NO attention",
+			revs:     []store.Revision{rev(1, "h1", "approved", false)},
+			wantNeed: false,
 		},
 		{
 			name: "new commits after I approved (re-review) → NEEDS",
@@ -60,9 +56,8 @@ func TestNeedsAttention(t *testing.T) {
 				rev(1, "h1", "approved", false), // I approved seq 1
 				rev(2, "h2", "", false),         // new head, I have not reviewed
 			},
-			draftReviewClosed: false, // even without a fresh draft review, re-review is needed
-			wantNeed:          true,
-			wantReason:        "re-review-after-my-approval",
+			wantNeed:   true,
+			wantReason: "re-review-after-my-approval",
 		},
 		{
 			name: "I approved an earlier head but teammate approved latest → NO attention",
@@ -70,8 +65,7 @@ func TestNeedsAttention(t *testing.T) {
 				rev(1, "h1", "approved", false),
 				rev(2, "h2", "", true), // teammate approved the new head
 			},
-			draftReviewClosed: true,
-			wantNeed:          false,
+			wantNeed: false,
 		},
 		{
 			name: "I approved latest head (re-reviewed after advance) → NO attention",
@@ -79,27 +73,33 @@ func TestNeedsAttention(t *testing.T) {
 				rev(1, "h1", "approved", false),
 				rev(2, "h2", "approved", false),
 			},
-			draftReviewClosed: true,
-			wantNeed:          false,
+			wantNeed: false,
 		},
 		{
-			name:              "changes-requested at head counts as I-reviewed-head → NO attention",
-			revs:              []store.Revision{rev(1, "h1", "changes-requested", false)},
-			draftReviewClosed: true,
-			wantNeed:          false,
+			name:     "changes-requested at head counts as I-reviewed-head → NO attention",
+			revs:     []store.Revision{rev(1, "h1", "changes-requested", false)},
+			wantNeed: false,
 		},
 		{
-			name:              "conflicting → NO attention even though draft review is ready (dampened)",
-			revs:              []store.Revision{rev(1, "h1", "", false)},
-			draftReviewClosed: true,
-			hasConflict:       true,
-			wantNeed:          false,
+			name:        "conflicting → NO attention even though I never reviewed it (dampened)",
+			revs:        []store.Revision{rev(1, "h1", "", false)},
+			hasConflict: true,
+			wantNeed:    false,
+		},
+		{
+			name: "conflicting → NO attention even on the re-review edge (dampened)",
+			revs: []store.Revision{
+				rev(1, "h1", "approved", false),
+				rev(2, "h2", "", false),
+			},
+			hasConflict: true,
+			wantNeed:    false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			need, reason := NeedsAttention(tc.revs, tc.draftReviewClosed, tc.hasConflict)
+			need, reason := NeedsAttention(tc.revs, tc.hasConflict)
 			if need != tc.wantNeed {
 				t.Errorf("need = %v, want %v (reason=%q)", need, tc.wantNeed, reason)
 			}
@@ -113,17 +113,37 @@ func TestNeedsAttention(t *testing.T) {
 	}
 }
 
+// TestNeedsAttention_FirstReviewEdgeIsReachable is the regression guard for
+// pg2-kh1ar: the first-review edge — "a teammate PR I have never reviewed" —
+// MUST fire from revision facts ALONE. It previously required a CLOSED pg-pr
+// draft-review bead, an artifact only the legacy review path produces, and that
+// path ships OFF (config.ReviewEnabled defaults false; ADR 0034) — so the edge
+// was dead code. The predicate now takes no such input at all, which is what
+// makes the edge reachable at the shipped default.
+func TestNeedsAttention_FirstReviewEdgeIsReachable(t *testing.T) {
+	// The minimal teammate-PR fact set: one observed head, nobody approved, no
+	// review by me, no conflict. Nothing bead-derived is available to feed in.
+	revs := []store.Revision{{Seq: 1, HeadSHA: "h1"}}
+	need, reason := NeedsAttention(revs, false)
+	if !need {
+		t.Fatal("a teammate PR with no prior review by me MUST need attention")
+	}
+	if reason != AttentionReasonUnreviewed {
+		t.Errorf("reason = %q, want %q", reason, AttentionReasonUnreviewed)
+	}
+}
+
 // TestNeedsAttention_ConflictDampens is the dedicated regression guard for the
 // pg2-tsgkj dampening rule: a conflicting team PR is not worth reviewing until
 // the author rebases, so hasConflict short-circuits the predicate to
 // (false, "") regardless of what the rest of the state machine would say.
 func TestNeedsAttention_ConflictDampens(t *testing.T) {
-	// A revision set that WOULD need attention (draft review ready, unapproved).
+	// A revision set that WOULD need attention (unapproved, unreviewed by me).
 	revs := []store.Revision{{Seq: 1, HeadSHA: "h"}}
-	if need, _ := NeedsAttention(revs, true, false); !need {
+	if need, _ := NeedsAttention(revs, false); !need {
 		t.Fatal("precondition: expected need=true without conflict")
 	}
-	if need, reason := NeedsAttention(revs, true, true); need || reason != "" {
+	if need, reason := NeedsAttention(revs, true); need || reason != "" {
 		t.Errorf("with conflict: need=%v reason=%q, want false/\"\"", need, reason)
 	}
 }

@@ -10,8 +10,8 @@ import (
 
 // refreshPR for an active TEAM PR MUST emit a pr.attention event derived from
 // persisted facts (per-tick, self-healing), and the returned snapshot input MUST
-// carry the store revisions + draft-review-closed signal so the dashboard read
-// model is store-derived (matching the bead).
+// carry the store revisions so the dashboard read model is store-derived
+// (matching the bead). Since pg2-kh1ar no bead artifact feeds either side.
 func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
 	ctx := context.Background()
 	db := store.OpenForTest(t)
@@ -25,8 +25,8 @@ func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
 		t.Fatalf("RecordRevision: %v", err)
 	}
 
-	// Draft review is READY (bead closed) → attention needed.
-	bdc := &attnFinderBeads{closed: true, found: true}
+	// No draft-review bead anywhere (the shipped default) → attention still needed.
+	bdc := &attnFinderBeads{}
 	pr := api.PR{
 		Repo: "o/r", Number: 7, State: "open",
 		Author: "teammate", HeadSHA: "h1", Base: "b1",
@@ -47,16 +47,13 @@ func TestRefreshPR_TeamPR_EmitsAttentionAndThreadsStore(t *testing.T) {
 	if len(evs) != 1 {
 		t.Fatalf("want exactly 1 pr.attention event, got %d: %+v", len(evs), evs)
 	}
-	if !evs[0].Need || evs[0].Reason != "draft-review-ready-unapproved" {
-		t.Fatalf("attention event = %+v, want need:true draft-review-ready-unapproved", evs[0])
+	if !evs[0].Need || evs[0].Reason != "unreviewed-by-me" {
+		t.Fatalf("attention event = %+v, want need:true unreviewed-by-me", evs[0])
 	}
 
-	// (b) Read model: the snapshot input threads the store revisions + readiness.
+	// (b) Read model: the snapshot input threads the store revisions.
 	if len(in.Revisions) != 1 || in.Revisions[0].HeadSHA != "h1" {
 		t.Fatalf("snapshot input must carry store revisions, got %+v", in.Revisions)
-	}
-	if !in.DraftReviewClosed {
-		t.Fatal("snapshot input must carry DraftReviewClosed=true (draft review ready)")
 	}
 }
 
@@ -68,7 +65,7 @@ func TestRefreshPR_MinePR_NoAttentionEmit(t *testing.T) {
 	if _, _, err := db.RecordRevision(ctx, prID, "h1", "b1"); err != nil {
 		t.Fatalf("RecordRevision: %v", err)
 	}
-	bdc := &attnFinderBeads{closed: true, found: true}
+	bdc := &attnFinderBeads{}
 	pr := api.PR{Repo: "o/r", Number: 3, State: "open", Author: "me", HeadSHA: "h1", URL: "https://github.com/o/r/pull/3"}
 	e := newRefreshEngineWithStore(t, "me", bdc, pr, db)
 

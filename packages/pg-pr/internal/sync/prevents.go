@@ -11,15 +11,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 )
 
-// draftReviewFinder is the optional bd capability the attention projector needs
-// to read the "draft review ready" signal (the draft-review bead CLOSED by
-// pg2-4c5i.36). The real *beads.Client satisfies it; test fakes may inject it.
-// Segregated (Interface Segregation) from the slim sync.BeadClient so the
-// projector degrades gracefully when the capability is absent (signal=false).
-type draftReviewFinder interface {
-	FindDraftReviewForPR(ctx context.Context, repo string, number int) (id string, closed bool, found bool, err error)
-}
-
 // prToStoreRow maps an observed PR + ownership into the authoritative
 // store.PullRequest row. Written for EVERY observed PR (regardless of
 // enrichment) so Task 8's close-detection (store.ListOpenPRs) can later find
@@ -73,11 +64,15 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 }
 
 // emitAttention re-derives the teammate-attention verdict for a PR from
-// PERSISTED store facts (its revision timeline + the draft-review-bead-closed
-// signal) plus the live hasConflict signal, through the SHARED
-// snapshot.NeedsAttention predicate, and emits a pr.attention event carrying
-// that verdict. Called once per tick from refreshPR for team AND co-owned
-// PRs.
+// PERSISTED store facts (its revision timeline) plus the live hasConflict
+// signal, through the SHARED snapshot.NeedsAttention predicate, and emits a
+// pr.attention event carrying that verdict. Called once per tick from refreshPR
+// for team AND co-owned PRs.
+//
+// It consults NO bead artifact: the readiness input keyed on the pg-pr
+// draft-review bead is gone (pg2-kh1ar), because that bead is produced only by
+// the legacy review path, which ships off (ADR 0034) — see
+// snapshot.NeedsAttention.
 //
 // own gates the verdict: a non-TEAM PR (co-owned) is never a review target for
 // me, so its attention bead must not stay open — emitAttention short-circuits
@@ -97,7 +92,7 @@ func (e *Engine) emitPREvent(ctx context.Context, eventType, repo string, pr api
 // It uses the SAME predicate + SAME store inputs the dashboard builder feeds
 // buildTeamRow, so the dashboard NeedsAttention signal and the open-attention-
 // bead set can never diverge (D4/R4). No-op when the store is nil.
-func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string, number int, prID int64, own ownership.Ownership, hasConflict bool) error {
+func (e *Engine) emitAttention(ctx context.Context, repo string, number int, prID int64, own ownership.Ownership, hasConflict bool) error {
 	if e.deps.Store == nil {
 		return nil
 	}
@@ -117,17 +112,7 @@ func (e *Engine) emitAttention(ctx context.Context, bdc BeadClient, repo string,
 	if err != nil {
 		return err
 	}
-	// "Draft review ready" = the draft-review bead was CLOSED by .36. Read it via
-	// the optional finder capability; absent capability degrades to "not ready".
-	draftReviewClosed := false
-	if finder, ok := bdc.(draftReviewFinder); ok {
-		_, closed, found, ferr := finder.FindDraftReviewForPR(ctx, repo, number)
-		if ferr != nil {
-			return ferr
-		}
-		draftReviewClosed = found && closed
-	}
-	need, reason := snapshot.NeedsAttention(revs, draftReviewClosed, hasConflict)
+	need, reason := snapshot.NeedsAttention(revs, hasConflict)
 	payload, err := json.Marshal(store.AttentionPayload{
 		Repo: repo, Number: number, Need: need, Reason: reason,
 	})

@@ -24,9 +24,6 @@ type PRInput struct {
 	// dashboard attention signal is store-derived, matching the bead projector
 	// (design §2.7, D4).
 	Revisions []store.Revision
-	// DraftReviewClosed is true iff pg2-4c5i.36 closed this PR's draft-review
-	// bead (the "draft review ready" signal). Also feeds needsAttention.
-	DraftReviewClosed bool
 	// Ownership is the PR's classification (mine/co-owned/team), computed by the
 	// sync layer (buildPRInput) via internal/ownership. Build partitions on it.
 	Ownership ownership.Ownership
@@ -152,7 +149,7 @@ func buildTeamRow(p PRInput, reg *agentregistry.Registry, reasons []string, excl
 	// Attention is STORE-derived through the shared predicate — the SAME function
 	// and SAME inputs the bead projector uses, so the dashboard signal and the
 	// open-attention-bead set can never diverge (design §2.7, D4 / R4).
-	need, reason := NeedsAttention(p.Revisions, p.DraftReviewClosed, p.PR.HasConflict())
+	need, reason := NeedsAttention(p.Revisions, p.PR.HasConflict())
 	return TeamRow{
 		Repo:            p.PR.Repo,
 		Number:          p.PR.Number,

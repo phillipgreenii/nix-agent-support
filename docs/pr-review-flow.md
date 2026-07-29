@@ -105,6 +105,18 @@ architecture**.
   (`packages/pg-pr/cmd/pg-pr/sync.go:95-118`, `:187-204`;
   `packages/pg-pr/internal/sync/reviewhook.go:103-106`). What stays active
   regardless: PR-data sync, and the read/write CLI surface `(B)` calls.
+- The **teammate-attention** signal (`snapshot.NeedsAttention`, feeding both the
+  dashboard `needs_attention` bit and the `attention:` bead) **MUST NOT** consume any
+  artifact the kill switch gates. It is derived purely from `pg-pr`'s own PR data —
+  the persisted revision timeline plus the live merge-conflict flag. Its
+  first-review edge previously required a **CLOSED draft-review bead**, which only
+  path (A) produces, so at the shipped default that edge was unreachable dead code
+  ("a teammate PR I have never reviewed" never fired); `pg2-kh1ar` removed the
+  input and renamed the reason to `unreviewed-by-me`
+  (`packages/pg-pr/internal/snapshot/attention.go`;
+  `packages/pg-pr/internal/sync/prevents.go` `emitAttention`). Coverage:
+  `TestNeedsAttention_FirstReviewEdgeIsReachable`,
+  `TestEmitAttention_FirstReviewFiresWithReviewDisabled`.
 
 ### 2.3 The review loop (path B)
 

@@ -48,7 +48,7 @@ func TestAttentionNeedEnsuresBead(t *testing.T) {
 	c := &attentionClient{mr: &beads.MergeRequest{ID: "mr-1", Status: "open"}}
 	h := New(c)
 	err := h.Handle(context.Background(), store.Event{
-		Type: store.EventPRAttention, Payload: attentionPayload(t, true, "draft-review-ready-unapproved"),
+		Type: store.EventPRAttention, Payload: attentionPayload(t, true, "unreviewed-by-me"),
 	})
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
@@ -86,7 +86,7 @@ func TestAttentionRedispatchReEnsures(t *testing.T) {
 	h := New(c)
 	for i := 0; i < 3; i++ {
 		if err := h.Handle(context.Background(), store.Event{
-			Type: store.EventPRAttention, Payload: attentionPayload(t, true, "draft-review-ready-unapproved"),
+			Type: store.EventPRAttention, Payload: attentionPayload(t, true, "unreviewed-by-me"),
 		}); err != nil {
 			t.Fatalf("Handle #%d: %v", i, err)
 		}
@@ -102,7 +102,7 @@ func TestAttentionSkippedWhenParentClosed(t *testing.T) {
 	c := &attentionClient{mr: &beads.MergeRequest{ID: "mr-1", Status: "closed"}}
 	h := New(c)
 	if err := h.Handle(context.Background(), store.Event{
-		Type: store.EventPRAttention, Payload: attentionPayload(t, true, "draft-review-ready-unapproved"),
+		Type: store.EventPRAttention, Payload: attentionPayload(t, true, "unreviewed-by-me"),
 	}); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}

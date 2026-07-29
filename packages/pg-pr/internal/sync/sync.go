@@ -986,20 +986,16 @@ func (e *Engine) buildPRInput(ctx context.Context, pr api.PR, enriched *vcs.Enri
 	}
 
 	// --- attention read-model inputs (pg2-4c5i.13) ---
-	// Thread the PR's PERSISTED revision timeline + the draft-review-closed
-	// signal so buildTeamRow's snapshot.NeedsAttention call is store-derived —
-	// the SAME predicate + SAME inputs the emitAttention write-model path uses,
-	// so the dashboard signal can never diverge from the attention bead (D4/R4).
-	// Only meaningful for team PRs (Build ignores these on Mine rows).
+	// Thread the PR's PERSISTED revision timeline so buildTeamRow's
+	// snapshot.NeedsAttention call is store-derived — the SAME predicate + SAME
+	// inputs the emitAttention write-model path uses, so the dashboard signal can
+	// never diverge from the attention bead (D4/R4). Only meaningful for team PRs
+	// (Build ignores these on Mine rows). No bead artifact feeds the predicate any
+	// more (pg2-kh1ar).
 	if e.deps.Store != nil {
 		if stored, gerr := e.deps.Store.GetPR(ctx, pr.Repo, pr.Number); gerr == nil && stored != nil {
 			if revs, rerr := e.deps.Store.ListRevisions(ctx, stored.ID); rerr == nil {
 				in.Revisions = revs
-			}
-			if finder, ok := bdc.(draftReviewFinder); ok {
-				if _, closed, found, ferr := finder.FindDraftReviewForPR(ctx, pr.Repo, pr.Number); ferr == nil {
-					in.DraftReviewClosed = found && closed
-				}
 			}
 		}
 	}

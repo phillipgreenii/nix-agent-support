@@ -164,7 +164,7 @@ func (e *Engine) refreshPR(ctx context.Context, repo string, number int) (*snaps
 	// attention signal.
 	if e.deps.Store != nil && own != ownership.Mine {
 		if stored, gerr := e.deps.Store.GetPR(ctx, rcfg.Remote, pr.Number); gerr == nil && stored != nil {
-			if aerr := e.emitAttention(ctx, bdc, rcfg.Remote, pr.Number, stored.ID, own, pr.HasConflict()); aerr != nil {
+			if aerr := e.emitAttention(ctx, rcfg.Remote, pr.Number, stored.ID, own, pr.HasConflict()); aerr != nil {
 				// Non-fatal: a failed attention emit self-heals next tick.
 				summary.Errors = append(summary.Errors, SummaryError{Repo: rcfg.Remote, Message: aerr.Error()})
 			} else {

@@ -10,9 +10,9 @@ import (
 )
 
 // buildTeamRow MUST populate NeedsAttention / AttentionReason from STORE revision
-// facts + the draft-review-closed signal via the shared needsAttention predicate
-// (NOT live reviews / classifyApprovals). A team PR with a closed draft-review
-// bead and no approval needs attention.
+// facts via the shared NeedsAttention predicate (NOT live reviews /
+// classifyApprovals). A team PR nobody approved that I have never reviewed needs
+// attention — and, per pg2-kh1ar, needs NO bead artifact to say so.
 func TestBuildTeamRow_NeedsAttentionFromStore(t *testing.T) {
 	reg, _ := agentregistry.New(nil)
 	in := BuilderInput{
@@ -22,9 +22,8 @@ func TestBuildTeamRow_NeedsAttentionFromStore(t *testing.T) {
 		Registry:    reg,
 		PRs: []PRInput{
 			{
-				PR:                api.PR{Repo: "o/r", Number: 2, Author: "bob", URL: "u2"},
-				Revisions:         []store.Revision{{Seq: 1, HeadSHA: "h1"}}, // nobody approved, I haven't reviewed
-				DraftReviewClosed: true,
+				PR:        api.PR{Repo: "o/r", Number: 2, Author: "bob", URL: "u2"},
+				Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1"}}, // nobody approved, I haven't reviewed
 			},
 		},
 	}
@@ -35,13 +34,13 @@ func TestBuildTeamRow_NeedsAttentionFromStore(t *testing.T) {
 	if !snap.Team[0].NeedsAttention {
 		t.Errorf("NeedsAttention should be true")
 	}
-	if snap.Team[0].AttentionReason != AttentionReasonDraftReviewReady {
-		t.Errorf("AttentionReason = %q, want %q", snap.Team[0].AttentionReason, AttentionReasonDraftReviewReady)
+	if snap.Team[0].AttentionReason != AttentionReasonUnreviewed {
+		t.Errorf("AttentionReason = %q, want %q", snap.Team[0].AttentionReason, AttentionReasonUnreviewed)
 	}
 }
 
 // A team PR whose latest revision carries a teammate approval is off the hook —
-// NeedsAttention false — regardless of the draft-review-closed signal.
+// NeedsAttention false.
 func TestBuildTeamRow_TeammateApprovedNoAttention(t *testing.T) {
 	reg, _ := agentregistry.New(nil)
 	in := BuilderInput{
@@ -51,9 +50,8 @@ func TestBuildTeamRow_TeammateApprovedNoAttention(t *testing.T) {
 		Registry:    reg,
 		PRs: []PRInput{
 			{
-				PR:                api.PR{Repo: "o/r", Number: 2, Author: "bob", URL: "u2"},
-				Revisions:         []store.Revision{{Seq: 1, HeadSHA: "h1", OthersApproved: true}},
-				DraftReviewClosed: true,
+				PR:        api.PR{Repo: "o/r", Number: 2, Author: "bob", URL: "u2"},
+				Revisions: []store.Revision{{Seq: 1, HeadSHA: "h1", OthersApproved: true}},
 			},
 		},
 	}
