@@ -53,10 +53,12 @@ var eventState = map[string]store.State{
 }
 
 // runHook is the CLI entrypoint. It NEVER returns nonzero on a logic failure —
-// a wedged hook must not block Claude. It logs and exits 0 (spec §9/§15).
+// a wedged hook must not block Claude. It logs and exits 0. This never-fail
+// policy is ccpool's hook contract; the sites below cite it by name.
 func runHook(args []string) int {
 	// Resolve the log dir independently of config.toml so logging survives a
-	// config-load failure (spec §9/§20 — the hook must never lose its diagnostic).
+	// config-load failure — the hook must never lose its diagnostic, because a
+	// silent hang is this daemonless tool's dominant failure mode.
 	stateDir := config.StateDirPath()
 	if len(args) < 1 {
 		logHook(stateDir, "hook: missing event arg")
@@ -82,7 +84,7 @@ func runHook(args []string) int {
 	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)
 	// Build the transient-retry actuator (StopFailure in-place retry). It is
 	// best-effort: a nil actuator (or any retry-path error) falls back to today's
-	// `errored` transition (never-fail policy, spec §9/§15).
+	// `errored` transition (never-fail policy, see runHook).
 	ra := &retryActuator{
 		cfg:    cfg.Retry,
 		store:  st,
@@ -105,9 +107,12 @@ func handleHook(event string, stdin io.Reader, st *store.Store, envExternalID st
 }
 
 // handleHookN parses the payload, resolves the row by claude_session_id (else the
-// launch-env external_id), transitions, and fires the notifier on an edge into an
-// On state (spec §9/§10). autonomous and denyOut are forwarded to handleAskHook;
-// for non-ask events they are unused.
+// launch-env external_id), transitions, and fires the notifier on an EDGE into an
+// On state — never on every tick. The edge is computed HERE, not in the
+// store-polling waiter: the hook observes EVERY transition, whereas the waiter
+// samples and can miss two transitions that collapse between polls, so a
+// transient needs_input would otherwise go unannounced. autonomous and denyOut
+// are forwarded to handleAskHook; for non-ask events they are unused.
 func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID string, n notify.Notifier, on []string, ra *retryActuator, autonomous bool, denyOut io.Writer) error {
 	// The `ask` event (PreToolUse/AskUserQuestion) is NOT a plain eventState entry —
 	// it must additionally parse the question text — so it is handled separately.
@@ -140,7 +145,7 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 	// budget remains. On a successful retry the row stays out of `errored`
 	// (maybeRetry returns it to `working`); the hook is done. Any retry-path
 	// error or a non-retry decision falls through to today's `errored`
-	// transition (never-fail policy, spec §9/§15).
+	// transition (never-fail policy, see runHook).
 	if event == "fail" && ra != nil {
 		if retried := tryRetryOnFail(ctx, ra, st, externalID, p.TranscriptPath); retried {
 			return nil
@@ -164,13 +169,14 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 	// pending fire-and-forget turn, or if a turn ends needs_input rather than Done.
 	// Documented known limitation, not a v1 requirement (see ResolveOldestPendingTurn).
 	// Best-effort: a turns-resolve error MUST NOT fail the hook nor suppress the
-	// notifier below (never-fail policy, spec §9/§15) — ignore it; the transition
+	// notifier below (never-fail policy, see runHook) — ignore it; the transition
 	// (the hook's primary job) already landed.
 	if event == "stop" {
 		_, _, _ = st.ResolveOldestPendingTurn(ctx, externalID, p.TranscriptPath)
 		// A successful turn ended: reset the transient-retry budget so a later,
 		// unrelated transient error gets a fresh attempt count rather than
-		// inheriting an old one (spec §"Counter resets on a successful turn").
+		// inheriting an old one: the budget counts attempts per FAILURE STREAK, and
+		// a completed turn ends the streak.
 		// Best-effort — a reset failure must not fail the hook (never-fail).
 		_ = st.ResetRetry(ctx, externalID)
 	}
@@ -226,7 +232,7 @@ func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n not
 		return fmt.Errorf("set pending question %q: %w", externalID, err)
 	}
 	// Fire the notifier on the working→needs_input edge, exactly like the existing
-	// needs_input path (spec §10).
+	// needs_input path.
 	if notify.ShouldNotify(on, string(prior), string(store.NeedsInput)) {
 		_ = n.Notify(notify.Event{Name: externalID, UUID: p.SessionID, State: string(store.NeedsInput), CWD: p.CWD})
 	}
@@ -250,7 +256,7 @@ const askDenyReason = "Autonomous mode: AskUserQuestion is disabled — there is
 // spec: code.claude.com/docs/en/hooks.md). Printed to stdout with exit 0, it
 // makes claude skip the tool, show no picker, and feed the reason back to the
 // model so it continues the turn. Best-effort: an encode error must not fail the
-// hook (never-fail policy, spec §9/§15).
+// hook (never-fail policy, see runHook).
 func writeAskDenyJSON(w io.Writer) {
 	type hookSpecificOutput struct {
 		HookEventName            string `json:"hookEventName"`
@@ -308,8 +314,9 @@ func resolveExternalID(ctx context.Context, st *store.Store, sessionID, envExter
 // logHook appends one structured JSONL diagnostic line to
 // <state-dir>/diagnostics.jsonl. Every logHook call records a hook FAILURE, so
 // the level is always "error". Best-effort: an Open/write error is swallowed (a
-// wedged hook must never block Claude — spec §9/§15), mirroring the prior
-// hook.log behavior. The lowercase time/level/msg schema is what the otelcol
+// wedged hook must never block Claude — never-fail policy, see runHook),
+// mirroring the prior hook.log behavior. The lowercase time/level/msg schema is
+// what the otelcol
 // filelog receiver parses (see internal/diaglog).
 func logHook(stateDir, msg string) {
 	lg, err := diaglog.Open(filepath.Join(stateDir, "diagnostics.jsonl"))

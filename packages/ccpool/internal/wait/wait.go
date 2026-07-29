@@ -1,5 +1,6 @@
 // Package wait blocks until a session row's generation advances past a snapshot
-// taken before the prompt/launch (spec §5/§8.3). It polls the store — no
+// taken before the prompt/launch (so a transition landing the instant after the
+// send is still observed, closing the lost-wakeup race). It polls the store — no
 // sentinels — so it observes transitions written by the (separate-process) hooks.
 package wait
 

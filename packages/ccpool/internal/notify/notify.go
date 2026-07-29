@@ -1,6 +1,6 @@
 // Package notify emits an edge-triggered event when a session crosses into a
-// notifying state (spec §10). ccpool does NOT own delivery: adapters route to
-// none/exec/desktop. The hook computes the edge and calls Notify.
+// notifying state. ccpool does NOT own delivery: adapters route to none/exec/
+// desktop. The hook computes the edge and calls Notify.
 package notify
 
 import (

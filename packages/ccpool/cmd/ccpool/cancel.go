@@ -44,7 +44,10 @@ func runCancel(args []string) int {
 	return 0
 }
 
-// cancelExitCode maps a cancel error to its CLI exit code (spec §20 + 6=unconfirmed).
+// cancelExitCode maps a cancel error to its CLI exit code. 6 is the shared
+// "cancel could not be confirmed" code (replyExitCode uses the same number for
+// the --interrupt case); 1 stays the generic catch-all, so any distinguishable
+// outcome gets its own code >= 2.
 func cancelExitCode(err error) int {
 	switch {
 	case err == nil:

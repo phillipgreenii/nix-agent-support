@@ -46,7 +46,7 @@ func runDoctor(args []string) int {
 
 	report := func(r store.Session) {
 		live := cl.HasSession(session.TmuxName(cfg.Tmux.Prefix, r.ExternalID))
-		// cwd-trust is one of the three hang causes doctor must distinguish (§20):
+		// cwd-trust is one of the three hang causes doctor must distinguish:
 		// untrusted cwd, dropped send-key, or missing/failed hook.
 		trusted := r.CWD != "" && trust.IsTrusted(claudeJSON, r.CWD)
 		fmt.Printf("external_id=%s name=%s state=%s live=%v cwd_trusted=%v claude_session_id=%s\n",

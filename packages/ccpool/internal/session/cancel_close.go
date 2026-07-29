@@ -14,11 +14,14 @@ import (
 // ErrCancelUnconfirmed means the Escape burst did not visibly interrupt the
 // turn. cancelLocked leaves the row `working` and returns this so callers fail
 // safely (the CLI exits non-zero; send --interrupt aborts) rather than racing a
-// possibly-live turn (spec §3.2).
+// possibly-live turn.
 var ErrCancelUnconfirmed = errors.New("cancel could not be confirmed (turn may still be running)")
 
 const (
-	escapeBurst   = 3                      // number of Escapes per cancel (spec §3.2; pinned §3.3)
+	// Escape burst, pinned empirically (not derived): a SINGLE Escape missed 1 of 7
+	// live cancels, so the burst spans the thinking->streaming window instead of
+	// betting on one keystroke. See cancelLocked for the measurement.
+	escapeBurst   = 3                      // number of Escapes per cancel
 	escapeSpacing = 200 * time.Millisecond // gap between Escapes
 
 	// Pane-stability confirmation tunables (pg2-33gl fix). cancelLocked confirms a
@@ -67,8 +70,10 @@ func (s *Service) confirmStable(tmuxName string) (bool, error) {
 }
 
 // Cancel interrupts the current turn (Escape) and resets the session to ready.
-// No Stop hook fires on a user interrupt (spec §4/§8.5), so Cancel resets state
-// itself rather than waiting. It also clears the restored input buffer.
+// No Stop hook fires on a user interrupt (verified against Claude Code 2.1.170),
+// so Cancel resets state itself rather than waiting for a Stop that never comes.
+// It also clears the input buffer, into which the interrupt restores the
+// cancelled prompt.
 func (s *Service) Cancel(ctx context.Context, externalID string) error {
 	return s.withLock(externalID, func() error { return s.cancelLocked(ctx, externalID) })
 }
@@ -86,7 +91,8 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 		return err
 	}
 	// Brute-force a burst of Escapes spanning the thinking->streaming window; a
-	// single Escape missed 1/7 in live verification (spec §3.1/§3.2).
+	// single Escape missed 1/7 in live verification (2026-06-11, real Claude on an
+	// isolated socket; the miss landed in the thinking->streaming transition).
 	for i := 0; i < escapeBurst; i++ {
 		if i > 0 {
 			s.sleep(escapeSpacing)
@@ -116,8 +122,8 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 }
 
 // Close ends the local REPL: clear input, send /exit, wait briefly for the tmux
-// session to vanish, else force-kill (spec §8.4). The row is NOT mutated on a
-// non-purge close — ccpool no longer fabricates a settled state (ADR 0015); the
+// session to vanish, else force-kill. The row is NOT mutated on a non-purge
+// close — ccpool no longer fabricates a settled state (ADR 0015); the
 // row keeps its last OBSERVED state and is pruned later, once the Claude session
 // is gone from disk. --purge additionally deletes the store row immediately.
 func (s *Service) Close(ctx context.Context, externalID string, purge bool) error {
@@ -143,7 +149,7 @@ func (s *Service) Close(ctx context.Context, externalID string, purge bool) erro
 }
 
 // deliverCommand sends a raw slash-command (e.g. /exit) — NOT space-guarded,
-// unlike a message (spec §8.4): clear input, paste the command, submit.
+// unlike a message: clear input, paste the command, submit.
 func (s *Service) deliverCommand(tmuxName, cmd string) error {
 	if err := s.clearInput(tmuxName); err != nil {
 		return err

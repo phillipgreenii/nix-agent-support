@@ -41,8 +41,10 @@ type (
 	}
 )
 
-// Locker serializes operations on one external_id (spec §15). A nil Locker on
-// Deps means "no locking" (used by unit tests with fakes).
+// Locker serializes operations on one external_id: a single writer per
+// conversation, so a resume cannot race a send (two writers to one transcript
+// corrupts it). A nil Locker on Deps means "no locking" (used by unit tests
+// with fakes).
 type Locker interface {
 	Lock(name string) (unlock func(), err error)
 }
@@ -117,7 +119,7 @@ type Deps struct {
 	Wait       Waiter
 	Transcript Transcript
 	Lock       Locker
-	Notify     notify.Notifier  // optional (nil = no-op); fires the §8.3 fallback edge (§10)
+	Notify     notify.Notifier  // optional (nil = no-op); fires the timeout-fallback edge
 	NotifyOn   []string         // states that trigger a notification
 	Events     *eventlog.Logger // optional (nil = no-op); records ordered input actions
 	// Exister probes whether a Claude session is resumable on disk by stat-ing the
@@ -428,8 +430,9 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 }
 
 // fireNotify edge-triggers the configured notifier for a transition that the
-// hook does NOT see (the §8.3 step-6 AskUserQuestion fallback, spec §10). No-op
-// when no notifier is wired or the edge/membership test fails.
+// hook does NOT see — the AskUserQuestion timeout fallback in resolveOutcome,
+// which fires no Notification hook at all. No-op when no notifier is wired or
+// the edge/membership test fails.
 func (s *Service) fireNotify(ctx context.Context, externalID string, prior, to store.State) {
 	if s.d.Notify == nil || !notify.ShouldNotify(s.d.NotifyOn, string(prior), string(to)) {
 		return

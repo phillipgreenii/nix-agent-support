@@ -1,6 +1,6 @@
-// Package lock provides a per-session advisory file lock (spec §15): a single
-// writer per conversation, so a resume can't race a send and two writers can't
-// corrupt one transcript.
+// Package lock provides a per-session advisory file lock: a single writer per
+// conversation, so a resume can't race a send and two writers can't corrupt one
+// transcript.
 package lock
 
 import (

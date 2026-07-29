@@ -28,8 +28,10 @@ func preservedForHuman(r store.Session) bool { return r.State == store.NeedsInpu
 
 // Reap reconciles liveness, prunes phantom rows whose Claude session is gone
 // (ADR 0015), and closes live sessions that are idle past idleTTL or beyond the
-// pool cap, evicting by least-recent activity (spec §8.6) — EXCEPT sessions parked
-// for a human, which both closure passes spare (preservedForHuman, ADR 0037). With
+// pool cap, evicting by least-recent activity (NOT creation age — the
+// oldest-created session is often the one the operator is deepest in) — EXCEPT
+// sessions parked for a human, which both closure passes spare
+// (preservedForHuman, ADR 0037). With
 // enough preserved sessions the pool is deliberately left ABOVE maxSessions; that
 // is safe because the cap is not an admission gate (Ensure never consults it), so
 // an over-cap pool grows but cannot starve new work. Only an operator clears a
@@ -72,9 +74,10 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		}
 	}
 	// Pass 2: still over cap AFTER the TTL closures → close more oldest-activity
-	// sessions. TTL closures COUNT toward the cap (spec §8.6: close "while over
-	// the cap"), so a pool already at/under cap after TTL reaping closes nothing
-	// more — otherwise we'd over-reap below the configured cap.
+	// sessions. TTL closures COUNT toward the cap — ADR 0037's Context records both
+	// passes, cap eviction running "while still over max_sessions AFTER the TTL
+	// closures" — so a pool already at/under cap after TTL reaping closes nothing
+	// more; otherwise we'd over-reap below the configured cap.
 	//
 	// A preserved session is skipped here too (ADR 0037) — the carve-out has NO
 	// last-resort override. It still COUNTS in len(live), so the eviction pressure

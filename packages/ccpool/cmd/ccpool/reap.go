@@ -22,7 +22,7 @@ func runReap(args []string) int {
 	}
 	defer func() { _ = st.Close() }()
 	// reap runs unattended (timer) — surface failures so the pool doesn't sit
-	// silently ungoverned (§20).
+	// silently ungoverned.
 	if err := svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL)); err != nil {
 		fmt.Fprintln(os.Stderr, "reap:", err)
 		return 1

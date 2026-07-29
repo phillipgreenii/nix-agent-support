@@ -176,8 +176,8 @@ type recordNotify struct{ events []notify.Event }
 
 func (r *recordNotify) Notify(e notify.Event) error { r.events = append(r.events, e); return nil }
 
-// The §8.3 step-6 fallback (timeout -> awaiting) fires NO Notification hook, so
-// Send must drive the notifier itself (spec §10).
+// The AskUserQuestion timeout fallback (timeout -> transcript says awaiting)
+// fires NO Notification hook, so Send must drive the notifier itself.
 func TestSend_fallbackFiresNotifier(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)

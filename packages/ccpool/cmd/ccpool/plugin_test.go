@@ -17,7 +17,9 @@ func TestPluginHooksJSON_hasWrapperAndAllEvents(t *testing.T) {
 	}
 	hooks, ok := root["hooks"].(map[string]any)
 	if !ok {
-		t.Fatal("hooks.json MUST wrap events under a top-level \"hooks\" key (spec §9)")
+		t.Fatal("hooks.json MUST wrap events under a top-level \"hooks\" key: a bare " +
+			"event map loads the plugin but SILENTLY never fires the hooks, so the " +
+			"store goes stale and every waiter hangs to timeout")
 	}
 	for _, ev := range []string{"SessionStart", "Stop", "StopFailure", "Notification", "PreToolUse"} {
 		if _, ok := hooks[ev]; !ok {

@@ -17,7 +17,7 @@
 // writes: O_APPEND keeps the small single-line writes atomic across the
 // concurrent hook/reply processes that share a pool. A nil *Logger is a valid
 // no-op so callers can treat it as an optional dependency, mirroring the
-// never-fail diagnostics policy of the hook (spec §9/§15).
+// never-fail diagnostics policy of the hook (see runHook).
 package diaglog
 
 import (

@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Client is the tmux adapter. All operations target the dedicated -L socket
-// (spec §3). run is injectable for tests; production uses execRun.
+// Client is the tmux adapter. All operations target the dedicated -L socket.
+// run is injectable for tests; production uses execRun.
 type Client struct {
 	Socket   string
 	run      func(args ...string) ([]byte, error)
@@ -45,7 +45,9 @@ func (c *Client) tmux(args ...string) ([]byte, error) {
 
 // NewSession starts a detached session running argv, with env exported at the
 // session level via -e (so the pane shell — the pid the nudger keys on —
-// carries the markers, spec §8.1). env keys are sorted for deterministic argv.
+// carries the markers). Session-level -e is load-bearing: a marker placed only
+// on the `claude` child is a grandchild of the pane shell and so invisible to a
+// nudger that reads the pane pid's env. env keys are sorted for deterministic argv.
 func (c *Client) NewSession(name, cwd string, env map[string]string, argv []string) error {
 	args := []string{"new-session", "-d", "-s", name}
 	if cwd != "" {
@@ -105,8 +107,10 @@ func (c *Client) PaneCurrentPath(name string) (string, error) {
 }
 
 // Paste delivers body to the session's input via bracketed paste, so multi-line
-// and special-char prompts arrive as a single message (spec §8.3, verified §4).
-// Caller sends Enter separately to submit.
+// and special-char prompts arrive as a single message. Verified against Claude
+// Code 2.1.170: a pasted multi-line prompt produced ONE turn / one Stop, whereas
+// raw send-keys of the same body would submit line-by-line, and `;`, `\` and
+// key-name tokens would be reinterpreted. Caller sends Enter separately to submit.
 func (c *Client) Paste(name, body string) error {
 	const buf = "ccpool-paste"
 	if _, err := c.runStdin(body, "-L", c.Socket, "load-buffer", "-b", buf, "-"); err != nil {
@@ -117,7 +121,7 @@ func (c *Client) Paste(name, body string) error {
 }
 
 // CapturePane returns the visible pane text of the session (tmux capture-pane
-// -p). Used to verify a cancel actually interrupted the turn (spec §3.2).
+// -p). Used to verify a cancel actually interrupted the turn.
 func (c *Client) CapturePane(name string) (string, error) {
 	out, err := c.tmux("capture-pane", "-p", "-t", name)
 	return string(out), err

@@ -10,7 +10,8 @@ mkGoApp {
 
   # The module uses a relative `replace ../claude-transcript`, so the build
   # sandbox must contain BOTH package dirs at their relative positions. Root the
-  # source at packages/ and build the ccpool subdir (spec §5.1, §14).
+  # source at packages/ and build the ccpool subdir — the rooted-fileset +
+  # modRoot form (phillipg-nix-repo-base ADR 0008, Pattern B).
   src = lib.fileset.toSource {
     root = ./..;
     fileset = lib.fileset.unions [

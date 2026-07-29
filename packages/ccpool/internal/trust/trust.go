@@ -1,8 +1,16 @@
 // Package trust ensures a cwd is pre-trusted in ~/.claude.json so an automated
-// `claude` launch does not stall on the interactive folder-trust prompt
-// (spec §4/§8.1.1). The file is Claude-managed: merge-only, write-only-when-
-// missing, atomic, read-back-verify. This write is inherently racy with Claude's
-// own writes (spec §15) — kept near-zero-frequency by writing only when needed.
+// `claude` launch does not stall on the interactive folder-trust prompt. That
+// prompt BLOCKS the REPL from starting, so SessionStart never fires and the
+// waiter hangs forever — which is why trust is guaranteed before launch rather
+// than detected after.
+//
+// The file is Claude-managed: merge-only, write-only-when-missing, atomic,
+// read-back-verify. Claude Code rewrites it on its own schedule and does NOT
+// honour ccpool's flock, so this read-merge-rename has an unavoidable
+// lost-update window and there is no CAS. A lost write degrades to the
+// trust-prompt hang, so the path is kept near-zero-frequency by writing only
+// when the key is actually missing; the home-manager activation's pre-trust of
+// default_cwd is the primary, non-racy path.
 package trust
 
 import (
@@ -42,7 +50,7 @@ func EnsureTrusted(path, cwd string) error {
 	if err := atomicWriteJSON(path, root); err != nil {
 		return err
 	}
-	// Read-back-verify; retry once on mismatch (spec §8.1.1).
+	// Read-back-verify; retry once on mismatch.
 	if !IsTrusted(path, cwd) {
 		if err := atomicWriteJSON(path, root); err != nil {
 			return err

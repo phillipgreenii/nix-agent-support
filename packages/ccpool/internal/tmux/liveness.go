@@ -1,5 +1,6 @@
 // Package tmux adapts the tmux CLI. Every call targets the dedicated -L socket
-// (spec §3) so pool sessions are isolated from default-socket tooling.
+// so pool sessions are isolated from default-socket tooling (this host runs
+// agent tooling that injects input into idle Claude sessions).
 package tmux
 
 // HasSession is a convenience for liveness reconcile without holding a Client.

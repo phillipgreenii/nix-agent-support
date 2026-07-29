@@ -12,7 +12,7 @@ import (
 )
 
 // ErrBusy is returned by Send in ModeRefuseIfBusy when the session is not idle.
-// Callers map it to the dedicated "busy" exit code (spec §12/§20).
+// Callers map it to the dedicated "busy" exit code 5 (see replyExitCode).
 var ErrBusy = errors.New("session busy")
 
 // ErrPromptNotIngested is returned by SendWithConfirm when an ingestion-confirmed
@@ -23,7 +23,7 @@ var ErrBusy = errors.New("session busy")
 var ErrPromptNotIngested = errors.New("prompt delivered but model never started a turn (not ingested)")
 
 // Send delivers prompt to the live session externalID and (unless ModeNoWait)
-// blocks for the turn outcome, returning the assistant reply. Spec §8.3.
+// blocks for the turn outcome, returning the assistant reply.
 func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode) (Result, error) {
 	var res Result
 	err := s.withLock(externalID, func() error {
@@ -148,10 +148,10 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 }
 
 // deliverPrompt clears the input line, then delivers the body via bracketed
-// paste (leading-`/` space-guarded so a path/regex isn't run as a command,
-// spec §8.3/§4), then submits with Enter. Each step is recorded to the event
-// log as an ordered input action (nil-safe). The paste detail is a short note —
-// NEVER the prompt body — so prompt contents stay out of the log.
+// paste (leading-`/` space-guarded so a path/regex isn't run as a command), then
+// submits with Enter. Each step is recorded to the event log as an ordered input
+// action (nil-safe). The paste detail is a short note — NEVER the prompt body —
+// so prompt contents stay out of the log.
 func (s *Service) deliverPrompt(externalID, tmuxName, prompt string) error {
 	body := guardLeadingSlash(prompt)
 	if err := s.clearInput(tmuxName); err != nil {
@@ -169,7 +169,8 @@ func (s *Service) deliverPrompt(externalID, tmuxName, prompt string) error {
 	return nil
 }
 
-// clearInput empties the prompt box so leftover text can't concatenate (spec §4).
+// clearInput empties the prompt box so leftover text can't concatenate with the
+// next send (leftover text broke a /exit during the design spike).
 // C-u is verified to clear the real TUI's INSERT-mode buffer (2026-06-11 live
 // run: planted text was wiped, no concatenation). Harmless to the fake-claude.
 func (s *Service) clearInput(tmuxName string) error {
@@ -177,7 +178,11 @@ func (s *Service) clearInput(tmuxName string) error {
 }
 
 // guardLeadingSlash prepends a space when the first non-whitespace char is '/'
-// so a message (path/regex) isn't interpreted as a slash-command (spec §4).
+// so a message (path/regex) isn't interpreted as a slash-command. Verified
+// against Claude Code 2.1.170: a leading-'/' body is treated as a command even
+// when PASTED, yielding `Unknown command` and firing NO Stop — so the waiter
+// would hang to timeout. A single leading space delivers it as a normal message.
+// Intentional commands take deliverCommand instead, which is NOT guarded.
 func guardLeadingSlash(prompt string) string {
 	t := strings.TrimLeft(prompt, " \t")
 	if strings.HasPrefix(t, "/") {
@@ -188,13 +193,13 @@ func guardLeadingSlash(prompt string) string {
 
 func (s *Service) resolveOutcome(ctx context.Context, externalID, transcriptPath string, out wait.Outcome) (Result, error) {
 	if out.TimedOut {
-		// AskUserQuestion fallback (spec §8.3 step 6): a dangling question fires
-		// no Notification hook, so detect it from the transcript.
+		// AskUserQuestion fallback: a dangling question fires no Notification
+		// hook, so detect it from the transcript.
 		if transcriptPath != "" {
 			if awaiting, _ := s.d.Transcript.IsAwaitingInput(transcriptPath); awaiting {
 				_, _ = s.d.Store.Transition(ctx, externalID, store.NeedsInput, "", "")
 				// This transition fires no Notification hook (AskUserQuestion gap),
-				// so the notifier must be driven here (spec §10).
+				// so the notifier must be driven here.
 				s.fireNotify(ctx, externalID, store.Working, store.NeedsInput)
 				return Result{State: store.NeedsInput}, nil
 			}

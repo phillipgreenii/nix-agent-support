@@ -1,7 +1,7 @@
 // Package launch is the single source of truth for the `claude` invocation.
 // Every pool launch — new and resume — ALWAYS includes --plugin-dir; without it
-// hooks don't load and the store goes stale (spec §8.1). No prompt is ever a
-// launch argument; prompts are delivered by send (Plan 3).
+// hooks don't load, the store goes stale, and the waiter hangs. No prompt is
+// ever a launch argument; prompts are delivered by send (Plan 3).
 package launch
 
 // PermissionMode is claude's --permission-mode value. The valid set is fixed by

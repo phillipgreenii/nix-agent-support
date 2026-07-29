@@ -178,7 +178,7 @@ func (a *retryActuator) maybeRetry(ctx context.Context, sess store.Session, tran
 // the actuator. It returns true ONLY when the session was actually resumed in
 // place (so the caller skips the `errored` transition). Any error — store load,
 // transcript read, tmux delivery — is swallowed and returns false so the caller
-// hands the failure back as `errored` (never-fail policy, spec §9/§15).
+// hands the failure back as `errored` (never-fail policy, see runHook).
 func tryRetryOnFail(ctx context.Context, ra *retryActuator, st *store.Store, externalID, transcriptPath string) bool {
 	sess, ok, err := st.GetByExternalID(ctx, externalID)
 	if err != nil || !ok {

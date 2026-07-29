@@ -135,7 +135,7 @@ type liveRow struct {
 	live bool
 }
 
-// visibleRows applies the state filter and the §11 retention view (unless all),
+// visibleRows applies the state filter and the retention view (unless all),
 // reconciling liveness via liveFn, and returns the rows to render in store order.
 // Shared by the text and JSON renderers so both honor identical view hygiene.
 func visibleRows(rows []store.Session, all bool, stateFilter string,
@@ -265,7 +265,8 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 	return string(b), nil
 }
 
-// hiddenByRetention implements the §11 view-hygiene predicate. `Terminal()` is
+// hiddenByRetention implements the view-hygiene predicate: hiding a row from the
+// default list is NOT deleting the session — it stays resumable. `Terminal()` is
 // gone (ADR 0015 has no terminal concept), so retention keys off the two SETTLED
 // last-observed outcomes directly: a row is hidden only when it is NOT live and
 // its state is idle/errored older than its TTL (idle→doneTTL, errored→failedTTL).
