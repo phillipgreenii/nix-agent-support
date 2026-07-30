@@ -290,7 +290,13 @@ func TestHeredocFeedingALoopIsLossless(t *testing.T) {
 			t.Errorf("leaf %q carries env assignments %+v lifted out of the heredoc BODY", pc.Raw, pc.EnvVars)
 		}
 	}
-	if want := []string{"read", "echo", "echo"}; !reflect.DeepEqual(execs, want) {
+	// The empty executable is the loop TERMINATOR's operator segment (`<<'EOF'`), which
+	// pg2-qkecz stopped discarding: it is a command-less leaf of exactly the shape
+	// `(cmd) > /etc/passwd` already produced. It is NOT a heredoc body line — the
+	// assertion this test exists for. Carrying the extent on its own leaf is also more
+	// precise than before, when resolveLoops dropped the segment and the leftover net
+	// attached the extent to whichever leaf happened to be last.
+	if want := []string{"read", "echo", "", "echo"}; !reflect.DeepEqual(execs, want) {
 		t.Fatalf("Parse(%q) executables = %q, want %q (body lines must not become leaves)", cmd, execs, want)
 	}
 	if !anyHeredoc || extents != 1 {

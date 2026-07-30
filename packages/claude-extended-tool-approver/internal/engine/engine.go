@@ -210,6 +210,20 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 				leafResult = hookio.MostRestrictive(leafResult, assignResult)
 				judgedLeaf = true
 			}
+			// A command-less leaf's Raw can still hold a live substitution, and this
+			// branch used to `continue` before reaching the recursion below — so
+			// nothing ever recursed it. That is what let a `for` loop's word list
+			// smuggle `$(curl|sh)` past every rule once the word list became a leaf of
+			// its own (pg2-qkecz hole B).
+			//
+			// StripLeadingEnvAssignments matches the main path exactly, which keeps
+			// env-assignment VALUES out of this scan — those are the static
+			// classifyExpansion path (pg2-gkd5e), and recursing them here would
+			// double-judge them under a different model. The fold is seeded with the
+			// neutral Approve, so a leaf whose Raw holds no substitution contributes
+			// nothing and cannot demote an otherwise-approved expression.
+			leafResult = hookio.MostRestrictive(leafResult,
+				e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
 			if leafResult.Decision > mostRestrictive.Decision {
 				mostRestrictive = leafResult
 			}

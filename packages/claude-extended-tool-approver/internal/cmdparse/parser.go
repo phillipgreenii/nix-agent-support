@@ -837,7 +837,7 @@ func Parse(command string) []ParsedCommand {
 	// leaf heredoc-bearing.
 	command, heredocs := stripHeredocBodies(command)
 	segments := splitCompound(command)
-	segments = resolveLoops(segments)
+	segments, loopWordLists := resolveLoops(segments)
 	result := make([]ParsedCommand, 0, len(segments))
 	// carried holds the heredocs claimed by segments walked so far but not yet
 	// attached to a leaf. Normally it is emptied onto the very next leaf. It also
@@ -947,6 +947,22 @@ func Parse(command string) []ParsedCommand {
 			last.HasHeredoc = true
 		}
 	}
+	// A `for` loop's word list reaches a leaf of its own (pg2-qkecz hole B). It carries
+	// ONLY Raw: it is data, so it has no executable and must never be judged as a
+	// command, but its text can hold a live `$(...)` that genuinely executes. The
+	// engine's command-less-leaf branch recurses substitutions in Raw, and that fold is
+	// seeded with the neutral Approve — so a literal list such as `*.md` contributes
+	// nothing and the 10,004 corpus commands with a for-loop keep their verdicts, while
+	// `for x in $(curl|sh)` is judged.
+	//
+	// Appended AFTER the heredoc leftover net on purpose: the net attaches an unclaimed
+	// extent to the LAST leaf, and a word-list leaf must not become that leaf. Leaf
+	// order is otherwise immaterial — verdicts fold through MostRestrictive.
+	for _, wl := range loopWordLists {
+		if wl != "" {
+			result = append(result, ParsedCommand{Raw: wl})
+		}
+	}
 	return result
 }
 
@@ -1051,15 +1067,35 @@ func splitCompound(s string) []string {
 // for/while/until ... do ... done constructs.  The loop keywords are
 // discarded and only the body commands (and while/until conditions) are
 // returned so the rule engine can evaluate them individually.
-func resolveLoops(segments []string) []string {
-	var result []string
+// wordLists carries the `for` word lists that were previously discarded. They are
+// returned SEPARATELY from result because a word list is DATA (a list of words to
+// iterate), not a command: routing it back through the ordinary segment stream would
+// make `*.md` in `for f in *.md` a bogus executable and demote 10,004 distinct corpus
+// commands. Parse turns each into a command-less leaf carrying only Raw, so its
+// substitutions are recursed while a literal list contributes nothing (pg2-qkecz).
+func resolveLoops(segments []string) (result []string, wordLists []string) {
 	i := 0
 	for i < len(segments) {
 		trimmed := strings.TrimSpace(segments[i])
 		if isLoopKeyword(trimmed) {
-			body, endIdx := extractLoopBody(segments, i)
+			body, endIdx, wordList := extractLoopBody(segments, i)
 			if endIdx > i {
-				result = append(result, resolveLoops(body)...)
+				innerSegs, innerWordLists := resolveLoops(body)
+				result = append(result, innerSegs...)
+				wordLists = append(wordLists, innerWordLists...)
+				if wordList != "" {
+					wordLists = append(wordLists, wordList)
+				}
+				// pg2-qkecz hole A: the terminator segment carried the loop
+				// compound's redirections, and dropping it dropped them with it —
+				// `for f in a b; do echo hi; done > /etc/passwd` approved because
+				// evaluateRedirections never ran. Emit whatever trails the `done`
+				// keyword as its own segment; it reduces to redirections only, which
+				// is exactly the command-less-leaf shape the subshell form
+				// `(cmd) > /etc/passwd` already relies on above. No new leftover net.
+				if residue := doneResidue(strings.TrimSpace(segments[endIdx])); residue != "" {
+					result = append(result, residue)
+				}
 				i = endIdx + 1
 				continue
 			}
@@ -1067,7 +1103,43 @@ func resolveLoops(segments []string) []string {
 		result = append(result, segments[i])
 		i++
 	}
-	return result
+	return result, wordLists
+}
+
+// doneResidue returns the text trailing the `done` keyword, or "" when the segment is
+// a bare `done`. The keyword test mirrors isDoneKeyword so the two cannot disagree
+// about what counts as a terminator.
+func doneResidue(seg string) string {
+	if seg == "done" {
+		return ""
+	}
+	if strings.HasPrefix(seg, "done ") || strings.HasPrefix(seg, "done\t") {
+		return strings.TrimSpace(seg[len("done"):])
+	}
+	return ""
+}
+
+// forWordList returns the word-list text of a `for x in <words>` header, or "" when
+// the header has no `in` clause at all — both `for x; do` (which iterates "$@") and
+// the C-style `for ((i=0;i<10;i++))`. The `in` keyword is always the third word of the
+// header and a loop variable can contain neither whitespace nor quotes, so the FIRST
+// standalone `in` is the keyword; anything quoted necessarily sits after it.
+func forWordList(header string) string {
+	rest := header
+	for {
+		idx := strings.Index(rest, "in")
+		if idx < 0 {
+			return ""
+		}
+		before, after := rest[:idx], rest[idx+2:]
+		// Standalone word: whitespace on both sides (or end of header after it).
+		leftOK := before != "" && (before[len(before)-1] == ' ' || before[len(before)-1] == '\t')
+		rightOK := after == "" || after[0] == ' ' || after[0] == '\t'
+		if leftOK && rightOK {
+			return strings.TrimSpace(after)
+		}
+		rest = rest[idx+2:]
+	}
 }
 
 func isLoopKeyword(seg string) bool {
@@ -1080,7 +1152,7 @@ func isLoopKeyword(seg string) bool {
 // Returns the body segments and the index of the "done" segment.
 // For while/until, the condition command is included in the returned body.
 // If no matching done is found, returns (nil, start) to fall through to abstain.
-func extractLoopBody(segments []string, start int) (body []string, endIdx int) {
+func extractLoopBody(segments []string, start int) (body []string, endIdx int, wordList string) {
 	trimmedStart := strings.TrimSpace(segments[start])
 	isCondLoop := strings.HasPrefix(trimmedStart, "while ") || strings.HasPrefix(trimmedStart, "until ")
 
@@ -1093,6 +1165,15 @@ func extractLoopBody(segments []string, start int) (body []string, endIdx int) {
 				conditionSegs = append(conditionSegs, cond)
 			}
 		}
+	} else {
+		// pg2-qkecz hole B: for a `for` loop isCondLoop is false, so the header
+		// segment was added to NEITHER conditionSegs NOR bodySegs and vanished —
+		// taking any command substitution in its word list with it. The engine
+		// recurses per leaf, so `for x in $(curl|sh); do echo hi; done` had `echo hi`
+		// as its only leaf and the substitution reached nothing. The word list is
+		// returned for a command-less leaf rather than pushed into the segment
+		// stream, because it is data and must not be judged as a command.
+		wordList = forWordList(trimmedStart)
 	}
 
 	doDepth := 0
@@ -1124,14 +1205,17 @@ func extractLoopBody(segments []string, start int) (body []string, endIdx int) {
 		if isDoneKeyword(trimmed) {
 			doDepth--
 			if doDepth == 0 {
-				return append(conditionSegs, bodySegs...), i
+				return append(conditionSegs, bodySegs...), i, wordList
 			}
 		}
 
 		bodySegs = append(bodySegs, segments[i])
 	}
 
-	return nil, start
+	// No matching `done`: resolveLoops keeps the header segment verbatim, so the word
+	// list is already in the segment stream and MUST NOT also be returned here — it
+	// would be judged twice, once as a command.
+	return nil, start, ""
 }
 
 // parseDoKeyword checks if a trimmed segment is the "do" keyword, optionally

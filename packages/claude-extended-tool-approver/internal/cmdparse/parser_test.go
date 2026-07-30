@@ -1399,52 +1399,62 @@ func TestParse_ForLoop(t *testing.T) {
 		wantCount int
 		wantExecs []string
 	}{
+		// pg2-qkecz: each `for` loop now contributes ONE extra command-less leaf
+		// carrying its word list, appended after the command leaves, so a live
+		// `$(...)` in the word list reaches the engine's substitution recursion. The
+		// leaf has no executable, so the positional wantExecs assertions below are
+		// unchanged — only the counts move. A loop whose terminator carries a
+		// redirection contributes a second extra leaf for that redirection.
 		{
 			name:      "simple for loop",
 			input:     `for f in *.md; do echo "$f"; done`,
-			wantCount: 1,
+			wantCount: 2, // echo + word-list leaf (`*.md`)
 			wantExecs: []string{"echo"},
 		},
 		{
 			name:      "for loop with multiple body commands",
 			input:     `for f in *.md; do echo "$f"; cat "$f"; done`,
-			wantCount: 2,
+			wantCount: 3, // echo, cat + word-list leaf
 			wantExecs: []string{"echo", "cat"},
 		},
 		{
 			name:      "for loop with pipe in body",
 			input:     `for f in *.md; do cat "$f" | grep pattern; done`,
-			wantCount: 2,
+			wantCount: 3, // cat, grep + word-list leaf
 			wantExecs: []string{"cat", "grep"},
 		},
 		{
 			name:      "for loop followed by other commands",
 			input:     `for f in a b; do echo "$f"; done && echo "all done"`,
-			wantCount: 2,
+			wantCount: 3, // echo, echo + word-list leaf
 			wantExecs: []string{"echo", "echo"},
 		},
 		{
 			name:      "for loop with newline separators",
 			input:     "for f in *.md\ndo\n  echo \"$f\"\ndone",
-			wantCount: 1,
+			wantCount: 2, // echo + word-list leaf
 			wantExecs: []string{"echo"},
 		},
 		{
 			name:      "nested for loops",
 			input:     `for x in a b; do for y in 1 2; do echo $x $y; done; done`,
-			wantCount: 1,
+			wantCount: 3, // echo + one word-list leaf per loop (`1 2`, `a b`)
 			wantExecs: []string{"echo"},
 		},
 		{
 			name:      "for loop with && in body",
 			input:     `for app in a b; do echo "=== $app ===" && ls "$app"; done`,
-			wantCount: 2,
+			wantCount: 3, // echo, ls + word-list leaf
 			wantExecs: []string{"echo", "ls"},
 		},
 		{
+			// SECURITY (pg2-qkecz hole A): this previously expected wantCount 1,
+			// pinning the DROP of the terminator segment as correct — which is what
+			// made `done > /etc/passwd` auto-approve. The redirection MUST now reach a
+			// leaf of its own.
 			name:      "for loop with redirect on done",
 			input:     `for f in a b; do echo "$f"; done 2>/dev/null`,
-			wantCount: 1,
+			wantCount: 3, // echo + `2>/dev/null` redirection leaf + word-list leaf
 			wantExecs: []string{"echo"},
 		},
 		{
