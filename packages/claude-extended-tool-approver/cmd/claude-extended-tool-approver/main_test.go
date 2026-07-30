@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
@@ -83,23 +85,72 @@ func findModuleRoot() (string, error) {
 	}
 }
 
+// hookAttempts bounds how many times runHook re-runs the binary when the only
+// thing that went wrong was the input processor's exec being killed by the
+// shipped deadline. Three makes a single lost CPU slice a non-event while still
+// failing, loudly and finitely, on a machine that cannot spawn a two-line shell
+// script at all.
+const hookAttempts = 3
+
+// inputProcDeadlineKilled reports whether the binary's stderr says the input
+// processor's exec hit its deadline. That line is the ONLY way the fact crosses
+// the process boundary: Process() collapses "killed" and "declined" into the
+// same (string, bool), so from out here a kill is indistinguishable from a
+// processor that chose not to rewrite. The needle is DERIVED from the sentinel
+// rather than typed out, so a stdlib rewording cannot make this stop matching
+// silently; the prefix pins it to the input processor specifically, since other
+// subsystems have deadlines of their own. The proof that the real binary still
+// emits a matching line is
+// TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr.
+func inputProcDeadlineKilled(stderr string) bool {
+	return strings.Contains(stderr, "input processor: "+context.DeadlineExceeded.Error())
+}
+
+// runHook runs the binary and retries iff the input processor's exec was killed
+// by its deadline — see TestIntegration_InputProcessor_RewritesBashApprove for
+// why that is the remedy here rather than a bigger deadline. Retrying is safe
+// because the trigger is not an assertion failure: a processor that actually ran
+// and produced the wrong answer fails on the first attempt. The retry lives here
+// rather than in the one test that needs it today for the same reason TestMain
+// isolates XDG_DATA_HOME package-wide — a newly added hook-mode test that
+// configures a processor cannot reintroduce the flake by forgetting to opt in.
+// For every test that configures no processor this is an unconditional no-op.
 func runHook(t *testing.T, input string) map[string]any {
+	t.Helper()
+	var lastStderr string
+	for attempt := 1; attempt <= hookAttempts; attempt++ {
+		result, stderr := runHookOnce(t, input)
+		if !inputProcDeadlineKilled(stderr) {
+			return result
+		}
+		lastStderr = strings.TrimSpace(stderr)
+		t.Logf("attempt %d/%d: the input processor exec was killed by the shipped deadline; retrying, because this is the environment failing to spawn the mock and not the code: %s", attempt, hookAttempts, lastStderr)
+	}
+	t.Fatalf("the input processor exec was killed by the shipped deadline on all %d attempts: this environment could not spawn the mock processor in time, which is NOT a logic failure: %s", hookAttempts, lastStderr)
+	return nil
+}
+
+// runHookOnce runs the binary once and returns its parsed stdout ALONGSIDE its
+// stderr. Capturing stderr is what makes the retry above possible: cmd.Output()
+// keeps stderr only to attach to an ExitError, so on the exit-0 path — which is
+// every hook run, including one whose input processor was killed — the binary's
+// own diagnosis was being discarded.
+func runHookOnce(t *testing.T, input string) (map[string]any, string) {
 	t.Helper()
 	cmd := exec.Command(cliBinary)
 	cmd.Env = os.Environ()
 	cmd.Stdin = bytes.NewBufferString(input)
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			t.Fatalf("hook failed: %v\nstderr: %s", err, ee.Stderr)
-		}
-		t.Fatalf("hook failed: %v", err)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("hook failed: %v\nstderr: %s", err, stderr.String())
 	}
 	var result map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(out), &result); err != nil {
-		t.Fatalf("invalid JSON output: %v\nraw: %s", err, out)
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
-	return result
+	return result, stderr.String()
 }
 
 func getDecision(result map[string]any) string {
@@ -479,6 +530,33 @@ func TestIntegration_PreToolUse_StillWorks(t *testing.T) {
 	}
 }
 
+// TestIntegration_InputProcessor_RewritesBashApprove is the module's only test
+// that spawns an input processor through the BUILT binary, so it is the only
+// place the SHIPPED 3s exec deadline is still in force. internal/inputproc's fix
+// for the same flake widened a package var from TestMain; a package var cannot
+// cross a process boundary, so it structurally could not reach here (pg2-iay90,
+// discovered from pg2-tl0ry).
+//
+// DECISION — keep the shipped 3s budget and make this test survive a slow
+// sandbox, rather than adding a knob. Recorded here so the next reader does not
+// re-derive it:
+//   - A production CETA_INPUT_PROCESSOR_TIMEOUT was rejected. The only reason to
+//     add it today would be "a test needs it", which is the wrong reason to grow
+//     the configurable surface of the binary that decides whether a command may
+//     run. A shorter value would silently stop wrapping commands; a longer one
+//     would stall every Bash tool call.
+//   - A test-only env knob was rejected: at runtime it is indistinguishable from
+//     the production one above, only undocumented.
+//   - Dropping /bin/sh from this mock was rejected on measurement (pg2-tl0ry,
+//     200 spawns each): /bin/sh at 5.0-7.5ms against a re-exec'd Go binary at
+//     3.6ms buys ~3ms against a 3000ms blowout. The cause is tail scheduling
+//     latency, not mean shell startup.
+//
+// What closes it instead is in runHook: the binary's stderr is captured so a
+// deadline kill is recognisable out here, and the run is retried on that one
+// signature. The residual risk is a sandbox that cannot spawn this two-line
+// script within 3s on three consecutive tries, which fails naming the
+// environment rather than blaming this assertion.
 func TestIntegration_InputProcessor_RewritesBashApprove(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
@@ -502,6 +580,59 @@ func TestIntegration_InputProcessor_RewritesBashApprove(t *testing.T) {
 	}
 	if cmd := ui["command"].(string); cmd != "wrapped git status" {
 		t.Errorf("updatedInput.command = %q, want %q", cmd, "wrapped git status")
+	}
+}
+
+// TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr is the guard on
+// runHook's retry: it proves the REAL binary emits a line inputProcDeadlineKilled
+// matches, end to end across the process boundary. Without it, a reworded
+// diagnostic in internal/inputproc would leave the detector matching nothing and
+// the retry would quietly stop working — the flake would return with no signal
+// that the guard had rotted.
+//
+// It deliberately calls runHookOnce, not runHook, so it observes the kill instead
+// of retrying past it. It costs the full shipped deadline (~3s) in wall time,
+// because refusing a knob means refusing one here too. It cannot become the next
+// flake: sandbox load makes the deadline fire MORE readily, and firing is what it
+// asserts.
+//
+// The mock `exec`s sleep rather than running it as a child, and that is
+// load-bearing, not style: CommandContext kills only the process it started, so a
+// forked sleep survives holding the inherited stdout pipe and Output() blocks
+// until it exits — measured at 30s here, ten times the deadline it is supposed to
+// be bounded by. Replacing `exec sleep` with plain `sleep` re-adds those 27s.
+// (That the SHIPPED deadline has the same hole is a production observation this
+// test does not attempt to fix; internal/inputproc's own kill test only escapes
+// it because a 50ms deadline lands before the shell can fork.)
+//
+// It also pins the consequence that makes the 3s budget worth caring about: a
+// killed processor degrades to no rewrite, so the ORIGINAL command is what
+// Claude Code is told to run.
+func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	procScript := filepath.Join(dir, "mock-processor")
+	if err := os.WriteFile(procScript, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
+	result, stderr := runHookOnce(t, input)
+
+	if !inputProcDeadlineKilled(stderr) {
+		t.Fatalf("stderr does not report a deadline kill, so runHook's retry can no longer recognise one: reconcile inputProcDeadlineKilled with internal/inputproc's diagnostic\nstderr: %s", stderr)
+	}
+	if d := getDecision(result); d != "allow" {
+		t.Errorf("decision = %q, want allow: a killed processor must not change the decision", d)
+	}
+	hso, ok := result["hookSpecificOutput"].(map[string]any)
+	if !ok {
+		t.Fatalf("hookSpecificOutput missing from output: %v", result)
+	}
+	if _, ok := hso["updatedInput"]; ok {
+		t.Error("updatedInput should not be present when the processor was killed before it could rewrite")
 	}
 }
 
