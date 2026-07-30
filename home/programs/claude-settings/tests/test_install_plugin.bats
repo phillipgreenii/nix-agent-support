@@ -147,14 +147,22 @@ _installed_plugins_path() {
 
 @test "corrupt manifest (parse error) is removed with WARNING on stderr" {
   _mock_claude 0 0 "" ""
-  # The actual failure mode hit in production: unresolved git merge markers.
-  _write_manifest "beads-marketplace" "beads" "1.0.4" \
-'{"name":"beads",
-<<<<<<< Updated upstream
-=======
-"version":"1.0.4",
->>>>>>> Stashed changes
-}'
+  # The actual failure mode hit in production: unresolved git merge markers —
+  # byte-for-byte what a real conflict leaves behind in plugin.json.
+  #
+  # Assembled rather than written literally so no line here BEGINS with a
+  # marker: check-merge-conflict matches markers only at the START of a line,
+  # and only while a merge/rebase is in progress, so a literal fixture makes
+  # `prek run --all-files` fail on this test mid-rebase (bead pg2-dmktk).
+  # printf -v, not a command substitution, so a trailing newline added here
+  # later would not be silently stripped.
+  local ours='<<<<<<< Updated upstream'
+  local divider='======='
+  local theirs='>>>>>>> Stashed changes'
+  local manifest
+  printf -v manifest '{"name":"beads",\n%s\n%s\n"version":"1.0.4",\n%s\n}' \
+    "$ours" "$divider" "$theirs"
+  _write_manifest "beads-marketplace" "beads" "1.0.4" "$manifest"
 
   run --separate-stderr "$SCRIPT" "$CLAUDE_BIN" "beads@beads-marketplace" "$CACHE_ROOT"
 
