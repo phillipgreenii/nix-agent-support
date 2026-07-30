@@ -52,4 +52,5 @@ cited `<repo> · <set-path>`; every owner below lives in the method set.
 | Name     | Owner set-path                                                   | Owner UUID                           |
 | -------- | ---------------------------------------------------------------- | ------------------------------------ |
 | `INV-11` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | f8174e40-806c-4c42-97da-996efd7c6e23 |
+| `INV-18` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | 4c6a764b-02f5-4c85-afae-a082fe6c21cd |
 | `INV-19` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | 4325bdf4-2458-4606-8b37-2e5e996aa53a |

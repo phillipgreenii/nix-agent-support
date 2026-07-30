@@ -1,7 +1,12 @@
-# ADR 0002 — Author behavior docs as a cross-linked markdown wiki
+# Authoring — decision docs for the behavior-docs method
 
-- **Status:** Stub — to be decided
-- **Date:** 2026-07-16
+Realization decisions about how the behavior docs themselves are organized, written, and
+cross-referenced — by humans and by agents.
+
+### `IMPL-2` — Author behavior docs as a cross-linked markdown wiki <!-- uuid: 2e66e8b3-0cbb-4fad-b87b-564ded2a8a59 -->
+
+_Captured 2026-07-16. Not yet decided — the `IMPL-` prefix carries that; promotion to
+`DEC-AUTHOR-1` will preserve the UUID._
 
 ## Context
 
@@ -11,9 +16,9 @@ are organized and cross-referenced for reading and writing — including by agen
 realization decision, so it lives here rather than in the method.
 
 The only behavioral requirement the method makes is that references are navigable and
-checkable for agreement (`INV-8` / `INV-18`). This ADR chooses a mechanism that satisfies it.
+checkable for agreement (`INV-8` / `INV-18`). This entry chooses a mechanism that satisfies it.
 
-## Decision (to be decided)
+**Open points to settle**
 
 Author behavior docs as a cross-linked markdown wiki — a page per concept with backlinks,
 in the "LLM-wiki" style that aids both human and agent reading/writing. Details (tooling,

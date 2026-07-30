@@ -17,10 +17,12 @@ A product comes from **two** durable, human-owned inputs — the **two-input mod
   under `docs/behavior`).
 - **decision docs** — the _how_: rationale-backed realization decisions (architecture,
   language, framework, tooling, testing, tuning, and **governance authority** — who or what may
-  approve or change the docs), conventionally under `docs/decisions`. An **ADR** is the canonical
-  decision doc. (A system's own **behavioral** governance — an identity, permission posture, or
+  approve or change the docs), conventionally under `docs/decisions`. An **ADR** is one
+  established form of decision doc; which form a project uses is its own realization decision.
+  (A system's own **behavioral** governance — an identity, permission posture, or
   non-defeatable guardrail it treats as intended behavior — stays in its behavior docs; see
-  [actors](actors.md).) Named here, but out of this method's scope.
+  [actors](actors.md).) Named here; the **hand-off** to them is in this method's extent
+  (`JOURNEY-5`), their internal form is out of this method's scope.
 
 `product = f(behavior docs, decision docs)`. When a product is wrong, the split says which
 input to fix: wrong _behavior_ → the behavior docs; behavior right but _realization_ wrong →
@@ -41,8 +43,10 @@ decision docs) a _behavior-conformant_ implementation can be regenerated.
   establishes scope; how it defines its interfaces to other products; the lifecycle
   journeys.
 - **Extent (out)** — the companion tooling (authoring, bootstrap) is a downstream product;
-  decision docs (tech, tuning, governance authority, human/agent roles) are a sibling input;
-  downstream spec/design/plan and any concrete file or output layout are downstream.
+  decision docs (tech, tuning, governance authority, human/agent roles) are a sibling input —
+  the **hand-off** across that seam is in extent (`JOURNEY-5`), their internal form, layout and
+  local ID vocabulary are not; downstream spec/design/plan and any concrete file or output layout
+  are downstream.
 - **Floor** — this behavior docs set speaks at "how the behavior-docs method should behave,"
   never how to build the tooling, nor a fixed file layout (**layout is illustrative** — the
   invariants govern content, not files).

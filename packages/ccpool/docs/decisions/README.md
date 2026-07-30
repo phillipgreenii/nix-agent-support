@@ -1,7 +1,7 @@
-# Decision docs — the behavior-docs project
+# Decision docs — ccpool
 
-The **decision docs** for the behavior-docs project: the durable _how_ that combines with the
-[behavior docs](../behavior/README.md) to produce the behavior-docs product
+The **decision docs** for pr-pool: the durable _how_ that combines with its
+behavior docs (`../behavior`, authored separately) to produce the product
 (`product = f(behavior docs, decision docs)` — the two-input model). These carry the realization
 decisions the behavior docs deliberately exclude: architecture, tooling, testing, tuning, and
 governance **authority**.
@@ -13,7 +13,8 @@ decision needs.
 ## Relocating content into this area
 
 Content arrives here from the behavior docs by the method's relocation procedure,
-[`JOURNEY-5`](../behavior/journeys.md). Follow it there; it is **not** restated here.
+[`JOURNEY-5`](../../../../behavior-docs/docs/behavior/journeys.md). Follow it there; it is **not**
+restated here.
 
 ## Entry ids
 
@@ -30,10 +31,6 @@ resolves by UUID, never by the mutable name.
   ``### `DEC-<TOPIC>-<n>` — one-line summary <!-- uuid: <a fresh lowercase RFC-4122 v4> -->``
 - There is **no per-entry status header**. `IMPL-` versus `DEC-` already says it.
 
-This area adopts the living-document discipline `INV-4` imposes on behavior docs **by choice** —
-`INV-4` binds behavior docs, not decision docs, and `self-checks.sh` never looks at
-`docs/decisions`, so no mechanical check covers this area.
-
 ## Layout
 
 Entries are grouped into **topic files** (`<topic>.md`), several entries per file. This README is
@@ -43,16 +40,9 @@ about what exists here. Numbered `NNNN-*.md` files are **not** used.
 ## Not in this area
 
 The repository's own `docs/adr/` records remain where they are and are **not** migrated here. This
-area holds (a) content relocated out of the behavior-docs method's behavior docs and (b) entries
-those behavior docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, never
-copy it.
+area holds (a) content relocated out of ccpool's behavior docs and (b) entries ccpool's behavior
+docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, never copy it.
 
 ## Entries
 
-- **`DEC-CONFORM-1`** — in [conformance.md](conformance.md) — conformance checking splits three
-  ways: **intra** (a set against the method's rules), **inter** (a set against other systems'
-  contracts), **impl** (an implementation against its own behavior docs).
-- **`IMPL-1`** — in [governance.md](governance.md) — who and what may author or change behavior
-  docs, and what supervision applies.
-- **`IMPL-2`** — in [authoring.md](authoring.md) — author behavior docs as a cross-linked markdown
-  wiki.
+_None yet._

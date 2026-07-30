@@ -96,6 +96,63 @@ flowchart TD
     fix --> pull
 ```
 
+### `JOURNEY-5` — Relocating implementation content out of a behavior doc <!-- uuid: 7d6de948-3ef5-426a-949e-2dd872f06d28 -->
+
+_Actor:_ `ACTOR-1` (Author) — owns both inputs of the two-input model, so only the Author routes
+content between them.
+
+A behavior doc has accumulated a statement that describes _how_, not _what_. Route it to the
+decision docs without losing the behavior it was standing in for. The **hand-off** is in this
+method's scope; the decision docs' own **internal form** is not.
+
+1. **Apply the `INV-2` test.** Would this statement change when the implementation changed while
+   intended behavior held? If yes it is realization content and MUST NOT stay.
+2. **Confirm it is below the floor, not merely specific**, with the substitution test (`INV-10`).
+   Generalize the term: if intended behavior survives the generalization, the content is below the
+   floor and MUST move. If generalizing loses essential meaning within the extent, the content is
+   **at** the floor — keep it, and stop here. Specificity alone is not a reason to move.
+3. **Move it to the owning scope's decision docs**, as an entry carrying a **typed local name** and
+   a **stable UUID** minted on its definition line in the same carrier form the behavior docs use
+   (`INV-3`), so a behavior doc MAY cite the entry by name and the cross-input reference resolves by
+   UUID. Which typed names a decision area uses, and how it lays its entries out, is that project's
+   own realization decision — out of this method's scope.
+4. **Restate the behavior at the floor.** Where a behavior statement leaned on the moved content,
+   the surviving statement MUST say what must hold, in the scope's own vocabulary. Cite the decision
+   entry **only** where the rule needs provenance (`GOAL-5`) — never merely to point at the detail
+   just shed, which would re-import the _how_ by reference.
+5. **Delete it from the behavior doc, with no tombstone** (`INV-4`): no "moved to …" note, no status
+   header, no changelog line. Git holds the history.
+
+A relocation is not a rename: if steps 1 and 2 both say "keep", nothing moves and the doc is already
+correct.
+
+```mermaid
+flowchart TD
+    start["a behavior doc statement looks like implementation detail"]
+    t1{"INV-2 test - would it change when the implementation changed while intended behavior held"}
+    keep1["it is intended behavior - keep it, stop"]
+    t2{"substitution test INV-10 - does generalizing preserve intended behavior"}
+    keep2["it is AT the floor - keep it, stop"]
+    move["move it to the owning scope decision docs as an entry with a typed name and a stable UUID"]
+    restate["restate the behavior at the floor in the scope own vocabulary"]
+    prov{"does the surviving rule need provenance"}
+    cite["cite the decision entry - GOAL-5"]
+    nocite["do not cite - a citation would re-import the how"]
+    del["delete from the behavior doc with NO tombstone - INV-4, git holds the history"]
+
+    start --> t1
+    t1 -->|"no"| keep1
+    t1 -->|"yes"| t2
+    t2 -->|"no - meaning is lost"| keep2
+    t2 -->|"yes - meaning survives"| move
+    move --> restate
+    restate --> prov
+    prov -->|"yes"| cite
+    prov -->|"no"| nocite
+    cite --> del
+    nocite --> del
+```
+
 ## Open questions
 
 Each open question states the gap, its owner, a resolution path, and where it blocks.

@@ -32,6 +32,10 @@ IDRE='\b(INV|GOAL|STORY|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 
 trim() { sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'; }
 
+# row_setpath <owner-set-path-cell> — the declared `<set-path>` half of a
+# `<repo> · <set-path>` cell, code-span backticks stripped.
+row_setpath() { printf '%s' "$1" | tr -d '`' | sed -E 's/.*·[[:space:]]*//' | trim; }
+
 # owner_name_for_uuid <uuid> — print the owner's current name (first ID token on
 # the carrier line) for a UUID, or empty if the UUID is not present in the owner.
 owner_name_for_uuid() {
@@ -85,6 +89,24 @@ while IFS= read -r row; do
       printf '  WARN      %-22s (row has no owner UUID and is not marked external)\n' "$name"
     fi
     continue
+  fi
+
+  # An imports table MAY declare owners in MORE THAN ONE set (a deployment set that
+  # implements one set's contracts AND follows the method). This script resolves ONE
+  # seam per invocation, so a row naming a different owner set MUST be skipped, not
+  # FAILed against the wrong owner.
+  #
+  # PLACEMENT IS LOAD-BEARING and MUST stay here, AFTER the no-UUID branch above.
+  # A row carrying no owner UUID has nothing to resolve against any owner, so this
+  # filter has no business touching it: its classification (declared external
+  # contract vs. malformed row -> WARN) is owner-independent, and filtering it
+  # earlier silently swallows that WARN (bats fixture #1, `external-misclass`).
+  if printf '%s' "$opath" | grep -q '·'; then
+    rsp=$(row_setpath "$opath")
+    case "/${OWNER%/}/" in
+    *"/$rsp/") ;;
+    *) continue ;;
+    esac
   fi
 
   u=$(printf '%s' "$uuidcell" | grep -oE "$UUIDRE" | head -1)

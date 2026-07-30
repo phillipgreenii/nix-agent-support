@@ -162,6 +162,57 @@ MD
   echo "$output" | grep -qE '^  ok .*INTF-SOURCE'
 }
 
+# --- Multi-owner imports table (bead pg2-wr6lm.2, WS-0 item 4a) ----------------
+# An imports table MAY declare owners in MORE THAN ONE set — a deployment set that
+# implements one set's contracts AND follows the behavior-docs method declares rows
+# into both. This script resolves ONE seam per invocation, so a row naming a
+# DIFFERENT owner set MUST be skipped, not FAILed against the owner passed in.
+# Before the `row_setpath` seam filter such a table could not pass in EITHER
+# direction. WS-6's D5 column shift MUST preserve the filter — these tests are the
+# guard.
+
+multi_owner_table() {
+  # Two rows: one into the owner set passed to the script (set-path suffix-matches
+  # $OWNER), one into an unrelated set that this invocation is NOT resolving.
+  cat > "$IMPL/interfaces.md" <<MD
+# Interfaces — implementer
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+| \`INTF-SOURCE\` | \`some-repo · $(basename "$OWNER")\` | 11111111-1111-4111-8111-111111111111 |
+| \`INV-OTHER-1\` | \`other-repo · other/docs/behavior\` | 77777777-7777-4777-8777-777777777777 |
+MD
+}
+
+@test "multi-owner (#6): a row naming ANOTHER owner set is skipped, not FAILed" {
+  multi_owner_table
+  run resolve-imports "$OWNER" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  ok .*INTF-SOURCE'
+  # The other seam's row MUST NOT be classified at all on this invocation.
+  ! echo "$output" | grep -qE 'INV-OTHER-1'
+}
+
+@test "multi-owner (#6): the seam filter does NOT swallow a no-UUID row's WARN" {
+  # Placement guard for the filter: a malformed row (no owner UUID, not marked
+  # external) is owner-INDEPENDENT, so it MUST WARN even though its declared
+  # set-path names a set this invocation is not resolving.
+  cat > "$IMPL/interfaces.md" <<'MD'
+# Interfaces — implementer
+
+## External references
+
+| Name | Owner set-path | Owner UUID |
+| ---- | -------------- | ---------- |
+| `INV-ELSEWHERE-1` | `other-repo · other/docs/behavior` |  |
+MD
+  run resolve-imports "$OWNER" "$IMPL"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '^  WARN .*no owner UUID and is not marked external'
+}
+
 # --- Shipped corpus is genuinely exercised (#5) --------------------------------
 # The durable corpus/v3 fixtures ARE the agent-facing artifact; drive the real
 # evaluator over each so the corpus cannot silently rot while the gate stays
