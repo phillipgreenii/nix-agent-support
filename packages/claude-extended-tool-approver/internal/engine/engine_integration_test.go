@@ -2042,3 +2042,93 @@ func TestIntegration_SshVaultThroughChain(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_AgentConfigWritesAbstain pins ADR 0041 through the REAL composed
+// chain, which is the only place the decision can actually be verified.
+//
+// Two failure modes make a unit test on path-safety alone insufficient:
+//
+//   - Abstain means "continue to the next rule". A carve-out placed in a rule AHEAD
+//     of path-safety is a silent no-op — the chain continues and path-safety approves
+//     exactly as before. Only the composed chain shows that.
+//   - Even with path-safety abstaining, a LATER rule could re-approve the same write
+//     and restore the defect. Asserting the ENGINE's verdict is Abstain rules that out
+//     for the whole chain as composed by setup.RuleChain.
+//
+// The four paths in the "abstains" table are the four logged rows ADR 0041 cites
+// (132474, 273301, 39391, 57580) rewritten onto the synthetic workspace: two are
+// project-local, one is a sibling repo reached via WORKSPACE_ROOT, one is the
+// workspace root's own `.claude`. The "still approves" table is the blast radius —
+// ADR 0041's Context names the memory directories, skills, plugins and transcripts
+// as the collateral that made a subtree-wide denyWrite unusable, so each stays
+// approved. Reads are asserted separately: ADR 0041 covers writes only.
+func TestIntegration_AgentConfigWritesAbstain(t *testing.T) {
+	const workspace = "/Users/testuser/workspace"
+	t.Setenv("WORKSPACE_ROOT", workspace)
+	projectRoot := workspace + "/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	fileInput := func(tool, path string) *hookio.HookInput {
+		b, err := json.Marshal(map[string]string{"file_path": path, "content": "x", "old_string": "a", "new_string": "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &hookio.HookInput{ToolName: tool, CWD: projectRoot, ToolInput: b}
+	}
+
+	abstains := []struct {
+		name string
+		tool string
+		path string
+	}{
+		{"row 132474 shape: project settings.local.json", "Write", projectRoot + "/.claude/settings.local.json"},
+		{"row 57580 shape: sibling repo settings.local.json", "Edit", workspace + "/other-repo/.claude/settings.local.json"},
+		{"row 39391 shape: workspace-root settings.local.json", "Edit", workspace + "/.claude/settings.local.json"},
+		{"row 273301 shape: rules.md agent instructions", "Write", workspace + "/.workforests/set/repo/.claude/rules.md"},
+		{"project settings.json", "Write", projectRoot + "/.claude/settings.json"},
+		{"MultiEdit of settings.local.json", "MultiEdit", projectRoot + "/.claude/settings.local.json"},
+		{"Delete of settings.local.json", "Delete", projectRoot + "/.claude/settings.local.json"},
+	}
+	for _, tt := range abstains {
+		t.Run("abstains/"+tt.name, func(t *testing.T) {
+			got := eng.EvaluateHook(fileInput(tt.tool, tt.path))
+			if got.Decision != hookio.Abstain {
+				t.Errorf("%s %s: got %s (%s: %s), want Abstain — ADR 0041 leaves the verdict to Claude Code, and no rule in the chain may re-approve it",
+					tt.tool, tt.path, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	approves := []struct {
+		name string
+		path string
+	}{
+		{"skill under .claude/skills", projectRoot + "/.claude/skills/my-skill/SKILL.md"},
+		{"plugin manifest", projectRoot + "/.claude/plugins/foo/plugin.json"},
+		{"agent data file in .claude", projectRoot + "/.claude/scheduled_tasks.lock"},
+		{"ordinary project file", projectRoot + "/internal/foo.go"},
+	}
+	for _, tt := range approves {
+		t.Run("approves/"+tt.name, func(t *testing.T) {
+			got := eng.EvaluateHook(fileInput("Write", tt.path))
+			if got.Decision != hookio.Approve {
+				t.Errorf("Write %s: got %s (%s: %s), want Approve — ADR 0041 covers agent config/instruction only",
+					tt.path, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+
+	for _, p := range []string{
+		projectRoot + "/.claude/settings.local.json",
+		projectRoot + "/.claude/settings.json",
+		workspace + "/.workforests/set/repo/.claude/rules.md",
+	} {
+		t.Run("reads-unaffected/"+p, func(t *testing.T) {
+			got := eng.EvaluateHook(fileInput("Read", p))
+			if got.Decision != hookio.Approve {
+				t.Errorf("Read %s: got %s (%s: %s), want Approve — ADR 0041 covers writes only",
+					p, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}

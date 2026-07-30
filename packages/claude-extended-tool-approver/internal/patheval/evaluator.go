@@ -489,6 +489,21 @@ func (pe *PathEvaluator) resolvePath(path string) string {
 	return evalSymlinksWithFallback(path)
 }
 
+// CleanPath exposes cleanPath: the env-expanded, ~-expanded, cwd-relative-resolved,
+// lexically cleaned form of path, WITHOUT symlink resolution. Use it when a rule has
+// to reason about the file a request NAMES rather than the zone the file lands in
+// (Evaluate answers the latter). Returns "" when the path holds an unexpanded
+// variable.
+func (pe *PathEvaluator) CleanPath(path string) string {
+	return pe.cleanPath(path)
+}
+
+// ResolvePath exposes resolvePath: CleanPath plus symlink resolution. Returns ""
+// when the path cannot be resolved at all (broken symlink, unexpanded variable).
+func (pe *PathEvaluator) ResolvePath(path string) string {
+	return pe.resolvePath(path)
+}
+
 // IsDenyRead returns true if path is blocked for reading by sandbox.filesystem.denyRead,
 // accounting for allowRead overrides (allowRead takes precedence over denyRead).
 func (pe *PathEvaluator) IsDenyRead(path string) bool {

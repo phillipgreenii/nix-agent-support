@@ -138,7 +138,7 @@ is authoritative.
 8. **webfetch** -- WebFetch to allowed hosts
 9. **claudetools** -- AskQuestion, Glob, Grep, BashOutput (read-only approve), etc.
 10. **killshell** -- KillShell: approve terminating an agent-owned tracked background shell, else Ask
-11. **pathsafety** -- file operations with path-based policies
+11. **pathsafety** -- file operations with path-based policies; a WRITE to an agent-config or agent-instruction file that sits directly in a `.claude/` directory (`settings.json`, `settings.local.json`, `mcp.json`, `.mcp.json`, or any `*.md`) Abstains instead of approving, so the verdict stays with Claude Code (ADR 0041). Deeper paths -- `.claude/skills/**`, `.claude/plugins/**`, `.claude/projects/**`, `.claude/plans/**` -- and all READS are unaffected
 12. **mcp** -- MCP tool allowlist + read-only-verb approval (search/get/list/read/fetch/check); mutating verbs (create/edit/update/delete/…) abstain
 13. **primary-commit** -- Reject a `git commit` on the canonical clone's primary branch in an auto-approving (`bypassPermissions`) session; Abstain otherwise.
 14. **git** -- git subcommands
