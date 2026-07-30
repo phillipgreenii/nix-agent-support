@@ -128,7 +128,7 @@ to the integration suite, which is how `git-directory` shipped non-overridable h
 Rejects with unit coverage only. The list below is documentation and can lag; the code
 is authoritative.
 
-1. **config-rules** -- consumer `rules.json` basename allow/block
+1. **config-rules** -- consumer `rules.json` basename allow/block; an `approvedCommands` Approve is argument-blind and absolute for its leaf, so the whole early validator band below is skipped for that leaf (ADR 0040 -- see **approvedCommands** under "Consumer configuration" for the blast radius)
 2. **git-directory** -- Reject any read/write inside a `.git/` directory (Bash + file/search tools)
 3. **dangerous-commands** -- blanket Reject of inherently dangerous commands (`sudo`, `su`, `doas`, `dd`, `mkfs*`, `fdisk`, `parted`, `mount`, `umount`, `reboot`, `shutdown`, `halt`, `poweroff`, `wget`, `nc`/`ncat`/`netcat`, `telnet`, `sftp`)
 4. **path-traversal** -- Ask (human-in-the-loop) on a Bash command containing a `../..` traversal escape
@@ -164,7 +164,9 @@ or empty block leaves its rule at the safe base default (the command-aware
 
 ```jsonc
 {
-  "approvedCommands": ["..."], // flat basename allow (config-rules rule)
+  // flat basename allow (config-rules rule). ABSOLUTE for its leaf: skips the
+  // early security band, git-directory's hard deny included. See below + ADR 0040.
+  "approvedCommands": ["..."],
   "blockedCommands": ["..."], // flat basename block (Reject)
   "kubectl": {
     /* aliases, plugin verbs, dev-workspace scope */
@@ -201,6 +203,38 @@ or empty block leaves its rule at the safe base default (the command-aware
 }
 ```
 
+- **approvedCommands** / **blockedCommands**: the two TOP-LEVEL flat basename
+  lists, decided by the `config-rules` rule at slot 1 of the chain. A
+  `blockedCommands` basename → Reject; an `approvedCommands` basename → Approve.
+  (Not to be confused with the `monorepo` block's own nested `approvedCommands`,
+  described below.)
+
+  **An `approvedCommands` entry is ABSOLUTE for its leaf: it approves the command,
+  arguments included, and the early security band is not consulted for that leaf**
+  (ADR 0040). Adding a tool to `approvedCommands` is therefore a security decision
+  with a wider blast radius than the option name suggests — it exempts that command
+  from secret-path detection, from path-traversal screening, and from
+  `git-directory`'s hard deny, the last of which is otherwise **not**
+  user-overridable anywhere else in the chain. Nothing about the name hints that it
+  disables a non-overridable deny, which is why it is called out here.
+
+  **The bar for entry is "I trust this command with any argument it is handed."** A
+  command that takes arbitrary paths, reads files it is pointed at, or forwards its
+  operands to another program does not meet that bar and belongs outside the list.
+
+  **Removal is the escalation path.** If an allowlisted command turns out to be a
+  problem, pull it from `approvedCommands`; it then falls through to the normal
+  chain and its arguments are screened again. No code change is needed to apply
+  that mitigation.
+
+  The exemption is per-LEAF, not total, so three backstops survive and must not
+  regress: the engine's redirection check (`grazr > /etc/hosts` → Reject), a
+  sibling leaf judged on its own (`grazr && sudo rm -rf /` → Reject), and
+  `config-rules`' own withhold when the leaf carries inline env assignments
+  (`FOO=bar grazr build` → Abstain). See
+  [ADR 0040](../../docs/adr/0040-ceta-approved-commands-are-absolute.md) for the
+  decision and its full Consequences.
+
 - **ssh**: password-auth patterns / `sshpass` → Reject; a login user outside
   `allowedUsers` → Reject; an interactive session, an unrecognized remote
   command, a redirect/`tee`, or a `secretPathPatterns` match → Ask; a remote
@@ -211,8 +245,9 @@ or empty block leaves its rule at the safe base default (the command-aware
 - **curl**: a read-only method (GET/HEAD) to a base host or an
   `allowedDomainSuffixes` domain → Approve; a `domainMethods` domain whose list
   includes the request method → Approve; everything else → Abstain.
-- **monorepo**: an `approvedCommands` basename (after normalizing the executable
-  relative to the project root) → Approve, unless it carries an inline
+- **monorepo**: a `monorepo.approvedCommands` basename — this block's own nested
+  key, distinct from the top-level list above — after normalizing the executable
+  relative to the project root → Approve, unless it carries an inline
   assignment of one of its `dangerousEnvByWrapper` vars (→ Abstain).
 
 Background-shell tracking: on **PostToolUse** of a `run_in_background` Bash call, the resulting shell id is recorded (SQLite `background_shells` table, `internal/asklog`) so the **killshell** rule can verify ownership.

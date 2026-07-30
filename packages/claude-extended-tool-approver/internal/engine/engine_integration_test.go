@@ -1717,7 +1717,18 @@ func TestIntegration_HarnessChainMatchesProduction(t *testing.T) {
 // consumer decision still wins"). The A/B pairs below make its ARGUMENT-level reach
 // observable rather than implicit: `frobnicate .git/config` is a hard Reject while
 // the identical shape spelled with a consumer-approved executable is an Approve.
-// These rows PIN today's production behavior; they are not an endorsement of it.
+//
+// These rows are INTENDED behavior, not merely recorded: ADR 0040 (which resolves
+// pg2-xkugg) decides that an `approvedCommands` entry is ABSOLUTE for its leaf — it
+// approves the command, arguments included, and the early security band MUST NOT be
+// consulted for that leaf. The unit of trust in ceta is the COMMAND, not the
+// argument. The mitigation for a command whose arguments are a concern is to take it
+// OUT of the consumer's `approvedCommands`, not to weaken the mechanism for all of
+// them; see ADR 0040's Decision and its Consequences. So do not "fix" the
+// argument-blind rows below and do not reorder config-rules to lose to secrets or
+// git-directory — either change reverses a settled decision. (These comments formerly
+// hedged that the rows recorded production behavior and were "not an endorsement";
+// ADR 0040 resolved that hedge in favor of the behavior.)
 func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
@@ -1744,7 +1755,9 @@ func TestIntegration_ConfigRulesPrecedence(t *testing.T) {
 		{"consumer-approved executable outranks secrets", "grazr /Users/testuser/.ssh/id_rsa", hookio.Approve, "config-rules"},
 
 		// --- The backstops that DO survive that precedence. They are per-leaf and
-		// engine-level, so config-rules' Approve is scoped to the leaf it matched. ---
+		// engine-level, so config-rules' Approve is scoped to the leaf it matched.
+		// ADR 0040's Consequences names these three as load-bearing: they bound the
+		// blast radius of an `approvedCommands` entry and MUST NOT regress. ---
 		// A redirection is the SHELL writing, not the approved command; the engine
 		// evaluates redirections separately from the chain, so the write to a read-only
 		// path still Rejects (deciding module here is "engine", not a rule).
