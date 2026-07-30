@@ -1,5 +1,4 @@
 ---
-disable-model-invocation: true
 name: pull-request
 description: Push-and-open/update-PR landing handler (PR-0..PR-4). Invoked by the `integrate-branch` skill as its `pull-request` handler when the resolved strategy is "pull-request" — not normally invoked directly. Never auto-merges; keeps the branch and worktree.
 ---
@@ -12,6 +11,14 @@ existing one, then stop — landing the PR is a separate, explicit human action 
 this handler never performs. It is invoked by the `integrate-branch` skill (via the
 `Skill` tool, using the strategy string as the skill name) — do not invoke it
 directly unless you are deliberately replaying its flow outside the dispatcher.
+
+Because that dispatch goes through the `Skill` tool, this handler MUST NOT set
+`disable-model-invocation` in its frontmatter. The flag is enforced against the
+`Skill` tool and also drops the entry from the model-visible skill listing, so
+setting it breaks both halves of the dispatcher's Step 4 — its "is this strategy
+installed" check and the dispatch itself. It was set here once as a listing-token
+saving and reverted for exactly this reason (bd `pg2-okzl0`); the prose above is
+the only sanctioned deterrent against invoking a handler directly.
 
 Skills receive no typed arguments, so this handler **re-derives its own context
 from git** rather than trusting values handed to it — the same discipline
