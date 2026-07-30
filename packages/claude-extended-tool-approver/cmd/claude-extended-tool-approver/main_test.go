@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 )
@@ -596,31 +597,46 @@ func TestIntegration_InputProcessor_RewritesBashApprove(t *testing.T) {
 // flake: sandbox load makes the deadline fire MORE readily, and firing is what it
 // asserts.
 //
-// The mock `exec`s sleep rather than running it as a child, and that is
-// load-bearing, not style: CommandContext kills only the process it started, so a
-// forked sleep survives holding the inherited stdout pipe and Output() blocks
-// until it exits — measured at 30s here, ten times the deadline it is supposed to
-// be bounded by. Replacing `exec sleep` with plain `sleep` re-adds those 27s.
-// (That the SHIPPED deadline has the same hole is a production observation this
-// test does not attempt to fix; internal/inputproc's own kill test only escapes
-// it because a 50ms deadline lands before the shell can fork.)
+// The mock runs `sleep 30` as an ordinary child, and that too is load-bearing.
+// It used to `exec` it (pg2-iay90) because CommandContext killed only the process
+// it started, so a FORKED sleep survived holding the inherited stdout pipe and
+// Output() blocked until it exited — 30s against a 3s deadline. pg2-15uhy fixed
+// that in internal/inputproc by putting the processor in its own process group and
+// killing the group, with a WaitDelay backstop, so the fork is now the shape worth
+// running here: this is the only place a FORKING processor meets the SHIPPED 3s
+// deadline and the real process-group isolation, since internal/inputproc's tests
+// install their deadline through a package var that cannot cross a process
+// boundary.
+//
+// wallClockBound is therefore an assertion, not a comment: it is what the fix buys
+// end to end. Measured 3.02-3.06s over five runs, against a ceiling of the 3s
+// deadline plus a 250ms grace plus a spawn; the defect returned at the mock's full
+// 30s. 15s sits ~4x above the former and 2x below the latter, so neither sandbox
+// load nor a fast machine decides the verdict.
 //
 // It also pins the consequence that makes the 3s budget worth caring about: a
 // killed processor degrades to no rewrite, so the ORIGINAL command is what
 // Claude Code is told to run.
 func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) {
+	const wallClockBound = 15 * time.Second
+
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 
 	procScript := filepath.Join(dir, "mock-processor")
-	if err := os.WriteFile(procScript, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(procScript, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
 
 	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
+	start := time.Now()
 	result, stderr := runHookOnce(t, input)
+	elapsed := time.Since(start)
 
+	if elapsed > wallClockBound {
+		t.Errorf("hook returned after %v, want under %v: the shipped deadline killed the input processor but a process it forked kept the output pipe open, so every gated Bash tool call can outlast the budget\nstderr: %s", elapsed, wallClockBound, stderr)
+	}
 	if !inputProcDeadlineKilled(stderr) {
 		t.Fatalf("stderr does not report a deadline kill, so runHook's retry can no longer recognise one: reconcile inputProcDeadlineKilled with internal/inputproc's diagnostic\nstderr: %s", stderr)
 	}

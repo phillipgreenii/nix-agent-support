@@ -3,8 +3,12 @@ package inputproc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -17,6 +21,15 @@ import (
 // never returns still fails here, rather than wedging the package until `go
 // test`'s 10-minute panic.
 const testTimeout = 60 * time.Second
+
+// forkStallBound is the wall clock the forking-mock tests below must return
+// within. It sits deliberately far from BOTH outcomes it discriminates, so it is
+// a verdict about the code and never about the machine: with the defect present
+// Process() parked for the mock's whole `sleep 30` (measured 30.25s against a
+// 300ms deadline), while the bounded path costs the deadline plus waitGrace —
+// under 600ms for every mock here. Scheduling latency cannot stretch 600ms to 5s,
+// and no machine is fast enough to bring 30s under it.
+const forkStallBound = 5 * time.Second
 
 // TestMain installs testTimeout for the WHOLE package rather than per test, for
 // the same reason cmd/claude-extended-tool-approver's TestMain isolates
@@ -193,6 +206,9 @@ func TestProcess_NotConfigured_NoRewrite(t *testing.T) {
 // asserts a killed exec is REPORTABLE as a deadline, not just as changed=false.
 // It is load-proof — whether the deadline elapses during the spawn or during the
 // sleep, the observable outcome is the same — so it cannot become the next flake.
+// It says nothing about WHEN process() returns, and at 50ms it structurally
+// cannot: the kill lands before /bin/sh can fork, which is why the wall clock is
+// pinned by the two forking tests below and not here.
 func TestProcess_DeadlineKill_IsDistinguishable(t *testing.T) {
 	withTimeout(t, 50*time.Millisecond)
 	script := writeMockProcessor(t, "slow", `sleep 30; echo "wrapped $1"`)
@@ -207,6 +223,123 @@ func TestProcess_DeadlineKill_IsDistinguishable(t *testing.T) {
 	}
 	if rewritten != "git status" {
 		t.Errorf("process() = %q, want the original %q", rewritten, "git status")
+	}
+}
+
+// TestProcess_ForkedGrandchild_DeadlineBoundsWallClock is the regression test for
+// the defect the deadline did NOT buy (pg2-15uhy): the mock FORKS, so killing the
+// direct child leaves a grandchild holding the inherited stdout write end, and
+// cmd.Output() reads to an EOF that cannot arrive until that grandchild exits.
+// Measured before the fix: 30.25s against a 300ms deadline, ~100x the budget.
+//
+// The 300ms deadline is chosen, not inherited: /bin/sh needs 20-180ms here to
+// start and fork, so at the 50ms TestProcess_DeadlineKill_IsDistinguishable uses
+// the kill lands BEFORE the fork and the stall cannot be reproduced at all
+// (measured: 51ms, indistinguishable from a pass). A mock that forks after the
+// deadline makes this test vacuous rather than flaky, which is why the
+// deterministic half of the reproduction is the test below.
+func TestProcess_ForkedGrandchild_DeadlineBoundsWallClock(t *testing.T) {
+	withTimeout(t, 300*time.Millisecond)
+	script := writeMockProcessor(t, "forker", "sleep 30 &\nwait")
+	t.Setenv(envKey, script)
+
+	start := time.Now()
+	rewritten, changed, err := process("git status")
+	elapsed := time.Since(start)
+
+	if elapsed > forkStallBound {
+		t.Errorf("process() returned after %v, want under %v: the %v deadline killed the processor but a process it forked kept the output pipe open, so the budget bounded nothing", elapsed, forkStallBound, timeout)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("process() err = %v, want an error matching context.DeadlineExceeded", err)
+	}
+	if changed {
+		t.Error("process() changed = true, want false when the exec is killed")
+	}
+	if rewritten != "git status" {
+		t.Errorf("process() = %q, want the original %q", rewritten, "git status")
+	}
+}
+
+// TestProcess_ForkedGrandchild_IsBoundedAndReaped is the deterministic half: the
+// processor exits 0 WITHIN its budget and leaves a background process holding the
+// output pipe, so the deadline is not what has to save us and there is no race
+// with the fork — the mock's `echo` cannot run until after the `&`, and
+// cmd.Output() cannot return until the direct child has exited. Measured before
+// the fix: 30.21s under a 60s deadline that never fired, with the rewrite applied
+// at the end.
+//
+// It pins both halves of the decision:
+//   - BOUNDED, and fail-safe rather than best-effort — the rewrite is DISCARDED.
+//     Whatever arrived before the pipe was force-closed may be a PREFIX of what
+//     the processor meant to say, and a truncated rewrite is a different command
+//     than the one it approved. Declining degrades to running the original, which
+//     is the same degradation a deadline kill already has.
+//   - REAPED: the forked process is killed, not abandoned. Asserted on the pid the
+//     mock records, because "no leak" is otherwise invisible — the stall it caused
+//     is gone either way.
+func TestProcess_ForkedGrandchild_IsBoundedAndReaped(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	script := writeMockProcessor(t, "backgrounder", fmt.Sprintf("sleep 30 &\necho $! > %s\necho \"wrapped $1\"", pidFile))
+	t.Setenv(envKey, script)
+
+	start := time.Now()
+	rewritten, changed, err := process("git status")
+	elapsed := time.Since(start)
+
+	if elapsed > forkStallBound {
+		t.Fatalf("process() returned after %v, want under %v: the processor exited within its budget but a process it forked kept the output pipe open, so nothing bounded the read", elapsed, forkStallBound)
+	}
+	if err == nil {
+		t.Error("process() err = nil, want the lingering output pipe reported: a discarded rewrite must not be silent")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("process() err = %v, want an error that does NOT match context.DeadlineExceeded: the deadline never fired here, and cmd/claude-extended-tool-approver's runHook retries on that signature", err)
+	}
+	if changed {
+		t.Error("process() changed = true, want false: output read from a pipe closed under a forked holder may be truncated, and a truncated rewrite is a different command")
+	}
+	if rewritten != "git status" {
+		t.Errorf("process() = %q, want the original %q", rewritten, "git status")
+	}
+
+	requireProcessGone(t, readPID(t, pidFile))
+}
+
+// readPID reads the pid the mock recorded. It is unconditional, not best-effort:
+// the mock writes the file BEFORE the line that ends it, and process() cannot
+// return until the direct child has exited, so an absent file means the mock did
+// not run as written rather than that the test was unlucky.
+func readPID(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("mock processor did not record the pid it forked, so nothing can be asserted about it: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("mock processor recorded %q, want a pid: %v", raw, err)
+	}
+	return pid
+}
+
+// requireProcessGone asserts pid is neither alive nor a zombie, using kill(pid, 0)
+// semantics: no signal is delivered, and ESRCH means the process is both dead and
+// reaped. It POLLS because SIGKILL delivery and the reap of an orphan reparented
+// to init are both asynchronous — so a single check would race the kill it is
+// verifying. Cost is milliseconds when the process was killed and the full bound
+// only when the assertion is about to fail anyway.
+func requireProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(forkStallBound)
+	for {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d the processor forked is still present after %v: it was abandoned rather than killed, so every gated Bash tool call can leak one", pid, forkStallBound)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

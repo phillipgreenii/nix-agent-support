@@ -46,6 +46,13 @@ in
         Command to rewrite bash commands before execution.
         Called as: <command> "<bash-command>".
         Exit 0 + stdout = rewritten command, exit 1+ = no rewrite.
+
+        It runs in a process group of its own with a 3s budget; on expiry the
+        whole group is killed and the command is left unrewritten. A process the
+        processor forks MUST NOT keep stdout open after the processor exits: the
+        read is cut off 250ms later, the possibly-truncated rewrite is discarded
+        (again leaving the command unrewritten), and the forked process is killed.
+        Every outcome is reported on stderr; none of them block the tool call.
       '';
     };
     extraReadWriteRoots = lib.mkOption {
