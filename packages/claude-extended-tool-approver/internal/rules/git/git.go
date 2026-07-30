@@ -103,6 +103,15 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 // classify returns the base verdict for a git subcommand, independent of any
 // `-C` path-safety concern (which Evaluate layers on top via chdirSafe).
 func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
+	// push: the force / remote-ref-destroying spellings are REJECTED (pg2-bohpm,
+	// see pushVerdict for the ruling and the rationale). Every other push falls
+	// through to the modifying-subcommand Approve below, so ordinary pushes and
+	// same-branch --force-with-lease keep their verdict.
+	if subcmd == "push" {
+		if res, ok := r.pushVerdict(rest); ok {
+			return res
+		}
+	}
 	if isDestructive(subcmd, rest) {
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
@@ -288,25 +297,18 @@ func hasSequenceEditorEnvVar(pc cmdparse.ParsedCommand) bool {
 	return false
 }
 
+// isDestructive reports whether a subcommand warrants the shared destructive
+// Ask. It is `git branch -D` ONLY: pg2-bohpm split the `git push` cases out to
+// pushVerdict, which REJECTS them, and `branch -D` MUST keep its present Ask
+// because re-classifying it is a separate, still-unreviewed question.
+//
+// The `branch` case MUST stay in this function to keep that Ask. Removing it
+// does not make `git branch -D` unhandled — it makes it fall through to
+// modifyingSubcommands["branch"] below and become an APPROVE, which is strictly
+// worse than the Ask it replaces. The exact-token `-D` test is likewise
+// deliberate: widening it (e.g. to a clustered-short scan) would change this
+// subcommand's verdicts, which is out of scope here.
 func isDestructive(subcmd string, args []string) bool {
-	if subcmd == "push" {
-		hasForce := false
-		hasForceWithLease := false
-		for _, a := range args {
-			switch a {
-			case "--force", "-f":
-				hasForce = true
-			case "--force-with-lease":
-				hasForceWithLease = true
-			}
-		}
-		if hasForce {
-			return true
-		}
-		if hasForceWithLease {
-			return isPushCrossBranch(args)
-		}
-	}
 	if subcmd == "branch" {
 		for _, a := range args {
 			if a == "-D" {
@@ -317,49 +319,184 @@ func isDestructive(subcmd string, args []string) bool {
 	return false
 }
 
-// isPushCrossBranch checks if a git push has a cross-branch refspec (local:different).
-// Returns true (destructive) if the refspec pushes to a different remote branch name.
-// Returns false (safe) if remote is "origin" or absent, and branch names match or no refspec given.
-func isPushCrossBranch(args []string) bool {
-	// Extract positional args (non-flag) from push args
-	var positional []string
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
-		positional = append(positional, a)
-	}
-	// positional: [remote] [refspec...]
-	// If remote is present and not "origin", treat as potentially unsafe
-	remote := ""
-	refspec := ""
-	switch len(positional) {
-	case 0:
-		// git push --force-with-lease (defaults)
-		return false
-	case 1:
-		// Could be remote or refspec; if it contains ":", it's a refspec
-		if strings.Contains(positional[0], ":") {
-			refspec = positional[0]
-		} else {
-			remote = positional[0]
-		}
-	default:
-		remote = positional[0]
-		refspec = positional[1]
-	}
-	// If remote is specified and not "origin", be cautious — treat as destructive
-	if remote != "" && remote != "origin" {
-		return true
-	}
-	// Check refspec for cross-branch push
-	if refspec != "" && strings.Contains(refspec, ":") {
-		parts := strings.SplitN(refspec, ":", 2)
-		local := parts[0]
-		remoteBranch := parts[1]
-		if local != remoteBranch {
-			return true
+// Long-flag ABBREVIATION MINIMUMS for the `git push` options pushVerdict gates.
+// git's parse-options accepts any UNAMBIGUOUS PREFIX of a long option, so
+// `--force-w`, `--del` and `--m` are all real spellings of flags this rule must
+// see; cmdparse.HasLongFlag matches one exact name by design and documents that
+// a caller needing abbreviations must ask for each spelling.
+//
+// Each value is the SHORTEST prefix real git accepted, MEASURED with `git push
+// <spelling> origin main` against git 2.54.0 on 2026-07-30; one character
+// shorter, git answered `error: ambiguous option`. Re-measure before changing
+// one. A future git option that makes a listed prefix ambiguous cannot cause a
+// false Reject — git refuses the ambiguous spelling itself — it only makes the
+// extra spelling dead.
+const (
+	minAbbrevForce          = len("force")   // `--force-` is ambiguous: --force-with-lease / --force-if-includes
+	minAbbrevForceWithLease = len("force-w") // same ambiguity one character shorter
+	minAbbrevDelete         = len("de")      // `--d` is ambiguous: --delete / --dry-run
+	minAbbrevMirror         = len("m")       // no other `git push` option starts with m
+)
+
+// hasPushLongFlag reports whether args carries long flag name in any spelling
+// git would accept — the full name, or an unambiguous prefix down to minLen
+// characters — and returns the value of the `=`-glued form (see
+// cmdparse.HasLongFlag for what an empty value means). It asks
+// cmdparse.HasLongFlag once per candidate spelling, LONGEST FIRST, so the glued
+// value is read from the longest spelling actually present.
+//
+// A `--no-<name>` token does not match, which is correct: `--no-force` turns
+// force off.
+func hasPushLongFlag(args []string, name string, minLen int) (string, bool) {
+	for n := len(name); n >= minLen; n-- {
+		if v, ok := cmdparse.HasLongFlag(args, name[:n]); ok {
+			return v, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// pushShortFlagTokens returns args with every short-flag cluster truncated at
+// its first `o` — `git push`'s ONLY short option that takes a value (`-o <opt>`,
+// and glued as `-oci.skip`, measured accepted on git 2.54.0). Everything after
+// that `o` is the option's VALUE, not more flag letters, so scanning it would let
+// a value that happens to contain `f` or `d` (`-oconfidential`) manufacture a
+// false force/delete Reject — the same false-positive class pg2-5b901 records,
+// arrived at through flag arity instead of command text. cmdparse.HasShortFlag
+// documents that it knows no arity and pushes exactly this question to its
+// caller.
+//
+// `--`, long flags and a lone `-` are returned untouched so HasShortFlag's own
+// end-of-options and operand handling still applies.
+func pushShortFlagTokens(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' {
+			if o := strings.IndexByte(a, 'o'); o > 0 {
+				a = a[:o]
+			}
+		}
+		out[i] = a
+	}
+	return out
+}
+
+// pushVerdict returns the verdict for a `git push` — rest being the args AFTER
+// the `push` subcommand — and false when the push is none of the prohibited
+// shapes, in which case classify lets it fall through to the ordinary modifying
+// Approve.
+//
+// WHY REJECT AND NOT ASK. Operator ruling, 2026-07-30: an agent must never
+// force-push. Until pg2-bohpm the rule matched `--force`/`-f` by exact token
+// equality, so every other spelling of the SAME operation reached
+// modifyingSubcommands["push"] and was approved outright — measured `allow` for
+// `git push origin +main`, `git push origin :main`, `git push
+// --force-with-lease=other origin main:other` and `git push -fu origin main`.
+// Ask cannot implement that ruling: it asks a person a question the ruling has
+// already answered, and an Ask on the two visible spellings beside four silent
+// approvals teaches its own bypass — the agent is told "--force is prohibited"
+// and retries with `+main`. Reject hands the reason back to the agent and leaves
+// no approvable spelling of the operation.
+//
+// WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling. Needing one force push
+// is not one — publishing is operator-authorized anyway, so the operator can run
+// it themselves; relaxing any of these to Ask requires the ruling to change.
+//
+// TEXT VS PARSED: every test here reads PARSED tokens (post-unquote
+// cmdparse.ParsedCommand.Args) and the rule runs only when
+// isGitExecutable(pc.Executable), so `--force` inside a commit message, a
+// heredoc body or a `bd comment` body is TEXT and never matches. That is the
+// pg2-5b901 failure mode this deliberately avoids; do not reintroduce a
+// strings.Contains over command text.
+func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
+	reject := func(reason string) (hookio.RuleResult, bool) {
+		return hookio.RuleResult{Decision: hookio.Reject, Reason: reason, Module: r.Name()}, true
+	}
+	shorts := pushShortFlagTokens(rest)
+	refspecs := cmdparse.ClassifyPushRefspecs(rest)
+
+	// FORCE — the ruling itself. All three spellings are the same operation: the
+	// `+` refspec prefix forces just that refspec, and `-f`/`--force` force every
+	// one. ClassifyPushRefspecs deliberately does not reflect the flags, and
+	// HasShortFlag deliberately does not match longs, so all three are asked.
+	if _, ok := hasPushLongFlag(rest, "force", minAbbrevForce); ok {
+		return reject("git: force-push is prohibited — an agent must never force-push (operator ruling 2026-07-30). Every spelling is refused (--force, -f, a clustered -f…, and a '+' refspec prefix), so retrying with another one will not work; use --force-with-lease on the SAME branch, or hand the push to the operator")
+	}
+	if cmdparse.HasShortFlag(shorts, 'f') {
+		return reject("git: force-push is prohibited — -f is --force (operator ruling 2026-07-30). Every spelling is refused, including a clustered -f… such as -fu and a '+' refspec prefix; use --force-with-lease on the SAME branch, or hand the push to the operator")
+	}
+	for _, rs := range refspecs {
+		if rs.Force {
+			return reject("git: force-push is prohibited — the '+' prefix in refspec " + rs.Raw + " IS a force (operator ruling 2026-07-30). Drop the '+'; if the push then fails as non-fast-forward, rebase, or use --force-with-lease on the SAME branch")
+		}
+	}
+
+	// --mirror deletes every remote ref that is absent locally, so it is a
+	// remote-ref delete of unbounded width — strictly broader than the
+	// single-branch delete below, and never a legitimate agent operation here.
+	if _, ok := hasPushLongFlag(rest, "mirror", minAbbrevMirror); ok {
+		return reject("git: git push --mirror is prohibited — it DELETES every remote ref absent locally, an unbounded remote-ref deletion (pg2-bohpm, 2026-07-30). Push the one ref you mean by name")
+	}
+
+	// REMOTE-REF DELETE. Not force-push, so outside the literal ruling, but it
+	// destroys a remote ref, which for another clone may be the only copy, and
+	// nothing an agent can do restores it. Rejected for the same reason the flag
+	// spellings are: pinning only the `:main` refspec form and leaving `--delete`
+	// open would teach the flag form as the bypass. Both are the same operation.
+	// Revisiting this needs an operator ruling on remote-ref deletion, not a
+	// workflow that finds it inconvenient — deleting a merged remote branch is
+	// the platform's job (GitHub does it on merge), not a push's.
+	if _, ok := hasPushLongFlag(rest, "delete", minAbbrevDelete); ok {
+		return reject("git: deleting a remote ref is prohibited — --delete destroys a ref that may be another clone's only copy (pg2-bohpm, 2026-07-30). Every spelling is refused (--delete, -d, and a ':ref' refspec); let the platform delete a merged branch, or hand it to the operator")
+	}
+	if cmdparse.HasShortFlag(shorts, 'd') {
+		return reject("git: deleting a remote ref is prohibited — -d is --delete (pg2-bohpm, 2026-07-30). Every spelling is refused; let the platform delete a merged branch, or hand it to the operator")
+	}
+	for _, rs := range refspecs {
+		if rs.Delete {
+			return reject("git: deleting a remote ref is prohibited — the empty source in refspec " + rs.Raw + " IS a delete (pg2-bohpm, 2026-07-30). Every spelling is refused; let the platform delete a merged branch, or hand it to the operator")
+		}
+	}
+
+	// --force-with-lease: CROSS-BRANCH is Reject, SAME-BRANCH stays approvable.
+	//
+	// Cross-branch is a Reject on measured evidence (2026-07-30): pushing `main`
+	// onto a divergent `other` with a FRESH lease exited 0 with `+ d3167d6...3cdea6c
+	// main -> other (forced update)` and DESTROYED the unique commit on `other`.
+	// The lease only pins the ref it NAMED, so it gives zero protection against
+	// naming the wrong branch — the safety property the same-branch idiom relies on
+	// is simply absent here, which is why this half cannot stay an Ask while the
+	// force spellings above are Rejects.
+	//
+	// Same-branch --force-with-lease is the correct post-rebase idiom and is in
+	// daily use, so it MUST fall through to Approve.
+	//
+	// SEMANTIC TRAP: in `--force-with-lease=<refname>:<expect>` the colon separates
+	// the ref from the EXPECTED OBJECT ID, not local from remote. So
+	// `--force-with-lease=main:abc123 origin main` is a SAME-branch push carrying an
+	// explicit lease — the safest form there is. The lease VALUE is therefore
+	// deliberately NOT read here; cross-branch-ness comes only from the push
+	// REFSPEC OPERANDS (`main:other`), which is what ClassifyPushRefspecs returns.
+	if _, ok := hasPushLongFlag(rest, "force-with-lease", minAbbrevForceWithLease); ok {
+		for _, rs := range refspecs {
+			// SameRef treats `HEAD:main` as cross-branch: HEAD cannot be resolved
+			// from a token, and for a gate the safe reading is cross-branch. Name the
+			// branch (`main`, or `main:main`) to get the same-branch verdict.
+			if !rs.SameRef() {
+				return reject("git: --force-with-lease onto a DIFFERENT remote branch is prohibited — refspec " + rs.Raw + " pushes to another ref, and the lease protects only the ref it NAMES (measured 2026-07-30: it force-updated the destination and destroyed its unique commit). Push to the same branch name instead")
+			}
+		}
+		// A non-origin remote keeps the Ask it has today. The lease is same-branch,
+		// so the ruling's Reject does not reach it, but nothing about pg2-bohpm
+		// justifies LOOSENING an existing Ask either — this rule's changes are
+		// one-directional.
+		if remote, _ := cmdparse.FirstOperand(rest); remote != "" && remote != "origin" {
+			return hookio.RuleResult{
+				Decision: hookio.Ask,
+				Reason:   "git: --force-with-lease to a remote other than origin (" + remote + ")",
+				Module:   r.Name(),
+			}, true
+		}
+	}
+	return hookio.RuleResult{}, false
 }

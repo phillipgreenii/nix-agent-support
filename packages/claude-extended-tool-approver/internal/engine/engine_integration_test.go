@@ -849,13 +849,14 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// git / kubectl / safe-commands / curl, so a decisive Approve would
 		// short-circuit them. If the safe-preserve verdict were an unconditional
 		// Approve, prefixing any command with a benign PATH extension would auto-
-		// approve it (measured: `git push --force` ask->allow, `tee /etc/hosts`,
+		// approve it (measured: `git push --force` reject->allow — it was ask->allow
+		// before pg2-bohpm made force-push a Reject — `tee /etc/hosts`,
 		// `kubectl delete ns prod` and `curl http://…` abstain->allow). The Approve is
 		// therefore scoped to leaves where the assignment IS the whole leaf; beside a
 		// real command the safe assignment is transparent and the command keeps its own
 		// verdict. Each pair below asserts the prefixed form matches the bare form.
-		{"anti-bypass destructive git bare", "git push --force origin main", hookio.Ask},
-		{"anti-bypass destructive git prefixed", `PATH="$PATH:/x" git push --force origin main`, hookio.Ask},
+		{"anti-bypass destructive git bare", "git push --force origin main", hookio.Reject},
+		{"anti-bypass destructive git prefixed", `PATH="$PATH:/x" git push --force origin main`, hookio.Reject},
 		{"anti-bypass protected write bare", "tee /etc/hosts", hookio.Abstain},
 		{"anti-bypass protected write prefixed", `PATH="$PATH:/x" tee /etc/hosts`, hookio.Abstain},
 		{"anti-bypass kubectl bare", "kubectl delete ns prod", hookio.Abstain},
@@ -866,7 +867,7 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// let its verified-safe Approve leak onto a SIBLING leaf. The fold is
 		// most-restrictive-wins across leaves, so the command keeps its own verdict —
 		// each compound row below must still equal its bare form above.
-		{"anti-bypass destructive git compound", `PATH="$PATH:/x" && git push --force origin main`, hookio.Ask},
+		{"anti-bypass destructive git compound", `PATH="$PATH:/x" && git push --force origin main`, hookio.Reject},
 		{"anti-bypass protected write compound", `PATH="$PATH:/x" && tee /etc/hosts`, hookio.Abstain},
 		{"anti-bypass kubectl compound", `PATH="$PATH:/x" && kubectl delete ns prod`, hookio.Abstain},
 		{"anti-bypass curl compound", `PATH="$PATH:/x" && curl http://evil.example.com`, hookio.Abstain},

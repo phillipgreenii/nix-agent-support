@@ -222,7 +222,7 @@ func TestEnvVars_AskVars_PreserveForm_Approve(t *testing.T) {
 // the safe-preserve verdict were an unconditional Approve, prefixing ANY command
 // with a benign PATH extension would auto-approve it — measured on this tree:
 //
-//	git push --force origin main       ask     -> allow
+//	git push --force origin main       reject  -> allow
 //	tee /etc/hosts                     abstain -> allow
 //	kubectl delete ns prod             abstain -> allow
 //	curl http://evil.example.com       abstain -> allow

@@ -178,8 +178,10 @@ func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 	if got := r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD)); got.Decision != hookio.Ask {
 		t.Errorf("git -C /etc reset --hard: got %s, want ask (unchanged)", got.Decision)
 	}
-	if got := r.Evaluate(chdirInput("git -C /etc push --force", projectCWD)); got.Decision != hookio.Ask {
-		t.Errorf("git -C /etc push --force: got %s, want ask (unchanged)", got.Decision)
+	// push --force is a Reject since pg2-bohpm (was Ask); either way the -C gate
+	// must leave it alone.
+	if got := r.Evaluate(chdirInput("git -C /etc push --force", projectCWD)); got.Decision != hookio.Reject {
+		t.Errorf("git -C /etc push --force: got %s, want reject (unchanged by the -C gate)", got.Decision)
 	}
 	// tag -> Reject even with an unsafe -C dir.
 	if got := r.Evaluate(chdirInput("git -C /etc tag v1.0", projectCWD)); got.Decision != hookio.Reject {
