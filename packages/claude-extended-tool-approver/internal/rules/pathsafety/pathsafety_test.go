@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -427,14 +428,165 @@ func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
 	}
 }
 
+// CASE FOLDING (pg2-2ng80). isAgentConfigPath originally folded case in ONE of its
+// three parts — the `.md` extension — and compared the directory name and the config
+// basenames exactly. On this machine that made the control bypassable rather than
+// merely imprecise: the home volume is APFS and case-INSENSITIVE, verified by
+// creating `.claude/settings.local.json` and reading the same bytes back through
+// `.CLAUDE/settings.local.json` and `.claude/Settings.Local.json`. So a case-varied
+// spelling named the SAME real agent-config file, matched nothing, fell through to
+// the CanWrite() approve, and was auto-approved.
+//
+// MATCHING AND NON-MATCHING SHAPES SHARE ONE TABLE ON PURPOSE. The fix has two
+// halves that pull in opposite directions — make the predicate case-insensitive,
+// and keep it bounded to the IMMEDIATE children of `.claude` — and each is easy to
+// satisfy while regressing the other (folding by prefix-matching `.claude` anywhere
+// in the path would pass every Abstain row here and silently start blocking the
+// memory directories, skills, plugins and transcripts ADR 0041's Context keeps in
+// scope for writing). Splitting these rows into two tests would let a later reader
+// fix one and break the other. Every `want: Approve` row is therefore a case-varied
+// path exactly ONE level deeper than `.claude`, or a directory that merely resembles
+// `.claude`.
+func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
+	const project = "/home/user/project"
+	cases := []struct {
+		name string
+		path string
+		want hookio.Decision
+	}{
+		// --- part 1 of the predicate: the PARENT DIRECTORY name ---
+		{"dir .CLAUDE + config basename", project + "/.CLAUDE/settings.local.json", hookio.Abstain},
+		{"dir .CLAUDE + one level deeper", project + "/.CLAUDE/skills/x.md", hookio.Approve},
+		{"dir .Claude + config basename", project + "/.Claude/settings.json", hookio.Abstain},
+		{"dir .Claude + one level deeper", project + "/.Claude/plugins/foo/plugin.json", hookio.Approve},
+
+		// --- part 2 of the predicate: the config BASENAME set ---
+		{"basename Settings.Local.json", project + "/.claude/Settings.Local.json", hookio.Abstain},
+		{"basename SETTINGS.JSON", project + "/.claude/SETTINGS.JSON", hookio.Abstain},
+		{"basename MCP.json", project + "/.claude/MCP.json", hookio.Abstain},
+		{"basename .MCP.JSON", project + "/.claude/.MCP.JSON", hookio.Abstain},
+		{"basename SETTINGS.JSON one level deeper", project + "/.claude/agents/SETTINGS.JSON", hookio.Approve},
+
+		// --- part 3 of the predicate: the `.md` EXTENSION (folded before the fix too;
+		// pinned here so the three parts are asserted side by side and cannot drift) ---
+		{"ext RULES.MD", project + "/.claude/RULES.MD", hookio.Abstain},
+		{"ext Claude.Md", project + "/.claude/Claude.Md", hookio.Abstain},
+		{"ext DEPLOY.MD one level deeper", project + "/.claude/commands/DEPLOY.MD", hookio.Approve},
+
+		// --- every part varied at once ---
+		{"all-caps dir and config basename", project + "/.CLAUDE/SETTINGS.LOCAL.JSON", hookio.Abstain},
+		{"all-caps dir and instruction basename", project + "/.CLAUDE/CLAUDE.MD", hookio.Abstain},
+		{"all-caps dir, one level deeper", project + "/.CLAUDE/SKILLS/MY-SKILL/SKILL.MD", hookio.Approve},
+
+		// --- folding MUST NOT turn into fuzzy matching: a directory that merely
+		// resembles `.claude` is still a different directory ---
+		{"dir claude without the dot", project + "/claude/settings.json", hookio.Approve},
+		{"dir .claudex", project + "/.claudex/settings.json", hookio.Approve},
+		{"dir .claude.bak", project + "/.claude.bak/settings.json", hookio.Approve},
+	}
+	for _, tc := range cases {
+		for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
+			t.Run(tc.name+"/"+tool, func(t *testing.T) {
+				pe := patheval.New(project)
+				r := New(pe)
+				// Both directions need this precondition: an Abstain only proves the
+				// carve-out fired if the zone would otherwise have approved, and an
+				// Approve only proves the fold did not widen if the zone permits it.
+				if !pe.Evaluate(tc.path).CanWrite() {
+					t.Fatalf("precondition: %s is not in a writable zone, so this case cannot distinguish the carve-out from zone classification", tc.path)
+				}
+				got := r.Evaluate(writeInput(tool, tc.path, project))
+				if got.Decision != tc.want {
+					t.Errorf("%s %s: got %s (%s), want %s", tool, tc.path, got.Decision, got.Reason, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// CRITERION: all three parts of the predicate AGREE on case handling. Asserted
+// directly on the predicate (not through Evaluate) so the agreement is visible as
+// one property rather than inferred from end-to-end verdicts, and with the bounded
+// cases in the SAME table for the reason given above.
+func TestIsAgentConfigPath_AllThreePartsFoldCase(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"baseline, all lowercase", "/p/.claude/settings.json", true},
+		{"part 1 varied: parent dir", "/p/.CLAUDE/settings.json", true},
+		{"part 2 varied: config basename", "/p/.claude/SETTINGS.JSON", true},
+		{"part 3 varied: .md extension", "/p/.claude/rules.MD", true},
+		{"all three varied at once", "/p/.CLAUDE/CLAUDE.MD", true},
+
+		// The depth-1 bound and the exact-name requirement survive the fold.
+		{"bound: one level deeper, case varied", "/p/.CLAUDE/skills/SKILL.MD", false},
+		{"bound: dir merely resembles .claude", "/p/.claudex/settings.json", false},
+		{"bound: non-config, non-md basename", "/p/.claude/scheduled_tasks.lock", false},
+		{"empty path", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAgentConfigPath(tc.path); got != tc.want {
+				t.Errorf("isAgentConfigPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// THE FOLD PRIMITIVE IS strings.EqualFold, NOT strings.ToLower — and that is a
+// correctness requirement, not a style choice. EqualFold implements Unicode simple
+// case FOLDING; ToLower implements simple case MAPPING; the two disagree, and the
+// disagreement is reachable on this filesystem. Verified on this machine's APFS
+// volume: after `echo real > .claude/settings.local.json`,
+// `cat .claude/ſettings.local.json` (U+017F LATIN SMALL LETTER LONG S) prints
+// `real` — the filesystem folds `ſ` to `s`. EqualFold matches that spelling; ToLower
+// leaves the `ſ` untouched and MISSES it, which is the pg2-2ng80 bypass one codepoint
+// over: a path that names the genuine agent-config file, matches nothing, falls
+// through to CanWrite() and is auto-approved.
+//
+// This test fails if the predicate is ever "simplified" to a ToLower/lowercased-key
+// form.
+func TestPathSafety_WriteAgentConfig_FoldsNotMerelyLowercases(t *testing.T) {
+	const project = "/home/user/project"
+	const canonical = "settings.local.json"
+	const witness = "ſettings.local.json" // ſettings.local.json
+
+	// Pin what makes this witness decisive, so a Go stdlib change cannot turn the
+	// test into a silent tautology.
+	if !strings.EqualFold(witness, canonical) {
+		t.Fatalf("premise: EqualFold(%q, %q) must be true for this witness to exercise the fold", witness, canonical)
+	}
+	if strings.ToLower(witness) == canonical {
+		t.Fatalf("premise: ToLower(%q) must NOT equal %q, or the witness cannot distinguish folding from lowercasing", witness, canonical)
+	}
+
+	p := project + "/.claude/" + witness
+	pe := patheval.New(project)
+	r := New(pe)
+	if !pe.Evaluate(p).CanWrite() {
+		t.Fatalf("precondition: %s is not in a writable zone, so this case cannot distinguish the carve-out from zone classification", p)
+	}
+	got := r.Evaluate(writeInput("Write", p, project))
+	if got.Decision != hookio.Abstain {
+		t.Errorf("Write %s: got %s (%s), want abstain — the predicate must FOLD case (strings.EqualFold), not merely lowercase", p, got.Decision, got.Reason)
+	}
+}
+
 // READS ARE UNAFFECTED (ADR 0041's Decision: "Reads are unaffected — this covers
-// writes only"). The Read branch is untouched.
+// writes only"). The Read branch is untouched — including by the pg2-2ng80 case
+// fold, so the case-varied spellings are listed here too.
 func TestPathSafety_ReadAgentConfig_StillApprove(t *testing.T) {
 	const project = "/home/user/project"
 	for _, p := range []string{
 		project + "/.claude/settings.local.json",
 		project + "/.claude/settings.json",
 		project + "/.claude/rules.md",
+		project + "/.CLAUDE/settings.local.json",
+		project + "/.Claude/settings.json",
+		project + "/.claude/Settings.Local.json",
+		project + "/.claude/RULES.MD",
 	} {
 		pe := patheval.New(project)
 		r := New(pe)

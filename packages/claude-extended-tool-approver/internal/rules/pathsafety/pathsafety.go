@@ -10,6 +10,10 @@ import (
 
 // agentConfigDir is the directory name whose immediate children this package treats
 // as agent configuration / instruction (see agentConfigBasenames, isAgentConfigPath).
+//
+// Written in its canonical lowercase spelling. isAgentConfigPath compares against it
+// with strings.EqualFold, so the spelling here is documentation rather than a
+// matching constraint.
 const agentConfigDir = ".claude"
 
 // agentConfigBasenames is the CLOSED set of agent-CONFIG basenames that, sitting
@@ -24,6 +28,13 @@ const agentConfigDir = ".claude"
 // `sandbox.filesystem.denyWrite` mechanism could not express this decision. Matching
 // only the immediate children of `.claude` keeps every one of those out of scope,
 // since each lives a directory deeper.
+//
+// Membership is tested by a strings.EqualFold SCAN, not by a hash lookup, because the
+// match must be case-insensitive (see isAgentConfigPath) and no single normalization
+// of the candidate reproduces EqualFold's folding. The set has four entries and is
+// consulted once per file-tool call, so the scan is free. Keys are written in their
+// canonical lowercase spelling for readability; EqualFold makes that a convention,
+// not a correctness requirement.
 var agentConfigBasenames = map[string]bool{
 	"settings.json":       true,
 	"settings.local.json": true,
@@ -34,11 +45,12 @@ var agentConfigBasenames = map[string]bool{
 // isAgentConfigPath reports whether an already-normalized absolute path names an
 // agent-config or agent-instruction file for the purposes of ADR 0041.
 //
-// The predicate is: the path's PARENT directory is named exactly `.claude`, AND the
-// basename is either a member of agentConfigBasenames (agent CONFIG) or a `*.md`
-// file (agent INSTRUCTION — the `.claude/rules.md` shape from logged row 273301,
-// and `.claude/CLAUDE.md`). A markdown file sitting directly in `.claude` has no
-// role other than steering future sessions.
+// The predicate is: the path's PARENT directory is named `.claude` (case aside — see
+// the case-handling note below), AND the basename is either a member of
+// agentConfigBasenames (agent CONFIG) or a `*.md` file (agent INSTRUCTION — the
+// `.claude/rules.md` shape from logged row 273301, and `.claude/CLAUDE.md`). A
+// markdown file sitting directly in `.claude` has no role other than steering
+// future sessions.
 //
 // Requiring the parent to BE `.claude` — rather than merely to contain it — is what
 // bounds the blast radius: `.claude/skills/**`, `.claude/plugins/**`,
@@ -46,16 +58,50 @@ var agentConfigBasenames = map[string]bool{
 // deeper and therefore unaffected, which is what ADR 0041 requires. It also holds
 // for BOTH scopes the ADR covers, project-local `<project>/.claude/` and user-global
 // `~/.claude/`, without either being special-cased.
+//
+// CASE HANDLING IS UNCONDITIONALLY CASE-INSENSITIVE, and all THREE parts of the
+// predicate — parent directory name, basename set, `.md` extension — use the SAME
+// primitive, `strings.EqualFold`. Folding only the extension (as this predicate
+// originally did) left the control trivially bypassable: this machine's home volume
+// is APFS and case-INSENSITIVE, so `<project>/.CLAUDE/settings.local.json` and
+// `<project>/.claude/settings.local.json` name the SAME real file, yet only the
+// second matched — the first fell through to the CanWrite() approve below and was
+// auto-approved, which is exactly the privilege escalation ADR 0041 exists to
+// prevent (pg2-2ng80).
+//
+// EqualFold, NOT strings.ToLower. EqualFold implements Unicode simple case FOLDING;
+// ToLower implements simple case MAPPING, and the two disagree on codepoints APFS
+// treats as equal. Verified on this machine: writing `.claude/settings.local.json`
+// and reading `.claude/ſettings.local.json` (U+017F LATIN SMALL LETTER LONG S)
+// returns the same bytes, and EqualFold matches that spelling while ToLower leaves
+// the `ſ` alone and misses it — the same bypass as `.CLAUDE`, one codepoint over.
+// Downgrading to ToLower reopens that hole; the
+// FoldsNotMerelyLowercases test fails if anyone does.
+//
+// DO NOT "optimize" this into a runtime probe of the volume's case-sensitivity.
+// Some paths in this workspace ARE on case-sensitive volumes (e.g.
+// /Volumes/ziprecruiter), so a per-volume answer would be correct-but-fragile,
+// and the two error directions are wildly asymmetric: over-matching costs ONE
+// unnecessary Abstain (ceta declines to approve; Claude Code still decides), while
+// under-matching costs the ENTIRE control. Fail-safe beats precision here. The same
+// asymmetry is why EqualFold over-matching (it also folds pairs APFS keeps distinct,
+// e.g. U+0130) is acceptable and ToLower under-matching is not.
+//
+// Folding case MUST NOT be confused with widening the match: the parent must still
+// BE `.claude` (case aside), so the depth-1 blast-radius bound above is untouched
+// and `.CLAUDE/skills/**` stays approved just as `.claude/skills/**` does.
 func isAgentConfigPath(path string) bool {
 	if path == "" {
 		return false
 	}
-	if filepath.Base(filepath.Dir(path)) != agentConfigDir {
+	if !strings.EqualFold(filepath.Base(filepath.Dir(path)), agentConfigDir) {
 		return false
 	}
 	base := filepath.Base(path)
-	if agentConfigBasenames[base] {
-		return true
+	for configBase := range agentConfigBasenames {
+		if strings.EqualFold(base, configBase) {
+			return true
+		}
 	}
 	return strings.EqualFold(filepath.Ext(base), ".md")
 }
