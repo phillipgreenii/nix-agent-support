@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: ff-merge-to-main
 description: Local rebase-then-fast-forward-merge landing handler (FF-0..FF-4). Invoked by the `integrate-branch` skill as its `ff-merge-to-main` handler when the resolved strategy is "ff-merge-to-main" — not normally invoked directly.
 ---

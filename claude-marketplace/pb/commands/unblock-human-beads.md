@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 description: >-
   Drain this pn-workspace's `bd ready --label human` queue by UNBLOCKING — the
   human-queue counterpart to /drain-beads. Loops: atomically claim one parked

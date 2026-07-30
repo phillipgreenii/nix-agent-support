@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: pull-request
 description: Push-and-open/update-PR landing handler (PR-0..PR-4). Invoked by the `integrate-branch` skill as its `pull-request` handler when the resolved strategy is "pull-request" — not normally invoked directly. Never auto-merges; keeps the branch and worktree.
 ---
