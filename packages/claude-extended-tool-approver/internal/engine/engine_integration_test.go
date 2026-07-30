@@ -1231,6 +1231,118 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 	}
 }
 
+// TestIntegration_GitDirCensusFalsePositives pins pg2-24sc9: the SEVEN commands
+// the false-positive census recorded as hard-Rejected by the old `.git` guard,
+// asserted through the real rule chain instead of being re-checked by hand.
+//
+// The old guard matched the literal substring `.git` anywhere in the command
+// TEXT, so a command whose whole purpose was to EXCLUDE git metadata
+// (`find … -not -path '*/.git/*'`) was rejected BECAUSE it named what it was
+// avoiding. Commit 09e0fd8d replaced that with role-and-direction analysis; these
+// rows are the acceptance evidence for it, and the exact-equality assertion fails
+// if the guard ever widens back over them.
+//
+// TRUNCATION, established during triage and recorded here so nobody re-derives it:
+// census rows 4-7 contain NO `.git` token as printed. They were truncated at the
+// first segment of a multi-segment compound whose LATER segment carried the
+// exclusion, so the printed prefix is NOT a reproducible repro of the original
+// Reject. Each is therefore asserted twice — once in the realistic compound shape
+// the row was really the head of, and once bare, where the only claim is the weaker
+// "not Rejected".
+//
+// Row 5 doubles as acceptance criterion 4 (a read of the approver's own data dir is
+// allowed). It is spelled through XDG_DATA_HOME rather than `~`: patheval resolves
+// no tilde, so the literal `~/.local/share/...` of the census row abstains for a
+// reason that has nothing to do with this guard, and asserting on it would pin the
+// wrong mechanism.
+//
+// The paths of rows 1 and 7 are kept EXACTLY as the census recorded them — row 1's
+// real-machine absolute root, row 7's workspace-relative one — rather than
+// rewritten onto the synthetic projectRoot. `find` and `ls` approve independently
+// of which root they walk (verified: both rows also approve when rewritten under
+// projectRoot), so preserving the recorded text costs nothing and keeps each row
+// greppable back to its census entry.
+func TestIntegration_GitDirCensusFalsePositives(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	// Both are read at PathEvaluator construction, so set BEFORE buildFullEngine.
+	t.Setenv("XDG_DATA_HOME", "/custom/data")
+	const ctaDir = "/custom/data/claude-extended-tool-approver"
+
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- Rows 1-3: printed in full, and each really carries the exclusion ---
+		{"row 1: named-glob walk excluding .git", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'", hookio.Approve},
+		// Row 2 is byte-identical to a case TestIntegration_GitDirDirectionAndRole
+		// already pins for pg2-3hk7t. It is restated here deliberately: this block is
+		// the acceptance evidence for pg2-24sc9's census, and a reader auditing "all
+		// seven rows" must not have to establish that one of them lives elsewhere.
+		{"row 2: -path … -prune walk", "find . -path ./.git -prune -o -type f -print", hookio.Approve},
+		{"row 3: go-file walk excluding .git", "find . -name '*.go' -not -path './.git/*'", hookio.Approve},
+
+		// --- Rows 4-7: truncated. Compound shape first, then the bare prefix ---
+		{"row 4 compound: check-ignore then a walk excluding .git", "git check-ignore -v .pre-commit-config.yaml; find . -maxdepth 3 -name '*.yaml' -not -path '*/.git/*'", hookio.Approve},
+		{"row 4 bare prefix", "git check-ignore -v .pre-commit-config.yaml", hookio.Approve},
+		// Row 5's truncation cut the SQL off. The sqlite3 rule needs a query to
+		// classify, so the completed read approves while the bare prefix can only be
+		// asserted as "not Rejected" — see the sub-assertion below the table.
+		{"row 5 compound: read query on the approver's own db", `sqlite3 -readonly ` + ctaDir + `/asks.db "SELECT count(*) FROM asks"`, hookio.Approve},
+		{"row 6 compound: ls then a walk excluding .git", "ls -1 behavior-docs-wip/ 2>/dev/null; find . -maxdepth 4 -name '*.md' -not -path '*/.git/*'", hookio.Approve},
+		{"row 6 bare prefix", "ls -1 behavior-docs-wip/ 2>/dev/null", hookio.Approve},
+		{"row 7 compound: behavior-docs walk excluding .git", "find phillipgreenii-nix-agent-support/behavior-docs -type f -not -path '*/.git/*'", hookio.Approve},
+		{"row 7 bare prefix", "find phillipgreenii-nix-agent-support/behavior-docs -type f", hookio.Approve},
+
+		// --- Criterion 4, the rest of the data dir: reads are allowed ---
+		{"criterion 4: list the approver data dir", "ls -la " + ctaDir + "/", hookio.Approve},
+		{"criterion 4: immutable URI spelling still approves", `sqlite3 -readonly "file:` + ctaDir + `/asks.db?immutable=1" "SELECT count(*) FROM asks"`, hookio.Approve},
+		// The read allowance is scoped to READS: DDL on the same db is not swept in.
+		{"criterion 4 contrast: DDL on the approver db is not approved", `sqlite3 ` + ctaDir + `/asks.db "DROP TABLE asks"`, hookio.Abstain},
+
+		// --- Criterion 2: the guard's floor. The fix was NOT a blanket removal ---
+		{"criterion 2: rm -rf .git/hooks still Rejects", "rm -rf .git/hooks", hookio.Reject},
+		{"criterion 2: echo into .git/config still Rejects", "echo x > .git/config", hookio.Reject},
+		// The same two writes hidden in the LATER segment of a compound whose head is
+		// one of the benign census rows: the fold must not lose the Reject.
+		{"criterion 2: write hidden behind a benign census prefix", "ls -1 behavior-docs-wip/ 2>/dev/null; rm -rf .git/hooks", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: makeBashJSON(tt.command),
+				CWD:       cwd,
+			}
+			got := eng.EvaluateHook(input)
+			if got.Decision != tt.want {
+				t.Errorf("EvaluateHook(%q) = %v (%s: %s), want %v", tt.command, got.Decision, got.Module, got.Reason, tt.want)
+			}
+		})
+	}
+
+	// Row 5's bare prefix, asserted at the strength the truncation permits. A bare
+	// `sqlite3 -readonly <db>` names no query, so the sqlite3 rule cannot classify it
+	// and no rule claims it — that is an Abstain (Claude's own permission flow), NOT
+	// the hard deny the census recorded. Asserting only "not Reject" keeps this row
+	// from pinning the sqlite3 rule's unrelated query requirement.
+	t.Run("row 5 bare prefix is not Rejected", func(t *testing.T) {
+		cmd := "sqlite3 -readonly " + ctaDir + "/asks.db"
+		got := eng.EvaluateHook(&hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: makeBashJSON(cmd),
+			CWD:       cwd,
+		})
+		if got.Decision == hookio.Reject {
+			t.Errorf("EvaluateHook(%q) = Reject (%s: %s), want anything but Reject", cmd, got.Module, got.Reason)
+		}
+	})
+}
+
 // TestIntegration_HeredocExtents pins the whole-chain behavior of first-class heredoc
 // extents (pg2-r2rf3), across the four properties that matter:
 //

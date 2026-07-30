@@ -59,6 +59,10 @@ func TestGitDir_Bash(t *testing.T) {
 		{"mv ONTO .git config", "mv /tmp/evil .git/config", hookio.Reject},
 		{"unknown command fails safe to write", "frobnicate .git/config", hookio.Reject},
 		{"exec a hook script", ".git/hooks/pre-commit", hookio.Reject},
+		// The two spellings pg2-24sc9 names verbatim as the guard's floor: the
+		// false-positive fix MUST NOT have been a blanket removal of the guard.
+		{"pg2-24sc9 floor: rm -rf .git/hooks", "rm -rf .git/hooks", hookio.Reject},
+		{"pg2-24sc9 floor: truncating redirect onto .git/config", "echo x > .git/config", hookio.Reject},
 		// The exclusion-flag set is named flag-by-flag rather than "any flag's
 		// value", precisely so a destructive operand that happens to follow a flag
 		// is still caught.
@@ -264,6 +268,52 @@ func TestGitDir_ExclusionRolesAreNotAccesses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := r.Evaluate(bashInput(tt.command)).Decision; got != hookio.Abstain {
 				t.Errorf("Decision = %v, want Abstain (exclusion/git-mediated role)", got)
+			}
+		})
+	}
+}
+
+// TestGitDir_CensusFalsePositiveSpellings pins pg2-24sc9: the EXCLUSION spellings
+// the false-positive census actually recorded, at this rule's own scope.
+//
+// TestGitDir_ExclusionRolesAreNotAccesses already covers the `!` spelling
+// (`! -path './.git/*'`) and `-path … -prune`, but every census row that negated
+// rather than pruned used find's OTHER negation, `-not -path`, which reaches
+// pathOperands as a distinct token sequence: `!` is skipped by the
+// `strings.HasPrefix(a, "!")` arm, whereas `-not` is skipped as a flag and the
+// pattern that follows is skipped only because args[i-1] is `-path`. Those are two
+// different code paths to the same verdict, and only one of them was pinned here —
+// the `-not` spelling was pinned solely in the engine integration suite, so a
+// change to pathOperands could regress it without any failure in this package.
+//
+// Rows 4-7 of the census carried no `.git` token as PRINTED: they were truncated
+// at the first segment of a compound whose LATER segment held the exclusion. The
+// reconstructed compounds are asserted at chain scope in
+// TestIntegration_GitDirCensusFalsePositives; what belongs here is the
+// `.git`-bearing segment those rows really ended with. Rows 6 and 7 get their own
+// entries below; row 4's tail is the same `-name` + `-not -path` shape as row 3,
+// and row 5's completion is a SQL argument that names no path at all, so neither
+// adds a distinct token sequence for this rule.
+func TestGitDir_CensusFalsePositiveSpellings(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+	}{
+		// Census row 1, verbatim: an absolute-root walk that EXCLUDES git metadata.
+		{"census row 1: -not -path with an absolute root", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'"},
+		// Census row 3's spelling: `-name` glob plus a `-not -path` exclusion. The
+		// `-name` pattern is a walk pattern too, so neither operand is a path.
+		{"census row 3: -name glob with -not -path", "find . -name '*.go' -not -path './.git/*'"},
+		{"census row 3 with a globbed exclusion", "find . -name '*.go' -not -path '*/.git/*' -print"},
+		// The `.git`-bearing tails the truncated rows 6/7 really ended with.
+		{"truncated row 6 tail: -maxdepth walk excluding .git", "find . -maxdepth 4 -name '*.md' -not -path '*/.git/*'"},
+		{"truncated row 7 tail: two -not -path exclusions", "find . -maxdepth 3 -type d -not -path '*/.git/*' -not -path '*/node_modules/*'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := r.Evaluate(bashInput(tt.command)).Decision; got != hookio.Abstain {
+				t.Errorf("Decision = %v, want Abstain (a `-not -path` operand is an exclusion, not an access)", got)
 			}
 		})
 	}
