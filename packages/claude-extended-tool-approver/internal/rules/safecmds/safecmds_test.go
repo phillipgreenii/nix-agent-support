@@ -953,6 +953,13 @@ func TestSafecmds_BashSyntaxCheck(t *testing.T) {
 // abstaining for unknown/secret-adjacent paths (mirrors
 // TestSafecmds_CatEtcPasswd_Abstain / TestSafecmds_HeadProjectFile_Approve).
 func TestSafecmds_Strings(t *testing.T) {
+	// Pin HOME so `~/.aws` below is genuinely an UNKNOWN zone. It is read once at
+	// evaluator construction, so it must be set first, and it must be a fixed
+	// non-/nix path: the shared mkGoTest builder exports HOME=$TMPDIR, which on
+	// darwin is /nix-rooted, and Evaluate's READ-ONLY /nix rule would then make
+	// ~/.aws readable — inverting the assertion below (`phillipg-nix-repo-base`
+	// ADR 0021).
+	t.Setenv("HOME", "/home/testuser")
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {

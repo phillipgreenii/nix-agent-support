@@ -1073,6 +1073,13 @@ func makeBashJSON(cmd string) json.RawMessage {
 // runs before safe-commands, and the extra roots do NOT include any secret dir.
 func TestIntegration_ExtraReadOnlyRoots(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	// Pin HOME too, so the `~/.aws` / `~/.ssh` adversarial rows below expand to a
+	// path OUTSIDE every known zone. It must be a fixed non-/nix path and must sit
+	// outside WORKSPACE_ROOT above: the shared mkGoTest builder exports
+	// HOME=$TMPDIR, which on darwin is /nix-rooted, so Evaluate's READ-ONLY /nix
+	// rule would make ~/.aws readable and sweep it into approval
+	// (`phillipg-nix-repo-base` ADR 0021).
+	t.Setenv("HOME", "/home/testuser")
 	// Read at PathEvaluator construction, so set BEFORE buildFullEngine.
 	roRoot := "/ceta-test-ro-root"
 	t.Setenv("CETA_EXTRA_READONLY_ROOTS", roRoot)

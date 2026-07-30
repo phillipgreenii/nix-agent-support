@@ -18,16 +18,30 @@ func chdirInput(cmd, cwd string) *hookio.HookInput {
 
 const projectCWD = "/home/user/project"
 
-// newWithProject returns a git rule wired to an evaluator rooted at projectCWD.
+// homeCWD is a fixed HOME for these tests, pinned so `~` expands to a path that
+// is genuinely OUTSIDE every zone the evaluator knows. It MUST NOT be a
+// t.TempDir(): inside a nix build sandbox that lands under /nix/**, whose
+// READ-ONLY zone Evaluate checks BEFORE anything home-relative — so `~/.ssh`
+// would come back readable and the unreadable-zone assertions below would
+// silently invert. (Same hazard already documented in the pathsafety rule's
+// tests; see also `phillipg-nix-repo-base` ADR 0021 — the shared mkGoTest
+// builder exports HOME=$TMPDIR, which on darwin IS /nix-rooted.)
+const homeCWD = "/home/testuser"
+
+// newWithProject returns a git rule wired to an evaluator rooted at projectCWD,
+// with HOME pinned so the zone table below actually holds.
 // Zones: <project>/** and /tmp/** are read-write; /nix/store/** is read-only;
-// everything else (/etc, /usr/bin, real ~/.ssh) is unknown (neither read nor write).
-func newWithProject() *Rule {
+// everything else (/etc, /usr/bin, ~/.ssh) is unknown (neither read nor write).
+// HOME is read once at evaluator construction, so it is pinned here.
+func newWithProject(t *testing.T) *Rule {
+	t.Helper()
+	t.Setenv("HOME", homeCWD)
 	return New(patheval.New(projectCWD))
 }
 
 // A read-only subcommand with a -C dir in a READABLE zone keeps its Approve.
 func TestGit_Chdir_ReadOnlySub_ReadableZone_Approve(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	approve := []string{
 		"git -C /home/user/project status", // read-write zone (readable)
 		"git -C /home/user/project/sub log",
@@ -44,11 +58,11 @@ func TestGit_Chdir_ReadOnlySub_ReadableZone_Approve(t *testing.T) {
 
 // A read-only subcommand with a -C dir OUTSIDE any readable zone demotes to Abstain.
 func TestGit_Chdir_ReadOnlySub_UnsafeZone_Abstain(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	abstain := []string{
 		"git -C /etc status",
 		"git -C /usr/bin log",
-		"git -C ~/.ssh status",     // tilde expands to real home; out of the synthetic project zone
+		"git -C ~/.ssh status",     // tilde expands to the pinned home; out of the synthetic project zone
 		"git -C ../outside status", // relative, escapes project via CWD
 	}
 	for _, cmd := range abstain {
@@ -62,7 +76,7 @@ func TestGit_Chdir_ReadOnlySub_UnsafeZone_Abstain(t *testing.T) {
 // Read-vs-write asymmetry: same read-only-zone dir Approves a read sub but
 // Abstains a modifying sub (which needs a WRITABLE dir).
 func TestGit_Chdir_ReadWriteAsymmetry(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	// read-only zone dir, read sub -> Approve
 	if got := r.Evaluate(chdirInput("git -C /nix/store/abc123-foo log", projectCWD)); got.Decision != hookio.Approve {
 		t.Errorf("git -C <ro> log: got %s, want approve", got.Decision)
@@ -82,7 +96,7 @@ func TestGit_Chdir_ReadWriteAsymmetry(t *testing.T) {
 
 // A modifying subcommand with a -C dir in a WRITABLE zone keeps its Approve.
 func TestGit_Chdir_ModifyingSub_WritableZone_Approve(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	approve := []string{
 		"git -C /home/user/project commit -m msg",
 		"git -C /home/user/project/sub add .",
@@ -98,7 +112,7 @@ func TestGit_Chdir_ModifyingSub_WritableZone_Approve(t *testing.T) {
 
 // A modifying subcommand with a -C dir that is NOT writable demotes to Abstain.
 func TestGit_Chdir_ModifyingSub_NonWritable_Abstain(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	abstain := []string{
 		"git -C /etc commit -m msg",
 		"git -C /etc add .",
@@ -114,7 +128,7 @@ func TestGit_Chdir_ModifyingSub_NonWritable_Abstain(t *testing.T) {
 
 // Relative -C is resolved against the invocation CWD.
 func TestGit_Chdir_RelativeResolvedAgainstCWD(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	// CWD in the writable zone; ./sub stays inside it.
 	if got := r.Evaluate(chdirInput("git -C ./sub status", projectCWD)); got.Decision != hookio.Approve {
 		t.Errorf("git -C ./sub (cwd in zone): got %s, want approve", got.Decision)
@@ -135,7 +149,7 @@ func TestGit_Chdir_RelativeResolvedAgainstCWD(t *testing.T) {
 // -C classification for the Approve-returning subcommands OUTSIDE both maps:
 // checkout / soft reset are write-class; read-only `git remote` is read-class.
 func TestGit_Chdir_OutsideMapSubcommands(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	// checkout is write-class: writable zone Approves, read-only zone Abstains.
 	if got := r.Evaluate(chdirInput("git -C /home/user/project checkout main", projectCWD)); got.Decision != hookio.Approve {
 		t.Errorf("git -C <rw> checkout: got %s, want approve", got.Decision)
@@ -159,7 +173,7 @@ func TestGit_Chdir_OutsideMapSubcommands(t *testing.T) {
 // The demotion only touches a would-be Approve. Ask/Reject verdicts are
 // unaffected by an unsafe -C dir (most-restrictive aggregation already covers them).
 func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	// destructive -> Ask even with an unsafe -C dir (not demoted to Abstain).
 	if got := r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD)); got.Decision != hookio.Ask {
 		t.Errorf("git -C /etc reset --hard: got %s, want ask (unchanged)", got.Decision)
@@ -176,7 +190,7 @@ func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 // A bare git command (no -C) MUST keep its verdict regardless of CWD zone —
 // the -C gate must never demote a chdir-less command.
 func TestGit_Chdir_BareGit_Unaffected_ByCWDZone(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	// CWD out of every zone; bare git must still Approve.
 	approve := []string{"git status", "git add .", "git commit -m x", "git log"}
 	for _, cmd := range approve {
@@ -205,7 +219,7 @@ func TestGit_Chdir_NilEvaluator_Legacy_Approve(t *testing.T) {
 // RCE guard regression: a pre-subcommand -c still Abstains, even with a safe -C
 // dir and a configured evaluator (the guard fires before the -C path logic).
 func TestGit_Chdir_ConfigInjection_StillAbstains(t *testing.T) {
-	r := newWithProject()
+	r := newWithProject(t)
 	if got := r.Evaluate(chdirInput(`git -C /home/user/project -c core.pager="touch /tmp/pwned" log`, projectCWD)); got.Decision != hookio.Abstain {
 		t.Errorf("git -C <rw> -c core.pager=EVIL log: got %s, want abstain (RCE guard)", got.Decision)
 	}

@@ -337,19 +337,6 @@
                   ];
                 };
 
-              # Go test gate (bead pg2-adhga). The package builds pin
-              # `subPackages = [ "cmd/<name>" ]`, and the gomod2nix builder's
-              # goCheckHook scopes `go test` to `$subPackages` when set — so the
-              # shipped-binary build (and thus `nix flake check` via that build)
-              # only tests `cmd/`, leaving every `internal/`+`pkg/` suite ungated
-              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). These
-              # dedicated checks call mkGoApp WITHOUT `subPackages`, so
-              # `getGoDirs` (go-config-hook.sh) falls back to `find … *test.go`
-              # and the check phase exercises the FULL module. The shipped-binary
-              # builds keep `subPackages` (stay scoped) — only this gate pays the
-              # test cost, and only under `nix flake check`, never a system build.
-              mkGoTestCheck = pkgs._agentSupportGoBuilders.mkGoApp;
-
               # golangci-lint (offline, gomod2nix vendor env) per Go module — the
               # base-sanctioned replacement (pg2-6wly, pg2-2cuzv) for the removed
               # network-dependent golangci-lint pre-commit hooks. Runs INSIDE the
@@ -655,45 +642,76 @@
                   touch $out
                 '';
 
+              # ── Full-module Go test gates (bead pg2-adhga; converged onto the
+              # fleet builder by bead pg2-spwj9) ────────────────────────────────
+              #
+              # Why these checks exist at all: the package builds pin
+              # `subPackages = [ "cmd/<name>" ]`, and the gomod2nix builder's
+              # goCheckHook scopes `go test` to `$subPackages` when set — so the
+              # shipped-binary build (and thus `nix flake check` via that build)
+              # only tests `cmd/`, leaving every `internal/`+`pkg/` suite ungated
+              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). The
+              # shipped-binary builds keep `subPackages` (stay scoped); only these
+              # gates pay the test cost, and only under `nix flake check`, never a
+              # system build.
+              #
+              # Why they call base's `goBuilders.mkGoTest`: it is the fleet's ONE
+              # builder for this job (`phillipg-nix-repo-base` ADR 0021). It never
+              # sets `subPackages` — that is its defining property, not an
+              # accident of the call site — and it runs `go test ./...` from the
+              # module root in buildPhase, so full-module coverage no longer
+              # depends on the caller remembering to OMIT an attribute. It also
+              # runs `go vet` (the `go test` default), which the previous
+              # mkGoApp-without-subPackages fallback disabled via gomod2nix's
+              # `-vet=off` check hook — so these gates are now strictly stricter
+              # than before. Test-time tools move from `nativeCheckInputs` (the
+              # mkGoApp check-phase attribute) to `testDeps`, mkGoTest's own
+              # attribute, which it places on nativeBuildInputs so the tool is on
+              # PATH during the buildPhase test run. The rename is not optional:
+              # mkGoTest's argument set is CLOSED (no `...`), so a leftover
+              # `nativeCheckInputs` is a hard eval error, not a silently dropped
+              # dependency.
+              #
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
               # resolver's real-git contract test (builds fixtures only; the
               # resolver itself is filesystem-only, never a git subprocess).
-              claude-extended-tool-approver-go-tests = mkGoTestCheck {
+              claude-extended-tool-approver-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "claude-extended-tool-approver-go-tests";
                 src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
                 gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
-                nativeCheckInputs = [ pkgs.git ];
+                testDeps = [ pkgs.git ];
               };
 
               # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
               # duration, run). git on PATH for the real-git unit tests; bd/pn
               # tests t.Skip when their tool is absent (matches pb/default.nix
               # nativeCheckInputs). contract/smoke-tagged files stay off by default.
-              pb-go-tests = mkGoTestCheck {
+              pb-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pb-go-tests";
                 src = lib.cleanSource ./packages/pb; # matches default.nix
                 gomod2nixToml = ./packages/pb/gomod2nix.toml;
-                nativeCheckInputs = [ pkgs.git ];
+                testDeps = [ pkgs.git ];
               };
 
               # pg-pr — 100+ internal/pkg suites incl. sync/store/auth security
               # seams. exec is temp-repo git (git on PATH) + in-process httptest
               # (loopback, sandbox-ok); the github.com URLs in the fixtures are
               # struct data, not live calls.
-              pg-pr-go-tests = mkGoTestCheck {
+              pg-pr-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-pr-go-tests";
                 src = ./packages/pg-pr; # matches default.nix (raw ./., no cleanSource)
                 gomod2nixToml = ./packages/pg-pr/gomod2nix.toml;
-                nativeCheckInputs = [ pkgs.git ];
+                testDeps = [ pkgs.git ];
               };
 
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
               # ../claude-transcript), so root the fileset at packages/ and pass
               # modRoot, mirroring the pa-monitor goLint + default.nix. Uses base
-              # `mkGoTest` directly (ADR 0021's preferred builder, not the mkGoApp
-              # fallback the other checks still use). Sandbox-hostile tests are
+              # `mkGoTest`, as every full-module Go test gate in this flake now
+              # does (bead pg2-spwj9 retired the last mkGoApp-without-subPackages
+              # fallbacks above). Sandbox-hostile tests are
               # guarded two ways (both sanctioned by ADR 0021): (1) tests that
               # spawn the built daemon binary / send real OS signals across
               # processes are split into `*_hostile_test.go` files carrying

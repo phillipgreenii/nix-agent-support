@@ -6,6 +6,41 @@ import (
 	"testing"
 )
 
+// pinnedHome is the fixed HOME every home-relative zone test runs against.
+//
+// These tests used to read the AMBIENT HOME (with a "/tmp" fallback or a
+// t.Skip), which made them non-hermetic in two ways at once. Under the nix
+// build sandbox HOME is $TMPDIR, which on darwin resolves under /nix/var/nix/
+// builds/... — so the /nix rule in Evaluate fired first and:
+//   - the PathReadWrite assertions FAILED (a real, reproducible break), and
+//   - the PathReadOnly assertions PASSED VACUOUSLY — satisfied by the /nix
+//     rule rather than by the home-relative rule actually under test.
+//
+// Pinning HOME makes both kinds meaningful and makes the whole file independent
+// of the environment it runs in. The path need not exist: every home-relative
+// zone check in Evaluate is a string comparison against pe.home, and
+// resolveRefPath falls back to the cleaned path for a non-existent one.
+const pinnedHome = "/home/testuser"
+
+// withPinnedHome pins HOME to pinnedHome for the duration of t and returns it.
+// It MUST be called BEFORE the evaluator is constructed: New/NewWithCWD read
+// the environment once, at construction time.
+//
+// It also CLEARS XDG_DATA_HOME, which is load-bearing rather than tidiness:
+// New/NewWithCWD only derive xdgDataHome as <home>/.local/share when
+// XDG_DATA_HOME is EMPTY, otherwise they take it verbatim. A developer shell
+// commonly exports XDG_DATA_HOME (e.g. /Users/<user>/.local/share), so pinning
+// HOME alone would DESYNCHRONISE the two and the tests asserting on the default
+// <home>/.local/share location would evaluate to PathUnknown. Clearing it is
+// also the accurate expression of their intent — the XDG_DATA_HOME OVERRIDE has
+// its own dedicated tests (…_XDGDataHome_…), which set it explicitly.
+func withPinnedHome(t *testing.T) string {
+	t.Helper()
+	t.Setenv("HOME", pinnedHome)
+	t.Setenv("XDG_DATA_HOME", "")
+	return pinnedHome
+}
+
 func TestPathEvaluator_ProjectPath_ReadWrite(t *testing.T) {
 	pe := NewWithCWD("/project", "/project")
 	if got := pe.Evaluate("/project/foo.go"); got != PathReadWrite {
@@ -41,10 +76,7 @@ func TestPathEvaluator_NixStoreRoot_ReadOnly(t *testing.T) {
 }
 
 func TestPathEvaluator_ClaudePlugins_ReadOnly(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".claude/plugins/x")
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -53,10 +85,7 @@ func TestPathEvaluator_ClaudePlugins_ReadOnly(t *testing.T) {
 }
 
 func TestPathEvaluator_ClaudePlans_ReadWrite(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".claude/plans/some-plan.md")
 	if got := pe.Evaluate(path); got != PathReadWrite {
@@ -65,10 +94,7 @@ func TestPathEvaluator_ClaudePlans_ReadWrite(t *testing.T) {
 }
 
 func TestPathEvaluator_ClaudeProjects_ReadWrite(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".claude/projects/myproject/memory/notes.md")
 	if got := pe.Evaluate(path); got != PathReadWrite {
@@ -77,10 +103,7 @@ func TestPathEvaluator_ClaudeProjects_ReadWrite(t *testing.T) {
 }
 
 func TestPathEvaluator_ClaudeSettings_ReadOnly(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".claude/settings.json")
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -89,10 +112,7 @@ func TestPathEvaluator_ClaudeSettings_ReadOnly(t *testing.T) {
 }
 
 func TestPathEvaluator_GoPkg_ReadOnly(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, "go/pkg/mod/foo")
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -122,10 +142,9 @@ func TestPathEvaluator_RelativePathResolved(t *testing.T) {
 }
 
 func TestPathEvaluator_TildeExpansion(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Skip("HOME not set")
-	}
+	// The evaluator expands "~" from HOME itself, so pinning HOME is what makes
+	// this assertion test the .claude rule rather than the /nix rule.
+	withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := "~/.claude/plugins/x"
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -215,10 +234,7 @@ func TestDetectProjectRoot_FallbackToCwd(t *testing.T) {
 }
 
 func TestPathEvaluator_NixSupportLocalPlugins_ReadOnly(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Skip("HOME not set")
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".local/share/nix-support-local-plugins/plugins/claude-extended-tool-approver/hooks.json")
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -227,10 +243,7 @@ func TestPathEvaluator_NixSupportLocalPlugins_ReadOnly(t *testing.T) {
 }
 
 func TestPathEvaluator_NixSupportLocalPluginsRoot_ReadOnly(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Skip("HOME not set")
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".local/share/nix-support-local-plugins")
 	if got := pe.Evaluate(path); got != PathReadOnly {
@@ -271,11 +284,9 @@ func TestEvaluator_WorkspaceRoot(t *testing.T) {
 }
 
 func TestPathEvaluator_EnvVarExpansion(t *testing.T) {
-	orig := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", orig) }()
-	_ = os.Setenv("HOME", "/home/testuser")
+	home := withPinnedHome(t)
 
-	pe := New("/home/testuser/project")
+	pe := New(filepath.Join(home, "project"))
 
 	tests := []struct {
 		name string
@@ -528,10 +539,7 @@ func TestPathEvaluator_IsDenyWrite_OverridesAllowWrite(t *testing.T) {
 }
 
 func TestPathEvaluator_ExtToolApprover_ReadWrite(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Skip("HOME not set")
-	}
+	home := withPinnedHome(t)
 	pe := NewWithCWD("/project", "/project")
 	path := filepath.Join(home, ".local/share/claude-extended-tool-approver/asks.db")
 	if got := pe.Evaluate(path); got != PathReadWrite {
