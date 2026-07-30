@@ -2,10 +2,15 @@ package secrets
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
 func bashInput(cmd string) *hookio.HookInput {
@@ -139,5 +144,258 @@ func TestRule_DenyListedSecretRejects(t *testing.T) {
 				t.Errorf("Evaluate(%s) = %v, want %v (reason %q)", tt.name, got.Decision, tt.want, got.Reason)
 			}
 		})
+	}
+}
+
+// linkFixture builds a credential-directory fixture in a temp dir and returns the
+// fixture root. It is deliberately NOT under the project root the rule is
+// constructed with: every resolution these tests assert therefore lands OUTSIDE
+// the workspace, which pins the decision recorded in pathRef — a resolved path is
+// classified wherever it lands, with no zone check.
+//
+//	<root>/.ssh/id_rsa        real credential file
+//	<root>/mykeys/id_rsa      -> <root>/.ssh/id_rsa   (leaf symlink)
+//	<root>/keydir             -> <root>/.ssh          (directory symlink)
+//	<root>/notes/README.md    real non-credential file
+//	<root>/readme-link        -> <root>/notes/README.md
+func linkFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, dir := range []string{".ssh", "mykeys", "notes"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{filepath.Join(".ssh", "id_rsa"), filepath.Join("notes", "README.md")} {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ln := range [][2]string{
+		{filepath.Join(root, ".ssh", "id_rsa"), filepath.Join(root, "mykeys", "id_rsa")},
+		{filepath.Join(root, ".ssh"), filepath.Join(root, "keydir")},
+		{filepath.Join(root, "notes", "README.md"), filepath.Join(root, "readme-link")},
+	} {
+		if err := os.Symlink(ln[0], ln[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Precondition: the SPELLINGS under test are not lexically secret, so a hit
+	// can only come from the resolved form. Without this the tests could pass for
+	// the wrong reason (e.g. a temp dir whose name contains a secret component).
+	for _, p := range []string{
+		filepath.Join(root, "mykeys", "id_rsa"),
+		filepath.Join(root, "keydir", "id_rsa"),
+		filepath.Join(root, "readme-link"),
+	} {
+		if secretpath.IsSecret(p) {
+			t.Fatalf("precondition: %s is already lexically secret, so the resolved form is not what is being tested", p)
+		}
+	}
+	return root
+}
+
+// A symlink pointing INTO a credential directory must be detected — the defect
+// this pass exists to close (~/mykeys/id_rsa -> ~/.ssh/id_rsa), in both the leaf
+// and directory-symlink shapes, and for every tool surface the rule covers.
+func TestRule_SecretViaSymlink_Ask(t *testing.T) {
+	root := linkFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+
+	leaf := filepath.Join(root, "mykeys", "id_rsa")
+	viaDir := filepath.Join(root, "keydir", "id_rsa")
+	tests := []struct {
+		name  string
+		input *hookio.HookInput
+	}{
+		{"Read leaf symlink into .ssh", fileInput("Read", leaf)},
+		{"Read through symlinked .ssh dir", fileInput("Read", viaDir)},
+		{"Write leaf symlink into .ssh", fileInput("Write", leaf)},
+		{"Grep under symlinked .ssh dir", searchInput("Grep", "PRIVATE", filepath.Join(root, "keydir"))},
+		{"cat leaf symlink into .ssh", bashInput("cat " + leaf)},
+		{"cat redirect from leaf symlink", bashInput("cat < " + leaf)},
+		{"bash -lc cat leaf symlink", bashInput("bash -lc 'cat " + leaf + "'")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.Evaluate(tt.input)
+			if got.Decision != hookio.Ask {
+				t.Errorf("Evaluate(%s) = %v, want ask (reason %q)", tt.name, got.Decision, got.Reason)
+			}
+			// The reason must name the indirection, else the asklog records a
+			// prompt for a path that does not look like a secret.
+			if !strings.Contains(got.Reason, " -> ") {
+				t.Errorf("Evaluate(%s) reason %q does not name the resolved target", tt.name, got.Reason)
+			}
+		})
+	}
+}
+
+// The NAMED-form check must survive the addition of the resolved form: a
+// credential file that is ITSELF a symlink still matches, even though resolving
+// it moves the path OUT of the credential directory.
+func TestRule_CredentialFileIsItselfASymlink_Ask(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ssh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "backup-key.pem")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	named := filepath.Join(root, ".ssh", "id_rsa")
+	if err := os.Symlink(target, named); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+
+	// Precondition: the resolved form is NOT secret, so only the named check can
+	// produce the Ask below.
+	if secretpath.IsSecret(target) {
+		t.Fatalf("precondition: resolved target %s is lexically secret, so this does not test the named form", target)
+	}
+	for _, tt := range []struct {
+		name  string
+		input *hookio.HookInput
+	}{
+		{"Read", fileInput("Read", named)},
+		{"cat", bashInput("cat " + named)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.Evaluate(tt.input)
+			if got.Decision != hookio.Ask {
+				t.Errorf("Evaluate(%s) = %v, want ask (reason %q)", tt.name, got.Decision, got.Reason)
+			}
+			// A named-form hit reports the name alone — byte-identical to what
+			// this rule emitted before the resolving pass existed.
+			if strings.Contains(got.Reason, " -> ") {
+				t.Errorf("Evaluate(%s) reason %q names a resolution; the named form matched", tt.name, got.Reason)
+			}
+		})
+	}
+}
+
+// A non-credential symlink must be unaffected — the resolving pass must not turn
+// every link into a prompt.
+func TestRule_NonCredentialSymlink_Abstain(t *testing.T) {
+	root := linkFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+	link := filepath.Join(root, "readme-link")
+	for _, tt := range []struct {
+		name  string
+		input *hookio.HookInput
+	}{
+		{"Read", fileInput("Read", link)},
+		{"cat", bashInput("cat " + link)},
+		{"Grep in notes dir", searchInput("Grep", "TODO", filepath.Join(root, "notes"))},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := r.Evaluate(tt.input); got.Decision != hookio.Abstain {
+				t.Errorf("Evaluate(%s) = %v, want abstain (reason %q)", tt.name, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// A nil PathEvaluator is a supported configuration (it makes the rule
+// cwd-independent). It MUST NOT panic, the named-form check MUST still run, and
+// the resolved-form check simply never matches.
+func TestRule_NilEvaluator_NamedFormStillRuns(t *testing.T) {
+	root := linkFixture(t)
+	r := New(nil)
+	tests := []struct {
+		name  string
+		input *hookio.HookInput
+		want  hookio.Decision
+	}{
+		// Named form — unchanged by the nil evaluator.
+		{"Read ssh key", fileInput("Read", "~/.ssh/id_rsa"), hookio.Ask},
+		{"cat dotenv", bashInput("cat .env"), hookio.Ask},
+		{"Grep secrets dir", searchInput("Grep", "password", "secrets/"), hookio.Ask},
+		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.Abstain},
+		// Resolved form — unavailable without an evaluator, so it degrades to the
+		// pre-pass behavior (Abstain) rather than panicking.
+		{"Read symlink into .ssh", fileInput("Read", filepath.Join(root, "mykeys", "id_rsa")), hookio.Abstain},
+		{"cat symlink into .ssh", bashInput("cat " + filepath.Join(root, "mykeys", "id_rsa")), hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.Evaluate(tt.input)
+			if got.Decision != tt.want {
+				t.Errorf("Evaluate(%s) = %v, want %v (reason %q)", tt.name, got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
+// BLAST-RADIUS BOUND: the resolving pass tests only PATH-SHAPED candidates, so a
+// bare word is never absolutized into a file in the cwd. `kubectl get secrets`
+// with a real ./secrets directory present is the case that would regress
+// (pg2-ia640.2's false-positive class); a path-shaped spelling of the same
+// reference is still caught.
+func TestRule_BareWordNotResolved_Abstain(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, "secrets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := New(patheval.NewWithCWD(project, project))
+	if got := r.Evaluate(bashInput("kubectl get secrets")); got.Decision != hookio.Abstain {
+		t.Errorf("kubectl get secrets = %v, want abstain (reason %q)", got.Decision, got.Reason)
+	}
+	// The same directory named path-shaped IS a hit — via the named form, since
+	// `./secrets/prod.json` is already lexically secret.
+	if got := r.Evaluate(bashInput("cat ./secrets/prod.json")); got.Decision != hookio.Ask {
+		t.Errorf("cat ./secrets/prod.json = %v, want ask (reason %q)", got.Decision, got.Reason)
+	}
+}
+
+// BLAST-RADIUS BOUND: resolution is capped at maxResolutions per Evaluate so a
+// long argument list cannot turn the check into a stat storm. Past the cap the
+// rule falls back to the lexical behavior that shipped before this pass, which is
+// what the second half asserts.
+func TestRule_ResolutionBudgetBounded(t *testing.T) {
+	root := linkFixture(t)
+	project := t.TempDir()
+	r := New(patheval.NewWithCWD(project, project))
+	link := filepath.Join(root, "mykeys", "id_rsa")
+
+	pad := make([]string, 0, maxResolutions+1)
+	for i := 0; i <= maxResolutions; i++ {
+		pad = append(pad, filepath.Join(project, "pad", "f"+strconv.Itoa(i)+".txt"))
+	}
+	padding := strings.Join(pad, " ")
+
+	if got := r.Evaluate(bashInput("cat " + link + " " + padding)); got.Decision != hookio.Ask {
+		t.Errorf("symlink within budget = %v, want ask (reason %q)", got.Decision, got.Reason)
+	}
+	if got := r.Evaluate(bashInput("cat " + padding + " " + link)); got.Decision != hookio.Abstain {
+		t.Errorf("symlink past the %d-resolution cap = %v, want abstain — the cap is the documented bound (reason %q)",
+			maxResolutions, got.Decision, got.Reason)
+	}
+	// The lexical pass is NOT capped: a named secret past the same padding still
+	// hits, so the cap can never cost more than the resolved-form refinement.
+	if got := r.Evaluate(bashInput("cat " + padding + " " + filepath.Join(root, ".ssh", "id_rsa"))); got.Decision != hookio.Ask {
+		t.Errorf("named secret past the cap = %v, want ask (reason %q)", got.Decision, got.Reason)
+	}
+}
+
+// A deny-listed secret reached VIA a symlink is still Reject, not Ask: patheval's
+// IsDenyRead resolves symlinks itself, so the escalation survives the indirection.
+func TestRule_DenyListedSecretViaSymlink_Rejects(t *testing.T) {
+	root := linkFixture(t)
+	project := t.TempDir()
+	pe := patheval.NewWithCWD(project, project)
+	resolvedSSH, err := filepath.EvalSymlinks(filepath.Join(root, ".ssh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{DenyRead: []string{resolvedSSH}})
+	r := New(pe)
+	got := r.Evaluate(fileInput("Read", filepath.Join(root, "mykeys", "id_rsa")))
+	if got.Decision != hookio.Reject {
+		t.Errorf("Read deny-listed secret via symlink = %v, want reject (reason %q)", got.Decision, got.Reason)
 	}
 }

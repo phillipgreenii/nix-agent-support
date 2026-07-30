@@ -132,7 +132,7 @@ is authoritative.
 2. **git-directory** -- Reject any read/write inside a `.git/` directory (Bash + file/search tools)
 3. **dangerous-commands** -- blanket Reject of inherently dangerous commands (`sudo`, `su`, `doas`, `dd`, `mkfs*`, `fdisk`, `parted`, `mount`, `umount`, `reboot`, `shutdown`, `halt`, `poweroff`, `wget`, `nc`/`ncat`/`netcat`, `telnet`, `sftp`)
 4. **path-traversal** -- Ask (human-in-the-loop) on a Bash command containing a `../..` traversal escape
-5. **secrets** -- prompts (ASK) before any tool touches a well-known credential/secret path (`.credentials`, `auth.json`, `secrets/**`, `.ssh/**`, `.env`, `*token*.json`) so such reads are never silently approved
+5. **secrets** -- prompts (ASK) before any tool touches a well-known credential/secret path (`.credentials`, `auth.json`, `secrets/**`, `.ssh/**`, `.env`, `*token*.json`) so such reads are never silently approved. Each path is tested both as NAMED and symlink-RESOLVED, so a link into a credential directory (`~/mykeys/id_rsa -> ~/.ssh/id_rsa`) is caught too, wherever it resolves to; for Bash the resolving pass covers path-shaped arguments only (a bare word is never absolutized into a file in the cwd)
 6. **envvars** -- dangerous environment variables
 7. **assume** -- Reject AWS `assume` (assume-role)
 8. **webfetch** -- WebFetch to allowed hosts
