@@ -136,8 +136,8 @@ NOT file a bead to remember it. Full contract: the always-on
    - Single repo → git worktree at `.worktrees/<id>` on branch `drain/<id>`
      (branch off local main). If that worktree/branch already exists (a
      parked/resumed bead), REUSE it.
-   - Multiple repos → a coordinated set via the `fork-workforest` skill, keyed to
-     the bead id.
+   - Multiple repos → a coordinated set via the
+     `pn-workspace-rules:fork-workforest` skill, keyed to the bead id.
 
 4. **DELEGATE THE WORK** to a subagent (REQUIRED — this preserves your context).
    Dispatch ONE subagent with: the bead id, its `bd show` details, and the
@@ -163,7 +163,8 @@ NOT file a bead to remember it. Full contract: the always-on
      repos touched. The subagent lands nothing — YOU land.
 
    Re-dispatch with guidance if the report is incomplete. If it reports
-   `needs-more-repos`, re-ISOLATE as a `fork-workforest` set and re-dispatch.
+   `needs-more-repos`, re-ISOLATE as a `pn-workspace-rules:fork-workforest` set and
+   re-dispatch.
 
 5. **VALIDATE** from the report: the pre-apply gates MUST show a clear PASS for
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
@@ -171,8 +172,9 @@ NOT file a bead to remember it. Full contract: the always-on
 
 6. **LAND** locally (rebase onto local main, then merge `--ff-only`; NO push, NO
    PR). Keep landing in THIS session — the skills need persistent shell/cwd state:
-   - Single repo → invoke the `integrate-branch` skill (ff-merge-to-main).
-   - Workforest set → invoke the `land-workforest` skill.
+   - Single repo → invoke the `integrate-branch:integrate-branch` skill (which
+     dispatches its `integrate-branch:ff-merge-to-main` handler).
+   - Workforest set → invoke the `pn-workspace-rules:land-workforest` skill.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-rebase and re-invoke LAND a
@@ -180,14 +182,29 @@ NOT file a bead to remember it. Full contract: the always-on
    GENUINE stop (rebase-conflict, or canonical off-primary/dirty).
 
    After a successful land, RECORD the landed commit SHA per changed repo — use
-   the SHA the `integrate-branch` / `land-workforest` skill reports as landed
+   the SHA the `integrate-branch:integrate-branch` /
+   `pn-workspace-rules:land-workforest` skill reports as landed
    (equivalently, the tip of the feature branch you just merged, e.g.
    `git -C <repo> rev-parse drain/<id>`). Do NOT re-read the shared primary branch
    (`rev-parse main`): a peer session may have advanced it, which would gate the
    child on the wrong change. The post-deploy gate keys on this SHA.
 
-7. **FINISH** — branch on the report status:
-   - `done`: CLEANUP the worktree (for a set, `cleanup-workforest`), then
+7. **FINISH** — branch on the report status.
+
+   ORDER IS LOAD-BEARING for a workforest SET: every member repo MUST have LANDED
+   (step 6) BEFORE the set is retired, and the bead MUST NOT be closed while any
+   member is un-landed. `pn-workspace-rules:cleanup-workforest` is safe by default —
+   it removes only members whose branch is already an ancestor of their primary, and
+   KEEPS plus reports the rest — so the destructive mistake is OVERRIDING it rather
+   than calling it early: the agent MUST NOT pass `--force-unlanded-branch-removal`
+   or `--force-dirty-worktree-removal` (nor `pn workspace workforest remove --force`)
+   to force teardown past a member that did not land, because that discards work no
+   other copy holds. Only an operator MAY authorize a force flag. If cleanup KEEPS
+   any member, teardown is INCOMPLETE: finish landing that member (re-invoke
+   `pn-workspace-rules:land-workforest`), then retire the set; if it cannot land,
+   leave the set IN PLACE and route the bead to STUCK, which preserves the isolation.
+   - `done`: CLEANUP the worktree (for a set,
+     `pn-workspace-rules:cleanup-workforest`), then
      `bd close <id> --reason "<short note>" --actor "ID"`.
    - `done-pending-apply-verification`: attach the post-deploy gate (see
      **POST-DEPLOY VERIFICATION GATE** below) instead of labeling `human`. ONLY
@@ -211,7 +228,7 @@ work for a later session (or a human) to run the live checks. A gate left
 unapplied past its stale window auto-converts to a `human` bead — so even the
 failure mode escalates to a person without you pre-labeling one.
 
-Follow the `pb-gate-lifecycle` skill's sequence — with `--commit <landed-sha>`
+Follow the `pb:pb-gate-lifecycle` skill's sequence — with `--commit <landed-sha>`
 pinned instead of the skill's `HEAD` default, for concurrency-safety (a peer may
 have advanced HEAD). The change is already committed + landed (step 6), so the
 patch-id exists. Do these IN ORDER — deferred-first is mandatory: it closes the
@@ -580,6 +597,14 @@ unchanged.
   preservation). Never fan out claiming/landing/gating/closing to a subagent.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
+- Land-then-teardown is ORDERED for a workforest set: every member repo MUST land
+  before the set is retired, and the bead MUST NOT be closed while any member is
+  un-landed. `pn-workspace-rules:cleanup-workforest` keeps un-landed members by
+  design, so its force flags (`--force-unlanded-branch-removal`,
+  `--force-dirty-worktree-removal`) and `pn workspace workforest remove --force` MUST
+  NOT be used to force teardown past one — that discards work no other copy holds,
+  and only an operator MAY authorize it. A member that cannot land leaves the set IN
+  PLACE and routes to STUCK.
 - Post-deploy-only verification uses a `pn:applied` gate on a verification child
   bead, NOT the `human` label. Reserve `human` for work that genuinely needs a
   person.
@@ -654,7 +679,7 @@ flowchart TD
     PD --> DONE(["Goal met: 0 ready. STOP (nothing was pushed)"])
     C -->|transient bd/dolt error| C
     C -->|got bead| U["bd show id (brief)"]
-    U --> I["ISOLATE keyed to bead id<br/>(worktree / fork-workforest; reuse if parked)"]
+    U --> I["ISOLATE keyed to bead id<br/>(worktree / pn-workspace-rules:fork-workforest, reuse if parked)"]
     I --> W["DELEGATE to SUBAGENT:<br/>implement + run pre-apply gates, report status"]
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
@@ -663,8 +688,8 @@ flowchart TD
     L -->|transient ff-race| L
     L -->|genuine stopped:reason| S
     L -->|landed, capture SHA| G{Post-deploy<br/>verification needed?}
-    G -- "no (done)" --> CL["CLEANUP worktree/set"]
-    G -- "yes" --> PB["pb-gate-lifecycle:<br/>bd create verify-child --defer +100y →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer ''"]
+    G -- "no (done)" --> CL["CLEANUP worktree/set<br/>(a set only AFTER every member landed, never force)"]
+    G -- "yes" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer +100y →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer ''"]
     PB -->|gate-create failed| S
     PB -->|gated + un-deferred| CL
     CL --> X["bd close impl id --reason ... --actor ID"]
