@@ -13,6 +13,24 @@
 - MUST write policies using RFC 2119 language (MUST/SHOULD/MAY/etc.)
 - MUST use mermaid diagrams instead of images in documentation
 
+### Mistake Acknowledgment Marker
+
+> Purpose: make agent self-corrections MECHANICALLY COUNTABLE so their rate can be tracked over
+> time. It is a WORDING convention only. Adopted 2026-07-30; it generates data FORWARD ONLY and
+> cannot be backfilled, which is why it landed ahead of the tooling that will consume it.
+
+- **M-1** When an acknowledgment of the agent's own error is warranted, its first words MUST be
+  `Correction:` — one stem, at the start of the sentence, in user-visible text. Thinking blocks are
+  excluded.
+- **M-2** M-1 MUST NOT change HOW OFTEN the agent acknowledges anything. The threshold for whether
+  an acknowledgment is warranted is set elsewhere and is unchanged: correct an earlier statement
+  only when the error would change the user's code, conclusions, or decisions. Silent fixes stay
+  silent and MUST NOT be marked. If M-1 would increase acknowledgment frequency, M-1 is being
+  misapplied.
+- **M-3** The agent MUST NOT add a second phrase distinguishing self-caught from user-caught. That
+  provenance is derived from transcript structure (whether the preceding turn was a typed user
+  prompt), so stating it is redundant and MUST NOT be attempted.
+
 ### Workflow Sequence
 
 1. **Search First** — confirm functionality exists or doesn't before implementing
@@ -20,20 +38,67 @@
 3. **No Assumptions** — only use files read, user messages, tool results. IF missing info: search first, then ask
 4. **Challenge Approach** — identify and state flaws/risks/better approaches directly
 
+### Absolute-Path Provenance
+
+> Observed 2026-07-30 (8-day census, 924 transcripts): 104 of 152 failed Reads named a root that
+> does not exist on this machine — 99 `/home/…`, 4 `/mnt/user-data/…`, 1 `/repo/…` — across 86
+> distinct sessions, worst single session 3, and 100% in the main loop rather than subagents. In
+> the traced cases the task gave repo-RELATIVE paths and the agent, required to use absolute paths,
+> FABRICATED a root instead of resolving against the session cwd. The failure text names the real
+> cwd, so each one is a round trip spent asking for something the harness had already answered.
+
+- **A-1** An absolute path MUST be built only from a root OBSERVED this session (the env block's
+  working directory, a tool result, or the user's text). This machine's roots are `/Users`,
+  `/Volumes`, `/nix` and `/private`; `/home`, `/mnt` and `/repo` do not exist on it, so producing
+  one means the root was invented rather than observed.
+- **A-2** Given a repo-relative path, resolve it as `<session-cwd>/<relative>`. If the root is
+  uncertain, probe first (`ls` the parent, Glob the suffix, or `git ls-files -- '*<name>'`) — MUST
+  NOT Read a guessed absolute path.
+- **A-3** When briefing a subagent, the brief MUST state the absolute repo root once; a brief that
+  lists relative paths without a root causes exactly this defect.
+
 ### Development Standards
 
 #### Validation
 
 **CRITICAL**: Before claiming any change is complete:
 
-- If the project has `.pre-commit-config.yaml`: `pre-commit run --all-files` MUST pass
-- If the project has `flake.nix`: `nix flake check && darwin-rebuild check --flake .` MUST pass
+- If the project has `.pre-commit-config.yaml` (test with `test -f .pre-commit-config.yaml && echo yes || echo no` — an exit-0 probe; do NOT probe by running the tool, and do NOT probe with bare `ls`, which exits nonzero on a missing file and is therefore itself a failed tool call — 19 such failures in the 8 days to 2026-07-30): `pre-commit run --all-files` MUST pass
+- If the project has `flake.nix` (same exit-0 probe: `test -f flake.nix && echo yes || echo no`): `nix flake check && darwin-rebuild check --flake .` MUST pass
 - IF no tests exist for changed code: create them
 - NEVER claim code is complete without passing tests
+
+> Observed 2026-07-30 (8-day census): 127 Bash timeouts across 69 sessions — mostly `git`
+> fetch/clone on the monorepo, `nix` builds/checks, and test loops re-issued unchanged after the
+> first timeout. 73 of the 127 were subagent calls, which is why **L-3** exists.
+
+- **L-1** A command expected to outlive the 2m default (`nix build` / `nix flake check`,
+  `go test ./...`, monorepo `git fetch|clone|push`, `prek`/`pre-commit run --all-files`) MUST set an
+  explicit `timeout`, or run via `run_in_background` and be watched with Monitor.
+- **L-2** After a timeout, the SAME command MUST NOT be re-issued unchanged; re-run it in the
+  background or with a larger explicit timeout, and narrow it if possible.
+- **L-3** A subagent brief that instructs a build, check, or full test run MUST state the timeout to
+  use, or say to run it in the background.
 
 #### Structured Data Files
 
 MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sed, awk, python).
+
+#### Scratch / Payload File Writes
+
+> Observed 2026-07-30: 125 of 134 Write errors in the 3-month census were "File has not been read
+> yet", and the mechanism is unchanged in the 8-day re-measure — 9 of 11 precondition failures were
+> regenerated payloads in the scratchpad (`commitmsg.txt`, `pr-body.md`, `*.jsonl` exports)
+> overwritten at a path this or a sibling session already wrote. In one session the agent alternated
+> between `commitmsg.txt` and `commit-msg.txt` rather than using a fresh name.
+
+- **V-1** A regenerated payload (commit message, PR body, report, export) MUST go to a FRESH unique
+  filename in the scratchpad (e.g. `pr-body.2.md`, `mktemp`-style suffix), not overwrite the
+  previous revision. Renaming or re-spelling the same file is NOT a fresh name.
+- **V-2** If overwriting an existing path is genuinely required, it MUST be Read first in this
+  session, immediately before the Write. A ranged Read suffices — verified 2026-07-30, a `limit: 1`
+  Read of a 4-line file satisfied the precondition — so the cost is one cheap call, not reading a
+  large file in full.
 
 #### Unit Tests
 
@@ -420,7 +485,7 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - **R-6** For a change judged very small/quick, the agent MAY take the direct-commit path (commit on the primary branch in the canonical clone) — but if it does, it MUST first ask the user.
 - **R-7** Concurrent agents in different worktrees are expected; the primary branch advancing during work is absorbed by the rebase. Only a rebase conflict or a persistent ff-race during landing warrants attention.
 - **R-8 (floating-branch halt)** If an integration would advance the canonical primary branch (e.g. a local ff-merge) and the canonical clone is not on its primary branch, the agent MUST halt and report — merging then advances the wrong branch and orphans work into hanging branches. (For methods that do not touch the canonical primary — e.g. `pull-request` — an off-primary/dirty canonical is an R-3 anomaly to surface, not necessarily to halt.)
-- **R-9 (integration entry point)** To integrate completed work, the agent MUST use the `integrate-branch` skill. The agent MUST NOT use `superpowers:finishing-a-development-branch` (plain non-ff merge, no rebase).
+- **R-9 (integration entry point)** To integrate completed work, the agent MUST invoke the Skill tool with the plugin-qualified id `integrate-branch:integrate-branch` (handlers: `integrate-branch:ff-merge-to-main`, `integrate-branch:pull-request`; session close-out is `session-wrapup:wrap-up-session`). Qualified ids are the form the Skill tool documents for plugin skills, and they are unambiguous where a bare name is not: a bare name can resolve to a different plugin's skill silently, whereas a stale qualified id fails loudly as `Unknown skill: <id>`. Bare names DO currently resolve — verified 2026-07-30: 7 bare `integrate-branch` invocations succeeded among 199 Skill calls over 8 days — so this is a SPECIFICITY requirement, NOT a fix for a live failure, and MUST NOT be cited as evidence of one. The agent MUST NOT use `superpowers:finishing-a-development-branch` (plain non-ff merge, no rebase).
 
 ### Prohibited Actions
 
@@ -435,6 +500,23 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - Include the Jira issue as `Refs: TICKET-ID` on the line immediately after the subject (before the body). Extract the ticket ID from the branch name (format: `username.TICKET-ID.description`). A valid ticket ID matches `[A-Z]+-\d+` (e.g., `FINDEV-9208`, `CI-1494`). If the branch contains `NO-JIRA`, `NOJIRA`, or any variation instead of a real ticket ID, omit the `Refs:` line entirely.
 - **CRITICAL**: NEVER use `--no-verify` (or `-n`) on git commands without explicit user approval
 - IF git hooks report violations: MUST fix the violations rather than bypassing hooks
+- Agent-authored GitHub PR comments/reviews (ZR repos) MUST include 🤖 in the body — a hook rejects them otherwise (12 rejected-and-retried comment bodies in the 3-month census; 1 in the 8 days to 2026-07-30)
+
+#### Waiting / Polling
+
+> Observed 2026-07-30 (8-day census): 26 foreground-`sleep` blocks across 26 DISTINCT sessions —
+> exactly one each, so the reflex is re-learned from scratch every time. 21 of 26 were subagents. 12
+> of 26 were `sleep N` followed by `tail`/`cat`/`wc -c` on a background job's scratchpad log, which
+> is the exact case Monitor exists for. The Bash tool description already states this prohibition and
+> is demonstrably not sufficient on its own.
+
+- **CRITICAL**: NEVER wait by foreground `sleep` — it is policy-blocked, so the call is a guaranteed
+  wasted round trip.
+- To wait for a background job's output to change or a file to appear: `run_in_background`, then
+  Monitor with an until-loop. MUST NOT poll it with `sleep` plus `tail`/`cat`/`wc`.
+- To wait on external state (a PR merging, a CI run finishing): Monitor with an until-loop, or a
+  single check at a delay matched to how fast that state actually changes — never a `sleep`-then-check
+  pair.
 
 #### Numeric Data
 
