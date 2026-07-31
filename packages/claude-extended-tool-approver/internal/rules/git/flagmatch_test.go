@@ -422,11 +422,10 @@ func TestGit_LongFlagTests_AreAbbreviationAware(t *testing.T) {
 		ast.Inspect(fd.Body, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.CallExpr:
-				callee := selectorName(node.Fun)
-				switch {
-				case callee == "cmdparse.HasLongFlag":
+				switch callee := selectorName(node.Fun); callee {
+				case "cmdparse.HasLongFlag":
 					report(fn, "cmdparse.HasLongFlag", "(exact-token primitive)", node.Pos())
-				case callee == "hasFlag", callee == "strings.HasPrefix", callee == "strings.EqualFold":
+				case "hasFlag", "strings.HasPrefix", "strings.EqualFold":
 					for _, arg := range node.Args {
 						if lit, ok := isLongFlagLit(arg); ok {
 							report(fn, callee, lit, node.Pos())
