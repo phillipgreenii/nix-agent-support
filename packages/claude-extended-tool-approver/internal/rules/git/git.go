@@ -27,6 +27,16 @@ var readOnlySubcommands = map[string]bool{
 	"check-ignore": true, "check-attr": true, "check-mailmap": true, "check-ref-format": true,
 }
 
+// remoteBlockedSubcommands is the `git remote` subcommand set that MUTATES which
+// repository a remote name resolves to, or which of its refs are tracked. Every
+// member is a hard Reject — see remoteVerdict for the ruling and the rationale.
+//
+// The set is exactly the operator's enumeration of 2026-07-30, and it is keyed on
+// the VERB only — a verb's own flags (`add -f`, `set-url --add`, `set-url --push`)
+// do not need listing, since the verb is what remoteVerdict looks up. `prune` and
+// `update` are DELIBERATELY absent: they only refresh LOCAL remote-tracking refs
+// from the remote a name already points at, so neither can redirect a push, and
+// gating them would change verdicts this bead has no ruling for.
 var remoteBlockedSubcommands = map[string]bool{
 	"add": true, "remove": true, "rm": true, "rename": true,
 	"set-url": true, "set-head": true, "set-branches": true,
@@ -102,6 +112,28 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 
 // classify returns the base verdict for a git subcommand, independent of any
 // `-C` path-safety concern (which Evaluate layers on top via chdirSafe).
+//
+// BARE-INDEX OPERAND SURVEY, 2026-07-30 (pg2-8imjo). Every arm below was checked
+// for an operand read by a fixed argument index — the defect class where a leading
+// flag displaces the token a gate keys on. Result: NONE REMAIN in this file. The
+// `git remote` arm's `rest[0]` was the only one and is now
+// cmdparse.FirstOperand(rest) in remoteVerdict; `subcmd` itself comes from
+// cmdparse.GitInvocation, which already consumes pre-subcommand options; and every
+// other arm keys on a FLAG (hasFlag, cmdparse.HasShortFlag/HasLongFlag) or on a
+// classified refspec, never on a position. A NEW arm MUST use FirstOperand rather
+// than an index.
+//
+// TWO ADJACENT GAPS ARE DELIBERATELY LEFT ALONE, each owned elsewhere:
+//
+//   - `git config` (pg2-szadj, open) — it is in modifyingSubcommands and approved
+//     OUTRIGHT, so there is no key lookup here to displace; the gap is that safety
+//     interlocks (`clean.requireForce`, `core.hooksPath`) can be written with no
+//     prompt. That bead also records the constraint this survey exists to enforce:
+//     `--global` and `--type=bool` shift the key's position, so its fix MUST read
+//     the key with FirstOperand and MUST NOT read it at a fixed index.
+//   - `isDestructive`'s exact-token `-D` — an intentionally narrow FLAG test, not
+//     an operand lookup; see that function's doc for why widening it is out of
+//     scope.
 func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
 	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
 	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
@@ -156,16 +188,10 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	if subcmd == "tag" {
 		return hookio.RuleResult{Decision: hookio.Reject, Reason: "git: git tag is prohibited — tags cause confusion in this workflow", Module: r.Name()}
 	}
-	// remote: special handling
+	// remote: a MUTATION is Reject, a read-only inspection stays Approve — see
+	// remoteVerdict for the ruling and the flag-displacement defect it closes.
 	if subcmd == "remote" {
-		remoteSub := ""
-		if len(rest) > 0 {
-			remoteSub = rest[0]
-		}
-		if remoteBlockedSubcommands[remoteSub] {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git remote modifying command", Module: r.Name()}
-		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
+		return r.remoteVerdict(rest)
 	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
@@ -188,6 +214,77 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git clean is destructive", Module: r.Name()}
 	}
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+}
+
+// remoteVerdict returns the verdict for a `git remote` — rest being the args AFTER
+// the `remote` subcommand. Unlike pushVerdict it always answers, because every
+// `git remote` is either a mutation (Reject) or an inspection (Approve).
+//
+// THE SUBCOMMAND IS LOCATED WITH cmdparse.FirstOperand, NOT rest[0], AND THAT IS
+// THE WHOLE BUG THIS CLOSES (pg2-8imjo). `rest[0]` is the first TOKEN, so any
+// leading flag displaced the subcommand out of remoteBlockedSubcommands and the
+// arm fell through to the read-only Approve below. Measured on a binary built from
+// main @ b497d6f6, 2026-07-30: `git remote -v add upstream
+// https://example.invalid/x.git` answered `allow` — rest[0] was `-v`. Every
+// mutating verb had this bypass in both flag spellings (`-v`, `--verbose`).
+// FirstOperand skips leading flags and `=`-glued values, and DELIBERATELY does not
+// skip SEPARATED values, which is exactly what this call site needs: its doc
+// comment pins this very case (`["-v","add","upstream",url]` → `add`), because a
+// value-skipping walk would consume `add` as -v's value and answer `upstream`.
+// A regression here MUST NOT be fixed by reintroducing an index — re-read that
+// helper's doc first.
+//
+// WHY REJECT AND NOT ASK. Operator ruling, 2026-07-30: a `git remote` mutation
+// must be a hard Reject; the operator would rather run those by hand. The
+// rationale is EXFILTRATION — a remote mutation silently redirects where pushes
+// land, so `git remote set-url origin <attacker-url>` turns every later, entirely
+// ordinary-looking `git push origin main` into a send to another host, with
+// nothing at the push site to show for it. An Ask cannot implement that ruling
+// twice over: it asks a person a question the ruling has already answered, and
+// before this change the Ask covered only the BARE spelling while every
+// flag-displaced spelling of the SAME mutation was approved outright — which
+// teaches its own bypass, the pattern the force-push Rejects (pushVerdict) exist
+// to stop. Reject leaves no approvable spelling.
+//
+// IT IS ALSO THE CONTROL pg2-abb65 MIRRORS. `git push` to a network URL is a
+// Reject whose recorded reasoning is that it is the SAME exfiltration vector with
+// fewer steps, and must therefore be at least as strict as the `git remote
+// set-url` gate. An Ask here would invert that relationship — the fast door
+// refused, the slow one prompted — so this Reject is what makes that sibling's
+// reasoning true. The two MUST be changed together or not at all.
+//
+// WHAT WOULD JUSTIFY CHANGING IT: a new operator ruling. Needing one remote added
+// is not one — the operator runs it by hand, which is the remedy the ruling names.
+//
+// FALSE-POSITIVE COST IS ZERO, measured 2026-07-30: the only in-tree callers of
+// `git remote add` are a `pn` workspace smoke script and two pg-pr Go tests, all of
+// which run the command INSIDE a test binary or a shell script, where the hook
+// never sees the inner command. The Reject reaches only an agent typing `git
+// remote …` as a Bash tool call, which is the intent.
+//
+// READ-ONLY `git remote` STAYS APPROVE: bare `git remote`, `-v`/`--verbose`,
+// `show`, `get-url`. `prune` and `update` also stay approvable — see
+// remoteBlockedSubcommands for why they are not mutations in the sense that
+// matters here.
+//
+// TEXT VS PARSED: the test reads PARSED tokens (post-unquote
+// cmdparse.ParsedCommand.Args) and the rule runs only when
+// isGitExecutable(pc.Executable), so `git remote set-url …` quoted in a commit
+// message or a `bd comment` body is TEXT and never matches. That is the pg2-5b901
+// failure mode; do not reintroduce a strings.Contains over command text.
+func (r *Rule) remoteVerdict(rest []string) hookio.RuleResult {
+	remoteSub, _ := cmdparse.FirstOperand(rest)
+	if remoteBlockedSubcommands[remoteSub] {
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason: "git: mutating a remote is prohibited — `git remote " + remoteSub +
+				"` changes where pushes land, an exfiltration vector, so it is refused rather than prompted (operator ruling 2026-07-30). " +
+				"Every spelling is refused, including a flag-displaced one such as `git remote -v " + remoteSub +
+				"`, so retrying with another will not work. Ask the operator to run it by hand",
+			Module: r.Name(),
+		}
+	}
+	return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
 }
 
 // chdirSafe reports whether the `-C` target directory is in a zone appropriate

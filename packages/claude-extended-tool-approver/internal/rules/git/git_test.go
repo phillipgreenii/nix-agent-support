@@ -426,6 +426,126 @@ func TestGit_Tag_Reject(t *testing.T) {
 	}
 }
 
+// TestGit_RemoteMutating_Reject pins the pg2-8imjo verdict. Operator ruling
+// 2026-07-30: a `git remote` MUTATION is a hard Reject — it silently redirects
+// where pushes land, which is an exfiltration vector, and the operator would
+// rather run those by hand. The bare forms were Ask before; the FLAG-DISPLACED
+// forms measured `allow` on a binary built from main @ b497d6f6 (2026-07-30)
+// because the arm read its subcommand as `rest[0]` with no flag skipping.
+//
+// The `-v` / `--verbose` rows are the defect this bead exists to close and MUST
+// NOT be dropped: deleting them would let a future edit reintroduce an index-based
+// lookup with every remaining row still green.
+func TestGit_RemoteMutating_Reject(t *testing.T) {
+	reject := []string{
+		// FLAG-DISPLACED — THE measured holes. rest[0] was the flag, not the verb.
+		"git remote -v add upstream https://example.invalid/x.git",
+		"git remote --verbose add upstream https://example.invalid/x.git",
+		"git remote -v set-url origin https://example.invalid/x.git",
+		"git remote --verbose set-url origin https://example.invalid/x.git",
+		"git remote -v rename origin upstream",
+		"git remote -v remove origin",
+		"git remote -v rm origin",
+		"git remote -v set-head origin main",
+		"git remote -v set-branches origin main",
+		// Bare forms — Ask before the ruling, Reject now.
+		"git remote add upstream https://example.invalid/x.git",
+		"git remote remove origin",
+		"git remote rm origin",
+		"git remote rename origin upstream",
+		"git remote set-url origin https://example.invalid/x.git",
+		"git remote set-head origin main",
+		"git remote set-branches origin main",
+		// Mutation flags AFTER the verb do not move the verb, but pin them anyway.
+		"git remote add -f upstream https://example.invalid/x.git",
+		"git remote set-url --add origin https://example.invalid/x.git",
+		"git remote set-url --push origin https://example.invalid/x.git",
+		// A `--` end-of-options terminator: FirstOperand takes the NEXT token.
+		"git remote -- add upstream https://example.invalid/x.git",
+		// A pre-subcommand `-C` does not displace the remote verb either.
+		"git -C /tmp/repo remote -v add upstream https://example.invalid/x.git",
+	}
+	r := New(nil)
+	for _, cmd := range reject {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision == hookio.Approve {
+			t.Fatalf("cmd %q: got APPROVE (%s) — the remote verb was displaced out of the blocked set; the pg2-8imjo defect", cmd, got.Reason)
+		}
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject (git remote mutation)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_RemoteReadOnly_Approve is the pg2-8imjo REGRESSION GUARD. Inspecting
+// remotes is how an agent reads its own repo state and MUST stay approvable; a fix
+// that Rejected the whole `git remote` subcommand would pass the Reject test above
+// and break every one of these.
+//
+// `prune` and `update` are here deliberately: they refresh LOCAL remote-tracking
+// refs from the remote a name already points at, so neither can redirect a push,
+// and gating them is a verdict change this bead has no ruling for.
+func TestGit_RemoteReadOnly_Approve(t *testing.T) {
+	approve := []string{
+		"git remote",
+		"git remote -v",
+		"git remote --verbose",
+		"git remote show origin",
+		"git remote show",
+		"git remote get-url origin",
+		"git remote get-url --all origin",
+		"git remote -v show origin",
+		"git remote prune origin",
+		"git remote update",
+	}
+	r := New(nil)
+	for _, cmd := range approve {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (read-only git remote must stay approvable)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_RemoteMutation_TextIsNotAnOperation is the pg2-8imjo half of the
+// pg2-5b901 text-vs-parsed guard. pg2-5b901 is the live precedent: primarycommit
+// hard-denied a `bd update` whose ARGUMENT TEXT documented a commit. A `git remote
+// set-url` spelling quoted in a bd body or a commit message is TEXT, and denying it
+// would make this bead's own bookkeeping undeniable-by-hook.
+func TestGit_RemoteMutation_TextIsNotAnOperation(t *testing.T) {
+	r := New(nil)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		{`bd comment pg2-8imjo -m "git remote set-url origin https://example.invalid/x.git measured allow"`, hookio.Abstain},
+		{`bd update pg2-8imjo --notes "do not run git remote -v add upstream https://example.invalid/x.git"`, hookio.Abstain},
+		{`git commit -m "git remote set-url is prohibited (pg2-8imjo)"`, hookio.Approve},
+		{`git commit -m "the git remote add gate was flag-displaceable"`, hookio.Approve},
+	}
+	for _, tc := range cases {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision == hookio.Reject {
+			t.Errorf("cmd %q: got REJECT (%s) — a remote mutation appearing as TEXT must not be denied", tc.cmd, got.Reason)
+		}
+		if got.Decision != tc.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", tc.cmd, got.Decision, got.Reason, tc.want)
+		}
+	}
+}
+
 // TestGit_PushForceWithLease_Approve is the pg2-bohpm REGRESSION GUARD: a
 // SAME-BRANCH --force-with-lease is the correct post-rebase idiom and is in daily
 // use, so it stays Approve in every spelling. Denying any of these is WRONG.
