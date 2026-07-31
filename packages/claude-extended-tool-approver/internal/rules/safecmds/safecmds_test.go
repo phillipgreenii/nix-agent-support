@@ -948,7 +948,7 @@ func TestSafecmds_BashSyntaxCheck(t *testing.T) {
 
 // TestSafecmds_Strings covers `strings` as a read command (pg2-t76k8). Before
 // this bead `strings` hit the unknown-command fallthrough and abstained; it now
-// belongs to safeReadCmds, so it is routed through the SAME hasUnsafeReadPath
+// belongs to safeReadCmds, so it is routed through the SAME readPathIssue
 // path-safety check as cat/head/tail/wc — approved only for readable zones,
 // abstaining for unknown/secret-adjacent paths (mirrors
 // TestSafecmds_CatEtcPasswd_Abstain / TestSafecmds_HeadProjectFile_Approve).
@@ -987,5 +987,157 @@ func TestSafecmds_Strings(t *testing.T) {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
 		})
+	}
+}
+
+// TestSafecmds_DynamicReadPath_Abstain is the pg2-2ke04 (P0 SECURITY) guard: a READ
+// command whose path argument is dynamically expanded ($VAR / ${VAR} / $(...) /
+// backtick) is NOT statically determinable, so it MUST NOT be approved — the same
+// refusal TestSafecmds_DynamicWritePath_Abstain pins for writes.
+//
+// The bypass this closes: because looksLikePath matches only a literal `/`, `./`,
+// `../` or `~/` prefix, a `$F` argument was not path-like, no zone check ran, and
+// `F=/Users/me/.ssh/id_rsa; cat $F` auto-approved a read of a DENY-LISTED
+// credential in every permission mode, while the identical `rm $F` was already
+// refused.
+func TestSafecmds_DynamicReadPath_Abstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	abstain := []string{
+		"cat $F",
+		"cat \"$F\"",
+		"cat ${F}",
+		"head -1 $F",
+		"tail -f $LOGFILE",
+		"xxd $F",
+		"strings $F",
+		"wc -l $f",
+		"cat $HOME/.ssh/id_rsa",
+		"cat $D/id_rsa",
+		"cat ~/$REL",
+		"cat /tmp/$F",
+		"cat ./$F",
+		"cat $(echo /Users/me/.ssh/id_rsa)",
+		"cat `echo /Users/me/.ssh/id_rsa`",
+		"grep x $F",
+		"rg x $F",
+		"sed -n 1p $F",
+		"yq . $F",
+		"gofmt -l $F",
+		"jar tf $F",
+		"bash -n $F",
+		"jq . $F",
+	}
+	for _, cmd := range abstain {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain (dynamic read path)", cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// Static in-zone reads are unchanged, proving the guard is scoped to dynamic
+	// args rather than gating reads wholesale.
+	approve := []string{
+		"cat /home/user/project/README.md",
+		"head -20 /home/user/project/go.mod",
+		"wc -l /home/user/project/main.go",
+		"grep -rn foo /home/user/project",
+		"jq . /home/user/project/x.json",
+		"cat",
+	}
+	for _, cmd := range approve {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (static in-zone read)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_EverySafeReadCmdGatesDynamicPath enumerates safeReadCmds FROM THE MAP
+// ITSELF — not from a hand-copied list — so a member added later cannot silently
+// escape the pg2-2ke04 guard. Each member is asked to read a deny-listed credential
+// through one variable hop; none may approve.
+func TestSafecmds_EverySafeReadCmdGatesDynamicPath(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	if len(safeReadCmds) == 0 {
+		t.Fatal("safeReadCmds is empty; the enumeration would assert nothing")
+	}
+	for cmdName := range safeReadCmds {
+		for _, spelling := range []string{cmdName + " $F", cmdName + " \"$F\"", cmdName + " $(echo /Users/me/.ssh/id_rsa)"} {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": spelling})}
+			got := r.Evaluate(input)
+			if got.Decision == hookio.Approve {
+				t.Errorf("safeReadCmds member %q: %q was APPROVED (%s); want != approve", cmdName, spelling, got.Reason)
+			}
+		}
+	}
+}
+
+// TestSafecmds_ProgramOperandRole pins the ROLE split the pg2-2ke04 guard needs
+// (programOperand / isDynamicPathOperand): awk's program, sed's script and jq's
+// filter are CODE, and code legitimately contains a literal `$` — an awk field
+// reference, a sed end-of-line anchor, a jq variable bound by --arg. Those args
+// reach this rule POST-UNQUOTE, so the single-quoted `$` the shell never expands is
+// textually identical to a live expansion; judging them by the coarse
+// contains-a-dollar predicate would gate every `awk '{print $2}' file`.
+//
+// The program operand is NOT exempt — a program that is ITSELF a bare expansion is
+// indistinguishable from a path and still refused.
+func TestSafecmds_ProgramOperandRole(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// Program/filter/script text containing a literal `$` stays approved.
+		{"awk field ref", "awk '{print $1}' /home/user/project/x", hookio.Approve},
+		{"awk field sep", `awk -F'\t' '{print $2}' /home/user/project/x`, hookio.Approve},
+		{"awk assign flag", "awk -v n=1 '{print $n}' /home/user/project/x", hookio.Approve},
+		{"sed eol anchor", "sed 's/x$//' /home/user/project/x", hookio.Approve},
+		{"jq filter var", "jq '.count = $c' /home/user/project/x.json", hookio.Approve},
+		{"jq arg then filter", "jq --arg a b '{a:$a}' /home/user/project/x.json", hookio.Approve},
+		// A program operand that IS a bare expansion is still refused.
+		{"awk bare var program", "awk $F", hookio.Abstain},
+		{"sed bare var script", "sed $S /home/user/project/x", hookio.Abstain},
+		{"jq bare var filter", "jq $Q /home/user/project/x.json", hookio.Abstain},
+		{"awk subst program", "awk $(cat /home/user/project/prog.awk)", hookio.Abstain},
+		// A path BUILT from an expansion is refused even in program position.
+		{"awk var-rooted path program", "awk $D/prog.awk", hookio.Abstain},
+		// Program supplied by -f: every positional is a path, so the coarse
+		// predicate applies to all of them.
+		{"awk -f then dynamic file", "awk -f /home/user/project/p.awk $F", hookio.Abstain},
+		{"sed -e then dynamic file", "sed -e 's/a/b/' $F", hookio.Abstain},
+		// A dynamic FILE argument is refused even when a static program precedes it.
+		{"awk program then dynamic file", "awk '{print $1}' $F", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.command})}
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_BrowsingCmdsKeepDynamicPaths records a DELIBERATE exclusion from the
+// pg2-2ke04 guard: ls/find/du/stat/file/lsof expose names, sizes and timestamps but
+// never file CONTENT, so a dynamic path there is not an exfiltration primitive and
+// gating it would buy prompts with no security gain.
+func TestSafecmds_BrowsingCmdsKeepDynamicPaths(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	for _, cmd := range []string{"ls $d", "ls -la $HOME", "find $d -name x", "du -sh $d", "stat $f"} {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (browsing commands are exempt)", cmd, got.Decision, got.Reason)
+		}
 	}
 }

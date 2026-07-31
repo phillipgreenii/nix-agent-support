@@ -2140,3 +2140,106 @@ func TestIntegration_AgentConfigWritesAbstain(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_DynamicReadPathNeverApproves is the pg2-2ke04 (P0 SECURITY)
+// end-to-end guard, driven through EvaluateHook — the real PreToolUse decision path.
+//
+// THE DEFECT, measured live on main @ 9c52f66b in permission_mode "default": binding
+// a DENY-LISTED credential path to a shell variable and dereferencing it on a READ
+// bypassed the credential deny-list entirely and was APPROVED. The commands in the
+// bypass table below are VERBATIM from that measurement. `cat <path>` denies, and
+// one variable hop turned the same read into an auto-approve, because
+// safecmds.argsHaveDynamicExpansion was wired to safeWriteCmds only —
+//
+//	cat  /Users/phillipg/.ssh/id_rsa      ->  deny     (secrets deny-list)
+//	F=…; cat $F                           ->  ALLOW    (the bypass)
+//	F=…; rm  $F                           ->  abstain  (write: guard fired)
+//
+// Verdicts here are asserted as "not Approve" rather than a specific decision: the
+// fix makes the bypass NON-SILENT (the read is handed back to Claude Code's prompt),
+// it does not restore a `deny`. Restoring `deny` needs the variable RESOLVED by
+// intra-command dataflow, which pg2-2ke04 scopes out and pg2-553z3 weighs for the
+// PATH/HOME predicate — the two are to share one primitive when either is built.
+func TestIntegration_DynamicReadPathNeverApproves(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	// VERBATIM bypass rows from the bead's "Verified live" block, plus the
+	// substitution spellings. None may Approve.
+	bypasses := []struct {
+		name    string
+		command string
+	}{
+		{"var hop cat", "F=/Users/phillipg/.ssh/id_rsa; cat $F"},
+		{"var hop head", "F=/Users/phillipg/.ssh/id_rsa; head $F"},
+		{"var hop xxd", "F=/Users/phillipg/.ssh/id_rsa; xxd $F"},
+		{"var hop aws credentials", "F=/Users/phillipg/.aws/credentials; cat $F"},
+		{"var hop tilde", "FOO=~/.ssh/id_rsa; cat $FOO"},
+		// Quoted and concatenated spellings of the same hop.
+		{"quoted var hop", `F=/Users/phillipg/.ssh/id_rsa; cat "$F"`},
+		{"dir var plus literal leaf", "D=/Users/phillipg/.ssh; cat $D/id_rsa"},
+		// Command substitution and backtick spellings, not only $VAR.
+		{"command substitution", "cat $(echo /Users/phillipg/.ssh/id_rsa)"},
+		{"backtick substitution", "cat `echo /Users/phillipg/.ssh/id_rsa`"},
+		{"substitution non-denylisted secret", "head -1 $(printf %s /Users/phillipg/.aws/credentials)"},
+	}
+	for _, tt := range bypasses {
+		t.Run("bypass/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision == hookio.Approve {
+				t.Errorf("command %q was APPROVED (%s: %s); want != Approve", tt.command, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// The WRITE path is unchanged — these were already refused and must stay so.
+	for _, tt := range []struct {
+		name    string
+		command string
+	}{
+		{"var hop rm", "F=/Users/phillipg/.ssh/id_rsa; rm $F"},
+		{"var hop cp", "F=/Users/phillipg/.ssh/id_rsa; cp $F /tmp/x"},
+	} {
+		t.Run("write-control/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision == hookio.Approve {
+				t.Errorf("command %q was APPROVED (%s: %s); want != Approve", tt.command, got.Module, got.Reason)
+			}
+		})
+	}
+
+	// TEXT-vs-PARSED (the pg2-5b901 failure mode). The guard keys on PARSED
+	// ARGUMENTS, never on a strings.Contains over raw command text — the very shape
+	// this bead's report criticises in the `pathtraversal` rule. A commit message or
+	// an `echo` argument that merely QUOTES the bypass carries the same bytes in a
+	// non-operand position and MUST still approve.
+	controls := []struct {
+		name    string
+		command string
+	}{
+		{"commit message quoting the bypass", `git commit -m "cat $F no longer auto-approves (pg2-2ke04)"`},
+		{"echo quoting the bypass", `echo "cat $F"`},
+		// Static in-zone reads keep their Approve (no over-blocking).
+		{"static in-project read", "cat /Users/testuser/workspace/my-project/README.md"},
+		{"static in-project head", "head -20 /Users/testuser/workspace/my-project/go.mod"},
+		// awk/sed/jq PROGRAM text containing a literal `$` is code, not a path.
+		{"awk field reference", "awk '{print $1}' /Users/testuser/workspace/my-project/x"},
+		{"sed end-of-line anchor", "sed 's/x$//' /Users/testuser/workspace/my-project/x"},
+		{"jq filter variable", `jq --arg a b '{a:$a}' /Users/testuser/workspace/my-project/x.json`},
+		// browsingCmds expose names, not content — deliberately still approved.
+		{"ls with dynamic path", "ls $d"},
+	}
+	for _, tt := range controls {
+		t.Run("control/"+tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tt.command)}
+			got := eng.EvaluateHook(input)
+			if got.Decision != hookio.Approve {
+				t.Errorf("command %q got %v (%s: %s); want Approve", tt.command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
