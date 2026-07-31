@@ -46,7 +46,10 @@ set -euo pipefail
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 IMPL="${2:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 UUIDRE='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-IDRE='\b(INV|GOAL|STORY|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# The typed-name families INV-3 enumerates, including `USECASE` — an imports row MAY cite a
+# use case, and `owner_name_for_uuid` extracts the owner's current name with this same regex,
+# so omitting a family would report a resolvable row as a divergence.
+IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 
 trim() { sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'; }
 

@@ -13,7 +13,7 @@ decision needs.
 ## Relocating content into this area
 
 Content arrives here from the behavior docs by the method's relocation procedure,
-[`JOURNEY-5`](../behavior/journeys.md). Follow it there; it is **not** restated here.
+[`USECASE-5`](../behavior/journeys.md). Follow it there; it is **not** restated here.
 
 ## Entry ids
 
@@ -52,6 +52,17 @@ copy it.
 - **`DEC-CONFORM-1`** — in [conformance.md](conformance.md) — conformance checking splits three
   ways: **intra** (a set against the method's rules), **inter** (a set against other systems'
   contracts), **impl** (an implementation against its own behavior docs).
+- **`DEC-VOCAB-1`** — in [vocabulary.md](vocabulary.md) — three extent-defining kinds (user story,
+  use case, journey), each citing its established source, with **level** as the test between them;
+  and the settled re-classification of the elements that predated `USECASE-`.
+- **`DEC-TRACE-1`** — in [traceability.md](traceability.md) — traceability is a **per-element
+  listing**, not a coverage section, and the listings land before any section is deleted.
+- **`DEC-SEAM-1`** — in [seams.md](seams.md) — an imports row says **what it is** and links the
+  owner UUID; the UUID is the authority, the link may rot, and it only ever points toward the more
+  publicly reachable side.
+- **`DEC-SEAM-2`** — in [seams.md](seams.md) — interfaces are classified on **two** axes
+  (counterparty kind and essential-vs-optional participation), and an enumerated catalog belongs to
+  the interface that carries it.
 - **`IMPL-1`** — in [governance.md](governance.md) — who and what may author or change behavior
   docs, and what supervision applies.
 - **`IMPL-2`** — in [authoring.md](authoring.md) — author behavior docs as a cross-linked markdown

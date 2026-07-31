@@ -10,17 +10,31 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
 
 - **`INV-1`** <!-- uuid: 5f8e3cf8-aedc-4718-b1b9-986d4b10ae17 --> — A behavior docs set describes exactly **one scope**. By convention it lives
   at that scope's `docs/behavior`.
-- **`INV-11`** <!-- uuid: f8174e40-806c-4c42-97da-996efd7c6e23 --> — A behavior docs set's **extent** is exactly what its user stories and
-  journeys require, so it MUST include user stories and journeys; establish scope by writing
-  them. Nothing is in scope that no story or journey needs.
+- **`INV-11`** <!-- uuid: f8174e40-806c-4c42-97da-996efd7c6e23 --> — A behavior docs set's **extent** is exactly what its user stories, use
+  cases and journeys require, so it MUST include user stories, use cases and journeys;
+  establish scope by writing them. Nothing is in scope that no story, use case or journey
+  needs. (Which kind of element to write, and at which level, is
+  `behavior-docs/docs/decisions · DEC-VOCAB-1`.)
 - **`INV-10`** <!-- uuid: 75d9daaa-46f5-4645-949d-f9223bb4fafc --> — A behavior docs set speaks at its scope's **floor** and MUST NOT descend
   below it (below is relative to scope), located by the **substitution test**: generalize a
   term unless doing so loses essential meaning within the extent.
 - **`INV-13`** <!-- uuid: 94285c70-da89-4402-8ae2-af27925008bd --> — A behavior docs set MUST make its **scope explicit** (extent + floor),
-  include its **user stories and journeys**, and define **all its actors** and **all its
-  interfaces**; known gaps MUST be recorded as open questions. Completeness is judged
-  against an implementer being able to _locate_ what it needs; unknown gaps surface as holes
-  in this structure.
+  include its **user stories, use cases and journeys**, and define **all its actors** and
+  **all its interfaces**; known gaps MUST be recorded as open questions. Completeness is
+  judged against an implementer being able to _locate_ what it needs; unknown gaps surface as
+  holes in this structure.
+- **`INV-22`** <!-- uuid: b2502527-1340-4a1f-858c-aaa80c601317 --> — **Traceability is a
+  listing obligation, not a coverage section.** Every user story, use case and journey MUST
+  carry, **on its own definition**, a **listing** of what it requires: the invariants and
+  goals it exercises, and the use cases or journeys it **includes** by reference. Every
+  invariant and goal MUST appear in at least one such listing — that listing is what puts it
+  in extent (`INV-11`) — and every name a listing carries MUST resolve to a definition in this
+  set or to a declared external reference (`INV-3`). A set MUST NOT discharge this with a
+  separate coverage or traceability section: a trace kept away from the element it belongs to
+  is read by nobody and revised with nothing. Where such a section already carries the **only**
+  trace for an element, the per-element listings MUST land **first** — a trace MUST NOT be
+  deleted before the listing that replaces it exists.
+  (`behavior-docs/docs/decisions · DEC-TRACE-1`.)
 
 ## What a behavior doc contains
 
@@ -38,17 +52,25 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
   built — is therefore normal, not a defect in the docs; it is tracked against the cited IDs,
   never annotated inline (the docs stay living, `INV-4`).
 - **`INV-3`** <!-- uuid: c44b760f-9baf-471a-8424-49984eb94ac7 --> — Every invariant, goal,
-  user story, journey, interface, and actor MUST carry a **typed name** (`INV-`, `GOAL-`,
-  `STORY-`, `JOURNEY-`, `INTF-`, `ACTOR-`; open questions use `OQ-`) **and, at its definition
-  only, a stable UUID** — minted once and **never changed** — which is the element's true
-  identity. The name is a **mutable, human-readable label** that need only be consistent
+  user story, use case, journey, interface, and actor MUST carry a **typed name** (`INV-`,
+  `GOAL-`, `STORY-`, `USECASE-`, `JOURNEY-`, `INTF-`, `ACTOR-`; open questions use `OQ-`) **and,
+  at its definition only, a stable UUID** — minted once and **never changed** — which is the
+  element's true identity. The name is a **mutable, human-readable label** that need only be consistent
   **within its own set**; renaming it never breaks identity. References stay **name-based** so
   raw markdown stays clean; the UUID lives only on the definition, carried in an **HTML comment
   appended to the definition line** (as on this line). Downstream artifacts MUST cite the
   element they implement or verify; across behavior docs sets an element is cited by name as
   `<repo-name> · <set-path> · <name>`, and a set **declares the external elements it
-  references, with each owner's UUID**, in its `## External references` imports table — the
-  same imports mechanism used for external contracts — so cross-set matching is by **UUID**. A
+  references** in its `## External references` imports table — the same imports mechanism used
+  for external contracts — so cross-set matching is by **UUID**. Each row MUST carry the cited
+  **name**, one line saying **what it is** (so a reader learns why the row is there without
+  following the reference), the **owner's set-path**, and the **owner's UUID rendered as a link
+  to the owner's remote-served definition**. The **UUID is the authority and the link is a
+  convenience**: a link MAY rot, and a rotted or missing link MUST NOT be read as a broken
+  identity. A link MUST be reachable from every side that reads the table, so it MAY point from
+  a **less** publicly reachable scope to a **more** publicly reachable one and MUST NOT point
+  the other way; a set that cannot publish a reachable link declares the bare UUID instead
+  (`behavior-docs/docs/decisions · DEC-SEAM-1`). A
   set that **cites another set** SHOULD namespace its own names by topic (`INV-DISP-1`,
   `INTF-SOURCE`) so a bare name it cites never collides with one of its own; the **root** set —
   this one, which cites no other — keeps bare numeric names. **Interim (before an external
@@ -70,7 +92,18 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
   (each keeping its own set) each product defines the interface on its own side (what it sends
   **out** and takes **in**), and this duplication is deliberate. Where one side is an
   **implementer** of the other's contract, that side **cites** the owner's interface and states
-  only its own obligations, rather than restating the contract.
+  only its own obligations, rather than restating the contract. Each interface MUST declare
+  **two** things about its counterparty, because they answer different questions: its **kind**
+  (peer, implementer, owner, actor), which fixes how agreement is reconciled (`INV-18`); and
+  whether the counterparty is an **essential participant** — one without which the system is
+  nonsense — or an **optional participant** — one the system runs untouched without. A set MUST
+  NOT group its interfaces on kind alone: several interfaces commonly share one kind while
+  differing on participation, so kind alone flattens away what the system is _for_. An
+  **enumerated catalog** — the closed set of named values a boundary carries, such as the
+  metrics, event types or failure classes crossing it — belongs to the **interface that carries
+  it** and MUST be stated there; an invariant states the **obligation** over the catalog (that
+  it exists, is complete, is honoured), never the list itself.
+  (`behavior-docs/docs/decisions · DEC-SEAM-2`.)
 - **`INV-18`** <!-- uuid: 4c6a764b-02f5-4c85-afae-a082fe6c21cd --> — A behavior docs set MUST be **inter-consistent** at every interface; how
   agreement is reconciled follows the **counterparty**'s kind. With a **peer** (both sides keep a
   set), the outgoing interface MUST match the peer's incoming interface and vice versa,
@@ -88,7 +121,7 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
 - **`INV-19`** <!-- uuid: 4325bdf4-2458-4606-8b37-2e5e996aa53a --> — A set **MAY** declare a **precedence** ordering over its own invariants so a
   genuine conflict between two of them resolves the same way every time, and a reader can trust
   which rule wins (`STORY-7`). A newly-surfaced precedence conflict MUST be recorded as an open
-  question and settled by a decision doc (`JOURNEY-3`) — never chosen ad hoc by an agent — and a
+  question and settled by a decision doc (`USECASE-3`) — never chosen ad hoc by an agent — and a
   downstream set **MAY** cite an owning set's ordering rather than restate it.
 - **`INV-20`** <!-- uuid: bafdd784-81ed-46fe-88f0-1a8c5fc4caf0 --> — At a **reference seam** (a
   set together with the sets it references), a shared term MUST be either **inherited** (same
@@ -101,7 +134,17 @@ out-of-sequence numbers are legal and a name MAY be changed without breaking ide
 
 ## Goals
 
-- **`GOAL-5`** <!-- uuid: 0a40e122-27d6-40c5-a7ba-5626230d3b1b --> — Adding or changing an invariant SHOULD reference a **decision doc** (ADR).
+- **`GOAL-5`** <!-- uuid: 0a40e122-27d6-40c5-a7ba-5626230d3b1b --> — Adding or changing an
+  invariant SHOULD **cite the decision-doc entry** that settles it. The citation form is the one
+  `INV-3` fixes for any element outside this set: the entry's **typed name**, qualified by where
+  it lives — `<repo-name> · <decisions-path> · <name>` across repositories,
+  `<decisions-path> · <name>` for this product's own decision area — with the entry's **stable
+  UUID** as the identity the citation resolves by. Promoting a captured entry to a settled one
+  changes the name and preserves the UUID, so a UUID-resolved citation survives both promotion
+  and rename. An entry belonging to **another** scope MUST additionally be declared, with that
+  UUID, in this set's `## External references` table like any other external element; this
+  product's own decision area is the sibling **input** of the two-input model, not an external
+  set, so it needs no row.
 - **`GOAL-17`** <!-- uuid: 71b3c304-d5cb-4cd9-81f6-b1d00737fdfb --> — The behavior docs set, with the decision docs, SHOULD suffice to
   **regenerate a behavior-conformant implementation** (not byte-identical); it outlives any
   implementation.

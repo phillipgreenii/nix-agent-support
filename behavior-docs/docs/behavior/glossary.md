@@ -47,14 +47,54 @@ system's glossary, not here.
 - **Interface** — a boundary described by **what crosses it** (its field-shape) and **what must
   hold** — never how it is implemented — so the parties on each side can be confirmed to agree.
   Agreement is reconciled by a peer cross-check where the counterparty keeps its own set, otherwise
-  by a conformance suite.
+  by a conformance suite. Every interface is classified on **two** axes: its counterparty's kind,
+  and whether that counterparty is an essential or an optional participant (`INV-8`).
+- **Essential participant** — a counterparty without which the system is nonsense; its interface
+  is on the path the system exists to serve, and is touched whenever the system is used.
+- **Optional participant** — a counterparty the system runs untouched without. Its interface is
+  real and MUST still be defined (`INV-13`), but a deployment that never configures it is a valid
+  deployment — which is also why it is touched far less often than an essential one.
+- **Catalog** — the closed, enumerated set of named values a boundary carries: the metrics, event
+  types or failure classes crossing it. A catalog belongs to the interface that carries it, and an
+  invariant states the obligation over it rather than the list (`INV-8`).
 - **Conformance suite** — the checks an implementer runs to confirm it adheres to an interface's
   stated shape. A conformance suite reconciles agreement in place of a peer cross-check when the
   counterparty keeps no behavior docs set of its own.
-- **User story** — a want from an actor's perspective, in the standard role–capability–
-  benefit form: `As <actor>, I want <capability>, so that <outcome>`.
-- **Journey** — an end-to-end flow through the system, told from the outside; MAY be written
-  as Given/When/Then (Gherkin) scenarios.
+- **User story** — a **want**, stated from one actor's perspective, in the role–capability–
+  benefit form `As <actor>, I want <capability>, so that <outcome>`. It states the want and the
+  benefit, never the steps — the steps belong to a use case or a journey. Established source:
+  the Connextra template, as treated in Mike Cohn's _User Stories Applied_, together with Ron
+  Jeffries' card/conversation/confirmation reading of what a story is. This method defines the
+  form it requires above and **cites** those sources for the rest rather than restating them.
+- **Use case** — a named description of an interaction, centred on a **primary actor**'s goal,
+  stating: the **primary actor**; the **scope** it is written against; its **level**; the
+  **preconditions** that must hold before it starts; a **main success scenario** as a numbered
+  sequence of steps; and **extensions** — the alternative and failure branches off numbered
+  steps. A use case MAY **include** another by reference at a lower level instead of restating
+  its steps. Established source: Alistair Cockburn's _Writing Effective Use Cases_, on the
+  form that originates with Ivar Jacobson's use-case-driven analysis; this method requires the
+  fields above and cites that source for the full field list and the writing guidance.
+- **Level** — an element's **goal level**, one of three: **summary** — an arc spanning several
+  user-goal elements, usually across more than one actor and longer than one sitting;
+  **user-goal** — what a single primary actor accomplishes in one sitting, which is where most
+  elements sit; **subfunction** — a step below a user goal, factored out precisely because more
+  than one element **includes** it by reference. Level is the test for which kind of element to
+  write: user-goal and subfunction are **use cases**, summary is a **journey**. Established
+  source: Cockburn's three goal levels (the sea-level metaphor).
+- **Journey** — an end-to-end flow through the system, told from the outside, at **summary**
+  level and usually spanning **more than one actor**: it names the arc and **includes** the
+  user-goal use cases by reference rather than restating their steps. Established source: the
+  journey- / experience-mapping practice, as treated in Jim Kalbach's _Mapping Experiences_.
+- **Scenario** — one concrete path through a story, use case or journey: **Given** the starting
+  state, **When** the act, **Then** the observable outcome. A scenario SHOULD be written in that
+  Given/When/Then form, **except** where a cited source prescribes another form for that kind of
+  element — a use case's main success scenario is a numbered step sequence with extensions, not
+  Given/When/Then. Established source: Dan North's introduction of Given/When/Then in
+  behaviour-driven development, and the Gherkin language that encodes it.
+- **Listing** — the trace an extent-defining element carries **on its own definition**: the
+  invariants and goals it exercises, and the use cases or journeys it includes by reference
+  (`INV-22`). A listing replaces a separate coverage section, so the trace is read and revised
+  with the element it belongs to.
 - **Invariant** — a rule that MUST always hold.
 - **Goal** — a desired, non-absolute property.
 - **Concept** — a named idea invariants and goals build on; not itself a rule.

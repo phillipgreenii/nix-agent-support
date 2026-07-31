@@ -15,7 +15,10 @@ mds=(*.md)
   echo "no .md files in $DIR" >&2
   exit 1
 }
-IDRE='\b(INV|GOAL|STORY|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
+# The typed-name families INV-3 enumerates. `USECASE` is one of them: without it a
+# `USECASE-<n>` definition line matches no ID, so its UUID carrier reads as an ORPHAN
+# (a carrier with no ID on its line) and the UUID section FAILs on a conformant set.
+IDRE='\b(INV|GOAL|STORY|USECASE|JOURNEY|INTF|ACTOR|OQ)-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\b'
 sec() { printf '\n=== %s ===\n' "$1"; }
 
 sec "Files"

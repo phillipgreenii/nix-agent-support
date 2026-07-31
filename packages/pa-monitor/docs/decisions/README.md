@@ -13,7 +13,7 @@ decision needs.
 ## Relocating content into this area
 
 Content arrives here from the behavior docs by the method's relocation procedure,
-[`JOURNEY-5`](../../../../behavior-docs/docs/behavior/journeys.md). Follow it there; it is **not**
+[`USECASE-5`](../../../../behavior-docs/docs/behavior/journeys.md). Follow it there; it is **not**
 restated here.
 
 ## Entry ids
