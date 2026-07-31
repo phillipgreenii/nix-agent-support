@@ -4,8 +4,8 @@ import "strings"
 
 // GIT FLAG / REFSPEC MATCHERS (pg2-si0bp)
 //
-// HasShortFlag, HasLongFlag, FirstOperand and ClassifyPushRefspecs below are the
-// token-level primitive the git rule needs in order to see the flag and refspec
+// HasShortFlag, HasLongFlag, FirstOperand, Operands and ClassifyPushRefspecs
+// below are the token-level primitive the git rule needs to see the flag and refspec
 // forms git ITSELF accepts. The rule module currently locates flags and operands
 // by exact token equality, so a clustered short (`-fu`), an `=`-glued long
 // (`--force-with-lease=other`), and a force/delete expressed purely in the
@@ -122,6 +122,32 @@ func FirstOperand(args []string) (string, int) {
 		return "", -1
 	}
 	return args[idx[0]], idx[0]
+}
+
+// Operands returns EVERY non-flag token in args, in order — FirstOperand's
+// whole-list form, walking the same operand scan so the two cannot disagree
+// about what counts as a flag.
+//
+// It exists for a caller that must be immune to POSITION, not merely to leading
+// flags: `git config` accepts its key at three different operand positions
+// (`git config <key> <value>`, `git config set <key> <value>`, and after a
+// separated `-f <file>`), so asking "does ANY operand name a gated key" is the
+// only formulation none of those spellings walks around.
+//
+// It inherits FirstOperand's separated-value limitation, and for this use the
+// direction of that error is load-bearing and SAFE: a separated flag value
+// (`-f <file>`, `--type bool`) is returned as an extra operand, so the returned
+// slice can only ever be a SUPERSET of the real operands. A caller scanning it
+// for a dangerous token therefore cannot lose that token to a flag-arity trick;
+// it can only consider one extra token that is not really an operand. A caller
+// that needs the operands to be exact MUST NOT use this.
+func Operands(args []string) []string {
+	idx := operandIndexes(args, 0)
+	out := make([]string, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, args[i])
+	}
+	return out
 }
 
 // operandIndexes returns the indexes of the non-flag tokens in args, stopping

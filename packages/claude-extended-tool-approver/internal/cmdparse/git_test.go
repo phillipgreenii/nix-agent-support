@@ -105,6 +105,72 @@ func TestFirstOperand(t *testing.T) {
 	}
 }
 
+// TestOperands pins the whole-list operand walk pg2-szadj's `git config` gate
+// needs. The `separated flag value` rows are the load-bearing ones: Operands
+// documents that it does NOT model flag arity, so a separated value is returned as
+// an extra operand. That over-collection is what makes the returned slice a
+// SUPERSET of the real operands and therefore safe for a gate to scan — a caller
+// cannot lose the token it is looking for to an arity trick. A "fix" that skipped
+// separated values would break that property and these rows would catch it.
+func TestOperands(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"no flags", []string{"key", "value"}, []string{"key", "value"}},
+		{"leading long flag", []string{"--global", "clean.requireForce", "false"}, []string{"clean.requireForce", "false"}},
+		{"glued long flag", []string{"--type=bool", "clean.requireForce", "false"}, []string{"clean.requireForce", "false"}},
+		{"flags interleaved", []string{"--global", "set", "--local", "core.hooksPath", "/tmp/h"}, []string{"set", "core.hooksPath", "/tmp/h"}},
+		{"separated short flag value is an operand", []string{"-f", "cfg", "core.hooksPath", "/tmp/h"}, []string{"cfg", "core.hooksPath", "/tmp/h"}},
+		{"separated long flag value is an operand", []string{"--type", "bool", "clean.requireForce", "false"}, []string{"bool", "clean.requireForce", "false"}},
+		{"only flags", []string{"--list", "-z"}, nil},
+		{"empty args", nil, nil},
+		{"lone dash is an operand", []string{"-l", "-"}, []string{"-"}},
+		{"after terminator every token is an operand", []string{"--unset", "--", "-weird", "-x"}, []string{"-weird", "-x"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Operands(tt.args)
+			if len(got) != len(tt.want) {
+				t.Fatalf("Operands(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("Operands(%v) = %v, want %v", tt.args, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestOperandsAgreesWithFirstOperand pins the shared-walk property: Operands and
+// FirstOperand run the same operandIndexes scan, so the first element of one MUST
+// be the other's answer. Two independent walks would be free to disagree about
+// what counts as a flag, which is the drift this guards.
+func TestOperandsAgreesWithFirstOperand(t *testing.T) {
+	cases := [][]string{
+		{"key", "value"},
+		{"--global", "clean.requireForce", "false"},
+		{"-v", "add", "upstream", "https://x/y.git"},
+		{"-f", "cfg", "core.hooksPath", "/tmp/h"},
+		{"--force", "--", "-weird"},
+		{"-f", "--force"},
+		nil,
+	}
+	for _, args := range cases {
+		first, _ := FirstOperand(args)
+		ops := Operands(args)
+		var wantFirst string
+		if len(ops) > 0 {
+			wantFirst = ops[0]
+		}
+		if first != wantFirst {
+			t.Errorf("args %v: FirstOperand = %q but Operands[0] = %q — the two walks disagree", args, first, wantFirst)
+		}
+	}
+}
+
 func TestClassifyPushRefspecs(t *testing.T) {
 	tests := []struct {
 		name string

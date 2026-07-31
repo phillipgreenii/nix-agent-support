@@ -913,3 +913,361 @@ func TestGit_BranchForceDelete_StaysAsk(t *testing.T) {
 		t.Errorf("git branch -D feat: got %s (%s), want ask (unchanged by pg2-bohpm)", got.Decision, got.Reason)
 	}
 }
+
+// TestGit_ConfigSafetyKeyWrite_Ask pins the pg2-szadj gate for the SINK and
+// INTERLOCK classes. Before this bead `config` was a plain member of
+// modifyingSubcommands with no key inspection at any position, so every row here
+// measured `allow` on a binary built from main @ 259f3331 (2026-07-30).
+//
+// THE FLAG ROWS ARE THE DEFECT AND MUST NOT BE DROPPED. `--global`, `--local`,
+// `--system` and `--type=bool` each shift the key out of first position, and the
+// git 2.54 `git config set <key> <value>` form shifts it again; a separated
+// `-f <file>` shifts it a third time. Deleting any of those rows would let a
+// future edit reintroduce a fixed-index key lookup with everything else green.
+func TestGit_ConfigSafetyKeyWrite_Ask(t *testing.T) {
+	ask := []string{
+		// The four measured holes.
+		"git config clean.requireForce false",
+		"git config --global clean.requireForce false",
+		"git config --type=bool clean.requireForce false",
+		"git config core.hooksPath /tmp/h",
+		// FLAG-POSITION INDEPENDENCE: every scope and type spelling.
+		"git config --local clean.requireForce false",
+		"git config --system clean.requireForce false",
+		"git config --worktree clean.requireForce false",
+		"git config --global --type=bool clean.requireForce false",
+		"git config --type bool clean.requireForce false",
+		"git config --replace-all core.hooksPath /tmp/h",
+		"git config --add core.hooksPath /tmp/h",
+		"git config -f .git/config core.hooksPath /tmp/h",
+		// --unset names ONE operand, exactly like a bare read, so it is recognised
+		// by configWriteIndicated rather than by the operand bound.
+		"git config --unset clean.requireForce",
+		"git config --unset-all clean.requireForce",
+		"git config --global --unset core.hooksPath",
+		// git 2.54 SUBCOMMAND form: the key is the SECOND operand.
+		"git config set core.hooksPath /tmp/h",
+		"git config set --global clean.requireForce false",
+		"git config unset clean.requireForce",
+		// Section and variable names are case-INsensitive in git (measured 2.54.0).
+		"git config CORE.HooksPath /tmp/h",
+		"git config Clean.RequireForce false",
+		// The remaining surveyed keys, one row each.
+		"git config core.pager /tmp/p",
+		"git config core.fsmonitor /tmp/m",
+		"git config core.sshCommand /tmp/s",
+		"git config diff.external /tmp/d",
+		"git config diff.mine.textconv /tmp/t",
+		"git config receive.denyCurrentBranch false",
+		"git config http.sslVerify false",
+		"git config http.https://host/.sslVerify false",
+		// Anti-bypass siblings: the same mechanism one word away.
+		"git config pager.log /tmp/p",
+		"git config core.editor /tmp/e",
+		"git config sequence.editor /tmp/e",
+		"git config diff.mine.command /tmp/c",
+		"git config merge.mine.driver /tmp/m",
+		"git config filter.mine.clean /tmp/c",
+		"git config filter.mine.smudge /tmp/s",
+		"git config filter.mine.process /tmp/p",
+		"git config credential.helper /tmp/ch",
+		"git config init.templateDir /tmp/tpl",
+		"git config include.path /tmp/evil.cfg",
+		"git config includeIf.gitdir:/x/.path /tmp/evil.cfg",
+		// A pre-subcommand -C does not displace the key either.
+		"git -C /tmp/repo config core.hooksPath /tmp/h",
+	}
+	r := New(nil)
+	for _, cmd := range ask {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision == hookio.Approve {
+			t.Fatalf("cmd %q: got APPROVE (%s) — the config key was not seen at this operand position; the pg2-szadj defect", cmd, got.Reason)
+		}
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask (safety-interlock / execution-sink config write)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigRedirectKeyWrite_Reject pins the REDIRECT class at the same hard
+// Reject remoteVerdict gives `git remote set-url`. `git config remote.origin.url
+// <url>` IS that mutation by another porcelain, and `url.<base>.insteadOf` is
+// strictly worse because the remote's own URL keeps looking correct. An Ask on any
+// of these would make the config spelling the cheaper way around the gate
+// pg2-8imjo closed, which is the inversion pg2-abb65's reasoning forbids.
+func TestGit_ConfigRedirectKeyWrite_Reject(t *testing.T) {
+	reject := []string{
+		"git config url.https://evil.invalid/.insteadOf https://github.com/",
+		"git config url.https://evil.invalid/.pushInsteadOf https://github.com/",
+		"git config --global url.https://evil.invalid/.insteadOf https://github.com/",
+		"git config remote.origin.url https://evil.invalid/x.git",
+		"git config remote.origin.pushurl https://evil.invalid/x.git",
+		"git config set remote.origin.url https://evil.invalid/x.git",
+		"git config --unset remote.origin.url",
+	}
+	r := New(nil)
+	for _, cmd := range reject {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Reject {
+			t.Errorf("cmd %q: got %s (%s), want reject (config-spelled remote redirect must match the git remote set-url Reject)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigRead_Approve is the pg2-szadj READ/WRITE discrimination guard.
+// Reading configuration is how an agent inspects its own repo and MUST stay
+// approvable — including a read of a GATED key, since reading one changes nothing.
+//
+// It also pins the REASON STRING. Before this bead a read reached the modifying arm
+// and was approved as "modifying git command"; `git config --get user.email`
+// modifies nothing, so that reason was wrong and is now "read-only git config".
+func TestGit_ConfigRead_Approve(t *testing.T) {
+	approve := []string{
+		"git config --get user.email",
+		"git config --list",
+		"git config -l",
+		"git config --get-all user.email",
+		"git config --get-regexp ^user",
+		"git config --global --list",
+		"git config --show-origin --list",
+		// A key with NO value is a read — including a gated key.
+		"git config core.hooksPath",
+		"git config clean.requireForce",
+		"git config --get core.hooksPath",
+		"git config --global core.hooksPath",
+		// git 2.54 subcommand form.
+		"git config get core.hooksPath",
+		"git config list",
+		"git config get --global clean.requireForce",
+	}
+	r := New(nil)
+	for _, cmd := range approve {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (a config READ must stay approvable)", cmd, got.Decision, got.Reason)
+		}
+		if got.Reason != "read-only git config" {
+			t.Errorf("cmd %q: reason is %q, want %q — before pg2-szadj a read reached the modifying arm and was reported as %q, which is wrong for a command that modifies nothing",
+				cmd, got.Reason, "read-only git config", "modifying git command")
+		}
+	}
+}
+
+// TestGit_ConfigOrdinaryWrite_Approve is the pg2-szadj FALSE-POSITIVE guard, and
+// the test that makes a blanket gate on `git config` writes fail. Routine config
+// writes carry no mechanism — they execute nothing, disable no refusal and redirect
+// nothing — and gating them would be a large false-positive surface over ordinary
+// traffic. A fix that Asked on every write would pass both gate tests above and
+// break every row here.
+func TestGit_ConfigOrdinaryWrite_Approve(t *testing.T) {
+	approve := []string{
+		"git config user.email a@b.c",
+		"git config user.name Someone",
+		"git config --global user.email a@b.c",
+		"git config commit.gpgsign true",
+		"git config branch.main.remote origin",
+		"git config branch.main.merge refs/heads/main",
+		"git config push.default simple",
+		"git config pull.rebase true",
+		"git config core.autocrlf false",
+		"git config init.defaultBranch main",
+		"git config alias.st status",
+		"git config --unset user.email",
+		"git config set user.email a@b.c",
+		// The row TestGit_Modifying_Approve pins; kept here too so this test alone
+		// documents why it must not become an Ask.
+		"git config x y",
+	}
+	r := New(nil)
+	for _, cmd := range approve {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve — a blanket gate on config WRITES is the wrong fix (pg2-szadj)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigWrite_TextIsNotAnOperation is the pg2-szadj half of the pg2-5b901
+// text-vs-parsed guard. pg2-5b901 is the live precedent: primarycommit hard-denied
+// a `bd update` whose ARGUMENT TEXT documented a commit. A `git config
+// clean.requireForce false` spelling quoted in a bd body or a commit message is
+// TEXT, and gating it would make this bead's own bookkeeping unrunnable.
+func TestGit_ConfigWrite_TextIsNotAnOperation(t *testing.T) {
+	r := New(nil)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+	}{
+		{`git commit -m "gate git config clean.requireForce false (pg2-szadj)"`, hookio.Approve},
+		{`git commit -m "git config core.hooksPath measured allow before the fix"`, hookio.Approve},
+		{`git commit -m "git config remote.origin.url is now a Reject"`, hookio.Approve},
+	}
+	for _, tc := range cases {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision == hookio.Reject || got.Decision == hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s) — a config write appearing as TEXT must not be gated", tc.cmd, got.Decision, got.Reason)
+		}
+		if got.Decision != tc.want {
+			t.Errorf("cmd %q: got %s (%s), want %s", tc.cmd, got.Decision, got.Reason, tc.want)
+		}
+	}
+}
+
+// TestGit_ConfigInjectionRoute_StillAbstains is the pg2-szadj REGRESSION GUARD on
+// the OTHER route to the same sinks. hasGitConfigInjection owns the pre-subcommand
+// `-c k=v` / `--config-env` form, and pg2-szadj gates only the PORCELAIN form; the
+// two are separate controls and adding one must not weaken the other. (pg2-arfw6
+// rewrites hasGitConfigInjection and has not landed — nothing here anticipates it.)
+func TestGit_ConfigInjectionRoute_StillAbstains(t *testing.T) {
+	r := New(nil)
+	abstain := []string{
+		"git -c clean.requireForce=false clean",
+		"git -c core.hooksPath=/tmp/h status",
+		"git --config-env=core.pager=X log",
+	}
+	for _, cmd := range abstain {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain (the -c injection guard must not be regressed by pg2-szadj)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_ConfigRedirectedContext pins how a redirected GIT_DIR/GIT_WORK_TREE
+// composes with the read/write discrimination, because one of these verdicts MOVED
+// with pg2-szadj and the move should be visible rather than incidental.
+//
+// A config READ under a redirect now Approves; it used to reach the modifying arm
+// and its Ask. That aligns it with the policy every other read already has —
+// `GIT_DIR=/other git log` is an Approve (TestGit_GitDirReadOnly_Approve) — instead
+// of leaving config as the one read that Asked. A config WRITE keeps the Ask, and a
+// gated key outranks it.
+func TestGit_ConfigRedirectedContext(t *testing.T) {
+	r := New(nil)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+		why  string
+	}{
+		{"GIT_DIR=/other git config --get user.email", hookio.Approve, "a READ under a redirect matches the read-only policy"},
+		{"GIT_DIR=/other git config user.email a@b.c", hookio.Ask, "a WRITE under a redirect keeps the redirect Ask"},
+		{"GIT_WORK_TREE=/other git config user.email a@b.c", hookio.Ask, "same for GIT_WORK_TREE"},
+		{"GIT_DIR=/other git config core.hooksPath /tmp/h", hookio.Ask, "a gated key is gated regardless of the redirect"},
+		{"GIT_DIR=/other git config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "a redirect must not soften the redirect-class Reject"},
+	}
+	for _, tc := range cases {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != tc.want {
+			t.Errorf("cmd %q: got %s (%s), want %s — %s", tc.cmd, got.Decision, got.Reason, tc.want, tc.why)
+		}
+	}
+}
+
+// TestGit_ConfigSeparatedFlagValue pins configElideFlagValues from BOTH sides, and
+// the two halves are in tension by design — a change that fixes one by loosening the
+// other is what this catches.
+//
+// PRECISION half: a separated value-taking flag must not turn a READ into a gated
+// write. `git config -f /repo/.git/config --get core.fsmonitor` is the shape
+// internal/engine's gitdir census already pins at Approve; without the elision it
+// presents two operands and reads as a write.
+//
+// SOUNDNESS half: eliding must not let a WRITE present as a read. The
+// `--comment --get` row is the measured proof this matters — on git 2.54.0,
+// 2026-07-30, `git config --comment --get core.hooksPath /tmp/h` DOES perform the
+// write, because git's parse-options hands `--comment` the next argv even though it
+// looks like an option. So honouring a `--get` token as a read indicator would be a
+// live bypass; eliding it is git's own parse, and the two remaining operands still
+// reach the gate.
+func TestGit_ConfigSeparatedFlagValue(t *testing.T) {
+	r := New(nil)
+	cases := []struct {
+		cmd  string
+		want hookio.Decision
+		why  string
+	}{
+		// PRECISION: a read stays a read.
+		{"git config -f /repo/.git/config --get core.fsmonitor", hookio.Approve, "separated -f value must not make a read look like a write"},
+		{"git config --file /repo/.git/config --get core.hooksPath", hookio.Approve, "same, long spelling"},
+		{"git config --type bool --get clean.requireForce", hookio.Approve, "same, separated --type value"},
+		// SOUNDNESS: a write stays a write.
+		{"git config --comment --get core.hooksPath /tmp/h", hookio.Ask, "git gives --comment the next argv, so the --get is its VALUE and this really writes"},
+		{"git config -f .git/config core.hooksPath /tmp/h", hookio.Ask, "eliding -f's value must still leave key and value as operands"},
+		{"git config --type bool clean.requireForce false", hookio.Ask, "separated --type value must not hide the key"},
+		{"git config --default X core.hooksPath /tmp/h", hookio.Ask, "same for --default"},
+		// A glued value is part of its own token: nothing to elide.
+		{"git config --type=bool clean.requireForce false", hookio.Ask, "glued --type=bool"},
+	}
+	for _, tc := range cases {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision != tc.want {
+			t.Errorf("cmd %q: got %s (%s), want %s — %s", tc.cmd, got.Decision, got.Reason, tc.want, tc.why)
+		}
+	}
+}
+
+// TestGit_Clean_StaysDecisiveAsk pins `git clean` at its present UNCONDITIONAL Ask.
+// pg2-szadj gates the `clean.requireForce` WRITE and deliberately leaves this arm
+// alone: a flag-aware re-classification was reviewed and rejected because the
+// clustered form `-fdx` is a SINGLE token, so an exact-token `-f` test would sort
+// the MOST destructive spelling into the "no force given" branch and approve it.
+// The `-fdx` and `-f -d -x` rows are that trap; if a later edit splits this Ask by
+// flag, they are what catches it.
+func TestGit_Clean_StaysDecisiveAsk(t *testing.T) {
+	r := New(nil)
+	ask := []string{
+		"git clean",
+		"git clean -n",
+		"git clean -f",
+		"git clean -fd",
+		"git clean -fdx",
+		"git clean -f -d -x",
+		"git clean --force",
+		"git clean -xdf",
+	}
+	for _, cmd := range ask {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := r.Evaluate(input)
+		if got.Decision == hookio.Approve {
+			t.Fatalf("cmd %q: got APPROVE (%s) — a flag-aware split of the clean arm misclassified a clustered force", cmd, got.Reason)
+		}
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask (unchanged by pg2-szadj)", cmd, got.Decision, got.Reason)
+		}
+	}
+}

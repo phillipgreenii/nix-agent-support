@@ -123,14 +123,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 // classified refspec, never on a position. A NEW arm MUST use FirstOperand rather
 // than an index.
 //
-// TWO ADJACENT GAPS ARE DELIBERATELY LEFT ALONE, each owned elsewhere:
+// `git config` was the second arm of that survey and is now closed the same way
+// (pg2-szadj): it was in modifyingSubcommands and approved OUTRIGHT, with no key
+// lookup at all, so any key could be written with no prompt. configVerdict below
+// locates the key with cmdparse.Operands — the whole-list form of FirstOperand —
+// because `--global` and `--type=bool` shift the key's position and a separated
+// `-f <file>` shifts it again. See that function for why a position-free scan is
+// required rather than a single FirstOperand read.
 //
-//   - `git config` (pg2-szadj, open) — it is in modifyingSubcommands and approved
-//     OUTRIGHT, so there is no key lookup here to displace; the gap is that safety
-//     interlocks (`clean.requireForce`, `core.hooksPath`) can be written with no
-//     prompt. That bead also records the constraint this survey exists to enforce:
-//     `--global` and `--type=bool` shift the key's position, so its fix MUST read
-//     the key with FirstOperand and MUST NOT read it at a fixed index.
+// ONE ADJACENT GAP IS DELIBERATELY LEFT ALONE:
+//
 //   - `isDestructive`'s exact-token `-D` — an intentionally narrow FLAG test, not
 //     an operand lookup; see that function's doc for why widening it is out of
 //     scope.
@@ -193,6 +195,13 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	if subcmd == "remote" {
 		return r.remoteVerdict(rest)
 	}
+	// config: a WRITE to a key that disables a safety interlock, points git at a
+	// program of the caller's choosing, or repoints a remote is gated; a READ and
+	// every ordinary write keep their Approve — see configVerdict for the key-by-key
+	// ruling and the invariant each verdict rests on.
+	if subcmd == "config" {
+		return r.configVerdict(pc, rest)
+	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
 		if hasRedirectEnvVar(pc) {
@@ -210,6 +219,23 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
 	}
+	// clean: a DECISIVE Ask in every spelling, and it MUST STAY decisive.
+	//
+	// WHAT THE OPERATOR IS ANSWERING, written down here because its absence was half
+	// of pg2-szadj: this prompt is worth answering only while `clean.requireForce`
+	// is TRUE — git's default, and the invariant that makes git refuse to delete
+	// untracked files without an explicit force flag. A prior `git config
+	// clean.requireForce false` removes that refusal and leaves this prompt
+	// unchanged, so the operator would be answering under a belief that is no longer
+	// true. configVerdict gates that write for exactly this reason; the two are one
+	// control and neither is sufficient alone.
+	//
+	// NO FLAG-AWARE RE-CLASSIFICATION HERE, deliberately (reviewed and rejected,
+	// 2026-07-30): the clustered form `-fdx` is a SINGLE token, so an exact-token
+	// `-f` test would sort the most destructive spelling into the "no force given"
+	// branch and approve it. Splitting this Ask by flag needs cmdparse.HasShortFlag
+	// and a ruling of its own; until then the unconditional Ask is the correct
+	// verdict for every spelling.
 	if subcmd == "clean" {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git clean is destructive", Module: r.Name()}
 	}
@@ -287,12 +313,608 @@ func (r *Rule) remoteVerdict(rest []string) hookio.RuleResult {
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git remote", Module: r.Name()}
 }
 
+// configGateClass is the MECHANISM by which a gated `git config` key is
+// dangerous. The verdict is derived from the CLASS rather than stored per key, so
+// two keys that fail the same way cannot drift to different answers, and adding a
+// key is a one-line decision about which mechanism it is.
+type configGateClass int
+
+const (
+	// configSink — git EXECUTES the value, or a program found under the path it
+	// names, during an ordinary git operation.
+	configSink configGateClass = iota + 1
+	// configInterlock — the value DISABLES a refusal git makes by default, so a
+	// later command that looks unchanged stops refusing what it used to.
+	configInterlock
+	// configRedirect — the value REPOINTS a remote at another host, so a later,
+	// entirely ordinary `git push origin main` sends elsewhere.
+	configRedirect
+)
+
+// gatedConfigKeys is the `git config` key set whose WRITE is gated, keyed on
+// `<section>.<name>` lowercased with any middle subsection dropped — the identity
+// configKeyID computes, and the reason one entry covers both `http.sslVerify` and
+// `http.https://host/.sslVerify`.
+//
+// THE SURVEY (pg2-szadj, 2026-07-30). Every key the bead enumerated was weighed by
+// MECHANISM, and the verdict follows the mechanism:
+//
+//	KEY                        MECHANISM  VERDICT  RATIONALE
+//	clean.requireForce         interlock  Ask      git's refusal to delete untracked files without an explicit force flag. `false` removes it AND leaves the `git clean` prompt unchanged, so the operator answers under a belief that is no longer true — the defect this bead names.
+//	core.hooksPath             sink       Ask      points hook execution at a caller-chosen directory: arbitrary code on the NEXT git operation, whatever that operation is.
+//	core.pager                 sink       Ask      git spawns the value on nearly every read command; it is the same sink the pre-subcommand `-c core.pager=…` guard already defers.
+//	core.fsmonitor             sink       Ask      the value MAY be a hook program git runs on every index refresh. Over-approximate: the harmless `true`/`false` spelling is gated too (see the OVER-APPROXIMATIONS note).
+//	core.sshCommand            sink       Ask      replaces the ssh binary for every fetch and push.
+//	diff.<driver>.textconv     sink       Ask      the enumerated `*.textconv`: git runs it to render a blob, selected by .gitattributes rather than by the command line.
+//	diff.external              sink       Ask      replaces the diff program for every `git diff`.
+//	receive.denyCurrentBranch  interlock  Ask      git's refusal to let a push update the branch checked out in a non-bare repo. `false`/`updateInstead` lets a push rewrite a live worktree's HEAD.
+//	http.sslVerify             interlock  Ask      certificate verification for every https fetch/push. `false` makes an interception invisible.
+//	url.<base>.insteadOf       redirect   REJECT   rewrites every matching URL, so `git push origin main` goes to another host with NO `git remote` change to show for it.
+//
+// NONE OF THE TEN IS LEFT APPROVED: each is either a program git executes or a
+// refusal git makes, and the bead pre-authorized the ruling.
+//
+// WHY THE INTERLOCK AND SINK CLASSES ARE ASK, NOT REJECT — the weaker verdict is
+// the CONSISTENT one. The identical vector by the other route, a pre-subcommand
+// `git -c core.pager=EVIL log`, is already handled by hasGitConfigInjection as an
+// ABSTAIN that defers to Claude's prompt. A decisive Ask is strictly stricter than
+// that Abstain, so this gate sits at or above the control it mirrors, which is the
+// relative-stringency test pushVerdict's network-URL Reject was argued from. Going
+// further to Reject would make the porcelain route stricter than the injection
+// route for the SAME sink, an inversion with no operator ruling behind it — and
+// unlike force-push or `git remote`, no ruling exists here. An Ask is also what
+// actually REPAIRS this defect: the harm is that the operator answers a later
+// prompt under a stale belief, and a prompt AT THE MOMENT THE BELIEF CHANGES is
+// exactly the remedy. Raising either class to Reject needs an operator ruling.
+//
+// WHY THE REDIRECT CLASS IS REJECT — relative stringency in the other direction.
+// `git remote set-url` is a hard Reject (remoteVerdict, operator ruling
+// 2026-07-30) precisely because it silently redirects where pushes land, and
+// pushing straight to a URL is a Reject (pushVerdict) so that it cannot be the
+// cheaper way around that gate. `git config remote.origin.url <url>` IS `git
+// remote set-url`, by another porcelain and the same one config write; and
+// `url.<base>.insteadOf` is strictly worse, since it leaves the remote's own URL
+// looking correct. An Ask on any of them would reopen the door remoteVerdict
+// closed. The three must be changed together with remoteVerdict or not at all.
+//
+// ANTI-BYPASS SIBLINGS ARE INCLUDED, because gating a key while the SAME mechanism
+// stays reachable one word away teaches the bypass instead of closing it — the
+// pattern remoteVerdict and pushVerdict were both written to stop:
+//
+//   - `pager.<cmd>` (whole section, see gatedConfigSections) — per-command pager;
+//     `pager.log` is core.pager for one command.
+//   - `core.editor`, `sequence.editor` — programs git spawns on commit/tag and on
+//     `rebase -i`; core.pager's immediate siblings.
+//   - `diff.<driver>.command`, `merge.<driver>.driver`,
+//     `filter.<driver>.clean|smudge|process` — the rest of the .gitattributes
+//     driver family that `diff.<driver>.textconv` belongs to; each runs a program
+//     on checkout, add, diff or merge.
+//   - `credential.helper` — a program git runs, and one handed credentials.
+//   - `init.templateDir` — plants hooks into every repo a later `git init`/`git
+//     clone` creates; core.hooksPath for repos that do not exist yet.
+//   - `include.path`, `includeIf.<cond>.path` — makes git READ CONFIG from a
+//     caller-chosen file, which can then set any key in this table. Gating the
+//     table while leaving this open would make the whole table one indirection
+//     deep.
+//   - `url.<base>.pushInsteadOf` — the push-only twin of insteadOf.
+//   - `remote.<name>.url`, `remote.<name>.pushurl` — the config spelling of `git
+//     remote set-url`, which remoteVerdict already Rejects.
+//
+// SURVEYED AND DELIBERATELY LEFT APPROVED:
+//
+//   - Ordinary configuration — `user.*`, `commit.gpgsign`, `branch.<n>.remote`,
+//     `push.default`, `pull.rebase`, `core.autocrlf`, `color.*`, `fetch.prune`,
+//     `init.defaultBranch`, `rerere.*` and the rest. None carries a mechanism, and
+//     a blanket gate on `git config` WRITES is explicitly the wrong answer here: it
+//     is a large false-positive surface over the routine traffic this rule exists
+//     to keep flowing.
+//   - `alias.<name>` — an alias whose value begins with `!` IS a shell command, but
+//     it only runs when someone LATER invokes `git <alias>`, and at that point this
+//     rule sees a git subcommand in no set and Abstains, deferring to the prompt.
+//     So the sink is already prompted at use time; gating the definition as well
+//     needs a ruling, not an inference.
+//   - `remote.<n>.uploadpack`/`receivepack`, `uploadpack.packObjectsHook`,
+//     `core.gitProxy`, `protocol.*.allow` — genuine sinks and loosenings, but on a
+//     server-side or alternate-transport path this workflow does not use. Named here
+//     so a later reader adds them under one ruling instead of rediscovering them.
+//   - `safe.directory`, `core.fileMode`, `core.symlinks` — they relax a check, but
+//     execute nothing and redirect nothing.
+//
+// OVER-APPROXIMATIONS, all in the safe direction and all deliberate:
+//
+//  1. THE GATE DOES NOT MODEL THE DIRECTION OF THE CHANGE. `git config --unset
+//     clean.requireForce` RESTORES the default and is harmless, yet it is gated.
+//     Deciding direction means reading the key's VALUE, and configElideFlagValues
+//     deliberately stops short of that: it knows which flags take an ARGUMENT, not
+//     which operand is the value — that additionally requires knowing the
+//     subcommand shape (`<key> <value>` vs `set <key> <value>` vs `--unset <key>`),
+//     which is a second table for a verdict that would not change. The cost is one
+//     prompt on a rare restore-to-default; the benefit is that no `--unset`-shaped
+//     spelling is an approvable route to a gated key. Direction is not even
+//     uniform: for a key whose safe state is SET, unsetting is the dangerous half.
+//  2. `core.fsmonitor true` is gated although it names no program.
+//  3. An operand that merely SPELLS a gated key is gated even in value position
+//     (`git config alias.x diff.external`). Absurd input, and gating it is the safe
+//     reading of an ambiguity that distinguishing key from value would be needed to
+//     resolve — see 1.
+var gatedConfigKeys = map[string]configGateClass{
+	// Execution sinks — git runs the value, or something under it.
+	"core.hookspath":    configSink,
+	"core.pager":        configSink,
+	"core.editor":       configSink,
+	"sequence.editor":   configSink,
+	"core.sshcommand":   configSink,
+	"core.fsmonitor":    configSink,
+	"diff.external":     configSink,
+	"diff.textconv":     configSink, // diff.<driver>.textconv
+	"diff.command":      configSink, // diff.<driver>.command
+	"merge.driver":      configSink, // merge.<driver>.driver
+	"filter.clean":      configSink, // filter.<driver>.clean
+	"filter.smudge":     configSink, // filter.<driver>.smudge
+	"filter.process":    configSink, // filter.<driver>.process
+	"credential.helper": configSink, // also credential.<url>.helper
+	"init.templatedir":  configSink,
+	"include.path":      configSink,
+	"includeif.path":    configSink, // includeIf.<condition>.path
+
+	// Disabled safety interlocks — a refusal git makes by default.
+	"clean.requireforce":        configInterlock,
+	"http.sslverify":            configInterlock, // also http.<url>.sslVerify
+	"receive.denycurrentbranch": configInterlock,
+
+	// Silent redirects — where fetches and pushes actually go.
+	"url.insteadof":     configRedirect, // url.<base>.insteadOf
+	"url.pushinsteadof": configRedirect, // url.<base>.pushInsteadOf
+	"remote.url":        configRedirect, // remote.<name>.url
+	"remote.pushurl":    configRedirect, // remote.<name>.pushurl
+}
+
+// gatedConfigSections gates an ENTIRE section, for the one mechanism where every
+// variable in the section is the same sink: `pager.<cmd>` sets the pager for one
+// git command, so gating `core.pager` alone would leave `pager.log` as a one-word
+// bypass of it.
+var gatedConfigSections = map[string]configGateClass{
+	"pager": configSink,
+}
+
+// Long-flag ABBREVIATION MINIMUMS for the `git config` options configVerdict keys
+// on. Same mechanism as the `git push` minimums (minAbbrevForce and its
+// neighbours) — git's parse-options accepts
+// any UNAMBIGUOUS PREFIX, so matching one exact spelling misses real ones — but the
+// minimums are NOT shared with that block: what a prefix collides with depends on
+// which option table git parsed the command against.
+//
+// Each value is the SHORTEST prefix real git accepted, MEASURED against git 2.54.0
+// on 2026-07-30 by running the flag and reading back the config; one character
+// shorter, git answered `error: ambiguous option`. Re-measure before changing one.
+//
+// ONLY WRITE-INDICATING options are listed, because those are the only spellings
+// that can change an answer (see configIsRead). `--global`, `--local`, `--system`
+// and `--type` need no entry: they are neither read nor write indicators, and the
+// operand scan skips flags whatever they spell. Measured anyway, for a later
+// reader: their minimums are `--gl`, `--lo`, `--sy` and `--t`, while `--g`, `--l`
+// and `--s` are all ambiguous (`--g` with --get-color/--get-colorbool, `--l` with
+// --local/--list, `--s` with --show-scope/--show-names).
+const (
+	minAbbrevUnset          = len("unset")  // exact only: `--unse` is ambiguous with --unset-all
+	minAbbrevUnsetAll       = len("unset-") // one shorter is `--unset`, which IS a different option
+	minAbbrevReplaceAll     = len("rep")    // `--re` is ambiguous: --rename-section / --remove-section
+	minAbbrevAdd            = len("a")      // no other legacy `git config` option starts with a
+	minAbbrevRemoveSection  = len("rem")    // `--re` as above
+	minAbbrevRenameSection  = len("ren")    // `--re` as above
+	minAbbrevConfigEditFlag = len("ed")     // `--e` is ambiguous: --edit / --expiry-date
+)
+
+// configWriteFlags maps each `git config` long option that MAKES THE INVOCATION A
+// WRITE to its measured abbreviation minimum. Order of iteration does not matter —
+// the caller only needs to know whether any is present.
+var configWriteFlags = map[string]int{
+	"unset":          minAbbrevUnset,
+	"unset-all":      minAbbrevUnsetAll,
+	"replace-all":    minAbbrevReplaceAll,
+	"add":            minAbbrevAdd,
+	"remove-section": minAbbrevRemoveSection,
+	"rename-section": minAbbrevRenameSection,
+	"edit":           minAbbrevConfigEditFlag,
+}
+
+// configValueFlags maps each `git config` long option that CONSUMES THE NEXT TOKEN
+// as its argument to that option's measured abbreviation minimum, and
+// configValueShortFlags is the same set's short spellings.
+//
+// MEASURED, not read off the usage text, against git 2.54.0 on 2026-07-30. The
+// probe is decisive: with `foo.bar` set to a sentinel, `git config <flag> zzz
+// foo.bar` prints the sentinel when <flag> CONSUMED `zzz` (so `foo.bar` is the key)
+// and answers `error: key does not contain a section: zzz` when it did not. By that
+// probe `--file`/`-f`, `--blob`, `--type`/`-t`, `--default`, `--comment`, `--value`
+// and `--url` consume; `--fixed-value`, `--includes`, `--name-only`,
+// `--show-origin`, `--regexp`, `--all`, `--bool`, `--int`, `--path`,
+// `--expiry-date`, `-z` and `--null` do NOT. `--value` and `--url` are rejected as
+// `unknown option` in the legacy positional mode and exist only under the git 2.54
+// subcommands; they are listed because configElideFlagValues cannot tell the two
+// modes apart and the entry is harmless in the mode that rejects the flag outright.
+//
+// THE MINIMUMS ARE ALSO GIT'S DISAMBIGUATION POINTS, which is why no BOOLEAN option
+// can be mistaken for one of these: `--fil` because `--fi` is ambiguous with
+// --fixed-value; `--bl` because `--b` is ambiguous with --bool-or-int/--bool-or-str;
+// `--t`, `--d`, `--c`, `--v`, `--u` because no other option of that mode starts with
+// those letters. Checked against every boolean listed above — none of their names
+// prefix-matches an entry here at or above its minimum.
+//
+// GETTING AN ENTRY WRONG IS THE UNSAFE DIRECTION, so both halves of the list matter.
+// A MISSING entry over-counts operands, which can only push an invocation INTO the
+// gate (a false prompt). A SPURIOUS entry would elide a token that is really an
+// operand, and could therefore drop the KEY out of the scan — which is why every
+// entry above was measured rather than inferred, and why a new one MUST be.
+var configValueFlags = map[string]int{
+	"file":    len("fil"),
+	"blob":    len("bl"),
+	"type":    len("t"),
+	"default": len("d"),
+	"comment": len("c"),
+	"value":   len("v"),
+	"url":     len("u"),
+}
+
+// configValueShortFlags holds the EXACT short spellings that consume the next
+// token. A CLUSTER is deliberately absent: `-zf cfg` does consume `cfg` (git hands
+// -f the next argv when the cluster has nothing glued after the letter), but
+// `-ft cfg` does NOT (there `t` is -f's glued value), and the two are
+// indistinguishable without modelling every letter's arity. Leaving clusters out
+// makes them over-count, which is the safe direction — see configValueFlags.
+var configValueShortFlags = map[string]bool{"-f": true, "-t": true}
+
+// configElidedValue replaces a separated flag ARGUMENT so the shared operand walk
+// skips it. Any token beginning `--` is a flag to cmdparse.Operands, so the
+// sentinel is invisible to both the operand count and the key scan.
+const configElidedValue = "--elided-flag-value"
+
+// configElideFlagValues returns args with the ARGUMENT of every separated
+// value-taking flag replaced by configElidedValue, so that the operand walk sees
+// only real operands.
+//
+// WHY IT IS NEEDED. cmdparse.Operands models no flag arity, so without this
+// `git config -f /repo/.git/config --get core.fsmonitor` — a pure READ — presents
+// two operands and reads as a write, which would gate it. With the elision it
+// presents one and stays approvable.
+//
+// WHY IT CANNOT OPEN A HOLE. Elision removes only a token that git itself hands to
+// a flag, so it reproduces git's own parse rather than second-guessing it — and this
+// is what settles the one bypass shape it has to survive. Measured 2026-07-30:
+// `git config --comment --get core.hooksPath /tmp/h` DOES perform the write, because
+// git's parse-options gives `--comment` the next argv even though that argv looks
+// like an option. Eliding `--get` there is therefore the CORRECT reading, and the
+// two remaining operands still reach the gate. It also cannot swallow a write's key:
+// a valid write names a key AND a value, and for elision to reach the key the flag
+// would have to sit directly before it with no argument of its own, which is the
+// spelling git rejects.
+//
+// Scanning STOPS at a `--` end-of-options terminator: after it no token is a flag,
+// so none consumes a value.
+func configElideFlagValues(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] == "--" {
+			return out // end of options; nothing after it is a flag value
+		}
+		if configValueShortFlags[out[i]] || configIsValueLongFlag(out[i]) {
+			out[i+1] = configElidedValue
+			i++ // the elided token cannot itself consume a value
+		}
+	}
+	return out
+}
+
+// configIsValueLongFlag reports whether tok is a long spelling of a `git config`
+// option that consumes the NEXT token — the full name or an unambiguous prefix down
+// to its configValueFlags minimum.
+//
+// An `=`-glued token (`--type=bool`) is NOT one: its argument is part of the same
+// token, so nothing follows to elide. A `--no-<name>` negation is not one either,
+// since `no-file` does not prefix-match `file`.
+func configIsValueLongFlag(tok string) bool {
+	if !strings.HasPrefix(tok, "--") || strings.Contains(tok, "=") {
+		return false
+	}
+	name := tok[2:]
+	for full, minLen := range configValueFlags {
+		if len(name) >= minLen && len(name) <= len(full) && full[:len(name)] == name {
+			return true
+		}
+	}
+	return false
+}
+
+// configWriteSubcommands is the git 2.54 SUBCOMMAND form of the same thing. git
+// 2.54.0 grew `git config {list|get|set|unset|rename-section|remove-section|edit}`
+// beside the legacy positional syntax (both measured working, 2026-07-30), and
+// `git config set core.hooksPath /tmp/h` puts the key at the SECOND operand — a
+// displacement a rule that only knew the legacy shape would walk straight past.
+var configWriteSubcommands = map[string]bool{
+	"set": true, "unset": true, "rename-section": true,
+	"remove-section": true, "edit": true,
+}
+
+// configWriteIndicated reports whether a `git config` invocation is a WRITE on the
+// evidence of an explicit option or subcommand alone, independent of how many
+// operands it carries. It exists for the spellings configIsRead's operand bound
+// cannot see: `--unset <key>` and `--unset-all <key>` name ONE operand, exactly
+// like a bare read, and `--edit` names none.
+func configWriteIndicated(args []string) bool {
+	if sub, _ := cmdparse.FirstOperand(args); configWriteSubcommands[sub] {
+		return true
+	}
+	for name, minLen := range configWriteFlags {
+		if _, ok := hasAbbrevLongFlag(args, name, minLen); ok {
+			return true
+		}
+	}
+	// `-e` is git's short spelling of --edit. Tested by EXACT token rather than
+	// with cmdparse.HasShortFlag because `git config`'s value-taking shorts are
+	// `-f` and `-t`, and a glued value (`-fsome.env`) would contribute a stray `e`
+	// to a cluster scan.
+	return hasFlag(args, "-e")
+}
+
+// configIsRead reports whether a `git config` invocation only READS configuration.
+// It is the read/write discrimination the gate needs in order to leave
+// `git config --get user.email`, `git config --list` and the bare-key form
+// `git config core.hooksPath` approvable while gating the writes.
+//
+// THE TEST IS AN OPERAND BOUND, NOT A FLAG ALLOWLIST, and that is what makes it
+// safe. Reading one variable names AT MOST ONE OPERAND — the key — whether it is
+// spelled `git config <key>`, `git config --get <key>` or `git config
+// --get-regexp <pattern>`; the new-form `git config get <key>` names two, the
+// subcommand plus the key. A WRITE always names one more (the value), so:
+//
+//   - `git config <key> <value>`, `git config --type=bool <key> <value>` and
+//     `git config set <key> <value>` all exceed the bound and reach the gate,
+//     whatever flags precede them. That is the FLAG-POSITION INDEPENDENCE the bead
+//     requires: `--global`, `--local`, `--system` and `--type=bool` are flags, the
+//     operand walk skips them, and the count is unchanged.
+//   - A SEPARATED flag value (`-f <file>`, `--type bool`, `--comment <msg>`) would
+//     otherwise be counted as an operand — cmdparse.Operands documents that it
+//     models no arity — and could only push an invocation OUT of the read shape and
+//     INTO the gate. So the bound is SOUND without any arity modelling; the
+//     measured configElideFlagValues that runs first is a PRECISION layer over it,
+//     removing the false prompt on reads such as `git config -f <file> --get
+//     <gated-key>`. args reaching this function are already elided.
+//
+// The bound also closes the one displacement a `FirstOperand == "get"` test would
+// have left open: for that token to be a separated flag VALUE rather than the
+// new-form subcommand there must be a further operand for the key, and for a write
+// a further one for the value, which puts the count past the bound. Measured
+// 2026-07-30: git rejects the remaining shapes outright anyway — `git config
+// --local get core.hooksPath` answers `error: key does not contain a section: get`,
+// because the subcommand form only parses when the subcommand is the FIRST
+// argument.
+//
+// WRITE INDICATORS ARE CHECKED FIRST because two write spellings sit INSIDE the
+// bound: `--unset <key>` and `--unset-all <key>` name one operand and `--edit`
+// names none. Without configWriteIndicated they would read as reads — and
+// `--unset` is a spelling the bead requires be gated.
+func configIsRead(args []string) bool {
+	if configWriteIndicated(args) {
+		return false
+	}
+	maxOperands := 1
+	if sub, _ := cmdparse.FirstOperand(args); sub == "get" || sub == "list" {
+		maxOperands = 2 // the git 2.54 subcommand token, plus at most one key
+	}
+	return len(cmdparse.Operands(args)) <= maxOperands
+}
+
+// configKeyID reduces a `git config` key token to the identity gatedConfigKeys is
+// keyed on — `<section>.<name>`, LOWERCASED, with any middle subsection DROPPED —
+// and reports false for a token that is not key-shaped, which is how a value
+// operand is skipped.
+//
+// LOWERCASING IS GIT'S OWN RULE, not a convenience: git documents section and
+// variable names as case-INsensitive (only the subsection is case-sensitive), and
+// measured on git 2.54.0, 2026-07-30, `git config CORE.HooksPath /tmp/h` followed
+// by `git config --get core.hookspath` printed `/tmp/h`. A case-sensitive table
+// would be bypassed by capitalisation.
+//
+// DROPPING THE MIDDLE is what lets one table entry cover every scope spelling of
+// the same variable, which is how git itself treats them: `http.sslVerify` and
+// `http.https://host/.sslVerify` (both measured accepted), `diff.<driver>.textconv`,
+// `url.<base>.insteadOf`, `credential.<url>.helper`. Only the FIRST and LAST
+// segments are read, because the subsection may contain dots and slashes — a
+// fixed-part split would fail on `url.https://evil.invalid/.insteadOf`, whose
+// subsection alone holds two dots.
+func configKeyID(tok string) (section, id string, ok bool) {
+	first := strings.IndexByte(tok, '.')
+	if first <= 0 {
+		return "", "", false // no dot, or an empty section: not a config key
+	}
+	name := strings.ToLower(tok[strings.LastIndexByte(tok, '.')+1:])
+	if name == "" {
+		return "", "", false // a trailing dot: no variable name
+	}
+	section = strings.ToLower(tok[:first])
+	return section, section + "." + name, true
+}
+
+// gatedConfigKey returns the first operand of a `git config` that names a gated
+// key, with the class that decides its verdict.
+//
+// IT SCANS EVERY OPERAND, WHICH IS THE STRONGER FORM OF THE BEAD'S CONSTRAINT, NOT
+// A DEPARTURE FROM IT. The requirement is that the key be located by the operand
+// walk rather than at a fixed index, and cmdparse.Operands IS that walk —
+// cmdparse.FirstOperand's whole-list form, sharing its one operandIndexes scan. A
+// single FirstOperand read is not sufficient here the way it is for `git remote`,
+// because `git config` accepts its key at three different operand POSITIONS: first
+// in `git config <key> <value>`, second in the git 2.54 `git config set <key>
+// <value>`, and second again after a separated `-f <file>` (measured accepted,
+// 2026-07-30). Asking "does ANY operand name a gated key" is the only formulation
+// none of those walks around. args are already configElideFlagValues'd, so the only
+// tokens missing from the scan are ones git ITSELF hands to a flag — never the key
+// of a valid write, which always keeps both its key and its value. A regression here
+// MUST NOT be fixed by reintroducing an index.
+func gatedConfigKey(args []string) (string, configGateClass, bool) {
+	for _, op := range cmdparse.Operands(args) {
+		section, id, ok := configKeyID(op)
+		if !ok {
+			continue
+		}
+		if class, gated := gatedConfigKeys[id]; gated {
+			return op, class, true
+		}
+		if class, gated := gatedConfigSections[section]; gated {
+			return op, class, true
+		}
+	}
+	return "", 0, false
+}
+
+// configVerdict returns the verdict for a `git config` — rest being the args AFTER
+// the `config` subcommand. Like remoteVerdict it always answers, because every
+// `git config` is a read, a gated write, or an ordinary write.
+//
+// THE DEFECT IT CLOSES (pg2-szadj, 2026-07-30). `config` was a plain member of
+// modifyingSubcommands, so EVERY key was approved outright with no key inspection
+// at any flag position. Measured `allow` on a binary built from main @ 259f3331:
+// `git config clean.requireForce false`, `git config --global clean.requireForce
+// false`, `git config --type=bool clean.requireForce false` and `git config
+// core.hooksPath /tmp/h`. The `-c` injection route for the same sinks was already
+// guarded by hasGitConfigInjection; only the PORCELAIN route was open, and the
+// `.git`-write guard deliberately exempts git's own arguments ("git is the
+// sanctioned porcelain"), so there was no second line of defence.
+//
+// WHAT MADE IT WORSE THAN A MISSING PROMPT: `git clean` still Asked. The operator
+// answering that prompt did so under the belief that git would refuse to delete
+// without an explicit force flag — an invariant the config write had already
+// removed. The prompt survived; the information behind it did not. See the `clean`
+// arm in classify, which now records that invariant, and gatedConfigKeys for the
+// per-key survey, the Ask-vs-Reject reasoning, and the invariant each verdict
+// rests on.
+//
+// THE INVARIANTS THE GATED VERDICTS REST ON, so a later reader can check whether
+// they are still true:
+//
+//   - INTERLOCK class — the gated key's git DEFAULT is still the safe value, and no
+//     config in scope has changed it. Verify per key with `git config --get <key>`
+//     returning nothing (measured: the flag form is a read and stays approvable).
+//   - SINK class — the only programs git executes during an ordinary operation are
+//     the ones the operator's own configuration names. Verify with `git config
+//     --list --show-origin` and read the origins.
+//   - REDIRECT class — a remote NAME still resolves to the URL the operator
+//     configured. This is the same invariant remoteVerdict protects; `git remote
+//     get-url <name>` (approvable) is the check.
+//
+// READS STAY APPROVE, WITH A CORRECTED REASON. Before this change a read reached
+// the modifying arm and was approved as `"modifying git command"` — measured for
+// `git config --get user.email`, which modifies nothing. That reason was wrong for
+// a read and is now `"read-only git config"`. configIsRead holds the
+// discrimination and its bound.
+//
+// THIS IS THE MODELLING gitdir EXPLICITLY DEFERS HERE. bindingDirection's
+// "RESIDUAL ASYMMETRY" note records that a bare `git` cannot be given a read/write
+// direction "without modelling every subcommand — the `git` rule's job", citing
+// corpus row 237336, which binds `.git/config` and then `git config --unset-all`s
+// it. configIsRead is that modelling for `config`, and `--unset-all` is one of the
+// write indicators it recognises.
+//
+// FALSE-POSITIVE COST IS ZERO, measured 2026-07-30 by enumerating every `git
+// config` invocation in this repo. The writes are all
+// `git-branch-maintenance.protectedBranch` / `.protectedWorktree` (`--local --add`,
+// `--unset`, `--unset-all`) and the reads are `pgii-integrate-branch.primaryBranch`
+// / `.strategy` and `user.email`. Not one names a gated key, so every in-tree caller
+// keeps its Approve.
+//
+// ONE OTHER VERDICT MOVES, and it is deliberate: a config READ under a redirected
+// GIT_DIR/GIT_WORK_TREE. It used to reach the modifying arm and its
+// hasRedirectEnvVar Ask; the read short-circuit above now Approves it. That is the
+// policy this rule already applies to every other read — `GIT_DIR=/other git log`
+// is an Approve (TestGit_GitDirReadOnly_Approve) — so recognising config reads as
+// reads makes the two consistent rather than carving an exception. WRITES keep the
+// redirect Ask, which is why hasRedirectEnvVar is still consulted below.
+//
+// ORDINARY WRITES ARE UNTOUCHED, and that is a requirement rather than a
+// side effect: `user.email`, `commit.gpgsign` and `branch.<name>.remote` keep
+// their Approve with their existing `"modifying git command"` reason, and
+// TestGit_Modifying_Approve's `git config x y` row still passes. A blanket
+// Ask/Reject on every `git config` write would be the wrong fix — a large
+// false-positive surface over routine traffic.
+//
+// TEXT VS PARSED: every test here reads PARSED tokens (post-unquote
+// cmdparse.ParsedCommand.Args) and the rule runs only when
+// isGitExecutable(pc.Executable), so `git config clean.requireForce false` quoted
+// in a commit message or a `bd comment` body is TEXT and never matches. That is the
+// pg2-5b901 failure mode; do not reintroduce a strings.Contains over command text.
+func (r *Rule) configVerdict(pc cmdparse.ParsedCommand, rest []string) hookio.RuleResult {
+	// Elide separated flag ARGUMENTS once, here, so the read/write bound and the key
+	// scan agree about what is an operand. Both consumers below take elided args.
+	args := configElideFlagValues(rest)
+	if configIsRead(args) {
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git config", Module: r.Name()}
+	}
+	if key, class, ok := gatedConfigKey(args); ok {
+		return r.configGateResult(key, class)
+	}
+	if hasRedirectEnvVar(pc) {
+		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+	}
+	return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+}
+
+// configGateResult turns a gated key and its class into the verdict. The mapping
+// lives here rather than in gatedConfigKeys so that every key of one mechanism is
+// answered identically — see gatedConfigKeys for why redirect is a Reject while
+// sink and interlock are Asks.
+//
+// The default arm answers ASK, so a class added to configGateClass without a
+// verdict of its own fails toward the prompt rather than toward an Approve.
+func (r *Rule) configGateResult(key string, class configGateClass) hookio.RuleResult {
+	switch class {
+	case configRedirect:
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason: "git: writing `" + key + "` is prohibited — it repoints where fetches and pushes go, so a later, " +
+				"entirely ordinary `git push origin main` sends repository contents to another host with no `git remote` " +
+				"change to show for it (pg2-szadj, 2026-07-30). It is refused rather than prompted because `git remote " +
+				"set-url` is already refused for exactly this exfiltration reason, and the config spelling must not be " +
+				"the cheaper way around that gate. Every spelling is refused, including --global/--local/--system, " +
+				"`git config set`, and --unset. Ask the operator to run it by hand",
+			Module: r.Name(),
+		}
+	case configInterlock:
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason: "git: `git config " + key + "` disables a safety interlock — a refusal git makes by DEFAULT, so a " +
+				"later command that looks unchanged stops refusing what it used to, and any prompt on that command is " +
+				"then answered under a belief that is no longer true (pg2-szadj, 2026-07-30). Every spelling is gated, " +
+				"including --global/--local/--system, --type=bool, `git config set` and --unset; reads are not. Confirm " +
+				"this is intended, or hand it to the operator",
+			Module: r.Name(),
+		}
+	default: // configSink, and any class added without a verdict of its own
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason: "git: `git config " + key + "` points git at a program of the caller's choosing, which git then runs " +
+				"during an ordinary git operation — arbitrary code execution with nothing at that later command to show " +
+				"for it (pg2-szadj, 2026-07-30). Every spelling is gated, including --global/--local/--system, " +
+				"--type=bool, `git config set` and --unset; reads are not. Confirm this is intended, or hand it to the " +
+				"operator",
+			Module: r.Name(),
+		}
+	}
+}
+
 // chdirSafe reports whether the `-C` target directory is in a zone appropriate
 // for the subcommand's access class. Read-only subcommands — and a read-only
 // `git remote` — require the directory be READABLE; every other approvable
 // subcommand (checkout, rebase, filter-branch, soft reset, and the modifying
 // set) writes and requires it be WRITABLE. Returns true (no gate) when no `-C`
 // is present or no evaluator is configured, preserving legacy behavior.
+//
+// `config` is DELIBERATELY not listed beside `remote` even though configVerdict
+// now answers Approve for a read: this function sees only the subcommand, not the
+// verdict, so listing it would drop the write-access requirement from every `git
+// config -C <dir> <key> <value>` too. Leaving it in the writable class keeps a
+// read-only `git config -C <dir> --get <key>` at exactly the demotion it had
+// before this bead — an over-restriction on the safe side, unchanged by pg2-szadj.
 func (r *Rule) chdirSafe(cwd string, chdirs []string, subcmd string) bool {
 	if r.eval == nil || len(chdirs) == 0 {
 		return true
@@ -437,7 +1059,7 @@ const (
 	minAbbrevRepo           = len("rep")     // `--re` is ambiguous: --recurse-submodules / --receive-pack
 )
 
-// hasPushLongFlag reports whether args carries long flag name in any spelling
+// hasAbbrevLongFlag reports whether args carries long flag name in any spelling
 // git would accept — the full name, or an unambiguous prefix down to minLen
 // characters — and returns the value of the `=`-glued form (see
 // cmdparse.HasLongFlag for what an empty value means). It asks
@@ -446,7 +1068,13 @@ const (
 //
 // A `--no-<name>` token does not match, which is correct: `--no-force` turns
 // force off.
-func hasPushLongFlag(args []string, name string, minLen int) (string, bool) {
+//
+// minLen is per SUBCOMMAND, not per flag name: what a prefix is ambiguous with
+// depends on which option table git parsed the command against. The measured
+// minimums live beside the subcommand that needs them — see the `git push` block
+// (minAbbrevForce and its neighbours) and the `git config` one (minAbbrevUnset and
+// its neighbours) — and this helper holds none of its own.
+func hasAbbrevLongFlag(args []string, name string, minLen int) (string, bool) {
 	for n := len(name); n >= minLen; n-- {
 		if v, ok := cmdparse.HasLongFlag(args, name[:n]); ok {
 			return v, true
@@ -576,7 +1204,7 @@ func pushNetworkDestination(rest []string, refspecs []cmdparse.Refspec) (string,
 	if dest, _ := cmdparse.FirstOperand(rest); dest != "" && pushDestinationOffMachine(dest) {
 		return dest, true
 	}
-	if v, ok := hasPushLongFlag(rest, "repo", minAbbrevRepo); ok && v != "" && pushDestinationOffMachine(v) {
+	if v, ok := hasAbbrevLongFlag(rest, "repo", minAbbrevRepo); ok && v != "" && pushDestinationOffMachine(v) {
 		return v, true
 	}
 	for _, rs := range refspecs {
@@ -651,7 +1279,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// `+` refspec prefix forces just that refspec, and `-f`/`--force` force every
 	// one. ClassifyPushRefspecs deliberately does not reflect the flags, and
 	// HasShortFlag deliberately does not match longs, so all three are asked.
-	if _, ok := hasPushLongFlag(rest, "force", minAbbrevForce); ok {
+	if _, ok := hasAbbrevLongFlag(rest, "force", minAbbrevForce); ok {
 		return reject("git: force-push is prohibited — an agent must never force-push (operator ruling 2026-07-30). Every spelling is refused (--force, -f, a clustered -f…, and a '+' refspec prefix), so retrying with another one will not work; use --force-with-lease on the SAME branch, or hand the push to the operator")
 	}
 	if cmdparse.HasShortFlag(shorts, 'f') {
@@ -666,7 +1294,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// --mirror deletes every remote ref that is absent locally, so it is a
 	// remote-ref delete of unbounded width — strictly broader than the
 	// single-branch delete below, and never a legitimate agent operation here.
-	if _, ok := hasPushLongFlag(rest, "mirror", minAbbrevMirror); ok {
+	if _, ok := hasAbbrevLongFlag(rest, "mirror", minAbbrevMirror); ok {
 		return reject("git: git push --mirror is prohibited — it DELETES every remote ref absent locally, an unbounded remote-ref deletion (pg2-bohpm, 2026-07-30). Push the one ref you mean by name")
 	}
 
@@ -678,7 +1306,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// Revisiting this needs an operator ruling on remote-ref deletion, not a
 	// workflow that finds it inconvenient — deleting a merged remote branch is
 	// the platform's job (GitHub does it on merge), not a push's.
-	if _, ok := hasPushLongFlag(rest, "delete", minAbbrevDelete); ok {
+	if _, ok := hasAbbrevLongFlag(rest, "delete", minAbbrevDelete); ok {
 		return reject("git: deleting a remote ref is prohibited — --delete destroys a ref that may be another clone's only copy (pg2-bohpm, 2026-07-30). Every spelling is refused (--delete, -d, and a ':ref' refspec); let the platform delete a merged branch, or hand it to the operator")
 	}
 	if cmdparse.HasShortFlag(shorts, 'd') {
@@ -734,7 +1362,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// explicit lease — the safest form there is. The lease VALUE is therefore
 	// deliberately NOT read here; cross-branch-ness comes only from the push
 	// REFSPEC OPERANDS (`main:other`), which is what ClassifyPushRefspecs returns.
-	if _, ok := hasPushLongFlag(rest, "force-with-lease", minAbbrevForceWithLease); ok {
+	if _, ok := hasAbbrevLongFlag(rest, "force-with-lease", minAbbrevForceWithLease); ok {
 		for _, rs := range refspecs {
 			// SameRef treats `HEAD:main` as cross-branch: HEAD cannot be resolved
 			// from a token, and for a gate the safe reading is cross-branch. Name the
