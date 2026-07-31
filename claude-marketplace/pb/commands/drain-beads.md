@@ -44,8 +44,8 @@ You are DONE only when a SUCCESSFUL query returns no agent-workable beads:
 bd ready --exclude-label human --json -n 10
 ```
 
-If that command SUCCEEDS (exit 0) and is empty, run the PUSH-DEBT REPORT below,
-then STOP. If it ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly
+If that command SUCCEEDS (exit 0) and is empty, STOP (see "Unpushed commits when
+you STOP"). If it ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly
 and retry; never exit on an error. `bd ready` already excludes
 `in_progress`/`blocked`/`deferred`, so in-flight work is excluded automatically;
 `human`-labeled parked beads are excluded here too. Beads awaiting post-deploy
@@ -53,49 +53,27 @@ verification are GATED (blocked), so they are absent from `bd ready` as well —
 the loop ends cleanly while they wait, and they resurface after the next
 `pn workspace apply` (whose post-hook runs `pb gate check`).
 
-### PUSH-DEBT REPORT (MANDATORY before you STOP)
+### Unpushed commits when you STOP
 
 You LAND locally and never push, so every bead you closed added commits to local
-`main` that this session did NOT publish. **Landed is not pushed.** That debt is
-DERIVED STATE, not a bead: you MUST re-derive it here and report it, and you MUST
-NOT file a bead to remember it. Full contract: the always-on
-`Unpushed Landing Debt` rules (**U-1..U-8**).
+`main` that this session did NOT publish. That is EXPECTED and is NOT a problem
+worth the operator's attention, so **REPORT NOTHING ABOUT IT** — no heading, no
+`pn workspace doctor` output, no per-repo counts, no remediation sequence. Do not
+run the probe just to have something to say. Full contract: the always-on
+`Unpushed Landing Debt` rules (**U-1..U-6**).
 
-1. Run the probe READ-ONLY (never `--fix`, which ff-merges in the CANONICAL
-   clone and cannot publish an ahead-only divergence anyway — U-4):
+The ONE exception is a CONSEQUENCE for the work itself: if being unpublished
+BLOCKS it — e.g. a consumer flake pins these repos as `github:` inputs, so a
+closed bead's change cannot take effect on apply until they are pushed and
+relocked — say that in ONE line and stop there. Still do not push (U-5); if you
+probe at all, it is read-only, never `--fix` (U-4).
 
-   ```bash
-   pn workspace doctor
-   ```
-
-2. Read the `branch-synced` findings:
-   - A repo with NO debt emits NO section — absence is a PASS, not a skip.
-   - Debt is
-     `ERROR branch-synced repo "<name>" local HEAD <a> != remote <b> (ahead N, behind M) [fixable]`.
-     `ahead N` with `N > 0` is the debt; `behind M` alone is not.
-   - `workspace doctor: 0 errors, 0 warnings.` with no `branch-synced` line ⇒
-     nothing unpublished ⇒ say so in one line and STOP. Do not read the trailer
-     count alone: other checks (e.g. `tree-clean`) also raise errors.
-
-3. If any `ahead N > 0`, your terminal report MUST carry, VERBATIM, each
-   `branch-synced` line, the total with its per-repo addends shown, and the
-   remediation path — reporting is in scope, pushing is NOT (U-5):
-
-   > **Unpushed landing debt** (this session landed locally and did not push):
-   > `<branch-synced lines verbatim>`
-   > Total `<N1 + N2 + … = T>` commits across `<k>` repos.
-   > Operator-authorized remediation: rebase each repo onto its remote primary
-   > branch, then `pn workspace update --siblings-only` (relocks siblings and
-   > pushes), then `pn workspace push` to confirm `Everything up-to-date`, then
-   > re-run `pn workspace doctor` and expect no `branch-synced` errors. The
-   > `/pn-workspace-sync` skill does the same in an isolated workforest.
-
-4. Do NOT `bd create` anything for this. There is deliberately NO standing push
-   bead: `pg2-5subz` became one by accident and nearly orphaned 11 commits, and
-   `pg2-dawg2` replaced it, pushed all 12, and closed correctly — after which the
-   debt regenerated within a day. A bead describes one instant; `pn workspace doctor`
-   describes now. If you find a standing push bead, report it as this defect
-   (U-2) rather than updating it.
+Do NOT `bd create` anything for this either way. There is deliberately NO
+standing push bead: `pg2-5subz` became one by accident and nearly orphaned 11
+commits, and `pg2-dawg2` replaced it, pushed all 12, and closed correctly — after
+which the debt regenerated within a day. A bead describes one instant; the probe
+describes now. If you find a standing push bead, report it as this defect (U-2)
+rather than updating it.
 
 ## Startup / resume (survives compaction)
 
@@ -119,9 +97,7 @@ NOT file a bead to remember it. Full contract: the always-on
 
    Atomically claims the highest-priority ready bead (assignee=ID,
    status=in_progress) and returns it. No other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → run the **PUSH-DEBT REPORT** → STOP (this
-   is the same termination path, so the report is not optional here either). A
-   transient error → retry. If the
+   SUCCESSFUL empty result → Goal met → STOP. A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
    (see "Optional scope arguments"); they never remove `--exclude-label human` or the
    deferred exclusion.
@@ -660,13 +636,12 @@ unchanged.
   repeatable failure routes to STUCK.
 - Never use `--no-verify`; fix hook violations instead.
 - Do not push to origin or open PRs — landing is local ff-merge only.
-- Landing locally CREATES unpushed debt, and this session MUST account for it before it
-  STOPs: the termination path MUST run `pn workspace doctor` (read-only, never `--fix`) and
-  MUST report every `branch-synced` `ahead N > 0` verbatim, with the total and the
-  operator-authorized remediation path. The debt is DERIVED STATE — the agent MUST NOT file
-  or update a standing push bead to track it, because a bead describes one instant while the
-  debt regenerates on every land. Full contract: the always-on `Unpushed Landing Debt` rules
-  (U-1..U-8).
+- Landing locally leaves commits unpushed. That is expected and MUST NOT be reported —
+  no heading, no probe output, no counts, no remediation path — unless being unpublished
+  BLOCKS the work, which earns ONE line. Never push to clear it (read-only probes only,
+  never `--fix`), and never file or update a standing push bead to track it: the debt is
+  DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
+  contract: the always-on `Unpushed Landing Debt` rules (U-1..U-6).
 
 ## Loop overview
 
@@ -675,7 +650,7 @@ flowchart TD
     A[Start: set actor ID, bd prime] --> R{Own an unfinished<br/>in_progress bead?}
     R -- yes --> I
     R -- no --> C["CLAIM: bd ready --claim<br/>--exclude-label human --actor ID --json"]
-    C -->|successful + empty| PD["PUSH-DEBT REPORT (mandatory, read-only):<br/>pn workspace doctor -- report every branch-synced<br/>ahead N verbatim + total + remediation path.<br/>Derived state, so NO bead (U-1..U-8)"]
+    C -->|successful + empty| PD["Unpushed commits: derived state, so NO bead and<br/>NO report unless being unpublished BLOCKS the work<br/>-- then ONE line (U-1..U-6)"]
     PD --> DONE(["Goal met: 0 ready. STOP (nothing was pushed)"])
     C -->|transient bd/dolt error| C
     C -->|got bead| U["bd show id (brief)"]
