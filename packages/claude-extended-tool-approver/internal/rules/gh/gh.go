@@ -90,11 +90,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		if resource == "api" {
-			return hookio.RuleResult{
-				Decision: hookio.Approve,
-				Reason:   "read-only gh api",
-				Module:   r.Name(),
-			}
+			return r.apiVerdict(pc.Args[1:])
 		}
 		if resource == "search" {
 			return hookio.RuleResult{
