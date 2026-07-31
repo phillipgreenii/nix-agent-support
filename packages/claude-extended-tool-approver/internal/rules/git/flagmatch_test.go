@@ -306,6 +306,138 @@ func TestGit_SiblingBeadVerdicts_Unchanged(t *testing.T) {
 	}
 }
 
+// TestGit_BranchForceDelete_PinnedProbeRows pins every command VERBATIM from the
+// widening's verdict block, with the corrected expected verdict. Measured on git
+// 2.54.0, one FRESH repo per spelling with a genuinely UNMERGED branch, 2026-07-30:
+// each of the five gated rows answered `Deleted branch unmerged (was <sha>)` and the
+// branch was gone, so this is DATA LOSS, not merely a policy bypass.
+//
+// The verdict LEVEL is deliberately Ask, not Reject: the widening requires only that
+// no spelling Approve, and re-classifying a force-delete upward is a separate,
+// still-unreviewed question.
+func TestGit_BranchForceDelete_PinnedProbeRows(t *testing.T) {
+	rows := []struct {
+		cmd  string
+		want hookio.Decision
+		note string
+	}{
+		{"git branch -D foo", hookio.Ask, "was already correct"},
+		{"git branch -Df foo", hookio.Ask, "was ALLOW — clustered short"},
+		{"git branch -fD foo", hookio.Ask, "was ALLOW — clustered short, reversed"},
+		{"git branch --delete --force foo", hookio.Ask, "was ALLOW — LONG-FORM EQUIVALENT, not an abbreviation"},
+		{"git branch --delet --forc foo", hookio.Ask, "was ALLOW — abbreviated long form"},
+		{"git branch -d foo", hookio.Approve, "allow is CORRECT: -d refuses unmerged branches"},
+	}
+	for _, row := range rows {
+		if got := evalCmd(t, row.cmd); got.Decision != row.want {
+			t.Errorf("pinned row %q: got %s (%s), want %s [%s]", row.cmd, got.Decision, got.Reason, row.want, row.note)
+		}
+	}
+}
+
+// TestGit_BranchForceDelete_EverySpelling covers the spellings beyond the pinned
+// block: every mixture of the delete and force halves across short, long, clustered
+// and abbreviated forms, and flag-AFTER-operand orderings (the rule scans all tokens,
+// so position must not matter).
+func TestGit_BranchForceDelete_EverySpelling(t *testing.T) {
+	forceDelete := []string{
+		// The fused short, bare and clustered in both orders.
+		"git branch -D foo",
+		"git branch -Df foo",
+		"git branch -fD foo",
+		"git branch -rD origin/foo",
+		// Measured deleting: the conjunction in every mixture.
+		"git branch --delete --force foo",
+		"git branch --delet --forc foo",
+		"git branch -d --force foo",
+		"git branch --delete -f foo",
+		"git branch -f --delet foo",
+		"git branch -df foo", // both halves fused in ONE cluster
+		"git branch -fd foo",
+		// Flag AFTER the operand.
+		"git branch foo -D",
+		"git branch foo -Df",
+		"git branch foo --delete --force",
+		"git branch foo --force --delete",
+		// A cluster whose value-taking letter comes after the D, so truncation keeps it.
+		"git branch -Dt foo",
+		"git branch -Dft foo",
+		// Over-matched: git answers `ambiguous option: f` here, gated anyway (fail-safe).
+		"git branch --d --f foo",
+		// The glued long form of either half.
+		"git branch --delete --force=x foo",
+	}
+	for _, cmd := range forceDelete {
+		got := evalCmd(t, cmd)
+		if got.Decision == hookio.Approve {
+			t.Errorf("cmd %q: got APPROVE (%s) — this force-deletes an unmerged branch, making its commits unreachable", cmd, got.Reason)
+		}
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — the verdict LEVEL must stay Ask, not be promoted", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGit_BranchNonForceDelete_StaysApprove is the other half of the conjunction, and
+// the reason it MUST be a conjunction rather than "delete or force". Each row is an
+// operation that is NOT a force-delete and whose verdict must not move.
+func TestGit_BranchNonForceDelete_StaysApprove(t *testing.T) {
+	cases := []struct{ cmd, why string }{
+		// DELETE WITHOUT FORCE: git itself refuses an unmerged branch (measured:
+		// "error: the branch 'unmerged' is not fully merged", branch still present).
+		{"git branch -d foo", "delete-if-merged; git refuses unmerged"},
+		{"git branch --delete foo", "same, long form"},
+		{"git branch --delet foo", "same, abbreviated"},
+		{"git branch -d foo bar", "two branches, still no force"},
+		// FORCE WITHOUT DELETE: a force-MOVE/create (measured: accepted, and the
+		// unmerged branch untouched). Gating -f alone would gate this.
+		{"git branch -f other main", "force create/move, no delete"},
+		{"git branch --force other main", "same, long form"},
+		{"git branch --forc other main", "same, abbreviated"},
+		// FORCE MOVE / COPY: not deletes; re-classifying them is a separate question.
+		{"git branch -M old new", "force move"},
+		{"git branch -C old new", "force copy"},
+		{"git branch -m old new", "plain move"},
+		// Reads and ordinary use.
+		{"git branch", "bare"},
+		{"git branch -a", "list all"},
+		{"git branch --list", "list"},
+		{"git branch -v", "verbose"},
+		{"git branch new-branch", "create"},
+		// GLUED SHORT VALUES: the letters after -u / -t are the option's VALUE, not
+		// flag letters. Without branchShortFlagTokens these would falsely gate —
+		// `-uorigin/DEV` carries a D, `-udrafts/x` carries both d and f.
+		{"git branch -uorigin/DEV foo", "upstream value contains D"},
+		{"git branch -udrafts/x foo", "upstream value contains d and f"},
+		{"git branch -tdirect foo", "track value contains d"},
+		{"git branch -uorigin/feature-docs foo", "upstream value contains d and f"},
+		// END OF OPTIONS: after `--` a dashed token is an operand (a branch name).
+		{"git branch -- -D", "`-D` after the terminator is a branch name"},
+		{"git branch -- --delete --force", "operands, not flags"},
+	}
+	for _, c := range cases {
+		if got := evalCmd(t, c.cmd); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want allow — %s", c.cmd, got.Decision, got.Reason, c.why)
+		}
+	}
+}
+
+// TestGit_BranchDeleteFlag_IsCaseSensitive is an explicit acceptance criterion: `-d`
+// and `-D` differ in meaning, so the fused-short test must not fold case. Asserted
+// from both directions so neither a ToLower nor a ToUpper slip can pass.
+func TestGit_BranchDeleteFlag_IsCaseSensitive(t *testing.T) {
+	if got := evalCmd(t, "git branch -d foo"); got.Decision != hookio.Approve {
+		t.Errorf("git branch -d: got %s (%s), want allow — `-d` alone MUST NOT be treated as force-delete", got.Decision, got.Reason)
+	}
+	if got := evalCmd(t, "git branch -D foo"); got.Decision != hookio.Ask {
+		t.Errorf("git branch -D: got %s (%s), want ask", got.Decision, got.Reason)
+	}
+	// The force half is case-sensitive too: `-F` is not a `git branch` option at all.
+	if got := evalCmd(t, "git branch -dF foo"); got.Decision != hookio.Approve {
+		t.Errorf("git branch -dF: got %s (%s), want allow — `-F` is not --force", got.Decision, got.Reason)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // LAYER 2 — THE MECHANICAL GUARD
 // ---------------------------------------------------------------------------
@@ -514,5 +646,84 @@ func TestGit_GatedLongFlags_UseTheChosenMatcher(t *testing.T) {
 		if openPrefix[flag] {
 			t.Errorf("`git config` option %q is tested with cmdparse.HasLongFlagPrefix — a config-option match shifts the operand count, so an over-match could change a git config verdict; keep the measured minimum (pg2-os1kq)", flag)
 		}
+	}
+}
+
+// TestGit_BranchForceDelete_UsesBothMechanisms scopes the guard to
+// isBranchForceDelete, because that predicate's defect class needs TWO mechanisms and
+// the file-wide checks above cannot tell that either one went missing: `force` and
+// `delete` are also passed to HasLongFlagPrefix by pushVerdict, so deleting the branch
+// conjunction entirely would leave every assertion above still passing while
+// `git branch --delete --force` silently returned to Approve.
+//
+// It asserts, inside that one function: the FUSED short is matched with
+// cmdparse.HasShortFlag on 'D' (a clustering primitive, not an exact token), and BOTH
+// halves of the conjunction are matched — each by a short-flag test and by
+// cmdparse.HasLongFlagPrefix, since `--delete --force` is `-D` spelled out and no
+// short-flag matching finds it.
+func TestGit_BranchForceDelete_UsesBothMechanisms(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "git.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse git.go: %v", err)
+	}
+
+	var fd *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if d, ok := decl.(*ast.FuncDecl); ok && d.Name.Name == "isBranchForceDelete" {
+			fd = d
+			break
+		}
+	}
+	if fd == nil {
+		t.Fatal("isBranchForceDelete() is absent from git.go — the `git branch` force-delete conjunction was deleted; `--delete --force` would fall through to modifyingSubcommands[\"branch\"] and APPROVE (pg2-os1kq widening)")
+	}
+
+	shortBytes := map[string]bool{}      // e.g. "'D'"
+	longPrefixNames := map[string]bool{} // e.g. "delete"
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return true
+		}
+		lit, ok := call.Args[1].(*ast.BasicLit)
+		if !ok {
+			return true
+		}
+		switch selectorName(call.Fun) {
+		case "cmdparse.HasShortFlag":
+			if lit.Kind == token.CHAR {
+				shortBytes[lit.Value] = true
+			}
+		case "cmdparse.HasLongFlagPrefix":
+			if lit.Kind == token.STRING {
+				longPrefixNames[strings.Trim(lit.Value, "`\"")] = true
+			}
+		}
+		return true
+	})
+
+	for _, want := range []string{"'D'", "'d'", "'f'"} {
+		if !shortBytes[want] {
+			t.Errorf("isBranchForceDelete does not test short flag %s with cmdparse.HasShortFlag — 'D' is the FUSED spelling (and must cluster: `-Df`/`-fD`), while 'd' and 'f' are the two halves of the conjunction", want)
+		}
+	}
+	for _, want := range []string{"delete", "force"} {
+		if !longPrefixNames[want] {
+			t.Errorf("isBranchForceDelete does not test long flag %q with cmdparse.HasLongFlagPrefix — `--delete --force` IS `-D` spelled out, so the long halves are not optional (pg2-os1kq widening)", want)
+		}
+	}
+	// Case folding would make `-d` a force-delete, which an acceptance criterion
+	// forbids outright.
+	if shortBytes["'D'"] && !shortBytes["'d'"] {
+		t.Error("isBranchForceDelete tests 'D' but not 'd' — the conjunction's delete half is missing")
+	}
+	for _, forbidden := range []string{"strings.ToLower", "strings.ToUpper", "strings.EqualFold"} {
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok && selectorName(call.Fun) == forbidden {
+				t.Errorf("%s: isBranchForceDelete calls %s — the `-D` test MUST be case-SENSITIVE; `-d` and `-D` differ in meaning and `-d` must stay approved", fset.Position(call.Pos()), forbidden)
+			}
+			return true
+		})
 	}
 }

@@ -132,6 +132,68 @@ probe 'git push --de origin main'
 probe 'git push -d origin main'
 probe 'git push origin :main'
 
+# ---------------------------------------------------------------------------
+# THE WIDENING, 2026-07-30: `git branch` FORCE-DELETE. Two root causes, both in
+# isDestructive — a clustered short (`-Df`, `-fD`) that an exact-token `-D` test
+# cannot see, and the LONG-FORM EQUIVALENT `--delete --force`, which is `-D`
+# spelled out and which no amount of short-flag matching finds.
+#
+# MEASURED AGAINST REAL GIT 2.54.0, 2026-07-30, one FRESH repo per spelling with
+# a genuinely UNMERGED branch. Every row below that this gate must catch answered
+# `Deleted branch unmerged (was <sha>)` and the branch was gone:
+#
+#   -D / -Df / -fD / --delete --force / --delet --forc
+#   -d --force / --delete -f / -f --delet
+#
+# And the two that must STAY approved really are not the destructive case:
+#
+#   git branch -d unmerged      -> "error: the branch 'unmerged' is not fully
+#                                   merged" — git REFUSES; branch still present.
+#   git branch -f other main    -> accepted, a force-MOVE/create; the unmerged
+#                                   branch is untouched.
+#
+# `git branch --d --f unmerged` is NOT a spelling git accepts — it answers
+# `error: ambiguous option: f (could be --force or --format)` — but the open
+# prefix matcher gates it anyway, which is the fail-safe direction.
+echo
+echo "=== WIDENING: git branch force-delete (must NOT allow, in any spelling) ==="
+probe 'git branch -D foo'
+probe 'git branch -Df foo'
+probe 'git branch -fD foo'
+probe 'git branch --delete --force foo'
+probe 'git branch --delet --forc foo'
+probe 'git branch -d foo'
+
+echo
+echo "=== WIDENING: further conjunction mixtures and orderings ==="
+probe 'git branch -d --force foo'
+probe 'git branch --delete -f foo'
+probe 'git branch -f --delet foo'
+probe 'git branch --d --f foo'
+probe 'git branch foo -D'
+probe 'git branch foo --delete --force'
+probe 'git branch -r -D origin/foo'
+probe 'git branch -Dt foo'
+probe 'git branch -Dft foo'
+
+echo
+echo "=== WIDENING: NOT the destructive case — these MUST keep their allow ==="
+probe 'git branch -d foo'
+probe 'git branch --delete foo'
+probe 'git branch --delet foo'
+probe 'git branch -f other main'
+probe 'git branch --force other main'
+probe 'git branch -M old new'
+probe 'git branch -C old new'
+probe 'git branch -m old new'
+probe 'git branch'
+probe 'git branch -a'
+probe 'git branch --list'
+probe 'git branch -uorigin/DEV foo'
+probe 'git branch -udrafts/x foo'
+probe 'git branch -tdirect foo'
+probe 'git branch -- -D'
+
 echo
 echo "=== REGRESSION: pg2-abb65 / pg2-8imjo / pg2-szadj verdicts ==="
 probe 'git push https://example.invalid/x.git main'
