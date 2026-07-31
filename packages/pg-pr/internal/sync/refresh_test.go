@@ -315,12 +315,16 @@ func (f *outboxFakeBeads) ListChildrenOfPR(context.Context, string) ([]string, e
 	return nil, nil
 }
 
-func (f *outboxFakeBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (f *outboxFakeBeads) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	return "", nil
 }
 
-func (f *outboxFakeBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (f *outboxFakeBeads) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, nil
+}
+
+func (f *outboxFakeBeads) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
 }
 func (f *outboxFakeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (f *outboxFakeBeads) CloseFeedback(context.Context, string, string) error        { return nil }

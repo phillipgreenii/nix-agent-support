@@ -29,9 +29,26 @@ my-PR review sink, not posted to GitHub). Like unresolved `ci-failure` items, **
 `self-review` findings BLOCK auto-merge until dispositioned** — disposition each one (`will-fix`
 / `wont-fix` / `no-action`) exactly as you would any other item to clear the merge gate.
 
-There can legitimately be more than one open cycle for a PR (pg-pr starts a new cycle when the
-existing one is already in-progress). That is fine — you work one cycle at a time and
-de-duplicate at the work-bead level (below).
+## One cycle per PR
+
+A processing-cycle bead is keyed on **(repo, PR number)** — its title tail — so **at most one
+open cycle exists per PR**. pg-pr UPDATES that cycle (appending a summary note) when new
+feedback arrives rather than opening a second one, and it opens **no** cycle at all when a sync
+surfaced nothing unaddressed. A comment authored by the PR author — including a reply an agent
+posted on their behalf, since pg-pr posts under the user's own login — is **not** feedback
+needing processing.
+
+- Each cycle's **description** states the count and kinds of unaddressed items (and who raised
+  them), so triage it from the bead before reaching for the pg-pr CLI or the VCS API.
+- A cycle that says it **supersedes** a closed predecessor is a successor opened because
+  genuinely new feedback arrived after that cycle closed; the predecessor's id is in the
+  description.
+- If you ever find **two open cycles for the same PR**, they are legacy duplicates from before
+  this invariant. Work one, and **report the other to the operator** — do not silently close it.
+  `pg-pr sync duplicates` reports them read-only.
+- Closing the cycle **without dispositioning** every item leaves those items unaddressed, so the
+  next genuinely-new finding produces a successor that lists them again. Disposition first
+  (step 5), then close — that is what makes the queue settle.
 
 ## Workflow
 

@@ -282,12 +282,16 @@ func (f *fakeBridgeBeads) ListChildrenOfPR(context.Context, string) ([]string, e
 	return nil, nil
 }
 
-func (f *fakeBridgeBeads) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (f *fakeBridgeBeads) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	return "", nil
 }
 
-func (f *fakeBridgeBeads) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (f *fakeBridgeBeads) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, nil
+}
+
+func (f *fakeBridgeBeads) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
 }
 func (f *fakeBridgeBeads) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (f *fakeBridgeBeads) CloseFeedback(context.Context, string, string) error        { return nil }

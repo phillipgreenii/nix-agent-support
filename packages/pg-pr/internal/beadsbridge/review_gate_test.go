@@ -60,11 +60,11 @@ func (c *feedbackCycleClient) FindByRepoAndNumber(context.Context, string, int) 
 	return &beads.MergeRequest{ID: "mr-1", Status: "open"}, nil
 }
 
-func (c *feedbackCycleClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (c *feedbackCycleClient) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, nil
 }
 
-func (c *feedbackCycleClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (c *feedbackCycleClient) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	c.created++
 	return "pf-1", nil
 }

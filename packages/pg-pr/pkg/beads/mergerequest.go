@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,11 +55,15 @@ type MergeRequest struct {
 // values are strings or numbers depending on what was set, so we decode
 // into a generic map and convert as needed.
 type bdIssue struct {
-	ID           string         `json:"id"`
-	Title        string         `json:"title"`
-	Status       string         `json:"status"`
-	Type         string         `json:"issue_type"`
-	Priority     int            `json:"priority"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Type        string `json:"issue_type"`
+	Priority    int    `json:"priority"`
+	Description string `json:"description,omitempty"`
+	// CreatedAt is bd's creation timestamp (RFC3339). Used to order duplicates
+	// and to pick the newest closed process-feedback predecessor.
+	CreatedAt    string         `json:"created_at,omitempty"`
 	Labels       []string       `json:"labels,omitempty"`
 	Metadata     map[string]any `json:"metadata"`
 	Dependencies []bdDependency `json:"dependencies,omitempty"`
@@ -273,7 +278,9 @@ func (c *Client) ListMergeRequests(ctx context.Context, includeClosed bool) ([]M
 	return out2, nil
 }
 
-// EnsureMergeRequest is the idempotent upsert used by the sync engine.
+// EnsureMergeRequest is the idempotent upsert used by the sync engine. At most
+// ONE merge-request bead may exist per (repo, pr_number) (pg2-onq1e): a
+// re-sync UPDATES the canonical bead and never creates a second one.
 //
 //   - If a bead with matching repo + pr_number exists and is open, fields
 //     are merged in via UpdateMergeRequest.
@@ -281,6 +288,11 @@ func (c *Client) ListMergeRequests(ctx context.Context, includeClosed bool) ([]M
 //     returned (id, alreadyClosed=true) lets callers skip.
 //   - If no matching bead exists, a new one is created via
 //     CreateMergeRequest.
+//
+// When the workspace ALREADY holds duplicates for the pair, findByRepoPR
+// collapses onto the canonical one (pickCanonicalMergeRequest) so the updates
+// stop alternating between them. Collapsing the duplicates themselves is
+// deliberately NOT done here — see FindDuplicateMergeRequests.
 //
 // The title rendered for new beads is "<repo>#<pr_number>: <user-title>".
 func (c *Client) EnsureMergeRequest(ctx context.Context, userTitle string, fields MergeRequestFields) (id string, alreadyClosed bool, err error) {
@@ -393,24 +405,143 @@ func (c *Client) RemoveLabel(ctx context.Context, id, label string) error {
 	return err
 }
 
-// findByRepoPR finds a merge-request bead by repo + pr_number metadata with a
-// fresh full scan (never the per-tick cache). Returns nil if not found.
+// findByRepoPR finds THE canonical merge-request bead for repo + pr_number with
+// a fresh full scan (never the per-tick cache). Returns nil if not found.
 // Includes closed beads.
 //
 // This is the UNCACHED path on purpose: EnsureMergeRequest's FB-2
 // diff-before-write compares the returned bead's STORED fields against desired,
 // and must therefore read current state, not a tick-start snapshot.
+//
+// (repo, pr_number) is supposed to identify EXACTLY ONE bead, but the live
+// workspace holds pairs where it does not (pg2-onq1e), so the pick must be
+// deterministic — see pickCanonicalMergeRequest. Returning "whichever matched
+// first" let bd's row order decide which bead got the field updates, which in
+// turn moved where children were parented from tick to tick.
 func (c *Client) findByRepoPR(ctx context.Context, repo string, pr int) (*MergeRequest, error) {
+	matches, err := c.findAllByRepoPR(ctx, repo, pr)
+	if err != nil {
+		return nil, err
+	}
+	return pickCanonicalMergeRequest(matches), nil
+}
+
+// findAllByRepoPR returns EVERY merge-request bead whose metadata matches
+// repo + pr_number, open or closed, in bd's row order. More than one is the
+// duplication defect; the audit path reports them and the write paths collapse
+// onto the canonical one.
+func (c *Client) findAllByRepoPR(ctx context.Context, repo string, pr int) ([]MergeRequest, error) {
 	all, err := c.ListMergeRequests(ctx, true)
 	if err != nil {
 		return nil, err
 	}
+	var out []MergeRequest
 	for i := range all {
 		if all[i].Fields.Repo == repo && all[i].Fields.PRNumber == pr {
-			return &all[i], nil
+			out = append(out, all[i])
 		}
 	}
-	return nil, nil
+	return out, nil
+}
+
+// pickCanonicalMergeRequest chooses the single bead that owns a (repo,
+// pr_number) pair when several exist. Precedence, most significant first:
+//
+//  1. OPEN over closed — a closed bead must not capture a live PR's updates.
+//  2. The most recently synced (last_synced_at) — that is the bead the daemon
+//     has actually been maintaining and the one children already hang off, so
+//     the choice is STABLE: the winner keeps being the winner every later tick.
+//  3. Lexicographically smallest ID — a total order, so the pick never depends
+//     on bd's row order.
+//
+// Returns nil for an empty slice.
+func pickCanonicalMergeRequest(matches []MergeRequest) *MergeRequest {
+	var best *MergeRequest
+	for i := range matches {
+		cand := &matches[i]
+		if best == nil || mergeRequestMoreCanonical(cand, best) {
+			best = cand
+		}
+	}
+	return best
+}
+
+// mergeRequestMoreCanonical reports whether a outranks b under
+// pickCanonicalMergeRequest's precedence.
+func mergeRequestMoreCanonical(a, b *MergeRequest) bool {
+	aOpen, bOpen := a.Status != "closed", b.Status != "closed"
+	if aOpen != bOpen {
+		return aOpen
+	}
+	if a.Fields.LastSyncedAt != b.Fields.LastSyncedAt {
+		return a.Fields.LastSyncedAt > b.Fields.LastSyncedAt
+	}
+	return a.ID < b.ID
+}
+
+// DuplicateMergeRequests reports one (repo, pr_number) pair that resolves to
+// more than one merge-request bead: Canonical is the bead the write paths use,
+// Excess is every other bead for the same pair.
+type DuplicateMergeRequests struct {
+	Repo      string         `json:"repo"`
+	PRNumber  int            `json:"pr_number"`
+	Canonical MergeRequest   `json:"canonical"`
+	Excess    []MergeRequest `json:"excess"`
+}
+
+// FindDuplicateMergeRequests scans every merge-request bead (open and closed)
+// and reports each (repo, pr_number) pair that resolves to more than one. It is
+// READ-ONLY — one `bd list` and no writes — and exists so an operator can see
+// the excess beads before deciding what to do about them. It MUST NOT be given
+// a mutating counterpart in this package: collapsing existing beads is an
+// operator-scheduled data migration, not something a sync tick may do.
+//
+// Pairs are returned sorted by repo then PR number so the report is stable.
+func (c *Client) FindDuplicateMergeRequests(ctx context.Context) ([]DuplicateMergeRequests, error) {
+	all, err := c.ListMergeRequests(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	type key struct {
+		repo string
+		pr   int
+	}
+	groups := map[key][]MergeRequest{}
+	var order []key
+	for i := range all {
+		f := all[i].Fields
+		if f.Repo == "" || f.PRNumber == 0 {
+			continue // not keyed on a PR; not a duplicate candidate
+		}
+		k := key{f.Repo, f.PRNumber}
+		if _, seen := groups[k]; !seen {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], all[i])
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].repo != order[j].repo {
+			return order[i].repo < order[j].repo
+		}
+		return order[i].pr < order[j].pr
+	})
+	var out []DuplicateMergeRequests
+	for _, k := range order {
+		g := groups[k]
+		if len(g) < 2 {
+			continue
+		}
+		canonical := pickCanonicalMergeRequest(g)
+		dup := DuplicateMergeRequests{Repo: k.repo, PRNumber: k.pr, Canonical: *canonical}
+		for i := range g {
+			if g[i].ID != canonical.ID {
+				dup.Excess = append(dup.Excess, g[i])
+			}
+		}
+		sort.Slice(dup.Excess, func(i, j int) bool { return dup.Excess[i].ID < dup.Excess[j].ID })
+		out = append(out, dup)
+	}
+	return out, nil
 }
 
 // FindByRepoAndNumber finds a merge-request bead by repo + pr_number metadata.

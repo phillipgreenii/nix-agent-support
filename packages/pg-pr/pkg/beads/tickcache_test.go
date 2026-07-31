@@ -36,7 +36,7 @@ func TestLoadTickCache_PRWithOpenCycleAndFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "x/y#1", false)
+	cycleID, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: prID, Key: "x/y#1", Mine: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestTickCache_OpenProcessingByPR_IgnoresClosedCycles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "x/y#7", false)
+	cycleID, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: prID, Key: "x/y#7", Mine: false})
 	if err != nil {
 		t.Fatal(err)
 	}

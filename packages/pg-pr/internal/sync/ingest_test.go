@@ -196,17 +196,15 @@ func TestIngestFeedbackToStore(t *testing.T) {
 		t.Fatalf("RunOutbox: %v", err)
 	}
 
-	// Expect 3 feedback.created events (one per non-skipped item: human, bot, CI).
+	// Expect exactly ONE feedback.created event for the PR, carrying the summary
+	// of everything unaddressed (pg2-onq1e). Pre-fix this was one event per
+	// upserted row (3 here) with an identical payload, so one PR drove N
+	// duplicate create-if-absent projections per tick.
 	feedbackCreatedCount := 0
 	for _, d := range dispatched {
 		if d.eventType == store.EventFeedbackCreated {
 			feedbackCreatedCount++
-			// Verify the payload shape matches FeedbackPayload.
-			var p struct {
-				Repo   string `json:"repo"`
-				Number int    `json:"number"`
-				Mine   bool   `json:"mine"`
-			}
+			var p store.FeedbackPayload
 			if err := json.Unmarshal(d.payload, &p); err != nil {
 				t.Errorf("decode feedback.created payload: %v", err)
 				continue
@@ -220,10 +218,25 @@ func TestIngestFeedbackToStore(t *testing.T) {
 			if !p.Mine {
 				t.Error("event mine: got false want true (pr author is SelfLogin)")
 			}
+			if p.Summary == nil {
+				t.Fatal("event summary: got nil want a summary (the bead description depends on it)")
+			}
+			if p.Summary.Unaddressed != 3 {
+				t.Errorf("summary unaddressed: got %d want 3 (alice comment, bot thread, ci-failure)", p.Summary.Unaddressed)
+			}
+			want := map[string]int{"pr-comments": 1, "code-comment-thread": 1, "ci-failure": 1}
+			for kind, n := range want {
+				if p.Summary.ByKind[kind] != n {
+					t.Errorf("summary by_kind[%s]: got %d want %d (full: %v)", kind, p.Summary.ByKind[kind], n, p.Summary.ByKind)
+				}
+			}
+			if p.Summary.Digest == "" {
+				t.Error("summary digest: got empty want a set digest (the no-new-feedback test depends on it)")
+			}
 		}
 	}
-	if feedbackCreatedCount != 3 {
-		t.Errorf("feedback.created events: got %d want 3", feedbackCreatedCount)
+	if feedbackCreatedCount != 1 {
+		t.Errorf("feedback.created events: got %d want 1 (one per PR, not one per row)", feedbackCreatedCount)
 	}
 }
 

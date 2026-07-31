@@ -62,14 +62,20 @@ func (f *fullChainBeadClient) ListChildrenOfPR(_ context.Context, _ string) ([]s
 	return nil, nil
 }
 
-func (f *fullChainBeadClient) CreateProcessingCycle(_ context.Context, _, _ string, _ bool) (string, error) {
+func (f *fullChainBeadClient) CreateProcessingCycle(_ context.Context, _ beads.CreateProcessingCycleInput) (string, error) {
 	f.createCycles++
 	return "cycle-chain-1", nil
 }
 
-func (f *fullChainBeadClient) FindOpenProcessingCycle(_ context.Context, prBeadID string) (string, bool, error) {
-	open := f.findOpenResults[prBeadID]
-	return "", open, nil
+func (f *fullChainBeadClient) ResolveProcessingCycle(_ context.Context, _, prBeadID string) (beads.ProcessingCycleState, error) {
+	if f.findOpenResults[prBeadID] {
+		return beads.ProcessingCycleState{Open: &beads.ProcessingCycle{ID: "cycle-chain-1", Status: "open"}}, nil
+	}
+	return beads.ProcessingCycleState{}, nil
+}
+
+func (f *fullChainBeadClient) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
 }
 
 func (f *fullChainBeadClient) CloseProcessingCycle(_ context.Context, _, _ string) error { return nil }

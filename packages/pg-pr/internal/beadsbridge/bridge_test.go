@@ -61,12 +61,16 @@ func (noopBeadClient) FindByRepoAndNumber(context.Context, string, int) (*beads.
 func (noopBeadClient) CloseMergeRequest(context.Context, string, string) error    { return nil }
 func (noopBeadClient) ListChildrenOfPR(context.Context, string) ([]string, error) { return nil, nil }
 
-func (noopBeadClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (noopBeadClient) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	return "", nil
 }
 
-func (noopBeadClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, nil
+func (noopBeadClient) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, nil
+}
+
+func (noopBeadClient) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
 }
 func (noopBeadClient) CloseProcessingCycle(context.Context, string, string) error { return nil }
 func (noopBeadClient) CloseFeedback(context.Context, string, string) error        { return nil }
@@ -88,7 +92,7 @@ func (noopBeadClient) SetPriority(context.Context, string, int) error    { retur
 func (noopBeadClient) AddLabel(context.Context, string, string) error    { return nil }
 func (noopBeadClient) RemoveLabel(context.Context, string, string) error { return nil }
 
-// errFindClient returns an error from FindOpenProcessingCycle; FindByRepoAndNumber
+// errFindClient returns an error from ResolveProcessingCycle; FindByRepoAndNumber
 // returns a stub (open) MR. Used to prove the find-error propagates (NOT swallowed
 // as "no open cycle" — that's the duplicate-cycle bug).
 type errFindClient struct{ noopBeadClient }
@@ -97,8 +101,8 @@ func (errFindClient) FindByRepoAndNumber(context.Context, string, int) (*beads.M
 	return &beads.MergeRequest{ID: "mr-1"}, nil
 }
 
-func (errFindClient) FindOpenProcessingCycle(context.Context, string) (string, bool, error) {
-	return "", false, errBoom
+func (errFindClient) ResolveProcessingCycle(context.Context, string, string) (beads.ProcessingCycleState, error) {
+	return beads.ProcessingCycleState{}, errBoom
 }
 
 var errBoom = errString("boom")
@@ -172,7 +176,7 @@ func (c *closedParentClient) FindByRepoAndNumber(context.Context, string, int) (
 	return &beads.MergeRequest{ID: "mr-1", Status: "closed"}, nil
 }
 
-func (c *closedParentClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (c *closedParentClient) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	c.createInc()
 	return "cycle-1", nil
 }
@@ -323,7 +327,7 @@ func (c *scenarioClosedClient) FindByRepoAndNumber(context.Context, string, int)
 	return &beads.MergeRequest{ID: "mr-closed-1", Status: "closed"}, nil
 }
 
-func (c *scenarioClosedClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (c *scenarioClosedClient) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	c.createCycles++
 	return "cycle-x", nil
 }
@@ -379,7 +383,7 @@ func (c *scenarioOpenClient) FindByRepoAndNumber(context.Context, string, int) (
 	return &beads.MergeRequest{ID: "mr-open-1", Status: "open"}, nil
 }
 
-func (c *scenarioOpenClient) CreateProcessingCycle(context.Context, string, string, bool) (string, error) {
+func (c *scenarioOpenClient) CreateProcessingCycle(context.Context, beads.CreateProcessingCycleInput) (string, error) {
 	c.createCycles++
 	return "cycle-open-1", nil
 }

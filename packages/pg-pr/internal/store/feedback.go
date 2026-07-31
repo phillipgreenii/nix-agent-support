@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -276,6 +279,103 @@ func (db *DB) HasBlockingFeedback(ctx context.Context, prID int64) (bool, error)
 		return false, fmt.Errorf("store: has blocking feedback pr=%d: %w", prID, err)
 	}
 	return exists == 1, nil
+}
+
+// processableFeedbackKinds are the feedback kinds that represent WORK TO
+// PROCESS on a PR — the ones a process-feedback bead exists to drive. Reviewer
+// comments (top-level and inline threads), CI failures, and the agent's own
+// self-review findings all qualify. 'review-request' and 'jira-link' do NOT:
+// they are routing/metadata rows, not findings, and no producer writes them
+// today (they exist only as fingerprint kinds).
+var processableFeedbackKinds = []string{"code-comment-thread", "pr-comments", "ci-failure", "self-review"}
+
+// unaddressedFeedbackStatuses are the statuses that still need processing. The
+// complement ('dispositioned','replied','resolved','superseded') is work the
+// agent has already handled, and mirrors HasBlockingFeedback's exclusion set
+// plus 'replied'.
+var unaddressedFeedbackStatuses = []string{"new", "presented"}
+
+// UnaddressedFeedback summarises the feedback on prID that still needs
+// processing (pg2-onq1e). It is the single decision point for "did this sync
+// surface anything to process?", and its result is what the beadsbridge
+// projection writes into the process-feedback bead's description.
+//
+// prAuthorLogin is the PR's own author. Rows they authored are EXCLUDED, which
+// is the fix for the self-feeding loop: pg-pr posts replies under the user's
+// OWN login (there is no bot account), so on my own PR an agent reply is
+// indistinguishable from a comment I typed — and re-counting it as feedback
+// produced a bead asking the agent to process its own replies. The comparison
+// is case-insensitive because GitHub logins are.
+//
+// A second, independent guard covers agent replies on a TEAMMATE's PR, where
+// the author login is not mine: is_ours=1 (marker-detected — see
+// internal/marker) rows are excluded too. 'self-review' is the deliberate
+// exception, because those rows are ours BY CONSTRUCTION and exist precisely to
+// be processed (see internal/reviewsink).
+//
+// Returns a non-nil summary always; Unaddressed == 0 means "nothing to
+// process".
+func (db *DB) UnaddressedFeedback(ctx context.Context, prID int64, prAuthorLogin string) (*FeedbackSummary, error) {
+	kindPH := make([]string, len(processableFeedbackKinds))
+	statusPH := make([]string, len(unaddressedFeedbackStatuses))
+	args := make([]any, 0, len(processableFeedbackKinds)+len(unaddressedFeedbackStatuses)+2)
+	args = append(args, prID)
+	for i, k := range processableFeedbackKinds {
+		kindPH[i] = "?"
+		args = append(args, k)
+	}
+	for i, s := range unaddressedFeedbackStatuses {
+		statusPH[i] = "?"
+		args = append(args, s)
+	}
+	args = append(args, prAuthorLogin)
+	q := `
+SELECT kind, COALESCE(author_login,''), fingerprint
+FROM feedback
+WHERE pr_id=?
+  AND kind IN (` + strings.Join(kindPH, ",") + `)
+  AND status IN (` + strings.Join(statusPH, ",") + `)
+  AND is_outdated=0 AND is_minimized=0
+  AND NOT (is_ours=1 AND kind <> 'self-review')
+  AND (author_login IS NULL OR author_login='' OR LOWER(author_login) <> LOWER(?))
+ORDER BY fingerprint`
+	rows, err := db.sql.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: unaddressed feedback pr=%d: %w", prID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	sum := &FeedbackSummary{ByKind: map[string]int{}}
+	seenReviewer := map[string]struct{}{}
+	h := sha256.New()
+	for rows.Next() {
+		var kind, login, fp string
+		if err := rows.Scan(&kind, &login, &fp); err != nil {
+			return nil, fmt.Errorf("store: scan unaddressed feedback pr=%d: %w", prID, err)
+		}
+		sum.Unaddressed++
+		sum.ByKind[kind]++
+		if login != "" {
+			if _, dup := seenReviewer[login]; !dup {
+				seenReviewer[login] = struct{}{}
+				sum.Reviewers = append(sum.Reviewers, login)
+			}
+		}
+		// Fingerprints arrive sorted (ORDER BY fingerprint), so the digest is
+		// stable regardless of insertion order.
+		_, _ = h.Write([]byte(fp))
+		_, _ = h.Write([]byte{0})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: unaddressed feedback pr=%d: %w", prID, err)
+	}
+	if sum.Unaddressed == 0 {
+		// Keep the zero value unambiguous: no counts, no digest.
+		return &FeedbackSummary{}, nil
+	}
+	sort.Strings(sum.Reviewers)
+	sum.Digest = hex.EncodeToString(h.Sum(nil))[:12]
+	return sum, nil
 }
 
 // SetDisposition records the agent's decision and (optionally) a queued reply.

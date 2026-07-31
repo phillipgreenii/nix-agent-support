@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -24,8 +25,9 @@ type BeadClient interface {
 	FindByRepoAndNumber(ctx context.Context, repo string, number int) (*beads.MergeRequest, error)
 	CloseMergeRequest(ctx context.Context, id, reason string) error
 	ListChildrenOfPR(ctx context.Context, prBeadID string) ([]string, error)
-	CreateProcessingCycle(ctx context.Context, prBeadID, title string, mine bool) (string, error)
-	FindOpenProcessingCycle(ctx context.Context, prBeadID string) (string, bool, error)
+	CreateProcessingCycle(ctx context.Context, in beads.CreateProcessingCycleInput) (string, error)
+	ResolveProcessingCycle(ctx context.Context, key, prBeadID string) (beads.ProcessingCycleState, error)
+	AppendProcessingCycleNote(ctx context.Context, id, note, addLabel string, removeLabels []string) error
 	CloseProcessingCycle(ctx context.Context, id, reason string) error
 	CloseFeedback(ctx context.Context, id, reason string) error
 	EnsureDraftReviewBead(ctx context.Context, prBeadID, title string, mine bool) (string, error)
@@ -67,12 +69,10 @@ func New(client BeadClient, opts ...Option) *Handler {
 	return h
 }
 
-// FeedbackPayload is the JSON payload for feedback.created events.
-type FeedbackPayload struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	Mine   bool   `json:"mine"`
-}
+// FeedbackPayload is the JSON payload for feedback.created events. It is an
+// ALIAS for the shared store type (which the emitters marshal), so there is one
+// definition of the wire shape rather than a copy per package.
+type FeedbackPayload = store.FeedbackPayload
 
 // Handle implements event.Handler. Idempotent: re-dispatch under the
 // at-least-once outbox must not duplicate beads.
@@ -154,9 +154,33 @@ func (h *Handler) Handle(ctx context.Context, e store.Event) error {
 	return nil
 }
 
-// ensureProcessFeedbackBead upserts the open process-feedback bead for a PR.
-// FindOpenProcessingCycle's error MUST propagate (swallowing it as "none open"
-// is the documented duplicate-cycle bug).
+// fbsumLabelPrefix stashes the digest of the unaddressed-feedback SET a
+// process-feedback bead already covers, as a `fbsum:<digest>` label. It mirrors
+// the `pbase:<n>` idiom used by reconcilePriority: a marker label is the only
+// per-bead state channel available to a stateless projection, it comes back on
+// the same `bd list --json` read the lookup already performs, and comparing it
+// makes the re-sync write a diff-before-write rather than an unconditional one.
+const fbsumLabelPrefix = "fbsum:"
+
+// ensureProcessFeedbackBead projects the process-feedback bead for ONE PR,
+// keyed on (repo, pr_number) — never on the merge-request bead's id (pg2-onq1e).
+//
+// The projection is re-run on every tick, so all four branches below must be
+// idempotent AND must write nothing when nothing changed:
+//
+//   - Nothing unaddressed (Summary says zero) → NO bead. This is what closes the
+//     self-feeding loop: an agent's own reply comments and push are not
+//     feedback, so they can no longer manufacture an empty bead asking the agent
+//     to process itself.
+//   - A live cycle exists → UPDATE it (append what is new), never create a
+//     second one; and only when the feedback set actually changed.
+//   - A predecessor was CLOSED covering the SAME feedback set → nothing new
+//     arrived, so no successor.
+//   - A predecessor was CLOSED and the set has changed → open a successor whose
+//     description REFERENCES the predecessor, rather than a bare duplicate.
+//
+// Every lookup error PROPAGATES (swallowing it as "none open" is the documented
+// duplicate-cycle bug).
 func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPayload) error {
 	mr, err := h.client.FindByRepoAndNumber(ctx, p.Repo, p.Number)
 	if err != nil {
@@ -168,15 +192,135 @@ func (h *Handler) ensureProcessFeedbackBead(ctx context.Context, p FeedbackPaylo
 	if mr.Status == "closed" {
 		return nil // do not attach a live cycle under a closed PR bead
 	}
-	_, open, err := h.client.FindOpenProcessingCycle(ctx, mr.ID)
+	// A summary that POSITIVELY reports nothing unaddressed suppresses the bead.
+	// A nil summary is "the emitter did not compute one" (a legacy outbox row);
+	// those keep the pre-pg2-onq1e behaviour so an in-flight event still
+	// projects rather than being silently dropped.
+	if p.Summary != nil && p.Summary.Unaddressed == 0 {
+		return nil
+	}
+	key := beads.ProcessingCycleKey(p.Repo, p.Number)
+	state, err := h.client.ResolveProcessingCycle(ctx, key, mr.ID)
 	if err != nil {
 		return err // propagate — do NOT treat as "no open cycle"
 	}
-	if open {
-		return nil
+	digest := summaryDigest(p.Summary)
+	if state.Open != nil {
+		// Criterion: update the EXISTING open bead, appending what is new.
+		// Unchanged set (or no digest to compare) ⇒ no write at all.
+		if digest == "" || hasLabel(state.Open.Labels, fbsumLabelPrefix+digest) {
+			return nil
+		}
+		return h.client.AppendProcessingCycleNote(ctx, state.Open.ID,
+			renderCycleNote(p.Summary),
+			fbsumLabelPrefix+digest,
+			staleFbsumLabels(state.Open.Labels, digest))
 	}
-	_, err = h.client.CreateProcessingCycle(ctx, mr.ID, fmt.Sprintf("%s#%d", p.Repo, p.Number), p.Mine)
+	predecessor := ""
+	if state.Closed != nil {
+		// A closed predecessor that already covered this exact set means the
+		// feedback is not new — it was processed and closed. Re-opening for it
+		// is precisely the churn this fix removes.
+		if digest != "" && hasLabel(state.Closed.Labels, fbsumLabelPrefix+digest) {
+			return nil
+		}
+		predecessor = state.Closed.ID
+	}
+	in := beads.CreateProcessingCycleInput{
+		PRBeadID:    mr.ID,
+		Key:         key,
+		Description: renderCycleDescription(key, p.Summary, predecessor),
+		Mine:        p.Mine,
+	}
+	if digest != "" {
+		in.Labels = []string{fbsumLabelPrefix + digest}
+	}
+	_, err = h.client.CreateProcessingCycle(ctx, in)
 	return err
+}
+
+// summaryDigest returns the summary's set digest, or "" when there is none to
+// compare (a legacy payload). An empty digest degrades every comparison to
+// "cannot tell", which the callers treat conservatively: no extra write, no
+// suppression of a genuinely-needed bead.
+func summaryDigest(s *store.FeedbackSummary) string {
+	if s == nil {
+		return ""
+	}
+	return s.Digest
+}
+
+// hasLabel reports whether labels contains want.
+func hasLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
+
+// staleFbsumLabels lists the `fbsum:` labels that are NOT the current digest, so
+// the update that adds the new marker drops the old ones in the same call and at
+// most one marker is ever present.
+func staleFbsumLabels(labels []string, keepDigest string) []string {
+	var out []string
+	for _, l := range labels {
+		if strings.HasPrefix(l, fbsumLabelPrefix) && l != fbsumLabelPrefix+keepDigest {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// renderCycleDescription builds the bead body. It MUST carry substance — the
+// count and kind of unaddressed findings, and who raised them — so a drain
+// session can triage from the bead alone instead of hitting the VCS API first.
+// Copying the title verbatim into the description (the old behaviour) is what
+// made the duplicated beads indistinguishable and unreviewable.
+func renderCycleDescription(key string, s *store.FeedbackSummary, predecessorID string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Unaddressed reviewer feedback on %s.\n", key)
+	if s == nil {
+		// No summary available (legacy event): say so rather than implying zero.
+		b.WriteString("\nFeedback breakdown unavailable for this event; run `pg-pr feedback list` for the current items.\n")
+	} else {
+		b.WriteString("\n" + renderCycleNote(s) + "\n")
+	}
+	if predecessorID != "" {
+		fmt.Fprintf(&b, "\nSupersedes closed process-feedback bead %s (that cycle was completed; "+
+			"the items above were not covered by it).\n", predecessorID)
+	}
+	return b.String()
+}
+
+// renderCycleNote renders the one-block summary appended to a bead on each
+// genuine change: the total, the per-kind breakdown, and the raising logins.
+// Kinds are emitted in sorted order so the same set always renders identically
+// (an unstable rendering would defeat the digest comparison).
+func renderCycleNote(s *store.FeedbackSummary) string {
+	if s == nil {
+		return "Feedback breakdown unavailable."
+	}
+	kinds := make([]string, 0, len(s.ByKind))
+	for k := range s.ByKind {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	parts := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		parts = append(parts, fmt.Sprintf("%s x%d", k, s.ByKind[k]))
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d unaddressed item(s)", s.Unaddressed)
+	if len(parts) > 0 {
+		fmt.Fprintf(&b, ": %s", strings.Join(parts, ", "))
+	}
+	b.WriteString(".")
+	if len(s.Reviewers) > 0 {
+		fmt.Fprintf(&b, "\nRaised by: %s.", strings.Join(s.Reviewers, ", "))
+	}
+	return b.String()
 }
 
 // projectAttentionBead ensures or closes the teammate-attention bead for a PR

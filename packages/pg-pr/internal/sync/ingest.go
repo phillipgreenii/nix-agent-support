@@ -88,16 +88,6 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		}
 	}
 
-	// Encode the shared event payload (identical for every item in this PR).
-	payloadBytes, err := json.Marshal(struct {
-		Repo   string `json:"repo"`
-		Number int    `json:"number"`
-		Mine   bool   `json:"mine"`
-	}{Repo: repo, Number: pr.Number, Mine: mine})
-	if err != nil {
-		return fmt.Errorf("ingest: marshal feedback payload: %w", err)
-	}
-
 	// --- Comments ---
 	//
 	// Split enriched.Comments into two groups:
@@ -167,10 +157,8 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			FirstSeenHeadSHA: pr.HeadSHA,
 		}
 		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
-			if _, err := tx.UpsertFeedback(f); err != nil {
-				return err
-			}
-			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
+			_, err := tx.UpsertFeedback(f)
+			return err
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert comment %s: %v (continuing)\n", c.ID, err)
 			continue
@@ -274,10 +262,7 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 			if err != nil {
 				return err
 			}
-			if err := tx.ReplaceMessages(fbID, msgs); err != nil {
-				return err
-			}
-			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
+			return tx.ReplaceMessages(fbID, msgs)
 		}); err != nil {
 			// A single thread failure must NOT abort the rest.
 			fmt.Fprintf(os.Stderr, "pg-pr: ingest: upsert thread %s: %v (continuing)\n", tid, err)
@@ -316,10 +301,8 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		}
 
 		if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
-			if _, err := tx.UpsertFeedback(f); err != nil {
-				return err
-			}
-			return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
+			_, err := tx.UpsertFeedback(f)
+			return err
 		}); err != nil {
 			// A single CI run failure must NOT abort the rest (including
 			// ReconcileStaleness). Record the error and continue.
@@ -334,5 +317,48 @@ func (e *Engine) ingestFeedbackToStore(ctx context.Context, repo string, pr api.
 		return fmt.Errorf("ingest: reconcile staleness pr=%d: %w", prID, err)
 	}
 
+	return e.emitFeedbackEvent(ctx, repo, pr, prID, mine)
+}
+
+// emitFeedbackEvent enqueues ONE feedback.created event for the PR, carrying the
+// summary of what still needs processing — and enqueues NOTHING when nothing
+// does (pg2-onq1e).
+//
+// Two deliberate changes from the per-row emission it replaces:
+//
+//   - ONE event per PR per tick instead of one per upserted row. The payload was
+//     already identical for every row, so N events meant N identical
+//     create-if-absent projections (each a full `bd list` scan) for one PR.
+//   - Emitted AFTER every row is committed and staleness reconciled, so the
+//     summary is derived from the FINAL state of the tick rather than guessed
+//     mid-loop. The outbox is at-least-once and the projection is idempotent, so
+//     the event no longer needs to share a transaction with a row write: a crash
+//     between the row and the event simply re-derives both on the next tick, the
+//     same self-healing the attention projector relies on.
+//
+// The suppression is the fix for the "empty bead on re-sync" defect: the PR
+// author's own comments — including agent replies posted under their login,
+// since pg-pr posts as the user — are not feedback needing processing, so a
+// tick whose only new activity was the agent's own replies now surfaces zero
+// unaddressed items and emits nothing.
+func (e *Engine) emitFeedbackEvent(ctx context.Context, repo string, pr api.PR, prID int64, mine bool) error {
+	sum, err := e.deps.Store.UnaddressedFeedback(ctx, prID, pr.Author)
+	if err != nil {
+		return fmt.Errorf("ingest: summarise unaddressed feedback %s#%d: %w", repo, pr.Number, err)
+	}
+	if sum.Unaddressed == 0 {
+		return nil // nothing to process ⇒ no event ⇒ no process-feedback bead
+	}
+	payloadBytes, err := json.Marshal(store.FeedbackPayload{
+		Repo: repo, Number: pr.Number, Mine: mine, Summary: sum,
+	})
+	if err != nil {
+		return fmt.Errorf("ingest: marshal feedback payload: %w", err)
+	}
+	if err := e.deps.Store.InTx(ctx, func(tx *store.Tx) error {
+		return tx.EnqueueEvent(store.EventFeedbackCreated, payloadBytes)
+	}); err != nil {
+		return fmt.Errorf("ingest: enqueue feedback.created %s#%d: %w", repo, pr.Number, err)
+	}
 	return nil
 }

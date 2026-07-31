@@ -60,17 +60,6 @@ func IngestSelfReview(ctx context.Context, st *store.DB, repo string, prNumber i
 	prID := pr.ID
 	headSHA := result.HeadSHA
 
-	// Shared feedback.created payload (identical for every finding in this PR;
-	// same shape the sync ingest path uses — {repo, number, mine}).
-	payload, err := json.Marshal(struct {
-		Repo   string `json:"repo"`
-		Number int    `json:"number"`
-		Mine   bool   `json:"mine"`
-	}{Repo: repo, Number: prNumber, Mine: true})
-	if err != nil {
-		return 0, fmt.Errorf("reviewsink: marshal feedback payload: %w", err)
-	}
-
 	// Build the finding set: an optional PR-level body finding + one per comment.
 	type finding struct {
 		body string
@@ -118,15 +107,8 @@ func IngestSelfReview(ctx context.Context, st *store.DB, repo string, prNumber i
 				return e
 			}
 			existed = cnt > 0
-			if _, e := tx.UpsertFeedback(f); e != nil {
-				return e
-			}
-			// Enqueue the event only for a genuinely new finding — a re-run at the
-			// same head must not spam the merge loop with duplicate cycles.
-			if !existed {
-				return tx.EnqueueEvent(store.EventFeedbackCreated, payload)
-			}
-			return nil
+			_, e := tx.UpsertFeedback(f)
+			return e
 		})
 		if err != nil {
 			return ingested, fmt.Errorf("reviewsink: ingest self-review finding (pr=%d fp=%s): %w", prID, fp, err)
@@ -134,6 +116,34 @@ func IngestSelfReview(ctx context.Context, st *store.DB, repo string, prNumber i
 		if !existed {
 			ingested++
 		}
+	}
+
+	// Enqueue ONE event for the PR, and only when a genuinely new finding landed
+	// — a re-run at the same head must not spam the merge loop with duplicate
+	// cycles. The payload carries the unaddressed-feedback summary (pg2-onq1e) so
+	// the process-feedback bead the bridge projects states what needs processing
+	// instead of repeating its own title. Emitted after the loop so the summary
+	// reflects every finding just written.
+	if ingested == 0 {
+		return 0, nil
+	}
+	sum, err := st.UnaddressedFeedback(ctx, prID, pr.Author)
+	if err != nil {
+		return ingested, fmt.Errorf("reviewsink: summarise unaddressed feedback (pr=%d): %w", prID, err)
+	}
+	if sum.Unaddressed == 0 {
+		return ingested, nil
+	}
+	payload, err := json.Marshal(store.FeedbackPayload{
+		Repo: repo, Number: prNumber, Mine: true, Summary: sum,
+	})
+	if err != nil {
+		return ingested, fmt.Errorf("reviewsink: marshal feedback payload: %w", err)
+	}
+	if err := st.InTx(ctx, func(tx *store.Tx) error {
+		return tx.EnqueueEvent(store.EventFeedbackCreated, payload)
+	}); err != nil {
+		return ingested, fmt.Errorf("reviewsink: enqueue feedback.created (pr=%d): %w", prID, err)
 	}
 	return ingested, nil
 }

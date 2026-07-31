@@ -66,7 +66,7 @@ func TestCreateProcessingCycle_StampsMineWhenSelf(t *testing.T) {
 	r := &recordingRunner{}
 	c := NewClientWithRunner(r)
 
-	if _, err := c.CreateProcessingCycle(ctx, "pr-1", "foo/bar#7", true); err != nil {
+	if _, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: "pr-1", Key: "foo/bar#7", Mine: true}); err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
 	joined := strings.Join(r.createArgs, " ")
@@ -80,7 +80,7 @@ func TestCreateProcessingCycle_TeamCycleUnlabeled(t *testing.T) {
 	r := &recordingRunner{}
 	c := NewClientWithRunner(r)
 
-	if _, err := c.CreateProcessingCycle(ctx, "pr-1", "foo/bar#7", false); err != nil {
+	if _, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: "pr-1", Key: "foo/bar#7", Mine: false}); err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
 	for _, a := range r.createArgs {
@@ -99,7 +99,7 @@ func TestCreateProcessingCycle_CreatesAndLinks(t *testing.T) {
 		t.Fatalf("ensure MR: %v", err)
 	}
 
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#7", false)
+	cycleID, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: prID, Key: "foo/bar#7", Mine: false})
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestFindOpenProcessingCycle_AfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#11", false)
+	cycleID, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: prID, Key: "foo/bar#11", Mine: false})
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestListChildrenOfPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure MR: %v", err)
 	}
-	cycleID, err := c.CreateProcessingCycle(ctx, prID, "foo/bar#21", false)
+	cycleID, err := c.CreateProcessingCycle(ctx, CreateProcessingCycleInput{PRBeadID: prID, Key: "foo/bar#21", Mine: false})
 	if err != nil {
 		t.Fatalf("CreateProcessingCycle: %v", err)
 	}

@@ -37,15 +37,15 @@ type concurrentBeadClient struct {
 	mu sync.Mutex
 	// beads keyed by "repo#number" → the projected merge-request bead.
 	beads map[string]*beads.MergeRequest
-	// openCycle keyed by prBeadID → whether an open processing cycle exists.
-	openCycle map[string]bool
+	// openCycle keyed by prBeadID → the open processing cycle, when one exists.
+	openCycle map[string]*beads.ProcessingCycle
 	nextID    int
 }
 
 func newConcurrentBeadClient() *concurrentBeadClient {
 	return &concurrentBeadClient{
 		beads:     map[string]*beads.MergeRequest{},
-		openCycle: map[string]bool{},
+		openCycle: map[string]*beads.ProcessingCycle{},
 	}
 }
 
@@ -89,19 +89,23 @@ func (c *concurrentBeadClient) ListChildrenOfPR(context.Context, string) ([]stri
 	return nil, nil
 }
 
-func (c *concurrentBeadClient) CreateProcessingCycle(_ context.Context, prBeadID, _ string, _ bool) (string, error) {
+func (c *concurrentBeadClient) CreateProcessingCycle(_ context.Context, in beads.CreateProcessingCycleInput) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.openCycle[prBeadID] = true
 	c.nextID++
-	return fmt.Sprintf("cycle-%d", c.nextID), nil
+	id := fmt.Sprintf("cycle-%d", c.nextID)
+	c.openCycle[in.PRBeadID] = &beads.ProcessingCycle{ID: id, Status: "open"}
+	return id, nil
 }
 
-func (c *concurrentBeadClient) FindOpenProcessingCycle(_ context.Context, prBeadID string) (string, bool, error) {
+func (c *concurrentBeadClient) ResolveProcessingCycle(_ context.Context, _, prBeadID string) (beads.ProcessingCycleState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	open := c.openCycle[prBeadID]
-	return "", open, nil
+	return beads.ProcessingCycleState{Open: c.openCycle[prBeadID]}, nil
+}
+
+func (c *concurrentBeadClient) AppendProcessingCycleNote(context.Context, string, string, string, []string) error {
+	return nil
 }
 
 func (c *concurrentBeadClient) CloseProcessingCycle(context.Context, string, string) error {

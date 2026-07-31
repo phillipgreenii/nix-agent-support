@@ -14,7 +14,8 @@ may lag, and when it and a behavior doc disagree, **the behavior doc wins**.
 2026-07-29 for multi-line review comments (pg2-3c8mo); all code citations
 re-anchored from pinned line ranges to symbol names 2026-07-29 (pg2-p1s8q);
 §2.2 gained the explicit `review.enabled` SCOPE + operator-path record
-2026-07-29 (pg2-hsap5).
+2026-07-29 (pg2-hsap5); JR6 (process-feedback bead identity) added 2026-07-30
+for the duplicate/empty-bead fix (pg2-onq1e).
 
 **Citation form:** code is cited by **symbol** — a file path plus the
 function/type/constant name in parentheses, e.g.
@@ -471,6 +472,92 @@ from `pg-pr` facts and never strands the following drain.
   `maxReviewFailures`)). Legacy old-schema held
   dead-letter beads are reconciled separately at cutover (deferred — §10).
 
+### JR6 — Process-feedback bead identity (one bead per PR, only when there is work)
+
+The beads `pg-pr sync` projects for a PR are keyed on **(repo, PR number)** and are
+produced only when the sync actually surfaced feedback that still needs processing.
+
+```mermaid
+flowchart TD
+    a["pg-pr sync tick: ingest feedback rows"] --> b["UnaddressedFeedback(pr, pr_author)<br/>excludes the author's own items,<br/>ours, and already-processed items"]
+    b --> c{"unaddressed &gt; 0?"}
+    c -->|no| d["emit NOTHING (no event, no bead)"]
+    c -->|yes| e["one feedback.created carrying<br/>count + kinds + reviewers + set digest"]
+    e --> f["ResolveProcessingCycle: key is repo + PR number"]
+    f -->|open cycle| g{"digest already<br/>recorded on it?"}
+    g -->|yes| h["no write (no Dolt commit)"]
+    g -->|no| i["append the new summary, swap the fbsum marker"]
+    f -->|closed predecessor| j{"predecessor covers<br/>this digest?"}
+    j -->|yes| d
+    j -->|no| k["create successor referencing the predecessor"]
+    f -->|none| l["create with a substantive description"]
+```
+
+- **Owner:** `pg-pr` (ingest summary + beadsbridge projection + bd wrappers).
+- **Acceptance criteria:**
+  - A process-feedback bead **MUST** be identified by `(repo, pr_number)` — its title
+    tail — **NOT** by the merge-request bead that parents it. A re-sync **MUST**
+    update the existing OPEN bead for that key and **MUST NOT** create a second one.
+  - At most ONE `merge-request` bead **MUST** exist per `(repo, pr_number)`; a
+    re-sync **MUST** update the canonical one. When duplicates already exist the
+    canonical pick **MUST** be deterministic (open over closed, then most recently
+    synced, then lowest id) so updates cannot alternate between them.
+  - A process-feedback bead **MUST NOT** be created when the sync surfaced no
+    unaddressed feedback. Items authored by the **PR author** — which includes an
+    agent reply posted on their behalf, because `pg-pr` posts under the user's own
+    login — **MUST NOT** count as feedback needing processing, and neither **MUST**
+    marker-detected "ours" items (except `self-review`, which exists to be
+    processed).
+  - When a CLOSED process-feedback bead already covers the same unaddressed set, a
+    successor **MUST NOT** be opened; when the set has changed, the successor's
+    description **MUST** reference the closed predecessor.
+  - Every bead description **MUST** carry substance — at minimum the count and kinds
+    of unaddressed items — so a drain session can triage without a VCS API call. The
+    title **MUST NOT** be copied verbatim as the description.
+  - The re-sync path **MUST** be diff-before-write: an unchanged feedback set
+    **MUST** issue no `bd` write (every write is a Dolt commit, and the daemon
+    re-projects every tick).
+  - Collapsing beads that are ALREADY duplicated is an operator-scheduled data
+    migration. The audit surface **MUST** stay read-only — `pg-pr sync duplicates`
+    reports the excess ids and **MUST NOT** grow an apply/fix mode.
+- **Code paths:** `packages/pg-pr/internal/store/feedback.go`
+  (`UnaddressedFeedback`, `processableFeedbackKinds`,
+  `unaddressedFeedbackStatuses`);
+  `packages/pg-pr/internal/store/event.go` (`FeedbackSummary`, `FeedbackPayload`);
+  `packages/pg-pr/internal/sync/ingest.go` (`emitFeedbackEvent`);
+  `packages/pg-pr/internal/reviewsink/minesink.go` (`IngestSelfReview`);
+  `packages/pg-pr/internal/beadsbridge/bridge.go` (`ensureProcessFeedbackBead`,
+  `fbsumLabelPrefix`, `renderCycleDescription`, `renderCycleNote`);
+  `packages/pg-pr/pkg/beads/processingcycle.go` (`ProcessingCycleKey`,
+  `ResolveProcessingCycle`, `CreateProcessingCycleInput`,
+  `AppendProcessingCycleNote`, `FindDuplicateProcessingCycles`);
+  `packages/pg-pr/pkg/beads/mergerequest.go` (`pickCanonicalMergeRequest`,
+  `FindDuplicateMergeRequests`);
+  `packages/pg-pr/cmd/pg-pr/sync_duplicates.go` (`syncDuplicatesCmd`).
+- **Coverage:** `unaddressed_feedback_test.go`
+  (`TestUnaddressedFeedbackExcludesPRAuthor`, `_ExcludesOursExceptSelfReview`,
+  `_ExcludesProcessedAndInactive`, `_DigestTracksTheSet`);
+  `ingest_selffeed_test.go` (`TestIngestEmitsNothingWhenOnlyTheAuthorCommented`,
+  `_EmitsOneEventWithSubstanceForRealFeedback`,
+  `TestIngestReSyncAfterDispositionEmitsNothing`);
+  `process_feedback_dedup_test.go` (`TestProcessFeedbackKeyedOnRepoAndPRNumber`,
+  `TestReSyncUpdatesOpenCycleInsteadOfCreatingASecond`,
+  `TestReSyncWithUnchangedFeedbackWritesNothing`,
+  `TestNoBeadWhenNothingUnaddressed`,
+  `TestClosedPredecessorCoveringSameSetIsNotRecreated`,
+  `TestClosedPredecessorWithNewFeedbackCreatesReferencingSuccessor`,
+  `TestCycleDescriptionCarriesSubstance`);
+  `duplicate_test.go` (`TestEnsureMergeRequestUpdatesCanonicalNeverCreatesASecond`,
+  `TestCanonicalMergeRequestPickIsDeterministic`,
+  `TestResolveProcessingCycleFindsOpenCycleAcrossParents`, `…TitleMatchIsExact`,
+  `…ReportsNewestClosedPredecessor`, `TestFindDuplicate*`);
+  `sync_duplicates_test.go` (`TestSyncDuplicatesHasNoMutatingFlag`).
+- **Known gap:** the acceptance measurement — open process-feedback count equal to
+  the distinct-PR count in a live workspace — can only be confirmed after the fixed
+  daemon is deployed and has re-synced, and after the already-duplicated beads are
+  reconciled by an operator. `pg-pr sync duplicates` is the read-only measurement;
+  the reconcile itself is deliberately not automated.
+
 ---
 
 ## 5. Review-executor security & isolation (untrusted PR content)
@@ -497,13 +584,14 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 
 ## 6. Verification & coverage goals
 
-| Journey | Covering tests (exist)                                                                       | Coverage goal (gap)                                                     |
-| ------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test` (`TestReconcile_DraftSelectionMatrix`) | Go-level merge gate (only if enforcement is moved off the skill layer)  |
-| JR2     | `teamsink_test`, `pending_test`, `review_test`                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved) |
-| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                       | —                                                                       |
-| JR4     | `acl_test` (head-advance suite), `reopen_test`                                               | —                                                                       |
-| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                     | —                                                                       |
+| Journey | Covering tests (exist)                                                                                                       | Coverage goal (gap)                                                     |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| JR1     | `minesink_test`, `blocking_feedback_test`, `acl_test` (`TestReconcile_DraftSelectionMatrix`)                                 | Go-level merge gate (only if enforcement is moved off the skill layer)  |
+| JR2     | `teamsink_test`, `pending_test`, `review_test`                                                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved) |
+| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                                                       | —                                                                       |
+| JR4     | `acl_test` (head-advance suite), `reopen_test`                                                                               | —                                                                       |
+| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                                                     | —                                                                       |
+| JR6     | `unaddressed_feedback_test`, `ingest_selffeed_test`, `process_feedback_dedup_test`, `duplicate_test`, `sync_duplicates_test` | Live open-count == distinct-PR-count measurement (deploy-gated)         |
 
 **Live end-to-end** verification (one PR I own + one teammate PR through path B,
 plus re-review-on-head-advance) against these journeys is **deploy-gated** — it

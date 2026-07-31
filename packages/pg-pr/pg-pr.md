@@ -24,6 +24,10 @@
 
 `pg-pr branch detect`
 
+- Report beads duplicated per PR (read-only audit; changes nothing):
+
+`pg-pr sync duplicates`
+
 - Daemon dashboard snapshot (JSON):
 
 `curl http://127.0.0.1:9818/api/v1/dashboard`

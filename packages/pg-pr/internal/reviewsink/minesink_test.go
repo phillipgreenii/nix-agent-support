@@ -2,6 +2,7 @@ package reviewsink
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/reviewstage"
@@ -81,9 +82,61 @@ func TestIngestSelfReview_InlineFindings(t *testing.T) {
 		}
 	}
 
-	// Two feedback.created events enqueued (one per finding).
-	if got := countPendingFeedbackEvents(t, db); got != 2 {
-		t.Fatalf("feedback.created events = %d, want 2", got)
+	// ONE feedback.created event for the PR, not one per finding (pg2-onq1e): the
+	// payload was already identical per finding, and it now carries the summary of
+	// everything unaddressed — which is a per-PR fact, computed once after the
+	// findings are committed.
+	if got := countPendingFeedbackEvents(t, db); got != 1 {
+		t.Fatalf("feedback.created events = %d, want 1 (one per PR, not one per finding)", got)
+	}
+}
+
+// TestIngestSelfReview_EventCarriesSummary pins the substance the projected
+// process-feedback bead's description is built from: the self-review findings are
+// "ours" by construction, so they MUST still be counted as needing processing.
+func TestIngestSelfReview_EventCarriesSummary(t *testing.T) {
+	ctx := context.Background()
+	db := store.OpenForTest(t)
+	seedMinePR(t, db)
+
+	draft := &reviewstage.Draft{
+		Repo: "o/r", PR: 7,
+		Comments: []api.Comment{
+			{Path: "a.go", Line: 3, Body: "avoid the naked return"},
+			{Path: "b.go", Line: 9, Body: "handle the error"},
+		},
+	}
+	result := &reviewstage.Result{Repo: "o/r", PR: 7, Ownership: "mine", HeadSHA: "h1", BeadID: "dr-1"}
+	if _, err := IngestSelfReview(ctx, db, "o/r", 7, draft, result); err != nil {
+		t.Fatalf("IngestSelfReview: %v", err)
+	}
+
+	var payloads []store.FeedbackPayload
+	if err := db.RunOutbox(ctx, func(_ context.Context, e store.Event) error {
+		if e.Type != store.EventFeedbackCreated {
+			return nil
+		}
+		var p store.FeedbackPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		payloads = append(payloads, p)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunOutbox: %v", err)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("feedback.created events = %d, want 1", len(payloads))
+	}
+	p := payloads[0]
+	if p.Summary == nil {
+		t.Fatal("payload summary is nil — the bead description would have no substance")
+	}
+	if p.Summary.Unaddressed != 2 || p.Summary.ByKind["self-review"] != 2 {
+		t.Fatalf("self-review findings must count as unaddressed: %+v", p.Summary)
+	}
+	if !p.Mine {
+		t.Error("my-PR sink must mark the payload mine")
 	}
 }
 
