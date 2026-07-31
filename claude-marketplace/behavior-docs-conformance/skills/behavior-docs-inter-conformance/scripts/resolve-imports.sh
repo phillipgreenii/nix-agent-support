@@ -9,11 +9,28 @@
 #              current name for that UUID (obligation-alignment).
 #   WARN     — the owner UUID resolves but the cited NAME differs: a stale NAME,
 #              never a broken identity (the UUID model's whole point — 1.1).
-#   FAIL     — the cited owner UUID resolves to NO owner definition: a genuine
-#              divergence / broken identity (the evaluator's core value).
+#   FAIL     — either the cited owner UUID resolves to NO owner definition (a
+#              genuine divergence / broken identity — the evaluator's core value),
+#              or the row declares no parseable owner UUID at all and is not marked
+#              external (an UNRESOLVABLE row). A row this script cannot resolve is
+#              a FAILURE, never a warning: warning on it left the failure counter at
+#              0, so a table whose shape this parser did not understand exited 0
+#              having checked nothing.
 #   external — the row declares a consumed EXTERNAL contract (a tool/system with
 #              no behavior-docs set of its own, e.g. git); there is no owner set
 #              to resolve, so it is recorded as declared.
+#
+# Two imports-table shapes are accepted, detected PER ROW (see row_cell/cell_uuid),
+# so a table part-way through the migration between them still resolves every row:
+#
+#   | Name | Owner set-path | Owner UUID |                      (current)
+#   | Name | What it is | Owner set-path | [<uuid>](remote-url) | (D5)
+#
+# The owner UUID is the LAST visible cell and the owner set-path the one before it
+# in both, so the owner cells are read from the RIGHT rather than by fixed index.
+# This script PARSES D5's link; it never DEREFERENCES the remote-url (verifying that
+# the URL resolves and still carries the UUID is a separate, deliberately deferred
+# item — this script makes no network calls).
 #
 # This is the executable reconciliation the docs name (INV-INTF-2 / method
 # INV-18, implementer form): the owner's contract vs. the implementer's stated
@@ -22,7 +39,8 @@
 # this script is the doc-level identity/seam layer that feeds it.
 #
 # Usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>
-# Exit: 0 if no FAIL (warnings allowed), 1 if any unresolved owner UUID.
+# Exit: 0 if no FAIL (warnings allowed), 1 if any row failed to resolve — an
+# unresolved owner UUID, or a row carrying no parseable owner UUID.
 set -euo pipefail
 
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
@@ -35,6 +53,53 @@ trim() { sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'; }
 # row_setpath <owner-set-path-cell> — the declared `<set-path>` half of a
 # `<repo> · <set-path>` cell, code-span backticks stripped.
 row_setpath() { printf '%s' "$1" | tr -d '`' | sed -E 's/.*·[[:space:]]*//' | trim; }
+
+# row_cell <gfm-row> <index> — print ONE cell of a leading-pipe GFM table row.
+# A POSITIVE index counts visible cells from the LEFT (1 = the first); a NEGATIVE
+# one counts from the RIGHT (-1 = the last, -2 = the one before it). awk's field 1
+# is the empty string before the leading pipe, and when the row also ends with a
+# pipe its LAST field is the empty string after it; both are dropped so the index
+# is over VISIBLE cells. Only an exactly-empty trailing field is dropped, so a
+# genuinely blank last cell (`| … | … |  |`) still counts as a cell.
+#
+# Reading the owner cells from the RIGHT is what makes this parser shape-agnostic.
+# The imports table's owner UUID is the LAST visible cell and the owner set-path
+# the one before it in BOTH live shapes: the current
+# `| Name | Owner set-path | Owner UUID |` and D5's
+# `| Name | What it is | Owner set-path | [<uuid>](remote-url) |`, which inserts a
+# column as the SECOND visible cell and so shifts both owner cells one field right.
+row_cell() {
+  printf '%s\n' "$1" | awk -F'|' -v i="$2" '
+    {
+      n = NF
+      if (n > 1 && $n == "") n--
+      k = (i + 0 < 0) ? n + 1 + i : 1 + i
+      if (k >= 2 && k <= n) print $k
+    }'
+}
+
+# cell_uuid <owner-uuid-cell> — the owner UUID the cell DECLARES, or nothing.
+# Two shapes are accepted, detected on the CELL ITSELF (never on a header or a
+# per-table mode) so a table MID-MIGRATION whose rows mix the shapes still
+# resolves row by row:
+#   bare      `<uuid>`                — the current shape
+#   D5 link   `[<uuid>](remote-url)`  — the shape D5 introduces
+# For the link form the identity is the LINK TEXT and ONLY the link text: a
+# remote-url may itself carry a UUID (a fragment, a permalink path), and "the
+# first UUID anywhere in the cell" would let that masquerade as the declared
+# identity. A cell that IS a link but whose text is not a well-formed UUID
+# therefore yields NOTHING — the caller MUST treat an empty result as a failure,
+# never as a pass (that silent pass is the whole defect this parser change fixes).
+cell_uuid() {
+  local cell u=''
+  cell=$(printf '%s' "$1" | tr -d '`')
+  if printf '%s' "$cell" | grep -q ']('; then
+    u=$(printf '%s' "$cell" | sed -nE "s|.*\[[[:space:]]*($UUIDRE)[[:space:]]*\][[:space:]]*\(.*|\1|p" | head -1) || u=''
+  else
+    u=$(printf '%s' "$cell" | grep -oE "$UUIDRE" | head -1) || u=''
+  fi
+  printf '%s' "$u"
+}
 
 # owner_name_for_uuid <uuid> — print the owner's current name (first ID token on
 # the carrier line) for a UUID, or empty if the UUID is not present in the owner.
@@ -65,9 +130,11 @@ while IFS= read -r row; do
   '|'*) ;;
   *) continue ;;
   esac
-  name=$(printf '%s\n' "$row" | awk -F'|' '{print $2}' | trim)
-  opath=$(printf '%s\n' "$row" | awk -F'|' '{print $3}' | trim)
-  uuidcell=$(printf '%s\n' "$row" | awk -F'|' '{print $4}' | trim)
+  # The NAME is the first visible cell; the owner set-path and owner UUID are read
+  # from the RIGHT (see row_cell) so both the current and D5's shape parse per row.
+  name=$(row_cell "$row" 1 | trim)
+  opath=$(row_cell "$row" -2 | trim)
+  uuidcell=$(row_cell "$row" -1 | trim)
   # Skip the header and the |----| separator.
   [ "$name" = "Name" ] && continue
   # Separator row: dashes, tolerating GFM alignment colons (:---, :---:, ---:).
@@ -76,17 +143,29 @@ while IFS= read -r row; do
 
   found_rows=$((found_rows + 1))
 
-  # External contract: no owner UUID. Classify on the UUID CELL ALONE, anchored —
-  # never on the PATH, because a real repo path contains hyphens and a bare '-'
-  # would spuriously read as the external marker (making the WARN branch below
-  # unreachable). Strip a markdown code span first so `(external)` matches whether
-  # or not it is wrapped in backticks.
-  if ! printf '%s' "$uuidcell" | grep -qE "$UUIDRE"; then
+  # No owner UUID the cell could declare: either a declared EXTERNAL contract or an
+  # UNRESOLVABLE row. Classify on the UUID CELL ALONE, anchored — never on the PATH,
+  # because a real repo path contains hyphens and a bare '-' would spuriously read
+  # as the external marker (making the failure branch below unreachable). Strip a
+  # markdown code span first so `(external)` matches whether or not it is wrapped in
+  # backticks.
+  #
+  # An unresolvable row is a FAILURE, never a warning. It used to warn and leave the
+  # counter at 0, so the script EXITED 0 having resolved nothing — a gate reporting
+  # success while checking nothing. That is exactly how a table-shape change (D5's
+  # column shift) degrades this evaluator silently, so the shape competence above
+  # and the hard failure here are one change: neither is verifiable without the other.
+  u=$(cell_uuid "$uuidcell")
+  if [ -z "$u" ]; then
     uuidnorm=$(printf '%s' "$uuidcell" | tr -d '`')
     if printf '%s' "$uuidnorm" | grep -qiE '^[[:space:]]*(\(?external\)?|n/a|[—-])[[:space:]]*$'; then
       printf '  external  %-22s (declared external contract: %s)\n' "$name" "$opath"
+    elif printf '%s' "$uuidnorm" | grep -q ']('; then
+      printf '  FAIL      %-22s (owner-UUID cell is a link whose text is not a UUID — unparseable: %s)\n' "$name" "$uuidcell"
+      fail=1
     else
-      printf '  WARN      %-22s (row has no owner UUID and is not marked external)\n' "$name"
+      printf '  FAIL      %-22s (row has no owner UUID and is not marked external — unresolvable)\n' "$name"
+      fail=1
     fi
     continue
   fi
@@ -99,8 +178,8 @@ while IFS= read -r row; do
   # PLACEMENT IS LOAD-BEARING and MUST stay here, AFTER the no-UUID branch above.
   # A row carrying no owner UUID has nothing to resolve against any owner, so this
   # filter has no business touching it: its classification (declared external
-  # contract vs. malformed row -> WARN) is owner-independent, and filtering it
-  # earlier silently swallows that WARN (bats fixture #1, `external-misclass`).
+  # contract vs. unresolvable row -> FAIL) is owner-independent, and filtering it
+  # earlier silently swallows that failure (bats fixture #1, `external-misclass`).
   if printf '%s' "$opath" | grep -q '·'; then
     rsp=$(row_setpath "$opath")
     case "/${OWNER%/}/" in
@@ -109,7 +188,6 @@ while IFS= read -r row; do
     esac
   fi
 
-  u=$(printf '%s' "$uuidcell" | grep -oE "$UUIDRE" | head -1)
   ownername=$(owner_name_for_uuid "$u")
   # Normalize the cited name to its bare ID token (the cell wraps it in a
   # markdown code span, e.g. `INTF-SOURCE`), so it compares to the owner's
@@ -142,7 +220,7 @@ elif [ "$found_rows" -eq 0 ]; then
   echo "  (implementer declares no external references)"
 fi
 if [ "$fail" -ne 0 ]; then
-  echo "V3: FAIL — one or more owner UUIDs did not resolve (genuine divergence)"
+  echo "V3: FAIL — one or more rows did not resolve (unresolved owner UUID, or an unresolvable row)"
   exit 1
 fi
 echo "V3: no divergence (warnings, if any, are stale NAMES — never broken identity)"

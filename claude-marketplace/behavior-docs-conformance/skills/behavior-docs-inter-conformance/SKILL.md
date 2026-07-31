@@ -36,10 +36,21 @@ owner's UUID — in its `## External references` imports table. The **name is a 
 ## Step 1 — Mechanical seam resolution (deterministic)
 
 Run **`scripts/resolve-imports.sh <owner> <implementer>`**. For every row of the implementer's
-`## External references` table it prints one of `ok` / `WARN` (stale name) / `FAIL` (unresolved owner
-UUID — divergence) / `external` (declared external contract), and exits non-zero iff any owner UUID
-failed to resolve. Turn each `FAIL` into a reconciliation finding and each `WARN` into a
-rename-the-citation note.
+`## External references` table it prints one of `ok` / `WARN` (stale name) / `FAIL` / `external`
+(declared external contract), and exits non-zero iff any row **failed to resolve**. Two conditions
+are a `FAIL`: an owner UUID that resolves to no owner definition (divergence), and a row carrying no
+parseable owner UUID that is not marked external (**unresolvable** — including a
+`[<uuid>](remote-url)` cell whose link text is not a UUID). An unresolvable row is never a warning:
+warning on it left the exit status at 0, so a table whose shape the parser did not understand
+reported success while resolving nothing. Turn each `FAIL` into a reconciliation finding and each
+`WARN` into a rename-the-citation note.
+
+Two table shapes are accepted, detected **per row**, so a set part-way through migrating is still
+checked: `| Name | Owner set-path | Owner UUID |` and
+`| Name | What it is | Owner set-path | [<uuid>](remote-url) |`. The owner UUID is the last visible
+cell and the owner set-path the one before it in both. The script **parses** the link; it never
+**dereferences** the remote-url — confirming that the URL resolves and still carries the UUID is a
+separate deferred check, and this script makes no network calls.
 
 ## Step 2 — Obligation reconciliation via the conformance suite (executable)
 
