@@ -75,6 +75,83 @@ func TestHasLongFlag(t *testing.T) {
 	}
 }
 
+// TestHasLongFlagPrefix pins the abbreviation matcher pg2-os1kq added. The rows
+// marked MEASURED are spellings verified against real git 2.54.0 on 2026-07-30; the
+// rows marked OVER-MATCH are spellings git itself refuses as ambiguous and this
+// matcher deliberately still reports, because for a dangerous-flag boolean test that
+// error is in the fail-safe direction (see the function's doc).
+func TestHasLongFlagPrefix(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		canonical string
+		want      bool
+	}{
+		// MEASURED: real git performs the hard reset for all four of these.
+		{"full name", []string{"--hard", "HEAD~1"}, "hard", true},
+		{"one char short", []string{"--har", "HEAD~1"}, "hard", true},
+		{"two chars short", []string{"--ha", "HEAD~1"}, "hard", true},
+		{"single char", []string{"--h", "HEAD~1"}, "hard", true},
+		// MEASURED: git parses these as --interactive; `--i` is ambiguous to git.
+		{"interactive abbreviated", []string{"--interactiv"}, "interactive", true},
+		{"interactive two chars", []string{"--in"}, "interactive", true},
+		// OVER-MATCH, fail-safe: git answers `ambiguous option: i` for this one.
+		{"interactive single char (git: ambiguous)", []string{"--i"}, "interactive", true},
+		// MEASURED: git parses --force-with-lease down to --force-w.
+		{"force-with-lease abbreviated", []string{"--force-w", "origin"}, "force-with-lease", true},
+		// A LONGER token never matches a shorter canonical — this is what keeps the
+		// separate `--force` and `--force-with-lease` gates from collapsing into one.
+		{"longer token vs shorter canonical", []string{"--force-with-lease"}, "force", false},
+		{"unrelated longer token", []string{"--dry-run"}, "delete", false},
+		{"different first letter", []string{"--soft"}, "hard", false},
+		// The `=`-glued form matches on the part BEFORE the '='; no value is returned.
+		{"glued value on an abbreviation", []string{"--force-with-lea=main:abc123"}, "force-with-lease", true},
+		{"glued value on the full name", []string{"--hard=x"}, "hard", true},
+		{"glued with empty flag name", []string{"--=x"}, "hard", false},
+		// A negation is not the flag.
+		{"no- negation", []string{"--no-hard"}, "hard", false},
+		{"no- negation abbreviated", []string{"--no-h"}, "hard", false},
+		// The `--` end-of-options terminator: after it every token is an operand.
+		{"after terminator not matched", []string{"--", "--hard"}, "hard", false},
+		{"after terminator abbreviated", []string{"--", "--har"}, "hard", false},
+		{"before terminator matched", []string{"--har", "--", "x"}, "hard", true},
+		{"bare terminator alone", []string{"--"}, "hard", false},
+		// Shorts, a lone `-`, and operands are never long flags.
+		{"short flag ignored", []string{"-h"}, "hard", false},
+		{"cluster ignored", []string{"-fh"}, "hard", false},
+		{"lone dash ignored", []string{"-"}, "hard", false},
+		{"operand ignored", []string{"hard"}, "hard", false},
+		// canonical MAY carry its own dashes; an empty canonical never matches.
+		{"canonical with dashes", []string{"--har"}, "--hard", true},
+		{"empty canonical", []string{"--hard"}, "", false},
+		{"empty canonical spelled as dashes", []string{"--hard"}, "--", false},
+		{"empty args", nil, "hard", false},
+		// Case is significant, as it is for git's long options.
+		{"case sensitive", []string{"--HARD"}, "hard", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasLongFlagPrefix(tt.args, tt.canonical); got != tt.want {
+				t.Errorf("HasLongFlagPrefix(%v, %q) = %v, want %v", tt.args, tt.canonical, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasLongFlagPrefix_MatchesEveryPrefixOfCanonical is the property the callers
+// rely on and the reason the primitive exists at all: no abbreviation of a gated flag
+// can be missed, so no enumeration has to be kept in step with git's option table.
+func TestHasLongFlagPrefix_MatchesEveryPrefixOfCanonical(t *testing.T) {
+	for _, canonical := range []string{"hard", "interactive", "force", "mirror", "delete", "force-with-lease"} {
+		for n := 1; n <= len(canonical); n++ {
+			tok := "--" + canonical[:n]
+			if !HasLongFlagPrefix([]string{tok, "origin", "main"}, canonical) {
+				t.Errorf("HasLongFlagPrefix([%q …], %q) = false, want true — every prefix must match", tok, canonical)
+			}
+		}
+	}
+}
+
 func TestFirstOperand(t *testing.T) {
 	tests := []struct {
 		name      string

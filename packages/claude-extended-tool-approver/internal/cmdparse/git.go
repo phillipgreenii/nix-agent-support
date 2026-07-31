@@ -9,7 +9,10 @@ import "strings"
 // forms git ITSELF accepts. The rule module currently locates flags and operands
 // by exact token equality, so a clustered short (`-fu`), an `=`-glued long
 // (`--force-with-lease=other`), and a force/delete expressed purely in the
-// refspec (`+main`, `:main`) are all invisible to it.
+// refspec (`+main`, `:main`) are all invisible to it. HasLongFlagPrefix was added
+// beside them by pg2-os1kq for the remaining spelling axis, git's unique-prefix
+// ABBREVIATIONS (`--har` IS `--hard`); see its doc for the fail-safe over-matching
+// property and the use restriction that comes with it.
 //
 // SCANNER CLASS — these helpers are TOKEN-LEVEL and POST-unquote: they consume
 // ParsedCommand.Args, i.e. the arguments AFTER the parser has lowered the raw
@@ -77,8 +80,11 @@ func HasShortFlag(args []string, f byte) bool {
 // build. It reports ok for that form (the flag IS present) with an empty value,
 // which is indistinguishable from both the bare form and an explicitly empty
 // `--name=`. Nor does it cover git's unique-prefix ABBREVIATIONS (git accepts
-// `--for` for `--force`) or `--no-` negations; a caller that must catch those
-// MUST ask for each spelling.
+// `--har` for `--hard`) or `--no-` negations. A caller that must catch the
+// abbreviations MUST NOT enumerate spellings by hand — that is how one gets
+// missed, which is the defect pg2-os1kq closed. Use HasLongFlagPrefix for a
+// boolean dangerous-flag test, or a MEASURED per-subcommand minimum where the
+// match length or the flag's value is load-bearing.
 func HasLongFlag(args []string, name string) (value string, ok bool) {
 	name = strings.TrimPrefix(name, "--")
 	if name == "" {
@@ -97,6 +103,75 @@ func HasLongFlag(args []string, name string) (value string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// HasLongFlagPrefix reports whether args carries long flag canonical in ANY
+// spelling git's parse-options would accept for it — the full name, or `--`
+// followed by any NON-EMPTY PREFIX of it. For canonical "hard" each of `--hard`,
+// `--har`, `--ha` and `--h` reports true. canonical MAY be written with or
+// without its leading `--` ("hard" and "--hard" are equivalent).
+//
+// WHY IT EXISTS BESIDE HasLongFlag (pg2-os1kq). HasLongFlag matches ONE exact
+// spelling and documents that a caller needing git's unique-prefix abbreviations
+// must ask for each spelling — and enumerating spellings by hand is exactly how
+// one gets missed. Measured on git 2.54.0, 2026-07-30, one FRESH repo per
+// spelling: `git reset --har HEAD~1`, `--ha` and `--h` each answered `HEAD is now
+// at <sha> base` and reverted the worktree, i.e. all three PERFORMED the hard
+// reset, and an exact-token `--hard` test saw none of them.
+//
+// IT DELIBERATELY OVER-MATCHES, AND THAT IS THE FAIL-SAFE DIRECTION. It knows
+// nothing of git's option TABLE, so it also matches a prefix git ITSELF refuses
+// as ambiguous (`git push --forc` answers `error: ambiguous option: forc`, yet
+// this reports true for canonical "force"). For a DANGEROUS-FLAG BOOLEAN TEST
+// that error is always in the safe direction: matching more spellings than git
+// accepts can only make the caller MORE restrictive — Ask or Reject where it
+// would have Approved — never less. That property is the entire reason this
+// primitive is allowed to be imprecise, and stating it is what lets a reader
+// check the reasoning rather than re-derive it.
+//
+// IT IS ALSO A USE RESTRICTION, for the same reason. A caller MUST NOT use it
+// where the match's LENGTH or the flag's VALUE is load-bearing — locating an
+// operand, eliding a separated flag argument, or reading an `=`-glued value —
+// because there an over-match shifts an operand count or attributes a value to a
+// flag git never parsed, and neither error has a safe direction. Such a caller
+// needs a MEASURED per-subcommand minimum instead (see internal/rules/git's
+// hasAbbrevLongFlag, which records the rule for choosing between the two).
+//
+// COVERS: the bare form `--name`; every non-empty `--`-prefixed prefix of it; and
+// the `=`-glued form of any of those (`--force-with-lea=main`), whose value is
+// NOT returned — this answers a boolean only. Scanning STOPS at a `--`
+// end-of-options terminator, so `git reset -- --hard` reports false: that token
+// is a pathspec, exactly as HasShortFlag and HasLongFlag treat one.
+//
+// DELIBERATELY DOES NOT COVER: short flags and clusters (HasShortFlag); `--no-`
+// negations, since `no-hard` does not prefix-match `hard` and negating a flag is
+// not setting it; and any spelling LONGER than canonical, so `--force-with-lease`
+// is NOT a match for canonical "force" — which is what keeps a caller's two
+// separately-worded gates for those flags from collapsing into one.
+func HasLongFlagPrefix(args []string, canonical string) bool {
+	canonical = strings.TrimPrefix(canonical, "--")
+	if canonical == "" {
+		return false
+	}
+	for _, a := range args {
+		if a == "--" {
+			return false // end of options; the rest are operands
+		}
+		if !strings.HasPrefix(a, "--") {
+			continue // an operand, a lone "-", or a short flag / cluster
+		}
+		name := a[2:]
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i] // `--force-with-lea=main`: the flag is the part before '='
+		}
+		if name == "" || len(name) > len(canonical) {
+			continue
+		}
+		if canonical[:len(name)] == name {
+			return true
+		}
+	}
+	return false
 }
 
 // FirstOperand returns the first non-flag token in args and its index, or

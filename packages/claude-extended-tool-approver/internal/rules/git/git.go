@@ -131,11 +131,30 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 // `-f <file>` shifts it again. See that function for why a position-free scan is
 // required rather than a single FirstOperand read.
 //
-// ONE ADJACENT GAP IS DELIBERATELY LEFT ALONE:
+// LONG-FLAG ABBREVIATION SURVEY, 2026-07-30 (pg2-os1kq). The bare-index survey
+// above records that every arm keys on a FLAG rather than a position — which moved
+// the same defect one axis over. git's parse-options accepts any UNAMBIGUOUS PREFIX
+// of a long option, so an EXACT-TOKEN long-flag test is bypassable by shortening the
+// flag by one character, and the bypass direction is toward Approve. Measured
+// `allow` on a binary built from main @ 9c52f66b: `git reset --har HEAD~1`, `--ha`,
+// `--h` (all three PERFORM the hard reset) and `git rebase --interactiv`, `--intera`,
+// `--int`, `--in`. Every long-flag test in this file now goes through
+// cmdparse.HasLongFlagPrefix or hasAbbrevLongFlag; see hasAbbrevLongFlag for the
+// rule that decides which, and flagmatch_test.go for the AST guard that enforces it.
+//
+// TWO ADJACENT GAPS ARE DELIBERATELY LEFT ALONE:
 //
 //   - `isDestructive`'s exact-token `-D` — an intentionally narrow FLAG test, not
 //     an operand lookup; see that function's doc for why widening it is out of
 //     scope.
+//   - `hasGitConfigInjection`'s exact-token `--config-env` / `--git-dir` /
+//     `--work-tree` / `--namespace` — those are PRE-SUBCOMMAND options, parsed by
+//     git's own `handle_options()` rather than by parse-options, and it accepts NO
+//     abbreviation. Measured on git 2.54.0, 2026-07-30: `git --git-di=<dir> log`,
+//     `git --git=<dir> log`, `git --work-tre=<dir> log`, `git --namespac=<ns> log`
+//     and `git --config-en=X=Y log` each answered `unknown option: …`, while every
+//     full spelling worked. So the exact-token test IS git's own parse there, and
+//     prefix-matching them would over-match with no bypass to close.
 func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
 	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
 	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
@@ -167,9 +186,23 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}
 	}
-	// rebase: approve unless interactive without automated editor
+	// rebase: approve unless interactive without automated editor.
+	//
+	// The long flag is matched by PREFIX (pg2-os1kq): the exact-token test missed
+	// `--interactiv`, `--intera`, `--inte`, `--int` and `--in`, all measured PARSED
+	// by git 2.54.0 on 2026-07-30 (`--i` alone is `ambiguous option: i`), so an
+	// interactive rebase could skip the editor requirement and hang on a prompt no
+	// one can answer.
+	//
+	// `-i` STAYS AN EXACT-TOKEN SHORT TEST, deliberately. Widening it to
+	// cmdparse.HasShortFlag would scan clusters, and `git rebase` has value-taking
+	// shorts whose GLUED value contains `i` (`-Xignore-all-space`), which would
+	// manufacture a false editor requirement — the arity problem HasShortFlag
+	// documents and pushes to its caller. A clustered `-qi` is therefore still
+	// missed; that is a SHORT-flag gap, not this bead's abbreviation class, and
+	// closing it needs its own measured ruling.
 	if subcmd == "rebase" {
-		if hasFlag(rest, "-i") || hasFlag(rest, "--interactive") {
+		if hasFlag(rest, "-i") || cmdparse.HasLongFlagPrefix(rest, "interactive") {
 			if !hasSequenceEditorEnvVar(pc) {
 				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git rebase -i requires editor", Module: r.Name()}
 			}
@@ -209,9 +242,18 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
 	}
-	// reset: approve unless --hard
+	// reset: approve unless --hard, IN ANY SPELLING GIT ACCEPTS.
+	//
+	// THIS WAS THE SEVERE HALF OF pg2-os1kq. The test was an exact-token
+	// `hasFlag(rest, "--hard")`, so `--har`, `--ha` and `--h` — measured on git
+	// 2.54.0, 2026-07-30, to each PERFORM the hard reset — fell through to the
+	// Approve below, whose reason ASSERTS the reset is soft. A hard reset was not
+	// merely approved: it was approved with a message telling every later reader of
+	// the log that the working tree was safe. cmdparse.HasLongFlagPrefix matches
+	// every abbreviation without an enumeration to keep in step with git; its doc
+	// records why over-matching is the fail-safe direction here.
 	if subcmd == "reset" {
-		if hasFlag(rest, "--hard") {
+		if cmdparse.HasLongFlagPrefix(rest, "hard") {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git reset --hard is destructive", Module: r.Name()}
 		}
 		if hasRedirectEnvVar(pc) {
@@ -478,11 +520,18 @@ var gatedConfigSections = map[string]configGateClass{
 }
 
 // Long-flag ABBREVIATION MINIMUMS for the `git config` options configVerdict keys
-// on. Same mechanism as the `git push` minimums (minAbbrevForce and its
-// neighbours) — git's parse-options accepts
-// any UNAMBIGUOUS PREFIX, so matching one exact spelling misses real ones — but the
-// minimums are NOT shared with that block: what a prefix collides with depends on
-// which option table git parsed the command against.
+// on. Same mechanism as minAbbrevRepo, the one remaining `git push` minimum —
+// git's parse-options accepts any UNAMBIGUOUS PREFIX, so matching one exact
+// spelling misses real ones — but the minimums are NOT shared with it: what a prefix
+// collides with depends on which option table git parsed the command against.
+//
+// THESE MINIMUMS MUST STAY MEASURED, and MUST NOT be replaced by
+// cmdparse.HasLongFlagPrefix the way the `git push` boolean gates were (pg2-os1kq).
+// A `git config` option match is not a bare dangerous-flag boolean: it ELIDES a
+// token (configElideFlagValues) or flips the write indication, so it shifts the
+// operand count that configIsRead's read/write bound and gatedConfigKey's key scan
+// both rest on. Over-matching there has no safe direction — it could drop a real
+// operand and change a `git config` verdict. See hasAbbrevLongFlag for the rule.
 //
 // Each value is the SHORTEST prefix real git accepted, MEASURED against git 2.54.0
 // on 2026-07-30 by running the flag and reading back the config; one character
@@ -1039,25 +1088,27 @@ func isDestructive(subcmd string, args []string) bool {
 	return false
 }
 
-// Long-flag ABBREVIATION MINIMUMS for the `git push` options pushVerdict gates.
-// git's parse-options accepts any UNAMBIGUOUS PREFIX of a long option, so
-// `--force-w`, `--del` and `--m` are all real spellings of flags this rule must
-// see; cmdparse.HasLongFlag matches one exact name by design and documents that
-// a caller needing abbreviations must ask for each spelling.
+// Long-flag ABBREVIATION MINIMUM for the ONE `git push` option pushVerdict reads a
+// VALUE from. git's parse-options accepts any UNAMBIGUOUS PREFIX of a long option,
+// so `--rep=<url>` is a real spelling of `--repo=<url>`.
 //
-// Each value is the SHORTEST prefix real git accepted, MEASURED with `git push
-// <spelling> origin main` against git 2.54.0 on 2026-07-30; one character
-// shorter, git answered `error: ambiguous option`. Re-measure before changing
-// one. A future git option that makes a listed prefix ambiguous cannot cause a
-// false Reject — git refuses the ambiguous spelling itself — it only makes the
-// extra spelling dead.
-const (
-	minAbbrevForce          = len("force")   // `--force-` is ambiguous: --force-with-lease / --force-if-includes
-	minAbbrevForceWithLease = len("force-w") // same ambiguity one character shorter
-	minAbbrevDelete         = len("de")      // `--d` is ambiguous: --delete / --dry-run
-	minAbbrevMirror         = len("m")       // no other `git push` option starts with m
-	minAbbrevRepo           = len("rep")     // `--re` is ambiguous: --recurse-submodules / --receive-pack
-)
+// The value is the SHORTEST prefix real git accepted, MEASURED with `git push
+// <spelling> origin main` against git 2.54.0 on 2026-07-30; one character shorter,
+// git answered `error: ambiguous option`. Re-measure before changing it.
+//
+// ONLY `--repo` IS LEFT HERE (pg2-os1kq). `--force`, `--force-with-lease`,
+// `--mirror` and `--delete` had measured minimums too — `len("force")`,
+// `len("force-w")`, `len("m")` and `len("de")`, each re-confirmed on git 2.54.0,
+// 2026-07-30 — and every one of them has moved to cmdparse.HasLongFlagPrefix. Those
+// four are BOOLEAN dangerous-flag tests whose only effect is to make the verdict
+// more restrictive, so a measured bound buys nothing and COSTS the thing this bead
+// is about: a minimum is a property of git's option table AT MEASUREMENT TIME, not
+// of this code, so `--forc` is safe today only because it is ambiguous with
+// --force-if-includes, and the day git retires that option `--forc` becomes a live
+// force-push this rule would approve. `--repo` keeps its minimum because its
+// `=`-glued VALUE is read and used as the push destination; see hasAbbrevLongFlag
+// for the rule that decides between the two matchers.
+const minAbbrevRepo = len("rep") // `--re` is ambiguous: --recurse-submodules / --receive-pack
 
 // hasAbbrevLongFlag reports whether args carries long flag name in any spelling
 // git would accept — the full name, or an unambiguous prefix down to minLen
@@ -1071,9 +1122,38 @@ const (
 //
 // minLen is per SUBCOMMAND, not per flag name: what a prefix is ambiguous with
 // depends on which option table git parsed the command against. The measured
-// minimums live beside the subcommand that needs them — see the `git push` block
-// (minAbbrevForce and its neighbours) and the `git config` one (minAbbrevUnset and
-// its neighbours) — and this helper holds none of its own.
+// minimums live beside the subcommand that needs them — see minAbbrevRepo for
+// `git push` and the `git config` block (minAbbrevUnset and its neighbours) — and
+// this helper holds none of its own.
+//
+// # WHICH MATCHER TO USE (pg2-os1kq) — the rule, so the next author does not guess
+//
+// Two abbreviation matchers now exist and they are NOT interchangeable. Both are
+// prefix-aware; they differ in whether the prefix is BOUNDED by a measured
+// minimum. The test is what a MATCH is used for, not which flag it is:
+//
+//   - cmdparse.HasLongFlagPrefix — an OPEN prefix, no minimum — is the DEFAULT, and
+//     MUST be used for a BOOLEAN DANGEROUS-FLAG TEST: one whose only effect is to
+//     move the verdict toward Ask or Reject. Over-matching is then fail-safe by
+//     construction (a spelling git would refuse as ambiguous is refused here
+//     instead), and the caller stops depending on git's current option table. Every
+//     `git push` force / --mirror / --delete / --force-with-lease gate, the `reset`
+//     `--hard` gate and the `rebase` `--interactive` gate are this shape.
+//   - hasAbbrevLongFlag — a MEASURED minimum — MUST be used where the match's
+//     LENGTH or the flag's VALUE is load-bearing, because over-matching there has no
+//     safe direction. Two call sites qualify and they are the only ones:
+//     pushNetworkDestination's `--repo`, whose `=`-glued VALUE becomes the
+//     destination the gate rules on; and every `git config` option
+//     (configWriteFlags, and configIsValueLongFlag's own bounded loop over
+//     configValueFlags), where a match ELIDES a token and so shifts the operand
+//     count configIsRead's read/write bound and gatedConfigKey's key scan both
+//     depend on. A blanket switch to the open matcher there could mis-elide and
+//     silently change a `git config` verdict.
+//
+// A NEW long-flag test MUST pick by that rule and is checked mechanically:
+// TestGit_LongFlagTests_AreAbbreviationAware in flagmatch_test.go walks this file's
+// AST and fails any exact-token long-flag test outside its named exemptions, and
+// pins each gated flag to the matcher chosen above.
 func hasAbbrevLongFlag(args []string, name string, minLen int) (string, bool) {
 	for n := len(name); n >= minLen; n-- {
 		if v, ok := cmdparse.HasLongFlag(args, name[:n]); ok {
@@ -1262,6 +1342,20 @@ func pushNetworkDestination(rest []string, refspecs []cmdparse.Refspec) (string,
 // LOCAL PATHS ARE NOT GATED. See pushDestinationOffMachine for the reasoning and
 // for why `file://` counts as local rather than as a URL.
 //
+// EVERY LONG FLAG BELOW IS MATCHED BY OPEN PREFIX (pg2-os1kq), not by a measured
+// abbreviation minimum. The verdicts are unchanged for every spelling git actually
+// accepts — re-measured on git 2.54.0, 2026-07-30, the minimums pg2-bohpm recorded
+// were correct — so this is not a bug fix here but the removal of a DEPENDENCY: a
+// minimum encodes git's option table at measurement time, so `--forc` is refused by
+// git today only because it is ambiguous with --force-if-includes, and retiring that
+// option would turn `--forc` into a live force-push this rule approved. The open
+// matcher now refuses `--forc`, `--for`, `--fo` and `--f` itself. `--repo` is the one
+// exception and keeps its minimum, because its VALUE is read; see hasAbbrevLongFlag.
+//
+// A LONGER flag never matches a shorter canonical, so `--force-with-lease` still
+// reaches its own block below rather than the force Reject above, and the two gates
+// keep their separate, differently-worded reasons.
+//
 // TEXT VS PARSED: every test here reads PARSED tokens (post-unquote
 // cmdparse.ParsedCommand.Args) and the rule runs only when
 // isGitExecutable(pc.Executable), so `--force` inside a commit message, a
@@ -1279,7 +1373,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// `+` refspec prefix forces just that refspec, and `-f`/`--force` force every
 	// one. ClassifyPushRefspecs deliberately does not reflect the flags, and
 	// HasShortFlag deliberately does not match longs, so all three are asked.
-	if _, ok := hasAbbrevLongFlag(rest, "force", minAbbrevForce); ok {
+	if cmdparse.HasLongFlagPrefix(rest, "force") {
 		return reject("git: force-push is prohibited — an agent must never force-push (operator ruling 2026-07-30). Every spelling is refused (--force, -f, a clustered -f…, and a '+' refspec prefix), so retrying with another one will not work; use --force-with-lease on the SAME branch, or hand the push to the operator")
 	}
 	if cmdparse.HasShortFlag(shorts, 'f') {
@@ -1294,7 +1388,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// --mirror deletes every remote ref that is absent locally, so it is a
 	// remote-ref delete of unbounded width — strictly broader than the
 	// single-branch delete below, and never a legitimate agent operation here.
-	if _, ok := hasAbbrevLongFlag(rest, "mirror", minAbbrevMirror); ok {
+	if cmdparse.HasLongFlagPrefix(rest, "mirror") {
 		return reject("git: git push --mirror is prohibited — it DELETES every remote ref absent locally, an unbounded remote-ref deletion (pg2-bohpm, 2026-07-30). Push the one ref you mean by name")
 	}
 
@@ -1306,7 +1400,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// Revisiting this needs an operator ruling on remote-ref deletion, not a
 	// workflow that finds it inconvenient — deleting a merged remote branch is
 	// the platform's job (GitHub does it on merge), not a push's.
-	if _, ok := hasAbbrevLongFlag(rest, "delete", minAbbrevDelete); ok {
+	if cmdparse.HasLongFlagPrefix(rest, "delete") {
 		return reject("git: deleting a remote ref is prohibited — --delete destroys a ref that may be another clone's only copy (pg2-bohpm, 2026-07-30). Every spelling is refused (--delete, -d, and a ':ref' refspec); let the platform delete a merged branch, or hand it to the operator")
 	}
 	if cmdparse.HasShortFlag(shorts, 'd') {
@@ -1362,7 +1456,7 @@ func (r *Rule) pushVerdict(rest []string) (hookio.RuleResult, bool) {
 	// explicit lease — the safest form there is. The lease VALUE is therefore
 	// deliberately NOT read here; cross-branch-ness comes only from the push
 	// REFSPEC OPERANDS (`main:other`), which is what ClassifyPushRefspecs returns.
-	if _, ok := hasAbbrevLongFlag(rest, "force-with-lease", minAbbrevForceWithLease); ok {
+	if cmdparse.HasLongFlagPrefix(rest, "force-with-lease") {
 		for _, rs := range refspecs {
 			// SameRef treats `HEAD:main` as cross-branch: HEAD cannot be resolved
 			// from a token, and for a gate the safe reading is cross-branch. Name the
