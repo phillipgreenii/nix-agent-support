@@ -3,11 +3,14 @@ disable-model-invocation: true
 description: >-
   Autonomously drain this pn-workspace's beads queue as an orchestrator: loop
   claim → isolate → delegate the implementation to a subagent → validate → land
-  (local ff-merge) → close, cooperating with other concurrent /drain-beads
+  (via the repo's declared integrate-branch strategy — local ff-merge, or push +
+  draft PR) → close, cooperating with other concurrent /drain-beads
   sessions via atomic claims. Post-deploy verification is handled by a
-  `pn:applied` gate on a verification child bead — NOT the `human` label, which
-  is reserved as a last resort for a blocker only a PERSON can clear (a blocker
-  that is another bead is modeled with `bd dep`, never with the label).
+  `pn:applied` gate on a verification child bead (or, where no such gate could ever
+  resolve, by a `human` verification child) — never by labeling the IMPLEMENTATION
+  bead `human`, which is reserved as a last resort for a blocker only a PERSON can
+  clear (a blocker that is another bead is modeled with `bd dep`, never with the
+  label).
 argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
 ---
 
@@ -55,11 +58,13 @@ the loop ends cleanly while they wait, and they resurface after the next
 
 ### Unpushed commits when you STOP
 
-You LAND locally and never push, so every bead you closed added commits to local
-`main` that this session did NOT publish. That is EXPECTED and is NOT a problem
-worth the operator's attention, so **REPORT NOTHING ABOUT IT** — no heading, no
-`pn workspace doctor` output, no per-repo counts, no remediation sequence. Do not
-run the probe just to have something to say. Full contract: the always-on
+Where the resolved strategy is `ff-merge-to-main` you LAND locally and never push, so
+every bead you closed added commits to local `main` that this session did NOT
+publish. That is EXPECTED and is NOT a problem worth the operator's attention, so
+**REPORT NOTHING ABOUT IT** — no heading, no `pn workspace doctor` output, no
+per-repo counts, no remediation sequence. Do not run the probe just to have something
+to say. A repo whose resolved strategy is `pull-request` leaves no unpushed debt at
+all — there the push IS the landing. Full contract: the always-on
 `Unpushed Landing Debt` rules (**U-1..U-6**).
 
 The ONE exception is a CONSEQUENCE for the work itself: if being unpublished
@@ -146,26 +151,73 @@ rather than updating it.
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
    status is `stuck` → STUCK.
 
-6. **LAND** locally (rebase onto local main, then merge `--ff-only`; NO push, NO
-   PR). Keep landing in THIS session — the skills need persistent shell/cwd state:
-   - Single repo → invoke the `integrate-branch:integrate-branch` skill (which
-     dispatches its `integrate-branch:ff-merge-to-main` handler).
-   - Workforest set → invoke the `pn-workspace-rules:land-workforest` skill.
+6. **LAND** by the strategy the REPO declares — never a hardcoded local ff-merge.
+   Keep landing in THIS session — the skills need persistent shell/cwd state:
+   - Single repo → invoke the `integrate-branch:integrate-branch` skill and let IT
+     resolve the strategy. You MUST NOT name a handler: the dispatcher reads
+     `pgii-integrate-branch.strategy` (already set per repo by the workspace's
+     `post-clone` hooks — no setup step of yours) and dispatches
+     `integrate-branch:ff-merge-to-main`, `integrate-branch:pull-request`, or a
+     declared custom handler. Naming a handler hardcodes ff-merge and makes this
+     command UNUSABLE in a `pull-request` repo (a protected-`main` monorepo, where an
+     `--ff-only` merge into local `main` would land unreviewed commits past the PR,
+     CODEOWNERS and CI).
+   - Workforest set → invoke the `pn-workspace-rules:land-workforest` skill; it is
+     itself a per-repo orchestrator over the same dispatcher, so each member repo
+     lands by ITS OWN strategy.
+
+   **What "LANDED" means depends on the resolved strategy.** Record whichever the
+   handler reports:
+   - `ff-merge-to-main` → outcome `landed`: the rebase-then-`--ff-only` merge onto the
+     canonical clone's primary branch succeeded. RECORD the landed commit SHA per
+     changed repo.
+   - `pull-request` → outcome `pr-opened` or `pr-updated`: the branch was pushed and a
+     PR was created or refreshed by that push. **THAT IS THE LANDED STATE** — nothing
+     further is required, and this command MUST NOT merge the PR or wait for a merge
+     (the handler's PR-3 forbids it; merging is a human action). RECORD the pushed head
+     SHA per changed repo AND the PR number + URL. If a PR already EXISTS for
+     `drain/<id>`, the push UPDATES it and a second PR MUST NOT be opened (the handler
+     probes for an open PR on the branch before creating one). The PR MUST be a DRAFT —
+     `gh pr create --draft` (promotion to ready is a separate human step); if it came
+     back non-draft, convert it immediately with `gh pr ready --undo <number>`.
+
+   **Autonomy — push and draft-PR are PRE-AUTHORIZED; merging is not.** When the
+   resolved strategy is `pull-request`, you MAY push `drain/<id>` and create or update
+   its DRAFT PR WITHOUT per-bead operator confirmation, and you MUST NOT stop to ask:
+   that push IS the landing method the repo itself declared, the PR is a draft nobody
+   has merged, and review + CODEOWNERS + CI still gate the merge. You MUST NOT merge
+   the PR, enable automerge, or push any PRIMARY branch. This is NOT the **U-5**
+   prohibition: U-5 bars pushing on your own initiative to discharge unpushed
+   local-`main` debt, whereas here the operator authorized the push in advance by
+   declaring `pgii-integrate-branch.strategy = pull-request` for that repo.
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-rebase and re-invoke LAND a
-   few more times (short backoff) before giving up. Only route to STUCK for a
-   GENUINE stop (rebase-conflict, or canonical off-primary/dirty).
+   few more times (short backoff) before giving up. The `pull-request` analogue is a
+   REJECTED NON-FAST-FORWARD PUSH (a peer advanced the remote `drain/<id>`): also
+   TRANSIENT — rebase onto the UPDATED REMOTE branch and re-invoke LAND a few more
+   times. Only route to STUCK for a GENUINE stop (rebase-conflict,
+   `stopped:ambiguous-remote`, `stopped:no-pr-host`, or a canonical off-primary/dirty
+   halt). A canonical off-primary/dirty clone halts only a canonical-ADVANCING
+   strategy: the `pull-request` handler's PR-0 SURFACES that anomaly and PROCEEDS,
+   because it never reads or writes the canonical clone (R-8's carve-out). Under
+   `pull-request` it MUST therefore be reported and NOT treated as a stop.
 
-   After a successful land, RECORD the landed commit SHA per changed repo — use
-   the SHA the `integrate-branch:integrate-branch` /
-   `pn-workspace-rules:land-workforest` skill reports as landed
-   (equivalently, the tip of the feature branch you just merged, e.g.
+   After a successful land, RECORD the SHA per changed repo — the merged commit for
+   `ff-merge-to-main`, the pushed head for `pull-request`. Use the SHA the
+   `integrate-branch:integrate-branch` / `pn-workspace-rules:land-workforest` skill
+   reports (equivalently, the tip of the feature branch, e.g.
    `git -C <repo> rev-parse drain/<id>`). Do NOT re-read the shared primary branch
    (`rev-parse main`): a peer session may have advanced it, which would gate the
    child on the wrong change. The post-deploy gate keys on this SHA.
 
 7. **FINISH** — branch on the report status.
+
+   CLEANUP IS STRATEGY-DEPENDENT: read "CLEANUP the worktree" below as "retire the
+   isolation ONLY where the resolved strategy was `ff-merge-to-main`". After a
+   `pull-request` land the worktree and branch MUST be KEPT (the handler's PR-4) — the
+   work is pushed, not merged, so review feedback still needs that worktree, and
+   whoever merges the PR retires them.
 
    ORDER IS LOAD-BEARING for a workforest SET: every member repo MUST have LANDED
    (step 6) BEFORE the set is retired, and the bead MUST NOT be closed while any
@@ -188,7 +240,11 @@ rather than updating it.
      then
      `bd close <id> --reason "implemented + gates pass + landed; post-deploy verification gated as <child> (pn:applied)" --actor "ID"`.
      If gating did NOT complete (any `pb gate create` failed), do NOT close `<id>`
-     — route it to STUCK instead.
+     — route it to STUCK instead. Where that section says the gate path does NOT
+     APPLY (a non-pn-workspace repo, or resolved strategy `pull-request`), take its
+     `human`-child FALLBACK instead and close `<id>` naming that child and the PR:
+     STUCK is for a gate creation that FAILED, not for a repo where gating is
+     structurally impossible.
 
 8. Go to 1.
 
@@ -203,6 +259,36 @@ post-hook (`pb gate check`) then resolves it and the child surfaces as ordinary
 work for a later session (or a human) to run the live checks. A gate left
 unapplied past its stale window auto-converts to a `human` bead — so even the
 failure mode escalates to a person without you pre-labeling one.
+
+**SCOPE — this gate path applies ONLY when the changed repo is a `pn workspace`
+MEMBER and its resolved strategy is `ff-merge-to-main`.** `pb gate create` resolves
+`--repo` through `pn workspace info` and fails
+(`repo "<x>" is not in workspace "<root>"`) for anything outside it, so in a repo with
+no `pn-workspace.toml` a `pn:applied` gate can NEVER be created — and even if it
+could, nothing there ever runs `pn workspace apply` / `pb gate check` to resolve one,
+so it would sit until it stale-converted. A `pull-request` repo is excluded for a
+second, independent reason: the `pb:pb-gate-lifecycle` skill's own squash-merge rule —
+an upstream squash rewrites the patch-id, so the gate can never auto-resolve.
+
+**FALLBACK when the gate path does NOT apply** (repo outside a pn-workspace, or
+resolved strategy `pull-request`). This outcome MUST still TERMINATE: you MUST NOT
+attempt `pb gate create`, MUST NOT route the bead to STUCK, and MUST NOT leave the
+verification tail unrecorded. File the verification child as a `human` bead instead —
+CORRECT under **D-1**, because what stands between the code and the live machine is a
+PERSON's out-of-band action (merging the draft PR, then that repo's own deploy), not
+another bead:
+
+```bash
+bd create "verify <thing> works once <pr-url> is merged and deployed (<impl-id>): <concrete checks>" \
+  --labels human --deps "discovered-from:<impl-id>" --actor "ID" --json
+# capture the new id as <child>. No --defer and NO gate: nothing here would resolve one.
+```
+
+Born ready-and-`human`, it is invisible to drain's `--exclude-label human` claim query
+and visible to `/unblock-human-beads` immediately — which is intended, not noise: the
+operator is the one who merges the PR, so "merge this, then verify" is exactly the
+work being handed over. Then CLEANUP per FINISH step 7 (for `pull-request`, KEEP the
+isolation) and close the impl bead with a reason naming `<child>` and the PR.
 
 Follow the `pb:pb-gate-lifecycle` skill's sequence — with `--commit <landed-sha>`
 pinned instead of the skill's `HEAD` default, for concurrency-safety (a peer may
@@ -264,8 +350,9 @@ VERIFICATION GATE's job), and do NOT use it because ANOTHER BEAD must finish fir
 (that is a DEPENDENCY — step 3).
 
 Triggers: underspecified / needs a human decision; the pre-apply gates cannot be
-made to pass; landing returns a GENUINE `stopped:<reason>` (not a transient
-ff-race); a post-deploy gate could not be attached; repeated failed attempts.
+made to pass; landing returns a GENUINE `stopped:<reason>` (not a transient ff-race
+or rejected non-ff push); a post-deploy gate could not be attached; repeated failed
+attempts.
 NOT a trigger: "another bead has to land first".
 
 Step 1 only PRESERVES the work; the park that goes in front of a human is the
@@ -582,8 +669,9 @@ unchanged.
   and only an operator MAY authorize it. A member that cannot land leaves the set IN
   PLACE and routes to STUCK.
 - Post-deploy-only verification uses a `pn:applied` gate on a verification child
-  bead, NOT the `human` label. Reserve `human` for work that genuinely needs a
-  person.
+  bead, NOT the `human` label on the IMPLEMENTATION bead. Reserve `human` for work that
+  genuinely needs a person — which, where no gate could ever resolve, is exactly that
+  verification child itself (see the gating-scope rule below).
 - `human` means A PERSON IS THE BLOCKER, never "not workable right now". Before applying it
   the agent MUST classify every live blocker (STUCK step 3): a blocker that is ANOTHER BEAD
   MUST be modeled with `bd dep add <id> --blocked-by <blocker>` — default `blocks` type, the
@@ -629,13 +717,30 @@ unchanged.
   with an exit condition, not a permanent property — a recorded verdict on the isolation
   retires it, and the retiring update MUST also restore the priority the entry marker recorded.
   Full contract: the always-on `Worktree-Review Label Lifecycle` rules (W-1..W-8).
-- If a skill reports the canonical clone is off its primary branch or dirty, HALT
-  and report — do not reset/stash/work around it.
+- If a skill reports the canonical clone is off its primary branch or dirty, HALT and
+  report — EXCEPT under a strategy that never touches the canonical clone, where the
+  handler surfaces the anomaly and proceeds (the `pull-request` handler's PR-0, R-8's
+  carve-out): there it MUST be reported but MUST NOT halt the land. Either way, do not
+  reset/stash/work around it.
 - Transient infra failures (bd/dolt server blip, git `index.lock` contention, a
   lost ff-race) are NOT "stuck": back off briefly and retry. Only a genuine,
   repeatable failure routes to STUCK.
 - Never use `--no-verify`; fix hook violations instead.
-- Do not push to origin or open PRs — landing is local ff-merge only.
+- Landing MUST go through the `integrate-branch:integrate-branch` dispatcher with NO
+  handler named, so every repo lands by the strategy IT declares in
+  `pgii-integrate-branch.strategy`. Where that resolves to `ff-merge-to-main`, do NOT
+  push to origin and do NOT open PRs — landing is local only. Where it resolves to
+  `pull-request`, pushing `drain/<id>` and creating or updating its DRAFT PR
+  (`gh pr create --draft`) IS the landing, is AUTHORIZED without per-bead operator
+  confirmation, and MUST NOT prompt; a created-or-updated PR is the landed state, and
+  the pushed head SHA plus the PR number MUST be recorded. Merging that PR MUST NOT be
+  done (the handler's PR-3), nor MAY any primary branch be pushed, and the worktree and
+  branch MUST be KEPT rather than retired (PR-4).
+- Post-deploy `pn:applied` gating applies ONLY to a pn-workspace member repo landed via
+  `ff-merge-to-main`; `pb gate create` cannot resolve `--repo` outside a workspace and a
+  squash-merged PR rewrites the patch-id. Outside that case a
+  `done-pending-apply-verification` outcome MUST take the documented `human`-child
+  fallback — it MUST NOT create an unresolvable gate, and MUST NOT route to STUCK.
 - Landing locally leaves commits unpushed. That is expected and MUST NOT be reported —
   no heading, no probe output, no counts, no remediation path — unless being unpublished
   BLOCKS the work, which earns ONE line. Never push to clear it (read-only probes only,
@@ -651,7 +756,7 @@ flowchart TD
     R -- yes --> I
     R -- no --> C["CLAIM: bd ready --claim<br/>--exclude-label human --actor ID --json"]
     C -->|successful + empty| PD["Unpushed commits: derived state, so NO bead and<br/>NO report unless being unpublished BLOCKS the work<br/>-- then ONE line (U-1..U-6)"]
-    PD --> DONE(["Goal met: 0 ready. STOP (nothing was pushed)"])
+    PD --> DONE(["Goal met: 0 ready. STOP"])
     C -->|transient bd/dolt error| C
     C -->|got bead| U["bd show id (brief)"]
     U --> I["ISOLATE keyed to bead id<br/>(worktree / pn-workspace-rules:fork-workforest, reuse if parked)"]
@@ -659,14 +764,16 @@ flowchart TD
     W -. needs-more-repos .-> I
     W --> V{Report + gates}
     V -- "stuck / gates fail" --> S["STUCK (last resort): park the WIP, re-verify the<br/>PREMISE, then decide WHO or WHAT is the blocker"]
-    V -- "done / done-pending-apply-verification" --> L["LAND (local ff-merge, no push)"]
-    L -->|transient ff-race| L
+    V -- "done / done-pending-apply-verification" --> L["LAND via integrate-branch:integrate-branch, NO handler named<br/>ff-merge-to-main lands locally, pull-request pushes<br/>drain/id and opens or updates a DRAFT PR"]
+    L -->|transient ff-race or rejected non-ff push| L
     L -->|genuine stopped:reason| S
-    L -->|landed, capture SHA| G{Post-deploy<br/>verification needed?}
-    G -- "no (done)" --> CL["CLEANUP worktree/set<br/>(a set only AFTER every member landed, never force)"]
-    G -- "yes" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer +100y →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer ''"]
+    L -- "landed / pr-opened / pr-updated: capture SHA and PR number" --> G{Post-deploy<br/>verification needed?}
+    G -- "no (done)" --> CL["CLEANUP worktree/set ONLY after an ff-merge-to-main land<br/>(a set only AFTER every member landed, never force)<br/>pull-request: KEEP the worktree and branch (PR-4)"]
+    G -- "yes, pn-workspace member landed via ff-merge-to-main" --> PB["pb:pb-gate-lifecycle<br/>bd create verify-child --defer +100y →<br/>pb gate create --blocks child --repo --commit SHA →<br/>(all gates OK?) bd update child --defer ''"]
+    G -- "yes, but outside a pn-workspace or landed via pull-request" --> HB["FALLBACK, no gate is possible:<br/>bd create verify-child --labels human<br/>--deps discovered-from impl-id, born ready"]
     PB -->|gate-create failed| S
     PB -->|gated + un-deferred| CL
+    HB --> CL
     CL --> X["bd close impl id --reason ... --actor ID"]
     X --> C
     S --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
@@ -722,6 +829,10 @@ re-enters this queue by itself as soon as its last blocker closes.
 - **Parked-bead accumulation.** Every parked bead deliberately leaves a
   worktree/branch behind. Periodic human review of `bd ready --label human`
   reclaims them and their worktrees.
+- **Retained isolation in `pull-request` repos.** A `pull-request` land KEEPS the
+  worktree and branch by design (PR-4), so a drain over such a repo accumulates one
+  `.worktrees/<id>` per closed bead until someone merges the PRs. Retiring them is the
+  merger's job, not this command's.
 
 ```
 
