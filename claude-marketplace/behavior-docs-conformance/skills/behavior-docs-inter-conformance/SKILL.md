@@ -1,15 +1,20 @@
 ---
 name: behavior-docs-inter-conformance
-description: Reconcile two behavior-docs sets across a seam (the V3 INTER-evaluator) — verify an implementer's stated obligations align with the owner's contract, matched BY UUID via the implementer's imports table, using the interface conformance suite as the executable reconciliation (not a verbatim peer cross-check). Use when asked to check whether an implementer set (e.g. a downstream deployment implementing another set's interfaces) reconciles with the owner set, to resolve cross-set references by UUID, to find genuine divergence vs. a merely stale name, or to check that a set declares the external/consumed contracts (tools/systems it uses that have no behavior-docs of their own, e.g. git). Distinct from V1 (a set's implementation vs. its own docs) and V2 (a single set vs. the method's rules — the behavior-docs-conformance skill). Do NOT use for a single set in isolation, or for non-behavior-docs markdown.
+description: The INTER third of the behavior-docs conformance family — reconcile two behavior-docs sets across a seam: verify an implementer's stated obligations align with the owner's contract, matched BY UUID via the implementer's imports table, using the interface conformance suite as the executable reconciliation (not a verbatim peer cross-check). Use when asked to check whether an implementer set (e.g. a downstream deployment implementing another set's interfaces) reconciles with the owner set, to resolve cross-set references by UUID, to find genuine divergence vs. a merely stale name, or to check that a set declares the external/consumed contracts (tools/systems it uses that have no behavior-docs of their own, e.g. git). Also reconciles the imports table in BOTH directions (cited-but-undeclared and declared-but-uncited) and flags cross-set name collisions, such as an implementer asserting an affordance name the owner does not have. The other two thirds are behavior-docs-intra-conformance (one set vs. the method's rules) and behavior-docs-impl-conformance (an implementation vs. its own set). Do NOT use for a single set in isolation, or for non-behavior-docs markdown.
 ---
 
-# Behavior-docs inter-conformance (V3)
+# Behavior-docs inter-conformance
 
 Verify the two sides of a **seam** between behavior-docs sets agree: the **owner** defines a contract
-(an `INTF-*`), and an **implementer** states its own obligations and **cites** the owner. V3 is the
-**inter**-evaluator — it reconciles **contract ↔ contract across sets**, complementing V1 (impl ↔ its
-own docs) and V2 (a set ↔ the method's rules, the [`behavior-docs-conformance`](../behavior-docs-conformance/SKILL.md)
-skill).
+(an `INTF-*`), and an **implementer** states its own obligations and **cites** the owner. This skill is
+the **inter**-evaluator — it reconciles **contract ↔ contract across sets**. It is one of three parallel
+evaluators, named for the concern each reconciles (never for a version number):
+
+| Evaluator | Reconciles                          | Skill                                                                            |
+| --------- | ----------------------------------- | -------------------------------------------------------------------------------- |
+| **intra** | one set ↔ the method's rules        | [`behavior-docs-intra-conformance`](../behavior-docs-intra-conformance/SKILL.md) |
+| **inter** | one set ↔ another system's contract | this skill                                                                       |
+| **impl**  | an implementation ↔ its own set     | [`behavior-docs-impl-conformance`](../behavior-docs-impl-conformance/SKILL.md)   |
 
 ## Arguments
 
@@ -28,7 +33,7 @@ owner's UUID — in its `## External references` imports table. The **name is a 
   of the UUID model — a rename never breaks a seam.
 - **genuine divergence (FAILURE)** — the cited owner UUID resolves to **no owner definition**: the
   implementer names an obligation the owner does not define (omits/contradicts the real contract).
-  This — distinguishing a real divergence from a cosmetic stale name — is V3's core value.
+  This — distinguishing a real divergence from a cosmetic stale name — is this evaluator's core value.
 - **external / consumed contract** — a row for a tool/system with **no behavior-docs set of its own**
   (e.g. `git`) is a **declared external contract** (`INV-8`); a set SHOULD declare the contracts it
   consumes even when the counterparty has no docs. An **undeclared** used tool is a finding.
@@ -76,15 +81,19 @@ UUID and the implementer row for each.
 
 ## Corpus
 
-[`corpus/v3/`](corpus/v3/) carries a fixture per seam-check type against a shared `owner/`:
+[`corpus/inter/`](corpus/inter/) carries a fixture per seam-check type against a shared `owner/`:
 `aligned/` (ok), `stale-name/` (WARN), `divergence/` (FAIL), and `external-contract/{declared,undeclared}/`.
-The `test-behavior-docs-conformance-v3` bats check drives `resolve-imports.sh` over them under
-`nix flake check`. Real-world seams are captured by the sibling skill's
-`capture-prefix-snapshots.sh` (pre-fix vs. post-fix sets).
+The `test-behavior-docs-inter-conformance` bats check drives all three scripts over them under
+`nix flake check`, and `test-behavior-docs-real-corpus` drives them over the REAL in-repo seam
+(method set → pr-pool set) so a shipped divergence fails the build. Real-world pre-fix seams are
+captured by the intra skill's `capture-prefix-snapshots.sh` (pre-fix vs. post-fix sets).
 
 ## Red flags
 
 - Treating a stale **name** as a broken **identity** → it is a warning; the UUID resolves.
 - Reconciling by pasting the owner's whole contract into the implementer → forbidden; cite + run the
   conformance suite (implementer form of `INV-18`).
-- Checking a single set → that is V1 or V2, not V3; V3 needs two sets and a seam.
+- Checking a single set → that is the impl or the intra evaluator, not this one; inter needs two sets
+  and a seam.
+- Reading a cross-set name collision as a rename → a rename keeps the UUID; a collision is two sets
+  using DIFFERENT names for one element, or the SAME name for two, and no UUID reconciles it.

@@ -47,10 +47,13 @@ implementation is a detail the core never sees. Handlers may be agent or non-age
 This set follows the behavior-docs method and cites elements the method defines. Each external
 element it references is declared here with the owner's UUID, so a cross-set reference resolves by
 the owner's UUID — not the mutable name (a rename never breaks the seam). The owner set-path is the
-cited `<repo> · <set-path>`; every owner below lives in the method set.
+cited `<repo> · <set-path>`; every owner below lives in the method set. The **what it is** column is
+one line, so a reader learns why the row is there without following the reference, and the UUID is
+rendered as a link to the owner's remote-served definition. **The UUID is the authority; the URL may
+rot** — a dead link is an inconvenience, never a broken identity.
 
-| Name     | Owner set-path                                                   | Owner UUID                           |
-| -------- | ---------------------------------------------------------------- | ------------------------------------ |
-| `INV-11` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | f8174e40-806c-4c42-97da-996efd7c6e23 |
-| `INV-18` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | 4c6a764b-02f5-4c85-afae-a082fe6c21cd |
-| `INV-19` | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | 4325bdf4-2458-4606-8b37-2e5e996aa53a |
+| Name     | What it is                                                                  | Owner set-path                                                   | Owner UUID                                                                                                                                      |
+| -------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-11` | a set's extent is exactly what its stories, use cases and journeys require  | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [f8174e40-806c-4c42-97da-996efd7c6e23](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |
+| `INV-18` | inter-consistency at every interface, reconciled by the counterparty's kind | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4c6a764b-02f5-4c85-afae-a082fe6c21cd](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |
+| `INV-19` | a set MAY declare a precedence ordering over its own invariants             | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4325bdf4-2458-4606-8b37-2e5e996aa53a](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# resolve-imports.sh — the mechanical core of the V3 INTER-evaluator (bead
+# resolve-imports.sh — the mechanical core of the INTER evaluator (bead
 # pg2-hvlyj.15, plan item 5.3). Given an OWNER behavior-docs set and an
 # IMPLEMENTER set, resolve every row of the implementer's `## External
 # references` imports table against the owner set BY UUID (INV-3, the 1.1
@@ -42,6 +42,16 @@
 # Exit: 0 if no FAIL (warnings allowed), 1 if any row failed to resolve — an
 # unresolved owner UUID, or a row carrying no parseable owner UUID.
 set -euo pipefail
+
+# DETERMINISM: every sort, comm, uniq and shell glob below MUST order bytes, not
+# locale-collated characters. Without this the SAME finding serializes differently
+# on a UTF-8 workstation (`invariants.md:75 README.md:61`) and in the `C`-locale
+# nix build sandbox (`README.md:61 invariants.md:75`) — so a gate that compares
+# finding strings reports one identical finding as BOTH a new regression AND a
+# no-longer-occurring entry, and is flaky rather than useful. The finding string is
+# the record: it MUST be canonical where it is WRITTEN, never normalized where it
+# is compared.
+export LC_ALL=C
 
 OWNER="${1:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
 IMPL="${2:?usage: resolve-imports.sh <owner-set-dir> <implementer-set-dir>}"
@@ -115,10 +125,10 @@ owner_name_for_uuid() {
 
 fail=0
 found_rows=0
-echo "=== V3 seam resolution: $IMPL  ->  $OWNER ==="
+echo "=== INTER seam resolution: $IMPL  ->  $OWNER ==="
 
 # Does the implementer declare an imports table at all? (case-insensitive). With
-# NO `## External references` section the V3 inter-check is vacuous for this seam,
+# NO `## External references` section the inter check is vacuous for this seam,
 # so surface a NOTICE rather than exiting 0 silently (an empty-but-present table
 # is a different, quieter case handled after the loop).
 has_table=0
@@ -218,12 +228,12 @@ done < <(
 )
 
 if [ "$has_table" -eq 0 ]; then
-  echo "  NOTICE: implementer declares no imports table (## External references) — the V3 inter-check is vacuous for this seam"
+  echo "  NOTICE: implementer declares no imports table (## External references) — the inter check is vacuous for this seam"
 elif [ "$found_rows" -eq 0 ]; then
   echo "  (implementer declares no external references)"
 fi
 if [ "$fail" -ne 0 ]; then
-  echo "V3: FAIL — one or more rows did not resolve (unresolved owner UUID, or an unresolvable row)"
+  echo "INTER: FAIL — one or more rows did not resolve (unresolved owner UUID, or an unresolvable row)"
   exit 1
 fi
-echo "V3: no divergence (warnings, if any, are stale NAMES — never broken identity)"
+echo "INTER: no divergence (warnings, if any, are stale NAMES — never broken identity)"

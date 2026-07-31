@@ -229,6 +229,53 @@
         inputs.phillipgreenii-nix-base.flakeModules.checks
       ];
 
+      # The behavior-docs conformance gates run ON THE WAY IN, not only under a
+      # full `nix flake check` (bead pg2-wr6lm.4, plan item 6). A gate that fires
+      # only on a flake check does not hold the line while a work stream is
+      # actively editing the sets it governs, which is exactly when it is needed.
+      #
+      # WHY pre-commit AND NOT pre-push/CI. Measured on this repo, 2026-07-31:
+      # the runner takes 7.3s over both real sets (self-checks 1.6s + 2.2s,
+      # trace-extract 0.7s + 0.8s, impl-traces 0.6s, the three inter scripts
+      # ~0.6s together). 7.3s on EVERY commit would not be acceptable, so the
+      # hook carries a `files` filter and fires only when something it actually
+      # governs is staged: a behavior-docs set, an evaluator script, the runner,
+      # or the recorded baseline. On every other commit it does not run at all.
+      # `always_run = false` plus that filter is what makes pre-commit the right
+      # stage rather than pre-push.
+      #
+      # `pass_filenames = false`: the evaluators take SET DIRECTORIES, not files.
+      # The runner resolves everything under `$PWD` — the working tree — so the
+      # hook checks what is about to be committed, while the flake check resolves
+      # the same runner against the store copy of the flake source.
+      phillipgreenii.pre-commit.extraHooks = pkgs: {
+        behavior-docs-real-corpus = {
+          enable = true;
+          name = "behavior-docs-real-corpus";
+          description = "run the intra/inter/impl conformance evaluators over the real in-repo behavior-docs sets";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "behavior-docs-real-corpus-hook";
+              runtimeInputs = [
+                pkgs.bash
+                pkgs.gawk
+                pkgs.gnugrep
+                pkgs.gnused
+                pkgs.coreutils
+                pkgs.findutils
+              ];
+              text = ''
+                exec bash "$PWD/tests/behavior-docs-real-corpus.sh" "$PWD"
+              '';
+            }
+          }/bin/behavior-docs-real-corpus-hook";
+          language = "system";
+          pass_filenames = false;
+          always_run = false;
+          files = "^(behavior-docs/docs/behavior/|packages/pr-pool/docs/behavior/|packages/pr-pool/.*\\.go$|claude-marketplace/behavior-docs-conformance/|tests/behavior-docs-real-corpus)";
+        };
+      };
+
       perSystem =
         {
           system,
@@ -830,67 +877,155 @@
                   touch $out
                 '';
 
-              # V2 intra-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
-              # item 5.2): drive the behavior-docs-conformance skill's
+              # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
+              # item 5.2): drive the behavior-docs-intra-conformance skill's
               # self-checks.sh over inline-status / floor-leakage FAIL & PASS
-              # fixtures and assert it flags / stays clean. bc for the mermaid
-              # fence-count section.
+              # fixtures and assert it flags / stays clean, plus trace-extract.sh
+              # (INV-22 traceability) and capture-prefix-snapshots.sh. bc for the
+              # mermaid fence-count section; git for the capture test's synthetic
+              # throwaway repo.
+              # The check is named for the CONCERN it evaluates (intra), never for
+              # a version number: `v2` read as a release of one evaluator when it
+              # actually named one of three parallel evaluators (intra / inter /
+              # impl), which is why the whole family was renamed.
               # Not checksHelpers.testBashScripts: that helper cannot inject an env
-              # var, and the suite now also drives the shipped corpus/v2 fixtures
-              # (bead pg2-vybrv #5) via CORPUS_V2_DIR so the durable corpus cannot
-              # rot while the gate stays green. Mirrors that helper otherwise.
-              test-behavior-docs-conformance-v2 =
+              # var, and the suite also drives the shipped corpus/intra fixtures
+              # (bead pg2-vybrv #5) via CORPUS_INTRA_DIR so the durable corpus
+              # cannot rot while the gate stays green. Mirrors that helper otherwise.
+              test-behavior-docs-intra-conformance =
                 let
-                  package = pkgs.writeShellScriptBin "self-checks" ''
-                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/scripts/self-checks.sh} "$@"
+                  selfChecks = pkgs.writeShellScriptBin "self-checks" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/self-checks.sh} "$@"
+                  '';
+                  traceExtract = pkgs.writeShellScriptBin "trace-extract" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/trace-extract.sh} "$@"
+                  '';
+                  capturePrefix = pkgs.writeShellScriptBin "capture-prefix-snapshots" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/capture-prefix-snapshots.sh} "$@"
                   '';
                 in
-                pkgs.runCommand "test-behavior-docs-conformance-v2"
+                pkgs.runCommand "test-behavior-docs-intra-conformance"
                   {
                     nativeBuildInputs = [
                       pkgs.bats
                       pkgs.git
                       pkgs.which
                       pkgs.bc
-                      package
+                      pkgs.gnutar
+                      selfChecks
+                      traceExtract
+                      capturePrefix
                     ];
                   }
                   ''
-                    export PATH="${package}/bin:$PATH"
-                    export CORPUS_V2_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-conformance/corpus/v2}"
-                    bats ${./tests/behavior-docs-conformance-v2.bats}
+                    export PATH="${selfChecks}/bin:${traceExtract}/bin:${capturePrefix}/bin:$PATH"
+                    export CORPUS_INTRA_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/corpus/intra}"
+                    bats ${./tests/behavior-docs-intra-conformance.bats}
                     touch $out
                   '';
 
-              # V3 inter-evaluator mechanical coverage (bead pg2-hvlyj.15, plan
+              # INTER-evaluator mechanical coverage (bead pg2-hvlyj.15, plan
               # item 5.3): drive the behavior-docs-inter-conformance skill's
               # resolve-imports.sh over a shared owner set and per-seam-check-type
               # implementer fixtures (aligned/stale-name/divergence/external) and
-              # assert the classification + exit code.
+              # assert the classification + exit code, plus reconcile-imports.sh
+              # (the BIDIRECTIONAL imports reconciler) and name-collisions.sh.
+              # Named for the CONCERN, not a version — see the intra check above.
               # Not checksHelpers.testBashScripts: that helper cannot inject an env
-              # var, and the suite now also drives the shipped corpus/v3 fixtures
-              # (bead pg2-vybrv #5) via CORPUS_V3_DIR so the durable corpus cannot
-              # rot while the gate stays green. Mirrors that helper otherwise.
-              test-behavior-docs-conformance-v3 =
+              # var, and the suite also drives the shipped corpus/inter fixtures
+              # (bead pg2-vybrv #5) via CORPUS_INTER_DIR so the durable corpus
+              # cannot rot while the gate stays green. Mirrors that helper otherwise.
+              test-behavior-docs-inter-conformance =
                 let
-                  package = pkgs.writeShellScriptBin "resolve-imports" ''
+                  resolveImports = pkgs.writeShellScriptBin "resolve-imports" ''
                     exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh} "$@"
                   '';
+                  reconcileImports = pkgs.writeShellScriptBin "reconcile-imports" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/reconcile-imports.sh} "$@"
+                  '';
+                  nameCollisions = pkgs.writeShellScriptBin "name-collisions" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/name-collisions.sh} "$@"
+                  '';
                 in
-                pkgs.runCommand "test-behavior-docs-conformance-v3"
+                pkgs.runCommand "test-behavior-docs-inter-conformance"
                   {
                     nativeBuildInputs = [
                       pkgs.bats
                       pkgs.git
                       pkgs.which
                       pkgs.gawk
-                      package
+                      resolveImports
+                      reconcileImports
+                      nameCollisions
                     ];
                   }
                   ''
-                    export PATH="${package}/bin:$PATH"
-                    export CORPUS_V3_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/corpus/v3}"
-                    bats ${./tests/behavior-docs-conformance-v3.bats}
+                    export PATH="${resolveImports}/bin:${reconcileImports}/bin:${nameCollisions}/bin:$PATH"
+                    export CORPUS_INTER_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/corpus/inter}"
+                    bats ${./tests/behavior-docs-inter-conformance.bats}
+                    touch $out
+                  '';
+
+              # IMPL-evaluator mechanical coverage — the third parallel evaluator
+              # (implementation vs. its OWN behavior docs). Drives impl-traces.sh
+              # over corpus/impl fixtures: a citation that resolves to a
+              # definition, one that resolves only through the imports table, one
+              # framed as historical, and one that resolves to nothing (FAIL).
+              test-behavior-docs-impl-conformance =
+                let
+                  implTraces = pkgs.writeShellScriptBin "impl-traces" ''
+                    exec ${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/scripts/impl-traces.sh} "$@"
+                  '';
+                in
+                pkgs.runCommand "test-behavior-docs-impl-conformance"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.which
+                      pkgs.gawk
+                      implTraces
+                    ];
+                  }
+                  ''
+                    export PATH="${implTraces}/bin:$PATH"
+                    export CORPUS_IMPL_DIR="${./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/corpus/impl}"
+                    bats ${./tests/behavior-docs-impl-conformance.bats}
+                    touch $out
+                  '';
+
+              # REAL-CORPUS gate (plan item 6 / WS-6 item 3) — the highest-value
+              # one. Every check above runs over FIXTURES: they prove each
+              # evaluator CAN see a defect, and prove nothing about the docs that
+              # actually ship. Two known defects reached main precisely because no
+              # gate ever read a real set. This check runs all three evaluators
+              # over every in-repo behavior-docs set and the real method->pr-pool
+              # seam, so a violation in shipped docs fails the build.
+              #
+              # `${./.}` is the flake source, already realised in the store — so
+              # the sets, the evaluator scripts and the runner all come from ONE
+              # consistent tree. The identical runner backs the pre-commit hook,
+              # invoked with the WORKING TREE as its root instead.
+              #
+              # The ZR deployment set (phillipg-nix-ziprecruiter) is the third real
+              # set and is deliberately NOT here: it lives in another repo, so it
+              # is absent from this flake's source and unreachable from the build
+              # sandbox. Its seams are checked by running the runner against a
+              # workspace checkout, never by this gate.
+              test-behavior-docs-real-corpus =
+                pkgs.runCommand "test-behavior-docs-real-corpus"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                      pkgs.findutils
+                    ];
+                  }
+                  ''
+                    bash ${./tests/behavior-docs-real-corpus.sh} ${./.}
                     touch $out
                   '';
 

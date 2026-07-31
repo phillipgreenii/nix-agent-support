@@ -1,0 +1,63 @@
+# behavior-docs real-corpus recorded findings
+#
+# Every line below is a finding the three conformance evaluators CURRENTLY report
+# against the real in-repo behavior-docs sets and pr-pool's implementation. This
+# file is a RATCHET, not an exemption list: `tests/behavior-docs-real-corpus.sh`
+# fails on any difference in EITHER direction, so a new finding fails the gate AND
+# a fixed finding fails it too until its line is deleted here. A baseline allowed
+# to keep entries for defects that no longer exist stops being a record.
+#
+# Format: <check-id>|<finding line, leading space stripped, runs of whitespace squeezed>
+#
+# Do NOT add a line to silence a finding you introduced. Fix the finding. A line
+# belongs here only when the fix is real work with a real owner, named below.
+#
+# ---------------------------------------------------------------------------
+# 1. pr-pool has PARTIALLY adopted INV-22 (10 lines)
+#
+# All 14 of pr-pool's stories carry a per-element listing; none of its 10 journeys
+# do. INV-22 makes the listing a per-element obligation, so this is a genuine
+# violation of a rule the method set already ships. It is PARTIAL adoption, which
+# is the state the check is sharpest about: a set with zero listings has simply not
+# been retrofitted yet, whereas a set with some listings has adopted the rule and
+# the gaps are omissions. Owner: the pr-pool set retrofit (WS-2/3/4 of the six-set
+# restructure), not this work stream.
+#
+# 2. Prose references that resolve to nothing (3 lines, all WARN)
+#
+# `INV-DISP-1` and `INTF-SOURCE` in the METHOD set are ID-shaped literals printed
+# to ILLUSTRATE the namespacing convention, not citations of elements — the root
+# method cites no other set and its imports table is deliberately empty. They are
+# recorded rather than fixed because no grep distinguishes a style example from a
+# citation, and a reader cannot either, which is itself worth a decision.
+#
+# `OQ-WORKFLOW` in pr-pool is different and is a real defect: the open question was
+# deleted and two citations were left behind. Owner: the pr-pool set retrofit.
+#
+# 3. Implementation citations that resolve to nothing (5 lines)
+#
+# pr-pool's code cites five elements its own set neither defines nor declares:
+# `GOAL-7` and `USECASE-5` belong to the METHOD set, and `INV-FRESH-1`,
+# `INV-CCPOOL-6` and `INTF-ZR-*` belong to the ZR deployment set. Each is a real
+# `INV-8` gap — the set should declare what its implementation cites — and fixing
+# it means adding imports rows, which is a docs change a human owns. Owner: the
+# pr-pool set retrofit.
+# ---------------------------------------------------------------------------
+impl/impl-traces|FAIL GOAL-7 (conformance/conformance_test.go:29) resolves to no definition in the set and no declared import
+impl/impl-traces|FAIL INTF-ZR (conformance/conformance.go:5) resolves to no definition in the set and no declared import
+impl/impl-traces|FAIL INV-CCPOOL-6 (internal/orchestrator/orchestrator.go:377) resolves to no definition in the set and no declared import
+impl/impl-traces|FAIL INV-FRESH-1 (internal/prpoolacl/acl.go:92 internal/prpoolacl/acl_test.go:513) resolves to no definition in the set and no declared import
+impl/impl-traces|FAIL USECASE-5 (docs/decisions/README.md:16) resolves to no definition in the set and no declared import
+intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:75) resolves to no definition here and no declared external reference
+intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:74) resolves to no definition here and no declared external reference
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFIG carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFORM carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-FAIL carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-FLOW carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-OBSERVE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-PAUSE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-RUN carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-SMOKE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-VALIDATE carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-WORKFLOW carries no listing on its definition
+intra/trace-extract packages/pr-pool/docs/behavior|WARN dangling in prose: OQ-WORKFLOW (interfaces.md:560 invariants.md:149) resolves to no definition here and no declared external reference

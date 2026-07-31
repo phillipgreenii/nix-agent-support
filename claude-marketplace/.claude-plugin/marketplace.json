@@ -57,7 +57,7 @@
     {
       "name": "behavior-docs-conformance",
       "source": "./behavior-docs-conformance",
-      "description": "Claude skill: review or mechanically fix a behavior-docs set against the behavior-docs method (the conformance / drift pass)."
+      "description": "Claude skills: the behavior-docs conformance family — intra (one set vs. the method), inter (two sets across a seam), impl (an implementation vs. its own set)."
     }
   ]
 }

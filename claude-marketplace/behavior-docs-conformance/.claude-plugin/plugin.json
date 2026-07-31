@@ -1,6 +1,6 @@
 {
   "name": "behavior-docs-conformance",
-  "description": "Claude skills for the behavior-docs method: V2 intra-conformance (review — or mechanically fix — a set against the method's invariant rules) and V3 inter-conformance (reconcile two sets across a seam by UUID).",
+  "description": "Claude skills for the behavior-docs method — the three parallel conformance evaluators: intra (one set against the method's invariant rules), inter (two sets reconciled across a seam by UUID, in both directions, plus cross-set name collisions), and impl (an implementation against its own set).",
   "version": "1.0.0",
   "defaultEnabled": true
 }
