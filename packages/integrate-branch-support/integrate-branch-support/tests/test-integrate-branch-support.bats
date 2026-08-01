@@ -119,6 +119,65 @@ add_worktree() {
   echo "$output" | jq -e '.remote == null and (.reason | test("ambig"; "i"))'
 }
 
+# Regression (bead tc-md1e0): from inside a LINKED WORKTREE whose feature
+# branch has no upstream, remote resolution MUST anchor to the canonical
+# clone (whose branch tracks a real remote), not the worktree's current
+# branch. Before the fix, the worktree's branch had no '@{upstream}', so the
+# fallback counted the repo's TWO remotes and reported "ambiguous" ->
+# remote:null, even though the canonical branch tracks origin/main. This is
+# exactly the homelab case (origin+bitbucket, main tracks origin/main), which
+# also runs from a flake SUBDIRECTORY (nix/) inside the workforest worktree.
+@test "remote: resolves the canonical branch's upstream from inside a linked worktree" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add bitbucket https://example.invalid/o2/r2.git
+  git update-ref refs/remotes/origin/main HEAD
+  git branch --set-upstream-to=origin/main main
+  add_worktree feat
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == "origin"'
+}
+
+@test "remote: resolves from a flake SUBDIRECTORY inside a linked worktree (homelab repro)" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add bitbucket https://example.invalid/o2/r2.git
+  git update-ref refs/remotes/origin/main HEAD
+  git branch --set-upstream-to=origin/main main
+  mkdir -p nix
+  echo "{}" >nix/flake.nix
+  git add -A
+  git -c user.email=t@t -c user.name=t commit -q -m "add nix/ flake subdir"
+  add_worktree feat
+  cd nix || return 1
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == "origin"'
+}
+
+@test "remote: sole remote still resolves from inside a linked worktree with no upstream" {
+  git remote add origin https://example.invalid/o/r.git
+  add_worktree feat
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == "origin"'
+}
+
+@test "remote: genuinely ambiguous (two remotes, no upstream anywhere) stays ambiguous from a worktree" {
+  git remote add origin https://example.invalid/o/r.git
+  git remote add bitbucket https://example.invalid/o2/r2.git
+  add_worktree feat
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == null and (.reason | test("ambig"; "i"))'
+}
+
+@test "remote: zero remotes stays null from inside a linked worktree" {
+  add_worktree feat
+  run bash "$BIN"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.remote == null'
+}
+
 @test "open_pr: an open PR surfaces as open_pr.number" {
   mkdir -p "$STUB_BIN"
   cat >"$STUB_BIN/gh" <<'EOF'

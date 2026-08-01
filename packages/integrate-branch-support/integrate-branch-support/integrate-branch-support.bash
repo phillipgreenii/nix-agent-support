@@ -57,20 +57,36 @@ canonical_dirty() {
 # lines (rather than a bare name via a global side-effect) because this
 # runs inside `$(...)` command substitutions, which fork a subshell — a
 # global set inside the function would not survive back to the caller.
-# Resolution order: (1) the current branch's upstream remote
-# (git rev-parse --abbrev-ref --symbolic-full-name @{upstream}, taking the
-# remote portion before the first "/"); (2) if exactly one git remote
-# exists, use it; (3) otherwise empty. Zero remotes is simply "no remote"
-# (not ambiguous); two or more remotes with no upstream configured IS
-# ambiguous (which remote would it be?) and reports so on line 2.
+# Resolution order: (1) the CANONICAL clone's checked-out branch's upstream
+# remote (git -C <canonical_root> rev-parse --abbrev-ref
+# --symbolic-full-name @{upstream}, taking the remote portion before the
+# first "/"); (2) if exactly one git remote exists, use it; (3) otherwise
+# empty. Zero remotes is simply "no remote" (not ambiguous); two or more
+# remotes with no upstream configured IS ambiguous (which remote would it
+# be?) and reports so on line 2. Every git query is anchored to
+# canonical_root so it is correct from a flake subdirectory and from inside
+# a linked worktree (see the anchoring note in the body).
 detect_remote() {
-  local upstream remotes count reason=""
-  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  local root upstream remotes count reason=""
+  # Anchor every git query to the canonical clone, NOT the current working
+  # directory. The tool may run from a flake SUBDIRECTORY (e.g. homelab's
+  # nix/) inside a LINKED WORKTREE whose feature branch has no upstream. A
+  # cwd-relative '@{upstream}' then resolves nothing and the fallback below
+  # counts the repo's remotes -- with 2+ remotes that is reported as
+  # "ambiguous", so remote comes back null even though the repo genuinely
+  # pushes to a remote (homelab has origin+bitbucket and main tracks
+  # origin/main). The canonical clone's checked-out branch is the one
+  # integration lands/pushes, so ITS upstream is the remote we want; this
+  # matches canonical_branch/canonical_dirty, which already anchor here.
+  # git remote's output is repo-wide (shared config) so anchoring it is a
+  # no-op for correctness, but kept consistent. See canonical_root.
+  root="$(canonical_root)"
+  upstream="$(git -C "$root" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
   if [ -n "$upstream" ]; then
     printf '%s\n\n' "${upstream%%/*}"
     return
   fi
-  remotes="$(git remote 2>/dev/null || true)"
+  remotes="$(git -C "$root" remote 2>/dev/null || true)"
   count=0
   if [ -n "$remotes" ]; then
     # Pure-bash line count via a read loop, not `grep -c`/`wc -l`: grep and
