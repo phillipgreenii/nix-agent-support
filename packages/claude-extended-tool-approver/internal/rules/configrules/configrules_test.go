@@ -70,11 +70,17 @@ func TestConfigRules_SegmentScan_BlockedInLaterSegment(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, Config{ApprovedCommands: []string{"mytool"}, BlockedCommands: []string{"my-self-apply"}})
 	r := NewFromFile(filepath.Join(dir, "rules.json"))
-	// Blocked command as the SECOND segment behind an unknown first command.
+	// Blocked command as the SECOND segment behind an unknown OR an approved first
+	// command. The approved-first cases (mytool …) are the tc-0j90a regression: the
+	// old single-pass loop returned Approve on the approved leaf before ever reaching
+	// the blocked leaf.
 	blocked := []string{
 		"git status && my-self-apply",
 		"echo hi ; my-self-apply",
 		"echo hi | my-self-apply",
+		"mytool && my-self-apply",
+		"mytool ; my-self-apply",
+		"mytool | my-self-apply",
 	}
 	for _, cmd := range blocked {
 		got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})})

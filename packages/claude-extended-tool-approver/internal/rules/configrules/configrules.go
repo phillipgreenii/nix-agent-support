@@ -253,6 +253,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 	}
 	parsed := cmdparse.Parse(cmdStr)
+	// First pass: a blocked leaf ANYWHERE in the compound is the most-restrictive
+	// outcome and MUST win, so scan every leaf for a block BEFORE considering an
+	// Approve. Returning Approve on an earlier approved leaf without this pass would
+	// miss a blocked leaf that follows it (e.g. `mytool && my-self-apply`). This is
+	// defense-in-depth for the direct-call entrypoint; the EvaluateHook path already
+	// folds per-leaf to most-restrictive independently (tc-0j90a).
 	for _, pc := range parsed {
 		base := filepath.Base(pc.Executable)
 		if r.blocked[base] {
@@ -262,6 +268,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Module:   r.Name(),
 			}
 		}
+	}
+	// Second pass: no leaf is blocked, so an approved leaf may Approve (an approved
+	// leaf carrying inline env vars Abstains, unchanged).
+	for _, pc := range parsed {
+		base := filepath.Base(pc.Executable)
 		if r.approved[base] {
 			if len(pc.EnvVars) > 0 {
 				return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
