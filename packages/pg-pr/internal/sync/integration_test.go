@@ -101,6 +101,7 @@ func (f *fullChainBeadClient) EnsureDraftReviewMineLabel(context.Context, string
 func (f *fullChainBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (f *fullChainBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }

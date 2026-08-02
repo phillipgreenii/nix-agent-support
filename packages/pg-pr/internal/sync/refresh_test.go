@@ -388,6 +388,7 @@ func (f *outboxFakeBeads) EnsureDraftReviewMineLabel(context.Context, string) er
 func (f *outboxFakeBeads) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (f *outboxFakeBeads) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }

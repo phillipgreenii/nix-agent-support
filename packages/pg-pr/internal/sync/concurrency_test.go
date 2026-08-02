@@ -135,6 +135,7 @@ func (c *concurrentBeadClient) EnsureDraftReviewMineLabel(context.Context, strin
 func (c *concurrentBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (c *concurrentBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }

@@ -92,6 +92,7 @@ func (noopBeadClient) EnsureDraftReviewMineLabel(context.Context, string) error 
 func (noopBeadClient) GetMergeRequest(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
+
 func (noopBeadClient) GetMergeRequestUncached(context.Context, string) (*beads.MergeRequest, error) {
 	return nil, nil
 }
