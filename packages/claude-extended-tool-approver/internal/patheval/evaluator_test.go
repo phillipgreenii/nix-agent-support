@@ -2,6 +2,7 @@ package patheval
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 )
@@ -149,6 +150,51 @@ func TestPathEvaluator_TildeExpansion(t *testing.T) {
 	path := "~/.claude/plugins/x"
 	if got := pe.Evaluate(path); got != PathReadOnly {
 		t.Errorf("Evaluate(%s) = %v, want PathReadOnly", path, got)
+	}
+}
+
+// TestPathEvaluator_TildeUserExpansion is the tc-fielf regression on cleanPath.
+// A "~user" argument (tilde + username, no leading slash) MUST resolve via an
+// os/user lookup to that user's real home — NOT via pe.home, which produced a
+// garbage path like /home/testuseruser (pe.home + "user") and could land in a
+// writable zone. An UNKNOWN user MUST NOT resolve to a garbage/writable path.
+func TestPathEvaluator_TildeUserExpansion(t *testing.T) {
+	// Pin HOME so a bug that mistakenly used pe.home for "~root" would produce a
+	// value clearly distinct from root's real home, making the assertion sharp.
+	withPinnedHome(t)
+	pe := NewWithCWD("/project", "/project")
+
+	// A real user ("root" is guaranteed on Linux/darwin) resolves to that user's
+	// actual home. Skip if the sandbox has no user database entry for it.
+	u, err := user.Lookup("root")
+	if err != nil {
+		t.Skip("user.Lookup(root) failed in this sandbox; cannot exercise ~user expansion")
+	}
+	wantHome := filepath.Clean(u.HomeDir)
+	if got := pe.CleanPath("~root"); got != wantHome {
+		t.Errorf("CleanPath(~root) = %q, want %q (real home, not pe.home-derived)", got, wantHome)
+	}
+	// The trailing remainder after ~user is appended to the resolved home.
+	if got := pe.CleanPath("~root/sub/file"); got != filepath.Clean(u.HomeDir+"/sub/file") {
+		t.Errorf("CleanPath(~root/sub/file) = %q, want %q", got, filepath.Clean(u.HomeDir+"/sub/file"))
+	}
+	// It must NOT be the pe.home-derived garbage the old code produced.
+	if got := pe.CleanPath("~root"); got == filepath.Clean(pinnedHome+"root") {
+		t.Errorf("CleanPath(~root) = %q resolved via pe.home (garbage), want real home", got)
+	}
+
+	// An UNKNOWN user does NOT resolve to a garbage/writable path: cleanPath
+	// returns "" -> Evaluate is PathUnknown (neither readable nor writable), so a
+	// referencing command is never auto-approved.
+	const unknown = "~nonexistent_user_xyz_tc_fielf"
+	if got := pe.CleanPath(unknown); got != "" {
+		t.Errorf("CleanPath(%s) = %q, want \"\" (unknown user must not expand)", unknown, got)
+	}
+	if got := pe.Evaluate(unknown); got != PathUnknown {
+		t.Errorf("Evaluate(%s) = %v, want PathUnknown", unknown, got)
+	}
+	if pe.Evaluate(unknown).CanWrite() {
+		t.Errorf("Evaluate(%s).CanWrite() = true, want false (must not auto-approve a write)", unknown)
 	}
 }
 

@@ -183,6 +183,49 @@ func TestSafecmds_Rm_Abstain(t *testing.T) {
 	}
 }
 
+// TestSafecmds_LooksLikePath_TildeUser is the tc-fielf regression: a "~user"
+// argument (tilde + username, no slash) is path-shaped and MUST be classified so
+// the zone check runs. Before this bead looksLikePath matched bare "~" and "~/..."
+// (tc-sfpto) but NOT "~user", so `rm -rf ~someuser` was never classified and
+// slipped through as safe. Bare "~" and "~/..." MUST stay path-shaped too.
+func TestSafecmds_LooksLikePath_TildeUser(t *testing.T) {
+	tests := []struct {
+		arg  string
+		want bool
+	}{
+		{"~someuser", true},        // tc-fielf: the gap
+		{"~someuser/config", true}, // ~user with a trailing path
+		{"~root", true},
+		{"~", true},           // bare ~ (tc-sfpto) still path-shaped
+		{"~/x", true},         // ~/... still path-shaped
+		{"/etc/passwd", true}, // sanity: absolute path
+		{"README.md", false},  // bare relative filename is not path-shaped
+	}
+	for _, tt := range tests {
+		if got := looksLikePath(tt.arg); got != tt.want {
+			t.Errorf("looksLikePath(%q) = %v, want %v", tt.arg, got, tt.want)
+		}
+	}
+}
+
+// TestSafecmds_RmTildeUser_Abstain pins the end-to-end tc-fielf behavior: because
+// "~someuser" is now path-shaped and resolves to an UNKNOWN zone (unknown user ->
+// cleanPath returns "" -> PathUnknown; a known user's home is also outside every
+// writable zone), `rm -rf ~someuser` is NOT auto-approved.
+func TestSafecmds_RmTildeUser_Abstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": "rm -rf ~someuser"}),
+	}
+	got := r.Evaluate(input)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("rm -rf ~someuser: got %s (%s), want abstain", got.Decision, got.Reason)
+	}
+}
+
 func TestSafecmds_Ls_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)

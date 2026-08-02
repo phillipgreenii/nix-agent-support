@@ -2,6 +2,7 @@ package patheval
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -471,8 +472,34 @@ func (pe *PathEvaluator) cleanPath(path string) string {
 		return ""
 	}
 	if strings.HasPrefix(path, "~") {
-		if pe.home != "" {
-			path = pe.home + path[1:]
+		switch {
+		case path == "~" || strings.HasPrefix(path, "~/"):
+			// Bare "~" and "~/..." expand via the current user's HOME (tc-sfpto).
+			if pe.home != "" {
+				path = pe.home + path[1:]
+			}
+		default:
+			// "~user" / "~user/rest" — tilde + a username with no leading slash.
+			// Resolve the NAMED user's home via os/user, then append the
+			// remainder. tc-fielf: this branch previously fell into the case
+			// above and produced pe.home + "user" (e.g. /Users/testuseruser), a
+			// garbage path that could land in a writable zone and auto-approve
+			// `rm -rf ~someuser`.
+			name := path[1:]
+			rest := ""
+			if i := strings.IndexByte(name, '/'); i >= 0 {
+				rest = name[i:]
+				name = name[:i]
+			}
+			u, err := user.Lookup(name)
+			if err != nil {
+				// Unknown user: do NOT silently expand to a garbage path. Return
+				// "" so Evaluate classifies it PathUnknown (neither readable nor
+				// writable), which keeps the referencing command from being
+				// auto-approved (matches the unexpanded-variable fallback above).
+				return ""
+			}
+			path = u.HomeDir + rest
 		}
 	}
 	if !filepath.IsAbs(path) {

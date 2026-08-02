@@ -432,11 +432,19 @@ func looksLikePath(arg string) bool {
 	// A bare "~" is the home directory just as much as "~/": the path Evaluator's
 	// cleanPath expands both to $HOME. Without matching it here, a bare "~" arg
 	// (e.g. `rm -rf ~`) is never classified and slips through as safe (tc-sfpto).
+	//
+	// A "~user" argument (tilde + username, no slash — e.g. "~someuser",
+	// "~someuser/x") is ALSO a home path: cleanPath resolves it via an os/user
+	// lookup to that user's home. Without matching it here it was never classified
+	// and `rm -rf ~someuser` slipped through as safe — the tc-fielf gap, the same
+	// shape as the bare-"~" tc-sfpto miss. Any "~" prefix except bare "~" is
+	// path-shaped; the len check keeps bare "~" going through the clause above.
 	return arg == "~" ||
 		strings.HasPrefix(arg, "/") ||
 		strings.HasPrefix(arg, "./") ||
 		strings.HasPrefix(arg, "../") ||
-		strings.HasPrefix(arg, "~/")
+		strings.HasPrefix(arg, "~/") ||
+		(strings.HasPrefix(arg, "~") && len(arg) > 1) // ~user / ~user/... (tc-fielf)
 }
 
 // argHasDynamicExpansion reports whether ONE argument contains a shell expansion
