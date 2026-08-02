@@ -195,6 +195,12 @@ func TestLoad_ParsesCommandAwareBlocks(t *testing.T) {
 	if subs := cfg.Ssh.ReadonlySubcommands["systemctl"]; len(subs) != 2 {
 		t.Errorf("ssh.ReadonlySubcommands[systemctl] = %v, want 2", subs)
 	}
+	if flags := cfg.Ssh.DangerousInlineFlags["journalctl"]; len(flags) != 2 || flags[0] != "--vacuum-size" || flags[1] != "--rotate" {
+		t.Errorf("ssh.DangerousInlineFlags[journalctl] = %v, want [--vacuum-size --rotate]", flags)
+	}
+	if flags := cfg.Ssh.DangerousInlineFlags["sed"]; len(flags) != 1 || flags[0] != "-i" {
+		t.Errorf("ssh.DangerousInlineFlags[sed] = %v, want [-i]", flags)
+	}
 	if len(cfg.Ssh.SecretPathPatterns) != 3 || len(cfg.Ssh.PasswordFlagPatterns) != 2 {
 		t.Errorf("ssh secret=%v passwd=%v; want 3 and 2", cfg.Ssh.SecretPathPatterns, cfg.Ssh.PasswordFlagPatterns)
 	}

@@ -19,7 +19,9 @@
 //   - read-only classification: ssh with no remote command -> Ask (interactive);
 //     a remote command whose every segment's executable is in ReadonlyCommands
 //     (honoring ReadonlySubcommands), with no redirect/tee and no secret path ->
-//     Approve; otherwise Ask.
+//     Approve; otherwise Ask. A segment whose executable is in ReadonlyCommands
+//     but which carries a configured DangerousInlineFlags flag (e.g.
+//     `journalctl --vacuum-size=1G`, `sed -i`) is demoted back to Ask.
 //   - scp: download from a non-secret remote path -> Approve; upload, mixed
 //     local/remote, or a secret remote path -> Ask.
 package ssh
@@ -47,6 +49,7 @@ type Rule struct {
 	allowedUsers         map[string]bool
 	readonlyCommands     map[string]bool
 	readonlySubcommands  map[string]map[string]bool
+	dangerousInlineFlags map[string][]string
 	secretPathPatterns   []string
 	passwordFlagPatterns []string
 }
@@ -58,6 +61,7 @@ func New(cfg configrules.SshConfig) *Rule {
 		allowedUsers:         toSet(cfg.AllowedUsers),
 		readonlyCommands:     toSet(cfg.ReadonlyCommands),
 		readonlySubcommands:  map[string]map[string]bool{},
+		dangerousInlineFlags: cfg.DangerousInlineFlags,
 		secretPathPatterns:   cfg.SecretPathPatterns,
 		passwordFlagPatterns: lowerAll(cfg.PasswordFlagPatterns),
 	}
@@ -65,8 +69,8 @@ func New(cfg configrules.SshConfig) *Rule {
 		r.readonlySubcommands[cmd] = toSet(subs)
 	}
 	r.configured = len(cfg.AllowedUsers) > 0 || len(cfg.ReadonlyCommands) > 0 ||
-		len(cfg.ReadonlySubcommands) > 0 || len(cfg.SecretPathPatterns) > 0 ||
-		len(cfg.PasswordFlagPatterns) > 0
+		len(cfg.ReadonlySubcommands) > 0 || len(cfg.DangerousInlineFlags) > 0 ||
+		len(cfg.SecretPathPatterns) > 0 || len(cfg.PasswordFlagPatterns) > 0
 	return r
 }
 
@@ -352,6 +356,17 @@ func (r *Rule) segmentIsReadonly(seg string) bool {
 		sub := firstSubToken(fields[1:])
 		if sub == "" || !allowed[sub] {
 			return false
+		}
+	}
+	// A configured dangerous inline flag demotes an otherwise read-only command
+	// back to Ask: a token equal to the flag or beginning with "<flag>=" (e.g.
+	// `journalctl --vacuum-size=1G`, `sed -i`) is destructive despite the command
+	// being in ReadonlyCommands.
+	for _, bad := range r.dangerousInlineFlags[base] {
+		for _, tok := range fields[1:] {
+			if tok == bad || strings.HasPrefix(tok, bad+"=") {
+				return false
+			}
 		}
 	}
 	return true

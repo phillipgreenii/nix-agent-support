@@ -86,3 +86,46 @@ func TestSSH_Configured(t *testing.T) {
 		})
 	}
 }
+
+// TestSSH_DangerousInlineFlags proves that a remote command whose executable is
+// in ReadonlyCommands is demoted from Approve to Ask when it carries a configured
+// dangerous inline flag (parity with hook-support's _DANGEROUS_INLINE_FLAGS). The
+// denylist is per-command: a flag on the list for one command does not affect a
+// different command. Match is exact-token OR "<flag>=" prefix; no substring magic.
+func TestSSH_DangerousInlineFlags(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"deploy"},
+		ReadonlyCommands: []string{"journalctl", "sed", "find", "cat"},
+		DangerousInlineFlags: map[string][]string{
+			"sed":        {"-i"},
+			"find":       {"-delete", "-exec", "-execdir", "-ok", "-okdir"},
+			"journalctl": {"--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate", "--flush"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"journalctl vacuum-size demoted", "ssh host journalctl --vacuum-size=1G", hookio.Ask},
+		{"journalctl read-only approved", "ssh host journalctl -u sshd", hookio.Approve},
+		{"journalctl rotate exact-token demoted", "ssh host journalctl --rotate", hookio.Ask},
+		{"journalctl vacuum-time demoted", "ssh host journalctl --vacuum-time=2d", hookio.Ask},
+		{"sed -i demoted", "ssh host sed -i s/a/b/ /f", hookio.Ask},
+		{"sed without -i approved", "ssh host sed -n 1p /f", hookio.Approve},
+		{"find -delete demoted", "ssh host find /var -delete", hookio.Ask},
+		{"find -exec demoted", "ssh host find /var -exec rm {} ;", hookio.Ask},
+		{"find read-only approved", "ssh host find /var -name x", hookio.Approve},
+		{"readonly command with no denylist entry approved", "ssh host cat /var/log/x", hookio.Approve},
+		{"denylist is per-command", "ssh host cat --rotate", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := r.Evaluate(input).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}

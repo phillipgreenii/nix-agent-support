@@ -47,6 +47,13 @@ type SshConfig struct {
 	// subcommands (e.g. "systemctl" -> ["status","is-active"]). A command absent
 	// from this map is read-only for any subcommand.
 	ReadonlySubcommands map[string][]string `json:"readonlySubcommands"`
+	// DangerousInlineFlags maps a read-only command basename to flags that DEMOTE
+	// it from read-only to Ask when present, even though the command is in
+	// ReadonlyCommands (e.g. "journalctl" -> ["--vacuum-size","--rotate"], "sed" ->
+	// ["-i"], "find" -> ["-delete","-exec"]). A token matches when it equals the
+	// flag or begins with "<flag>=". This lets a consumer read-approve a read-mostly
+	// command while still forcing Ask on a destructive invocation.
+	DangerousInlineFlags map[string][]string `json:"dangerousInlineFlags"`
 	// SecretPathPatterns are substrings that mark a referenced remote path as
 	// secret (e.g. "/etc/shadow", "id_rsa", ".env"); a match forces Ask.
 	SecretPathPatterns []string `json:"secretPathPatterns"`

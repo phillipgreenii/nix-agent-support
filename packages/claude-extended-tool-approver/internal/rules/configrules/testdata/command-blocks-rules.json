@@ -5,6 +5,10 @@
     "readonlySubcommands": {
       "systemctl": ["status", "is-active"]
     },
+    "dangerousInlineFlags": {
+      "sed": ["-i"],
+      "journalctl": ["--vacuum-size", "--rotate"]
+    },
     "secretPathPatterns": ["/etc/shadow", "id_rsa", ".env"],
     "passwordFlagPatterns": [
       "passwordauthentication=yes",
