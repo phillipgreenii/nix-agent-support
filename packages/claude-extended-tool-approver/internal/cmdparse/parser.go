@@ -23,6 +23,7 @@ package cmdparse
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -538,6 +539,107 @@ func unwrapExecPrefix(base string, args []string) (inner string, innerArgs []str
 	return args[i], args[i+1:], envAssigns, true
 }
 
+// commandRunner describes a command-runner wrapper's flag grammar: which options
+// take a SEPARATE following value (consume the next token too), and whether the
+// wrapper has a mandatory DURATION operand before the inner command.
+type commandRunner struct {
+	// valueOpts are the short/long options that take a value in their SEPARATE
+	// form and therefore consume the following token. Glued forms (`-n10`,
+	// `--adjustment=10`, `-oL`, `--output=L`) are a single `-`-prefixed token and
+	// are skipped as ordinary options without a lookahead, so they need no entry.
+	valueOpts map[string]bool
+	// hasDuration marks a wrapper (only `timeout`) whose first BARE operand is a
+	// DURATION that precedes the command, not the command itself.
+	hasDuration bool
+}
+
+// commandRunnerPrefixes are command-runner wrappers that execute an INNER command
+// after their own options. Like execPrefixes (env/command) they must be unwrapped
+// so downstream argv[0]-keyed rules (dangerouscmds, buildtools, …) evaluate the
+// real command — otherwise `nice dd if=/dev/zero of=x` parses to Executable
+// `nice` and no rule matches → abstain, when dangerouscmds SHOULD see `dd` and
+// Reject (tc-otuid). Unlike env, these wrappers set NO NAME=VALUE assignments, so
+// no EnvAssignment capture is needed. Flag grammars follow GNU coreutils.
+//
+// `xargs` is DELIBERATELY EXCLUDED: internal/rules/safecmds handles it with
+// richer semantics (extractXargsCommand, `sh -c` recursion, stdin-append) that a
+// parser-level unwrap would conflict with and drop. Do NOT add it here.
+var commandRunnerPrefixes = map[string]commandRunner{
+	// nohup: only --help/--version, neither takes a value → no valueOpts.
+	"nohup": {},
+	// nice: -n/--adjustment take a value (legacy `-10` is a single option token).
+	"nice": {valueOpts: map[string]bool{"-n": true, "--adjustment": true}},
+	// stdbuf: -i/-o/-e and their long forms take a value.
+	"stdbuf": {valueOpts: map[string]bool{
+		"-i": true, "-o": true, "-e": true,
+		"--input": true, "--output": true, "--error": true,
+	}},
+	// timeout: -s/--signal and -k/--kill-after take a value; -p/-f/-v (and long
+	// forms) do not. The first bare operand is the DURATION, then the command.
+	"timeout": {
+		valueOpts:   map[string]bool{"-s": true, "--signal": true, "-k": true, "--kill-after": true},
+		hasDuration: true,
+	},
+}
+
+// timeoutDurationPattern matches a GNU timeout DURATION operand: an integer or
+// decimal optionally suffixed with a unit (s/m/h/d). It is a SAFETY gate — see
+// unwrapCommandRunner — so an unknown future option that swallows the command
+// cannot make us skip the real command.
+var timeoutDurationPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[smhd]?$`)
+
+// unwrapCommandRunner strips a command-runner wrapper's options (and, for
+// timeout, its mandatory duration operand) and returns the inner executable + its
+// args. It walks args skipping `-`-prefixed option tokens (consuming a following
+// value for cr.valueOpts entries), stops at `--` or the first bare token, then:
+//   - for a plain wrapper, that first bare token is the inner command;
+//   - for timeout (hasDuration), the first bare token is the DURATION — it is
+//     skipped, and the SECOND bare token is the command; but ONLY when the first
+//     bare token actually looks like a duration (timeoutDurationPattern). If it
+//     does not, the command is left un-unwrapped (ok=false).
+//
+// CONSERVATISM (mirrors unwrapExecPrefix's ok=false path): whenever an inner
+// command cannot be confidently identified — no bare command token, the required
+// duration+command pair is absent, or a value-taking option consumed what would
+// have been the command — ok is false and the caller leaves the ParsedCommand
+// as-is. That yields the current behavior (abstain / defer to Claude), which is
+// SAFE; mis-identifying a benign token as the command is the dangerous direction
+// and never happens here.
+func unwrapCommandRunner(cr commandRunner, args []string) (inner string, innerArgs []string, ok bool) {
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "--" { // explicit end of options
+			i++
+			break
+		}
+		if strings.HasPrefix(a, "-") {
+			// A value-taking option in its SEPARATE form consumes the following
+			// token too; glued forms are a single token skipped by this same branch.
+			if cr.valueOpts[a] {
+				i += 2
+				continue
+			}
+			i++
+			continue
+		}
+		break // first bare (non-'-') token
+	}
+	if cr.hasDuration {
+		// timeout: the first bare token is the DURATION. Only treat it as a
+		// duration+command pair if it matches the duration shape; otherwise be
+		// conservative and do not unwrap.
+		if i >= len(args) || !timeoutDurationPattern.MatchString(args[i]) {
+			return "", nil, false
+		}
+		i++ // skip the duration operand; the command is the next bare token
+	}
+	if i >= len(args) {
+		return "", nil, false // no inner command (bare wrapper / options only)
+	}
+	return args[i], args[i+1:], true
+}
+
 // newEnvAssignment builds an EnvAssignment from a raw NAME=VALUE token,
 // classifying its value's expansion the same way extractExecAndArgs does. The
 // bash append form NAME+=VALUE is normalized to NAME so name-based guards (e.g.
@@ -595,6 +697,27 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		}
 		// No inner command and no assignments (bare `env`/`command` or flags only) —
 		// leave as-is; it is a read-only environment query handled by safe-commands.
+		return pc
+	}
+	// Command-runner wrappers (nice/timeout/nohup/stdbuf) run an inner command
+	// after their own options. Recurse like execPrefixes so nested cases —
+	// `nice env dd`, `timeout 5 nice dd` — unwrap all the way to the real command
+	// (tc-otuid). On failure to identify an inner command, leave the leaf as-is
+	// (the safe abstain/defer default).
+	if cr, isRunner := commandRunnerPrefixes[base]; isRunner {
+		if inner, innerArgs, ok := unwrapCommandRunner(cr, pc.Args); ok {
+			return unwrapCommand(ParsedCommand{
+				Executable:           inner,
+				Args:                 innerArgs,
+				EnvVars:              pc.EnvVars,
+				Redirections:         pc.Redirections,
+				ProcessSubstitutions: pc.ProcessSubstitutions,
+				HasHeredoc:           pc.HasHeredoc,
+				Heredocs:             pc.Heredocs,
+				Raw:                  pc.Raw,
+				Comment:              pc.Comment,
+			})
+		}
 		return pc
 	}
 	for _, wp := range wrapperPrefixes {

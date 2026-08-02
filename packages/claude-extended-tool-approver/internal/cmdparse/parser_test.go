@@ -1,6 +1,7 @@
 package cmdparse
 
 import (
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -48,6 +49,68 @@ func TestUnwrapCommand_ExecPrefixes(t *testing.T) {
 		if len(got) != 1 || got[0].Executable != "command" {
 			t.Errorf("Parse(%q): want bare command (lookup, not executed), got %#v", lookup, got)
 		}
+	}
+}
+
+func TestUnwrapCommand_CommandRunnerPrefixes(t *testing.T) {
+	// nice/timeout/nohup/stdbuf are command-runner wrappers: they must unwrap to
+	// the inner command so argv[0]-keyed rules (dangerouscmds, buildtools, …) see
+	// the real command (tc-otuid). basename is asserted so a full-path inner
+	// command still matches.
+	tests := []struct {
+		in       string
+		wantExec string
+	}{
+		{"nice dd if=/dev/zero of=x", "dd"},
+		{"nice -n 10 dd if=/dev/zero of=x", "dd"},
+		{"nice -10 dd if=/dev/zero of=x", "dd"}, // legacy adjustment is a single option token
+		{"nohup dd if=/dev/zero of=x", "dd"},
+		{"stdbuf -oL dd if=/dev/zero of=x", "dd"},  // glued value form
+		{"stdbuf -o L dd if=/dev/zero of=x", "dd"}, // separate value form
+		{"timeout 5 dd if=/dev/zero of=x", "dd"},
+		{"timeout 5s dd if=/dev/zero of=x", "dd"},        // duration with unit suffix
+		{"timeout -s KILL 5 dd if=/dev/zero of=x", "dd"}, // value-taking option before duration
+		{"timeout -k 1 5 dd if=/dev/zero of=x", "dd"},    // kill-after value before duration
+		{"nice env dd if=/dev/zero of=x", "dd"},          // nested: nice → env → dd
+		{"timeout 5 nice dd x", "dd"},                    // nested: timeout → nice → dd
+		{"nice ls", "ls"},                                // benign inner command
+	}
+	for _, tt := range tests {
+		got := Parse(tt.in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", tt.in, len(got))
+		}
+		if base := filepath.Base(got[0].Executable); base != tt.wantExec {
+			t.Errorf("Parse(%q).Executable basename = %q, want %q", tt.in, base, tt.wantExec)
+		}
+	}
+	// Conservative cases: when no inner command can be confidently identified the
+	// wrapper is left as-is (Executable stays the wrapper), which yields the safe
+	// abstain/defer default. Never mis-identify a benign token (e.g. the duration
+	// `5`) as the command.
+	conservative := []struct {
+		in       string
+		wantExec string
+	}{
+		{"nohup", "nohup"},                       // bare wrapper, no command
+		{"nice", "nice"},                         // bare wrapper, no command
+		{"timeout 5", "timeout"},                 // duration but no command → stays timeout, not "5"
+		{"timeout notaduration dd x", "timeout"}, // first bare token isn't a duration → do not unwrap
+	}
+	for _, tt := range conservative {
+		got := Parse(tt.in)
+		if len(got) != 1 {
+			t.Fatalf("Parse(%q): got %d cmds, want 1", tt.in, len(got))
+		}
+		if got[0].Executable != tt.wantExec {
+			t.Errorf("Parse(%q).Executable = %q, want %q (should not unwrap)", tt.in, got[0].Executable, tt.wantExec)
+		}
+	}
+	// xargs is DELIBERATELY NOT unwrapped by cmdparse — internal/rules/safecmds
+	// owns it (extractXargsCommand, `sh -c` recursion, stdin-append). This pins
+	// the exclusion so a future edit does not "helpfully" add it here.
+	if got := Parse("xargs dd if=/dev/zero of=x"); len(got) != 1 || got[0].Executable != "xargs" {
+		t.Errorf(`Parse("xargs dd …"): want Executable "xargs" (not unwrapped by cmdparse), got %#v`, got)
 	}
 }
 

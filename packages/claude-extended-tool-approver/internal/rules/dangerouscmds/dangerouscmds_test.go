@@ -42,6 +42,11 @@ func TestDangerousCommands(t *testing.T) {
 		{"sftp", "sftp user@host", "Bash", hookio.Reject},
 		{"full path sudo", "/usr/bin/sudo id", "Bash", hookio.Reject},
 		{"dangerous leaf in compound", "git status && sudo rm -rf /", "Bash", hookio.Reject},
+		// Command-runner wrappers must not hide the dangerous inner command from
+		// the argv[0]-keyed denylist (tc-otuid): cmdparse now unwraps nice/timeout
+		// (and nohup/stdbuf) so dd is seen and Rejected.
+		{"nice wraps dd", "nice dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
+		{"timeout wraps dd", "timeout 5 dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
 		// Not on the denylist / handled elsewhere.
 		{"curl not here (curl rule)", "curl https://x", "Bash", hookio.Abstain},
 		{"ssh not here (ssh rule)", "ssh host ls", "Bash", hookio.Abstain},
