@@ -20,17 +20,23 @@
 //     safe (denied in an auto-approving session);
 //   - `--all` / `--mirror` (push every local branch, primary included);
 //   - no refspec (bare `git push` / `git push origin`) while the canonical clone is
-//     ON primary, OR with an injected `-c push.default=matching` (which pushes all
-//     same-name branches, primary included, regardless of the current branch).
+//     ON primary, OR with push.default=matching — whether injected as
+//     `-c push.default=matching` OR set AMBIENTLY in git config (local .git/config or
+//     the user-global file) — which pushes all same-name branches, primary included,
+//     regardless of the current branch.
 //
 // A push of a FEATURE branch (remote side != primary) stays Approve; pushes from a
 // linked worktree, non-push git, and any resolver error all Abstain (fail-open; the
 // worktree discipline is the primary control — R-2/R-8).
 //
-// Known limitations (documented, not fixed here): an AMBIENT push.default=matching
-// in ~/.gitconfig is invisible to the file-based resolver; and a subcommand hidden
-// behind a git alias (`git -c alias.p='push …' p`) is not recognized as a push —
-// both are shared with primary-commit and inherent to static, subprocess-free parsing.
+// A push hidden behind a git alias — command-line `git -c alias.p='push …' p` or a
+// config `[alias] p = push …` (global or local) — IS recognized: the rule expands the
+// alias (once, git's single-pass rule) via the resolver's Aliases plus the injected
+// `-c alias.X=` before gating on the subcommand (tc-2phi8). A SHELL alias (`!…`) has
+// its body re-parsed and its git commands re-checked. Residual limitation: an exotic
+// shell-alias body whose command parser cannot recover the underlying `git push`
+// (e.g. one assembled by string interpolation) is not seen — it matters only in an
+// already auto-approving session, where the worktree discipline remains the control.
 package primarypush
 
 import (
@@ -77,31 +83,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if !isGit(pc.Executable) {
 			continue
 		}
-		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
-		if subcmd != "push" {
-			continue
-		}
 		if r.resolver == nil {
 			return abstain
 		}
-		dir := effectiveDir(input.CWD, chdirs)
-		canonical, err := r.resolver.IsCanonical(dir)
-		if err != nil || !canonical {
-			return abstain
-		}
-		primary, err := r.resolver.PrimaryBranch(dir)
-		if err != nil || primary == "" {
-			return abstain
-		}
-		cur, err := r.resolver.CurrentBranch(dir)
-		if err != nil {
-			return abstain
-		}
-		// `-c push.default=matching` is consumed by GitInvocation before `rest`, so
-		// detect it from the full arg list.
-		matching := hasMatchingPushDefault(pc.Args)
-		if !pushTargetsPrimary(rest, primary, cur, matching) {
-			return abstain
+		advances, primary := r.pushAdvancesPrimary(pc, input.CWD, true)
+		if !advances {
+			continue
 		}
 		// Push advances the canonical primary. Block only an auto-approving session
 		// (which would otherwise silently accept); trust interactive/default sessions (R-6).
@@ -115,6 +102,78 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		return abstain
 	}
 	return abstain
+}
+
+// pushAdvancesPrimary reports whether a single parsed git invocation would advance the
+// canonical clone's primary branch on the shared remote, and returns that primary's
+// name. When expandAliases is true it first expands a git alias hiding the subcommand
+// (tc-2phi8): a normal alias is expanded once and re-checked; a SHELL alias (`!…`) has
+// its body re-parsed and each git command in it checked with expansion OFF (single-pass,
+// which also bounds recursion). A resolver error, a linked worktree, or a feature-branch
+// push all return false — the fail-open posture (R-2/R-8: the worktree discipline is the
+// primary control).
+func (r *Rule) pushAdvancesPrimary(pc cmdparse.ParsedCommand, cwd string, expandAliases bool) (bool, string) {
+	chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
+	dir := effectiveDir(cwd, chdirs)
+	if expandAliases {
+		effSubcmd, effRest, shellBody := primarycommit.ResolveGitAlias(subcmd, rest, r.mergedAliases(dir, pc.Args))
+		if shellBody != "" {
+			for _, sub := range cmdparse.Parse(shellBody) {
+				if !isGit(sub.Executable) {
+					continue
+				}
+				if advances, primary := r.pushAdvancesPrimary(sub, dir, false); advances {
+					return true, primary
+				}
+			}
+			return false, ""
+		}
+		subcmd, rest = effSubcmd, effRest
+	}
+	if subcmd != "push" {
+		return false, ""
+	}
+	canonical, err := r.resolver.IsCanonical(dir)
+	if err != nil || !canonical {
+		return false, ""
+	}
+	primary, err := r.resolver.PrimaryBranch(dir)
+	if err != nil || primary == "" {
+		return false, ""
+	}
+	cur, err := r.resolver.CurrentBranch(dir)
+	if err != nil {
+		return false, ""
+	}
+	// `-c push.default=matching` is consumed by GitInvocation before `rest`, so detect
+	// the injected form from the full arg list; the AMBIENT form (set in ~/.gitconfig,
+	// not injected) is read from the resolver. Either makes a bare push advance primary.
+	matching := hasMatchingPushDefault(pc.Args) || r.pushDefaultIsMatching(dir)
+	if !pushTargetsPrimary(rest, primary, cur, matching) {
+		return false, ""
+	}
+	return true, primary
+}
+
+// mergedAliases returns the aliases visible to this invocation — config-defined
+// (resolver, tolerating an error as none) merged with command-line-injected `-c
+// alias.X=`, injected overriding (git: `-c` beats config).
+func (r *Rule) mergedAliases(dir string, args []string) map[string]string {
+	cfg, err := r.resolver.Aliases(dir)
+	if err != nil {
+		cfg = nil
+	}
+	return primarycommit.MergeAliases(cfg, primarycommit.InjectedAliases(args))
+}
+
+// pushDefaultIsMatching reports whether the effective push.default (per the resolver)
+// is "matching" (case-insensitive). A resolver error is tolerated as false (fail-open).
+func (r *Rule) pushDefaultIsMatching(dir string) bool {
+	v, err := r.resolver.PushDefault(dir)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(v), "matching")
 }
 
 // pushTargetsPrimary reports whether a `git push` whose args are `rest` (everything

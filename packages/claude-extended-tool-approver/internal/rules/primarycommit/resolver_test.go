@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -94,4 +95,122 @@ func TestFileResolver_WalkUpAndDetached(t *testing.T) {
 	if b, err := r.CurrentBranch(dir); err != nil || b != "" {
 		t.Fatalf("CurrentBranch(detached) = %q, %v; want \"\"", b, err)
 	}
+}
+
+// writeRepo creates a canonical-looking repo (a real .git DIRECTORY) at a temp path
+// with the given .git/config contents, so FileResolver's file reads have something to
+// parse without shelling out to git. Returns the repo root.
+func writeRepo(t *testing.T, config string) string {
+	t.Helper()
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", gitDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("WriteFile(config): %v", err)
+	}
+	return root
+}
+
+// writeGlobal writes a temp global config file and points GIT_CONFIG_GLOBAL at it.
+func writeGlobal(t *testing.T, config string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
+		t.Fatalf("WriteFile(global): %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
+}
+
+// TestFileResolver_PushDefault exercises the tc-2phi8 push.default reader: local
+// .git/config wins over the global config, and either is read on its own.
+func TestFileResolver_PushDefault(t *testing.T) {
+	r := NewFileResolver()
+
+	t.Run("local only", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+		root := writeRepo(t, "[push]\n\tdefault = matching\n")
+		if v, err := r.PushDefault(root); err != nil || v != "matching" {
+			t.Fatalf("PushDefault(local) = %q, %v; want matching", v, err)
+		}
+	})
+
+	t.Run("global only", func(t *testing.T) {
+		writeGlobal(t, "[push]\n\tdefault = current\n")
+		root := writeRepo(t, "[core]\n\tbare = false\n") // no push.default locally
+		if v, err := r.PushDefault(root); err != nil || v != "current" {
+			t.Fatalf("PushDefault(global) = %q, %v; want current", v, err)
+		}
+	})
+
+	t.Run("local overrides global", func(t *testing.T) {
+		writeGlobal(t, "[push]\n\tdefault = matching\n")
+		root := writeRepo(t, "[push]\n\tdefault = nothing\n")
+		if v, err := r.PushDefault(root); err != nil || v != "nothing" {
+			t.Fatalf("PushDefault(local over global) = %q, %v; want nothing", v, err)
+		}
+	})
+
+	t.Run("unset in both", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+		root := writeRepo(t, "[core]\n\tbare = false\n")
+		if v, err := r.PushDefault(root); err != nil || v != "" {
+			t.Fatalf("PushDefault(unset) = %q, %v; want \"\"", v, err)
+		}
+	})
+}
+
+// TestFileResolver_Aliases exercises the tc-2phi8 alias reader: the [alias] section of
+// the local and global configs are merged, local overriding global per-alias, keys lowered.
+func TestFileResolver_Aliases(t *testing.T) {
+	r := NewFileResolver()
+
+	t.Run("local only", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+		root := writeRepo(t, "[alias]\n\tci = commit -am x\n\tst = status\n")
+		got, err := r.Aliases(root)
+		want := map[string]string{"ci": "commit -am x", "st": "status"}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("Aliases(local) = %v, %v; want %v", got, err, want)
+		}
+	})
+
+	t.Run("global only", func(t *testing.T) {
+		writeGlobal(t, "[alias]\n\tp = push origin HEAD:main\n")
+		root := writeRepo(t, "[core]\n\tbare = false\n")
+		got, err := r.Aliases(root)
+		want := map[string]string{"p": "push origin HEAD:main"}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("Aliases(global) = %v, %v; want %v", got, err, want)
+		}
+	})
+
+	t.Run("local overrides global, union of names", func(t *testing.T) {
+		writeGlobal(t, "[alias]\n\tp = status\n\tg = gc\n")
+		root := writeRepo(t, "[alias]\n\tp = push origin HEAD:main\n")
+		got, err := r.Aliases(root)
+		// p overridden by local; g inherited from global.
+		want := map[string]string{"p": "push origin HEAD:main", "g": "gc"}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("Aliases(local over global) = %v, %v; want %v", got, err, want)
+		}
+	})
+
+	t.Run("case-insensitive keys lowered", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+		root := writeRepo(t, "[alias]\n\tCI = commit -am x\n")
+		got, _ := r.Aliases(root)
+		if got["ci"] != "commit -am x" {
+			t.Fatalf("Aliases key not lowered: got %v", got)
+		}
+	})
+
+	t.Run("none defined -> nil", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+		root := writeRepo(t, "[core]\n\tbare = false\n")
+		if got, err := r.Aliases(root); err != nil || got != nil {
+			t.Fatalf("Aliases(none) = %v, %v; want nil", got, err)
+		}
+	})
 }

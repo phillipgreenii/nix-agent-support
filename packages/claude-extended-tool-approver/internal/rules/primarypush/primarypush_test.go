@@ -9,11 +9,18 @@ import (
 )
 
 // stubResolver implements primarycommit.PrimaryResolver for the rule under test.
+// pushDefault/aliases (and their optional error fields) drive the tc-2phi8 alias and
+// ambient-push.default cases; their zero values (pushDefault "", aliases nil) mean
+// "no alias / unset", i.e. the pre-tc-2phi8 behavior, so existing constructors are
+// unaffected.
 type stubResolver struct {
 	canonical      bool
 	primary, cur   string
 	canonicalErr   error
 	priErr, curErr error
+	pushDefault    string
+	aliases        map[string]string
+	pdErr, aliErr  error
 	gotDir         string
 }
 
@@ -23,6 +30,10 @@ func (s *stubResolver) IsCanonical(dir string) (bool, error) {
 }
 func (s *stubResolver) PrimaryBranch(string) (string, error) { return s.primary, s.priErr }
 func (s *stubResolver) CurrentBranch(string) (string, error) { return s.cur, s.curErr }
+func (s *stubResolver) PushDefault(string) (string, error)   { return s.pushDefault, s.pdErr }
+func (s *stubResolver) Aliases(string) (map[string]string, error) {
+	return s.aliases, s.aliErr
+}
 
 func mustJSON(cmd string) json.RawMessage {
 	b, _ := json.Marshal(hookio.BashToolInput{Command: cmd})
@@ -83,6 +94,39 @@ func TestPrimaryPushRule(t *testing.T) {
 		{"bypass: feature refspec", "git push origin feat:feat", "Bash", "bypassPermissions", canonMain(), hookio.Abstain},
 		{"bypass: same-name feature push", "git push origin feat", "Bash", "bypassPermissions", canonFeat(), hookio.Abstain},
 		{"bypass: HEAD:feat refspec", "git push origin HEAD:feat", "Bash", "bypassPermissions", canonMain(), hookio.Abstain},
+
+		// --- tc-2phi8: alias hides the push subcommand -> expand and gate ---
+		// injected `-c alias.p='push origin HEAD:main' p` from a feature branch: the alias
+		// body pushes to primary, so the hidden push is caught.
+		{"bypass: injected alias to primary push", "git -c alias.p='push origin HEAD:main' p", "Bash", "bypassPermissions", canonFeat(), hookio.Reject},
+		// config-defined alias (via the resolver) to a primary push, bare `git p`.
+		{"bypass: config alias to primary push", "git p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "push origin HEAD:main"}}, hookio.Reject},
+		// alias name lookup is case-insensitive (git config keys are); injected `alias.P`.
+		{"bypass: injected alias case-insensitive name", "git -c alias.P='push origin HEAD:main' p", "Bash", "bypassPermissions", canonFeat(), hookio.Reject},
+		// injected `-c` beats a config alias of the same name.
+		{"bypass: injected alias overrides config (to primary)", "git -c alias.p='push origin HEAD:main' p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "status"}}, hookio.Reject},
+		// alias to a FEATURE push -> not primary -> Abstain.
+		{"bypass: config alias to feature push", "git p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "push origin HEAD:feat"}}, hookio.Abstain},
+		// harmless alias that is not a push at all -> Abstain.
+		{"bypass: harmless alias (st=status)", "git st", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"st": "status"}}, hookio.Abstain},
+		// interactive mode: an alias to a primary push must NOT prompt every push.
+		{"default: config alias to primary push (no friction)", "git p", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "push origin HEAD:main"}}, hookio.Abstain},
+
+		// --- tc-2phi8: ambient push.default=matching (set in git config, not injected) ---
+		// bare push from a feature branch advances primary via matching -> Reject.
+		{"bypass: ambient push.default=matching bare push from feature", "git push", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", pushDefault: "matching"}, hookio.Reject},
+		// push.default=simple leaves a feature bare push harmless -> Abstain.
+		{"bypass: ambient push.default=simple bare push from feature", "git push", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", pushDefault: "simple"}, hookio.Abstain},
+		// value is compared case-insensitively.
+		{"bypass: ambient push.default=Matching (case-insensitive)", "git push", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", pushDefault: "Matching"}, hookio.Reject},
+		// interactive mode: ambient matching must NOT prompt every push.
+		{"default: ambient push.default=matching (no friction)", "git push", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "feat", pushDefault: "matching"}, hookio.Abstain},
+
+		// --- tc-2phi8: shell alias (`!…`) body re-parsed and its git commands re-checked ---
+		{"bypass: shell alias pushing to primary", "git p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "!git push origin HEAD:main"}}, hookio.Reject},
+		{"bypass: shell alias not a push (echo)", "git p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "!echo hi"}}, hookio.Abstain},
+		{"bypass: shell alias pushing to feature", "git p", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "!git push origin HEAD:feat"}}, hookio.Abstain},
+		{"default: shell alias pushing to primary (no friction)", "git p", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"p": "!git push origin HEAD:main"}}, hookio.Abstain},
 
 		// --- worktree / non-canonical stays Approve (worktree discipline is the control) ---
 		{"bypass: push to main from linked worktree", "git push origin HEAD:main", "Bash", "bypassPermissions", &stubResolver{canonical: false, primary: "main", cur: "feat"}, hookio.Abstain},

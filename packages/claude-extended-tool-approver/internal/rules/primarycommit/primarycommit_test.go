@@ -8,11 +8,17 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
+// stubResolver implements PrimaryResolver. pushDefault/aliases (and their optional
+// error fields) drive the tc-2phi8 alias cases; their zero values mean "no alias /
+// unset", so existing constructors keep their pre-tc-2phi8 behavior.
 type stubResolver struct {
 	canonical      bool
 	primary, cur   string
 	canonicalErr   error
 	priErr, curErr error
+	pushDefault    string
+	aliases        map[string]string
+	pdErr, aliErr  error
 	gotDir         string
 }
 
@@ -22,6 +28,10 @@ func (s *stubResolver) IsCanonical(dir string) (bool, error) {
 }
 func (s *stubResolver) PrimaryBranch(string) (string, error) { return s.primary, s.priErr }
 func (s *stubResolver) CurrentBranch(string) (string, error) { return s.cur, s.curErr }
+func (s *stubResolver) PushDefault(string) (string, error)   { return s.pushDefault, s.pdErr }
+func (s *stubResolver) Aliases(string) (map[string]string, error) {
+	return s.aliases, s.aliErr
+}
 
 func mustJSON(cmd string) json.RawMessage {
 	b, _ := json.Marshal(hookio.BashToolInput{Command: cmd})
@@ -56,6 +66,27 @@ func TestPrimaryCommitRule(t *testing.T) {
 		{"bypass: non-bash tool", "", "Read", "bypassPermissions", canonMain(), hookio.Abstain},
 		{"bypass: resolver error (fail-open)", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonicalErr: errors.New("x")}, hookio.Abstain},
 		{"bypass: compound commit && push", "git commit -m x && git push", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
+
+		// --- tc-2phi8: alias hides the commit subcommand -> expand and gate ---
+		// injected `-c alias.ci='commit -am x' ci` on the canonical primary.
+		{"bypass: injected alias to commit on primary", "git -c alias.ci='commit -am x' ci", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
+		// config-defined alias (via the resolver), bare `git ci`, on the canonical primary.
+		{"bypass: config alias to commit on primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Reject},
+		// alias name lookup is case-insensitive.
+		{"bypass: injected alias case-insensitive name", "git -c alias.CI='commit -am x' ci", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
+		// injected `-c` beats a config alias of the same name.
+		{"bypass: injected alias overrides config (to commit)", "git -c alias.ci='commit -am x' ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "status"}}, hookio.Reject},
+		// same alias but OFF primary -> Abstain.
+		{"bypass: config alias to commit off primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Abstain},
+		// harmless alias (not a commit) -> Abstain.
+		{"bypass: harmless alias (st=status)", "git st", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"st": "status"}}, hookio.Abstain},
+		// alias to commit-tree is NOT a commit -> Abstain (matches the bare commit-tree case).
+		{"bypass: alias to commit-tree", "git ct", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ct": "commit-tree abc"}}, hookio.Abstain},
+		// interactive mode: an alias to a primary commit must NOT prompt.
+		{"default: config alias to commit on primary (no friction)", "git ci", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Abstain},
+		// shell alias (`!…`) body re-parsed and its git commands re-checked.
+		{"bypass: shell alias committing on primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!git commit -am x"}}, hookio.Reject},
+		{"bypass: shell alias not a commit (echo)", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!echo hi"}}, hookio.Abstain},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -584,9 +584,11 @@ type fakePrimaryResolver struct {
 	primary, cur string
 }
 
-func (f fakePrimaryResolver) IsCanonical(string) (bool, error)     { return f.canonical, nil }
-func (f fakePrimaryResolver) PrimaryBranch(string) (string, error) { return f.primary, nil }
-func (f fakePrimaryResolver) CurrentBranch(string) (string, error) { return f.cur, nil }
+func (f fakePrimaryResolver) IsCanonical(string) (bool, error)          { return f.canonical, nil }
+func (f fakePrimaryResolver) PrimaryBranch(string) (string, error)      { return f.primary, nil }
+func (f fakePrimaryResolver) CurrentBranch(string) (string, error)      { return f.cur, nil }
+func (f fakePrimaryResolver) PushDefault(string) (string, error)        { return "", nil }
+func (f fakePrimaryResolver) Aliases(string) (map[string]string, error) { return nil, nil }
 
 // TestPrecedence_PrimaryCommitBeatsGit proves primary-commit is consulted before the
 // generic git rule (registration order). On the REAL hook path (EvaluateHook) a
