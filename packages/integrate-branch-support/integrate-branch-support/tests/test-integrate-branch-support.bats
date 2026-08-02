@@ -42,6 +42,27 @@ add_worktree() {
   cd "$WT_DIR/wt" || return 1
 }
 
+# link_real_tools: symlink into $STUB_BIN the real tools the tool and this
+# harness need at runtime (bash/git/jq/coreutils), so an "optional source
+# absent" test can set PATH="$STUB_BIN" alone and thereby run with gh/bd
+# genuinely ABSENT (they are never linked here) while real tools still resolve.
+# This replaces a literal `PATH="$STUB_BIN:/usr/bin:/bin"`, which carries NO
+# bash/coreutils in the nix build sandbox (and none on NixOS, where /usr/bin
+# holds only `env` and /bin only `sh`) -- there `run bash "$BIN"` and
+# teardown's `rm` exited 127 and the tests failed. gh/bd absence is the POINT
+# of those tests: they exercise the tool's `command -v gh`/`command -v bd`
+# graceful-degradation branch. Resolving each tool's real path (rather than
+# adding a fixed dir to PATH) is layout-independent: on NixOS gh/bd live in the
+# same profile bin dir as git/jq/bash, so dropping a dir cannot scrub them --
+# only linking a curated allow-list can. MUST be called while PATH is still the
+# default (so `command -v`/`ln` resolve), i.e. BEFORE setting PATH="$STUB_BIN".
+link_real_tools() {
+  local t p
+  for t in bash git jq dirname rm mktemp cat; do
+    p="$(command -v "$t" 2>/dev/null)" && ln -s "$p" "$STUB_BIN/$t"
+  done
+}
+
 @test "prints valid JSON with a strategy field" {
   run bash "$BIN"
   [ "$status" -eq 0 ]
@@ -219,7 +240,8 @@ EOF
 
 @test "gh/bd absent: open_pr and mr_bead are null and the tool still exits 0" {
   mkdir -p "$STUB_BIN"
-  PATH="$STUB_BIN:/usr/bin:/bin"
+  link_real_tools
+  PATH="$STUB_BIN"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.open_pr == null and .mr_bead == null'
@@ -260,7 +282,8 @@ EOF
 echo '{"data":[{"id":"pg2-abcd"}],"schema_version":1}'
 EOF
   chmod +x "$STUB_BIN/bd"
-  PATH="$STUB_BIN:/usr/bin:/bin"
+  link_real_tools
+  PATH="$STUB_BIN"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == "pull-request"'
@@ -269,7 +292,8 @@ EOF
 @test "strategy: remote present, no PR/bead, undeclared cannot be inferred" {
   git remote add origin https://example.invalid/o/r.git
   mkdir -p "$STUB_BIN"
-  PATH="$STUB_BIN:/usr/bin:/bin"
+  link_real_tools
+  PATH="$STUB_BIN"
   run bash "$BIN"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.strategy == null'
