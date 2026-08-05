@@ -38,8 +38,8 @@ schema = 3
     hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
-    version = 'v1.74.3'
-    hash = 'sha256-aWSAtyc9RotOrcZtc5bqUSqksvgVIKfkppWsgtvPysk='
+    version = 'v1.74.4'
+    hash = 'sha256-DcxhQA8poGw638ZHuBaEvpiyi0/K/B57ge/YhzyfJxs='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -50,5 +50,5 @@ schema = 3
     hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.54.0'
-    hash = 'sha256-qXMv1gVl9th9DDp8/dVyJh9kKOFt3qRl74BgZ82Fnew='
+    version = 'v1.56.0'
+    hash = 'sha256-dm+ehuPSqdZ4k+PNPnhj7YaXk2nVAx2sdQi9/UpVUuA='
