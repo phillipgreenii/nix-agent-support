@@ -38,8 +38,8 @@ schema = 3
     hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
 
   [mod.'github.com/grpc-ecosystem/grpc-gateway/v2']
-    version = 'v2.29.0'
-    hash = 'sha256-a/J/iffTIqbKXIBGGKfPIjgfyb2F05jw3Au8f1q6yEk='
+    version = 'v2.30.0'
+    hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
 
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
@@ -94,52 +94,52 @@ schema = 3
     hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
 
   [mod.'go.opentelemetry.io/contrib/bridges/otelslog']
-    version = 'v0.19.0'
-    hash = 'sha256-wIbFVFbDxPjNyMiz0Flny67B93561uu+pc+Ul3ytWlk='
+    version = 'v0.20.0'
+    hash = 'sha256-eN8qaSqpK7Q+Us70fNPfKftHQuVC2FCQMzDtYWlUxAw='
 
   [mod.'go.opentelemetry.io/otel']
-    version = 'v1.44.0'
-    hash = 'sha256-XTGV9RjOIKyWrrgXJ32IA59lovxXqSeRrpcpC1FAFZA='
+    version = 'v1.45.0'
+    hash = 'sha256-ORef6E6hxMrpVU8b+4vh311bMbv2zGbYAIJ9ZE8gXvc='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc']
-    version = 'v0.20.0'
-    hash = 'sha256-naBnFZNCVipm0xhX/IZLWTDC8jxj3gwpDP9vL6wR3iY='
+    version = 'v0.21.0'
+    hash = 'sha256-FGpQp6G7uHfntlCABqpwUycz4yeiRz6m+X3GqWzBUJY='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp']
-    version = 'v0.20.0'
-    hash = 'sha256-HRMfz9VmT9SvYNnTyE9vBbsuSdGj4/MVIByLXaJHn40='
+    version = 'v0.21.0'
+    hash = 'sha256-+suZDi6pwZ5WWE7jnYwap5nxb2e8TWjFAC2+HBSNZ8w='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace']
-    version = 'v1.44.0'
-    hash = 'sha256-hqgoY2kWcu58Vdq+DrBZCT0g5bs/cnVLCcwYYWfinu4='
+    version = 'v1.45.0'
+    hash = 'sha256-+q9AqsCDxlrXTmELo5IJwR5yNiHzCk/dk7mtxxmqCf8='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc']
-    version = 'v1.44.0'
-    hash = 'sha256-hQeEeRqWCiMr2m1GHWlIOSbA6YTHgW6EW+M3e26lDn0='
+    version = 'v1.45.0'
+    hash = 'sha256-fqrhkxeR2Go6sA9W9xKRYpXQfHBZ78/7MVWnyuRpWSU='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp']
-    version = 'v1.44.0'
-    hash = 'sha256-IOYc4gNOf6DB2f9T1qu1R5jbRM0RhJwpoImmsyUZDSA='
+    version = 'v1.45.0'
+    hash = 'sha256-GT6dy7rdPY6WK3aByofcuWkMHuT5IhULkiisuzStqag='
 
   [mod.'go.opentelemetry.io/otel/log']
-    version = 'v0.20.0'
-    hash = 'sha256-LUQmrfbnKPHwRgcuX1wlfFDJDiwddOrtbBFHNrMdc+Y='
+    version = 'v0.21.0'
+    hash = 'sha256-c4QuZ3aWeIJx0aB4GKnvQP+ah3Vh3u2rooEef6MBx3E='
 
   [mod.'go.opentelemetry.io/otel/metric']
-    version = 'v1.44.0'
-    hash = 'sha256-e8dVyRoavby/YG7aH2T05IhWHlLvwnMHyPhelAS1mCQ='
+    version = 'v1.45.0'
+    hash = 'sha256-Ec/v1Ghb8Ohb1NsdYQ6juggl/wJMrVA6ktPRPczGWMQ='
 
   [mod.'go.opentelemetry.io/otel/sdk']
-    version = 'v1.44.0'
-    hash = 'sha256-rNqJXr5P2f5Qgllp/3E5Rm5lqt1kBhxHXppT5dXw5Cw='
+    version = 'v1.45.0'
+    hash = 'sha256-VoyRt1cLW8apITGla1K1fqbSyJyRPr53+R3iisreE+4='
 
   [mod.'go.opentelemetry.io/otel/sdk/log']
-    version = 'v0.20.0'
-    hash = 'sha256-pxmdUm2IQcYaRyxK1CiaSXTdXUnX5gvx8SGmg6giVEE='
+    version = 'v0.21.0'
+    hash = 'sha256-FI+YN8zJXGNWAYWxNxozl6GnFl8ApI+jnXa4bEjtVyQ='
 
   [mod.'go.opentelemetry.io/otel/trace']
-    version = 'v1.44.0'
-    hash = 'sha256-69HorWRTLLzAHRgLe4nPp13qJthb3qp7RU7c0Y9qV/c='
+    version = 'v1.45.0'
+    hash = 'sha256-LKrsYVdfPEzxXPEFSapjGIiw2e1C4Yq5HXtoYrN4FIY='
 
   [mod.'go.opentelemetry.io/proto/otlp']
     version = 'v1.11.0'
@@ -158,16 +158,16 @@ schema = 3
     hash = 'sha256-LJfnki46XEreGbSgjl+DeqgcTsINTOu2owyXNvijMcA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260724162435-b2f20204f0df'
-    hash = 'sha256-At6v+tTZ/GyNQzNOM7w596n692hbw0n4/ixl+EJxQ38='
+    version = 'v0.0.0-20260803160001-6ac0973c030d'
+    hash = 'sha256-cECK1WQFTL6TgViX2EOA5honMcFueFP0omL2PmYIEd0='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260724162435-b2f20204f0df'
+    version = 'v0.0.0-20260803160001-6ac0973c030d'
     hash = 'sha256-ldJTTb7hhj1mdmzTn9IEkQVwCoj3KRlENZtUSEKHABU='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.82.1'
-    hash = 'sha256-5Q85pZWiKulJSGRAjYcVrlBe7y4tfa9gsjCqYiBhLUU='
+    version = 'v1.83.0'
+    hash = 'sha256-LHtpuau00DepMffR2wG1Bw5MPooBE3V+nlcPLhhI6LI='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.11'
@@ -178,8 +178,8 @@ schema = 3
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'modernc.org/libc']
-    version = 'v1.74.3'
-    hash = 'sha256-aWSAtyc9RotOrcZtc5bqUSqksvgVIKfkppWsgtvPysk='
+    version = 'v1.74.4'
+    hash = 'sha256-DcxhQA8poGw638ZHuBaEvpiyi0/K/B57ge/YhzyfJxs='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -190,5 +190,5 @@ schema = 3
     hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.54.0'
-    hash = 'sha256-qXMv1gVl9th9DDp8/dVyJh9kKOFt3qRl74BgZ82Fnew='
+    version = 'v1.56.0'
+    hash = 'sha256-dm+ehuPSqdZ4k+PNPnhj7YaXk2nVAx2sdQi9/UpVUuA='
