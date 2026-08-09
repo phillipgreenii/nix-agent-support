@@ -233,6 +233,103 @@ func TestBuildtools_VerbScopedFromConfig(t *testing.T) {
 	}
 }
 
+// --- Task-runner (recipe-dispatcher) verb scoping ---
+//
+// `just` is the primary task runner in the homelab consumer, but it is a RECIPE
+// DISPATCHER, not a fixed-behaviour tool: `just <verb>` runs whatever the nearest
+// justfile defines. A blanket approvedTools entry would therefore auto-approve
+// `just deploy` / `just terraform apply` / `just converge-synology` (the last of
+// which the auto-mode classifier already denies as "runs a real, non-dry-run
+// converge that mutates the shared NAS"). The correct shape is
+// verbScopedApprovals, per recipe. The verb list below MIRRORS the homelab
+// consumer config (homelab `development/agent-support/ceta/rules.example.json`);
+// it lives here as test DATA so the base binary keeps no consumer literals.
+
+func justBuildtoolsConfig() configrules.BuildtoolsConfig {
+	verbs := []string{
+		// local build / test / lint / format
+		"build", "check", "check-all", "check-quick", "coverage", "fmt", "lint",
+		"lint-rules", "syntax-check", "test", "test-formulas", "test-rules",
+		"typecheck", "validate",
+		// read-only inspection + documented dry-runs
+		"help", "version", "status", "logs", "check-config", "check-synology",
+	}
+	var cfg configrules.BuildtoolsConfig
+	for _, v := range verbs {
+		cfg.VerbScopedApprovals = append(cfg.VerbScopedApprovals,
+			configrules.VerbScopedApproval{Tool: "just", Verb: v})
+	}
+	return cfg
+}
+
+func TestBuildtools_JustVerbScoped_ApprovedRecipes(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just check",
+		"just check kprod",
+		"just build",
+		"just test-rules",
+		"just lint-rules",
+		"just syntax-check",
+		"just status kagents",
+		"just check-synology synfra",
+		// the dominant observed form: cd into the project, then run the recipe
+		"cd /repo/media/management/calibre && just check kprod",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (verb-scoped just recipe)", cmd, got.Decision)
+		}
+	}
+}
+
+func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		// the observed denial: a real converge against the shared NAS
+		"just converge-synology synfra",
+		"just deploy kinfra",
+		"just deploy-remote 192.168.2.120",
+		"just undeploy",
+		// first-subcommand scoping cannot separate plan from apply
+		"just terraform apply",
+		"just terraform-infra apply",
+		// secret-handling and publishing recipes
+		"just pull-unseal-keys",
+		"just check-vault",
+		"just registry-login",
+		"just push",
+		// takes arbitrary SQL/PromQL as an argument
+		`just query "DROP TABLE events"`,
+		// bare `just` runs the justfile's default recipe — no verb to scope on
+		"just",
+		"cd /repo/infrastructure/machines/ansible && just converge-synology databackup",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (recipe not verb-scoped)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_FlagWithValueAbstains pins the known limitation
+// documented in the homelab schema: firstSubcommand skips leading-dash tokens but
+// does not know which flags CONSUME a value, so `just -f <path> <verb>` resolves
+// the "verb" to <path>. That is fail-safe (Abstain, never a wrong Approve), and
+// the consumer docs tell callers to use `cd <dir> && just <verb>` instead.
+func TestBuildtools_JustVerbScoped_FlagWithValueAbstains(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just -f infrastructure/k3s/prometheus-stack/justfile lint-rules",
+		"just --justfile media/management/calibre/justfile check",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (flag value consumed the verb slot)", cmd, got.Decision)
+		}
+	}
+}
+
 // --- Base-only (empty config) guards: the base binary must carry NO ZR
 // literals. Under a zero BuildtoolsConfig only the generic tools are approved. ---
 
@@ -260,6 +357,20 @@ func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
 			t.Errorf("cmd %q under empty config: got %s, want abstain (ZR tool not baked in base)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_EmptyConfig_JustAbstains guards the decision recorded in the
+// homelab schema: `just` MUST NOT be promoted into baseApprovedTools. It is a
+// recipe dispatcher whose behavior is defined by the repo, so approval belongs in
+// a consumer's verbScopedApprovals, never in the generic base.
+func TestBuildtools_EmptyConfig_JustAbstains(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{"just check", "just build", "just deploy kinfra"} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q under empty config: got %s, want abstain (just is not a base generic tool)", cmd, got.Decision)
 		}
 	}
 }
