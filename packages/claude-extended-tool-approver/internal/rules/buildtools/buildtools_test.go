@@ -259,6 +259,14 @@ func justBuildtoolsConfig() configrules.BuildtoolsConfig {
 		cfg.VerbScopedApprovals = append(cfg.VerbScopedApprovals,
 			configrules.VerbScopedApproval{Tool: "just", Verb: v})
 	}
+	// MIRRORS the homelab consumer config's buildtools.valueFlags: only the
+	// justfile/working-directory NAVIGATION flags are declared. `just`'s
+	// execution-altering value flags (--shell, --shell-arg, -c/--command,
+	// -E/--dotenv-path, --chooser, --set) are deliberately absent so their value
+	// still lands in the verb slot and the command Abstains.
+	cfg.ValueFlags = map[string][]string{
+		"just": {"-f", "--justfile", "-d", "--working-directory", "--color"},
+	}
 	return cfg
 }
 
@@ -312,20 +320,190 @@ func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
 	}
 }
 
-// TestBuildtools_JustVerbScoped_FlagWithValueAbstains pins the known limitation
-// documented in the homelab schema: firstSubcommand skips leading-dash tokens but
-// does not know which flags CONSUME a value, so `just -f <path> <verb>` resolves
-// the "verb" to <path>. That is fail-safe (Abstain, never a wrong Approve), and
-// the consumer docs tell callers to use `cd <dir> && just <verb>` instead.
-func TestBuildtools_JustVerbScoped_FlagWithValueAbstains(t *testing.T) {
+// TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb is the tc-xjoe fix for what
+// TestBuildtools_JustVerbScoped_FlagWithValueAbstains used to PIN as a limitation:
+// with buildtools.valueFlags declaring `just`'s -f/--justfile and
+// -d/--working-directory, the flag's VALUE no longer occupies the verb slot, so
+// the `just -f <justfile> <verb>` form — the dominant form in the homelab decision
+// DB — resolves to <verb> and the verb-scoped approval applies.
+func TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb(t *testing.T) {
 	r := New(justBuildtoolsConfig())
 	for _, cmd := range []string{
+		// separated short + long form
 		"just -f infrastructure/k3s/prometheus-stack/justfile lint-rules",
 		"just --justfile media/management/calibre/justfile check",
+		// glued short + long form
+		"just -f=infrastructure/k3s/prometheus-stack/justfile lint-rules",
+		"just --justfile=media/management/calibre/justfile check",
+		// working-directory, and both navigation flags together
+		"just -d media/management/calibre --justfile media/management/calibre/justfile check",
+		"just --working-directory=/repo -f /repo/justfile test-rules",
+		// a boolean flag before and after a value flag
+		"just --unstable -f /repo/justfile --quiet lint-rules",
+		// recipe arguments still follow the verb
+		"just -f infrastructure/k3s/prometheus-stack/justfile status kagents",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (value flag must not consume the verb slot)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_ValueFlagSafety is the load-bearing half of
+// tc-xjoe: resolving MORE commands to a real verb MUST NOT approve any mutating
+// recipe. Each command below now resolves its verb correctly and MUST still
+// Abstain because the verb is not in verbScopedApprovals.
+func TestBuildtools_JustVerbScoped_ValueFlagSafety(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		// the three cases named in the bead's safety requirement
+		"just -f infrastructure/machines/ansible/justfile converge-synology synfra",
+		"just -f infrastructure/k3s/kinfra/justfile deploy kinfra",
+		"just -d infrastructure/machines/monorepod terraform apply",
+		// same verbs via the long / glued forms
+		"just --justfile=infrastructure/k3s/kinfra/justfile deploy kinfra",
+		"just --working-directory /repo --justfile /repo/justfile undeploy",
+		"just -f /repo/justfile pull-unseal-keys",
+		"just -f /repo/justfile push",
+		`just -f /repo/justfile query "DROP TABLE events"`,
+		// no verb at all after the flag pair — runs the default recipe
+		"just -f /repo/justfile",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
-			t.Errorf("cmd %q: got %s, want abstain (flag value consumed the verb slot)", cmd, got.Decision)
+			t.Errorf("cmd %q: got %s, want abstain (mutating recipe MUST NOT auto-approve)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove covers the truncated
+// invocation: a declared value flag with NO value must neither panic nor approve.
+func TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just -f",
+		"just --justfile",
+		"just --working-directory",
+		// the verb is consumed as the flag's value, leaving nothing behind
+		"just -f check",
+		"just --justfile lint-rules",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (no resolvable verb)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains proves the
+// deliberate omission of `just`'s execution-altering value flags is load-bearing:
+// because they are NOT declared, their value occupies the verb slot and the
+// command Abstains rather than approving a recipe run under an operator-supplied
+// shell / dotenv / variable override.
+func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just --shell /bin/evil check",
+		"just --shell-arg zsh check",
+		"just --dotenv-path /tmp/evil.env check",
+		"just -E /tmp/evil.env check",
+		"just --set IMAGE evil check",
+		"just --chooser /bin/evil check",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (undeclared value flag must stay fail-safe)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_ValueFlags_NoDeclarationIsUnchanged is the no-regression guard:
+// a verb-scoped tool with NO valueFlags entry behaves exactly as before the
+// tc-xjoe change — dash tokens are skipped and the first remaining token is the
+// verb, so a flag's value still lands in the verb slot and Abstains.
+func TestBuildtools_ValueFlags_NoDeclarationIsUnchanged(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+	})
+	cases := []struct {
+		command string
+		want    hookio.Decision
+	}{
+		{"mytool check ./x", hookio.Approve},
+		{"mytool --verbose check", hookio.Approve},
+		{"mytool -f ./cfg check", hookio.Abstain},
+		{"mytool run ./x", hookio.Abstain},
+	}
+	for _, tt := range cases {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
+		if got := r.Evaluate(input); got.Decision != tt.want {
+			t.Errorf("cmd %q: got %s, want %s (undeclared-tool behavior must not change)", tt.command, got.Decision, tt.want)
+		}
+	}
+}
+
+// TestBuildtools_ValueFlags_Arity covers the generic multi-token mechanism
+// (`--set NAME VALUE`-shaped flags, declared as `--flag:2`) and the rejection of a
+// malformed arity suffix, on a synthetic tool so the base carries no consumer data.
+func TestBuildtools_ValueFlags_Arity(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+		ValueFlags: map[string][]string{
+			"mytool": {"--opt:2", "--one", "--bad:x", "--worse:0", "--neg:-1"},
+		},
+	})
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"two-token flag resolves the verb", "mytool --opt NAME VALUE check", hookio.Approve},
+		{"two-token flag glued supplies the first value", "mytool --opt=NAME VALUE check", hookio.Approve},
+		{"two-token flag truncated consumes the verb", "mytool --opt NAME check", hookio.Abstain},
+		{"one-token flag resolves the verb", "mytool --one v check", hookio.Approve},
+		{"malformed arity suffix is dropped", "mytool --bad v check", hookio.Abstain},
+		{"zero arity is dropped", "mytool --worse v check", hookio.Abstain},
+		{"negative arity is dropped", "mytool --neg v check", hookio.Abstain},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
+			if got := r.Evaluate(input); got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s, want %s", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildtools_ValueFlags_ParseSpec unit-tests the spec parser directly, since
+// its reject-rather-than-default behavior is the guard against a declaration that
+// over-skips tokens (the only direction that can manufacture a wrong Approve).
+func TestBuildtools_ValueFlags_ParseSpec(t *testing.T) {
+	cases := []struct {
+		spec      string
+		wantName  string
+		wantArity int
+		wantOK    bool
+	}{
+		{"--justfile", "--justfile", 1, true},
+		{"-f", "-f", 1, true},
+		{"--set:2", "--set", 2, true},
+		{"--big:3", "--big", 3, true},
+		{"--set:x", "", 0, false},
+		{"--set:0", "", 0, false},
+		{"--set:-1", "", 0, false},
+		{"--set:", "", 0, false},
+		{"justfile", "", 0, false},
+		{"", "", 0, false},
+		{"-", "", 0, false},
+		{"--", "", 0, false},
+	}
+	for _, tt := range cases {
+		name, arity, ok := parseValueFlagSpec(tt.spec)
+		if name != tt.wantName || arity != tt.wantArity || ok != tt.wantOK {
+			t.Errorf("parseValueFlagSpec(%q) = (%q, %d, %v), want (%q, %d, %v)",
+				tt.spec, name, arity, ok, tt.wantName, tt.wantArity, tt.wantOK)
 		}
 	}
 }

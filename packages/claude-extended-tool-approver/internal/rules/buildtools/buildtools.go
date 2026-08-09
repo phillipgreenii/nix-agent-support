@@ -2,6 +2,8 @@ package buildtools
 
 import (
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -21,6 +23,7 @@ type Rule struct {
 	approvedTools   map[string]bool
 	approvedScripts map[string]bool
 	verbScoped      map[string]map[string]bool // tool -> approved first-subcommand set
+	valueFlags      map[string]map[string]int  // tool -> flag -> tokens consumed
 }
 
 // New constructs the build-tools rule. cfg carries the consumer-specific tool /
@@ -31,6 +34,7 @@ func New(cfg configrules.BuildtoolsConfig) *Rule {
 		approvedTools:   mergeSet(baseApprovedTools, cfg.ApprovedTools),
 		approvedScripts: toSet(cfg.ApprovedScripts),
 		verbScoped:      map[string]map[string]bool{},
+		valueFlags:      map[string]map[string]int{},
 	}
 	for _, vs := range cfg.VerbScopedApprovals {
 		if r.verbScoped[vs.Tool] == nil {
@@ -38,7 +42,44 @@ func New(cfg configrules.BuildtoolsConfig) *Rule {
 		}
 		r.verbScoped[vs.Tool][vs.Verb] = true
 	}
+	for tool, specs := range cfg.ValueFlags {
+		for _, spec := range specs {
+			name, arity, ok := parseValueFlagSpec(spec)
+			if !ok {
+				continue
+			}
+			if r.valueFlags[tool] == nil {
+				r.valueFlags[tool] = map[string]int{}
+			}
+			r.valueFlags[tool][name] = arity
+		}
+	}
 	return r
+}
+
+// parseValueFlagSpec splits a valueFlags entry into its flag name and the number
+// of following tokens it consumes: "--justfile" -> ("--justfile", 1),
+// "--set:2" -> ("--set", 2).
+//
+// A spec whose ":<n>" suffix is not a positive integer, or that does not look
+// like a flag, is REJECTED (ok=false) and dropped by the caller. It is
+// deliberately NOT assumed to be arity 1: over-skipping tokens is the only
+// direction in which a value-flag declaration can manufacture a wrong Approve,
+// whereas dropping the entry merely restores the pre-existing behavior (the
+// flag's value lands in the verb slot and the command Abstains).
+func parseValueFlagSpec(spec string) (string, int, bool) {
+	name, arity := spec, 1
+	if i := strings.LastIndexByte(spec, ':'); i >= 0 {
+		n, err := strconv.Atoi(spec[i+1:])
+		if err != nil || n < 1 {
+			return "", 0, false
+		}
+		name, arity = spec[:i], n
+	}
+	if !strings.HasPrefix(name, "-") || name == "-" || name == "--" {
+		return "", 0, false
+	}
+	return name, arity, true
 }
 
 func toSet(items []string) map[string]bool {
@@ -106,7 +147,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		// Consumer-configured verb-scoped approvals (additive over the base).
 		if verbs := r.verbScoped[basename]; verbs != nil {
-			if sub := firstSubcommand(pc.Args); sub != "" && verbs[sub] {
+			if sub := firstSubcommand(pc.Args, r.valueFlags[basename]); sub != "" && verbs[sub] {
 				return hookio.RuleResult{
 					Decision: hookio.Approve,
 					Reason:   "approved verb-scoped tool: " + basename + " " + sub,
@@ -146,13 +187,42 @@ func hasSubcommand(args []string, sub string) bool {
 	return false
 }
 
-// firstSubcommand returns the first non-flag argument, or "".
-func firstSubcommand(args []string) string {
-	for _, a := range args {
-		if len(a) > 0 && a[0] == '-' {
+// firstSubcommand returns the first non-flag argument that is not consumed as a
+// flag's VALUE, or "".
+//
+// valueFlags maps a flag name to the number of following tokens it consumes; it
+// is the per-tool data from BuildtoolsConfig.ValueFlags. A nil/empty map yields
+// exactly the historical behavior (skip dash-prefixed tokens, return the first
+// remaining token) — so a tool with no declared value flags is unaffected.
+//
+// Forms handled:
+//   - separated  `-f <path> <verb>`   -> the path is skipped, verb resolves
+//   - glued      `-f=<path> <verb>`   -> the value is inline, so nothing extra is
+//     skipped (an n-value flag still consumes n-1 further tokens)
+//   - multi-value `--set <NAME> <VALUE> <verb>` when declared as `--set:2`
+//   - trailing   `just -f`            -> the loop simply runs off the end and
+//     returns "", which cannot approve anything
+//
+// An UNDECLARED value-taking flag stays fail-safe: its value is returned as the
+// "verb", which matches no approval entry, so the command Abstains.
+func firstSubcommand(args []string, valueFlags map[string]int) string {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "" || a[0] != '-' {
+			return a
+		}
+		name, glued := a, false
+		if eq := strings.IndexByte(a, '='); eq >= 0 {
+			name, glued = a[:eq], true
+		}
+		n, ok := valueFlags[name]
+		if !ok {
 			continue
 		}
-		return a
+		if glued {
+			n--
+		}
+		i += n
 	}
 	return ""
 }

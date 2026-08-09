@@ -167,6 +167,25 @@ type BuildtoolsConfig struct {
 	// VerbScopedApprovals approve a tool only for a specific first subcommand
 	// (like the base generic `devbox search` / `cue vet` / `jar xf`).
 	VerbScopedApprovals []VerbScopedApproval `json:"verbScopedApprovals"`
+	// ValueFlags declares, per tool basename, the flags that CONSUME one or more
+	// following tokens as their value (e.g. "just" -> ["-f","--justfile"]). Without
+	// it the verb-scope matcher skips a dash-prefixed token but then takes that
+	// flag's VALUE as the verb, so `just -f <justfile> lint-rules` can never match
+	// a verbScopedApprovals entry.
+	//
+	// Each entry is a flag name, optionally suffixed with `:<n>` to declare that it
+	// consumes n following tokens (default 1) — e.g. `--set:2` for
+	// `just --set NAME VALUE`. The glued forms `--flag=value` / `-f=value` supply
+	// the first value inline and therefore consume n-1 further tokens.
+	//
+	// Declaring a flag WIDENS what can resolve to an approved verb, so a flag whose
+	// presence changes how the recipe/subcommand EXECUTES (e.g. `just --shell`,
+	// `--shell-arg`, `-c/--command`, `--dotenv-path`) SHOULD be left undeclared: its
+	// value then lands in the verb slot and the command Abstains, which is the
+	// fail-safe outcome. An entry with a malformed `:<n>` suffix is DROPPED rather
+	// than assumed to be 1 — over-skipping is the only direction that can
+	// manufacture a wrong Approve.
+	ValueFlags map[string][]string `json:"valueFlags"`
 }
 
 // VerbScopedApproval approves Tool only when its first subcommand is Verb.

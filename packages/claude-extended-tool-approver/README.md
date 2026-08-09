@@ -174,7 +174,14 @@ or empty block leaves its rule at the safe base default (the command-aware
   "buildtools": {
     "approvedTools": [],
     "approvedScripts": [],
-    "verbScopedApprovals": [],
+    "verbScopedApprovals": [], // [{ "tool": "just", "verb": "lint-rules" }]
+    // per-tool flags that CONSUME their value, so the verb-scope matcher does not
+    // mistake the value for the verb (`just -f <justfile> <verb>`). `:<n>` declares
+    // a multi-token flag (`--set:2`); the glued `-f=<v>` form supplies the first
+    // value inline. An UNDECLARED value flag stays fail-safe: its value lands in
+    // the verb slot and the command Abstains — so leave execution-altering flags
+    // (`--shell`, `-c/--command`, `--dotenv-path`) out on purpose.
+    "valueFlags": { "just": ["-f", "--justfile", "-d", "--working-directory"] },
   },
 
   "ssh": {
