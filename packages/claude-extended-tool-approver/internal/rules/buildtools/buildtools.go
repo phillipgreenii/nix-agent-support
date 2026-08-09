@@ -176,21 +176,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		// Base-generic verb-scoped approvals (stay in the base, not config).
-		if basename == "devbox" && hasSubcommand(pc.Args, "search") {
+		if basename == "devbox" && baseVerbIs(pc.Args, "devbox", "search") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "devbox search is approved",
 				Module:   r.Name(),
 			}
 		}
-		if basename == "cue" && hasSubcommand(pc.Args, "vet") {
+		if basename == "cue" && baseVerbIs(pc.Args, "cue", "vet") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "cue vet is approved (read-only validation)",
 				Module:   r.Name(),
 			}
 		}
-		if basename == "jar" && hasSubcommand(pc.Args, "xf") {
+		if basename == "jar" && baseVerbIs(pc.Args, "jar", "xf") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "approved build tool: jar xf (extraction)",
@@ -229,14 +229,92 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
 }
 
-func hasSubcommand(args []string, sub string) bool {
-	for _, a := range args {
-		if len(a) > 0 && a[0] == '-' {
-			continue
+// baseVerbFlags is the BUILT-IN pre-verb flag allowlist behind the base-generic
+// verb-scoped approvals (`devbox search`, `cue vet`, `jar xf`). Every tool named
+// here resolves its verb under STRICT rules, so a dash token that is not listed
+// resolves NO verb and the command Abstains. The predecessor of this table was a
+// resolver that skipped every dash token unconditionally, with no allowlist.
+//
+// Why a BUILT-IN table is defensible here when a built-in valueFlags table was
+// refused (bead tc-xjoe): the two fields fail in OPPOSITE directions. Declaring a
+// flag value-taking when it is not over-skips tokens and can manufacture a wrong
+// Approve, so that table had to stay consumer-authored. An ALLOW list can only
+// ever be too SHORT, and an omitted flag costs exactly one prompt — never a wrong
+// Approve. A base allowlist that is merely incomplete is therefore safe to ship.
+//
+// Every entry is a flag the tool accepts BEFORE its verb AND that alters only
+// OUTPUT, never execution. Enumeration recorded 2026-08-09 (bead tc-457w):
+//
+//   - devbox 0.17.5, from `devbox --help` and the "Global Flags" block of
+//     `devbox search --help`. The root command's only persistent flags are
+//     `-q/--quiet` and `-h/--help`; both are boolean and log-suppressing. Nothing
+//     names an interpreter, a config file, an env/dotenv file or a directory, and
+//     devbox itself rejects anything else in that position ("Error: unknown flag:
+//     --config"). NOT exploitable. Listed anyway, so the path fails closed if
+//     devbox later grows such a flag. `--show-all` is deliberately absent: it
+//     belongs to `search`, and written pre-verb cobra consumes the verb token as
+//     its value (`devbox --show-all search cowsay` reports `unknown command
+//     "cowsay"`), so allowing it would approve a spelling that never searches.
+//   - cue 0.16.1, from the "Global Flags" block of `cue vet --help` and
+//     `cue mod --help`. The root persistent flags are `-E/--all-errors`,
+//     `-i/--ignore`, `-s/--simplify` and `-h/--help`, all boolean and output-only.
+//     Cobra also honors `vet`'s own flags ahead of the verb (`cue -t xv=zzz vet
+//     a.cue` evaluates), but those only select or inject DATA: CUE evaluation
+//     cannot run an external command, and the one subcommand that can (`cue cmd`,
+//     via tool/exec) is unreachable while `vet` holds the verb slot. The module
+//     registry is chosen by $CUE_REGISTRY, not by a flag. NOT exploitable; those
+//     vet-local flags are simply left off, which costs a prompt and nothing else.
+//   - jar 21.0.12, from `jar --help` and `jar --help:compat`. EXPLOITABLE, which
+//     is why its list is EMPTY. `xf` is not a subcommand at all — it is the legacy
+//     operation-mode operand, and jar reads it as one only when it is the FIRST
+//     argument. Put any dash token in front and jar switches to GNU-style parsing,
+//     where `xf` degrades to a positional file operand and the operation MODE
+//     comes from the flags instead. Measured: `jar -v xf a.jar` fails outright
+//     ("One of options -{ctxuid} or --validate must be specified"), but
+//     `jar --create --file=<path> xf` SUCCEEDS and overwrites <path> with a new
+//     archive — which the old dash-skipping resolver approved as "jar xf
+//     (extraction)". An empty list confines the approval to `jar xf ...` with `xf`
+//     first, which is also the only spelling jar itself honors.
+//
+// This table is deliberately NOT merged with BuildtoolsConfig.AllowedFlags. A
+// consumer needing a wider pre-verb surface declares its own verbScopedApprovals
+// entry for the tool; that path is evaluated separately and carries its own
+// consumer-authored policy, so the base approvals cannot be widened by config.
+var baseVerbFlags = map[string][]string{
+	"devbox": {"-q", "--quiet", "-h", "--help"},
+	"cue":    {"-E", "--all-errors", "-i", "--ignore", "-s", "--simplify", "-h", "--help"},
+	"jar":    {},
+}
+
+// baseFlagPolicies compiles baseVerbFlags through the same parseFlagName
+// validator the consumer field uses, so `-`, `--`, and glued or arity spellings
+// can never enter the base allowlist either.
+var baseFlagPolicies = compileBaseFlagPolicies()
+
+func compileBaseFlagPolicies() map[string]flagPolicy {
+	policies := make(map[string]flagPolicy, len(baseVerbFlags))
+	for tool, flags := range baseVerbFlags {
+		set := make(map[string]bool, len(flags))
+		for _, f := range flags {
+			if name, ok := parseFlagName(f); ok {
+				set[name] = true
+			}
 		}
-		return a == sub
+		policies[tool] = flagPolicy{allowed: set, strict: true}
 	}
-	return false
+	return policies
+}
+
+// baseVerbIs reports whether args resolve, under tool's built-in strict policy,
+// to exactly verb. A tool with no entry in baseFlagPolicies resolves nothing:
+// the zero flagPolicy is NOT strict, so falling through to it would restore the
+// unconditional dash-skipping this function exists to remove.
+func baseVerbIs(args []string, tool, verb string) bool {
+	policy, ok := baseFlagPolicies[tool]
+	if !ok {
+		return false
+	}
+	return firstSubcommand(args, policy) == verb
 }
 
 // firstSubcommand returns the first non-flag argument that is not consumed as a
@@ -260,9 +338,11 @@ func hasSubcommand(args []string, sub string) bool {
 // enough on its own — in the GLUED form (`--shell=/bin/x <verb>`) the flag and its
 // value are ONE dash-token, so the loop skips both and the real verb resolves.
 //
-// p.strict closes that hole. When the consumer has declared an allowedFlags entry
-// for the tool, a dash-token is skipped ONLY if it is a declared value flag, or a
-// declared allowed flag spelled BARE; anything else ends resolution with "".
+// p.strict closes that hole. When the policy is strict — because the consumer
+// declared an allowedFlags entry for the tool, or because the tool is one of the
+// base-generic verbs compiled into baseFlagPolicies — a dash-token is skipped ONLY
+// if it is a declared value flag, or a declared allowed flag spelled BARE;
+// anything else ends resolution with "".
 // Every non-canonical spelling lands there: `--shell=/bin/x`, an attached short
 // value (`-E/tmp/x`), a clustered short group (`-nq`), a value glued onto a flag
 // declared boolean (`--quiet=x`), and the end-of-flags separator `--`.

@@ -845,3 +845,129 @@ func TestBuildtools_NoZRLiteralsInSource(t *testing.T) {
 		}
 	}
 }
+
+// --- Base-generic verb resolution (bead tc-457w) ---
+//
+// The base path behind `devbox search` / `cue vet` / `jar xf` used to skip every
+// dash-prefixed token with no allowlist, which is the wrong-approve class tc-080p
+// fixed for consumer-configured tools. These tests pin the strict replacement.
+
+// TestBuildtools_BaseVerbs_PinnedApprovals is the no-regression pin: the exact
+// spellings the base has always approved MUST keep approving, and the pre-verb
+// flags enumerated as output-only in baseVerbFlags MUST be accepted. A future
+// widening of this set is visible as a diff to this list.
+func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{
+		// canonical, no pre-verb flags
+		"devbox search nodejs",
+		"cue vet ./schemas/",
+		"jar xf /tmp/cache/some.jar",
+		// devbox: the root command's only persistent flags
+		"devbox -q search nodejs",
+		"devbox --quiet search nodejs",
+		// cue: the root command's persistent flags, singly and combined
+		"cue -E vet ./x",
+		"cue --all-errors vet ./x",
+		"cue -i vet ./x",
+		"cue --ignore vet ./x",
+		"cue -s vet ./x",
+		"cue --simplify vet ./x",
+		"cue -E -i -s vet ./x",
+		// post-verb flags never reach verb resolution
+		"devbox search --show-all nodejs",
+		"cue vet -c ./x",
+		"jar xf /tmp/a.jar META-INF/MANIFEST.MF",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (pinned base approval)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains is the fix itself: a dash
+// token that is not on the built-in allowlist resolves NO verb, in every spelling
+// that defeated the old dash-skipping resolver.
+//
+// The `jar --create --file=<path> xf` case is the measured exploit that motivated
+// the change — jar creates and OVERWRITES <path> there, while the old resolver
+// approved it as "jar xf (extraction)". See baseVerbFlags for the enumeration.
+func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"jar exploit: glued long flag flips extract to create", "jar --create --file=/etc/motd xf"},
+		{"jar exploit: short mode flag", "jar -c --file=/etc/motd xf"},
+		{"jar exploit: extract from an attacker-named archive", "jar -x --file=/tmp/evil.jar xf"},
+		{"jar: no flag may precede the legacy operand", "jar -v xf /tmp/a.jar"},
+		{"jar: end-of-flags separator is never allowlisted", "jar -- xf /tmp/a.jar"},
+		{"devbox: undeclared glued flag", "devbox --config=/tmp/evil search nodejs"},
+		{"devbox: undeclared bare flag", "devbox --debug search nodejs"},
+		{"devbox: clustered shorts fail closed", "devbox -qh search nodejs"},
+		{"devbox: value glued onto a boolean flag", "devbox --quiet=x search nodejs"},
+		{"devbox: end-of-flags separator", "devbox -- search nodejs"},
+		{"cue: undeclared glued flag", "cue --schema=/tmp/evil vet ./x"},
+		{"cue: undeclared bare flag", "cue --inject-vars vet ./x"},
+		{"cue: attached short value", "cue -E/tmp/x vet ./x"},
+		{"cue: clustered shorts fail closed", "cue -Eis vet ./x"},
+		{"cue: end-of-flags separator", "cue -- vet ./x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tc.command})}
+			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+				t.Errorf("cmd %q: got %s, want abstain", tc.command, got.Decision)
+			}
+		})
+	}
+}
+
+// TestBuildtools_BaseVerbs_WrongVerbAbstains guards the verb slot itself: the
+// strict policy must not accidentally widen which verb resolves.
+func TestBuildtools_BaseVerbs_WrongVerbAbstains(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{
+		"devbox run build", "devbox -q shell", "devbox",
+		"cue export ./x", "cue -E eval ./x", "cue cmd deploy", "cue",
+		"jar cf out.jar src/", "jar xvf /tmp/a.jar", "jar",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_BaseFlagPolicies_AllStrict pins the invariant that makes
+// baseVerbIs safe: every base-generic tool carries a STRICT policy, and jar's is
+// empty. A new entry added without strict:true would silently reinstate
+// unconditional dash-skipping for that tool.
+func TestBuildtools_BaseFlagPolicies_AllStrict(t *testing.T) {
+	for _, tool := range []string{"devbox", "cue", "jar"} {
+		policy, ok := baseFlagPolicies[tool]
+		if !ok {
+			t.Fatalf("%s: no base flag policy compiled", tool)
+		}
+		if !policy.strict {
+			t.Errorf("%s: base flag policy is not strict", tool)
+		}
+		if len(policy.valueFlags) != 0 {
+			t.Errorf("%s: base policy declares value flags %v; over-declaring arity is the only direction that manufactures a wrong Approve", tool, policy.valueFlags)
+		}
+	}
+	if n := len(baseFlagPolicies["jar"].allowed); n != 0 {
+		t.Errorf("jar: allowlist has %d entries, want 0 (no dash token may precede the legacy `xf` operand)", n)
+	}
+}
+
+// TestBuildtools_BaseVerbIs_UnknownToolFailsClosed pins the fail-closed default:
+// a tool with no compiled policy must resolve nothing rather than fall through to
+// the permissive zero flagPolicy.
+func TestBuildtools_BaseVerbIs_UnknownToolFailsClosed(t *testing.T) {
+	if baseVerbIs([]string{"check"}, "not-a-base-tool", "check") {
+		t.Error("baseVerbIs resolved a verb for a tool with no compiled policy")
+	}
+}
