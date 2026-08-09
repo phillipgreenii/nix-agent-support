@@ -18,7 +18,9 @@
 //     AllowedUsers, or conflicting users -> Reject.
 //   - read-only classification: ssh with no remote command -> Ask (interactive);
 //     a remote command whose every segment's executable is in ReadonlyCommands
-//     (honoring ReadonlySubcommands), with no redirect/tee and no secret path ->
+//     (honoring ReadonlySubcommands), with no file-writing redirect (see
+//     hasWriteRedirection: `2>&1` and `2>/dev/null` are fine, `> f` is not), no
+//     tee and no secret path ->
 //     Approve; otherwise Ask. A segment whose executable is in ReadonlyCommands
 //     but which carries a configured DangerousInlineFlags flag (e.g.
 //     `journalctl --vacuum-size=1G`, `sed -i`) is demoted back to Ask.
@@ -337,11 +339,12 @@ func splitSegments(cmd string) []string {
 }
 
 // segmentIsReadonly reports whether a single remote-command segment is a
-// recognized read-only invocation: no redirect/tee, executable in
+// recognized read-only invocation: no file-writing redirect (hasWriteRedirection
+// draws that line — stderr redirection such as `2>&1` is NOT a write), no tee, executable in
 // ReadonlyCommands, and (if the command has a configured subcommand allowlist)
 // its first subcommand token is allowed.
 func (r *Rule) segmentIsReadonly(seg string) bool {
-	if strings.Contains(seg, ">") {
+	if hasWriteRedirection(seg) {
 		return false
 	}
 	fields := strings.Fields(seg)
@@ -367,6 +370,108 @@ func (r *Rule) segmentIsReadonly(seg string) bool {
 			if tok == bad || strings.HasPrefix(tok, bad+"=") {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// hasWriteRedirection reports whether a remote-command segment contains an
+// output redirection that could CREATE OR MODIFY A FILE on the remote host.
+//
+// It replaces a bare `strings.Contains(seg, ">")` test, which could not tell a
+// real redirection from the ubiquitous stderr idiom `2>&1` and so refused
+// allowlisted read-only commands (`ls -la … 2>&1` was reported as "not a
+// recognized read-only command").
+//
+// POLICY — what counts as a WRITE (segment is NOT read-only):
+//
+//   - Any redirection whose TARGET IS A PATH, on any file descriptor:
+//     `> f`, `>> f`, `>| f`, `1> f`, `2> f`, `9>> f`, `&> f`, `&>> f`, and
+//     bash's both-streams `>& f` (a target that is neither an fd number nor `-`).
+//   - The read-write open `<>`, which may create/truncate its target.
+//
+// POLICY — what is HARMLESS (does not by itself disqualify the segment):
+//
+//   - File-descriptor DUPLICATION and CLOSE: `N>&M` (`2>&1`, `>&2`) and `N>&-`.
+//     These create no file; they only re-point an existing stream.
+//   - A redirection to `/dev/null` on ANY descriptor (`2>/dev/null`,
+//     `&>/dev/null`, `>/dev/null`). The target is the null device, so output is
+//     discarded rather than written.
+//   - INPUT redirection — `< f`, `<< EOF`, `<<< word`, `<&N` — which only reads.
+//
+// The classifier FAILS CLOSED: an operator whose target cannot be read as an fd
+// number, `-`, or `/dev/null` is treated as a write. A false "write" costs one
+// approval prompt; a false "read-only" costs an unreviewed file write on a
+// remote host, so the asymmetry is deliberate.
+//
+// Scope note: `|& tee f` needs no special case here — splitSegments already
+// splits on `|`, leaving a segment whose executable is `&`, which is not in
+// ReadonlyCommands.
+func hasWriteRedirection(seg string) bool {
+	rs := []rune(seg)
+	for i := 0; i < len(rs); i++ {
+		switch rs[i] {
+		case '<':
+			// `<>` opens the target for reading AND writing; every other input
+			// form (`<`, `<<`, `<<<`, `<&N`) only reads.
+			if i+1 < len(rs) && rs[i+1] == '>' {
+				return true
+			}
+		case '>':
+			// Consume the operator's remaining punctuation: `>>` (append) and
+			// `>|` (clobber) still take a FILE target, so they change nothing
+			// about the classification below.
+			j := i + 1
+			for j < len(rs) && (rs[j] == '>' || rs[j] == '|') {
+				j++
+			}
+			if j < len(rs) && rs[j] == '&' {
+				// `N>&WORD`: a bare fd number or `-` duplicates/closes a
+				// descriptor and touches no file. Anything else is bash's
+				// both-streams-to-file form and IS a write.
+				j++
+				word, next := readWord(rs, j)
+				if word != "-" && !isAllDigits(word) {
+					return true
+				}
+				i = next - 1
+				continue
+			}
+			// Ordinary file target, spaced (`> f`) or glued (`>f`).
+			for j < len(rs) && isShellSpace(rs[j]) {
+				j++
+			}
+			word, next := readWord(rs, j)
+			if strings.Trim(word, `"'`) != "/dev/null" {
+				return true
+			}
+			i = next - 1
+		}
+	}
+	return false
+}
+
+// readWord returns the whitespace-delimited word starting at index i and the
+// index just past it. An empty word means the operator had no target.
+func readWord(rs []rune, i int) (string, int) {
+	j := i
+	for j < len(rs) && !isShellSpace(rs[j]) {
+		j++
+	}
+	return string(rs[i:j]), j
+}
+
+func isShellSpace(c rune) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits (an fd
+// number). The empty string is NOT a digit run, so a dangling `>&` fails closed.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
 		}
 	}
 	return true
