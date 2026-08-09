@@ -186,6 +186,33 @@ type BuildtoolsConfig struct {
 	// than assumed to be 1 — over-skipping is the only direction that can
 	// manufacture a wrong Approve.
 	ValueFlags map[string][]string `json:"valueFlags"`
+	// AllowedFlags declares, per tool basename, the flags KNOWN NOT to change how
+	// the verb executes (e.g. "just" -> ["--quiet","--dry-run"]).
+	//
+	// THE PRESENCE OF A KEY — even with an empty list — switches that tool to
+	// STRICT flag checking: while resolving the verb slot, any dash-prefixed token
+	// whose name is neither in AllowedFlags nor in ValueFlags for that tool yields
+	// NO verb, so the verb-scoped approval cannot fire and the command Abstains.
+	// A tool with no key here is unchanged: unknown dash tokens are skipped, exactly
+	// as before this field existed.
+	//
+	// This is the ALLOWLIST-INVERSION of ValueFlags and it is the field that fails
+	// CLOSED. Leaving a dangerous flag out of ValueFlags only protects the SEPARATED
+	// form (`--shell /bin/x <verb>`); the GLUED form (`--shell=/bin/x <verb>`) is one
+	// dash-token and was skipped wholesale, so the verb still resolved and the
+	// command Approved. Under strict checking the glued form, an attached short value
+	// (`-EFILE`), a clustered short group (`-nq`) and the `--` separator are all
+	// unrecognized names and therefore all Abstain. A DENY list cannot give that
+	// guarantee: it is only ever as complete as the last time somebody read the
+	// tool's `--help`.
+	//
+	// Mis-declaring here fails SAFE in both directions: naming a flag that does not
+	// exist changes nothing, and naming a value-taking flag as if it were boolean
+	// leaves its VALUE in the verb slot, which matches no approval and Abstains.
+	// Entries are flag names only (no `:<n>` arity, no `=value`); an entry that is
+	// not a flag name, or is bare `-` / `--`, is DROPPED — dropping narrows what is
+	// allowed, which is again the safe direction.
+	AllowedFlags map[string][]string `json:"allowedFlags"`
 }
 
 // VerbScopedApproval approves Tool only when its first subcommand is Verb.

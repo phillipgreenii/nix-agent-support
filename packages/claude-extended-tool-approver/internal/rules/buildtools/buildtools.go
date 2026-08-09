@@ -24,6 +24,26 @@ type Rule struct {
 	approvedScripts map[string]bool
 	verbScoped      map[string]map[string]bool // tool -> approved first-subcommand set
 	valueFlags      map[string]map[string]int  // tool -> flag -> tokens consumed
+	// allowedFlags is tool -> flag -> true. The PRESENCE of a tool key (even with
+	// an empty set) puts that tool in STRICT flag checking; see flagPolicy.
+	allowedFlags map[string]map[string]bool
+}
+
+// flagPolicy is the per-tool flag knowledge firstSubcommand resolves a verb with.
+//
+// strict is the allowlist switch: it is set iff the consumer declared an
+// allowedFlags entry for the tool. When strict, a flag that is in neither map
+// stops verb resolution (fail CLOSED); when not strict, it is skipped (the
+// historical behavior).
+type flagPolicy struct {
+	valueFlags map[string]int
+	allowed    map[string]bool
+	strict     bool
+}
+
+func (r *Rule) flagPolicyFor(tool string) flagPolicy {
+	allowed, strict := r.allowedFlags[tool]
+	return flagPolicy{valueFlags: r.valueFlags[tool], allowed: allowed, strict: strict}
 }
 
 // New constructs the build-tools rule. cfg carries the consumer-specific tool /
@@ -35,6 +55,7 @@ func New(cfg configrules.BuildtoolsConfig) *Rule {
 		approvedScripts: toSet(cfg.ApprovedScripts),
 		verbScoped:      map[string]map[string]bool{},
 		valueFlags:      map[string]map[string]int{},
+		allowedFlags:    map[string]map[string]bool{},
 	}
 	for _, vs := range cfg.VerbScopedApprovals {
 		if r.verbScoped[vs.Tool] == nil {
@@ -54,7 +75,38 @@ func New(cfg configrules.BuildtoolsConfig) *Rule {
 			r.valueFlags[tool][name] = arity
 		}
 	}
+	// The tool key is created even when the list is empty or every entry is
+	// rejected: the KEY is the strict-mode switch, so an operator can declare
+	// `"allowedFlags": {"just": []}` to mean "no bare flag is acceptable".
+	for tool, flags := range cfg.AllowedFlags {
+		set := map[string]bool{}
+		for _, f := range flags {
+			if name, ok := parseFlagName(f); ok {
+				set[name] = true
+			}
+		}
+		r.allowedFlags[tool] = set
+	}
 	return r
+}
+
+// parseFlagName validates an allowedFlags entry. It accepts a bare flag NAME and
+// nothing else — no `:<n>` arity (an allowed flag consumes no tokens by
+// definition) and no `=value` (matching is done on the name half of a glued
+// token). Bare `-` and `--` are rejected so the end-of-flags separator can never
+// be declared acceptable.
+//
+// A rejected entry is DROPPED, which NARROWS what may resolve a verb. That is the
+// opposite bias from parseValueFlagSpec — but both are the same rule applied to
+// opposite fields: on failure, prefer the outcome that can only Abstain.
+func parseFlagName(spec string) (string, bool) {
+	if !strings.HasPrefix(spec, "-") || spec == "-" || spec == "--" {
+		return "", false
+	}
+	if strings.ContainsAny(spec, "=:") {
+		return "", false
+	}
+	return spec, true
 }
 
 // parseValueFlagSpec splits a valueFlags entry into its flag name and the number
@@ -147,7 +199,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		// Consumer-configured verb-scoped approvals (additive over the base).
 		if verbs := r.verbScoped[basename]; verbs != nil {
-			if sub := firstSubcommand(pc.Args, r.valueFlags[basename]); sub != "" && verbs[sub] {
+			if sub := firstSubcommand(pc.Args, r.flagPolicyFor(basename)); sub != "" && verbs[sub] {
 				return hookio.RuleResult{
 					Decision: hookio.Approve,
 					Reason:   "approved verb-scoped tool: " + basename + " " + sub,
@@ -188,12 +240,12 @@ func hasSubcommand(args []string, sub string) bool {
 }
 
 // firstSubcommand returns the first non-flag argument that is not consumed as a
-// flag's VALUE, or "".
+// flag's VALUE, or "" when no verb can be resolved. "" can never approve.
 //
-// valueFlags maps a flag name to the number of following tokens it consumes; it
-// is the per-tool data from BuildtoolsConfig.ValueFlags. A nil/empty map yields
-// exactly the historical behavior (skip dash-prefixed tokens, return the first
-// remaining token) — so a tool with no declared value flags is unaffected.
+// p.valueFlags maps a flag name to the number of following tokens it consumes
+// (BuildtoolsConfig.ValueFlags). A nil/empty policy yields exactly the historical
+// behavior — skip dash-prefixed tokens, return the first remaining token — so a
+// tool the consumer has said nothing about is unaffected.
 //
 // Forms handled:
 //   - separated  `-f <path> <verb>`   -> the path is skipped, verb resolves
@@ -203,9 +255,18 @@ func hasSubcommand(args []string, sub string) bool {
 //   - trailing   `just -f`            -> the loop simply runs off the end and
 //     returns "", which cannot approve anything
 //
-// An UNDECLARED value-taking flag stays fail-safe: its value is returned as the
-// "verb", which matches no approval entry, so the command Abstains.
-func firstSubcommand(args []string, valueFlags map[string]int) string {
+// An UNDECLARED value-taking flag is fail-safe in the SEPARATED form only: its
+// value is returned as the "verb", which matches no approval entry. That is NOT
+// enough on its own — in the GLUED form (`--shell=/bin/x <verb>`) the flag and its
+// value are ONE dash-token, so the loop skips both and the real verb resolves.
+//
+// p.strict closes that hole. When the consumer has declared an allowedFlags entry
+// for the tool, a dash-token is skipped ONLY if it is a declared value flag, or a
+// declared allowed flag spelled BARE; anything else ends resolution with "".
+// Every non-canonical spelling lands there: `--shell=/bin/x`, an attached short
+// value (`-E/tmp/x`), a clustered short group (`-nq`), a value glued onto a flag
+// declared boolean (`--quiet=x`), and the end-of-flags separator `--`.
+func firstSubcommand(args []string, p flagPolicy) string {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "" || a[0] != '-' {
@@ -215,7 +276,15 @@ func firstSubcommand(args []string, valueFlags map[string]int) string {
 		if eq := strings.IndexByte(a, '='); eq >= 0 {
 			name, glued = a[:eq], true
 		}
-		n, ok := valueFlags[name]
+		n, ok := p.valueFlags[name]
+		if p.strict && !ok && !(p.allowed[name] && !glued) {
+			// Not a declared value flag, so it must be a declared allowed flag
+			// AND spelled bare. An allowed flag is boolean by declaration, so
+			// `--allowed=value` contradicts the declaration — which is exactly
+			// how a mis-declared dangerous flag (`--shell` listed as allowed)
+			// would otherwise smuggle its value past the verb slot.
+			return ""
+		}
 		if !ok {
 			continue
 		}

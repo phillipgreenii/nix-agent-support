@@ -267,6 +267,17 @@ func justBuildtoolsConfig() configrules.BuildtoolsConfig {
 	cfg.ValueFlags = map[string][]string{
 		"just": {"-f", "--justfile", "-d", "--working-directory", "--color"},
 	}
+	// MIRRORS the homelab consumer config's buildtools.allowedFlags (tc-080p).
+	// Its PRESENCE puts `just` in strict flag checking, which is what makes the
+	// omissions above load-bearing in EVERY spelling rather than only in the
+	// separated one. Every entry is output/verbosity or does strictly less work.
+	cfg.AllowedFlags = map[string][]string{
+		"just": {
+			"--unstable", "-q", "--quiet", "-v", "--verbose", "-n", "--dry-run",
+			"--highlight", "--no-highlight", "--no-aliases", "--no-deps",
+			"--timestamp", "--time", "--explain",
+		},
+	}
 	return cfg
 }
 
@@ -397,10 +408,15 @@ func TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove(t *testing.T) {
 }
 
 // TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains proves the
-// deliberate omission of `just`'s execution-altering value flags is load-bearing:
-// because they are NOT declared, their value occupies the verb slot and the
-// command Abstains rather than approving a recipe run under an operator-supplied
-// shell / dotenv / variable override.
+// deliberate omission of `just`'s execution-altering value flags is load-bearing
+// in the SEPARATED form: the flag's value occupies the verb slot, so the command
+// Abstains rather than approving a recipe run under an operator-supplied shell /
+// dotenv / variable override.
+//
+// The omission alone does NOT cover the glued form — see
+// TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling, which is
+// what actually holds tc-080p closed. This test is kept as the regression pin the
+// bead asks for: the separated form must not stop Abstaining.
 func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
 	r := New(justBuildtoolsConfig())
 	for _, cmd := range []string{
@@ -414,6 +430,263 @@ func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
 			t.Errorf("cmd %q: got %s, want abstain (undeclared value flag must stay fail-safe)", cmd, got.Decision)
+		}
+	}
+}
+
+// --- tc-080p: allowlist (strict) flag checking ---
+
+// TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling is the
+// tc-080p fix. Every flag that changes HOW an approved recipe executes MUST fail
+// to resolve a verb in EVERY spelling — separated, glued with `=`, and bare
+// (boolean) — so the verb-scoped approval cannot fire.
+//
+// The glued column is the reported defect: `just --shell=/bin/evil check` is a
+// single dash-token, so the pre-tc-080p resolver skipped it wholesale, resolved
+// `check`, and APPROVED a recipe run under an operator-supplied shell.
+//
+// The bare column is the reason this is an ALLOW list rather than the DENY list
+// the bead first proposed: `--no-dotenv`, `--shell-command`, `-g`, `--yes`,
+// `--choose`, `-e` and `--allow-missing` all alter execution and none of them
+// appear in the bead's proposed deny list, because they take no value and so
+// never occupied the verb slot to begin with. Under an allowlist they need no
+// enumeration at all — they are simply not on it.
+func TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	// The bead's SAFETY REQUIREMENT set: each MUST Abstain glued AND separated.
+	valueTaking := []string{
+		"--shell", "--shell-arg", "--command", "-c", "--dotenv-path", "-E",
+		"--chooser", "--cygpath", "--tempdir", "--set",
+		// found by reading `just --version 1.51.0 --help`; all missing from the
+		// bead's proposed deny list, all execution-relevant
+		"--dotenv-filename", "--justfile-name", "--ceiling", "--command-color",
+	}
+	for _, f := range valueTaking {
+		for _, cmd := range []string{
+			"just " + f + "=/bin/evil check",  // glued — the tc-080p defect
+			"just " + f + " /bin/evil check",  // separated — already Abstained
+			"just " + f + "=/bin/evil deploy", // and a mutating verb, both ways
+			"just " + f + " /bin/evil deploy",
+			// behind a legitimate navigation flag, so the dangerous flag is not
+			// the first token examined
+			"just -f /repo/justfile " + f + "=/bin/evil check",
+			"just --justfile=/repo/justfile " + f + " /bin/evil check",
+		} {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+				t.Errorf("cmd %q: got %s, want abstain (execution-altering flag must never resolve a verb)", cmd, got.Decision)
+			}
+		}
+	}
+	// Boolean execution-altering flags — no value to displace the verb, so ONLY
+	// the allowlist stops these.
+	for _, f := range []string{
+		"--no-dotenv", "--shell-command", "-g", "--global-justfile", "--yes",
+		"--choose", "-e", "--edit", "--allow-missing", "--one",
+	} {
+		for _, cmd := range []string{
+			"just " + f + " check",
+			"just -f /repo/justfile " + f + " check",
+		} {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+				t.Errorf("cmd %q: got %s, want abstain (undeclared boolean flag must not resolve a verb)", cmd, got.Decision)
+			}
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_NonCanonicalFlagSpellingsAbstain pins the three
+// spellings the bead calls out explicitly. None of them can be expressed as a
+// deny-list entry, and all three are unknown NAMES under the allowlist:
+//
+//   - `--` end-of-flags: it is a dash-token that parseFlagName refuses to accept,
+//     so it can never be declared allowed and always stops resolution. That closes
+//     `just -- --shell=/bin/x check` as a bypass.
+//   - clustered short flags (`-nq`): the cluster is one token whose name matches no
+//     declared flag, so it Abstains rather than silently resolving a verb — even
+//     though every flag INSIDE the cluster is individually allowed.
+//   - an attached short value (`-E/tmp/evil.env`, `-f/repo/justfile`): likewise one
+//     unrecognized token. `-f` attached therefore costs a prompt; the ask-log shows
+//     0 uses of that form against 135 uses of the separated `-f <path>`.
+func TestBuildtools_JustVerbScoped_NonCanonicalFlagSpellingsAbstain(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		// end-of-flags separator, alone and as a bypass attempt
+		"just -- check",
+		"just -- --shell=/bin/x check",
+		"just --shell=/bin/x -- check",
+		"just -f /repo/justfile -- --shell=/bin/x check",
+		// clustered short flags (both members individually allowed)
+		"just -nq check",
+		"just -qv check",
+		// attached short value, dangerous and benign alike
+		"just -E/tmp/evil.env check",
+		"just -c/bin/evil check",
+		"just -f/repo/justfile check",
+		// a value glued onto a flag declared BOOLEAN contradicts the declaration
+		"just --quiet=x check",
+		"just --unstable=1 check",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (unrecognized flag spelling must fail closed)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove is the other half: the
+// allowlist must not cost the forms the consumer actually uses. Everything here
+// resolved and approved before tc-080p and MUST continue to.
+func TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove(t *testing.T) {
+	r := New(justBuildtoolsConfig())
+	for _, cmd := range []string{
+		"just check",
+		"just --quiet check",
+		"just -q -v check",
+		"just --dry-run check",
+		"just --unstable --no-deps test-rules",
+		// declared value flags, separated and GLUED (tc-xjoe must not regress)
+		"just -f /repo/justfile lint-rules",
+		"just -f=/repo/justfile lint-rules",
+		"just --justfile=/repo/justfile check",
+		"just --working-directory=/repo -f /repo/justfile test-rules",
+		"just --color=always -f /repo/justfile check",
+		// allowed booleans interleaved with declared value flags
+		"just --unstable -f /repo/justfile --quiet lint-rules",
+		"just --timestamp --justfile /repo/justfile status kagents",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve (declared/allowed flags must still resolve the verb)", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged is the compatibility guard
+// the bead requires: a tool with NO allowedFlags entry keeps the exact
+// pre-tc-080p behavior, INCLUDING the glued hole. Strictness is opt-in per tool,
+// so adding the field cannot change a consumer that has not adopted it.
+func TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+		ValueFlags:          map[string][]string{"mytool": {"-f"}},
+	})
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"plain verb", "mytool check", hookio.Approve},
+		{"declared value flag", "mytool -f ./cfg check", hookio.Approve},
+		{"unknown boolean flag is skipped", "mytool --whatever check", hookio.Approve},
+		{"unknown glued flag is still skipped (pre-existing behavior)", "mytool --shell=/bin/x check", hookio.Approve},
+		{"end-of-flags is still skipped", "mytool -- check", hookio.Approve},
+		{"unknown separated value flag still eats the verb", "mytool --shell /bin/x check", hookio.Abstain},
+		{"unapproved verb", "mytool run", hookio.Abstain},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
+			if got := r.Evaluate(input); got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s, want %s (no allowedFlags entry must mean no behavior change)", tt.command, got.Decision, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildtools_AllowedFlags_EmptyEntryIsStrict pins the switch itself: it is the
+// PRESENCE of the tool key, not a non-empty list, that turns strictness on. An
+// operator who writes `"allowedFlags": {"mytool": []}` means "this tool takes no
+// bare flags", and a key whose every entry is malformed collapses to the same
+// thing rather than silently reverting to permissive.
+func TestBuildtools_AllowedFlags_EmptyEntryIsStrict(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"empty list", []string{}},
+		{"all entries malformed", []string{"check", "", "-", "--", "--opt=x", "--opt:2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := New(configrules.BuildtoolsConfig{
+				VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+				ValueFlags:          map[string][]string{"mytool": {"-f"}},
+				AllowedFlags:        map[string][]string{"mytool": tc.flags},
+			})
+			cases := []struct {
+				command string
+				want    hookio.Decision
+			}{
+				{"mytool check", hookio.Approve},
+				{"mytool -f ./cfg check", hookio.Approve},
+				{"mytool --whatever check", hookio.Abstain},
+				{"mytool --shell=/bin/x check", hookio.Abstain},
+				{"mytool -- check", hookio.Abstain},
+			}
+			for _, c := range cases {
+				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.command})}
+				if got := r.Evaluate(input); got.Decision != c.want {
+					t.Errorf("cmd %q: got %s, want %s", c.command, got.Decision, c.want)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildtools_AllowedFlags_MisdeclarationFailsSafe records the property that
+// makes this field safe to author, and is the mirror image of the valueFlags
+// hazard documented on parseValueFlagSpec.
+//
+// Declaring a VALUE-TAKING flag as if it were boolean does not over-skip: the
+// value is left in the verb slot, matches no approval, and Abstains. Declaring a
+// flag that does not exist changes nothing. So the worst outcome of a wrong entry
+// here is a prompt — never a wrong Approve.
+func TestBuildtools_AllowedFlags_MisdeclarationFailsSafe(t *testing.T) {
+	r := New(configrules.BuildtoolsConfig{
+		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
+		// --shell actually TAKES a value; declaring it boolean is the mistake.
+		AllowedFlags: map[string][]string{"mytool": {"--shell", "--does-not-exist"}},
+	})
+	for _, cmd := range []string{
+		"mytool --shell /bin/evil check",
+		"mytool --shell=/bin/evil check",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s, want abstain (a mis-declared allowed flag must not approve)", cmd, got.Decision)
+		}
+	}
+	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool --does-not-exist check"})}
+	if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		t.Errorf("declaring a nonexistent flag must be inert: got %s, want approve", got.Decision)
+	}
+}
+
+// TestBuildtools_AllowedFlags_ParseFlagName unit-tests the entry validator. It is
+// stricter than parseValueFlagSpec on purpose: an allowed flag consumes no tokens,
+// so `:<n>` is meaningless, and `=` would confuse a name with a glued token. Bare
+// `-` / `--` are refused so the end-of-flags separator can never be allowlisted.
+func TestBuildtools_AllowedFlags_ParseFlagName(t *testing.T) {
+	cases := []struct {
+		spec     string
+		wantName string
+		wantOK   bool
+	}{
+		{"--quiet", "--quiet", true},
+		{"-q", "-q", true},
+		{"--no-dotenv", "--no-dotenv", true},
+		{"quiet", "", false},
+		{"", "", false},
+		{"-", "", false},
+		{"--", "", false},
+		{"--set:2", "", false},
+		{"--color=always", "", false},
+	}
+	for _, tt := range cases {
+		name, ok := parseFlagName(tt.spec)
+		if name != tt.wantName || ok != tt.wantOK {
+			t.Errorf("parseFlagName(%q) = (%q, %v), want (%q, %v)", tt.spec, name, ok, tt.wantName, tt.wantOK)
 		}
 	}
 }

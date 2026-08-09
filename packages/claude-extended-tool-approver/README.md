@@ -182,6 +182,16 @@ or empty block leaves its rule at the safe base default (the command-aware
     // the verb slot and the command Abstains — so leave execution-altering flags
     // (`--shell`, `-c/--command`, `--dotenv-path`) out on purpose.
     "valueFlags": { "just": ["-f", "--justfile", "-d", "--working-directory"] },
+    // per-tool flags KNOWN not to alter execution. The PRESENCE of a tool key —
+    // even with an empty list — makes that tool STRICT: a dash token is skipped
+    // only if it is a declared value flag or a declared allowed flag spelled BARE,
+    // and anything else resolves NO verb, so the command Abstains. That is what
+    // closes the glued form (`just --shell=/bin/x check`), a bare dangerous flag
+    // (`--no-dotenv`), `--`, a clustered short group (`-nq`) and an attached short
+    // value (`-E/tmp/x`) — none of which a deny list can cover. A tool with no key
+    // here is unchanged. Fails CLOSED: an unlisted flag costs a prompt, never an
+    // approval.
+    "allowedFlags": { "just": ["--quiet", "--verbose", "--dry-run"] },
   },
 
   "ssh": {

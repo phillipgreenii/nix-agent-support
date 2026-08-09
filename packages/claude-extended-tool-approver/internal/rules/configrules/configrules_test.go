@@ -186,6 +186,35 @@ func TestLoad_ParsesVerbScopedApprovals(t *testing.T) {
 	}
 }
 
+// TestLoad_ParsesBuildtoolsFlagFields proves the two flag fields parse from JSON,
+// and — the part that matters for tc-080p — that an EMPTY allowedFlags list is
+// preserved as a present key. The buildtools rule keys strict flag checking on
+// the key's presence, so a loader that dropped an empty list would silently leave
+// the tool permissive.
+func TestLoad_ParsesBuildtoolsFlagFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.json")
+	body := `{"buildtools":{"valueFlags":{"mytool":["-f","--set:2"]},` +
+		`"allowedFlags":{"mytool":["--quiet"],"strictool":[]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Load(path)
+	if got := cfg.Buildtools.ValueFlags["mytool"]; len(got) != 2 || got[0] != "-f" || got[1] != "--set:2" {
+		t.Errorf("valueFlags[mytool] = %v, want [-f --set:2]", got)
+	}
+	if got := cfg.Buildtools.AllowedFlags["mytool"]; len(got) != 1 || got[0] != "--quiet" {
+		t.Errorf("allowedFlags[mytool] = %v, want [--quiet]", got)
+	}
+	got, ok := cfg.Buildtools.AllowedFlags["strictool"]
+	if !ok {
+		t.Error("allowedFlags[strictool] key missing — an empty list MUST survive as a present key")
+	}
+	if len(got) != 0 {
+		t.Errorf("allowedFlags[strictool] = %v, want empty", got)
+	}
+}
+
 // TestLoad_ParsesCommandAwareBlocks proves the loader parses the structured
 // ssh/vault/curl/monorepo sub-configs (WS3) — the schema the ssh, vault, curl,
 // and monorepo rules consume via DI (ADR 0033).
