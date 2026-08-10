@@ -306,10 +306,15 @@ func FuzzTokenize(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, seg string) {
-		tokens, procSubs := tokenize(seg)
-		tokens2, procSubs2 := tokenize(seg)
-		if !reflect.DeepEqual(tokens, tokens2) || !reflect.DeepEqual(procSubs, procSubs2) {
+		tokens, raws, procSubs := tokenize(seg)
+		tokens2, raws2, procSubs2 := tokenize(seg)
+		if !reflect.DeepEqual(tokens, tokens2) || !reflect.DeepEqual(raws, raws2) || !reflect.DeepEqual(procSubs, procSubs2) {
 			t.Fatalf("tokenize(%q) is non-deterministic", seg)
+		}
+		// raws is indexed in lockstep with tokens by extractRedirections' quoting
+		// guard; a length skew would silently read the WRONG token's quoting.
+		if len(raws) != len(tokens) {
+			t.Fatalf("tokenize(%q): %d raws for %d tokens", seg, len(raws), len(tokens))
 		}
 		for _, ps := range procSubs {
 			if !strings.Contains(seg, ps) {

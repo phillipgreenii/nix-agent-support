@@ -401,11 +401,100 @@ func TestHasWriteRedirection(t *testing.T) {
 		{`ls -la > "/tmp/my out"`, true},
 		// /dev/null is exempt only as the WHOLE target, not as a prefix.
 		{"ls -la > /dev/nullish", true},
+
+		// tc-j7k2: a QUOTED redirection character is DATA, not an operator. The
+		// classifier scans raw text, so before the quote mask every one of these
+		// reported a write and the segment was refused.
+		{"grep '>' f", false},
+		{"grep '>>' f", false},
+		{`grep ">" f`, false},
+		{"grep '2>' f", false},
+		{"grep '<>' f", false},
+		{"grep -- '->' f", false},
+		{`docker inspect x --format "{{.Source}} -> {{.Destination}}"`, false},
+		{`echo -n "$u => "`, false},
+		{"grep -n '</content>' f", false},
+		{"awk '{ if ($1 > 2) print }' f", false},
+		// A REAL operator alongside a quoted one is still a write: the mask must
+		// demote only the quoted occurrence, never the whole segment.
+		{"grep '>' f > /tmp/out", true},
+		{`grep ">" f 2> /tmp/err`, true},
+		// Only the OPERATOR consults the mask; a quoted TARGET is still read as
+		// text, so `/dev/null` in quotes stays exempt.
+		{`ls -la > "/dev/null"`, false},
+		{"ls -la > '/dev/null'", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.seg, func(t *testing.T) {
 			if got := hasWriteRedirection(tt.seg); got != tt.want {
 				t.Errorf("hasWriteRedirection(%q) = %v, want %v", tt.seg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_QuotedRedirectionCharIsNotARedirection pins tc-j7k2 end-to-end, at the
+// Evaluate level where the defect was observed: `ssh host "grep '>' f"` Asked
+// with "not a recognized read-only command: grep '>' f", even though `grep` is on
+// every consumer's allowlist and bash redirects nothing there — the `>` is grep's
+// PATTERN.
+//
+// The defect had TWO layers and both are asserted here, because fixing either
+// alone leaves the other:
+//
+//   - rules/ssh's hasWriteRedirection scanned raw text for a `>` byte with no
+//     notion of quoting (the visible symptom); and
+//   - cmdparse's extractRedirections matched operators on the UNQUOTED token, so
+//     `grep '>' f` parsed to executable `grep` with NO arguments and a phantom
+//     `> f` redirection. Left unfixed, that silently swallows the arguments the
+//     subcommand and dangerous-inline-flag checks are meant to inspect.
+//
+// The verdicts tc-85g7 chose are asserted UNCHANGED alongside, because the whole
+// risk of this change is relaxing that line by accident.
+func TestSSH_QuotedRedirectionCharIsNotARedirection(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"deploy"},
+		ReadonlyCommands: []string{"ls", "cat", "grep", "docker", "echo"},
+		DangerousInlineFlags: map[string][]string{
+			"grep": {"--dangerous"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The bead's two shapes.
+		{"quoted gt is grep's pattern", `ssh host "grep '>' f"`, hookio.Approve},
+		{"quoted double gt is grep's pattern", `ssh host "grep '>>' f"`, hookio.Approve},
+		// Corpus shapes carrying a quoted redirection character (rows 4690, 10847).
+		{"quoted arrow in docker format", `ssh host 'docker inspect x --format "{{.Source}} -> {{.Destination}}"'`, hookio.Approve},
+		{"quoted fat arrow in echo", `ssh host 'echo -n "$u => "'`, hookio.Approve},
+
+		// tc-85g7's line, unmoved.
+		{"2>&1 still approved", "ssh host 'ls -la 2>&1'", hookio.Approve},
+		{"2>/dev/null still approved", "ssh host 'ls -la 2>/dev/null'", hookio.Approve},
+		{"> file still asks", "ssh host 'ls -la > /tmp/out'", hookio.Ask},
+		{">> file still asks", "ssh host 'ls -la >> /tmp/out'", hookio.Ask},
+		{"1> file still asks", "ssh host 'ls -la 1> /tmp/out'", hookio.Ask},
+		{"2> file still asks", "ssh host 'ls -la 2> /tmp/err'", hookio.Ask},
+		{"|& tee still asks", "ssh host 'ls -la |& tee /tmp/out'", hookio.Ask},
+
+		// A quoted `>` must not become a way to smuggle a REAL one past the check.
+		{"quoted then real redirect asks", `ssh host "grep '>' f > /tmp/out"`, hookio.Ask},
+		// Nor a way to hide the arguments the other checks read: before the parser
+		// half of the fix, the phantom redirection consumed `--dangerous` as its
+		// target and left Args empty, so the flag became invisible.
+		{"quoted gt does not hide a dangerous flag", `ssh host "grep '>' --dangerous f"`, hookio.Ask},
+		// A non-allowlisted command is refused whatever the quoting.
+		{"non-allowlisted with quoted gt asks", `ssh host "make '>' install"`, hookio.Ask},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := r.Evaluate(input).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
 	}

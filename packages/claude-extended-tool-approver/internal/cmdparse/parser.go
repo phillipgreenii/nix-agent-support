@@ -942,6 +942,52 @@ func (sc *shellScanner) nested() bool {
 	return f.inSingle || f.inDouble || f.inBacktick
 }
 
+// UnquotedMask returns a byte-parallel mask over s: mask[i] is true exactly when
+// s[i] is a LIVE top-level shell byte — one whose OPERATOR meaning is in force —
+// and false when it is inert, i.e. inside single or double quotes, inside a
+// backtick or `$( )` substitution, or is itself one of the quote/substitution
+// bytes that only move the scanner's state.
+//
+// It is the shared shellScanner's state exposed as data, for the callers that
+// cannot use the scanner's streaming form because they must scan a string they
+// did not tokenize themselves (rules/ssh's redirection classifier) or must ask a
+// question ABOUT an already-built token (extractRedirections' quoting guard).
+// Without it each such caller re-hand-writes the quote state machine, which is
+// the drift the scanner was introduced to end.
+//
+// The backslash rule is escapeUnquoted=false, matching tokenize: outside double
+// quotes a backslash is a plain byte, so `\>` reports LIVE. That is the
+// CONSERVATIVE reading for both callers — each of them only ever uses a false
+// mask byte to DEMOTE something from operator to literal, so over-reporting live
+// bytes can only keep the stricter verdict.
+func UnquotedMask(s string) []bool {
+	mask := make([]bool, len(s))
+	sc := newShellScanner(false)
+	for i := 0; i < len(s); {
+		if n := sc.advance(s, i); n > 0 {
+			i += n
+			continue
+		}
+		mask[i] = true
+		i++
+	}
+	return mask
+}
+
+// hasLiveRedirChar reports whether raw (a token's PRE-UNQUOTE text) carries a
+// '<' or '>' in live, unquoted position. A token whose redirection characters
+// are ALL quoted is a literal argument — `grep '>' f` passes `>` to grep and
+// redirects nothing — so it must not be read as an operator.
+func hasLiveRedirChar(raw string) bool {
+	mask := UnquotedMask(raw)
+	for i := 0; i < len(raw); i++ {
+		if mask[i] && (raw[i] == '<' || raw[i] == '>') {
+			return true
+		}
+	}
+	return false
+}
+
 // ExtractComment returns the text of a bash-style inline comment (after the
 // first unquoted '#'), trimmed. Returns "" if none.
 func ExtractComment(cmd string) string {
@@ -1022,11 +1068,11 @@ func Parse(command string) []ParsedCommand {
 		if seg == "" {
 			continue
 		}
-		tokens, procSubs := tokenize(seg)
+		tokens, rawTokens, procSubs := tokenize(seg)
 		if len(tokens) == 0 {
 			continue
 		}
-		tokens, redirs, hasHeredoc := extractRedirections(tokens)
+		tokens, redirs, hasHeredoc := extractRedirections(tokens, rawTokens)
 		leafHeredocs := carried
 		carried = nil
 		// A recorded extent is itself proof of a heredoc, which also closes the
@@ -1469,9 +1515,11 @@ func isDoneKeyword(seg string) bool {
 	return seg == "done" || strings.HasPrefix(seg, "done ") || strings.HasPrefix(seg, "done\t")
 }
 
-func tokenize(s string) ([]string, []string) {
-	var tokens []string
-	var procSubs []string
+// tokenize splits one segment into tokens. It returns THREE parallel-ish
+// results: the unquoted tokens, the RAW (pre-unquote) text of each token — same
+// length and index as tokens, so extractRedirections can ask whether a token's
+// `<`/`>` was quoted — and any process-substitution bodies lifted out.
+func tokenize(s string) (tokens []string, raws []string, procSubs []string) {
 	var buf strings.Builder
 	// escapeUnquoted=false: outside double quotes a backslash stays a plain byte of
 	// the token (tokenize has never collapsed `\(`/`\ ` in bare context).
@@ -1514,6 +1562,7 @@ func tokenize(s string) ([]string, []string) {
 		}
 		if c == ' ' || c == '\t' {
 			if buf.Len() > 0 {
+				raws = append(raws, buf.String())
 				tokens = append(tokens, unquote(buf.String()))
 				buf.Reset()
 			}
@@ -1524,9 +1573,10 @@ func tokenize(s string) ([]string, []string) {
 		i++
 	}
 	if buf.Len() > 0 {
+		raws = append(raws, buf.String())
 		tokens = append(tokens, unquote(buf.String()))
 	}
-	return tokens, procSubs
+	return tokens, raws, procSubs
 }
 
 func unquote(s string) string {
@@ -1575,13 +1625,31 @@ var redirectionOperators = []struct {
 
 // extractRedirections scans tokens for redirection operators and their targets,
 // returning cleaned tokens, collected redirections, and whether a heredoc was found.
-func extractRedirections(tokens []string) (cleaned []string, redirs []hookio.Redirection, hasHeredoc bool) {
+//
+// raws is tokens' PRE-UNQUOTE text at the same indices. It is what makes the scan
+// QUOTE-AWARE: the operator match below runs on the unquoted token, where `'>'`
+// and `>` are the same byte, so without raws a quoted `>` is read as a real
+// redirection — `grep '>' f` parsed to executable `grep`, NO arguments, and a
+// phantom `> f` write. bash redirects nothing there; the `>` is grep's pattern.
+// The guard is purely SUBTRACTIVE: it can only demote a token from operator to
+// literal, never promote one, so nothing that is a redirection today stops being
+// one unless every one of its `<`/`>` bytes is quoted.
+func extractRedirections(tokens []string, raws []string) (cleaned []string, redirs []hookio.Redirection, hasHeredoc bool) {
 	i := 0
 	for i < len(tokens) {
 		tok := tokens[i]
 
 		// Process substitution placeholders should not be treated as redirections
 		if strings.HasPrefix(tok, "<(") || strings.HasPrefix(tok, ">(") {
+			cleaned = append(cleaned, tok)
+			i++
+			continue
+		}
+
+		// A token whose every '<'/'>' is quoted carries no operator, whatever the
+		// unquoted text looks like. `''>f` still redirects (the '>' there IS live),
+		// so the test is per-BYTE liveness, not "the raw starts with a quote".
+		if i < len(raws) && !hasLiveRedirChar(raws[i]) {
 			cleaned = append(cleaned, tok)
 			i++
 			continue

@@ -385,8 +385,12 @@ func (r *Rule) matchesSecretPath(s string) bool {
 //     reading pc.Redirections. The two draw the line in different places —
 //     `2> /tmp/err` creates a real file on the remote host but captures no stdout,
 //     so a Redirections-based test shaped like cmdparse.CapturesStdout would
-//     quietly start approving it. tc-85g7 chose this line; this bead does not move
-//     it.
+//     quietly start approving it. tc-85g7 chose this line; tc-j7k2 re-examined it
+//     and kept it, for a second and independent reason: pc.Redirections does not
+//     even SEE `1> f`, `9> f`, `>| f`, `<>` or `3>&1` (extractRedirections matches
+//     `>`, `>>`, `2>`, `2>>`, `&>`, `<` and nothing else), so those arrive as
+//     ordinary Args and a Redirections-only test would call every one of them
+//     read-only. What tc-j7k2 DID change is that the raw scan is now quote-aware.
 //   - a leaf carrying an ENVIRONMENT ASSIGNMENT is never read-only. cmdparse lifts
 //     `FOO=bar ls` into EnvVars plus executable `ls`, and `env LD_PRELOAD=/evil.so
 //     ls` into that same shape; judging the executable alone would auto-approve
@@ -492,18 +496,32 @@ func carriesSubstitution(raw string) bool {
 // approval prompt; a false "read-only" costs an unreviewed file write on a
 // remote host, so the asymmetry is deliberate.
 //
+// QUOTE-AWARENESS (tc-j7k2). The scan is over the segment's RAW TEXT, because
+// pc.Redirections does not model the shapes this policy turns on — `1> f`,
+// `9> f`, `>| f`, `<>` and `3>&1` all reach ParsedCommand as ARGUMENTS, so a
+// classifier reading only pc.Redirections would call them read-only and start
+// approving remote writes. Scanning raw text is therefore kept, and made
+// quote-aware instead: cmdparse.UnquotedMask marks which bytes carry live
+// operator meaning, and a `<`/`>` inside quotes is skipped. Without that,
+// `ssh host "grep '>' f"` reported grep's own PATTERN as a redirection and
+// Asked. Only OPERATOR detection consults the mask; the TARGET word is still
+// read from the real text, so `> '/dev/null'` stays harmless.
+//
 // Scope note: `|& tee f` needs no special case here — cmdparse.Parse splits the
 // pipe, and the `tee` stage is then refused twice over: it is in no consumer's
 // ReadonlyCommands, and it is not in cmdparse.PipeFilterCmds either, so the
 // pipeline sink check reports it as a writer.
 func hasWriteRedirection(seg string) bool {
-	rs := []rune(seg)
-	for i := 0; i < len(rs); i++ {
-		switch rs[i] {
+	live := cmdparse.UnquotedMask(seg)
+	for i := 0; i < len(seg); i++ {
+		if !live[i] {
+			continue
+		}
+		switch seg[i] {
 		case '<':
 			// `<>` opens the target for reading AND writing; every other input
 			// form (`<`, `<<`, `<<<`, `<&N`) only reads.
-			if i+1 < len(rs) && rs[i+1] == '>' {
+			if i+1 < len(seg) && live[i+1] && seg[i+1] == '>' {
 				return true
 			}
 		case '>':
@@ -511,15 +529,15 @@ func hasWriteRedirection(seg string) bool {
 			// `>|` (clobber) still take a FILE target, so they change nothing
 			// about the classification below.
 			j := i + 1
-			for j < len(rs) && (rs[j] == '>' || rs[j] == '|') {
+			for j < len(seg) && live[j] && (seg[j] == '>' || seg[j] == '|') {
 				j++
 			}
-			if j < len(rs) && rs[j] == '&' {
+			if j < len(seg) && live[j] && seg[j] == '&' {
 				// `N>&WORD`: a bare fd number or `-` duplicates/closes a
 				// descriptor and touches no file. Anything else is bash's
 				// both-streams-to-file form and IS a write.
 				j++
-				word, next := readWord(rs, j)
+				word, next := readWord(seg, j)
 				if word != "-" && !isAllDigits(word) {
 					return true
 				}
@@ -527,10 +545,10 @@ func hasWriteRedirection(seg string) bool {
 				continue
 			}
 			// Ordinary file target, spaced (`> f`) or glued (`>f`).
-			for j < len(rs) && isShellSpace(rs[j]) {
+			for j < len(seg) && isShellSpace(seg[j]) {
 				j++
 			}
-			word, next := readWord(rs, j)
+			word, next := readWord(seg, j)
 			if strings.Trim(word, `"'`) != "/dev/null" {
 				return true
 			}
@@ -540,17 +558,19 @@ func hasWriteRedirection(seg string) bool {
 	return false
 }
 
-// readWord returns the whitespace-delimited word starting at index i and the
-// index just past it. An empty word means the operator had no target.
-func readWord(rs []rune, i int) (string, int) {
+// readWord returns the whitespace-delimited word starting at byte index i and
+// the index just past it. An empty word means the operator had no target. Byte
+// indexing is safe: every delimiter it tests is ASCII, so a multi-byte rune is
+// never split.
+func readWord(s string, i int) (string, int) {
 	j := i
-	for j < len(rs) && !isShellSpace(rs[j]) {
+	for j < len(s) && !isShellSpace(s[j]) {
 		j++
 	}
-	return string(rs[i:j]), j
+	return s[i:j], j
 }
 
-func isShellSpace(c rune) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+func isShellSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
 // isAllDigits reports whether s is a non-empty run of ASCII digits (an fd
 // number). The empty string is NOT a digit run, so a dangling `>&` fails closed.

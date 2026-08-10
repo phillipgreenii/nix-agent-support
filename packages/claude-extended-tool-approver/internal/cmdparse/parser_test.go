@@ -748,7 +748,7 @@ func TestTokenize_QuotedParensInSubstitution(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens, _ := tokenize(tt.input)
+			tokens, _, _ := tokenize(tt.input)
 			if !reflect.DeepEqual(tokens, tt.want) {
 				t.Errorf("tokenize(%q) = %#v, want %#v", tt.input, tokens, tt.want)
 			}
@@ -1155,6 +1155,60 @@ func TestParse_Redirections(t *testing.T) {
 			wantExec: "ls", wantArgs: []string{"-la", "/tmp"},
 			wantRedirs: nil,
 		},
+
+		// tc-j7k2: the operator match runs on the UNQUOTED token, where `'>'` and
+		// `>` are the same byte, so a quoted redirection character was read as a
+		// real operator — and it ate the FOLLOWING token as its target. Every case
+		// below therefore pins TWO things: no phantom Redirection, and the
+		// arguments still present. bash redirects nothing in any of them.
+		{
+			name: "single-quoted gt is an argument", command: "grep '>' f",
+			wantExec: "grep", wantArgs: []string{">", "f"},
+			wantRedirs: nil,
+		},
+		{
+			name: "single-quoted append is an argument", command: "grep '>>' f",
+			wantExec: "grep", wantArgs: []string{">>", "f"},
+			wantRedirs: nil,
+		},
+		{
+			name: "double-quoted gt is an argument", command: `grep ">" f`,
+			wantExec: "grep", wantArgs: []string{">", "f"},
+			wantRedirs: nil,
+		},
+		{
+			name: "quoted fd-prefixed operator is an argument", command: "grep '2>' f",
+			wantExec: "grep", wantArgs: []string{"2>", "f"},
+			wantRedirs: nil,
+		},
+		{
+			// Corpus row 11044: `</content>` was parsed as stdin from the path
+			// `/content>`, and the engine then reported a redirection "from
+			// non-readable path /content>" that the shell never performs.
+			name: "quoted xml close tag is an argument", command: "grep -n '</content>' f",
+			wantExec: "grep", wantArgs: []string{"-n", "</content>", "f"},
+			wantRedirs: nil,
+		},
+		{
+			// Corpus row 4690.
+			name: "quoted arrow in a format string is an argument", command: `docker inspect x --format "{{.Source}} -> {{.Destination}}"`,
+			wantExec: "docker", wantArgs: []string{"inspect", "x", "--format", "{{.Source}} -> {{.Destination}}"},
+			wantRedirs: nil,
+		},
+		{
+			// The guard is SUBTRACTIVE: an unquoted operator in the same command
+			// is unaffected, so a quoted `>` is no way to smuggle a real one past.
+			name: "quoted gt beside a real redirect", command: "grep '>' f > /tmp/out",
+			wantExec: "grep", wantArgs: []string{">", "f"},
+			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "/tmp/out", Kind: hookio.RedirectStdout}},
+		},
+		{
+			// Liveness is per BYTE, not "the raw token starts with a quote": the
+			// operator here is genuinely unquoted even though the token is not.
+			name: "partially quoted target still redirects", command: "echo x >'/tmp/out'",
+			wantExec: "echo", wantArgs: []string{"x"},
+			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "'/tmp/out'", Kind: hookio.RedirectStdout}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1178,6 +1232,44 @@ func TestParse_Redirections(t *testing.T) {
 			}
 			if !reflect.DeepEqual(pc.Redirections, tt.wantRedirs) {
 				t.Errorf("Redirections = %v, want %v", pc.Redirections, tt.wantRedirs)
+			}
+		})
+	}
+}
+
+// TestUnquotedMask pins the shape both callers of the mask rely on: it is
+// BYTE-parallel to its input, true only where a shell operator would be in
+// force. The expectation is written as a marker string so a length or offset
+// skew fails visibly — a mask read one byte off would silently mis-classify the
+// operator next to a quote.
+func TestUnquotedMask(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string // '.' = live (operator meaning in force), '_' = inert
+	}{
+		{"a > b", "....."},
+		{"a '>' b", "..___.."},
+		{`a ">" b`, "..___.."},
+		{"a >'b'", "...___"},
+		{"a `>` b", "..___.."},
+		{"a $(>) b", "..____.."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			mask := UnquotedMask(tt.in)
+			if len(mask) != len(tt.in) {
+				t.Fatalf("UnquotedMask(%q): len %d, want %d", tt.in, len(mask), len(tt.in))
+			}
+			var got strings.Builder
+			for _, live := range mask {
+				if live {
+					got.WriteByte('.')
+				} else {
+					got.WriteByte('_')
+				}
+			}
+			if got.String() != tt.want {
+				t.Errorf("UnquotedMask(%q) = %q, want %q", tt.in, got.String(), tt.want)
 			}
 		})
 	}
