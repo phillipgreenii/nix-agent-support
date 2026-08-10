@@ -56,6 +56,39 @@ func DefaultDBPath() string {
 	return newPath
 }
 
+// synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`
+// immediately after open — before the WAL conversion and before migrate, so it
+// governs every fsync those steps would otherwise perform.
+//
+// Production leaves it EMPTY, so SQLite keeps its default (FULL) and every commit
+// to the ask log is durably flushed. Do not set it from non-test code.
+//
+// The package's own tests set it to "OFF" (see TestMain in store_test.go). Why
+// that seam exists — this is a real, reproducible environment interaction, not a
+// micro-optimisation:
+//
+//   - Creating a store costs ~17 fsyncs: the journal_mode=WAL conversion, plus one
+//     commit per schema migration (migrate runs each migration in its own
+//     transaction), plus the checkpoint on Close.
+//   - Every test builds a throwaway DB under t.TempDir(), so it pays that in full.
+//   - fsync latency is a property of the HOST FILESYSTEM, and it varies by orders
+//     of magnitude. Measured on the Linux dev host for this repo: ~50ms per fsync
+//     on the ext4 root (which backs /tmp, and therefore t.TempDir()), versus
+//     ~0.8us on tmpfs — a ~60,000x spread.
+//   - Result on such a host: the 73-test asklog suite took 2m10s wall for 0.9s of
+//     CPU. It was not hung and not deadlocked; it was ~100% fsync wait. That fits
+//     under `go test`'s 10m default timeout (so the nix check
+//     `claude-extended-tool-approver-go-tests` passed, since mkGoTest passes no
+//     -timeout), but it blows any tighter budget — a `go test -timeout 90s` run
+//     panicked mid-suite with a stack inside modernc sqlite's pager open, which
+//     reads like a hang but is only the timeout landing on whichever test was
+//     current.
+//
+// Durability is meaningless for a database deleted when the test exits, so tests
+// opt out of it. Anything asserting on-disk crash behaviour must set this back to
+// "" for the duration of that test.
+var synchronousPragma string
+
 func NewStore(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
@@ -66,6 +99,12 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
+	if synchronousPragma != "" {
+		if _, err := db.Exec("PRAGMA synchronous=" + synchronousPragma); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("set synchronous: %w", err)
+		}
+	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)

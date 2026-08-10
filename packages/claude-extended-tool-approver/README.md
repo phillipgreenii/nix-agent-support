@@ -269,6 +269,40 @@ or empty block leaves its rule at the safe base default (the command-aware
 
 Background-shell tracking: on **PostToolUse** of a `run_in_background` Bash call, the resulting shell id is recorded (SQLite `background_shells` table, `internal/asklog`) so the **killshell** rule can verify ownership.
 
+## Testing
+
+```bash
+go test ./...
+```
+
+The suite is **I/O-bound, not CPU-bound**, because most of it exercises the SQLite ask
+log. Every test builds a throwaway database under `t.TempDir()`, and creating one costs
+roughly 17 `fsync` calls (the `journal_mode=WAL` conversion, one commit per schema
+migration, and the close checkpoint).
+
+`fsync` latency is a property of the **host filesystem** and varies by orders of
+magnitude — measured on the Linux dev host for this repo, ~50ms per `fsync` on the ext4
+root that backs `/tmp` versus ~0.8us on tmpfs, a ~60,000x spread. On the slow end that
+is enough to dominate wall-clock time entirely.
+
+Two consequences worth knowing before you tune a timeout:
+
+- `internal/asklog` sets `PRAGMA synchronous=OFF` for its own tests via `TestMain`
+  (see `synchronousPragma` in `internal/asklog/store.go`). Durability is meaningless for
+  a database deleted at test exit, and without this the 73-test package took **2m10s of
+  wall clock for 0.9s of CPU** on a slow-`fsync` host; with it, **1.2s**. Production is
+  unaffected and still runs at SQLite's default `synchronous=FULL`.
+- `cmd/claude-extended-tool-approver` tests exec the **real binary** as a subprocess, so
+  they deliberately run production code with full durability. That package is therefore
+  the slowest one (~1 minute on a slow-`fsync` host) and cannot use the pragma seam.
+
+If this suite ever looks like it is hanging, check wall-clock against CPU time first. A
+`go test` timeout panic whose stack sits inside `modernc.org/sqlite`'s pager open is the
+signature of slow `fsync`, **not** a deadlock — the timeout simply lands on whichever
+test happened to be running. The nix check
+(`checks.<system>.claude-extended-tool-approver-go-tests`) passes no `-timeout`, so it
+gets Go's 10m default and has headroom; a tighter budget may not.
+
 ## Dependencies
 
 Go deps are not vendored. The Nix build uses `vendorHash` to fetch modules reproducibly. After changing Go dependencies (adding/removing imports, `go get -u`, etc.), refresh the hash:

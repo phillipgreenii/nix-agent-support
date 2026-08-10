@@ -10,6 +10,24 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TestMain makes every store this package opens non-durable.
+//
+// Each test creates a fresh DB under t.TempDir(), and each creation costs ~17
+// fsyncs (WAL conversion + one commit per migration + the close checkpoint).
+// fsync latency is a host-filesystem property that spans orders of magnitude:
+// ~50ms per fsync on this repo's ext4 Linux dev host versus ~0.8us on tmpfs.
+// At the slow end that made this 73-test suite take 2m10s of wall clock for
+// 0.9s of CPU — pure I/O wait, which presents as an apparent hang whenever the
+// caller sets a -timeout below the 10m Go default. See synchronousPragma in
+// store.go for the full write-up.
+//
+// A test that needs real durability semantics must restore synchronousPragma to
+// "" for its own duration.
+func TestMain(m *testing.M) {
+	synchronousPragma = "OFF"
+	os.Exit(m.Run())
+}
+
 func TestNewStore_CreatesDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
