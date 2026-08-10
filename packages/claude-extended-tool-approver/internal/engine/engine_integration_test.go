@@ -1208,20 +1208,39 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		{"row 244438: bound path is sed -i'd", "f=\"$r/.git/info/exclude\"\ncat \"$f\"\nsed -i '' '/^x$/d' \"$f\"", hookio.Reject},
 		{"bound path written by redirection", "f=/repo/.git/config\necho x > \"$f\"", hookio.Reject},
 
-		// --- Class 3, READ half: decisive Ask, no longer a hard deny ---
-		{"cat the config", "cat .git/config", hookio.Ask},
-		{"ls the hooks dir", "ls -la .git/hooks", hookio.Ask},
-		{"stat a ref", "stat .git/refs/heads/main", hookio.Ask},
-		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Ask},
+		// --- Class 3, READ half: Approve (tc-k2m3), no longer a hard deny or an Ask ---
+		// These four are the shapes behind tc-k2m3's 14 cited rows, all of which the
+		// operator approved 100% of the time. A single literal-path leaf, so gitdir's
+		// Approve is the whole verdict.
+		{"cat the config", "cat .git/config", hookio.Approve},
+		{"ls the hooks dir", "ls -la .git/hooks", hookio.Approve},
+		{"stat a ref", "stat .git/refs/heads/main", hookio.Approve},
+		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Approve},
 		// The contrast to `mv` above: copying FROM git metadata does not modify the
-		// source, so it must stay Ask. Without this the mv fix would be indexed as
-		// "any two-operand command is a write" and the Class-3 fix would regress.
-		{"cp FROM gitmeta stays a read", "cp .git/config /tmp/backup", hookio.Ask},
+		// SOURCE, so the direction model classifies it a read. Without this case the mv
+		// fix would be indexed as "any two-operand command is a write".
+		//
+		// It now AUTO-APPROVES, and that is a real widening, not a bookkeeping update:
+		// `.git/config` can carry a token in a remote URL, so this shape copies a
+		// credential-bearing file to an arbitrary destination with no prompt. It is the
+		// direct consequence of "reads approve" meeting a read whose destination is a
+		// write, and it is NOT covered by tc-k2m3's evidence (those 14 rows are
+		// cat/ls/stat/readlink, never a copy-out). Recorded here and tracked as its own
+		// bead rather than silently absorbed; see gitdir.go's KNOWN GAP note.
+		{"cp FROM gitmeta stays a read — and now auto-approves (see KNOWN GAP)", "cp .git/config /tmp/backup", hookio.Approve},
 		// Row 167117's shape: a rebase-merge path bound then only inspected.
-		{"row 167117: bound path only read", "RM=/repo/.git/worktrees/slot-c/rebase-merge\nls -la \"$RM\"\ncat \"$RM/done\"", hookio.Ask},
+		//
+		// Abstain, NOT Approve. gitdir speaks only at the leaf holding the literal
+		// `.git/` token (the assignment) and is silent at the consuming leaves, which
+		// see a bare `$RM`. Approve is 0 and Abstain is 1, so under the engine's
+		// most-restrictive fold the silent siblings dominate — and no later rule
+		// positively approves them either, because the variable's value is not
+		// statically known. The net effect for bound-path reads is therefore a demotion
+		// from Ask to "no opinion" (defer to Claude Code), not an auto-approval.
+		{"row 167117: bound path only read", "RM=/repo/.git/worktrees/slot-c/rebase-merge\nls -la \"$RM\"\ncat \"$RM/done\"", hookio.Abstain},
 		// Row 163591's shape: the read happens INSIDE a command substitution, which
-		// cmdparse.Parse leaves glued into the outer leaf's token.
-		{"row 163591: bound hooks path read in a substitution", "h=\"$r/.git/hooks\"\necho \"active -> $(grep -m1 prek \"$h/pre-commit\")\"", hookio.Ask},
+		// cmdparse.Parse leaves glued into the outer leaf's token. Same fold as above.
+		{"row 163591: bound hooks path read in a substitution", "h=\"$r/.git/hooks\"\necho \"active -> $(grep -m1 prek \"$h/pre-commit\")\"", hookio.Abstain},
 
 		// --- Class 1: PROSE mentioning a path is not an access ---
 		// Row 126856's shape: a notification payload whose bead title named
@@ -1425,11 +1444,20 @@ func TestIntegration_HeredocExtents(t *testing.T) {
 	// with a heredoc must not erase that: Ask outranks the heredoc leaf's Abstain floor,
 	// so the fold is Ask whichever side the heredoc is on. Before this bead BOTH
 	// spellings answered Abstain — gitdir's Ask silently dropped.
+	//
+	// tc-k2m3 moved the read verdict from Ask to Approve, which changes what this
+	// particular pairing can prove. Approve (0) is BELOW the heredoc leaf's Abstain
+	// floor (1), so the floor now legitimately dominates and the paired verdict is
+	// Abstain — the same answer a total discard of gitdir's verdict would give. This
+	// case therefore still pins ORDER-INDEPENDENCE, which is the property the parser
+	// bug actually broke, but it can no longer discriminate a dropped verdict on its
+	// own. The subtest immediately below carries that half: a Reject outranks the
+	// floor, so a discard there is still visible.
 	t.Run("both orderings of gitmeta-read + heredoc agree", func(t *testing.T) {
 		const body = "the .git/index is 0 bytes"
 		solo := decide("grep -n foo .git/config")
-		if solo.Decision != hookio.Ask {
-			t.Fatalf("precondition: the non-heredoc leaf alone = %v, want ask", solo.Decision)
+		if solo.Decision != hookio.Approve {
+			t.Fatalf("precondition: the non-heredoc leaf alone = %v, want approve", solo.Decision)
 		}
 		heredocFirst := decide("cat <<'EOF' && grep -n foo .git/config\n" + body + "\nEOF")
 		heredocLast := decide("grep -n foo .git/config && cat <<'EOF'\n" + body + "\nEOF")
@@ -1437,9 +1465,11 @@ func TestIntegration_HeredocExtents(t *testing.T) {
 			t.Fatalf("verdict depends on heredoc POSITION: heredoc-first = %v, heredoc-last = %v",
 				heredocFirst.Decision, heredocLast.Decision)
 		}
-		if heredocFirst.Decision != solo.Decision {
-			t.Fatalf("the non-heredoc leaf's decision was discarded: with heredoc = %v, alone = %v",
-				heredocFirst.Decision, solo.Decision)
+		// The fold of the solo verdict against the heredoc leaf's Abstain floor.
+		want := hookio.MostRestrictive(solo, hookio.RuleResult{Decision: hookio.Abstain}).Decision
+		if heredocFirst.Decision != want {
+			t.Fatalf("paired verdict = %v, want %v (solo %v folded against the heredoc Abstain floor)",
+				heredocFirst.Decision, want, solo.Decision)
 		}
 	})
 

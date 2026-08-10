@@ -10,23 +10,63 @@
 //     with confidence 1.0 and consistent with ceta's other hard-block rules
 //     (`assume` Rejects assume-role; `config-rules` Rejects blocked basenames).
 //   - a READ (`ls`, `cat`, `grep`, `readlink`, `[ -e ]`, `head`, `wc`, `stat`,
-//     `diff`) is a DECISIVE Ask: never auto-approved, still surfaced to the user
-//     on every access, but USER-OVERRIDABLE.
+//     `diff`) is APPROVED (tc-k2m3).
 //   - an access whose direction cannot be determined is treated as a WRITE.
 //
-// Why reads are Ask and not Reject. A non-overridable deny on a read-only
-// inspection is the failure mode most likely to get the whole guard disabled,
-// which is strictly worse security than a prompt — the same reasoning that
-// demoted `ENV` from Reject to Ask in the env-var rule (see
-// envvars.injectorAskVars). Reads of `.git/hooks/*` and `.git/worktrees/*/rebase-merge/*`
-// are ordinary diagnostic traffic that no git porcelain command exposes, and the
-// old blanket Reject also emitted a reason claiming the user was MODIFYING
-// metadata when they were only listing it. Ask keeps the rule decisive, so a read
-// can still never be silently approved by path-safety or safe-commands.
+// THE READ SIDE HAS NOW SOFTENED TWICE, and only the read side has ever moved.
+// It shipped as a blanket Reject, became a decisive Ask (pg2-3hk7t), and is now
+// an Approve; the write-side Reject is the load-bearing protection and is
+// unchanged at every step. The first softening was because a non-overridable
+// deny on a read-only inspection is the failure mode most likely to get the whole
+// guard disabled — the rule reproduced against the orchestrator mid-triage and
+// blocked read-only calls during the very run that found it. The second is the
+// same argument carried to its end: of the 113 historical `deny` rows in the
+// decision DB not one still replays as `deny`, and every one of the 14 rows that
+// remained at `ask` was APPROVED by the operator — 100%, no denial — so the
+// prompt was pure friction. Reads of `.git/config`, `.git/hooks/*` and
+// `.git/worktrees/*/rebase-merge/*` are ordinary diagnostic traffic that no git
+// porcelain command exposes; `.git/config` in particular is the standard
+// diagnostic for the author-identity and `core.hooksPath` problems that recur
+// throughout that corpus.
 //
-// Why reads are Ask and not Allow: an Allow would auto-approve silently and
-// short-circuit every later rule for that leaf (engine.Evaluate is
-// first-match-wins and this rule runs in the early band).
+// # KNOWN GAP: an approving read SHORT-CIRCUITS the rest of the chain (tc-k2m3)
+//
+// engine.Evaluate is FIRST-MATCH-WINS and this rule sits at position 2 of
+// setup.RuleChain — after the consumer `config-rules`, but BEFORE
+// `path-traversal`, `secrets`, `path-safety` and `safe-commands`. A DECISIVE
+// verdict of any kind ends the chain for that leaf. That was harmless while the
+// read verdict was Ask, because Ask outranks anything those later rules could
+// have contributed anyway; it is NOT harmless now that the verdict is Approve,
+// the least restrictive verdict there is. Three consequences, each measured
+// through the real chain rather than reasoned about:
+//
+//   - CREDENTIALS IN `.git/config`. A remote URL can carry an embedded token
+//     (`https://x-access-token:ghp_…@github.com/…`), and `secrets` is the rule
+//     that would prompt before handing a credential to a reader. It does not
+//     cover this, and the ordering is not why: secretpath.IsSecret is false for
+//     EVERY `.git/` path, so the coverage is absent outright rather than merely
+//     masked (pinned by TestGitDir_SecretsDoesNotCoverGitPaths). An embedded
+//     token in `.git/config` is therefore readable with no prompt.
+//   - PATH TRAVERSAL. `cat ../../../../etc/passwd/../.git/config` asked via
+//     `path-traversal` while this rule said Ask; it now approves here and
+//     `path-traversal` is never consulted.
+//   - OUT-OF-PROJECT READS. `cat /elsewhere/.git/config` lands outside the
+//     project root, where `path-safety` yields Abstain (defer to Claude Code);
+//     it now approves.
+//
+// These are RECORDED, not endorsed. The operator decision was that reads
+// approve, and the three shapes above are the residue that decision does not
+// itself settle. The structural fix is NOT to widen secretpath to match `.git/`
+// — that addresses only the first shape, and only if this rule also stopped
+// short-circuiting. It is to make the read verdict NON-DECISIVE (Abstain) so the
+// later rules still run. That was MEASURED against the whole decision DB, not
+// merely proposed: it yields the identical verdict for every row cited on
+// tc-k2m3 (`safe-commands` approves an ordinary `cat`/`ls` of a readable path)
+// and differs from this Approve on only 16 rows of the entire corpus, each one a
+// row where no later rule positively approves and the verdict therefore defers
+// to Claude Code instead of auto-approving — while restoring the traversal Ask
+// and the out-of-project Abstain. That is a composition change with its own
+// blast radius and belongs in its own bead.
 //
 // SYNTACTIC ROLE, not bare text. A git-metadata path token is a violation only
 // when it is a path the command actually OPERATES ON. The rule therefore parses
@@ -128,8 +168,8 @@ func (r *Rule) verdict(d direction) hookio.RuleResult {
 		}
 	}
 	return hookio.RuleResult{
-		Decision: hookio.Ask,
-		Reason:   "reading git metadata under .git/ requires confirmation",
+		Decision: hookio.Approve,
+		Reason:   "reading git metadata under .git/ is a read-only inspection",
 		Module:   r.Name(),
 	}
 }
