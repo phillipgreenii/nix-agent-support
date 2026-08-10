@@ -259,10 +259,10 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 			if !isGitMetadataPath(rd.Path) {
 				continue
 			}
-			if rd.Kind == hookio.RedirectStdin {
-				note(dirRead)
-			} else {
+			if rd.Kind.IsWrite() {
 				note(dirWrite)
+			} else {
+				note(dirRead)
 			}
 		}
 		// An assignment BINDS a path; it accesses nothing itself. Its direction is
@@ -538,7 +538,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 	// is the shell, not the executable, so `echo x > "$f"` must not inherit echo's
 	// read-only classification.
 	for _, rd := range pc.Redirections {
-		if rd.Kind != hookio.RedirectStdin && target(rd.Path) {
+		if rd.Kind.IsWrite() && target(rd.Path) {
 			return dirWrite
 		}
 	}

@@ -795,6 +795,28 @@ func TestEngine_EvaluateExpression_RedirectionPaths(t *testing.T) {
 		{"stdout to project", "cmd > /tmp/project/out.txt", hookio.Approve},
 		{"stdout to readonly", "cmd > /nix/store/bad.txt", hookio.Reject},
 		{"stdin from unknown", "cmd < /home/other/file", hookio.Abstain},
+
+		// tc-xs8x: every one of these write spellings reached this check as an
+		// ordinary ARGUMENT, so the protected path was never evaluated and the
+		// leaf's own rule verdict (Approve) stood. `1>` is exactly `>`, so a single
+		// extra character defeated the guard. The reference row above — `cmd >
+		// /nix/store/bad.txt` — is the verdict each of these must now match.
+		{"fd 1 to readonly", "cmd 1> /nix/store/bad.txt", hookio.Reject},
+		{"high fd to readonly", "cmd 9> /nix/store/bad.txt", hookio.Reject},
+		{"high fd append to readonly", "cmd 3>> /nix/store/bad.txt", hookio.Reject},
+		{"read-write open of readonly", "cmd <> /nix/store/bad.txt", hookio.Reject},
+		{"clobber to readonly", "cmd >| /nix/store/bad.txt", hookio.Reject},
+		{"both-streams to readonly", "cmd >& /nix/store/bad.txt", hookio.Reject},
+		{"both-streams append to readonly", "cmd &>> /nix/store/bad.txt", hookio.Reject},
+		{"varname fd to readonly", "cmd {fd}> /nix/store/bad.txt", hookio.Reject},
+		{"fd 1 to project is still fine", "cmd 1> /tmp/project/out.txt", hookio.Approve},
+
+		// NEGATIVES: descriptor duplication and close create no file, so they must
+		// not be path-checked — otherwise the ubiquitous `2>&1` idiom would start
+		// demanding approval.
+		{"fd duplication is not a write", "cmd 3>&1", hookio.Approve},
+		{"fd close is not a write", "cmd 7>&-", hookio.Approve},
+		{"stderr duplication is not a write", "cmd 2>&1", hookio.Approve},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

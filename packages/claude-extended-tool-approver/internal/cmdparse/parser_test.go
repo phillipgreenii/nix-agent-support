@@ -1209,6 +1209,137 @@ func TestParse_Redirections(t *testing.T) {
 			wantExec: "echo", wantArgs: []string{"x"},
 			wantRedirs: []hookio.Redirection{{Operator: ">", Path: "'/tmp/out'", Kind: hookio.RedirectStdout}},
 		},
+
+		// tc-xs8x: the operator table modelled only `>`, `>>`, `2>`, `2>>`, `&>`
+		// and `<`. EVERY other write spelling reached ParsedCommand as an ordinary
+		// ARG, so the engine's protected-path check never saw a redirection —
+		// `echo pwned 1> /etc/passwd`, exactly equivalent to `>`, was APPROVED.
+		// Each case below pins the widened spelling as a real redirection AND the
+		// disappearance of the token from Args, which is what made it invisible.
+		{
+			name: "fd 1 is stdout", command: "echo pwned 1> /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+		},
+		{
+			name: "fd 1 glued", command: "echo pwned 1>/etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "1>", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+		},
+		{
+			name: "high fd is a path write on its own descriptor", command: "echo pwned 9> /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "9>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+		},
+		{
+			name: "high fd append", command: "echo pwned 3>> /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "3>>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+		},
+		{
+			name: "stderr append keeps its kind", command: "echo pwned 2>> /tmp/err",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "2>>", Path: "/tmp/err", Kind: hookio.RedirectStderr}},
+		},
+		{
+			// `<>` opens the target for reading AND WRITING and may create it, so it
+			// is classified as a write. It used to parse as stdin from the path `>`,
+			// leaving /etc/passwd as an argument to echo.
+			name: "read-write open is a write", command: "echo pwned <> /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hookio.RedirectReadWrite}},
+		},
+		{
+			name: "read-write open glued", command: "echo pwned <>/etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "<>", Path: "/etc/passwd", Kind: hookio.RedirectReadWrite}},
+		},
+		{
+			// `>|` also had to stop being SPLIT: splitCompound consumed the `|` as a
+			// pipe, which dropped the redirection as a dangling operator and turned
+			// the target into a bogus executable of its own leaf.
+			name: "clobber operator is one redirection", command: "echo pwned >| /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+		},
+		{
+			name: "clobber operator glued", command: "echo pwned >|/etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: ">|", Path: "/etc/passwd", Kind: hookio.RedirectStdout}},
+		},
+		{
+			// `>& WORD` is a file target when WORD is neither a descriptor number
+			// nor `-`; bash sends BOTH streams there, hence RedirectAll.
+			name: "ampersand form with a file target", command: "echo pwned >& /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: ">&", Path: "/etc/passwd", Kind: hookio.RedirectAll}},
+		},
+		{
+			name: "both-streams append", command: "echo pwned &>> /tmp/all.log",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "&>>", Path: "/tmp/all.log", Kind: hookio.RedirectAll}},
+		},
+		{
+			// bash's open-and-assign form: it CREATES the file and stores the new
+			// descriptor in $fd, so it writes a path exactly as `>` does.
+			name: "varname fd open-and-assign", command: "echo pwned {fd}> /etc/passwd",
+			wantExec: "echo", wantArgs: []string{"pwned"},
+			wantRedirs: []hookio.Redirection{{Operator: "{fd}>", Path: "/etc/passwd", Kind: hookio.RedirectOtherFD}},
+		},
+
+		// --- tc-xs8x NEGATIVES: things that must NOT become path writes ---
+		{
+			// N>&M DUPLICATES a descriptor; no file is created. Only `2>&1`, `>&2`,
+			// `1>&2`, `2>&-` and `>&-` were recognised before, by exact token match.
+			name: "fd duplication on an arbitrary descriptor", command: "cmd 3>&1",
+			wantExec: "cmd", wantArgs: []string{}, wantRedirs: nil,
+		},
+		{
+			name: "fd duplication onto stderr", command: "cmd 9>&2",
+			wantExec: "cmd", wantArgs: []string{}, wantRedirs: nil,
+		},
+		{
+			name: "fd close on an arbitrary descriptor", command: "cmd 7>&-",
+			wantExec: "cmd", wantArgs: []string{}, wantRedirs: nil,
+		},
+		{
+			// The dup test reads the TARGET WORD, so the spaced spelling is covered
+			// by the same branch rather than by a second exact-token list.
+			name: "spaced fd duplication", command: "cmd 2>& 1",
+			wantExec: "cmd", wantArgs: []string{}, wantRedirs: nil,
+		},
+		{
+			// The INPUT family is deliberately untouched: an fd-prefixed read cannot
+			// create a file, and modelling it could only convert an argument into a
+			// readability check — the opposite of this bead's direction.
+			name: "fd-prefixed input stays an argument", command: "cat 3< /etc/passwd",
+			wantExec: "cat", wantArgs: []string{"3<", "/etc/passwd"}, wantRedirs: nil,
+		},
+		{
+			// tc-j7k2's quoting guard runs FIRST and still wins: the widened grammar
+			// never sees a token whose every `<`/`>` is quoted.
+			name: "quoted fd-prefixed operator is an argument", command: "grep '1>' f",
+			wantExec: "grep", wantArgs: []string{"1>", "f"}, wantRedirs: nil,
+		},
+		{
+			name: "quoted clobber operator is an argument", command: "grep '>|' f",
+			wantExec: "grep", wantArgs: []string{">|", "f"}, wantRedirs: nil,
+		},
+		{
+			name: "quoted read-write operator is an argument", command: "grep '<>' f",
+			wantExec: "grep", wantArgs: []string{"<>", "f"}, wantRedirs: nil,
+		},
+		{
+			// A digit run with no operator after it is just an argument.
+			name: "bare digits are an argument", command: "cmd 123",
+			wantExec: "cmd", wantArgs: []string{"123"}, wantRedirs: nil,
+		},
+		{
+			// Brace EXPANSION is unsupported syntax and must not be mistaken for the
+			// `{varname}` descriptor form — a comma is not a variable name.
+			name: "brace expansion is not a descriptor", command: "cmd {a,b}>x",
+			wantExec: "cmd", wantArgs: []string{"{a,b}>x"}, wantRedirs: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1232,6 +1363,43 @@ func TestParse_Redirections(t *testing.T) {
 			}
 			if !reflect.DeepEqual(pc.Redirections, tt.wantRedirs) {
 				t.Errorf("Redirections = %v, want %v", pc.Redirections, tt.wantRedirs)
+			}
+		})
+	}
+}
+
+// TestParse_ClobberOperatorIsNotAPipe pins the SPLIT half of tc-xs8x. `>|` is
+// bash's clobber redirection, but splitCompound consumed the `|` as a pipe
+// separator, so `echo pwned >| /etc/passwd` became TWO leaves — `echo pwned >`
+// (whose dangling operator was dropped) and `/etc/passwd` (a bogus executable).
+// The redirection therefore never reached the engine's path check at all.
+//
+// The guard is on the previous LIVE byte, not on s[i-1], so an ESCAPED `\>`
+// followed by a real pipe still splits. Mis-gluing there would swallow the next
+// command into this segment and remove a leaf from evaluation — the dangerous
+// direction.
+func TestParse_ClobberOperatorIsNotAPipe(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		wantExecs []string
+	}{
+		{"clobber is one leaf", "echo pwned >| /etc/passwd", []string{"echo"}},
+		{"clobber glued to its target", "echo pwned >|/etc/passwd", []string{"echo"}},
+		{"clobber then a real separator", "echo a >| /tmp/x && echo b", []string{"echo", "echo"}},
+		{"a real pipe still splits", "echo a > /tmp/x | cat", []string{"echo", "cat"}},
+		{"an escaped gt does not make a clobber", `echo \>|cat`, []string{"echo", "cat"}},
+		{"a quoted gt does not make a clobber", "grep '>'|cat", []string{"grep", "cat"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.command)
+			var execs []string
+			for _, pc := range got {
+				execs = append(execs, pc.Executable)
+			}
+			if !reflect.DeepEqual(execs, tt.wantExecs) {
+				t.Errorf("Parse(%q) executables = %v, want %v", tt.command, execs, tt.wantExecs)
 			}
 		})
 	}

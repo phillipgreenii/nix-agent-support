@@ -78,6 +78,23 @@ var fuzzSeeds = []string{
 	// the next line's command (pg2-t4uyx class; fixed in splitCompound).
 	"echo hi;#\"x\nrm -rf /etc",
 	"git status &#\"y\nrm -rf ~",
+	// tc-xs8x: the widened redirection grammar. `>|` is the one spelling that also
+	// changes SPLITTING (the `|` is part of the operator, not a pipe), so the
+	// atomicity and determinism invariants above are the ones that matter here.
+	"echo pwned 1> /etc/passwd",
+	"echo pwned 9>>/etc/passwd",
+	"echo pwned <> /etc/passwd",
+	"echo pwned >| /etc/passwd",
+	"echo pwned >& /etc/passwd",
+	"echo pwned {fd}> /etc/passwd",
+	"echo a >| /tmp/x && echo b",
+	`echo \>|cat`,
+	"cmd 3>&1 9>&2 7>&-",
+	"cmd 2>& 1",
+	"cmd >|",
+	"cmd 9>",
+	"cmd {fd",
+	"cmd {a,b}>x",
 	// pg2-3ggxm command-substitution paren desync: a single-quoted region inside
 	// $(...) whose contents carry parens (a jq/awk filter). Quote tracking used to
 	// be disabled inside $(...) and any ')' decremented the substitution depth, so

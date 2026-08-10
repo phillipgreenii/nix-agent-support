@@ -160,14 +160,32 @@ type RedirectionKind int
 
 const (
 	RedirectStdin  RedirectionKind = iota // <
-	RedirectStdout                        // >, >>
-	RedirectStderr                        // 2>, 2>>
-	RedirectAll                           // &>
+	RedirectStdout                        // >, >>, >|, 1>, 1>>, 1>|
+	RedirectStderr                        // 2>, 2>>, 2>|
+	RedirectAll                           // &>, &>>, >& FILE
+	// RedirectOtherFD is a write to a PATH on a descriptor that is neither stdout
+	// nor stderr: `9> f`, `3>> f`, `{fd}> f`. It is a file write like any other —
+	// every write-direction consumer must treat it as one — but it captures no
+	// stdout, so cmdparse.CapturesStdout deliberately does NOT count it.
+	RedirectOtherFD
+	// RedirectReadWrite is bash's `<>` open: the target is opened for reading AND
+	// writing, and may be created. It is classified as a WRITE (it is checked for
+	// writability, not readability) because creating/modifying the target is the
+	// direction that matters to a permission gate.
+	RedirectReadWrite
 )
+
+// IsWrite reports whether the redirection can CREATE OR MODIFY its target.
+// Everything that is not a pure read (`<`) is a write, so a kind added later
+// fails closed rather than silently becoming read-only.
+func (k RedirectionKind) IsWrite() bool { return k != RedirectStdin }
 
 // Redirection represents a parsed I/O redirection.
 type Redirection struct {
-	Operator string          // "<", ">", ">>", "2>", "2>>", "&>"
+	// Operator is the operator text AS WRITTEN, including any file-descriptor
+	// prefix: "<", ">", ">>", ">|", ">&", "<>", "1>", "2>>", "9>", "{fd}>", "&>",
+	// "&>>". A consumer MUST classify by Kind, never by matching this string.
+	Operator string
 	Path     string          // target file path
 	Kind     RedirectionKind // classification
 }

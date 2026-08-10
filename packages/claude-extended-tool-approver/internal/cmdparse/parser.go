@@ -6,7 +6,10 @@ package cmdparse
 //     cmd1 & cmd2 (bare '&' background separator; '&>', '>&', '2>&1' preserved)
 //   - Quoting: double quotes (with backslash escapes), single quotes (literal)
 //   - Environment prefixes: FOO=bar cmd
-//   - Redirections: <, >, >>, 2>, 2>>, &>, herestrings (<<<)
+//   - Redirections: any [FD]OP[TARGET] where FD is empty, a descriptor number, or
+//     bash's `{varname}` open-and-assign form, and OP is one of <, >, >>, >|, >&,
+//     <>, &>, &>>; plus fd duplication/close N>&M / N>&- (dropped: no file target)
+//     and herestrings (<<<)
 //   - Heredocs (<<, <<-, quoted or unquoted delimiter): the BODY is an opaque extent
 //     lifted out before splitting, never leaves and never args — see heredoc.go
 //   - Command substitution: $(cmd), `cmd`
@@ -1220,6 +1223,19 @@ func splitCompound(s string) []segment {
 	pendingPipe := false
 	// escapeUnquoted: a bare `\(` must not be read as a subshell start (find \( … \)).
 	sc := newShellScanner(true)
+	// prevLive is the previous byte this scan emitted as a LIVE top-level byte, or
+	// 0 when the last bytes consumed were inert (quoted, escaped, or inside a
+	// substitution) or were a separator. It exists for exactly one decision: bash's
+	// CLOBBER operator `>|` is a REDIRECTION, not a pipe, so `cmd >| f` is one
+	// segment (tc-xs8x). Splitting it produced `cmd >` and `f` — the redirection was
+	// dropped as a dangling operator and `f` became a bogus executable, so the
+	// protected-path check never ran on the target.
+	//
+	// Reading s[i-1] directly (as the '&' guard below still does) would misread an
+	// ESCAPED `\>|`, where the `>` is a literal byte and the `|` a real pipe;
+	// mis-gluing there would swallow the following command into this segment and
+	// silently remove a leaf from evaluation, which is the dangerous direction.
+	var prevLive byte
 	flush := func() {
 		// A WHITESPACE-ONLY buffer is not a segment. Parse has always discarded such
 		// segments (it trims and skips), but emitting one here would consume the
@@ -1240,6 +1256,7 @@ func splitCompound(s string) []segment {
 		if n := sc.advance(s, i); n > 0 {
 			_, _ = buf.WriteString(s[i : i+n])
 			i += n
+			prevLive = 0
 			continue
 		}
 		c := s[i]
@@ -1259,6 +1276,7 @@ func splitCompound(s string) []segment {
 				i++
 			}
 			// i now points to \n or past end; let the outer loop handle \n as a splitter
+			prevLive = 0
 			continue
 		}
 		// Bare subshell grouping: ( cmd1; cmd2 )
@@ -1295,6 +1313,7 @@ func splitCompound(s string) []segment {
 					pendingPipe = false
 					result = append(result, innerSegs...)
 					i = j
+					prevLive = 0
 					continue
 				}
 			}
@@ -1304,6 +1323,7 @@ func splitCompound(s string) []segment {
 			if two == "&&" || two == "||" {
 				flush()
 				i += 2
+				prevLive = 0
 				continue
 			}
 		}
@@ -1314,9 +1334,18 @@ func splitCompound(s string) []segment {
 		if c == '&' && (i+1 >= len(s) || s[i+1] != '>') && (i == 0 || s[i-1] != '>') {
 			flush()
 			i++
+			prevLive = 0
 			continue
 		}
 		if c == ';' || c == '|' || c == '\n' {
+			// `>|` is bash's CLOBBER redirection operator: this `|` belongs to the
+			// operator and separates nothing (tc-xs8x).
+			if c == '|' && prevLive == '>' {
+				buf.WriteByte(c)
+				prevLive = c
+				i++
+				continue
+			}
 			flush()
 			if c == '|' {
 				// `||` is consumed by the two-char block above, so this is a real pipe:
@@ -1324,9 +1353,11 @@ func splitCompound(s string) []segment {
 				pendingPipe = true
 			}
 			i++
+			prevLive = 0
 			continue
 		}
 		buf.WriteByte(c)
+		prevLive = c
 		i++
 	}
 	flush()
@@ -1609,18 +1640,142 @@ func unquote(s string) string {
 	return s
 }
 
-// redirectionOperators maps shell redirection operators to their RedirectionKind.
-// Ordered longest-first so prefix matching works correctly.
-var redirectionOperators = []struct {
-	op   string
-	kind hookio.RedirectionKind
-}{
-	{"2>>", hookio.RedirectStderr},
-	{"2>", hookio.RedirectStderr},
-	{"&>", hookio.RedirectAll},
-	{">>", hookio.RedirectStdout},
-	{">", hookio.RedirectStdout},
-	{"<", hookio.RedirectStdin},
+// redirectionOperators WAS a fixed table of six operator spellings — `2>>`, `2>`,
+// `&>`, `>>`, `>` and `<` — matched by exact token or string prefix. It is gone,
+// replaced by the fd-prefix grammar below (splitFDPrefix + redirectionCore +
+// redirectionKind), because a FIXED TABLE cannot express the descriptor prefix
+// and therefore modelled only three of bash's write spellings.
+//
+// That was a live SECURITY bypass (tc-xs8x): every unmodelled spelling reached
+// ParsedCommand as an ordinary ARG, so the engine's protected-path check never
+// saw a redirection at all and `echo pwned 1> /etc/passwd` — exactly equivalent
+// to `>` — was APPROVED while `echo pwned > /etc/passwd` abstained. Writing one
+// extra character defeated the guard; `9>`, `<>`, `>|`, `>&` and `N>>` did too.
+//
+// The grammar below recognizes `[FD]OP[TARGET]` where FD is empty, a descriptor
+// number, or bash's `{varname}` open-and-assign form, and OP is one of `>`, `>>`,
+// `>|`, `>&`, `<>`, `<`, `&>`, `&>>`. It composes with — never bypasses — the
+// quoting guard tc-j7k2 added: extractRedirections still consults
+// hasLiveRedirChar on the token's PRE-UNQUOTE text first, so `grep '>' f` yields
+// no redirection and keeps its `f` argument.
+
+// splitFDPrefix splits a candidate redirection token into its optional
+// file-descriptor prefix and the operator text that follows.
+//
+// Two spellings carry a descriptor. A literal NUMBER (`2>`, `9>>`) selects an
+// existing descriptor. bash's `{varname}>` form OPENS the target and stores the
+// new descriptor in $varname — it creates/truncates a file exactly as `>` does,
+// so it is a write and must be modelled as one. The varname shape is required to
+// match precisely (`[A-Za-z_][A-Za-z0-9_]*`) so that brace expansion, which this
+// parser does not support, is left alone: `{a,b}>x` has a comma, fails the test,
+// and falls through to the pre-existing "ordinary argument" behavior.
+//
+// ok is false only for the empty token; a token with no digits and no brace form
+// simply yields an empty fd, and the caller's operator match then decides.
+func splitFDPrefix(tok string) (fd, rest string, ok bool) {
+	if tok == "" {
+		return "", "", false
+	}
+	if tok[0] == '{' {
+		end := strings.IndexByte(tok, '}')
+		if end < 0 || !isVarName(tok[1:end]) {
+			return "", "", false
+		}
+		return tok[:end+1], tok[end+1:], true
+	}
+	i := 0
+	for i < len(tok) && tok[i] >= '0' && tok[i] <= '9' {
+		i++
+	}
+	return tok[:i], tok[i:], true
+}
+
+func isVarName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '_', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// redirectionCore matches the operator that follows a descriptor prefix and
+// returns it, or "" when rest does not begin with one.
+//
+// `&>` / `&>>` (redirect BOTH streams) take no descriptor prefix — `2&>` is not a
+// redirection — and neither does a bare `<`. Restricting `<` to fd == "" is
+// deliberate and conservative: an INPUT redirection cannot write, so widening it
+// to `3< f` would only convert an argument into a READ check, which can flip an
+// abstain into an approve. This bead's direction is the opposite one, so the
+// input family is left exactly as it was.
+func redirectionCore(fd, rest string) string {
+	switch {
+	case fd == "" && strings.HasPrefix(rest, "&>>"):
+		return "&>>"
+	case fd == "" && strings.HasPrefix(rest, "&>"):
+		return "&>"
+	case strings.HasPrefix(rest, "<>"):
+		return "<>"
+	case strings.HasPrefix(rest, ">>"):
+		return ">>"
+	case strings.HasPrefix(rest, ">|"):
+		return ">|"
+	case strings.HasPrefix(rest, ">&"):
+		return ">&"
+	case strings.HasPrefix(rest, ">"):
+		return ">"
+	case fd == "" && strings.HasPrefix(rest, "<"):
+		return "<"
+	}
+	return ""
+}
+
+// redirectionKind classifies a (descriptor, operator) pair. Kinds exist so that
+// consumers can ask what STREAM is affected without re-parsing operator text:
+// only stdout-bearing kinds capture a command's payload (cmdparse.CapturesStdout),
+// while every non-stdin kind is a write for the engine's path check.
+func redirectionKind(fd, core string) hookio.RedirectionKind {
+	switch core {
+	case "<":
+		return hookio.RedirectStdin
+	case "<>":
+		return hookio.RedirectReadWrite
+	case "&>", "&>>":
+		return hookio.RedirectAll
+	case ">&":
+		// `>& FILE` with NO descriptor is bash's both-streams form. With an
+		// explicit descriptor the construct is ambiguous in bash; fall through to
+		// the descriptor's own classification, which is the conservative reading.
+		if fd == "" {
+			return hookio.RedirectAll
+		}
+	}
+	switch fd {
+	case "", "1":
+		return hookio.RedirectStdout
+	case "2":
+		return hookio.RedirectStderr
+	}
+	return hookio.RedirectOtherFD
 }
 
 // extractRedirections scans tokens for redirection operators and their targets,
@@ -1633,7 +1788,9 @@ var redirectionOperators = []struct {
 // phantom `> f` write. bash redirects nothing there; the `>` is grep's pattern.
 // The guard is purely SUBTRACTIVE: it can only demote a token from operator to
 // literal, never promote one, so nothing that is a redirection today stops being
-// one unless every one of its `<`/`>` bytes is quoted.
+// one unless every one of its `<`/`>` bytes is quoted. tc-xs8x WIDENED the
+// operator grammar underneath it and deliberately kept the guard in front, so the
+// widening cannot resurrect the phantom redirection tc-j7k2 removed.
 func extractRedirections(tokens []string, raws []string) (cleaned []string, redirs []hookio.Redirection, hasHeredoc bool) {
 	i := 0
 	for i < len(tokens) {
@@ -1651,12 +1808,6 @@ func extractRedirections(tokens []string, raws []string) (cleaned []string, redi
 		// so the test is per-BYTE liveness, not "the raw starts with a quote".
 		if i < len(raws) && !hasLiveRedirChar(raws[i]) {
 			cleaned = append(cleaned, tok)
-			i++
-			continue
-		}
-
-		// Check for fd duplication patterns: 2>&1, >&2, etc.
-		if tok == "2>&1" || tok == ">&2" || tok == "1>&2" || tok == "2>&-" || tok == ">&-" {
 			i++
 			continue
 		}
@@ -1682,44 +1833,41 @@ func extractRedirections(tokens []string, raws []string) (cleaned []string, redi
 			continue
 		}
 
-		// Try to match a redirection operator
-		matched := false
-		for _, ro := range redirectionOperators {
-			if tok == ro.op {
-				// Operator is a standalone token; next token is the path
-				if i+1 < len(tokens) {
-					redirs = append(redirs, hookio.Redirection{
-						Operator: ro.op,
-						Path:     tokens[i+1],
-						Kind:     ro.kind,
-					})
-					i += 2
-				} else {
-					// No path follows — skip the dangling operator
-					i++
-				}
-				matched = true
-				break
-			}
-			if strings.HasPrefix(tok, ro.op) {
-				// Operator and path glued together, e.g. "2>/dev/null"
-				path := tok[len(ro.op):]
-				redirs = append(redirs, hookio.Redirection{
-					Operator: ro.op,
-					Path:     path,
-					Kind:     ro.kind,
-				})
-				i++
-				matched = true
-				break
-			}
+		// Try to match a redirection operator: [FD]OP[TARGET], where the TARGET is
+		// glued to the operator ("2>/dev/null") or is the next token ("2> /dev/null").
+		fd, rest, okFD := splitFDPrefix(tok)
+		core := ""
+		if okFD {
+			core = redirectionCore(fd, rest)
 		}
-		if matched {
+		if core == "" {
+			cleaned = append(cleaned, tok)
+			i++
 			continue
 		}
-
-		cleaned = append(cleaned, tok)
-		i++
+		target, consumed := rest[len(core):], 1
+		if target == "" && i+1 < len(tokens) {
+			target, consumed = tokens[i+1], 2
+		}
+		if core == ">&" && (target == "-" || isAllDigits(target)) {
+			// `N>&M` DUPLICATES a descriptor and `N>&-` CLOSES one. Neither names a
+			// path and neither creates a file, so both are dropped rather than
+			// recorded — this is the branch that keeps `2>&1` off the write path.
+			// The test is on the TARGET WORD, so it covers the spaced form too.
+			i += consumed
+			continue
+		}
+		if target == "" {
+			// Dangling operator with nothing after it — nothing to path-check.
+			i++
+			continue
+		}
+		redirs = append(redirs, hookio.Redirection{
+			Operator: fd + core,
+			Path:     target,
+			Kind:     redirectionKind(fd, core),
+		})
+		i += consumed
 	}
 	if len(redirs) == 0 {
 		redirs = nil

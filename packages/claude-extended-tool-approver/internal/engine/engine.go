@@ -551,18 +551,21 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			continue
 		}
 		access := pe.Evaluate(r.Path)
-		switch r.Kind {
-		case hookio.RedirectStdin:
+		// Kind.IsWrite is the fail-closed test: everything that is not the pure
+		// read `<` is checked for WRITABILITY, so a redirection kind added later
+		// (tc-xs8x added two) lands on the write branch by default rather than
+		// silently becoming read-only here.
+		if !r.Kind.IsWrite() {
 			if !access.CanRead() {
 				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: stdin from non-readable path " + r.Path, Module: "engine"}
 			}
-		default:
-			if access == patheval.PathReadOnly {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
-			}
-			if !access.CanWrite() {
-				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
-			}
+			continue
+		}
+		if access == patheval.PathReadOnly {
+			return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
+		}
+		if !access.CanWrite() {
+			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
 		}
 	}
 	if dynamic != nil {
