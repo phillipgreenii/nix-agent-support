@@ -708,3 +708,107 @@ func TestHasInPlaceFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestGitDir_PipeToWritingSinkIsACopyOut pins tc-vul7: the THIRD spelling of a
+// copy-out, a PIPE into a stage that writes what it receives.
+//
+//	cat .git/config | tee /tmp/backup
+//
+// copies exactly what `cp .git/config /tmp/backup` and `cat .git/config >
+// /tmp/backup` copy — tc-403c already Asks on both — yet it auto-approved, because
+// cmdparse consumed `|` exactly like `;`/`&&` and recorded no relation between the
+// stages. Standing at the `cat` leaf the rule could not tell `| tee /tmp/x` from
+// `| grep url`. The relation is now recorded (cmdparse PipelineID/PipelineIndex)
+// and read through cmdparse.DownstreamStages.
+//
+// The FILTER half is asserted just as hard as the writer half, and is the reason
+// this is an allowlist rather than a denylist of sinks: `| grep`, `| head`, `| jq`
+// are how `.git/config` is read in practice, so a fix that prompted on them would
+// re-create the friction that softened the read side twice already (tc-k2m3).
+func TestGitDir_PipeToWritingSinkIsACopyOut(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The bead's named shape and its relatives: the sink PERSISTS the payload.
+		{"pipe to tee", "cat .git/config | tee /tmp/backup", hookio.Ask},
+		{"pipe to tee -a", "cat .git/config | tee -a /tmp/backup", hookio.Ask},
+		{"pipe to dd of=", "cat .git/config | dd of=/tmp/x", hookio.Ask},
+		{"pipe to sponge", "cat .git/config | sponge /tmp/x", hookio.Ask},
+		{"pipe to a stage that redirects", "cat .git/config | cat > /tmp/x", hookio.Ask},
+		{"a filter that redirects is still a capture", "cat .git/config | grep url > /tmp/x", hookio.Ask},
+		{"the writer can be further down the pipeline", "cat .git/config | grep url | tee /tmp/x", hookio.Ask},
+		{"an UNKNOWN sink fails closed", "cat .git/config | frobnicate", hookio.Ask},
+		{"a sink that runs an arbitrary command fails closed", "cat .git/config | xargs -I{} echo {}", hookio.Ask},
+		{"a shell as the sink fails closed", "cat .git/config | sh", hookio.Ask},
+		{"a listing piped to a writer", "ls -la .git/hooks | tee /tmp/list", hookio.Ask},
+		{"a filter with a writing flag", "cat .git/config | sort -o /tmp/x", hookio.Ask},
+
+		// The FILTER half: a stage that consumes without persisting is not a copy-out.
+		{"pipe to grep", "cat .git/config | grep url", hookio.Abstain},
+		{"pipe to head", "cat .git/config | head -5", hookio.Abstain},
+		{"pipe to wc", "cat .git/config | wc -l", hookio.Abstain},
+		{"pipe to jq", "cat .git/config | jq .", hookio.Abstain},
+		{"pipe to sed without -i", "cat .git/config | sed 's/a/b/'", hookio.Abstain},
+		{"pipe to awk", "cat .git/config | awk '{print $1}'", hookio.Abstain},
+		{"pipe to sort without -o", "cat .git/config | sort", hookio.Abstain},
+		{"a chain of filters", "cat .git/config | grep url | head -1 | cut -d= -f2", hookio.Abstain},
+		{"a filter discarding into /dev/null", "cat .git/config | grep url > /dev/null", hookio.Abstain},
+		{"the git read is DOWNSTREAM, not upstream", "cat /tmp/x | grep -c url .git/config", hookio.Abstain},
+
+		// `|` must not be confused with the separators that carry no data.
+		{"&& is not a pipe", "cat .git/config && tee /tmp/x", hookio.Abstain},
+		{"; is not a pipe", "cat .git/config ; tee /tmp/x", hookio.Abstain},
+		{"|| is not a pipe", "cat .git/config || tee /tmp/x", hookio.Abstain},
+		{"a tee in a LATER pipeline is not this one's sink", "cat .git/config | grep url && echo hi | tee /tmp/x", hookio.Abstain},
+		{"no pipe at all", "cat .git/config", hookio.Abstain},
+
+		// The write side is untouched by any of this.
+		{"a write piped to a filter still Rejects", "sed -i 's/a/b/' .git/config | grep x", hookio.Reject},
+		{"a write piped to a writer still Rejects", "rm -rf .git/objects | tee /tmp/x", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Decision(hookio.Approve)
+			for _, leaf := range leavesOf(tt.command) {
+				in := &hookio.HookInput{
+					ToolName:       "Bash",
+					ToolInput:      bashJSON(leaf),
+					RootExpression: tt.command,
+				}
+				if d := r.Evaluate(in).Decision; d > got {
+					got = d
+				}
+			}
+			if got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGitDir_PipeSinkWithoutRootExpression pins the DIRECT-call path (tc-vul7):
+// with no RootExpression the rule falls back to the leaf text as its own scope, so
+// a whole pipeline handed to Evaluate in one piece is still classified. This is the
+// shape `ceta check` and any non-engine caller produce, and without the fallback
+// they would silently keep the old auto-approve.
+func TestGitDir_PipeSinkWithoutRootExpression(t *testing.T) {
+	r := New()
+	tests := []struct {
+		command string
+		want    hookio.Decision
+	}{
+		{"cat .git/config | tee /tmp/backup", hookio.Ask},
+		{"cat .git/config | grep url", hookio.Abstain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", ToolInput: bashJSON(tt.command)}
+			if got := r.Evaluate(in).Decision; got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

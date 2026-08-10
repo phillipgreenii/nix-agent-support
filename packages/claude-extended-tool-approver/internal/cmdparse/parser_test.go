@@ -644,10 +644,10 @@ func TestParse_Row167529_NoPhantomEnvVars(t *testing.T) {
 func reachableExecutables(cmd string) []string {
 	var out []string
 	for _, seg := range splitCompound(cmd) {
-		for _, sub := range EnumerateSubstitutions(seg) {
+		for _, sub := range EnumerateSubstitutions(seg.text) {
 			out = append(out, reachableExecutables(sub.Body)...)
 		}
-		for _, pc := range Parse(seg) {
+		for _, pc := range Parse(seg.text) {
 			if pc.Executable == "" {
 				continue
 			}
@@ -1651,5 +1651,121 @@ func TestNormalizeCommand_LongDistinctNotCollapsed(t *testing.T) {
 	}
 	if !strings.HasSuffix(b, " BBB") {
 		t.Errorf("key b should preserve the full command past 120 chars, got %q", b)
+	}
+}
+
+// TestParse_PipelineRelation pins tc-vul7: `|` is no longer indistinguishable from
+// the other compound operators once a leaf has been split out.
+//
+// splitCompound treated `|`, `;`, `&&`, `||` and `&` identically — it flushed a
+// segment and dropped the operator — so the ONE relation that says "this leaf's
+// stdout is that leaf's stdin" was destroyed at parse time. No rule could recover
+// it: a leaf's own Parse shows a single stage, and RootExpression carries the
+// expression's TEXT but not its structure. The gitdir rule was the first caller to
+// need it (it cannot tell `cat .git/config | tee /tmp/x` from `| grep url`), but
+// the need is generic to any rule reasoning about where a leaf's OUTPUT goes.
+//
+// The assertions are on the STRUCTURE, not on any rule's policy: which leaves share
+// a pipeline, in what order, and — the half that matters as much — which do NOT.
+func TestParse_PipelineRelation(t *testing.T) {
+	type stage struct {
+		raw string
+		id  int
+		idx int
+	}
+	tests := []struct {
+		name string
+		cmd  string
+		want []stage
+	}{
+		{"a lone command is a one-stage pipeline", "cat .git/config", []stage{
+			{"cat .git/config", 0, 0},
+		}},
+		{"two stages of one pipeline", "cat .git/config | tee /tmp/x", []stage{
+			{"cat .git/config", 0, 0}, {"tee /tmp/x", 0, 1},
+		}},
+		{"three stages keep their order", "a | b | c", []stage{
+			{"a", 0, 0}, {"b", 0, 1}, {"c", 0, 2},
+		}},
+		// The operators that carry NO data must start a fresh pipeline.
+		{"&& starts a new pipeline", "a && b", []stage{{"a", 0, 0}, {"b", 1, 0}}},
+		{"|| starts a new pipeline", "a || b", []stage{{"a", 0, 0}, {"b", 1, 0}}},
+		{"; starts a new pipeline", "a ; b", []stage{{"a", 0, 0}, {"b", 1, 0}}},
+		{"& starts a new pipeline", "a & b", []stage{{"a", 0, 0}, {"b", 1, 0}}},
+		{"a newline starts a new pipeline", "a\nb", []stage{{"a", 0, 0}, {"b", 1, 0}}},
+		{"mixed operators", "a | b && c | d", []stage{
+			{"a", 0, 0}, {"b", 0, 1}, {"c", 1, 0}, {"d", 1, 1},
+		}},
+		// A pipe spanning a newline is still one pipeline: bash continues the line
+		// after `|`, and treating the newline as a separator would break the relation.
+		{"a pipe continued over a newline", "a |\nb", []stage{{"a", 0, 0}, {"b", 0, 1}}},
+		// Subshell groups. The whitespace between `)` and `|` must not become a
+		// phantom segment that separates the group from its sink.
+		{"pipe out of a group", "(a; b) | c", []stage{
+			{"a", 0, 0}, {"b", 1, 0}, {"c", 1, 1},
+		}},
+		{"pipe into a group", "a | (b; c)", []stage{
+			{"a", 0, 0}, {"b", 0, 1}, {"c", 1, 0},
+		}},
+		// A loop body reads the pipeline's payload through its condition, so the
+		// `read` must stay the stage downstream of the producer.
+		{"pipe into a while-read loop", "cat .git/config | while read l; do echo $l; done", []stage{
+			{"cat .git/config", 0, 0}, {"read l", 0, 1}, {"echo $l", 1, 0},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			if len(leaves) != len(tt.want) {
+				t.Fatalf("Parse(%q) produced %d leaves, want %d: %+v", tt.cmd, len(leaves), len(tt.want), leaves)
+			}
+			for i, w := range tt.want {
+				got := leaves[i]
+				if got.Raw != w.raw || got.PipelineID != w.id || got.PipelineIndex != w.idx {
+					t.Errorf("leaf %d = {raw:%q id:%d idx:%d}, want {raw:%q id:%d idx:%d}",
+						i, got.Raw, got.PipelineID, got.PipelineIndex, w.raw, w.id, w.idx)
+				}
+			}
+		})
+	}
+}
+
+// TestDownstreamStages pins the accessor rules read the pipeline relation through
+// (tc-vul7). The negative cases are the load-bearing ones: a caller that got
+// downstream stages for a `&&` sibling, or for a leaf whose text it merely
+// resembles, would prompt on commands that pipe nothing anywhere.
+func TestDownstreamStages(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		leafRaw string
+		want    []string
+	}{
+		{"the sink of a two-stage pipeline", "cat .git/config | tee /tmp/x", "cat .git/config", []string{"tee /tmp/x"}},
+		{"every stage after this one", "a | b | c", "a", []string{"b", "c"}},
+		{"only the stages AFTER it", "a | b | c", "b", []string{"c"}},
+		{"the last stage has none", "a | b | c", "c", nil},
+		{"an && sibling is not downstream", "cat .git/config && tee /tmp/x", "cat .git/config", nil},
+		{"a later pipeline's sink is not downstream", "cat .git/config | grep x && y | tee /tmp/x", "cat .git/config", []string{"grep x"}},
+		{"an unmatched leaf yields nothing", "a | b", "nosuchleaf", nil},
+		// A word list is DATA, not a stage: it carries PipelineID -1 and must never
+		// be reported, in either direction.
+		{"a for word list is not a stage", "for f in *.md; do echo $f; done | tee /tmp/x", "*.md", nil},
+		// Repeated text unions every occurrence rather than picking one, so a caller
+		// cannot be shown the harmless half of an ambiguous match.
+		{"repeated text unions both pipelines", "a | b ; a | tee /tmp/x", "a", []string{"b", "tee /tmp/x"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DownstreamStages(Parse(tt.cmd), tt.leafRaw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("DownstreamStages(%q, %q) returned %d stages, want %d: %+v", tt.cmd, tt.leafRaw, len(got), len(tt.want), got)
+			}
+			for i, w := range tt.want {
+				if got[i].Raw != w {
+					t.Errorf("stage %d = %q, want %q", i, got[i].Raw, w)
+				}
+			}
+		})
 	}
 }

@@ -3,14 +3,16 @@
 // git porcelain rather than by an agent poking at the files (a hook-support
 // parity capability; GitDirectoryEvaluator).
 //
-// Decision policy, by DIRECTION of the access (pg2-3hk7t, tc-k2m3, tc-403c):
+// Decision policy, by DIRECTION of the access (pg2-3hk7t, tc-k2m3, tc-403c,
+// tc-vul7):
 //
 //   - a WRITE (`sed -i`, `>`, `rm`, `mv`/`cp` onto it, `tee`, `chmod`, …) is
 //     Rejected. This is the hard security block, matching hook-support's DENY
 //     with confidence 1.0 and consistent with ceta's other hard-block rules
 //     (`assume` Rejects assume-role; `config-rules` Rejects blocked basenames).
 //   - a COPY-OUT — a read whose DESTINATION is a write (`cp .git/config /tmp/x`,
-//     `cat .git/config > /tmp/x`, `ln -s .git/config /tmp/link`) — Asks.
+//     `cat .git/config > /tmp/x`, `ln -s .git/config /tmp/link`,
+//     `cat .git/config | tee /tmp/x`) — Asks.
 //   - a plain READ (`ls`, `cat`, `grep`, `readlink`, `[ -e ]`, `head`, `wc`,
 //     `stat`, `diff`) ABSTAINS: no verdict, the rest of the chain decides.
 //   - an access whose direction cannot be determined is treated as a WRITE.
@@ -76,6 +78,25 @@
 // and says yes. So the credential-bearing file still reached an arbitrary
 // destination with no prompt, by the one command shape tc-k2m3's 14 rows never
 // contained.
+//
+// THREE SPELLINGS, ONE ACCESS. `cp .git/config /tmp/backup`,
+// `cat .git/config > /tmp/backup` and `cat .git/config | tee /tmp/backup` copy the
+// same bytes to the same place, so they MUST reach the same verdict or the
+// treatment is decoration. tc-403c closed the first two; the third stayed open
+// only because cmdparse discarded the pipe relation at the split, leaving no way
+// to tell `| tee /tmp/x` from `| grep url` at leaf scope. tc-vul7 records that
+// relation in the parser rather than re-deriving it here — see pipeScope, and the
+// argument for putting it there in cmdparse.ParsedCommand's PipelineID doc.
+//
+// SINKS ARE AN ALLOWLIST, not a denylist (pipeFilterCmds): a stage that is not
+// positively known to consume-without-persisting is treated as a writer. That is
+// tc-080p's settled direction and tc-403c's undeterminable-access rule, and its
+// measured cost here is ZERO — replaying all 16,756 non-excluded corpus rows
+// before and after moves exactly ONE decision class, and no row at all: of 111
+// leaves that name a `.git` path with a downstream stage, every sink observed is
+// `head`, `grep`, `sort`, `tail`, `wc`, `jq`, `cut`, `paste`, `xargs` or a `while
+// read`, and the 11 rows carrying a non-filter sink are all `find … -not -path
+// '*/.git/*'` exclusions the role model already declines to match.
 //
 // The FAILURE DIRECTION is the design: a copy-out fails toward PROMPTING. Ask is
 // decisive, so it does short-circuit the chain — harmlessly, because Ask outranks
@@ -208,13 +229,15 @@ func (r *Rule) verdict(d direction) hookio.RuleResult {
 
 // bashAccess reports whether leafText operates on a path inside a `.git`
 // directory, and in which direction. scopeText is the whole expression leafText
-// was split out of, used to resolve the direction of a path bound to a variable.
+// was split out of, used to resolve the direction of a path bound to a variable
+// and to resolve where a stage's output is PIPED (see pipeScope).
 func bashAccess(leafText, scopeText string) (direction, bool) {
 	dir, matched := dirRead, false
 	note := func(d direction) {
 		dir = worse(dir, d)
 		matched = true
 	}
+	pipes := newPipeScope(scopeText)
 	for _, pc := range cmdparse.Parse(leafText) {
 		// `git` is the sanctioned porcelain this rule funnels access through, so its
 		// own ARGUMENTS are never a violation and the dedicated `git` rule judges
@@ -228,7 +251,7 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 		if !gitPorcelain {
 			for _, tok := range pathOperands(pc) {
 				if isGitMetadataPath(tok) {
-					note(commandDirection(pc, func(s string) bool { return s == tok }))
+					note(commandDirection(pc, func(s string) bool { return s == tok }, pipes))
 				}
 			}
 		}
@@ -246,7 +269,7 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 		// whatever the expression later does with the variable.
 		for _, ev := range pc.EnvVars {
 			if isGitMetadataPath(ev.Value) {
-				note(bindingDirection(ev.Name, scopeText))
+				note(bindingDirection(ev.Name, scopeText, pipes))
 			}
 		}
 	}
@@ -268,14 +291,14 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 // the right one to err on here: corpus row 237336 binds `.git/config` and then
 // `git config --unset-all`s it, which is a genuine write no read/write table for
 // bare `git` would catch without modelling every subcommand — the `git` rule's job.
-func bindingDirection(name, scope string) direction {
+func bindingDirection(name, scope string, pipes *pipeScope) direction {
 	dir, used := dirRead, false
 	for _, pc := range scopeLeaves(scope, 0) {
 		if !leafReferencesVar(pc, name) {
 			continue
 		}
 		used = true
-		dir = worse(dir, commandDirection(pc, func(s string) bool { return referencesVar(s, name) }))
+		dir = worse(dir, commandDirection(pc, func(s string) bool { return referencesVar(s, name) }, pipes))
 		if dir == dirWrite {
 			break
 		}
@@ -565,7 +588,7 @@ var excludeValueFlags = map[string]bool{
 
 // commandDirection classifies how pc accesses the operand(s) selected by target.
 // Anything not positively known to be read-only is a write (fail safe).
-func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direction {
+func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes *pipeScope) direction {
 	// A redirection ONTO the target is a write whatever the command is: the writer
 	// is the shell, not the executable, so `echo x > "$f"` must not inherit echo's
 	// read-only classification.
@@ -585,7 +608,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direc
 		if hasInPlaceFlag(args) {
 			return dirWrite
 		}
-		return readOrCapture(pc)
+		return readOrCapture(pc, pipes)
 	case copyLikeCmds[base]:
 		// A destination-bearing flag inverts the geometry, so the last operand is
 		// no longer the destination and must not be read as one.
@@ -606,7 +629,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direc
 		if hasAnyFlag(args, mutatingFlags[base]) {
 			return dirWrite
 		}
-		return readOrCapture(pc)
+		return readOrCapture(pc, pipes)
 	}
 	return dirWrite
 }
@@ -623,22 +646,137 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direc
 // /dev/null, the tty, an inherited fd — is likewise not a capture
 // (hookio.IsSafeRedirectTarget).
 //
-// KNOWN RESIDUE, deliberately not addressed here: a PIPE to a writing sink
-// (`cat .git/config | tee /tmp/backup`) is the same exfiltration, but cmdparse
-// hands each pipeline stage to the rule as its own leaf and records no pipe
-// relation between them, so this rule cannot tell that sink from a `| grep url`
-// filter without modelling the pipeline. That is a cmdparse capability, not a
-// verdict question, and it is unchanged by this bead rather than opened by it.
-func readOrCapture(pc cmdparse.ParsedCommand) direction {
+// A PIPE to a writing sink (`cat .git/config | tee /tmp/backup`) is the same
+// exfiltration by a third spelling and is classified here too (tc-vul7), via
+// pipeScope. It was tc-403c's KNOWN RESIDUE for a reason that has since been
+// removed rather than worked around: cmdparse discarded the pipe relation at the
+// split, so no rule could tell a writing sink from a `| grep url` filter. The
+// relation is now recorded (cmdparse.ParsedCommand.PipelineID / PipelineIndex) and
+// this rule reads it through cmdparse.DownstreamStages.
+func readOrCapture(pc cmdparse.ParsedCommand, pipes *pipeScope) direction {
+	if capturesStdout(pc) {
+		return dirCopyOut
+	}
+	return pipes.sinkDirection(pc.Raw)
+}
+
+// capturesStdout reports whether pc's own redirections land its STDOUT somewhere
+// that keeps the bytes. Only the STDOUT-bearing kinds count: `2>/dev/null`
+// discards diagnostics and captures none of the file, and a target that captures
+// nothing — /dev/null, the tty, an inherited fd — is likewise not a capture
+// (hookio.IsSafeRedirectTarget).
+func capturesStdout(pc cmdparse.ParsedCommand) bool {
 	for _, rd := range pc.Redirections {
 		if rd.Kind != hookio.RedirectStdout && rd.Kind != hookio.RedirectAll {
 			continue
 		}
 		if !hookio.IsSafeRedirectTarget(rd.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+// pipeFilterCmds are pipeline stages that CONSUME what they receive without
+// persisting it: they transform their stdin onto their own stdout and open no
+// file for writing. Everything NOT listed is treated as a possible WRITER, which
+// is the fail-closed direction tc-080p settled (an allowlist of the known-safe,
+// never a denylist of the known-dangerous) and the direction tc-403c already
+// applies to an undeterminable access.
+//
+// It is a SEPARATE set from readCmds even though the two overlap heavily, because
+// they answer different questions. readCmds asks "does this command modify its
+// PATH OPERANDS" — `tee`, `dd` and `install` are absent from it for that reason
+// but so are `sed`, `tac` and `base64`, which are perfectly good filters. Reusing
+// readCmds here would have made `cat .git/config | sed 's/x/y/'` prompt.
+//
+// `xargs`, `sh`, `bash` and `python` are deliberately absent: each runs an
+// arbitrary command over what the pipeline carries, so the sink is whatever that
+// command is. `tee` is the shape this exists to catch and MUST NOT be added.
+//
+// MEASURED RESIDUE, accepted: `awk` stays a filter although its program text can
+// itself redirect (`awk '{print > "/tmp/x"}'`). Detecting that means reading the
+// awk program, and the cheap proxy — a `>` anywhere in the script — also fires on
+// every `awk '$1 > 5'` comparison. The same is true of the `-e`/`-f` script of
+// `sed`, and of `jq`'s `output` builtins.
+var pipeFilterCmds = map[string]bool{
+	"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true, "ack": true,
+	"head": true, "tail": true, "wc": true, "cut": true, "tr": true, "sort": true,
+	"uniq": true, "column": true, "jq": true, "yq": true, "nl": true, "fold": true,
+	"awk": true, "gawk": true, "nawk": true, "sed": true, "gsed": true,
+	"cat": true, "bat": true, "tac": true, "rev": true, "less": true, "more": true,
+	"od": true, "xxd": true, "hexdump": true, "strings": true, "base64": true,
+	"md5sum": true, "shasum": true, "sha1sum": true, "sha256sum": true, "cksum": true,
+	"echo": true, "printf": true, "true": true, "false": true,
+}
+
+// pipeScope answers, for a leaf of the expression it was built from, where that
+// leaf's STDOUT goes. It exists because the pipe relation lives at EXPRESSION
+// scope — cmdparse.Parse of the leaf alone shows a single stage with no
+// downstream — and because building it once per Evaluate keeps the scope parsed a
+// bounded number of times.
+//
+// It is deliberately built from cmdparse.Parse(scope) and NOT from scopeLeaves:
+// pipeline numbering is per-Parse-call, so folding a substitution body's leaves
+// into the same slice would let its pipeline 0 collide with the outer one and
+// relate stages that never shared a pipe. A substitution body reaches this rule as
+// its OWN RootExpression (the engine recurses it through EvaluateExpression), so
+// nothing is lost by leaving it out.
+//
+// The scope parse is LAZY and cached. This rule sits at position 2 of the chain, so
+// it runs on EVERY Bash leaf, and the overwhelming majority name no git metadata at
+// all; parsing the whole expression eagerly once per leaf would make the cost
+// quadratic in a compound's leaf count for an answer almost nobody asks for.
+type pipeScope struct {
+	scope  string
+	parsed bool
+	leaves []cmdparse.ParsedCommand
+}
+
+func newPipeScope(scope string) *pipeScope {
+	return &pipeScope{scope: scope}
+}
+
+// sinkDirection classifies where the stage whose raw text is leafRaw sends its
+// output: dirRead when it goes nowhere it can be kept (no pipe, or only filtering
+// stages downstream), dirCopyOut when any downstream stage might WRITE it.
+//
+// A leafRaw that matches no stage yields dirRead — the same answer as "not in a
+// pipeline", which is the pre-tc-vul7 verdict and so never a new prompt.
+func (p *pipeScope) sinkDirection(leafRaw string) direction {
+	if !p.parsed {
+		p.leaves = cmdparse.Parse(p.scope)
+		p.parsed = true
+	}
+	for _, stage := range cmdparse.DownstreamStages(p.leaves, leafRaw) {
+		if stageWritesInput(stage) {
 			return dirCopyOut
 		}
 	}
 	return dirRead
+}
+
+// stageWritesInput reports whether a downstream pipeline stage might PERSIST what
+// it receives. Unknown is a writer.
+func stageWritesInput(pc cmdparse.ParsedCommand) bool {
+	// A capturing stdout redirection persists the whole pipeline's payload whatever
+	// the stage is: `cat .git/config | grep url > /tmp/x` is a copy-out through a
+	// stage that is otherwise a pure filter.
+	if capturesStdout(pc) {
+		return true
+	}
+	base, args := effectiveExec(pc)
+	if base == "" {
+		// A command-less stage is a bare redirection segment; capturesStdout already
+		// ruled on it, and anything left captures nothing.
+		return false
+	}
+	if !pipeFilterCmds[base] {
+		return true
+	}
+	// A filter with a flag that makes it write a file is a writer after all —
+	// `sort -o FILE`, `yq -i`, `tree -o` — the same table the operand side uses.
+	return hasAnyFlag(args, mutatingFlags[base])
 }
 
 // hasAnyFlag reports whether any arg is one of the given flags, matching both the

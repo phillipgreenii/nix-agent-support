@@ -1252,6 +1252,25 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		{"a capturing redirect is the same copy-out", "cat .git/config > /tmp/backup", hookio.Ask},
 		{"ln publishes a second name for it", "ln -s .git/config /tmp/link", hookio.Ask},
 
+		// --- Class 3, COPY-OUT THROUGH A PIPE (tc-vul7) ---
+		//
+		// The third spelling of the same access. `cat .git/config | tee /tmp/backup`
+		// copies exactly what the two cases above copy, and it AUTO-APPROVED after
+		// tc-403c: the rule stands at the `cat` leaf, and cmdparse discarded the pipe
+		// relation at the split, so a WRITING sink was indistinguishable from a
+		// FILTERING one. The `| grep url` contrast is asserted with equal force — it is
+		// how `.git/config` is actually read, and a fix that prompted on it would
+		// re-create the friction that softened the read verdict twice already.
+		{"pipe to a writing sink is a copy-out", "cat .git/config | tee /tmp/backup", hookio.Ask},
+		{"pipe to a filtering sink is not", "cat .git/config | grep url", hookio.Approve},
+		{"a filter that captures IS a copy-out", "cat .git/config | grep url | tee /tmp/x", hookio.Ask},
+		{"an unrecognised sink fails closed", "cat .git/config | frobnicate", hookio.Ask},
+		// Corpus shapes: genuine `.git` reads piped to a filter, which MUST stay allow.
+		{"corpus row 3203: hooks listing to head", "ls -la /home/tcadmin/homelab/.git/hooks/ | head -20", hookio.Approve},
+		{"corpus row 3202: hooks listing to grep", "ls -la /home/tcadmin/homelab/.git/hooks/ | grep -v sample", hookio.Approve},
+		// `&&` carries no data, so a sink on its right is not this read's sink.
+		{"&& is not a pipe", "cat .git/config && tee /tmp/x", hookio.Approve},
+
 		// --- The two shapes the short-circuit hid from later rules (tc-403c) ---
 		//
 		// Both are chain-composition facts, not gitdir facts: gitdir must be silent for

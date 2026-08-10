@@ -180,10 +180,10 @@ var fuzzSeeds = []string{
 
 // nonBlankSegments counts the segments that carry a non-whitespace command; a
 // blank/whitespace segment is dropped by Parse and does not represent a command.
-func nonBlankSegments(segs []string) int {
+func nonBlankSegments(segs []segment) int {
 	n := 0
-	for _, s := range segs {
-		if strings.TrimSpace(s) != "" {
+	for _, seg := range segs {
+		if strings.TrimSpace(seg.text) != "" {
 			n++
 		}
 	}
@@ -290,8 +290,8 @@ func FuzzSplitCompound(f *testing.F) {
 			t.Fatalf("splitCompound(%q) is non-deterministic:\n first=%#v\n again=%#v", cmd, segs, again)
 		}
 		for _, seg := range segs {
-			if n := nonBlankSegments(splitCompound(seg)); n > 1 {
-				t.Fatalf("splitCompound(%q): segment %q re-splits into %d segments; splitting is incomplete (a separator escaped)", cmd, seg, n)
+			if n := nonBlankSegments(splitCompound(seg.text)); n > 1 {
+				t.Fatalf("splitCompound(%q): segment %q re-splits into %d segments; splitting is incomplete (a separator escaped)", cmd, seg.text, n)
 			}
 		}
 	})

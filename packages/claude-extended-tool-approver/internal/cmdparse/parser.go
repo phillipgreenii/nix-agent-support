@@ -676,17 +676,14 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	}
 	if execPrefixes[base] {
 		if inner, innerArgs, envAssigns, ok := unwrapExecPrefix(base, pc.Args); ok {
-			return unwrapCommand(ParsedCommand{
-				Executable:           inner,
-				Args:                 innerArgs,
-				EnvVars:              appendEnvAssignments(pc.EnvVars, envAssigns),
-				Redirections:         pc.Redirections,
-				ProcessSubstitutions: pc.ProcessSubstitutions,
-				HasHeredoc:           pc.HasHeredoc,
-				Heredocs:             pc.Heredocs,
-				Raw:                  pc.Raw,
-				Comment:              pc.Comment,
-			})
+			// COPY-then-override rather than a fresh literal: every field an unwrap does
+			// not deliberately change (Raw, Heredocs, the pipeline coordinates, …) must
+			// survive it, and a literal silently drops any field added later.
+			next := pc
+			next.Executable = inner
+			next.Args = innerArgs
+			next.EnvVars = appendEnvAssignments(pc.EnvVars, envAssigns)
+			return unwrapCommand(next)
 		} else if len(envAssigns) > 0 {
 			// No inner command (bare `env`/`command`, or flags + NAME=VALUE only) —
 			// leave the leaf as a read-only env query, but keep the captured
@@ -706,17 +703,10 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 	// (the safe abstain/defer default).
 	if cr, isRunner := commandRunnerPrefixes[base]; isRunner {
 		if inner, innerArgs, ok := unwrapCommandRunner(cr, pc.Args); ok {
-			return unwrapCommand(ParsedCommand{
-				Executable:           inner,
-				Args:                 innerArgs,
-				EnvVars:              pc.EnvVars,
-				Redirections:         pc.Redirections,
-				ProcessSubstitutions: pc.ProcessSubstitutions,
-				HasHeredoc:           pc.HasHeredoc,
-				Heredocs:             pc.Heredocs,
-				Raw:                  pc.Raw,
-				Comment:              pc.Comment,
-			})
+			next := pc
+			next.Executable = inner
+			next.Args = innerArgs
+			return unwrapCommand(next)
 		}
 		return pc
 	}
@@ -728,17 +718,10 @@ func unwrapCommand(pc ParsedCommand) ParsedCommand {
 		if len(pc.Args) < 2 || pc.Args[0] != wp.subcommand {
 			continue
 		}
-		return ParsedCommand{
-			Executable:           pc.Args[1],
-			Args:                 pc.Args[2:],
-			EnvVars:              pc.EnvVars,
-			Redirections:         pc.Redirections,
-			ProcessSubstitutions: pc.ProcessSubstitutions,
-			HasHeredoc:           pc.HasHeredoc,
-			Heredocs:             pc.Heredocs,
-			Raw:                  pc.Raw,
-			Comment:              pc.Comment,
-		}
+		next := pc
+		next.Executable = pc.Args[1]
+		next.Args = pc.Args[2:]
+		return next
 	}
 	return pc
 }
@@ -803,6 +786,52 @@ type ParsedCommand struct {
 	Heredocs []Heredoc
 	Raw      string
 	Comment  string
+	// PipelineID and PipelineIndex expose the PIPELINE RELATION between leaves —
+	// the one compound operator whose meaning splitCompound used to discard
+	// (tc-vul7). `|` was consumed exactly like `;`, `&&` and `&`, so a rule holding
+	// one leaf could not tell where that leaf's OUTPUT went; `cat .git/config | tee
+	// /tmp/x` and `cat .git/config | grep url` were indistinguishable at leaf scope,
+	// and RootExpression carries only text, not the relation.
+	//
+	// Leaves of the SAME expression that share a PipelineID are stages of one
+	// pipeline, ordered by PipelineIndex; stage N's stdout is stage N+1's stdin. IDs
+	// are per-Parse-call, so leaves from DIFFERENT Parse calls (e.g. an outer
+	// expression and a substitution body) MUST NOT be compared — see
+	// DownstreamStages, which is the supported accessor.
+	//
+	// The zero value is a lone stage of the first pipeline, which is what a
+	// hand-built ParsedCommand should mean. Synthesized leaves that belong to no
+	// pipeline (a `for` word list, a leftover heredoc extent) carry -1.
+	PipelineID    int
+	PipelineIndex int
+}
+
+// DownstreamStages returns the leaves of `leaves` that receive the STDOUT of a
+// stage whose Raw text equals leafRaw — i.e. everything leafRaw pipes into.
+//
+// `leaves` MUST be a single Parse call's output (pipeline IDs are per-call), and
+// is normally Parse of the whole expression a rule was handed as
+// hookio.HookInput.RootExpression. Matching on Raw is exact: the engine builds a
+// leaf's synthetic HookInput from that same Raw and hands the rule the same
+// RootExpression it parsed the leaf out of, so re-parsing either yields the same
+// text. A leafRaw that matches nothing returns no stages — the same answer as "no
+// pipeline", which is the pre-tc-vul7 behavior and therefore never a regression.
+//
+// Every match is unioned, so a text appearing twice in an expression contributes
+// both pipelines' downstreams rather than silently picking one.
+func DownstreamStages(leaves []ParsedCommand, leafRaw string) []ParsedCommand {
+	var out []ParsedCommand
+	for _, stage := range leaves {
+		if stage.PipelineID < 0 || stage.Raw != leafRaw {
+			continue
+		}
+		for _, candidate := range leaves {
+			if candidate.PipelineID == stage.PipelineID && candidate.PipelineIndex > stage.PipelineIndex {
+				out = append(out, candidate)
+			}
+		}
+	}
+	return out
 }
 
 // shellScanner is the SINGLE byte-level shell-context scanner shared by every
@@ -960,6 +989,9 @@ func Parse(command string) []ParsedCommand {
 	// leaf heredoc-bearing.
 	command, heredocs := stripHeredocBodies(command)
 	segments := splitCompound(command)
+	// Number the pipelines while the segments are still in SOURCE order (tc-vul7);
+	// resolveLoops reorders and drops them.
+	assignPipelineIDs(segments)
 	segments, loopWordLists := resolveLoops(segments)
 	result := make([]ParsedCommand, 0, len(segments))
 	// carried holds the heredocs claimed by segments walked so far but not yet
@@ -979,8 +1011,8 @@ func Parse(command string) []ParsedCommand {
 		carried = append(carried, heredocs[:k]...)
 		heredocs = heredocs[k:]
 	}
-	for _, seg := range segments {
-		seg = strings.TrimSpace(seg)
+	for _, segRec := range segments {
+		seg := strings.TrimSpace(segRec.text)
 		if seg == "" {
 			continue
 		}
@@ -1008,7 +1040,10 @@ func Parse(command string) []ParsedCommand {
 			// leaf so the engine still evaluates the redirection; dropping it
 			// silently loses a write to a protected path.
 			if len(redirs) > 0 || hasHeredoc {
-				result = append(result, ParsedCommand{Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg})
+				result = append(result, ParsedCommand{
+					Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg,
+					PipelineID: segRec.pipelineID, PipelineIndex: segRec.pipelineIndex,
+				})
 			}
 			continue
 		}
@@ -1029,7 +1064,10 @@ func Parse(command string) []ParsedCommand {
 			// then. There is no executable to unwrapCommand, so the leaf is appended
 			// as-is.
 			if len(envVars) > 0 || len(redirs) > 0 || hasHeredoc {
-				result = append(result, ParsedCommand{EnvVars: envVars, Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg})
+				result = append(result, ParsedCommand{
+					EnvVars: envVars, Redirections: redirs, HasHeredoc: hasHeredoc, Heredocs: leafHeredocs, Raw: seg,
+					PipelineID: segRec.pipelineID, PipelineIndex: segRec.pipelineIndex,
+				})
 			}
 			continue
 		}
@@ -1043,6 +1081,8 @@ func Parse(command string) []ParsedCommand {
 			Heredocs:             leafHeredocs,
 			Raw:                  seg,
 			Comment:              comment,
+			PipelineID:           segRec.pipelineID,
+			PipelineIndex:        segRec.pipelineIndex,
 		}))
 	}
 	// Any extent left unclaimed still has to reach a leaf, or an unquoted body's
@@ -1063,7 +1103,9 @@ func Parse(command string) []ParsedCommand {
 	// and no redirections, only the extent.
 	if leftover := append(carried, heredocs...); len(leftover) > 0 {
 		if len(result) == 0 {
-			result = append(result, ParsedCommand{HasHeredoc: true, Heredocs: leftover})
+			// PipelineID -1: this leaf is synthesized from an orphaned extent and stands
+			// in no pipeline, so it must never be reported as a stage (tc-vul7).
+			result = append(result, ParsedCommand{HasHeredoc: true, Heredocs: leftover, PipelineID: -1, PipelineIndex: -1})
 		} else {
 			last := &result[len(result)-1]
 			last.Heredocs = append(last.Heredocs, leftover...)
@@ -1083,22 +1125,66 @@ func Parse(command string) []ParsedCommand {
 	// order is otherwise immaterial — verdicts fold through MostRestrictive.
 	for _, wl := range loopWordLists {
 		if wl != "" {
-			result = append(result, ParsedCommand{Raw: wl})
+			// PipelineID -1: a word list is DATA, not a stage of any pipeline (tc-vul7).
+			result = append(result, ParsedCommand{Raw: wl, PipelineID: -1, PipelineIndex: -1})
 		}
 	}
 	return result
 }
 
-func splitCompound(s string) []string {
-	var result []string
+// segment is one chunk of an expression as splitCompound produced it, together
+// with the pipeline relation that used to be thrown away at the split (tc-vul7).
+// It is an internal carrier: the relation reaches rules as
+// ParsedCommand.PipelineID / PipelineIndex.
+type segment struct {
+	text string
+	// pipedFromPrev reports that a top-level `|` — NOT `;`, `&&`, `||`, `&` or a
+	// newline — separated this segment from the previous one, so the previous
+	// segment's stdout is this segment's stdin.
+	pipedFromPrev bool
+	pipelineID    int
+	pipelineIndex int
+}
+
+// assignPipelineIDs numbers segments into pipelines, in place. It runs BEFORE
+// resolveLoops on purpose: resolveLoops reorders and drops segments (a loop
+// condition is hoisted ahead of the body, keywords vanish), so numbering
+// afterwards would attribute positions the source text never had. Numbering the
+// segments while they are still in source order and letting resolveLoops carry
+// the struct keeps the relation correct through that rewrite.
+func assignPipelineIDs(segs []segment) {
+	id, idx := -1, 0
+	for i := range segs {
+		if segs[i].pipedFromPrev && id >= 0 {
+			idx++
+		} else {
+			id++
+			idx = 0
+		}
+		segs[i].pipelineID = id
+		segs[i].pipelineIndex = idx
+	}
+}
+
+func splitCompound(s string) []segment {
+	var result []segment
 	var buf strings.Builder
+	// pendingPipe is set by a top-level `|` and claimed by the NEXT segment emitted.
+	// It survives a flush that emits nothing, so `a |\n b` still relates b to a.
+	pendingPipe := false
 	// escapeUnquoted: a bare `\(` must not be read as a subshell start (find \( … \)).
 	sc := newShellScanner(true)
 	flush := func() {
-		if buf.Len() > 0 {
-			result = append(result, buf.String())
-			buf.Reset()
+		// A WHITESPACE-ONLY buffer is not a segment. Parse has always discarded such
+		// segments (it trims and skips), but emitting one here would consume the
+		// pending pipe relation and a pipeline number: in `(a; b) | c` the space
+		// between `)` and `|` became a phantom segment that separated c from the group
+		// entirely (tc-vul7). Dropping it changes no leaf, only the relation.
+		if strings.TrimSpace(buf.String()) != "" {
+			result = append(result, segment{text: buf.String(), pipedFromPrev: pendingPipe})
+			pendingPipe = false
 		}
+		buf.Reset()
 	}
 	i := 0
 	for i < len(s) {
@@ -1151,7 +1237,17 @@ func splitCompound(s string) []string {
 					flush()
 					inner := s[start : j-1]
 					// Recursively split inner content (it may contain &&, ||, ;, etc.)
-					result = append(result, splitCompound(inner)...)
+					innerSegs := splitCompound(inner)
+					// `a | (b; c)` pipes into the group's FIRST stage. RESIDUE: the group's
+					// LATER stages also read that stdin (`a | (b; c)` feeds c too) and are
+					// not related here, so a pipe into a multi-stage group is an
+					// under-approximation. It is the pre-tc-vul7 answer for those stages,
+					// never a new one.
+					if len(innerSegs) > 0 && pendingPipe {
+						innerSegs[0].pipedFromPrev = true
+					}
+					pendingPipe = false
+					result = append(result, innerSegs...)
 					i = j
 					continue
 				}
@@ -1176,6 +1272,11 @@ func splitCompound(s string) []string {
 		}
 		if c == ';' || c == '|' || c == '\n' {
 			flush()
+			if c == '|' {
+				// `||` is consumed by the two-char block above, so this is a real pipe:
+				// record the relation for the segment that follows (tc-vul7).
+				pendingPipe = true
+			}
 			i++
 			continue
 		}
@@ -1196,10 +1297,10 @@ func splitCompound(s string) []string {
 // make `*.md` in `for f in *.md` a bogus executable and demote 10,004 distinct corpus
 // commands. Parse turns each into a command-less leaf carrying only Raw, so its
 // substitutions are recursed while a literal list contributes nothing (pg2-qkecz).
-func resolveLoops(segments []string) (result []string, wordLists []string) {
+func resolveLoops(segments []segment) (result []segment, wordLists []string) {
 	i := 0
 	for i < len(segments) {
-		trimmed := strings.TrimSpace(segments[i])
+		trimmed := strings.TrimSpace(segments[i].text)
 		if isLoopKeyword(trimmed) {
 			body, endIdx, wordList := extractLoopBody(segments, i)
 			if endIdx > i {
@@ -1216,8 +1317,12 @@ func resolveLoops(segments []string) (result []string, wordLists []string) {
 				// keyword as its own segment; it reduces to redirections only, which
 				// is exactly the command-less-leaf shape the subshell form
 				// `(cmd) > /etc/passwd` already relies on above. No new leftover net.
-				if residue := doneResidue(strings.TrimSpace(segments[endIdx])); residue != "" {
-					result = append(result, residue)
+				if residue := doneResidue(strings.TrimSpace(segments[endIdx].text)); residue != "" {
+					// Keep the terminator's own pipeline coordinates: `… done | tee x`
+					// relates the residue to whatever follows exactly as the source did.
+					residueSeg := segments[endIdx]
+					residueSeg.text = residue
+					result = append(result, residueSeg)
 				}
 				i = endIdx + 1
 				continue
@@ -1275,17 +1380,22 @@ func isLoopKeyword(seg string) bool {
 // Returns the body segments and the index of the "done" segment.
 // For while/until, the condition command is included in the returned body.
 // If no matching done is found, returns (nil, start) to fall through to abstain.
-func extractLoopBody(segments []string, start int) (body []string, endIdx int, wordList string) {
-	trimmedStart := strings.TrimSpace(segments[start])
+func extractLoopBody(segments []segment, start int) (body []segment, endIdx int, wordList string) {
+	trimmedStart := strings.TrimSpace(segments[start].text)
 	isCondLoop := strings.HasPrefix(trimmedStart, "while ") || strings.HasPrefix(trimmedStart, "until ")
 
-	var conditionSegs []string
+	var conditionSegs []segment
 	if isCondLoop {
 		spaceIdx := strings.IndexByte(trimmedStart, ' ')
 		if spaceIdx > 0 {
 			cond := strings.TrimSpace(trimmedStart[spaceIdx+1:])
 			if cond != "" {
-				conditionSegs = append(conditionSegs, cond)
+				// The condition keeps the header segment's pipeline coordinates: in
+				// `cat .git/config | while read l; do …; done` the `read` IS the stage
+				// downstream of the cat, and losing that would lose the relation.
+				condSeg := segments[start]
+				condSeg.text = cond
+				conditionSegs = append(conditionSegs, condSeg)
 			}
 		}
 	} else {
@@ -1301,10 +1411,10 @@ func extractLoopBody(segments []string, start int) (body []string, endIdx int, w
 
 	doDepth := 0
 	doFound := false
-	var bodySegs []string
+	var bodySegs []segment
 
 	for i := start + 1; i < len(segments); i++ {
-		trimmed := strings.TrimSpace(segments[i])
+		trimmed := strings.TrimSpace(segments[i].text)
 		isDo, afterDo := parseDoKeyword(trimmed)
 
 		if !doFound {
@@ -1312,7 +1422,9 @@ func extractLoopBody(segments []string, start int) (body []string, endIdx int, w
 				doDepth = 1
 				doFound = true
 				if afterDo != "" {
-					bodySegs = append(bodySegs, afterDo)
+					afterDoSeg := segments[i]
+					afterDoSeg.text = afterDo
+					bodySegs = append(bodySegs, afterDoSeg)
 				}
 			} else if isCondLoop {
 				// Segments between loop keyword and first 'do' are part of the condition
