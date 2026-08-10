@@ -39,65 +39,164 @@ func bashInput(cmd string) *hookio.HookInput {
 	return &hookio.HookInput{ToolName: "Bash", ToolInput: bashJSON(cmd)}
 }
 
+// TestGitDir_Bash is the rule-scope decision table.
+//
+// `matched` exists because the read verdict is now Abstain (tc-403c), which makes
+// a MATCHED plain read and a NON-match textually identical in their Decision. They
+// are not the same thing: a matched read means "this rule looked, saw an access it
+// has no verdict on, and handed the leaf to the rest of the chain", while a
+// non-match means the rule never recognised an access at all — and it is the
+// non-match that the pg2-3hk7t false-positive classes are about. The rule
+// distinguishes them by carrying a Reason only when it matched, so the tests do
+// too; without this column a regression that stopped recognising `.git/` paths
+// entirely would pass every read row here.
 func TestGitDir_Bash(t *testing.T) {
 	r := New()
 	tests := []struct {
 		name    string
 		command string
 		want    hookio.Decision
+		matched bool
 	}{
 		// Writes stay a hard block.
-		{"write into .git", "echo x > .git/hooks/pre-commit", hookio.Reject},
-		{"append into .git", "echo x >> .git/config", hookio.Reject},
-		{"rm .git dir", "rm -rf .git/", hookio.Reject},
-		{"rm bare .git", "rm -rf .git", hookio.Reject},
-		{"sed -i on .git config", "sed -i 's/a/b/' .git/config", hookio.Reject},
-		{"sed -i bundled on .git config", "sed -ri 's/a/b/' .git/config", hookio.Reject},
-		{"tee into .git", "tee .git/config", hookio.Reject},
-		{"chmod a hook", "chmod +x .git/hooks/pre-commit", hookio.Reject},
-		{"truncate a ref", "truncate -s 0 .git/refs/heads/main", hookio.Reject},
-		{"cp ONTO .git config", "cp /tmp/evil .git/config", hookio.Reject},
-		{"mv ONTO .git config", "mv /tmp/evil .git/config", hookio.Reject},
-		{"unknown command fails safe to write", "frobnicate .git/config", hookio.Reject},
-		{"exec a hook script", ".git/hooks/pre-commit", hookio.Reject},
+		{"write into .git", "echo x > .git/hooks/pre-commit", hookio.Reject, true},
+		{"append into .git", "echo x >> .git/config", hookio.Reject, true},
+		{"rm .git dir", "rm -rf .git/", hookio.Reject, true},
+		{"rm bare .git", "rm -rf .git", hookio.Reject, true},
+		{"sed -i on .git config", "sed -i 's/a/b/' .git/config", hookio.Reject, true},
+		{"sed -i bundled on .git config", "sed -ri 's/a/b/' .git/config", hookio.Reject, true},
+		{"tee into .git", "tee .git/config", hookio.Reject, true},
+		{"chmod a hook", "chmod +x .git/hooks/pre-commit", hookio.Reject, true},
+		{"truncate a ref", "truncate -s 0 .git/refs/heads/main", hookio.Reject, true},
+		{"cp ONTO .git config", "cp /tmp/evil .git/config", hookio.Reject, true},
+		{"mv ONTO .git config", "mv /tmp/evil .git/config", hookio.Reject, true},
+		{"unknown command fails safe to write", "frobnicate .git/config", hookio.Reject, true},
+		{"exec a hook script", ".git/hooks/pre-commit", hookio.Reject, true},
 		// The two spellings pg2-24sc9 names verbatim as the guard's floor: the
 		// false-positive fix MUST NOT have been a blanket removal of the guard.
-		{"pg2-24sc9 floor: rm -rf .git/hooks", "rm -rf .git/hooks", hookio.Reject},
-		{"pg2-24sc9 floor: truncating redirect onto .git/config", "echo x > .git/config", hookio.Reject},
+		{"pg2-24sc9 floor: rm -rf .git/hooks", "rm -rf .git/hooks", hookio.Reject, true},
+		{"pg2-24sc9 floor: truncating redirect onto .git/config", "echo x > .git/config", hookio.Reject, true},
 		// The exclusion-flag set is named flag-by-flag rather than "any flag's
 		// value", precisely so a destructive operand that happens to follow a flag
 		// is still caught.
-		{"rm operand following a flag still rejects", "rm -rf .git", hookio.Reject},
-		{"rm -r operand following a flag still rejects", "rm -r .git/objects", hookio.Reject},
-		{"git porcelain with a redirect INTO .git", "git status > .git/stolen", hookio.Reject},
+		{"rm operand following a flag still rejects", "rm -rf .git", hookio.Reject, true},
+		{"rm -r operand following a flag still rejects", "rm -r .git/objects", hookio.Reject, true},
+		{"git porcelain with a redirect INTO .git", "git status > .git/stolen", hookio.Reject, true},
 
-		// Reads are decisive but overridable.
-		{"cat .git config", "cat .git/config", hookio.Approve},
-		{"nested .git", "cat repo/.git/HEAD", hookio.Approve},
-		{"trailing /.git", "ls foo/.git", hookio.Approve},
-		{"stat a ref", "stat .git/refs/heads/main", hookio.Approve},
-		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Approve},
-		{"test -e a hook", "[ -e .git/hooks/pre-commit ]", hookio.Approve},
-		{"if test -e a hook", "if [ -e .git/hooks/pre-commit ]", hookio.Approve},
-		{"wc a ref", "wc -l .git/info/exclude", hookio.Approve},
-		{"head a ref", "head -5 .git/HEAD", hookio.Approve},
-		{"diff two refs", "diff .git/HEAD /tmp/head", hookio.Approve},
-		{"sed WITHOUT -i streams to stdout", "sed -n '1p' .git/config", hookio.Approve},
-		{"grep a hook file", "grep prek .git/hooks/pre-commit", hookio.Approve},
-		{"cp FROM .git is a read", "cp .git/config /tmp/backup", hookio.Approve},
-		{"ln pointing AT .git neither reads nor writes it", "ln -s .git/config /tmp/link", hookio.Approve},
-		{"stdin FROM .git is a read", "wc -l < .git/config", hookio.Approve},
+		// A COPY-OUT — a read whose destination is a write — Asks (tc-403c).
+		{"cp FROM .git copies metadata out", "cp .git/config /tmp/backup", hookio.Ask, true},
+		{"ln publishes a second name for .git metadata", "ln -s .git/config /tmp/link", hookio.Ask, true},
+		{"capturing redirect is the same copy by another spelling", "cat .git/config > /tmp/backup", hookio.Ask, true},
+
+		// A PLAIN read is matched but non-decisive: no verdict, the chain continues.
+		{"cat .git config", "cat .git/config", hookio.Abstain, true},
+		{"nested .git", "cat repo/.git/HEAD", hookio.Abstain, true},
+		{"trailing /.git", "ls foo/.git", hookio.Abstain, true},
+		{"stat a ref", "stat .git/refs/heads/main", hookio.Abstain, true},
+		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Abstain, true},
+		{"test -e a hook", "[ -e .git/hooks/pre-commit ]", hookio.Abstain, true},
+		{"if test -e a hook", "if [ -e .git/hooks/pre-commit ]", hookio.Abstain, true},
+		{"wc a ref", "wc -l .git/info/exclude", hookio.Abstain, true},
+		{"head a ref", "head -5 .git/HEAD", hookio.Abstain, true},
+		{"diff two refs", "diff .git/HEAD /tmp/head", hookio.Abstain, true},
+		{"sed WITHOUT -i streams to stdout", "sed -n '1p' .git/config", hookio.Abstain, true},
+		{"grep a hook file", "grep prek .git/hooks/pre-commit", hookio.Abstain, true},
+		{"stdin FROM .git is a read", "wc -l < .git/config", hookio.Abstain, true},
+		// A redirection that captures NOTHING leaves a read a read — the shape the
+		// corpus actually carries (rows 474/475, 3200/3204: `… 2>/dev/null`).
+		{"stderr discard does not capture the file", "ls -la .git/hooks 2>/dev/null", hookio.Abstain, true},
+		{"stdout to /dev/null captures nothing", "cat .git/config > /dev/null", hookio.Abstain, true},
 
 		// Non-accesses: nothing is matched at all.
-		{"bare git command not blocked", "git status", hookio.Abstain},
-		{"git config not blocked", "git config user.name", hookio.Abstain},
-		{"gitignore not blocked", "cat .gitignore", hookio.Abstain},
-		{"git-suffixed name not blocked", "cat .git.bak", hookio.Abstain},
-		{"unrelated", "ls -la", hookio.Abstain},
+		{"bare git command not blocked", "git status", hookio.Abstain, false},
+		{"git config not blocked", "git config user.name", hookio.Abstain, false},
+		{"gitignore not blocked", "cat .gitignore", hookio.Abstain, false},
+		{"git-suffixed name not blocked", "cat .git.bak", hookio.Abstain, false},
+		{"unrelated", "ls -la", hookio.Abstain, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := r.Evaluate(bashInput(tt.command)).Decision; got != tt.want {
+			got := r.Evaluate(bashInput(tt.command))
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
+			}
+			if matched := got.Reason != ""; matched != tt.matched {
+				t.Errorf("matched = %v (reason %q), want matched = %v", matched, got.Reason, tt.matched)
+			}
+		})
+	}
+}
+
+// TestGitDir_CopyOutIsNotAPlainRead pins tc-403c's mechanism at rule scope.
+//
+// THE DEFECT: `cp .git/config /tmp/backup` is classified a READ — cp does not
+// modify its source, a distinction this rule keeps on purpose — so under tc-k2m3's
+// approving read verdict it AUTO-APPROVED, copying a file that can carry a token in
+// a remote URL to an arbitrary destination with no prompt. Making the read verdict
+// non-decisive does not fix that on its own: every later rule approves the shape
+// too (`safe-commands` sees a readable source and a writable destination), so the
+// copy-out needs a verdict of its own.
+//
+// THE FAILURE DIRECTION, which is the property under test: a read whose bytes LEAVE
+// the guarded directory fails toward PROMPTING. Not Reject — nothing is modified and
+// backing up `.git/config` before editing it is legitimate, and a non-overridable
+// deny on a non-destructive operation is what softened the read side twice already.
+// Not Abstain — deferring hands the decision to a layer that does not know the
+// source is git metadata.
+//
+// The negative cases carry as much weight as the positives. Promoting every
+// redirection would swallow `2>/dev/null`, which the corpus attaches to routine
+// `ls`/`cat` inspections (rows 474, 475, 3200, 3204) and which captures none of the
+// file; promoting a destination that stores nothing would swallow `> /dev/null`.
+func TestGitDir_CopyOutIsNotAPlainRead(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// The bead's named shape, and its equivalents.
+		{"cp from gitmeta", "cp .git/config /tmp/backup", hookio.Ask},
+		{"cp -p from gitmeta", "cp -p .git/config /tmp/backup", hookio.Ask},
+		{"cp -r the whole dir out", "cp -r .git /tmp/backup", hookio.Ask},
+		{"install from gitmeta", "install -m 644 .git/config /tmp/out", hookio.Ask},
+		{"ln -s at gitmeta", "ln -s .git/config /tmp/link", hookio.Ask},
+		{"ln -sf at gitmeta", "ln -sf .git/config /tmp/link", hookio.Ask},
+		// Same copy, spelled as a capturing redirection.
+		{"stdout capture", "cat .git/config > /tmp/backup", hookio.Ask},
+		{"stdout append capture", "cat .git/config >> /tmp/backup", hookio.Ask},
+		{"&> capture", "grep url .git/config &> /tmp/backup", hookio.Ask},
+		{"capture of a listing", "ls -la .git/hooks > /tmp/list", hookio.Ask},
+		// A path BOUND to a variable and copied out through it is the same access.
+		{"bound path is cp'd out", "f=/repo/.git/config\ncp \"$f\" /tmp/backup", hookio.Ask},
+
+		// NOT a copy-out: nothing is captured.
+		{"stderr discard", "cat .git/config 2>/dev/null", hookio.Abstain},
+		{"stderr discard on a listing", "ls -la .git/hooks 2>/dev/null", hookio.Abstain},
+		{"stdout to /dev/null", "cat .git/config > /dev/null", hookio.Abstain},
+		{"stdout to the tty", "cat .git/config > /dev/tty", hookio.Abstain},
+		{"stdout to an inherited fd", "cat .git/config > /dev/fd/3", hookio.Abstain},
+		{"stdin FROM gitmeta is not a capture", "wc -l < .git/config", hookio.Abstain},
+
+		// A copy-out must never MASK a write: the write side still Rejects.
+		{"cp ONTO gitmeta is still a write", "cp /tmp/evil .git/config", hookio.Reject},
+		{"redirect ONTO gitmeta is still a write", "cat /tmp/evil > .git/config", hookio.Reject},
+		{"mv out is destructive, not a copy-out", "mv .git/HEAD /tmp/x", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hookio.Decision(hookio.Approve)
+			for _, leaf := range leavesOf(tt.command) {
+				in := &hookio.HookInput{
+					ToolName:       "Bash",
+					ToolInput:      bashJSON(leaf),
+					RootExpression: tt.command,
+				}
+				if d := r.Evaluate(in).Decision; d > got {
+					got = d
+				}
+			}
+			if got != tt.want {
 				t.Errorf("Decision = %v, want %v", got, tt.want)
 			}
 		})
@@ -116,8 +215,11 @@ func TestGitDir_Bash(t *testing.T) {
 // covered `sed -i`, redirections and `rm`, but no rename/move shape at all.
 //
 // The contrast cases matter as much as the fix: cp/ln/install genuinely only READ
-// their source, so those must stay on the READ side or the split becomes "everything is a
-// write" and the Class-3 false positives come straight back.
+// their source, so those must stay OFF the write side or the split becomes
+// "everything is a write" and the Class-3 false positives come straight back. Since
+// tc-403c they land on the copy-out verdict (Ask) rather than the plain-read one —
+// still strictly less restrictive than `mv`'s Reject, which is the asymmetry these
+// cases exist to pin.
 func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 	r := New()
 	tests := []struct {
@@ -134,12 +236,12 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 		// A rename bound through a variable is a write too.
 		{"bound path is mv'd away", "f=/repo/.git/HEAD\nmv \"$f\" /tmp/x", hookio.Reject},
 
-		// cp/ln/install only READ their source — these MUST stay on the read side.
-		{"cp FROM gitmeta", "cp .git/config /tmp/backup", hookio.Approve},
-		{"cp -p FROM gitmeta", "cp -p .git/config /tmp/backup", hookio.Approve},
-		{"ln -s AT gitmeta", "ln -s .git/config /tmp/link", hookio.Approve},
-		{"ln -sf AT gitmeta", "ln -sf .git/config /tmp/link", hookio.Approve},
-		{"install FROM gitmeta", "install -m 644 .git/config /tmp/out", hookio.Approve},
+		// cp/ln/install only READ their source — these MUST stay off the write side.
+		{"cp FROM gitmeta", "cp .git/config /tmp/backup", hookio.Ask},
+		{"cp -p FROM gitmeta", "cp -p .git/config /tmp/backup", hookio.Ask},
+		{"ln -s AT gitmeta", "ln -s .git/config /tmp/link", hookio.Ask},
+		{"ln -sf AT gitmeta", "ln -sf .git/config /tmp/link", hookio.Ask},
+		{"install FROM gitmeta", "install -m 644 .git/config /tmp/out", hookio.Ask},
 
 		// …but writing INTO gitmeta with the same commands is a write.
 		{"cp INTO gitmeta", "cp /tmp/evil .git/config", hookio.Reject},
@@ -157,8 +259,8 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 		{"find -exec", "find .git -type f -exec rm {} ;", hookio.Reject},
 		{"sort -o writes its output file", "sort -o .git/config /tmp/in", hookio.Reject},
 		{"yq -i edits in place", "yq -i '.a=1' .git/config", hookio.Reject},
-		{"find WITHOUT a mutating flag still reads", "find .git/objects -type f", hookio.Approve},
-		{"sort WITHOUT -o still reads", "sort .git/config", hookio.Approve},
+		{"find WITHOUT a mutating flag still reads", "find .git/objects -type f", hookio.Abstain},
+		{"sort WITHOUT -o still reads", "sort .git/config", hookio.Abstain},
 
 		// dd names its operands as key=value, so a component walk over the whole
 		// token misses the path entirely.
@@ -193,19 +295,19 @@ func TestGitDir_DestructiveOnSourceOperand(t *testing.T) {
 	}
 }
 
-// TestGitDir_ReadWriteAsymmetry is the ONE test that pins both halves of the
-// direction split TOGETHER, on the SAME path, in the same assertion — so that a
-// refactor cannot collapse them into a single shared verdict without failing
-// here (tc-k2m3).
+// TestGitDir_ReadWriteAsymmetry is the ONE test that pins EVERY direction the rule
+// distinguishes TOGETHER, on the SAME path, in the same assertion — so that a
+// refactor cannot collapse them into a shared verdict without failing here
+// (tc-k2m3, extended by tc-403c).
 //
-// Why a paired test and not two independent ones. The rule's entire value is the
-// ASYMMETRY: `.git/hooks` reads Approve, `.git/hooks` writes Reject. Split across
-// two tests, a change that made verdict() return one decision for both directions
-// fails only the half that moved, which reads as "one expectation drifted" rather
-// than "the security property was deleted" — and if the collapse lands on the read
-// side, the surviving failure is the harmless one. Pinning the pair makes the
-// property itself the unit under test: the two decisions must differ, the read
-// must be the permissive one, and the write must be the hard block.
+// Why one grouped test and not three independent ones. The rule's entire value is
+// the ASYMMETRY: on `.git/hooks`, a read defers, a copy-out prompts, a write is a
+// hard block. Split across separate tests, a change that made verdict() return one
+// decision for two directions fails only the half that moved, which reads as "one
+// expectation drifted" rather than "the security property was deleted" — and if the
+// collapse lands on the permissive side, the surviving failure is the harmless one.
+// Pinning the ordering makes the property itself the unit under test: the three
+// decisions must be strictly increasing in restrictiveness, in that order.
 //
 // The reasons are asserted verbatim as well, because they have been wrong before
 // in a way no decision assertion could catch: the pre-pg2-3hk7t rule told the user
@@ -216,25 +318,38 @@ func TestGitDir_ReadWriteAsymmetry(t *testing.T) {
 	const path = ".git/hooks"
 
 	read := r.Evaluate(bashInput("ls -la " + path))
+	copyOut := r.Evaluate(bashInput("cp -r " + path + " /tmp/backup"))
 	write := r.Evaluate(bashInput("rm -rf " + path))
 
-	// The asymmetry itself: same path, opposite verdicts. This is the assertion a
-	// collapse of the read/write split must break.
-	if read.Decision == write.Decision {
-		t.Fatalf("read and write of %s returned the SAME decision %v — the direction split has collapsed",
-			path, read.Decision)
-	}
-	if read.Decision >= write.Decision {
-		t.Fatalf("read %v is not less restrictive than write %v — the directions are inverted",
-			read.Decision, write.Decision)
+	// The asymmetry itself: same path, three distinct verdicts in increasing
+	// restrictiveness. This is the assertion a collapse of the direction split must
+	// break, whichever pair it collapses.
+	if !(read.Decision < copyOut.Decision && copyOut.Decision < write.Decision) {
+		t.Fatalf("directions on %s are not strictly increasing: read %v, copy-out %v, write %v",
+			path, read.Decision, copyOut.Decision, write.Decision)
 	}
 
-	// …and the exact verdicts, so "different" cannot drift to some other pair.
-	if read.Decision != hookio.Approve {
-		t.Errorf("read Decision = %v, want Approve", read.Decision)
+	// …and the exact verdicts, so "increasing" cannot drift to some other triple.
+	//
+	// Abstain, not Approve: a plain read is NON-DECISIVE, so `path-traversal`,
+	// `secrets` and the zone checks below this rule still run (tc-403c). An Approve
+	// here would end the chain for the leaf and is exactly the defect.
+	if read.Decision != hookio.Abstain {
+		t.Errorf("read Decision = %v, want Abstain", read.Decision)
 	}
-	if want := "reading git metadata under .git/ is a read-only inspection"; read.Reason != want {
+	if want := "reading git metadata under .git/ is a read-only inspection (no verdict; later rules decide)"; read.Reason != want {
 		t.Errorf("read Reason = %q, want %q", read.Reason, want)
+	}
+	// A matched read MUST still carry a reason: that is the only thing separating it
+	// from the rule having recognised no access at all.
+	if read.Module != "git-directory" {
+		t.Errorf("read Module = %q, want git-directory", read.Module)
+	}
+	if copyOut.Decision != hookio.Ask {
+		t.Errorf("copy-out Decision = %v, want Ask", copyOut.Decision)
+	}
+	if want := "copying git metadata out of .git/ to another location — .git/config can carry a credential in a remote URL"; copyOut.Reason != want {
+		t.Errorf("copy-out Reason = %q, want %q", copyOut.Reason, want)
 	}
 	if write.Decision != hookio.Reject {
 		t.Errorf("write Decision = %v, want Reject", write.Decision)
@@ -397,24 +512,29 @@ func TestGitDir_BoundPathDirectionFollowsItsUse(t *testing.T) {
 			want: hookio.Reject,
 		},
 		{
-			name: "row 167117 shape: bound path is only read → read (Approve)",
+			name: "row 167117 shape: bound path is only read → read (Abstain)",
 			expr: "RM=/repo/.git/worktrees/slot-c/rebase-merge\nls -la \"$RM\"\ncat \"$RM/done\"",
-			want: hookio.Approve,
+			want: hookio.Abstain,
 		},
 		{
-			name: "row 163591 shape: bound hooks path read inside a substitution → read (Approve)",
+			name: "row 163591 shape: bound hooks path read inside a substitution → read (Abstain)",
 			expr: "h=\"$r/.git/hooks\"\necho \"active -> $(grep -m1 prek \"$h/pre-commit\")\"",
-			want: hookio.Approve,
+			want: hookio.Abstain,
 		},
 		{
-			name: "row 184010 shape: bound hook path tested and readlink'd → read (Approve)",
+			name: "row 184010 shape: bound hook path tested and readlink'd → read (Abstain)",
 			expr: "h=\"$r/.git/hooks/pre-commit\"\nif [ -e \"$h\" ]\nthen echo \"present ($(readlink \"$h\"))\"",
-			want: hookio.Approve,
+			want: hookio.Abstain,
 		},
 		{
-			name: "row 305013 shape: default-expansion binding read by ls/head → read (Approve)",
+			name: "row 305013 shape: default-expansion binding read by ls/head → read (Abstain)",
 			expr: "HP=\"${HP:-$CC/.git/hooks}\"\nls -la \"$HP/pre-push\"\nhead -5 \"$HP/pre-push\"",
-			want: hookio.Approve,
+			want: hookio.Abstain,
+		},
+		{
+			name: "bound path copied out → copy-out (Ask)",
+			expr: "f=\"$r/.git/config\"\ncp \"$f\" /tmp/backup",
+			want: hookio.Ask,
 		},
 		{
 			name: "bound path written by a redirection → Reject",
@@ -431,17 +551,17 @@ func TestGitDir_BoundPathDirectionFollowsItsUse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// The engine hands the rule one leaf at a time with RootExpression set to
 			// the whole expression, then folds most-restrictive-wins. This test drives
-			// ONE rule, so it folds only the leaves where THIS rule has an opinion.
+			// ONE rule, so it folds only the leaves where THIS rule MATCHED an access.
 			//
-			// That distinction became load-bearing when the read verdict moved from Ask
-			// to Approve (tc-k2m3). git-directory speaks only at the leaf carrying the
-			// literal `.git/` token — the assignment — and Abstains at the consuming
-			// leaves (`ls -la "$RM"`), which see a bare variable. While reads were Ask
-			// the fold worked by accident, because Ask (2) outranks Abstain (1). Approve
-			// is 0, so a raw most-restrictive fold would report Abstain for every read
-			// shape here and pin the wrong property: it would be measuring this rule's
-			// SILENCE at the sibling leaves, not the direction it assigns to the bound
-			// path.
+			// A leaf is selected by whether it carries a REASON, not by its decision.
+			// git-directory speaks only at the leaf holding the literal `.git/` token —
+			// the assignment — and recognises nothing at the consuming leaves
+			// (`ls -la "$RM"`), which see a bare variable. Selecting on the decision
+			// worked only while every direction was decisive: since tc-403c a plain read
+			// returns Abstain, which is byte-for-byte the "recognised nothing" verdict,
+			// so a decision-based filter would drop the very leaf under test and then
+			// report the fold's Approve seed for every read shape here. The reason is
+			// the rule's own record that it matched, so it is the correct selector.
 			//
 			// NOTE the sibling leaves are not rescued by later rules either — the whole
 			// expression really does land on Abstain through the full chain, because the
@@ -450,8 +570,8 @@ func TestGitDir_BoundPathDirectionFollowsItsUse(t *testing.T) {
 			// deliberately about the DIRECTION this rule assigns, and the end-to-end
 			// verdict is pinned over there rather than inferred from here.
 			//
-			// So: skip no-opinion leaves, and require that at least one leaf spoke —
-			// otherwise a rule that went entirely silent would read as Approve.
+			// So: skip leaves the rule did not match, and require that at least one leaf
+			// spoke — otherwise a rule that went entirely silent would read as Approve.
 			got := hookio.Decision(hookio.Approve)
 			spoke := false
 			for _, leaf := range leavesOf(tt.expr) {
@@ -460,13 +580,13 @@ func TestGitDir_BoundPathDirectionFollowsItsUse(t *testing.T) {
 					ToolInput:      bashJSON(leaf),
 					RootExpression: tt.expr,
 				}
-				d := r.Evaluate(in).Decision
-				if d == hookio.Abstain {
+				res := r.Evaluate(in)
+				if res.Reason == "" {
 					continue
 				}
 				spoke = true
-				if d > got {
-					got = d
+				if res.Decision > got {
+					got = res.Decision
 				}
 			}
 			if !spoke {
@@ -490,22 +610,28 @@ func TestGitDir_LeafScopeFailsSafeWithoutRootExpression(t *testing.T) {
 	}
 }
 
+// TestGitDir_FileTools covers the non-Bash tools. The `matched` column carries the
+// same weight it does in TestGitDir_Bash: a read now Abstains, so only the reason
+// separates "matched an access this rule has no verdict on" from "recognised
+// nothing". For the read tools the deferral is the point — `path-safety` owns the
+// zone question for a Read/Grep/Glob and is the rule that must get to answer it.
 func TestGitDir_FileTools(t *testing.T) {
 	r := New()
 	tests := []struct {
-		name string
-		tool string
-		path string
-		want hookio.Decision
+		name    string
+		tool    string
+		path    string
+		want    hookio.Decision
+		matched bool
 	}{
-		{"read .git config approves", "Read", "/repo/.git/config", hookio.Approve},
-		{"grep .git approves", "Grep", "/repo/.git/objects", hookio.Approve},
-		{"glob .git approves", "Glob", "/repo/.git", hookio.Approve},
-		{"write .git ref rejects", "Write", ".git/refs/heads/main", hookio.Reject},
-		{"edit .git config rejects", "Edit", "/repo/.git/config", hookio.Reject},
-		{"delete .git ref rejects", "Delete", "/repo/.git/refs/heads/main", hookio.Reject},
-		{"edit non-git", "Edit", "/repo/src/main.go", hookio.Abstain},
-		{"read gitignore", "Read", "/repo/.gitignore", hookio.Abstain},
+		{"read .git config defers", "Read", "/repo/.git/config", hookio.Abstain, true},
+		{"grep .git defers", "Grep", "/repo/.git/objects", hookio.Abstain, true},
+		{"glob .git defers", "Glob", "/repo/.git", hookio.Abstain, true},
+		{"write .git ref rejects", "Write", ".git/refs/heads/main", hookio.Reject, true},
+		{"edit .git config rejects", "Edit", "/repo/.git/config", hookio.Reject, true},
+		{"delete .git ref rejects", "Delete", "/repo/.git/refs/heads/main", hookio.Reject, true},
+		{"edit non-git", "Edit", "/repo/src/main.go", hookio.Abstain, false},
+		{"read gitignore", "Read", "/repo/.gitignore", hookio.Abstain, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -516,8 +642,12 @@ func TestGitDir_FileTools(t *testing.T) {
 				ti = fileJSON(tt.path)
 			}
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: ti}
-			if got := r.Evaluate(input).Decision; got != tt.want {
-				t.Errorf("Decision = %v, want %v", got, tt.want)
+			got := r.Evaluate(input)
+			if got.Decision != tt.want {
+				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
+			}
+			if matched := got.Reason != ""; matched != tt.matched {
+				t.Errorf("matched = %v (reason %q), want matched = %v", matched, got.Reason, tt.matched)
 			}
 		})
 	}

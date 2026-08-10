@@ -1174,9 +1174,17 @@ func TestIntegration_ExtraReadOnlyRoots(t *testing.T) {
 // guard either widens (prose or an exclusion regains a verdict) or narrows (a real
 // write stops rejecting):
 //
-//	a WRITE to git metadata Rejects; a READ is a decisive Ask (never Approve, and
-//	never a hard deny); a token that is PROSE, an EXCLUSION, or an argument to
-//	`git` itself is not an access at all.
+//	a WRITE to git metadata Rejects; a COPY-OUT Asks; a plain READ carries no
+//	verdict from this rule and settles wherever the REST of the chain puts it; a
+//	token that is PROSE, an EXCLUSION, or an argument to `git` itself is not an
+//	access at all.
+//
+// Chain scope is what makes this suite the authority for tc-403c, not the rule's
+// own package. Since the plain-read verdict became Abstain, the whole question
+// "does a `.git/` read still auto-approve" is answerable ONLY here: at rule scope a
+// read looks identical to silence, and the four shapes tc-k2m3 cited reach `allow`
+// through `safe-commands` rather than through `git-directory`. A regression that
+// demoted them to a prompt would leave every rule-scope test passing.
 func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
 	projectRoot := "/Users/testuser/workspace/my-project"
@@ -1208,26 +1216,55 @@ func TestIntegration_GitDirDirectionAndRole(t *testing.T) {
 		{"row 244438: bound path is sed -i'd", "f=\"$r/.git/info/exclude\"\ncat \"$f\"\nsed -i '' '/^x$/d' \"$f\"", hookio.Reject},
 		{"bound path written by redirection", "f=/repo/.git/config\necho x > \"$f\"", hookio.Reject},
 
-		// --- Class 3, READ half: Approve (tc-k2m3), no longer a hard deny or an Ask ---
+		// --- Class 3, READ half: still `allow` END-TO-END (tc-k2m3), now via the
+		// rest of the chain rather than by gitdir short-circuiting it (tc-403c) ---
+		//
 		// These four are the shapes behind tc-k2m3's 14 cited rows, all of which the
-		// operator approved 100% of the time. A single literal-path leaf, so gitdir's
-		// Approve is the whole verdict.
+		// operator approved 100% of the time. THIS is the group that proves tc-403c
+		// preserved that operator decision instead of walking it back: gitdir now
+		// Abstains on each, and `safe-commands` approves them — a readable in-project
+		// path for cat, a browsing command for ls/stat, an always-safe command for
+		// readlink. If any of these turns to abstain, the decision WAS walked back and
+		// the change must not ship in that form.
 		{"cat the config", "cat .git/config", hookio.Approve},
 		{"ls the hooks dir", "ls -la .git/hooks", hookio.Approve},
 		{"stat a ref", "stat .git/refs/heads/main", hookio.Approve},
 		{"readlink a hook", "readlink .git/hooks/pre-commit", hookio.Approve},
-		// The contrast to `mv` above: copying FROM git metadata does not modify the
-		// SOURCE, so the direction model classifies it a read. Without this case the mv
-		// fix would be indexed as "any two-operand command is a write".
+		// …and the same four with the `2>/dev/null` the corpus actually attaches to
+		// them (rows 474, 475, 3200, 3204). A redirection that discards diagnostics
+		// captures none of the file, so it must not trip the copy-out verdict.
+		{"cat the config, stderr discarded", "cat .git/config 2>/dev/null", hookio.Approve},
+		{"ls the hooks dir, stderr discarded", "ls -la .git/hooks 2>/dev/null", hookio.Approve},
+
+		// --- Class 3, COPY-OUT: a read whose DESTINATION is a write (tc-403c) ---
 		//
-		// It now AUTO-APPROVES, and that is a real widening, not a bookkeeping update:
-		// `.git/config` can carry a token in a remote URL, so this shape copies a
-		// credential-bearing file to an arbitrary destination with no prompt. It is the
-		// direct consequence of "reads approve" meeting a read whose destination is a
-		// write, and it is NOT covered by tc-k2m3's evidence (those 14 rows are
-		// cat/ls/stat/readlink, never a copy-out). Recorded here and tracked as its own
-		// bead rather than silently absorbed; see gitdir.go's KNOWN GAP note.
-		{"cp FROM gitmeta stays a read — and now auto-approves (see KNOWN GAP)", "cp .git/config /tmp/backup", hookio.Approve},
+		// The contrast to `mv` above: copying FROM git metadata does not modify the
+		// SOURCE, so the direction model does not classify it a write. Without this
+		// case the mv fix would be indexed as "any two-operand command is a write".
+		//
+		// But it is not a plain read either, and this is the shape tc-403c exists for:
+		// `.git/config` can carry a token in a remote URL, so it moves a
+		// credential-bearing file to an arbitrary destination. Under tc-k2m3 it
+		// AUTO-APPROVED. Note that making the read verdict non-decisive does NOT fix
+		// this on its own — every later rule approves this command too, `safe-commands`
+		// included — which is why the copy-out carries a verdict of its own.
+		{"cp FROM gitmeta is a copy-out", "cp .git/config /tmp/backup", hookio.Ask},
+		{"a capturing redirect is the same copy-out", "cat .git/config > /tmp/backup", hookio.Ask},
+		{"ln publishes a second name for it", "ln -s .git/config /tmp/link", hookio.Ask},
+
+		// --- The two shapes the short-circuit hid from later rules (tc-403c) ---
+		//
+		// Both are chain-composition facts, not gitdir facts: gitdir must be silent for
+		// either rule below it to be reached at all. They are the reason the read
+		// verdict is Abstain rather than Approve, and they can only be pinned here.
+		//
+		// `path-traversal` Asks on a `../..` escape. It sits AFTER gitdir, so while the
+		// read verdict was decisive this auto-approved.
+		{"traversal into gitmeta reaches path-traversal", "cat ../../../../etc/passwd/../.git/config", hookio.Ask},
+		// An out-of-project read has no readable zone, so `safe-commands` defers to
+		// Claude Code. While the read verdict was decisive this auto-approved — for
+		// ANY `.git` path anywhere on the filesystem, not merely this one.
+		{"out-of-project gitmeta read defers", "cat /elsewhere/.git/config", hookio.Abstain},
 		// Row 167117's shape: a rebase-merge path bound then only inspected.
 		//
 		// Abstain, NOT Approve. gitdir speaks only at the leaf holding the literal
@@ -1440,19 +1477,24 @@ func TestIntegration_HeredocExtents(t *testing.T) {
 
 	// --- Property 1: both orderings agree, and neither discards the other leaf ---
 	//
-	// `grep … .git/config` alone is a decisive Ask (gitdir, read direction). Pairing it
-	// with a heredoc must not erase that: Ask outranks the heredoc leaf's Abstain floor,
-	// so the fold is Ask whichever side the heredoc is on. Before this bead BOTH
-	// spellings answered Abstain — gitdir's Ask silently dropped.
+	// `grep … .git/config` alone was a decisive Ask (gitdir, read direction) when this
+	// case was written. Pairing it with a heredoc must not erase that: Ask outranks the
+	// heredoc leaf's Abstain floor, so the fold is Ask whichever side the heredoc is on.
+	// Before this bead BOTH spellings answered Abstain — gitdir's Ask silently dropped.
 	//
-	// tc-k2m3 moved the read verdict from Ask to Approve, which changes what this
-	// particular pairing can prove. Approve (0) is BELOW the heredoc leaf's Abstain
-	// floor (1), so the floor now legitimately dominates and the paired verdict is
-	// Abstain — the same answer a total discard of gitdir's verdict would give. This
-	// case therefore still pins ORDER-INDEPENDENCE, which is the property the parser
-	// bug actually broke, but it can no longer discriminate a dropped verdict on its
-	// own. The subtest immediately below carries that half: a Reject outranks the
-	// floor, so a discard there is still visible.
+	// The read verdict has moved twice since (tc-k2m3 Ask -> Approve, tc-403c Approve
+	// -> Abstain with `safe-commands` supplying the end-to-end Approve), which changes
+	// what this particular pairing can prove. Either way the solo verdict is Approve
+	// (0), BELOW the heredoc leaf's Abstain floor (1), so the floor legitimately
+	// dominates and the paired verdict is Abstain — the same answer a total discard of
+	// the solo verdict would give. This case therefore still pins ORDER-INDEPENDENCE,
+	// which is the property the parser bug actually broke, but it can no longer
+	// discriminate a dropped verdict on its own. The subtest immediately below carries
+	// that half: a Reject outranks the floor, so a discard there is still visible.
+	//
+	// The precondition assertion is deliberately kept: it is the tripwire that tells a
+	// later reader the solo verdict moved AGAIN, rather than letting this subtest
+	// quietly measure a different fold than the one it documents.
 	t.Run("both orderings of gitmeta-read + heredoc agree", func(t *testing.T) {
 		const body = "the .git/index is 0 bytes"
 		solo := decide("grep -n foo .git/config")

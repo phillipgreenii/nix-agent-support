@@ -3,23 +3,25 @@
 // git porcelain rather than by an agent poking at the files (a hook-support
 // parity capability; GitDirectoryEvaluator).
 //
-// Decision policy, by DIRECTION of the access (pg2-3hk7t):
+// Decision policy, by DIRECTION of the access (pg2-3hk7t, tc-k2m3, tc-403c):
 //
 //   - a WRITE (`sed -i`, `>`, `rm`, `mv`/`cp` onto it, `tee`, `chmod`, …) is
 //     Rejected. This is the hard security block, matching hook-support's DENY
 //     with confidence 1.0 and consistent with ceta's other hard-block rules
 //     (`assume` Rejects assume-role; `config-rules` Rejects blocked basenames).
-//   - a READ (`ls`, `cat`, `grep`, `readlink`, `[ -e ]`, `head`, `wc`, `stat`,
-//     `diff`) is APPROVED (tc-k2m3).
+//   - a COPY-OUT — a read whose DESTINATION is a write (`cp .git/config /tmp/x`,
+//     `cat .git/config > /tmp/x`, `ln -s .git/config /tmp/link`) — Asks.
+//   - a plain READ (`ls`, `cat`, `grep`, `readlink`, `[ -e ]`, `head`, `wc`,
+//     `stat`, `diff`) ABSTAINS: no verdict, the rest of the chain decides.
 //   - an access whose direction cannot be determined is treated as a WRITE.
 //
-// THE READ SIDE HAS NOW SOFTENED TWICE, and only the read side has ever moved.
-// It shipped as a blanket Reject, became a decisive Ask (pg2-3hk7t), and is now
-// an Approve; the write-side Reject is the load-bearing protection and is
-// unchanged at every step. The first softening was because a non-overridable
+// ONLY THE READ SIDE HAS EVER MOVED, and it has now moved three times: a blanket
+// Reject, then a decisive Ask (pg2-3hk7t), then a decisive Approve (tc-k2m3), and
+// now Abstain (tc-403c). The write-side Reject is the load-bearing protection and
+// is unchanged at every step. The first softening was because a non-overridable
 // deny on a read-only inspection is the failure mode most likely to get the whole
 // guard disabled — the rule reproduced against the orchestrator mid-triage and
-// blocked read-only calls during the very run that found it. The second is the
+// blocked read-only calls during the very run that found it. The second was the
 // same argument carried to its end: of the 113 historical `deny` rows in the
 // decision DB not one still replays as `deny`, and every one of the 14 rows that
 // remained at `ask` was APPROVED by the operator — 100%, no denial — so the
@@ -27,46 +29,62 @@
 // `.git/worktrees/*/rebase-merge/*` are ordinary diagnostic traffic that no git
 // porcelain command exposes; `.git/config` in particular is the standard
 // diagnostic for the author-identity and `core.hooksPath` problems that recur
-// throughout that corpus.
+// throughout that corpus. The third is described next.
 //
-// # KNOWN GAP: an approving read SHORT-CIRCUITS the rest of the chain (tc-k2m3)
+// # WHY A PLAIN READ ABSTAINS RATHER THAN APPROVING (tc-403c)
 //
 // engine.Evaluate is FIRST-MATCH-WINS and this rule sits at position 2 of
 // setup.RuleChain — after the consumer `config-rules`, but BEFORE
 // `path-traversal`, `secrets`, `path-safety` and `safe-commands`. A DECISIVE
 // verdict of any kind ends the chain for that leaf. That was harmless while the
 // read verdict was Ask, because Ask outranks anything those later rules could
-// have contributed anyway; it is NOT harmless now that the verdict is Approve,
-// the least restrictive verdict there is. Three consequences, each measured
-// through the real chain rather than reasoned about:
+// have contributed anyway. It was NOT harmless once the verdict became Approve,
+// the least restrictive verdict there is: this rule then answered `allow` for
+// every `.git/` read in ceta's name, and three whole rules never ran.
 //
+//   - PATH TRAVERSAL. `cat ../../../../etc/passwd/../.git/config` asked via
+//     `path-traversal` while this rule said Ask, and auto-approved while it said
+//     Approve.
+//   - OUT-OF-PROJECT READS. `cat /elsewhere/.git/config` lands outside the
+//     project root, where the zone check yields no read permission and the
+//     verdict should defer to Claude Code; it auto-approved instead.
 //   - CREDENTIALS IN `.git/config`. A remote URL can carry an embedded token
 //     (`https://x-access-token:ghp_…@github.com/…`), and `secrets` is the rule
-//     that would prompt before handing a credential to a reader. It does not
-//     cover this, and the ordering is not why: secretpath.IsSecret is false for
-//     EVERY `.git/` path, so the coverage is absent outright rather than merely
-//     masked (pinned by TestGitDir_SecretsDoesNotCoverGitPaths). An embedded
-//     token in `.git/config` is therefore readable with no prompt.
-//   - PATH TRAVERSAL. `cat ../../../../etc/passwd/../.git/config` asked via
-//     `path-traversal` while this rule said Ask; it now approves here and
-//     `path-traversal` is never consulted.
-//   - OUT-OF-PROJECT READS. `cat /elsewhere/.git/config` lands outside the
-//     project root, where `path-safety` yields Abstain (defer to Claude Code);
-//     it now approves.
+//     that would prompt before handing a credential to a reader. Reaching
+//     `secrets` is necessary but NOT sufficient here and the ordering was never
+//     the only problem: secretpath.IsSecret is false for EVERY `.git/` path, so
+//     that coverage is absent outright rather than merely masked (pinned by
+//     TestGitDir_SecretsDoesNotCoverGitPaths). Widening secretpath is therefore a
+//     separate, still-open question — but it could not have helped at all while
+//     this rule short-circuited the chain.
 //
-// These are RECORDED, not endorsed. The operator decision was that reads
-// approve, and the three shapes above are the residue that decision does not
-// itself settle. The structural fix is NOT to widen secretpath to match `.git/`
-// — that addresses only the first shape, and only if this rule also stopped
-// short-circuiting. It is to make the read verdict NON-DECISIVE (Abstain) so the
-// later rules still run. That was MEASURED against the whole decision DB, not
-// merely proposed: it yields the identical verdict for every row cited on
-// tc-k2m3 (`safe-commands` approves an ordinary `cat`/`ls` of a readable path)
-// and differs from this Approve on only 16 rows of the entire corpus, each one a
-// row where no later rule positively approves and the verdict therefore defers
-// to Claude Code instead of auto-approving — while restoring the traversal Ask
-// and the out-of-project Abstain. That is a composition change with its own
-// blast radius and belongs in its own bead.
+// Abstain restores all three: the traversal Asks again, the out-of-project read
+// defers, and every later rule is consulted. It is NOT a walk-back of tc-k2m3's
+// operator decision, because that decision's own evidence still lands on `allow`
+// END-TO-END — `safe-commands` approves an ordinary `cat`/`ls`/`stat` of a
+// readable path and treats `readlink` as always-safe, which is why the four cited
+// shapes are pinned end-to-end in engine_integration_test.go rather than at this
+// rule's own scope. What Abstain gives up is only the ABILITY TO OVERRIDE a later
+// rule's objection, which is exactly the property that was doing the damage.
+//
+// # WHY A COPY-OUT ASKS (tc-403c)
+//
+// Abstain alone does not close the sharp shape. `cp .git/config /tmp/backup` is
+// classified a READ — cp genuinely does not modify its source, a distinction this
+// rule keeps deliberately (see copyLikeCmds vs moveCmds) — and every later rule
+// approves it: `safe-commands` sees a readable source and a writable destination
+// and says yes. So the credential-bearing file still reached an arbitrary
+// destination with no prompt, by the one command shape tc-k2m3's 14 rows never
+// contained.
+//
+// The FAILURE DIRECTION is the design: a copy-out fails toward PROMPTING. Ask is
+// decisive, so it does short-circuit the chain — harmlessly, because Ask outranks
+// everything below it except Reject, so nothing downstream could have made the
+// verdict more restrictive. It is not Reject: a copy-out modifies no git metadata,
+// backing `.git/config` up before editing it is legitimate, and a non-overridable
+// deny on a non-destructive operation is the exact failure that softened the read
+// side twice already. And it is not Abstain: deferring would hand the decision to
+// a layer that has no idea the source is git metadata.
 //
 // SYNTACTIC ROLE, not bare text. A git-metadata path token is a violation only
 // when it is a path the command actually OPERATES ON. The rule therefore parses
@@ -101,12 +119,19 @@ import (
 const maxScopeDepth = 8
 
 // direction is the access direction of a matched git-metadata path. The zero
-// value is dirRead; dirWrite is strictly more restrictive, so `worse` folds by
-// numeric order exactly as hookio.MostRestrictive does for decisions.
+// value is dirRead and each successive value is strictly more restrictive, so
+// `worse` folds by numeric order exactly as hookio.MostRestrictive does for
+// decisions.
+//
+// dirCopyOut sits BETWEEN the two because a copy-out is neither: it modifies no
+// git metadata (so the write-side Reject would be wrong and would hard-block a
+// legitimate backup), yet it is not a plain inspection either — it lands the
+// bytes somewhere the guard no longer covers.
 type direction int
 
 const (
 	dirRead direction = iota
+	dirCopyOut
 	dirWrite
 )
 
@@ -160,16 +185,23 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 }
 
 func (r *Rule) verdict(d direction) hookio.RuleResult {
-	if d == dirWrite {
+	switch d {
+	case dirWrite:
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
 			Reason:   "refusing to write git metadata under .git/ directly — modify it through git commands only",
 			Module:   r.Name(),
 		}
+	case dirCopyOut:
+		return hookio.RuleResult{
+			Decision: hookio.Ask,
+			Reason:   "copying git metadata out of .git/ to another location — .git/config can carry a credential in a remote URL",
+			Module:   r.Name(),
+		}
 	}
 	return hookio.RuleResult{
-		Decision: hookio.Approve,
-		Reason:   "reading git metadata under .git/ is a read-only inspection",
+		Decision: hookio.Abstain,
+		Reason:   "reading git metadata under .git/ is a read-only inspection (no verdict; later rules decide)",
 		Module:   r.Name(),
 	}
 }
@@ -225,7 +257,8 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 // variable name by folding the direction of every command in the expression that
 // CONSUMES it. A binding nothing consumes here is undecidable, so it fails safe
 // to a write — that is what keeps a real `f=…/.git/info/exclude` + `sed -i "$f"`
-// rejected while `RM=…/rebase-merge` + `ls "$RM"` only asks.
+// rejected while `RM=…/rebase-merge` + `ls "$RM"` folds to a plain read (and so to
+// no verdict from this rule at all).
 //
 // RESIDUAL ASYMMETRY, deliberate: `git` is not in readCmds, so a path consumed
 // only through git (`S=…/.git/config; git config --file "$S" --get x`) folds to a
@@ -415,7 +448,8 @@ var readCmds = map[string]bool{
 
 // copyLikeCmds take a DESTINATION as their last operand and only READ their
 // source, so their direction depends on WHICH operand the git-metadata path is:
-// naming it as a source reads it, naming it as the destination writes it.
+// naming it as the destination writes it (Reject), naming it as a SOURCE copies
+// it out (Ask — see commandDirection's copyLikeCmds arm and dirCopyOut).
 //
 // `mv` is deliberately NOT a member — see moveCmds. Do not add it back.
 var copyLikeCmds = map[string]bool{
@@ -551,7 +585,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direc
 		if hasInPlaceFlag(args) {
 			return dirWrite
 		}
-		return dirRead
+		return readOrCapture(pc)
 	case copyLikeCmds[base]:
 		// A destination-bearing flag inverts the geometry, so the last operand is
 		// no longer the destination and must not be read as one.
@@ -561,14 +595,50 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool) direc
 		if dest, ok := lastOperand(args); ok && target(dest) {
 			return dirWrite
 		}
-		return dirRead
+		// The git-metadata path is a SOURCE. These commands do not modify it — that
+		// is why they are not moveCmds — but every one of them exists to make its
+		// source reachable at a destination they WRITE: cp/install duplicate the
+		// bytes, `ln` publishes a second name that resolves to them. Either way the
+		// content leaves the directory this rule guards, so it is a copy-out and not
+		// a plain read.
+		return dirCopyOut
 	case readCmds[base]:
 		if hasAnyFlag(args, mutatingFlags[base]) {
 			return dirWrite
 		}
-		return dirRead
+		return readOrCapture(pc)
 	}
 	return dirWrite
+}
+
+// readOrCapture classifies a command already established to READ its git-metadata
+// operand: a plain read, unless its OUTPUT is captured into a file, which makes it
+// a copy-out by a different spelling.
+//
+// `cat .git/config > /tmp/backup` copies exactly what `cp .git/config /tmp/backup`
+// copies, so the two must reach the same verdict or the cp treatment is decoration.
+// Only the STDOUT-bearing kinds count: `2>/dev/null` discards diagnostics and
+// captures none of the file, and `ls -la .git/hooks 2>/dev/null` is a routine
+// inspection that must not be promoted. A target that captures nothing —
+// /dev/null, the tty, an inherited fd — is likewise not a capture
+// (hookio.IsSafeRedirectTarget).
+//
+// KNOWN RESIDUE, deliberately not addressed here: a PIPE to a writing sink
+// (`cat .git/config | tee /tmp/backup`) is the same exfiltration, but cmdparse
+// hands each pipeline stage to the rule as its own leaf and records no pipe
+// relation between them, so this rule cannot tell that sink from a `| grep url`
+// filter without modelling the pipeline. That is a cmdparse capability, not a
+// verdict question, and it is unchanged by this bead rather than opened by it.
+func readOrCapture(pc cmdparse.ParsedCommand) direction {
+	for _, rd := range pc.Redirections {
+		if rd.Kind != hookio.RedirectStdout && rd.Kind != hookio.RedirectAll {
+			continue
+		}
+		if !hookio.IsSafeRedirectTarget(rd.Path) {
+			return dirCopyOut
+		}
+	}
+	return dirRead
 }
 
 // hasAnyFlag reports whether any arg is one of the given flags, matching both the

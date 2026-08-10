@@ -2,6 +2,7 @@ package hookio
 
 import (
 	"encoding/json"
+	"regexp"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
@@ -169,6 +170,38 @@ type Redirection struct {
 	Operator string          // "<", ">", ">>", "2>", "2>>", "&>"
 	Path     string          // target file path
 	Kind     RedirectionKind // classification
+}
+
+// devFdPattern matches /dev/fd/<n> for any file-descriptor number.
+var devFdPattern = regexp.MustCompile(`^/dev/fd/[0-9]+$`)
+
+// IsSafeRedirectTarget reports whether path is one of the standard special device
+// files that are always safe as an I/O redirection target — for reading (stdin)
+// and writing (stdout/stderr) alike: /dev/null, /dev/stdout, /dev/stderr,
+// /dev/tty, and /dev/fd/<n>.
+//
+// TWO callers, for two different reasons, which is why it lives beside the
+// Redirection type rather than inside either of them (the same relocation
+// cmdparse.SkipGrepPattern got when a rule needed to share it):
+//
+//   - the engine's redirection evaluation, where the PathEvaluator does not model
+//     these pseudo-files (it classifies them PathUnknown) and without the
+//     short-circuit a redirect to one would demote an otherwise-approved command
+//     to Abstain (pg2-9ctmb);
+//   - the gitdir rule's copy-out detection, where an output redirection is what
+//     turns a read of git metadata into a capture of it — but writing to a
+//     terminal or discarding to /dev/null captures nothing, so `ls .git/hooks
+//     2>/dev/null` must stay a plain read (tc-403c).
+//
+// Being a redirect-TARGET predicate is the whole of its meaning: it does NOT make
+// these paths writable to the rest of the ruleset (e.g. `rm /dev/null` is
+// unaffected).
+func IsSafeRedirectTarget(path string) bool {
+	switch path {
+	case "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty":
+		return true
+	}
+	return devFdPattern.MatchString(path)
 }
 
 // Evaluator allows rules to recursively evaluate inner expressions

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -13,24 +12,12 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
-// devFdPattern matches /dev/fd/<n> for any file-descriptor number.
-var devFdPattern = regexp.MustCompile(`^/dev/fd/[0-9]+$`)
-
-// isSafeRedirectTarget reports whether path is one of the standard special
-// device files that are always safe as an I/O redirection target — for reading
-// (stdin) and writing (stdout/stderr) alike: /dev/null, /dev/stdout,
-// /dev/stderr, /dev/tty, and /dev/fd/<n>. The PathEvaluator does not model these
-// pseudo-files (it classifies them PathUnknown), so without this short-circuit a
-// redirect to one would demote an otherwise-approved command to Abstain
-// (pg2-9ctmb). Kept redirect-scoped on purpose: it does NOT make these paths
-// writable to the rest of the ruleset (e.g. `rm /dev/null` is unaffected).
-func isSafeRedirectTarget(path string) bool {
-	switch path {
-	case "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty":
-		return true
-	}
-	return devFdPattern.MatchString(path)
-}
+// isSafeRedirectTarget is hookio.IsSafeRedirectTarget, kept as a local alias so
+// this file's call sites and comments read unchanged. The predicate moved to
+// hookio when the gitdir rule needed the same "this target captures nothing"
+// answer for its copy-out detection (tc-403c); hookio owns the Redirection type,
+// so it is the one place both an engine and a rule can reach.
+func isSafeRedirectTarget(path string) bool { return hookio.IsSafeRedirectTarget(path) }
 
 // isDynamicRedirectTarget reports whether a redirection target contains a shell
 // expansion ($VAR, ${VAR}, $(...), backtick) that resolves only at runtime,
