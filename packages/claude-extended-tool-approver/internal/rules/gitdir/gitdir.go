@@ -88,7 +88,8 @@
 // relation in the parser rather than re-deriving it here — see pipeScope, and the
 // argument for putting it there in cmdparse.ParsedCommand's PipelineID doc.
 //
-// SINKS ARE AN ALLOWLIST, not a denylist (pipeFilterCmds): a stage that is not
+// SINKS ARE AN ALLOWLIST, not a denylist (cmdparse.PipeFilterCmds — relocated
+// there by tc-yk2z when the ssh rule needed the same classification): a stage that is not
 // positively known to consume-without-persisting is treated as a writer. That is
 // tc-080p's settled direction and tc-403c's undeterminable-access rule, and its
 // measured cost here is ZERO — replaying all 16,756 non-excluded corpus rows
@@ -127,7 +128,6 @@
 package gitdir
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -245,7 +245,7 @@ func bashAccess(leafText, scopeText string) (direction, bool) {
 		// same leaf (`git status > .git/foo`) is NOT a git-mediated access and is
 		// still checked below.
 		gitPorcelain := false
-		if base, _ := effectiveExec(pc); base == "git" {
+		if base, _ := cmdparse.EffectiveExec(pc); base == "git" {
 			gitPorcelain = true
 		}
 		if !gitPorcelain {
@@ -427,33 +427,12 @@ func unquoteOperand(s string) string {
 	return s
 }
 
-// shellKeywords are compound-statement keywords cmdparse leaves as a segment's
-// "executable" (`if [ -e "$h" ]` parses to Executable=="if"). The real command is
-// the next token, so direction classification must step past them or every
-// `if [ -e … ]` read would be an unknown command and fail safe to a write.
-var shellKeywords = map[string]bool{
-	"if": true, "then": true, "else": true, "elif": true,
-	"while": true, "until": true, "do": true, "!": true, "time": true,
-}
-
-// effectiveExec returns the leaf's real command basename and the args that follow
-// it, stepping past any leading shell keywords.
-func effectiveExec(pc cmdparse.ParsedCommand) (string, []string) {
-	base := baseName(pc.Executable)
-	args := pc.Args
-	for shellKeywords[base] && len(args) > 0 {
-		base = baseName(args[0])
-		args = args[1:]
-	}
-	return base, args
-}
-
-func baseName(s string) string {
-	if s == "" {
-		return ""
-	}
-	return filepath.Base(s)
-}
+// shellKeywords / effectiveExec / hasAnyFlag / mutatingFlags / capturesStdout and
+// the sink allowlist all used to be defined HERE. They moved to cmdparse
+// (cmdparse/pipesink.go, tc-yk2z) when the ssh rule needed the same sink
+// classification and a rule may not import another rule's package. Only the
+// MECHANISM moved: the DIRECTION POLICY below — readCmds, copyLikeCmds, moveCmds,
+// destFlagCmds, and what each direction MEANS — is still this rule's own.
 
 // readCmds never modify their path operands.
 var readCmds = map[string]bool{
@@ -507,40 +486,6 @@ var moveCmds = map[string]bool{
 // read-only `cp -t /tmp .git/config`, which is the correct side to err on.
 var destFlagCmds = map[string]bool{
 	"-t": true, "--target-directory": true, "-d": true, "--directory": true,
-}
-
-// mutatingFlags list, per read-allowlisted command, the flags that turn it into a
-// WRITER — the second shape a read allowlist gets wrong. Each of these commands is
-// genuinely read-only in its bare form, which is why it belongs on readCmds, but a
-// single flag makes it destructive:
-//
-//   - `find -delete` removes what it matches, and `-exec`/`-execdir`/`-ok` run an
-//     arbitrary command over it (`find .git -exec rm {} \;`); the `-f*print*`
-//     family writes its listing to a named file.
-//   - `sort -o FILE` writes to FILE, which may be the git-metadata path itself.
-//   - `yq -i` edits in place. (`jq` has NO in-place flag — it is stdout-only, so it
-//     is deliberately absent here.)
-//   - `tree -o FILE` redirects its listing into FILE.
-//
-// A flag match flips the WHOLE command to write rather than just the flag's own
-// operand. That deliberately over-blocks a read-only `find .git -exec grep …`: an
-// `-exec` payload is opaque (`-exec sh -c '…'` doubly so), and the rule's policy is
-// that a direction which cannot be determined is a write.
-//
-// Measured cost of the `-exec` entry: exactly ONE corpus row, 305265, a read-only
-// `find <gitdirs> -name index.lock -exec sh -c 'echo … stat …'` lock scan. That row
-// Rejects on unpatched main too, so this entry RESTORES the status quo for it
-// rather than introducing a new deny — worth knowing before anyone "fixes" it by
-// dropping `-exec`, which would silently downgrade `find .git -exec rm {} \;` to a
-// user-overridable prompt.
-var mutatingFlags = map[string]map[string]bool{
-	"find": {
-		"-delete": true, "-exec": true, "-execdir": true, "-ok": true,
-		"-fprint": true, "-fprint0": true, "-fls": true, "-fprintf": true,
-	},
-	"sort": {"-o": true, "--output": true},
-	"yq":   {"-i": true, "--inplace": true, "--in-place": true},
-	"tree": {"-o": true},
 }
 
 // ddPathPrefixes are the `key=value` operand prefixes dd uses for its input and
@@ -597,7 +542,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 			return dirWrite
 		}
 	}
-	base, args := effectiveExec(pc)
+	base, args := cmdparse.EffectiveExec(pc)
 	switch {
 	case moveCmds[base]:
 		// Destructive on the source as well as the destination — checked BEFORE
@@ -612,7 +557,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 	case copyLikeCmds[base]:
 		// A destination-bearing flag inverts the geometry, so the last operand is
 		// no longer the destination and must not be read as one.
-		if hasAnyFlag(args, destFlagCmds) {
+		if cmdparse.HasAnyFlag(args, destFlagCmds) {
 			return dirWrite
 		}
 		if dest, ok := lastOperand(args); ok && target(dest) {
@@ -626,7 +571,7 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 		// a plain read.
 		return dirCopyOut
 	case readCmds[base]:
-		if hasAnyFlag(args, mutatingFlags[base]) {
+		if cmdparse.HasAnyFlag(args, cmdparse.MutatingFlags[base]) {
 			return dirWrite
 		}
 		return readOrCapture(pc, pipes)
@@ -654,60 +599,10 @@ func commandDirection(pc cmdparse.ParsedCommand, target func(string) bool, pipes
 // relation is now recorded (cmdparse.ParsedCommand.PipelineID / PipelineIndex) and
 // this rule reads it through cmdparse.DownstreamStages.
 func readOrCapture(pc cmdparse.ParsedCommand, pipes *pipeScope) direction {
-	if capturesStdout(pc) {
+	if cmdparse.CapturesStdout(pc) {
 		return dirCopyOut
 	}
 	return pipes.sinkDirection(pc.Raw)
-}
-
-// capturesStdout reports whether pc's own redirections land its STDOUT somewhere
-// that keeps the bytes. Only the STDOUT-bearing kinds count: `2>/dev/null`
-// discards diagnostics and captures none of the file, and a target that captures
-// nothing — /dev/null, the tty, an inherited fd — is likewise not a capture
-// (hookio.IsSafeRedirectTarget).
-func capturesStdout(pc cmdparse.ParsedCommand) bool {
-	for _, rd := range pc.Redirections {
-		if rd.Kind != hookio.RedirectStdout && rd.Kind != hookio.RedirectAll {
-			continue
-		}
-		if !hookio.IsSafeRedirectTarget(rd.Path) {
-			return true
-		}
-	}
-	return false
-}
-
-// pipeFilterCmds are pipeline stages that CONSUME what they receive without
-// persisting it: they transform their stdin onto their own stdout and open no
-// file for writing. Everything NOT listed is treated as a possible WRITER, which
-// is the fail-closed direction tc-080p settled (an allowlist of the known-safe,
-// never a denylist of the known-dangerous) and the direction tc-403c already
-// applies to an undeterminable access.
-//
-// It is a SEPARATE set from readCmds even though the two overlap heavily, because
-// they answer different questions. readCmds asks "does this command modify its
-// PATH OPERANDS" — `tee`, `dd` and `install` are absent from it for that reason
-// but so are `sed`, `tac` and `base64`, which are perfectly good filters. Reusing
-// readCmds here would have made `cat .git/config | sed 's/x/y/'` prompt.
-//
-// `xargs`, `sh`, `bash` and `python` are deliberately absent: each runs an
-// arbitrary command over what the pipeline carries, so the sink is whatever that
-// command is. `tee` is the shape this exists to catch and MUST NOT be added.
-//
-// MEASURED RESIDUE, accepted: `awk` stays a filter although its program text can
-// itself redirect (`awk '{print > "/tmp/x"}'`). Detecting that means reading the
-// awk program, and the cheap proxy — a `>` anywhere in the script — also fires on
-// every `awk '$1 > 5'` comparison. The same is true of the `-e`/`-f` script of
-// `sed`, and of `jq`'s `output` builtins.
-var pipeFilterCmds = map[string]bool{
-	"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true, "ack": true,
-	"head": true, "tail": true, "wc": true, "cut": true, "tr": true, "sort": true,
-	"uniq": true, "column": true, "jq": true, "yq": true, "nl": true, "fold": true,
-	"awk": true, "gawk": true, "nawk": true, "sed": true, "gsed": true,
-	"cat": true, "bat": true, "tac": true, "rev": true, "less": true, "more": true,
-	"od": true, "xxd": true, "hexdump": true, "strings": true, "base64": true,
-	"md5sum": true, "shasum": true, "sha1sum": true, "sha256sum": true, "cksum": true,
-	"echo": true, "printf": true, "true": true, "false": true,
 }
 
 // pipeScope answers, for a leaf of the expression it was built from, where that
@@ -748,53 +643,10 @@ func (p *pipeScope) sinkDirection(leafRaw string) direction {
 		p.leaves = cmdparse.Parse(p.scope)
 		p.parsed = true
 	}
-	for _, stage := range cmdparse.DownstreamStages(p.leaves, leafRaw) {
-		if stageWritesInput(stage) {
-			return dirCopyOut
-		}
+	if cmdparse.PipedToWriter(p.leaves, leafRaw) {
+		return dirCopyOut
 	}
 	return dirRead
-}
-
-// stageWritesInput reports whether a downstream pipeline stage might PERSIST what
-// it receives. Unknown is a writer.
-func stageWritesInput(pc cmdparse.ParsedCommand) bool {
-	// A capturing stdout redirection persists the whole pipeline's payload whatever
-	// the stage is: `cat .git/config | grep url > /tmp/x` is a copy-out through a
-	// stage that is otherwise a pure filter.
-	if capturesStdout(pc) {
-		return true
-	}
-	base, args := effectiveExec(pc)
-	if base == "" {
-		// A command-less stage is a bare redirection segment; capturesStdout already
-		// ruled on it, and anything left captures nothing.
-		return false
-	}
-	if !pipeFilterCmds[base] {
-		return true
-	}
-	// A filter with a flag that makes it write a file is a writer after all —
-	// `sort -o FILE`, `yq -i`, `tree -o` — the same table the operand side uses.
-	return hasAnyFlag(args, mutatingFlags[base])
-}
-
-// hasAnyFlag reports whether any arg is one of the given flags, matching both the
-// separate (`-o FILE`) and glued (`-o=FILE`, `--output=FILE`) spellings so a
-// mutating flag cannot hide behind an `=`.
-func hasAnyFlag(args []string, flags map[string]bool) bool {
-	if len(flags) == 0 {
-		return false
-	}
-	for _, a := range args {
-		if flags[a] {
-			return true
-		}
-		if eq := strings.IndexByte(a, '='); eq > 0 && flags[a[:eq]] {
-			return true
-		}
-	}
-	return false
 }
 
 // hasInPlaceFlag reports whether args carry sed's in-place flag in any spelling:
@@ -836,7 +688,7 @@ func lastOperand(args []string) (string, bool) {
 // pathOperands returns the args of pc that are candidate PATHS — the operands the
 // command actually acts on — with flags and every EXCLUSION role removed.
 func pathOperands(pc cmdparse.ParsedCommand) []string {
-	base, args := effectiveExec(pc)
+	base, args := cmdparse.EffectiveExec(pc)
 	out := make([]string, 0, len(args)+1)
 	if pc.Executable != "" {
 		out = append(out, pc.Executable)

