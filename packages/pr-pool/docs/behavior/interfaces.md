@@ -15,13 +15,13 @@ implements these interfaces.)
 
 The five interfaces, each named for its boundary rather than a number, are:
 
-| Interface      | Boundary                             | Counterparty (actor)             | Initiator                    |
-| -------------- | ------------------------------------ | -------------------------------- | ---------------------------- |
-| `INTF-SOURCE`  | typed events into the core           | `ACTOR-SRC` event source         | core (pull) or source (push) |
-| `INTF-HANDLER` | events out to a handler; status back | `ACTOR-HDL` event handler        | core                         |
-| `INTF-MON`     | the metric catalog out               | `ACTOR-MON` monitoring sink      | either (sink declares)       |
-| `INTF-STORE`   | key/value scratch for core state     | `ACTOR-STO` storage              | core                         |
-| `INTF-CLI`     | operator commands; manager callbacks | `ACTOR-OP` operator (+ managers) | operator / manager           |
+| Interface      | Boundary                                 | Counterparty (actor)             | Initiator                    |
+| -------------- | ---------------------------------------- | -------------------------------- | ---------------------------- |
+| `INTF-SOURCE`  | typed events into the core               | `ACTOR-SRC` event source         | core (pull) or source (push) |
+| `INTF-HANDLER` | events out to a handler; acceptance back | `ACTOR-HDL` event handler        | core                         |
+| `INTF-MON`     | the metric catalog out                   | `ACTOR-MON` monitoring sink      | either (sink declares)       |
+| `INTF-STORE`   | key/value scratch for core state         | `ACTOR-STO` storage              | core                         |
+| `INTF-CLI`     | operator commands; manager callbacks     | `ACTOR-OP` operator (+ managers) | operator / manager           |
 
 ```mermaid
 flowchart LR
@@ -30,7 +30,7 @@ flowchart LR
     end
     SRC["event source"] -- "INTF-SOURCE: typed events" --> C
     C -- "INTF-HANDLER: dispatch event → handler session" --> HDL["event handler"]
-    HDL -. "INTF-HANDLER: handler-session status (callback)" .-> C
+    HDL -. "INTF-HANDLER: accept or decline (reply)" .-> C
     C -- "INTF-MON: metric catalog" --- MON["monitoring sink"]
     C -- "INTF-STORE: get/put/delete" --- STO["storage (optional)"]
     OP["operator"] -- "INTF-CLI: run / inspect" --> C
@@ -57,22 +57,28 @@ requires it; the details are here.
   deferred result or a later callback correlates by **echoing that `id`** — or the participant MAY
   return its own tracking id in the deferred acknowledgement, which the core stores and maps back.
   Either way the core can match a later delivery to the original call. The tracking id is per-call.
-- **Deferred replies.** A reply is **either** an inline result **or** `{ "deferred": true }`. On a
-  deferred reply the participant later reaches the core over its **callback** channel, keyed by the
-  tracking id. The core handles either form on every call; a participant does not declare a
-  sync/async mode up front. Which calls a given interface may defer is shown in that interface's
-  sequence diagram below.
+- **Deferred replies.** A reply is **either** an inline result **or** `{ "deferred": true }`. Where a
+  deferred reply still **owes the core a result**, the participant later reaches the core over its
+  **callback** channel, keyed by the tracking id — `INTF-SOURCE`'s deferred `query`, whose events
+  arrive later via `ingest-event`. Where the deferred reply **is** the acceptance and the core is owed
+  nothing further — `INTF-HANDLER`'s `dispatch` — **no later callback follows**. The core handles
+  either form on every call; a participant does not declare a sync/async mode up front. Which calls a
+  given interface may defer is shown in that interface's sequence diagram below.
 - **Callback.** When the core needs to be reached back, it hands the participant a single
   **callback** — one `command` string already carrying the socket and an auth token as arguments.
   The participant appends its own arguments and runs it; it never assembles the socket or token
-  itself. The concrete callback targets are `INTF-CLI` subcommands (`ingest-event`,
-  `session-status`).
+  itself. The one concrete callback target for a deferred or pushed result is the `INTF-CLI`
+  `ingest-event` subcommand — a **source**'s. A handler needs no callback target of its own: its
+  acceptance already arrives in the **dispatch reply**, so nothing is left for it to call back about.
 - **Coarse exit codes.** A subcommand's exit code stays coarse: `0` ok, `1` unexpected error,
   `2` busy. The **rich outcome is in the JSON reply**; a participant in a degraded state MAY return
   an exit code only (e.g. busy → `2`, no body).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — over its callback channel, independent of any per-item outcome. This is the
-  participant reporting on itself, distinct from a handler session's per-session state.
+  participant reporting on **itself**, and it is the **only** status channel into the core: an
+  `unavailable` self-report is a **pre-accept decline** the core acts on by re-offering the event
+  while it is unexpired (`INV-FAIL-1`, `INV-CONC-1`). It is distinct from the accept-or-decline reply
+  a participant gives to one dispatched item, and pr-pool takes no per-item progress stream at all.
 - **Registry & lifecycle.** A participant **registers** with the core (joins the **registry**) to
   receive lifecycle signals and to make its callback reachable, and **deregisters** on exit. The
   lifecycle and its state diagram are the next section.
@@ -248,39 +254,39 @@ sequenceDiagram
     "type": "review-requested",
     "expiresAt": "2026-07-16T12:15:00Z",
     "payload": {}
-  },
-  "callback": "pr-pool session-status --socket … --token …"
+  }
 }
 ```
 
-- **Reply (sync):** `{ "schemaVersion": "1", "id": "hs-771e", "outcome": { … } }`.
-- **Reply (deferred):** `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — accepted;
-  the outcome and any progress arrive later on the callback. The core never holds an open call
-  across long or paused work.
+- **Reply (sync):** `{ "schemaVersion": "1", "id": "hs-771e", "outcome": { … } }` — an inline
+  completion: the handler took the event and finished it inside the call.
+- **Reply (deferred):** `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — an **ack**:
+  the handler took the event and will run it on its own. The core never holds an open call across
+  long or paused work, and **the ack is the last thing the core is owed** for that dispatch.
 
-**Handler-session status (handler → core, via the `session-status` callback)** (illustrative):
+**A handler's run status is not part of this contract.** The core's delivery responsibility ends at
+acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
+finished are the **handler's** to expose on the **handler's own** surface (for a ccpool-backed
+handler, ccpool's own CLI — which pr-pool's implementation already reads directly rather than being
+pushed to, so nothing that works today depended on a status callback). The core keeps only what it
+needs to route: acceptance per `(event, handler)`, queue depth, and the unconsumed-expired count
+(`INV-OBS-1`).
 
-```json
-{
-  "schemaVersion": "1",
-  "id": "hs-771e",
-  "state": "running",
-  "progress": 40,
-  "detail": "checked out; running review",
-  "at": "2026-07-16T12:03:00Z"
-}
-```
+A handler reporting **its own** health — `healthy` / `degraded` / `unavailable`, over the common
+**self-status** channel above — is a **different channel**, and pr-pool **does** act on it: an
+`unavailable` self-report is a **pre-accept decline** that drives the core's re-offer (`INV-FAIL-1`,
+`INV-CONC-1`). Self-status describes the **participant**; it never describes one dispatched event, so
+the two never collide.
 
-- `state` — one of `running | paused | completed | failed`.
-- `progress` — optional, an **opaque `0..1`** whose meaning is **deployment-defined** (the core does
-  not interpret it; a deployment MAY specialize it, e.g. budget consumption).
-- `detail` — optional human-readable liveness note.
-- `failure` — present **iff** `state = failed`: `{ "class": "<FailureClass>", "message": "…" }`.
-
-A handler reporting **its own** health (not a session's) uses the common **self-status** channel
-instead, so the two never collide.
-
-**Failure class** (coarse; response follows the **acceptance boundary**, `INV-FAIL-1`):
+**Failure class** (coarse; response follows the **acceptance boundary**, `INV-FAIL-1`). This
+vocabulary is the **handler-side** contract — a handler reports these and `INV-FAIL-1` routes them —
+and it is deliberately **not** the list of things pr-pool measures. pr-pool **classifies and counts**
+the **delivery-side** cases only: a **pre-accept decline** (`unavailable`, or a **`busy` exit code
+`2`**) and a **dispatch failure** where the core could not hand the event over at all (`INV-OBS-1`).
+The three **post-accept** classes — `retryable`, `resource-limit`, `critical` — pr-pool merely **hands
+over**; they are the accepting **handler's own observability concern** and live on the handler's own
+surface (for a ccpool-backed handler, ccpool's own metrics and logs), so their absence from pr-pool's
+metric catalog is the boundary working, not an oversight.
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -302,14 +308,13 @@ sequenceDiagram
     participant Core as core
     participant H as event handler (INTF-HANDLER)
     Note over Core,H: sync dispatch
-    Core->>H: dispatch { id, event, callback }
+    Core->>H: dispatch { id, event }
     H-->>Core: { id, outcome }
-    Note over Core,H: deferred dispatch + status callbacks
-    Core->>H: dispatch { id, event, callback }
+    Note over Core,H: deferred dispatch - the ack IS the acceptance
+    Core->>H: dispatch { id, event }
     H-->>Core: { id, deferred: true }
-    H->>Core: session-status { id, state: running, progress: 40 }
-    H->>Core: session-status { id, state: completed }
-    Note over Core,H: on failure the final callback carries failure.class
+    Note over Core,H: nothing further is owed - the run, its progress and its outcome are the handler's own
+    Note over Core,H: a pre-accept decline is busy (exit 2) or an unavailable self-status, and the core re-offers
 ```
 
 ## `INTF-MON` — monitoring sink <!-- uuid: 11c08936-42df-4fd6-a912-70fe88244012 -->
@@ -367,9 +372,9 @@ sequenceDiagram
 ## `INTF-CLI` — operator commands (and the manager callbacks) <!-- uuid: 746dd5a6-34c4-4294-b727-e442c2afa723 -->
 
 - **Counterparty:** `ACTOR-OP`, the operator. **Initiator:** operator. The same binary
-  **also** carries the **manager→core callback** subcommands (`ingest-event`, `session-status`);
-  those belong to `INTF-SOURCE` / `INTF-HANDLER`'s manager-initiated direction and are invoked
-  through the callback the core hands out, not by the operator.
+  **also** carries the **manager→core callback** subcommand `ingest-event`; it belongs to
+  `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands
+  out, not by the operator.
 - **Operator push-inject.** The operator subcommand `push-inject` (below) is the **operator-facing
   front door to the push-ingest path**: it performs the **same core-side enqueue** as the
   `ingest-event` manager callback, but is **operator-initiated** (not invoked through a core-issued
@@ -409,17 +414,19 @@ config** — the mechanism behind `STORY-OP-3`. They scope which sources and han
 | `run-role <role> <event>` | role, event                    | **Smoke test**: dispatch **one named event** through **one handler** (its CLI-facing name is its _role_), then tear down. Runs **no discovery** — the event is explicit. Sets a **test-mode** signal (env) so the handler knows a test is in flight.                                                                                                                                                                                                                   |
 | `run-query <query>`       | query                          | **Smoke test**: run **one pull source's query** once, **read-only**, and print the events it would emit. Also sets the test-mode signal.                                                                                                                                                                                                                                                                                                                               |
 | `push-inject <json>`      | event JSON                     | Inject an **arbitrary operator-supplied event** into the **live** core — the same core-side enqueue as the `ingest-event` manager callback, but **operator-initiated**, locating/authenticating the core like the other operator subcommands. Durable via the queue, delivered at-least-once and deduped (`INV-EVT-*`). **Distinct** from `ingest-event` (a manager→core callback) and `run-role` (a smoke test that tears down). Primarily for manual/test injection. |
-| `status`                  | —                              | Resolved-config summary **plus** live **handler sessions** and per-`type` **queue depths**.                                                                                                                                                                                                                                                                                                                                                                            |
+| `status`                  | —                              | Resolved-config summary **plus** live **deliveries** and per-`type` **queue depths**.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `config`                  | `--show` \| `--print-defaults` | `--show` prints the **resolved** configuration; `--print-defaults` prints the built-in defaults as a copy-paste starting point.                                                                                                                                                                                                                                                                                                                                        |
 
 _"role"_ is the operator-facing name for a configured **event handler** (its concrete kind); the
 core dispatches it as a **handler session**. _"query"_ names one pull **event source**'s query.
 
-### Manager→core callback subcommands
+### Manager→core callback subcommand
 
-These are the concrete callback targets the core hands out (socket + token already baked in); a
-manager appends its arguments and runs one. They follow the common contract (JSON on stdin → JSON
-on stdout; coarse exit codes).
+This is the concrete callback target the core hands out (socket + token already baked in); a manager
+appends its arguments and runs it. It follows the common contract (JSON on stdin → JSON on stdout;
+coarse exit codes). There is **one**: the core takes event ingest back over the callback channel and
+nothing else. In particular a handler pushes back **no run status at all** — the core's delivery
+responsibility ends at acceptance (`INV-EVT-1`, `INV-FAIL-1`), so there is nothing for it to report.
 
 **`ingest-event`** — a **push source**, or a **deferred pull** reply, delivers one or more events.
 
@@ -471,49 +478,25 @@ or missing required fields), each with a reason — e.g. exit `1` with:
 }
 ```
 
-**`session-status`** — an event handler reports a **handler session**'s deferred progress or
-terminal outcome, keyed by the tracking id.
-
-Request (stdin), terminal failure example:
-
-```json
-{
-  "schemaVersion": "1",
-  "id": "hs-771e",
-  "state": "failed",
-  "detail": "usage window reached",
-  "failure": {
-    "class": "resource-limit",
-    "message": "provider usage window exhausted"
-  },
-  "at": "2026-07-16T12:07:00Z"
-}
-```
-
-Reply (stdout, exit `0`):
-
-```json
-{ "schemaVersion": "1", "id": "hs-771e", "accepted": true }
-```
-
 **`status --json`** (operator side, for reference):
 
 ```json
 {
   "schemaVersion": "1",
-  "sessions": [
-    {
-      "id": "hs-771e",
-      "handler": "review",
-      "event": "evt-abc123",
-      "state": "running",
-      "progress": 40
-    }
+  "deliveries": [
+    { "id": "hs-771e", "handler": "review", "event": "evt-abc123" }
   ],
   "queues": [{ "type": "review-requested", "depth": 3 }],
   "config": { "sources": 2, "handlers": 3 }
 }
 ```
+
+`deliveries` is **delivery provenance** — which event the core handed to which handler, keyed by that
+dispatch's tracking id — and the core legitimately knows it, because it already marks acceptance per
+`(event, handler)` (`INV-EVT-1`). It is **not** a window into a handler session, so it carries no
+per-run state and no progress: those are the accepting handler's own, on the handler's own surface.
+`queues` is the per-`type` depth `INV-OBS-1` obliges, and `config` is pr-pool's own resolved
+source/handler count.
 
 ```mermaid
 sequenceDiagram
@@ -525,9 +508,8 @@ sequenceDiagram
     activate Core
     Core->>Src: query { id, callback }
     Src-->>Core: { id, events: [Event] }
-    Core->>H: offer { id, event, callback }
-    H-->>Core: { id, deferred: true }  (accept = ack)
-    H->>Core: session-status { id, state: completed }
+    Core->>H: offer { id, event }
+    H-->>Core: { id, deferred: true }  (accept = ack, nothing further owed)
     Note over Core: queue drained and no offer outstanding → exit (INV-LIFE-1)
     Core-->>Op: exit 0
     deactivate Core

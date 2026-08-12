@@ -45,10 +45,11 @@ load and failure.
 - **`STORY-OP-10`** <!-- uuid: 738e4c5e-01f9-4c2b-bb11-81ed0a4c6dc9 --> — **validate** that wiring before running — no orphan event types, no unhandled
   source output, no disconnected handlers, no unbounded loops — so I get a pass/fail report, not a
   runtime surprise. _(→ `JOURNEY-VALIDATE`; `INV-WORKFLOW-1`.)_
-- **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **by its class** (`retryable` re-offered while
-  unexpired, `resource-limit` paused and re-offered, `unavailable` deferred, `critical` never retried
-  and sent to a human), so transient trouble self-heals and only genuine defects reach me.
-  _(→ `JOURNEY-PAUSE`, `JOURNEY-FAIL`; `INV-FAIL-1`.)_
+- **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **at the acceptance boundary** — a **pre-accept
+  decline** (`busy`, `unavailable`) re-offered by the core while the event is unexpired, and a
+  **post-accept** outcome (`retryable`, `resource-limit`, `critical`) owned by the handler that
+  accepted it, `critical` never retried and sent to a human — so transient trouble self-heals and only
+  genuine defects reach me. _(→ `JOURNEY-PAUSE`, `JOURNEY-FAIL`; `INV-FAIL-1`.)_
 - **`STORY-OP-12`** <!-- uuid: 20a9f5f1-9b4a-4f67-a18b-bb1dedf23153 --> — trust that when the core must trade off, it prefers **safety over continuity
   over efficiency**, so it will halt on a `critical` fault and pause rather than push order-dependent
   work unsafely. _(→ `JOURNEY-FAIL`; `INV-PREC-1`.)_
@@ -58,8 +59,9 @@ load and failure.
 - **`STORY-OBS-1`** <!-- uuid: ce97e9c6-5719-4b18-9de9-fa1900b951bd --> — see throughput, backlog, failures, and liveness through dashboards fed by the
   **metric catalog**, so I know the system's health. _(→ `JOURNEY-OBSERVE`; `INV-OBS-1`.)_
 - **`STORY-OBS-2`** <!-- uuid: 257f9e86-187b-4ee8-8123-b75b71d976b5 --> — distinguish a **source infrastructure failure** from a genuinely idle "no
-  work" reading, and see **expiry drops** and failure classes as metrics, so a silent outage does not
-  read as "nothing to do." _(→ `JOURNEY-FAIL`, `JOURNEY-OBSERVE`; `INV-DISP-3`, `INV-OBS-1`.)_
+  work" reading, and see **expiry drops** and the **delivery-side** failure classes as metrics, so a
+  silent outage does not read as "nothing to do."
+  _(→ `JOURNEY-FAIL`, `JOURNEY-OBSERVE`; `INV-DISP-3`, `INV-OBS-1`.)_
 
 **Coverage (traceability).** Per the method's rule that a set's extent is exactly what its stories
 and journeys require (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · INV-11`),
@@ -93,10 +95,11 @@ contract, then run the **conformance suite** (positive + negative) before trusti
    - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
      callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`, an
      optional `at`, an optional `expiresAt`, and a **JSON-object** `payload`.
-   - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
-     and (if deferred) push `running / paused / completed / failed` via the callback; a `failed`
-     carries a **failure class** (`INV-FAIL-1`). MUST tolerate a **duplicate event** idempotently
-     (`INV-EVT-2`).
+   - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`; a
+     deferred ack **is** the acceptance, so nothing further is pushed back and the run's progress and
+     outcome stay on your own surface (`INV-FAIL-1`). Decline **pre-accept** — `busy` (exit `2`) or an
+     `unavailable` self-status — when you cannot take the work, and the core re-offers it while the
+     event is unexpired. MUST tolerate a **duplicate event** idempotently (`INV-EVT-2`).
    - **`INTF-MON`** — declare push or pull, and the metric subset handled.
    - **`INTF-STORE`** — `get` / `put` / `delete` over string keys and JSON-string values.
 4. Run the interface's **conformance suite** (`INV-INTF-2`): **positive** checks (well-formed
@@ -255,7 +258,7 @@ it while it runs (`INV-LIFE-1`).
   offer, `INV-LIFE-1`); the socket stays open throughout so managers can still push.
 
 Both modes keep the socket available. The operator inspects a running core with `status` (resolved
-config + live handler-sessions + queue depths) and `config` (the resolved configuration); every
+config + live **deliveries** + queue depths) and `config` (the resolved configuration); every
 subcommand emits text by default and `--json` for machines (`INTF-CLI`). A command that finds **no
 running core** MUST **fail with a "no running core" error** — the CLI never **auto-starts** one, so
 "is a core running?" stays answerable from a caller's exit code (`INTF-CLI` "Locating the core",
@@ -278,8 +281,8 @@ flowchart TD
 
 **Actors:** `ACTOR-SRC`, core, `ACTOR-HDL`.
 **Intent:** follow one event from a source, through routing, to a bound handler, through a
-sync-or-deferred reply and status, to completion — with the handler's new work re-entering later as
-events via a query.
+sync-or-deferred reply, to **acceptance** — where pr-pool's interest ends — with the handler's new work
+re-entering later as events via a query.
 
 **Flow.** A source **emits** a typed event (a pull source on its query trigger; a push source on its
 ingest callback). The core **de-duplicates by `id` within retention** (`INV-EVT-3`) and **routes by
@@ -287,9 +290,9 @@ ingest callback). The core **de-duplicates by `id` within retention** (`INV-EVT-
 and metrics, and returned to the caller on the push/ingest path (`INV-DISP-3`). Otherwise the core
 **dispatches** the event to a handler as a **handler-session** (tracked by the request `id`),
 delivering each event to **one** session bounded by the handler's capacity (`INV-CONC-1`). The
-handler replies **sync** (outcome inline) or **deferred** (`{ deferred: true }`, then
-`running / paused / completed / failed` via the callback). New work the handler produces re-enters
-later as fresh events through a query.
+handler replies **sync** (outcome inline) or **deferred** (`{ deferred: true }` — an **ack** that is
+itself the acceptance, after which the core is owed nothing further and the run is the handler's own,
+`INV-FAIL-1`). New work the handler produces re-enters later as fresh events through a query.
 
 ```mermaid
 flowchart TD
@@ -299,7 +302,7 @@ flowchart TD
     route -->|yes| disp["core dispatches to one handler-session, bounded by capacity (INV-CONC-1)"]
     disp --> reply{"sync or deferred?"}
     reply -->|sync| out["outcome returned inline"]
-    reply -->|deferred| cb["manager pushes running/paused/completed/failed via callback"]
+    reply -->|deferred| cb["deferred ack is the acceptance, so the handler owns the run from here (INV-FAIL-1)"]
     out --> done["handler's new work re-enters later as events via a query"]
     cb --> done
 ```
@@ -323,7 +326,7 @@ sequenceDiagram
         HDL-->>CORE: outcome inline
     else deferred
         HDL-->>CORE: deferred:true
-        HDL->>CORE: running / paused / completed / failed via callback
+        Note over CORE,HDL: the ack IS the acceptance, so the core is owed nothing further (INV-FAIL-1)
     end
     Note over HDL,Q: handler's new work re-enters later as events via a query
 ```
@@ -369,10 +372,11 @@ and with no handler still owed one the event is dropped (unconsumed-expired) —
 it on its next trigger.
 
 **Flow — post-accept (`resource-limit`).** A handler that has **already accepted** an event and then
-hits a usage-window / quota ceiling reports **`resource-limit`**. Post-accept, the **handler owns**
-persistence and resume (`INV-FAIL-1`): it pauses its own work and resumes once the ceiling lifts, or
-surfaces the outcome / emits a new event. The core does **not** re-offer accepted work. `critical` is
-never retried (`JOURNEY-FAIL`).
+hits a usage-window / quota ceiling reports **`resource-limit`** — on its **own** surface, not to the
+core. Post-accept, the **handler owns** persistence and resume (`INV-FAIL-1`): it pauses its own work
+and resumes once the ceiling lifts, or surfaces the outcome / emits a new event. The core does **not**
+re-offer accepted work and does **not** count post-accept classes (`INV-OBS-1`). `critical` is never
+retried (`JOURNEY-FAIL`).
 
 ```mermaid
 sequenceDiagram
@@ -384,10 +388,9 @@ sequenceDiagram
         Note over CORE: continuity over efficiency (INV-PREC-1)
         CORE->>HDL: re-offer once capacity returns, while the event is unexpired
     else accepted, then hits a ceiling (post-accept)
-        HDL-->>CORE: accept (ack)
-        HDL-->>CORE: session-status resource-limit — handler pauses/resumes (INV-FAIL-1)
+        HDL-->>CORE: accept (ack) — the core is owed nothing further
+        Note over HDL: resource-limit is the handler's own — it pauses, then resumes and finishes once the ceiling lifts, reporting on its own surface (INV-FAIL-1)
     end
-    HDL-->>CORE: completed once the ceiling lifts
 ```
 
 ### `JOURNEY-FAIL` — failure scenarios <!-- uuid: fd32bd84-c5e8-456e-a1f7-f60dc3e05c05 -->
@@ -405,8 +408,13 @@ acceptance:
   expired (`INV-EVT-1`).
 - **post-accept outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that
   **already accepted** — are the **handler's** own (it owns persistence/resume/retry once it
-  accepts). The core does **not** re-offer accepted work; the outcome is surfaced back or becomes a
-  new event, and `critical` is **surfaced to a human** — safety over continuity (`INV-PREC-1`).
+  accepts). The core does **not** re-offer accepted work; the outcome is surfaced on the **handler's
+  own** surface or becomes a new event, and `critical` is **surfaced to a human** — safety over
+  continuity (`INV-PREC-1`).
+- **delivery failures the core itself sees** — a **dispatch failure** where the core could not hand
+  the event over at all — are the **core's** own. Together with the pre-accept declines above, these
+  are the **only** failures pr-pool classifies and counts; the post-accept classes are counted on the
+  handler's surface, not pr-pool's (`INV-OBS-1`).
 
 ```mermaid
 flowchart TD
@@ -477,12 +485,16 @@ sequenceDiagram
 (counter / gauge / histogram), `unit`, and label shape (`INV-OBS-1`). The catalog MUST declare at
 least **queue depth** (gauge, per `type`), **failure rate** (counter, per failure class), and
 **unconsumed-expired** (counter, per `type` — the "no event misses" signal, `INV-DISP-3`), alongside
-throughput / backlog / liveness / dispatch-latency metrics. A monitoring sink **declares its mode and
-metric subset** and either **pulls** current values on its own schedule or receives **pushed** updates
-(`INTF-MON`); it serves its own external surface (dashboards, alerts). Emission uses **OTel for
-metrics only**; **logs stay JSONL**, and observability covers **metrics + logs** (traces are a later
-concern). A **daemon** emits continuously; **`run-until-idle`** MAY emit a final snapshot. The core
-stays unaware of the concrete backend (`GOAL-MIN-1`).
+throughput / backlog / liveness / dispatch-latency metrics. The failure-rate classes are
+**delivery-side** and there are exactly two — a **pre-accept decline** (`unavailable`, or `busy` exit
+code `2`) and a **dispatch failure** the core could not hand over; post-accept classes belong to the
+accepting handler and are counted on **its** surface, not here (`INV-FAIL-1`). A monitoring sink
+**declares its mode and metric subset** and either **pulls** current values on its own schedule or
+receives **pushed** updates (`INTF-MON`); it serves its own external surface (dashboards, alerts).
+Emission uses **OTel for metrics only**; **logs stay JSONL**, and observability covers **metrics +
+logs** (traces are a later concern). A **daemon** emits continuously, and **`run-until-idle` does emit
+a final snapshot** before it exits. The core stays unaware of the concrete backend, which remains a
+deployment binding via `INTF-MON` (`GOAL-MIN-1`).
 
 ```mermaid
 sequenceDiagram

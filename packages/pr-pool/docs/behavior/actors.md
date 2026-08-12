@@ -8,7 +8,7 @@ an **interface** is _how_ an actor interacts. A behavior docs set MUST define al
 - **`ACTOR-OP` — Operator** <!-- uuid: 41f74815-a594-4443-9dd3-bb83252cf5e9 --> — a **principal — a
   human or an agent** — that configures the core (participants, event sources, handlers and their
   bindings, selectors, wiring), runs it as a daemon or run-until-idle, and inspects it
-  (status, resolved config, live handler sessions). Works through the CLI (`INTF-CLI`), which is
+  (status, resolved config, live deliveries). Works through the CLI (`INTF-CLI`), which is
   drivable by either a human or an agent.
 
 ## Human actors
@@ -22,7 +22,8 @@ Each registers with the core, receives lifecycle signals, and interacts only thr
 which concrete implementation fills the role is a downstream deployment set's concern.
 
 - **`ACTOR-SRC` — Event source** <!-- uuid: 39e28ce5-ef60-47bb-8aa7-2d93d267447f --> — emits typed events (pull or push). Interface: `INTF-SOURCE`.
-- **`ACTOR-HDL` — Event handler** <!-- uuid: a5997046-d20a-445d-bf10-328855b03810 --> — responds to bound events as handler sessions and reports status;
+- **`ACTOR-HDL` — Event handler** <!-- uuid: a5997046-d20a-445d-bf10-328855b03810 --> — responds to bound events as handler sessions, replying with its
+  acceptance or a pre-accept decline and keeping the run's own progress on its own surface;
   capacity-limited. Interface: `INTF-HANDLER`.
 - **`ACTOR-MON` — Monitoring sink** <!-- uuid: bf5b0941-b26b-433d-b991-b84fe3b601c2 --> — pulls or pushes a declared subset of the metric catalog.
   Interface: `INTF-MON`.

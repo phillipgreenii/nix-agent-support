@@ -44,8 +44,9 @@ their own terms in a downstream deployment set.
 
 - **Event source** — emits typed events; **pull** (the core queries it on a query trigger) or **push**
   (it calls the core's ingest callback). A push-only source still registers.
-- **Event handler** — responds to an event it is bound to: it runs, reports status, and may be
-  capacity-limited. Its concrete kinds (a "role") are named in a downstream deployment set.
+- **Event handler** — responds to an event it is bound to: it **accepts** the event and owns the run
+  from there, reporting its progress and outcome on its **own** surface rather than back to the core,
+  and may be capacity-limited. Its concrete kinds (a "role") are named in a downstream deployment set.
 - **Handler session** — one run of an event handler against one event, tracked by its tracking id.
 - **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.
 - **Storage** — an optional key/value scratch a participant provides for core state; never backs
@@ -70,7 +71,10 @@ their own terms in a downstream deployment set.
 
 ## Outcomes
 
-- **Failure class** — the coarse category a handler failure carries.
+- **Failure class** — the coarse category a handler failure carries. The vocabulary is the
+  handler-side contract; pr-pool itself **classifies and counts only the delivery-side** cases — a
+  pre-accept decline and a dispatch failure it could not hand over — while the post-accept classes are
+  the accepting handler's own to report (`INV-FAIL-1`, `INV-OBS-1`).
 - **retryable** — a transient condition; the same event MAY be re-offered while it is unexpired
   (`INV-EVT-4`) and may then succeed.
 - **resource-limit** — a capacity or quota ceiling was reached (e.g. a usage window); not a defect,
@@ -88,7 +92,7 @@ their own terms in a downstream deployment set.
   workflow engine (`INV-WORKFLOW-1`). (A deployment's user-facing **workflow** is a separate,
   downstream concept.)
 - **Metric catalog** — the set of metrics the core declares (name, kind, unit, labels) and exposes to
-  monitoring sinks — the neutral **shape**, including queue depth, failure rate, and
+  monitoring sinks — the neutral **shape**, including queue depth, **delivery-side** failure rate, and
   unconsumed-expired (`INV-OBS-1`). **OTel** is the default emission transport for **metrics only**;
   logs stay JSONL.
 

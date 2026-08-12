@@ -135,7 +135,7 @@ sequenceDiagram
     B-->>Core: busy — pre-accept decline (at capacity)
     Note over Core: not a defect — re-offer E2 while it is unexpired (INV-FAIL-1)
     Core->>A: re-offer E2 once A has capacity (still unexpired)
-    A-->>Core: accept → later session-status completed
+    A-->>Core: accept (ack) — the core is owed nothing further (INV-FAIL-1)
 ```
 
 - **`INV-CONC-1`** <!-- uuid: 20c84e0f-8ffb-428c-9acc-dcaabb4fdf1b --> — Capacity is
@@ -156,9 +156,12 @@ sequenceDiagram
   handler. **Post-accept
   outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that has
   **already accepted** the event — are the **handler's** own (once it accepts, the handler owns
-  persistence/resume/retry); the core does **not** re-offer post-accept work. Such an outcome is
-  **surfaced back** (session status + logs/metrics) or turned into a **new event**, and `critical`
-  still means **a human is needed** — never a silent core retry.
+  persistence/resume/retry); the core does **not** re-offer post-accept work, and does **not**
+  classify or count it (`INV-OBS-1`). Such an outcome is **surfaced on the handler's own surface** (its
+  own logs and metrics) or turned into a **new event**, and `critical` still means **a human is
+  needed** — never a silent core retry. The core takes no per-run status stream back from a handler at
+  all; the only status a participant pushes to the core is its **own** health (`healthy` / `degraded` /
+  `unavailable`), and an `unavailable` report is a pre-accept decline handled above.
 
 ## Wiring
 
@@ -184,12 +187,18 @@ sequenceDiagram
   (counter, per failure class), and **unconsumed-expired** (counter, per `type` — events that expired
   with no handler accepting them, which under `INV-EVT-4` is a genuine miss and is the concrete "no
   event misses" signal, `INV-DISP-3`),
-  alongside the existing throughput / backlog / liveness metrics. The metric catalog is the neutral
-  **shape**; **OTel** is the default **emission transport for metrics only** (a neutral standard, not
-  a mandated tool — `GOAL-MIN-1` still holds), while logs stay JSONL; the concrete backend is a
-  deployment binding via `INTF-MON`. The core is unaware of any concrete monitoring backend, and an
-  **observer** reads the sink, never the core. A daemon emits continuously; `run-until-idle` MAY emit
-  a final snapshot.
+  alongside the existing throughput / backlog / liveness metrics. **The failure-rate classes are
+  DELIVERY-SIDE and there are exactly two**: a **pre-accept decline** (an `unavailable` report, or a
+  `busy` **exit code `2`**, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the
+  event over at all. Post-accept classes (`retryable`, `resource-limit`, `critical`) are **NOT**
+  counted here: after acceptance the handler owns the work (`INV-FAIL-1`), so classifying its outcomes
+  is the handler's own observability concern on the handler's own surface. Queue depth and
+  unconsumed-expired are unaffected by that narrowing — both are already pure delivery. The metric
+  catalog is the neutral **shape**; **OTel** is the default **emission transport for metrics only** (a
+  neutral standard, not a mandated tool — `GOAL-MIN-1` still holds), while logs stay JSONL; the
+  concrete backend **remains** a deployment binding via `INTF-MON`. The core is unaware of any
+  concrete monitoring backend, and an **observer** reads the sink, never the core. A daemon emits
+  continuously, and **`run-until-idle` DOES emit a final snapshot** before it exits.
 - **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs as a **socket
   service** in both modes — a long-running **daemon** (`run`) and a one-off **run-until-idle**, which
   exits when the **queue is drained and no offer is outstanding** (every enqueued event is accepted
