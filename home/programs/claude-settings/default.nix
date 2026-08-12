@@ -336,8 +336,21 @@ in
       ${lib.optionalString hasPlugins ''
         CLAUDE="${cfg.claudeCodePackage}/bin/claude"
 
+        # This block runs INLINE in the activation script, so it does NOT get the
+        # wrapped scripts' runtimeDeps PATH — and home-manager REPLACES PATH with a
+        # set containing no git (git is home-manager-provided on darwin, so there is
+        # no system fallback). `plugin marketplace update` and `plugin install` both
+        # clone via `git` BY NAME, so without this prepend every github/url-source
+        # marketplace and plugin fails. See bead pg2-ly6a6.
+        PATH="${pkgs.git}/bin:$PATH"
+        export PATH
+
         act_info "updating marketplaces"
-        $CLAUDE plugin marketplace update 2>/dev/null || true
+        # Non-fatal (a transient network failure MUST NOT fail activation), but the
+        # reason is no longer discarded: this previously ran `2>/dev/null || true`,
+        # which hid the git-missing failure above for every github-source
+        # marketplace, silently, for as long as the defect existed.
+        $CLAUDE plugin marketplace update || act_warn "marketplace update failed (non-fatal)"
 
         ${lib.optionalString (directoryMarketplaces != { }) ''
           act_info "registering directory marketplaces"

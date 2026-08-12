@@ -2145,6 +2145,67 @@
                 ];
               };
 
+              # Regression guard for pg2-ly6a6: `claude plugin install` / `plugin
+              # marketplace update` clone a url/github-source plugin by shelling out
+              # to `git` BY NAME, but home-manager REPLACES PATH during activation
+              # with a set that has no git — and on darwin git is home-manager
+              # provided, so there is no /run/current-system/sw/bin/git fallback
+              # either. The observed failure was `Failed to clone repository:` with
+              # an EMPTY reason, because there was no git stderr to quote.
+              #
+              # This asserts git is REACHABLE, not merely declared: it RUNS the
+              # wrapped script's own PATH setup in an `env -i` shell and resolves
+              # `git` through it, so a future edit that drops pkgs.git from
+              # runtimeDeps fails here rather than at someone's next apply.
+              test-claude-settings-install-plugin-has-git =
+                pkgs.runCommand "claude-settings-install-plugin-has-git-ok"
+                  {
+                    installPlugin = claudeSettingsScripts.installPlugin.script;
+                    gitBin = "${pkgs.git}/bin";
+                  }
+                  ''
+                    set -euo pipefail
+                    wrapper="$installPlugin/bin/claude-settings-install-plugin"
+                    test -f "$wrapper" || { echo "FAIL: wrapper not found at $wrapper"; exit 1; }
+
+                    # The wrapper is: shebang, then one PATH-extending block per
+                    # runtimeDep, then a final `exec` of the real script. Take
+                    # EVERYTHING between the shebang and that `exec` — the store-path
+                    # lines are INDENTED inside `if` blocks, so a `^PATH=` filter would
+                    # silently drop exactly the lines under test and make this vacuous.
+                    prologue="$(${pkgs.gawk}/bin/awk '/^exec /{exit} NR>1{print}' "$wrapper")"
+                    test -n "$prologue" || { echo "FAIL: no PATH prologue in wrapper"; exit 1; }
+
+                    # Run that prologue under an EMPTY environment over a sentinel PATH,
+                    # mirroring activation (PATH replaced wholesale, no git), and ask
+                    # whether git resolves. Behavioural, not a grep of the closure.
+                    probe() {
+                      ${pkgs.coreutils}/bin/env -i ${pkgs.bash}/bin/bash -c "
+                        PATH=/nonexistent-activation-path
+                        $prologue
+                        command -v $1 || true
+                      "
+                    }
+
+                    if [ -z "$(probe git)" ]; then
+                      echo "FAIL: git does NOT resolve from the install-plugin wrapper PATH."
+                      echo "      \`claude plugin install\` will fail as 'Failed to clone repository:'"
+                      echo "      with an EMPTY reason. Re-add pkgs.git to installPlugin runtimeDeps."
+                      echo "      store paths present in the wrapper were:"
+                      ${pkgs.gnugrep}/bin/grep -oE "/nix/store/[a-z0-9]{32}-[^'\"]*/bin" "$wrapper" | sort -u
+                      exit 1
+                    fi
+
+                    # Negative control: an undeclared tool MUST NOT resolve, else the
+                    # assertion above would pass no matter what runtimeDeps contained.
+                    if [ -n "$(probe definitely-not-a-real-tool)" ]; then
+                      echo "FAIL: negative control resolved; this check is vacuous."
+                      exit 1
+                    fi
+
+                    touch $out
+                  '';
+
               # Validate claude-theme token map: parse as JSON and assert required keys.
               # Uses mock Catppuccin Mocha hex values; actual values come from
               # config.lib.stylix.colors at module evaluation time.

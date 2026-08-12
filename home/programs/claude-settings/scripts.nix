@@ -40,6 +40,19 @@ let
     runtimeDeps = [
       pkgs.jq
       pkgs.coreutils
+      # git is REQUIRED, not incidental: `claude plugin install` clones a
+      # `url`/`github`-source plugin by shelling out to `git` BY NAME, and
+      # home-manager's activation script REPLACES PATH outright with a set that
+      # has no git — while on darwin git is home-manager-provided, so there is no
+      # /run/current-system/sw/bin/git to fall back on either. Without this the
+      # clone fails as `Failed to clone repository:` with an EMPTY reason (no git
+      # stderr to quote), which is what made bead pg2-ly6a6 hard to read.
+      # runtimeDeps are added with `--suffix PATH`, i.e. APPENDED as a fallback so
+      # an ambient git still wins; that is exactly what is wanted here, since the
+      # activation PATH supplies none. Guarded by
+      # `checks.<system>.test-claude-settings-install-plugin-has-git`, which
+      # resolves git through the built wrapper's own PATH prologue.
+      pkgs.git
     ];
     manPage = false;
   };
