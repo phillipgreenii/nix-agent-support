@@ -128,6 +128,23 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 - **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
   rather than silently steal or clear it — it is this defect, and the operator decides.
 
+### Beads Is The Issue Tracker For The Skills That Ask For One
+
+> The `mattpocock-skills` plugin's skills (`/wayfinder`, `/triage`, `/to-tickets`, `/to-spec`)
+> each read a per-repo "issue tracker" doc. They ship templates for GitHub, GitLab and local
+> markdown only, and DEFAULT SILENTLY to local markdown when no tracker is provided — which
+> would put planning state in `.scratch/` files, contradicting the beads-only rule. The
+> workspace's tracker description is therefore written by hand, once, and MUST be found.
+
+- **T-1** For any repo in the `pn-workspace`, the tracker doc is
+  `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/docs/agents/issue-tracker.md`.
+  A skill that asks for an issue tracker MUST read it and MUST NOT fall back to local
+  markdown, `.scratch/`, or GitHub Issues. `/wayfinder`'s "Wayfinding operations" section is
+  in that file.
+- **T-2** An agent MUST NOT run `/setup-matt-pocock-skills` in a workspace repo. It would
+  propose GitHub (a GitHub `git remote` is its default posture) and overwrite T-1's doc with
+  its GitHub template. Changing trackers is an operator decision.
+
 ### Handoff Preconditions
 
 > A precondition written at time T against implementation I persists as an INSTRUCTION while
