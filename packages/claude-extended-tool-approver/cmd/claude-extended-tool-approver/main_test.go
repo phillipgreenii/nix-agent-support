@@ -208,11 +208,90 @@ func TestIntegration_MCPTool(t *testing.T) {
 	}
 }
 
-func TestIntegration_GitResetHard(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD~1"},"cwd":"/tmp"}`
-	result := runHook(t, input)
-	if d := getDecision(result); d != "ask" {
-		t.Errorf("git reset --hard decision = %q, want ask", d)
+// assertEmptyHookOutput pins the two halves of "the hook emitted the empty
+// object": the decoded output carries NOTHING (so the binary printed `{}`), and in
+// particular it does not carry `permissionDecision: "allow"`. The second check is
+// redundant with the first by construction and is asserted anyway, because "allow"
+// is the ONE wrong answer that would be indistinguishable from the right one in a
+// test that only compared decision strings — an Abstain and a missing key both read
+// as "".
+func assertEmptyHookOutput(t *testing.T, cmd string, result map[string]any) {
+	t.Helper()
+	if len(result) != 0 {
+		t.Errorf("cmd %q: emitted %v, want the empty object {} — an abstaining rule must hand the decision to claude-code, not answer it", cmd, result)
+	}
+	if d := getDecision(result); d == "allow" {
+		t.Errorf("cmd %q: emitted permissionDecision=%q — the abstain was re-approved by a later rule, which is the exact regression this test exists for", cmd, d)
+	}
+}
+
+// TestIntegration_GitResetHard_EmitsEmptyObject is the BOUNDARY assertion for the
+// operator ruling of pg2-4yy4r item 4 (implemented by pg2-ur9zc): `git reset --hard`
+// is an Abstain in the git rule, and what the HOOK emits for it must be `{}`.
+//
+// A rule-level assertion on RuleResult.Decision is NOT sufficient coverage and the
+// acceptance criteria say so: the git rule is mid-chain, so only running the real
+// binary proves no later rule re-approves the leaf and that hookio.FormatOutput
+// turns the verdict into `{}` rather than an `allow`. `--har` is included because
+// git's parse-options accepts it as `--hard` (pg2-os1kq), so the ruling has to reach
+// every abbreviation, not just the canonical spelling.
+func TestIntegration_GitResetHard_EmitsEmptyObject(t *testing.T) {
+	for _, cmd := range []string{
+		"git reset --hard",
+		"git reset --hard HEAD~1",
+		"git reset --hard origin/main",
+		"git reset --har HEAD~1",
+	} {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		assertEmptyHookOutput(t, cmd, runHook(t, input))
+	}
+}
+
+// TestIntegration_GitResetHardCompound_EmitsEmptyObject pins the COMPOUND case
+// separately, because it exercises a different machine: `&&` makes the engine fold
+// the leaves through hookio.MostRestrictive, whose seed is Approve. The trailing
+// `echo ok` is approvable on its own, so the emitted verdict is `{}` only because
+// Abstain outranks Approve in that fold (pg2-t4uyx). If that ordering ever moved,
+// the single-leaf test above would still pass while a hard reset inside a compound
+// answered `allow`.
+func TestIntegration_GitResetHardCompound_EmitsEmptyObject(t *testing.T) {
+	cmd := "git reset --hard && echo ok"
+	input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+	assertEmptyHookOutput(t, cmd, runHook(t, input))
+}
+
+// TestIntegration_GitResetRedirectedContext_StillAsks is the other half of the
+// reorder pg2-ur9zc made inside the reset arm. The redirect test now precedes the
+// `--hard` test, so a GIT_DIR-redirected reset keeps its always-prompting `ask` for
+// BOTH spellings. Asserted at the boundary rather than on Decision alone because the
+// defect it guards against is a verdict INVERSION — the hard form emitting the
+// weaker `{}` while the soft form emitted `ask` — and only the emitted output shows
+// the two side by side.
+func TestIntegration_GitResetRedirectedContext_StillAsks(t *testing.T) {
+	for _, cmd := range []string{
+		"GIT_DIR=/other git reset --hard HEAD~1",
+		"GIT_DIR=/other git reset --soft HEAD~1",
+	} {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d != "ask" {
+			t.Errorf("cmd %q: emitted permissionDecision=%q, want ask — a redirected context keeps its prompt for EVERY reset spelling", cmd, d)
+		}
+	}
+}
+
+// TestIntegration_GitResetSoft_StillAllows pins that the ruling did not widen: the
+// non-`--hard` reset modes keep their `allow` at the boundary too.
+func TestIntegration_GitResetSoft_StillAllows(t *testing.T) {
+	for _, cmd := range []string{
+		"git reset HEAD~1",
+		"git reset --soft HEAD~1",
+		"git reset --mixed HEAD~1",
+		"git reset --keep HEAD~1",
+	} {
+		input := fmt.Sprintf(`{"tool_name":"Bash","tool_input":{"command":%q},"cwd":"/tmp"}`, cmd)
+		if d := getDecision(runHook(t, input)); d != "allow" {
+			t.Errorf("cmd %q: emitted permissionDecision=%q, want allow (not a --hard spelling)", cmd, d)
+		}
 	}
 }
 

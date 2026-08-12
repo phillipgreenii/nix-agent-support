@@ -275,12 +275,89 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	// the log that the working tree was safe. cmdparse.HasLongFlagPrefix matches
 	// every abbreviation without an enumeration to keep in step with git; its doc
 	// records why over-matching is the fail-safe direction here.
+	//
+	// `--hard` IS AN ABSTAIN, NOT AN ASK (pg2-ur9zc). Operator ruling, pg2-4yy4r
+	// item 4, 2026-07-30: an ordinary `git reset --hard` MUST NOT be prompted by
+	// this rule. ONE verdict changed; the classification is otherwise untouched, and
+	// the abbreviation coverage above is unchanged — it now decides who receives the
+	// non-decision rather than who receives a prompt.
+	//
+	// WHY ABSTAIN AND NOT THE ADJACENT ASK. Ask means "a person is wanted", and the
+	// operator has already answered that question for this command. Approve is the
+	// wrong other direction: it would ASSERT the working tree is safe, which is the
+	// exact false claim pg2-os1kq closed. Abstain is the only verdict that neither
+	// prompts nor asserts safety — it hands the decision back to claude-code. See
+	// `docs/adr/0043-ceta-rule-verdict-vocabulary.md`'s "Why the missing verdict
+	// costs prompts", where `git: reset --hard` is 10 of the 268 replayed asks.
+	//
+	// THE CONSEQUENCE THE OPERATOR EXPLICITLY ACCEPTED. hookio.FormatOutput maps
+	// Abstain to the empty object `{}`, which hands the decision to claude-code in
+	// its documented order — auto-approve mode, then settings pre-authorization,
+	// then the prompt (ADR 0043's Decision). So in `default` permission mode
+	// `git reset --hard` still prompts, and in `auto` mode it RUNS UNPROMPTED. The
+	// ruling accepted that. The operator's `git clean` ruling has the same shape but
+	// is a SEPARATE bead (pg2-u0e0c) and is NOT landed: the clean arm below is still
+	// a decisive Ask, and this arm is not authority to change it.
+	//
+	// THE ABSTAIN REALLY REACHES `{}` — IT IS NOT RE-APPROVED DOWNSTREAM, WHICH IS
+	// THE ONLY SAFETY QUESTION LEFT. `git` appears in the safecmds tables only in
+	// hasSubcommands, which covers `git <sub> --help` and `git help <sub>` and
+	// nothing else; it is absent from alwaysSafe, safeReadCmds and safeWriteCmds, so
+	// no later member of setup.RuleChain approves a `git` leaf. THE PROBE that
+	// establishes it is scripts/probe-pg2-ur9zc.sh — it builds the binary from the
+	// current worktree with XDG_DATA_HOME redirected away from real state and prints
+	// the RAW emitted output, because a decision-only reading cannot tell `{}` from
+	// a missing key. Measured 2026-08-12: `git reset --hard`,
+	// `git reset --hard HEAD~1`, `git reset --hard origin/main`,
+	// `git reset --har HEAD~1` and the compound `git reset --hard && echo ok` each
+	// emitted `{}`. The compound holds because Abstain outranks Approve in the
+	// hookio.MostRestrictive fold (pg2-t4uyx), so the trailing `echo` cannot lift
+	// the expression to `allow`. Corroborated by two leaves that ALREADY fall through
+	// this rule's terminal Abstain — `git bisect start` and `git notes list` — which
+	// ADR 0043's Consequences records emitting `{}` for this same reason.
+	//
+	// ASSERTING THE Decision ALONE IS INSUFFICIENT and MUST NOT be the only
+	// coverage: a rule-level Abstain cannot see a later rule re-approving the leaf.
+	// The boundary assertions live in cmd/claude-extended-tool-approver/main_test.go
+	// (TestIntegration_GitResetHard_EmitsEmptyObject and its compound sibling),
+	// which run the real binary and require the emitted output to be `{}` and NOT
+	// `permissionDecision: "allow"`.
+	//
+	// ONE THING ADR 0043 ASKS FOR THAT THIS DOES NOT SATISFY, recorded rather than
+	// glossed. Its Decision requires, for an Ask -> non-decisive conversion, that
+	// removing the rule from the chain be shown to make the leaf reach `allow`. This
+	// leaf does NOT: it reaches `{}`, per the probe above. That demonstration exists
+	// to tell a Shape-A blocking Ask apart from an Ask that genuinely wants a human,
+	// and the operator ruling answers the second question directly. ADR 0043's
+	// Consequences carves this case out by name — the `git`- and `gh`-family rulings
+	// "MUST NOT be sequenced behind this ADR", precisely because a plain
+	// non-decisive verdict already reaches `{}` — so no `Defer`/`NoOpinion` level
+	// (pg2-744af) is a prerequisite here.
 	if subcmd == "reset" {
-		if cmdparse.HasLongFlagPrefix(rest, "hard") {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git:destructive: git reset --hard is destructive", Module: r.Name()}
-		}
+		// THE REDIRECT TEST RUNS FIRST, AND THE ORDER IS LOAD-BEARING SINCE
+		// pg2-ur9zc. Before it, both branches returned Ask and their order was
+		// invisible. Testing `--hard` first now would hand a redirected-context HARD
+		// reset the WEAKER verdict — Abstain, hence `{}` and auto-approvable — while
+		// a redirected-context SOFT reset kept its always-prompting Ask: the strictly
+		// more dangerous command answered strictly more permissively. Keeping the
+		// redirect test first preserves the Ask for EVERY reset spelling under a
+		// GIT_DIR / GIT_WORK_TREE redirect (the verdict TestGit_GitDirModifying_Ask
+		// pins) and confines the operator's ruling to the ordinary, non-redirected
+		// invocation it was actually about. A future edit MUST NOT swap these two.
+		//
+		//	redirected context, any reset spelling  -> Ask      (unchanged)
+		//	--hard, any abbreviation, no redirect   -> Abstain  (the ruling)
+		//	soft / mixed / keep / merge, no redirect -> Approve (unchanged)
 		if hasRedirectEnvVar(pc) {
 			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+		}
+		if cmdparse.HasLongFlagPrefix(rest, "hard") {
+			return hookio.RuleResult{
+				Decision: hookio.Abstain,
+				Reason: "git:destructive: git reset --hard is destructive — not prompted by this rule per operator ruling 2026-07-30, " +
+					"deferred to claude-code (auto-approve mode, then settings, then the prompt)",
+				Module: r.Name(),
+			}
 		}
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
 	}

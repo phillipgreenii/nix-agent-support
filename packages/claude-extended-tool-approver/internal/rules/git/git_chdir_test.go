@@ -174,9 +174,26 @@ func TestGit_Chdir_OutsideMapSubcommands(t *testing.T) {
 // unaffected by an unsafe -C dir (most-restrictive aggregation already covers them).
 func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 	r := newWithProject(t)
-	// destructive -> Ask even with an unsafe -C dir (not demoted to Abstain).
-	if got := r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD)); got.Decision != hookio.Ask {
-		t.Errorf("git -C /etc reset --hard: got %s, want ask (unchanged)", got.Decision)
+	// THE ASK WITNESS. `git clean -fd` used to be it, but pg2-u0e0c made every `clean`
+	// spelling an Abstain, and Abstain IS the demotion target — so it can no longer
+	// distinguish "left alone" from "demoted". `git config core.hooksPath` is an Ask
+	// that no pg2-4yy4r ruling touched, so it carries the claim now.
+	if got := r.Evaluate(chdirInput("git -C /etc config core.hooksPath /tmp/h", projectCWD)); got.Decision != hookio.Ask {
+		t.Errorf("git -C /etc config core.hooksPath: got %s, want ask (an unsafe -C dir must not demote an Ask)", got.Decision)
+	}
+	// `clean` is asserted anyway, for the same reason `reset --hard` is below: the -C
+	// gate must not turn an already-abstaining verdict into anything ELSE.
+	if got := r.Evaluate(chdirInput("git -C /etc clean -fd", projectCWD)); got.Decision != hookio.Abstain {
+		t.Errorf("git -C /etc clean -fd: got %s, want abstain (pg2-u0e0c; the -C gate leaves a non-Approve alone)", got.Decision)
+	}
+	// `reset --hard` is an Abstain since pg2-ur9zc (operator ruling pg2-4yy4r item
+	// 4), so it can no longer witness "an unsafe -C dir does not demote a
+	// non-Approve" — Abstain IS the demotion target. It is asserted here anyway,
+	// because the -C gate must not turn it into anything ELSE: chdirSafe fires only
+	// on a would-be Approve, so an already-abstaining verdict passes through
+	// untouched, reason and all.
+	if got := r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD)); got.Decision != hookio.Abstain {
+		t.Errorf("git -C /etc reset --hard: got %s, want abstain (the -C gate leaves a non-Approve alone)", got.Decision)
 	}
 	// push --force is a Reject since pg2-bohpm (was Ask); either way the -C gate
 	// must leave it alone.

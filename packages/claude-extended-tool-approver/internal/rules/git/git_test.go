@@ -114,52 +114,42 @@ func TestGit_ResetSoft_Approve(t *testing.T) {
 	}
 }
 
-func TestGit_ResetHard_Ask(t *testing.T) {
-	// Ensure reset --hard still asks
+// TestGit_ResetHard_Abstain pins the operator ruling of pg2-4yy4r item 4
+// (implemented by pg2-ur9zc): `git reset --hard` is NOT prompted by this rule. It
+// used to be pinned here as Ask; the change of that ONE verdict is the whole bead.
+//
+// Abstain is asserted rather than Approve on purpose — Approve would carry a reason
+// asserting the reset is safe, the false claim pg2-os1kq closed. The verdict this
+// test pins is only half the contract: what the HOOK emits for it must be `{}` and
+// not an `allow`, which a rule-level Decision cannot see. That half is
+// TestIntegration_GitResetHard_EmitsEmptyObject in cmd/claude-extended-tool-approver.
+func TestGit_ResetHard_Abstain(t *testing.T) {
 	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git reset --hard HEAD~1"}),
 	}
 	got := r.Evaluate(input)
-	if got.Decision != hookio.Ask {
-		t.Errorf("git reset --hard: got %s, want ask", got.Decision)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("git reset --hard: got %s (%s), want abstain (operator ruling pg2-4yy4r item 4: this rule does not prompt for it)", got.Decision, got.Reason)
 	}
 }
 
-// TestGit_Destructive_Ask pins what remains on a destructive Ask after three splits.
-// `git push --force` and `git push -f` USED to be pinned here as Ask; they are now
-// Reject (TestGit_PushForce_Reject) per the operator ruling of 2026-07-30. `git branch
-// -D` was pinned here too, and moved to Abstain per the operator ruling of 2026-07-31
-// (pg2-4yy4r item 5, implemented by pg2-fkmg4) — see
-// TestGit_BranchForceDelete_NeverApproves for its replacement assertion. `git clean -fd`
-// was the LAST row to leave, moved to Abstain by the operator ruling of 2026-07-30
-// (pg2-4yy4r item 3, implemented by pg2-u0e0c) — see TestGit_Clean_UniformAbstain and
-// TestGit_Clean_EmitsEmptyHookOutput. All three absences are the intended change, not a
-// weakened test.
+// TestGit_Destructive_Ask USED TO LIVE HERE and was DELETED, not weakened. It was a
+// shared table of commands pinned to a destructive Ask, and the four `pg2-4yy4r`
+// operator rulings emptied it one row at a time — `git push --force` / `-f` to Reject
+// (2026-07-30), then `git branch -D` (item 5, pg2-fkmg4), `git clean -fd` (item 3,
+// pg2-u0e0c) and finally `git reset --hard` (item 4, pg2-ur9zc) to Abstain. pg2-u0e0c
+// left the standing instruction to delete rather than leave an empty table that
+// asserts nothing, and this commit is the ruling that emptied it.
 //
-// WITH `branch` GONE, THE SHARED `isDestructive` SITE WENT TOO: it had exactly one
-// caller left, so pg2-fkmg4 deleted it and gave `git branch` its own arm. `git reset
-// --hard` is now the ONLY row here, answered by its own arm in classify with its own
-// reason. If the next ruling moves it as well, delete this test rather than leaving an
-// empty table that asserts nothing.
-func TestGit_Destructive_Ask(t *testing.T) {
-	destructive := []string{
-		"git reset --hard HEAD",
-	}
-	r := New(nil)
-	for _, cmd := range destructive {
-		input := &hookio.HookInput{
-			ToolName:  "Bash",
-			ToolInput: mustJSON(map[string]string{"command": cmd}),
-		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
-		}
-	}
-}
-
+// Nothing is unpinned by the deletion. Each former row now has its OWN arm in
+// classify with its own reason, and its own assertion: TestGit_PushForce_Reject,
+// TestGit_BranchForceDelete_NeverApproves, TestGit_Clean_UniformAbstain (plus
+// TestGit_Clean_EmitsEmptyHookOutput), and TestGit_ResetHard_Abstain (plus
+// TestIntegration_GitResetHard_EmitsEmptyObject). The shared `isDestructive` helper
+// the table exercised is itself gone — pg2-fkmg4 deleted it once `branch` stopped
+// being its last caller.
 func TestGit_NonGit_Abstain(t *testing.T) {
 	r := New(nil)
 	input := &hookio.HookInput{
@@ -220,6 +210,14 @@ func TestGit_GitDirModifying_Ask(t *testing.T) {
 		"GIT_WORK_TREE=/other git add .",
 		"GIT_DIR=/other git rebase main",
 		"GIT_DIR=/other git reset HEAD~1",
+		// The HARD spellings belong here too, and their presence is what makes the
+		// reset arm's ordering claim checkable: `--hard` is an Abstain since
+		// pg2-ur9zc, so if the redirect test ever stopped running FIRST, a
+		// redirected HARD reset would silently answer `{}` — the weaker verdict —
+		// while the soft row above kept its always-prompting Ask.
+		"GIT_DIR=/other git reset --hard HEAD~1",
+		"GIT_DIR=/other git reset --har HEAD~1",
+		"GIT_WORK_TREE=/other git reset --hard HEAD~1",
 	}
 	for _, cmd := range commands {
 		input := &hookio.HookInput{

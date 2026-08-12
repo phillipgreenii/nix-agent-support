@@ -58,12 +58,17 @@ func longFlagSpellings(canonical string) []string {
 // missing prompt: no `--hard` spelling may Approve, AND no verdict for one may carry
 // a reason asserting the reset is soft — before the fix `--har` was approved with
 // exactly that reason, so every later reader of the asklog saw a soft reset.
+//
+// THE EXPECTED VERDICT IS ABSTAIN, NOT ASK, SINCE pg2-ur9zc — operator ruling
+// pg2-4yy4r item 4. Both of this test's claims are unchanged by that: Abstain is
+// still not Approve, and the reason still must not call the reset soft. What the
+// ruling moved is only WHO the non-approval is handed to.
 func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 	for _, flag := range longFlagSpellings("hard") {
 		cmd := "git reset " + flag + " HEAD~1"
 		got := evalCmd(t, cmd)
-		if got.Decision != hookio.Ask {
-			t.Errorf("cmd %q: got %s (%s), want ask — real git PERFORMS the hard reset for --hard/--har/--ha/--h (measured git 2.54.0, 2026-07-30)", cmd, got.Decision, got.Reason)
+		if got.Decision != hookio.Abstain {
+			t.Errorf("cmd %q: got %s (%s), want abstain — real git PERFORMS the hard reset for --hard/--har/--ha/--h (measured git 2.54.0, 2026-07-30), so no spelling may Approve", cmd, got.Decision, got.Reason)
 		}
 		if strings.Contains(strings.ToLower(got.Reason), "soft") {
 			t.Errorf("cmd %q: reason %q claims the reset is soft — it is a HARD reset", cmd, got.Reason)
@@ -71,8 +76,8 @@ func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 	}
 	// `--hard=x` is rejected by real git ("option `hard' takes no value"), so gating
 	// it costs nothing and matching the glued form keeps the matcher uniform.
-	if got := evalCmd(t, "git reset --har=x HEAD~1"); got.Decision != hookio.Ask {
-		t.Errorf("git reset --har=x: got %s, want ask", got.Decision)
+	if got := evalCmd(t, "git reset --har=x HEAD~1"); got.Decision != hookio.Abstain {
+		t.Errorf("git reset --har=x: got %s, want abstain", got.Decision)
 	}
 }
 
@@ -246,10 +251,14 @@ func TestGit_Pg2os1kq_PinnedProbeRows(t *testing.T) {
 		want hookio.Decision
 		note string
 	}{
-		{"git reset --hard HEAD~1", hookio.Ask, "was already correct"},
-		{"git reset --har  HEAD~1", hookio.Ask, "was ALLOW — destroys the working tree"},
-		{"git reset --ha   HEAD~1", hookio.Ask, "was ALLOW — destroys the working tree"},
-		{"git reset --h    HEAD~1", hookio.Ask, "was ALLOW — the shortest accepted spelling"},
+		// The four reset rows read Abstain, not Ask, since pg2-ur9zc: the operator
+		// ruled (pg2-4yy4r item 4) that this rule does not prompt for a hard reset.
+		// The row this bead's probe was ABOUT is still pinned — none of the four may
+		// Approve, which is what pg2-os1kq measured going wrong.
+		{"git reset --hard HEAD~1", hookio.Abstain, "was ASK, correct for pg2-os1kq; Abstain since pg2-ur9zc"},
+		{"git reset --har  HEAD~1", hookio.Abstain, "was ALLOW — destroys the working tree"},
+		{"git reset --ha   HEAD~1", hookio.Abstain, "was ALLOW — destroys the working tree"},
+		{"git reset --h    HEAD~1", hookio.Abstain, "was ALLOW — the shortest accepted spelling"},
 		{"git push --force origin main", hookio.Reject, "was already correct"},
 		{"git push --force-with-leas origin main", hookio.Approve, "allow is CORRECT: same-branch lease to origin"},
 		{"git push --force-with-leas origin main:other", hookio.Reject, "cross-branch: already denied before this bead"},
@@ -650,7 +659,13 @@ func TestGit_BranchScope_OtherSubcommandsUnchanged(t *testing.T) {
 		cmd  string
 		want hookio.Decision
 	}{
-		{"git reset --hard HEAD~1", hookio.Ask},
+		// Abstain, NOT Ask, and that is NOT pg2-fkmg4 leaking: pg2-ur9zc moved this row
+		// under a SEPARATE operator ruling (pg2-4yy4r item 4) — see
+		// TestGit_ResetHard_Abstain and TestIntegration_GitResetHard_EmitsEmptyObject.
+		// The row stays here on purpose: this guard's job is to pin that the `branch`
+		// predicate is unreachable from `reset`, and it does that just as well against
+		// reset's CURRENT verdict as against its old one.
+		{"git reset --hard HEAD~1", hookio.Abstain},
 		{"git reset --soft HEAD~1", hookio.Approve},
 		{"git clean", hookio.Abstain},
 		{"git clean -fdx", hookio.Abstain},
