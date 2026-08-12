@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -2370,6 +2371,74 @@ func TestIntegration_DynamicReadPathNeverApproves(t *testing.T) {
 			got := eng.EvaluateHook(input)
 			if got.Decision != hookio.Approve {
 				t.Errorf("command %q got %v (%s: %s); want Approve", tt.command, got.Decision, got.Module, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIntegration_BranchUnguardedEmitsEmptyHookOutput is the CHAIN-LEVEL boundary
+// assertion for pg2-fkmg4's `git branch` ruling (operator ruling pg2-4yy4r item 5,
+// 2026-07-31: Abstain on any unsafe spelling, Approve any safe one).
+//
+// IT ASSERTS THE EMITTED HOOK OUTPUT, NOT A Decision, AND THAT IS THE POINT. The git
+// rule's own tests can only show what that ONE rule returned. Two things they cannot
+// show are exactly what a reader of this ruling needs: that no LATER rule in the
+// production chain re-approves what the git rule declined to answer, and that what
+// Claude Code actually receives is `{}` — the byte string that makes it prompt — rather
+// than a `permissionDecision` of any kind. hookio.FormatOutput is the same function
+// cmd/claude-extended-tool-approver's handlePreToolUse writes to stdout, and
+// updatedInput is nil here because handlePreToolUse only computes one for Approve/Ask.
+//
+// THE SAFE ROWS ARE NOT OPTIONAL. An `{}`-only assertion is satisfied by a rule that
+// abstains on EVERY `git branch`, which would silently retire the ordinary traffic this
+// rule exists to keep flowing; the guarded spellings must still emit an explicit allow.
+func TestIntegration_BranchUnguardedEmitsEmptyHookOutput(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	emit := func(command string) string {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(command)}
+		return string(hookio.FormatOutput(eng.EvaluateHook(input), nil))
+	}
+
+	// UNGUARDED: git's own refusal has been removed, so the verdict is Claude Code's.
+	for _, tt := range []struct{ name, command string }{
+		{"fused force-delete", "git branch -D feat"},
+		{"fused force-move", "git branch -M old keepme"},
+		{"fused force-copy", "git branch -C a keepme"},
+		{"clustered fused move", "git branch -vM old keepme"},
+		{"explicit force creation", "git branch -f other main"},
+		{"long force", "git branch --force other main"},
+		{"abbreviated long force", "git branch --forc other main"},
+		{"delete with force", "git branch --delete -f feat"},
+		{"flag after operand", "git branch feat -D"},
+	} {
+		t.Run("unguarded/"+tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if out != "{}" {
+				t.Errorf("command %q emitted %s, want {} — an unguarded `git branch` must be handed to Claude Code, and `permissionDecision: \"allow\"` would auto-approve it", tt.command, out)
+			}
+			if strings.Contains(out, `"allow"`) {
+				t.Errorf("command %q emitted %s, which carries an allow decision", tt.command, out)
+			}
+		})
+	}
+
+	// GUARDED: git itself refuses the destructive case, so the chain still approves.
+	for _, tt := range []struct{ name, command string }{
+		{"delete-if-merged", "git branch -d merged"},
+		{"plain move", "git branch -m old new"},
+		{"plain copy", "git branch -c a b"},
+		{"create", "git branch new-branch"},
+		{"bare read", "git branch"},
+		{"negation is not the flag", "git branch --no-force other main"},
+		{"end of options", "git branch -- -D"},
+	} {
+		t.Run("guarded/"+tt.name, func(t *testing.T) {
+			out := emit(tt.command)
+			if !strings.Contains(out, `"permissionDecision":"allow"`) {
+				t.Errorf("command %q emitted %s, want an explicit allow — git's own guard still stands here, so the ruling keeps it approvable", tt.command, out)
 			}
 		})
 	}

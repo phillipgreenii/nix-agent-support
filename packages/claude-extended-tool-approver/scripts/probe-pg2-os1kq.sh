@@ -155,6 +155,23 @@ probe 'git push origin :main'
 # `git branch --d --f unmerged` is NOT a spelling git accepts — it answers
 # `error: ambiguous option: f (could be --force or --format)` — but the open
 # prefix matcher gates it anyway, which is the fail-safe direction.
+#
+# SUPERSEDED, 2026-07-31 — READ THIS BEFORE JUDGING THE `git branch` ROWS BELOW.
+# Operator ruling pg2-4yy4r item 5, implemented by pg2-fkmg4, replaced this bead's
+# force-DELETE classification with git's own safe/unsafe boundary, so TWO of the
+# expectations written above and below are no longer this repo's policy:
+#
+#   * the gated rows now answer `abstain`, not `ask` — the verdict level moved
+#     down, to Claude Code's prompt;
+#   * `git branch -f other main`, `-M old new` and `-C a b` now answer `abstain`
+#     too. They are NOT "not the destructive case": -M and -C were measured
+#     CLOBBERING an existing branch, and -f is a force CREATION that silently
+#     MOVES an existing ref.
+#
+# The rows that must still answer `allow` are the GUARDED spellings only — `-d`,
+# `-m`, `-c` alone, plain creation, the read/list flags, a `--no-` negation, and
+# anything after `--`. scripts/probe-pg2-fkmg4.sh is the current probe for this
+# subcommand; the block below is kept as this bead's historical reproduction.
 echo
 echo "=== WIDENING: git branch force-delete (must NOT allow, in any spelling) ==="
 probe 'git branch -D foo'
@@ -177,7 +194,7 @@ probe 'git branch -Dt foo'
 probe 'git branch -Dft foo'
 
 echo
-echo "=== WIDENING: NOT the destructive case — these MUST keep their allow ==="
+echo "=== WIDENING: kept their allow in 2026-07-30; see the SUPERSEDED note above ==="
 probe 'git branch -d foo'
 probe 'git branch --delete foo'
 probe 'git branch --delet foo'

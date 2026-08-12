@@ -127,17 +127,21 @@ func TestGit_ResetHard_Ask(t *testing.T) {
 	}
 }
 
-// TestGit_Destructive_Ask pins what remains on the shared destructive Ask after
-// pg2-bohpm split it. `git push --force` and `git push -f` USED to be pinned here
-// as Ask; they are now Reject (TestGit_PushForce_Reject) per the operator ruling
-// of 2026-07-30, so their absence from this list is the intended change, not a
-// weakened test. `git branch -D` deliberately stays — see
-// TestGit_BranchForceDelete_StaysAsk for why that is load-bearing.
+// TestGit_Destructive_Ask pins what remains on a destructive Ask after two splits.
+// `git push --force` and `git push -f` USED to be pinned here as Ask; they are now
+// Reject (TestGit_PushForce_Reject) per the operator ruling of 2026-07-30. `git branch
+// -D` was pinned here too, and moved to Abstain per the operator ruling of 2026-07-31
+// (pg2-4yy4r item 5, implemented by pg2-fkmg4) — see
+// TestGit_BranchForceDelete_NeverApproves for its replacement assertion. Both absences
+// are the intended change, not a weakened test.
+//
+// WITH `branch` GONE, THE SHARED `isDestructive` SITE IS GONE TOO: it had exactly one
+// caller left, so pg2-fkmg4 deleted it and gave `git branch` its own arm. The two rows
+// remaining here are answered by their OWN arms in classify, each with its own reason.
 func TestGit_Destructive_Ask(t *testing.T) {
 	destructive := []string{
 		"git reset --hard HEAD",
 		"git clean -fd",
-		"git branch -D feat",
 	}
 	r := New(nil)
 	for _, cmd := range destructive {
@@ -893,13 +897,19 @@ func TestGit_PushForce_TextIsNotAnOperation(t *testing.T) {
 	}
 }
 
-// TestGit_BranchForceDelete_StaysAsk pins the OTHER half of the split Ask site.
-// pg2-bohpm turned the push cases into Rejects WITHOUT touching `git branch -D`,
-// whose re-classification is a separate, still-unreviewed question. Both naive
-// edits are wrong, and this test catches each: flipping the shared site to Reject
-// would make this Reject, and dropping the `branch` case from isDestructive would
-// make it fall through to modifyingSubcommands["branch"] and become APPROVE.
-func TestGit_BranchForceDelete_StaysAsk(t *testing.T) {
+// TestGit_BranchForceDelete_NeverApproves pins the ONE claim about `git branch -D`
+// that no ruling has moved and none is expected to: it MUST NOT auto-approve. The
+// verdict LEVEL has moved twice — Ask under pg2-bohpm/pg2-os1kq, Abstain under
+// pg2-fkmg4's operator ruling of 2026-07-31 — so this test asserts the invariant
+// separately from the current level, and names the exact defect each naive edit
+// produces.
+//
+// The APPROVE check is a Fatal because it is the failure with a consequence: dropping
+// the branch arm from classify makes `git branch -D` fall through to
+// modifyingSubcommands["branch"] and auto-approve the destruction of an unmerged
+// branch's commits. Replacing this file's `git branch` policy is a RULING, not a
+// refactor.
+func TestGit_BranchForceDelete_NeverApproves(t *testing.T) {
 	r := New(nil)
 	input := &hookio.HookInput{
 		ToolName:  "Bash",
@@ -909,8 +919,8 @@ func TestGit_BranchForceDelete_StaysAsk(t *testing.T) {
 	if got.Decision == hookio.Approve {
 		t.Fatalf("git branch -D feat: got APPROVE (%s) — it fell through to modifyingSubcommands[\"branch\"]; the documented trap", got.Reason)
 	}
-	if got.Decision != hookio.Ask {
-		t.Errorf("git branch -D feat: got %s (%s), want ask (unchanged by pg2-bohpm)", got.Decision, got.Reason)
+	if got.Decision != hookio.Abstain {
+		t.Errorf("git branch -D feat: got %s (%s), want abstain (operator ruling pg2-4yy4r item 5, 2026-07-31: Abstain on any unsafe `git branch` spelling)", got.Decision, got.Reason)
 	}
 }
 

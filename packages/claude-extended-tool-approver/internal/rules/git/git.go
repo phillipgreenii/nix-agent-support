@@ -147,8 +147,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 // clustered shorts `-Df` / `-fD` AND the long-form equivalent `--delete --force` —
 // the latter not an abbreviation at all, but `-D` spelled out, which no short-flag
 // matching can find. All four measured `allow` while really deleting an unmerged
-// branch. See isBranchForceDelete for the conjunction that closes it and for the two
-// adjacent operations (`-d` alone, `-f` alone) that MUST stay approved.
+// branch.
+//
+// THAT ARM IS NOW SUPERSEDED, AND SO IS `isDestructive` ITSELF (pg2-fkmg4,
+// 2026-07-31 operator ruling). `-D` was never the real surface: the force-DELETE
+// conjunction left `-M`, `-C` and a bare `-f` approved. `-M` and `-C` were MEASURED
+// clobbering an existing branch the caller did not name, and `-f` is git's own
+// documented force CREATION, which silently MOVES an existing ref. The ruling replaces
+// flag-by-flag classification with git's own safe/unsafe boundary, and the verdict
+// LEVEL moves from Ask to Abstain — so the shared "destructive git command" Ask site
+// that `isDestructive` fed had exactly one caller left and is gone with it. `git
+// branch` now has its own arm below, and isBranchUnsafe holds the whole policy: the
+// guarded-vs-unguarded principle, the accepted auto-mode consequence, and the
+// `--no-` negation trap.
 //
 // ONE ADJACENT GAP IS DELIBERATELY LEFT ALONE:
 //
@@ -171,10 +182,17 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 			return res
 		}
 	}
-	if isDestructive(subcmd, rest) {
+	// branch: THE VERDICT IS BY SAFETY, NOT BY FLAG (operator ruling pg2-4yy4r item 5,
+	// implemented by pg2-fkmg4). A spelling from which GIT'S OWN GUARD has been removed
+	// Abstains; every spelling where that guard still stands keeps its Approve by
+	// FALLING THROUGH to modifyingSubcommands["branch"] below. Falling through rather
+	// than answering here is deliberate: it is what keeps the redirected-context Ask
+	// (`GIT_DIR=/other git branch -d foo`) and the `-C <path>` chdir demotion applying
+	// to a safe `git branch` exactly as they did before. See isBranchUnsafe.
+	if subcmd == "branch" && isBranchUnsafe(rest) {
 		return hookio.RuleResult{
-			Decision: hookio.Ask,
-			Reason:   "destructive git command",
+			Decision: hookio.Abstain,
+			Reason:   "git: git branch with git's own guard removed (-D/-M/-C, or an explicit -f/--force); deferring to prompt",
 			Module:   r.Name(),
 		}
 	}
@@ -1071,90 +1089,121 @@ func hasSequenceEditorEnvVar(pc cmdparse.ParsedCommand) bool {
 	return false
 }
 
-// isDestructive reports whether a subcommand warrants the shared destructive
-// Ask. It is a `git branch` FORCE-DELETE only: pg2-bohpm split the `git push` cases
-// out to pushVerdict, which REJECTS them.
+// isBranchUnsafe reports whether a `git branch` invocation is one from which GIT'S
+// OWN GUARD has been removed. It holds the WHOLE `git branch` policy; the branch arm
+// in classify is only the verdict it feeds.
 //
-// THE VERDICT LEVEL IS DELIBERATELY UNCHANGED — Ask, not Reject. Re-classifying a
-// force-delete upward is a separate, still-unreviewed question, and pg2-os1kq's
-// widening asks only that no spelling APPROVE. Ask satisfies that.
+// THE VERDICT IS BY SAFETY, NOT BY FLAG — operator ruling of 2026-07-31, recorded as
+// pg2-4yy4r item 5 and implemented by pg2-fkmg4: "abstain for any spelling which is
+// unsafe, approve any which is safe". That SUPERSEDES the narrower "`git branch -D` →
+// Ask" ruling and, with it, the force-DELETE conjunction pg2-os1kq's widening put
+// here (isBranchForceDelete, folded into this predicate and deleted).
 //
-// The `branch` case MUST stay in this function to keep that Ask. Removing it does
-// not make the force-delete unhandled — it makes it fall through to
-// modifyingSubcommands["branch"] below and become an APPROVE, which is strictly
-// worse than the Ask it replaces.
+// THE BOUNDARY IS GIT'S, NOT OURS, which is what makes this predicate short. `git
+// branch -h` states it outright:
 //
-// THE EXACT-TOKEN `-D` TEST THIS DOC USED TO DEFEND IS GONE, AND THIS PARAGRAPH
-// REPLACES THAT DEFENCE (pg2-os1kq widening, 2026-07-30). It read: "The exact-token
-// `-D` test is likewise deliberate: widening it (e.g. to a clustered-short scan)
-// would change this subcommand's verdicts, which is out of scope here." That was
-// true as a scope statement and is now SUPERSEDED, because the verdicts it was
-// protecting were WRONG. Measured on git 2.54.0, one fresh repo per spelling with a
-// genuinely unmerged branch, 2026-07-30 — every one of these answered `Deleted
-// branch unmerged (was <sha>)` and the branch was gone:
+//	-d, --[no-]delete   delete fully merged branch           GUARDED
+//	-D                  delete branch (even if not merged)   = -d FUSED with --force
+//	-m, --[no-]move     move/rename a branch and its reflog  GUARDED
+//	-M                  move/rename, even if target exists   = -m FUSED with --force
+//	-c, --[no-]copy     copy a branch and its reflog         GUARDED
+//	-C                  copy, even if target exists          = -c FUSED with --force
+//	-f, --[no-]force    force creation, move/rename, deletion
 //
-//	git branch -Df <b>              CETA said allow  (clustered short)
-//	git branch -fD <b>              CETA said allow  (clustered short, reversed)
-//	git branch --delete --force <b> CETA said allow  (LONG-FORM EQUIVALENT)
-//	git branch --delet --forc <b>   CETA said allow  (abbreviated long form)
+// The LOWERCASE forms are GUARDED: git itself refuses the destructive case, so they
+// are not this rule's business and keep their Approve. The UPPERCASE forms ARE the
+// guarded form fused with --force, and an explicit -f/--force removes the guard from
+// any of them. So "is it unsafe" is exactly "is the guard gone" — three fused letters,
+// plus force in any spelling.
 //
-// Force-deleting an unmerged branch makes its commits unreachable, so this is DATA
-// LOSS, not merely a policy bypass. See isBranchForceDelete for the two root causes
-// and why a conjunction is required rather than more flag spellings.
-func isDestructive(subcmd string, args []string) bool {
-	if subcmd == "branch" {
-		return isBranchForceDelete(args)
-	}
-	return false
-}
-
-// isBranchForceDelete reports whether a `git branch` invocation force-deletes a
-// branch — the operation that makes an UNMERGED branch's commits unreachable.
+// `-D` WAS NEVER THE REAL SURFACE, which is the finding that motivated the ruling.
+// Measured 2026-07-31 in throwaway repos: `git branch -M old keepme` CLOBBERED the
+// existing target, `keepme` going bdfdb1f -> bad17ef, and `git branch -C a keepme`
+// overwrote an existing branch — both `allow` before this change. Their guarded twins
+// held: `-m old keepme` answered "fatal: a branch named 'keepme' already exists" and
+// `-d unmerged` answered "error: the branch 'unmerged' is not fully merged".
 //
-// TWO ROOT CAUSES, and they need two different mechanisms (pg2-os1kq widening):
+// `-f` ALONE IS NOW GATED, REVERSING WHAT THIS FILE USED TO SAY, and this is the one
+// verdict that moves from Approve for a spelling no earlier bead thought destructive.
+// isBranchForceDelete's doc recorded `git branch -f <name> <start>` as "a force-MOVE/
+// create, no delete at all … Gating `-f` alone would gate that, so it is deliberately
+// not gated". Force CREATION silently MOVES an EXISTING branch ref, which is the same
+// lost tip under another name, and the tokens alone cannot say whether <name> already
+// exists — so the guard-removed reading is the only one available from the command
+// line, and the ruling gates it.
 //
-//  1. CLUSTERED SHORTS. `-Df` and `-fD` are single TOKENS, so no exact-token test
-//     can see the `D`. cmdparse.HasShortFlag clusters and is the right primitive.
-//  2. LONG-FORM EQUIVALENCE. `--delete --force` IS `-D` spelled out, and no amount
-//     of short-flag matching finds it — the two flags are separate tokens, neither
-//     of which is a force-delete on its own. So the predicate must recognise the
-//     CONJUNCTION (delete AND force) in addition to the fused `-D`, across every
-//     mixture of short, long, clustered and abbreviated spellings. Measured
-//     deleting: `-d --force`, `--delete -f`, `-f --delet`.
+// MEASURED, git 2.54.0, throwaway repo, 2026-08-12, with `keepme` at 82cd0ea and
+// `probe` at 6eeb755:
 //
-// THE CONJUNCTION MUST REQUIRE BOTH HALVES, which is what keeps the two adjacent
-// operations approved:
+//	git branch keepme probe      -> "fatal: a branch named 'keepme' already exists"
+//	                                (the guard; keepme untouched)
+//	git branch -f keepme probe   -> accepted, and keepme MOVED 82cd0ea -> 6eeb755
 //
-//   - `git branch -d <b>` — delete-if-merged. GIT ITSELF refuses an unmerged branch
-//     here (measured: `error: the branch 'unmerged' is not fully merged`, branch
-//     still present), so it is not the destructive case and keeps its Approve.
-//   - `git branch -f <name> <start>` — a force-MOVE/create, no delete at all
-//     (measured: accepted, and the unmerged branch untouched). Gating `-f` alone
-//     would gate that, so it is deliberately not gated.
+// One flag, and the same command goes from a refusal to a silent ref rewrite. Nothing
+// in the argv distinguishes the two, which is the whole reason `-f` cannot be read as
+// "just a creation".
 //
-// CASE IS SIGNIFICANT and the requirement is explicit: `-d` and `-D` differ in
-// meaning. cmdparse.HasShortFlag compares bytes, so 'd' never matches 'D'.
+// WHY ABSTAIN AND NOT ASK, AND THE CONSEQUENCE THE OPERATOR ACCEPTED. Abstain emits
+// `{}` (hookio.FormatOutput), so an unsafe `git branch` PROMPTS in `default` mode and
+// is AUTO-APPROVED in an auto-approving mode. The operator accepted that explicitly,
+// consistent with the same ruling for `git clean` (pg2-u0e0c) and `git reset --hard`
+// (pg2-ur9zc), on the mitigation that a deleted or clobbered branch TIP stays
+// reachable through the reflog for gc.reflogExpire (90 days by default) — materially
+// less final than `git clean -fdx`. Raising this to Ask or Reject would contradict
+// that ruling and needs a new one.
 //
-// The long halves use cmdparse.HasLongFlagPrefix rather than a measured minimum,
-// per the rule recorded on hasAbbrevLongFlag: this is a BOOLEAN dangerous-flag test,
-// so over-matching only moves the verdict toward Ask. It does over-match — real git
+// THE `--no-` TRAP, AND WHY IT NEEDED NO NEW HELPER. `git branch -h` spells the long
+// forms `--[no-]force` / `--[no-]delete` / `--[no-]move` / `--[no-]copy`, so
+// `--no-force` is a REAL spelling and MUST NOT read as force. cmdparse.HasLongFlag
+// documents that it covers no negation, and a hand-rolled `strings.HasPrefix(tok,
+// "--f")` predicate would have had to exclude them by hand — which is the trap. The
+// matcher used here does not: cmdparse.HasLongFlagPrefix never matches a token LONGER
+// than its canonical, and "no-force" is longer than "force", so every negation is
+// excluded BY CONSTRUCTION. That is why no sibling of HasLongFlag was added.
+//
+// AND THE NEGATION REALLY IS THE OPPOSITE, measured on git 2.54.0, 2026-08-12 in the
+// same repo as above: `git branch --no-force newname probe` was accepted (so it IS a
+// spelling git parses), while `git branch --no-force keepme <other>` answered "fatal: a
+// branch named 'keepme' already exists" — the guard git had just skipped for `-f` was
+// back. Reading `--no-force` as force would gate the STRICTER of the two commands.
+//
+// CASE IS SIGNIFICANT, an explicit acceptance criterion: `-d`/`-D`, `-m`/`-M` and
+// `-c`/`-C` differ in meaning, and cmdparse.HasShortFlag compares BYTES, so no folding
+// can happen. `-F` is not a `git branch` option at all and is not `--force`.
+//
+// POSITION DOES NOT MATTER — every token is scanned, so a flag written AFTER the
+// operand (`git branch foo -D`) is still seen — and the `--` END-OF-OPTIONS TERMINATOR
+// IS RESPECTED, because both cmdparse matchers stop there: `git branch -- -D` is a
+// branch NAMED `-D` and stays approvable.
+//
+// THE LONG HALF USES cmdparse.HasLongFlagPrefix rather than a measured minimum, per
+// the rule recorded on hasAbbrevLongFlag: this is a BOOLEAN dangerous-flag test, so
+// over-matching only moves the verdict toward Abstain. It does over-match — real git
 // answers `error: ambiguous option: f (could be --force or --format)` for
-// `git branch --d --f <b>` (measured), which this gates anyway — and that is the
-// fail-safe direction. `--format=…` cannot be mistaken for `--force`: "format" is
-// longer than "force", and HasLongFlagPrefix never matches a longer token against a
-// shorter canonical.
+// `git branch --d --f <b>` (measured 2026-07-30, recorded by pg2-os1kq), which this
+// gates anyway — and that is the fail-safe direction. `--format=…` cannot be mistaken
+// for `--force`: "format" is longer than "force", and HasLongFlagPrefix never matches a
+// longer token against a shorter canonical, which is also what keeps the `--no-`
+// negations out.
 //
-// `-M` (force move) and `-C` (force copy) are NOT force-deletes and keep their
-// verdicts; re-classifying them is a separate question this widening does not ask.
-func isBranchForceDelete(args []string) bool {
+// SCOPE IS `git branch` ONLY. The operator stated the principle generally, but ruled
+// it only here. Several other git subcommands still get ONE blanket verdict regardless
+// of flags (`git clean` is the documented example), and widening the principle to them
+// is its own bead and its own ruling — pg2-fkmg4 says so in terms. Do not generalise
+// this predicate.
+func isBranchUnsafe(args []string) bool {
 	shorts := branchShortFlagTokens(args)
-	// The FUSED spelling, in any cluster position: `-D`, `-Df`, `-fD`, `-rD`.
-	if cmdparse.HasShortFlag(shorts, 'D') {
+	// The FUSED forms: a guarded operation with --force baked into the one letter, in
+	// any cluster position (`-D`, `-Dv`, `-vM`, `-rC`).
+	if cmdparse.HasShortFlag(shorts, 'D') || cmdparse.HasShortFlag(shorts, 'M') || cmdparse.HasShortFlag(shorts, 'C') {
 		return true
 	}
-	del := cmdparse.HasShortFlag(shorts, 'd') || cmdparse.HasLongFlagPrefix(args, "delete")
-	force := cmdparse.HasShortFlag(shorts, 'f') || cmdparse.HasLongFlagPrefix(args, "force")
-	return del && force
+	// An EXPLICIT force removes the guard from delete, move, copy AND creation, so it
+	// is unsafe ON ITS OWN. NO CONJUNCTION with a delete/move/copy half is required,
+	// and requiring one is precisely what let `-M`, `-C`, `-f`, `-m -f` and `-c -f`
+	// through before pg2-fkmg4 — a conjunction can only ever gate the pairs someone
+	// remembered to enumerate.
+	return cmdparse.HasShortFlag(shorts, 'f') || cmdparse.HasLongFlagPrefix(args, "force")
 }
 
 // branchShortFlagTokens returns args with every short-flag cluster truncated at its
@@ -1166,18 +1215,23 @@ func isBranchForceDelete(args []string) bool {
 //
 // WITHOUT THIS, AN UPSTREAM OR BRANCH NAME MANUFACTURES A VERDICT. Everything after
 // the value-taking letter is the option's VALUE, not more flag letters, yet a cluster
-// scan reads it as letters: `-uorigin/DEV` contains a `D` (a false force-delete on
-// its own), and `-udrafts/x` contains both `d` and `f` (a false conjunction). This is
-// the same false-positive class pg2-5b901 records, arrived at through flag arity
-// instead of command text, and the same reason pushShortFlagTokens exists for
-// `git push -o <opt>`. cmdparse.HasShortFlag documents that it models no arity and
-// pushes exactly this question to its caller.
+// scan reads it as letters. The false-positive surface GREW when pg2-fkmg4 widened the
+// predicate from force-delete to every unguarded spelling, because it now asks about
+// four letters instead of two: `-uorigin/DEV` carries a `D`, `-uorigin/MAIN` an `M`,
+// `-uorigin/CI` a `C`, and `-uorigin/feature-docs` an `f` — each a false verdict on its
+// own, with no second half needed. This is the same false-positive class pg2-5b901
+// records, arrived at through flag arity instead of command text, and the same reason
+// pushShortFlagTokens exists for `git push -o <opt>`. cmdparse.HasShortFlag documents
+// that it models no arity and pushes exactly this question to its caller.
 //
 // TRUNCATION IS LOSSLESS, measured the same day: `-tD` answers "option `--track'
 // expects \"direct\" or \"inherit\"" and `-uD` answers "the requested upstream branch
 // 'D' does not exist" — neither deletes anything, because there the `D` IS the
 // option's value — while `-Dt` and `-Dft` DO delete and carry their `D` BEFORE the
-// truncation point, so both survive. No spelling that really force-deletes is lost.
+// truncation point, so both survive. The same reading covers the letters pg2-fkmg4
+// added: after `-t` or `-u` an `M`, `C` or `f` is that option's VALUE (a track mode git
+// refuses, or an upstream branch name), so nothing that really moves, copies or forces
+// is lost, while `-Mt`, `-Cf` and `-fu` carry their letter before the truncation point.
 //
 // `--`, long flags and a lone `-` are returned untouched so HasShortFlag's own
 // end-of-options and operand handling still applies.
