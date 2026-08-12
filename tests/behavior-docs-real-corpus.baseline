@@ -34,20 +34,7 @@
 # `OQ-WORKFLOW` in pr-pool is different and is a real defect: the open question was
 # deleted and two citations were left behind. Owner: the pr-pool set retrofit.
 #
-# 3. Implementation citations that resolve to nothing (5 lines)
-#
-# pr-pool's code cites five elements its own set neither defines nor declares:
-# `GOAL-7` and `USECASE-5` belong to the METHOD set, and `INV-FRESH-1`,
-# `INV-CCPOOL-6` and `INTF-ZR-*` belong to the ZR deployment set. Each is a real
-# `INV-8` gap — the set should declare what its implementation cites — and fixing
-# it means adding imports rows, which is a docs change a human owns. Owner: the
-# pr-pool set retrofit.
 # ---------------------------------------------------------------------------
-impl/impl-traces|FAIL GOAL-7 (conformance/conformance_test.go:29) resolves to no definition in the set and no declared import
-impl/impl-traces|FAIL INTF-ZR (conformance/conformance.go:5) resolves to no definition in the set and no declared import
-impl/impl-traces|FAIL INV-CCPOOL-6 (internal/orchestrator/orchestrator.go:377) resolves to no definition in the set and no declared import
-impl/impl-traces|FAIL INV-FRESH-1 (internal/prpoolacl/acl.go:92 internal/prpoolacl/acl_test.go:513) resolves to no definition in the set and no declared import
-impl/impl-traces|FAIL USECASE-5 (docs/decisions/README.md:16) resolves to no definition in the set and no declared import
 intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INTF-SOURCE (README.md:61 invariants.md:75) resolves to no definition here and no declared external reference
 intra/trace-extract behavior-docs/docs/behavior|WARN dangling in prose: INV-DISP-1 (README.md:60 invariants.md:74) resolves to no definition here and no declared external reference
 intra/trace-extract packages/pr-pool/docs/behavior|FAIL JOURNEY-CONFIG carries no listing on its definition

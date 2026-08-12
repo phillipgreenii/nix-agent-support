@@ -12,23 +12,85 @@ journeys, and open questions in [journeys](journeys.md).
 
 ## The model
 
+The diagram below **is** this set's **interface inventory** — the five interfaces and the participant
+kinds behind them. It is not a data-flow diagram and not a component diagram.
+
 ```mermaid
 flowchart LR
-    SRCa["event source (pull / push)"] -->|typed events| core
-    SRCb["event source"] -->|typed events| core
-    subgraph prpool["pr-pool core — dispatcher + durable queue + registry"]
-      core["enqueue event → match → offer to a bound handler until accepted"]
+    subgraph essential["essential path — remove any one of these and the tool is nonsense"]
+      SRC["event source (pull mode or push mode)"]
+      Q["durable event queue"]
+      DISP["dispatcher — match a queued event to a bound handler"]
+      HDL["event handler"]
+      SRC ==>|"INTF-SOURCE: typed events"| Q
+      Q ==>|"in order, de-duped"| DISP
+      DISP ==>|"INTF-HANDLER: offer until accepted"| HDL
     end
-    core -->|offer until accepted| HDL["event handler → handler session (agent or non-agent)"]
-    core --- MON["monitoring sink (pull / push metrics)"]
-    core --- STO["storage (optional)"]
-    OP["operator via CLI"] -->|configure / run / inspect| core
+    OP["operator"] -.->|"INTF-CLI: configure, run, inspect"| DISP
+    STO["storage"] -.->|"INTF-STORE: key or value scratch"| DISP
+    MON["monitoring sink"] -.->|"INTF-MON: declared subset of the metric catalog"| DISP
 ```
 
-Event sources **emit** typed events; event handlers **bind** to event types (or other declared
-fields) and respond to any of their bound events. Everything outside the core — event sources,
-handlers, monitoring, storage — is a **participant** reached through an interface; adding another
-implementation is a detail the core never sees. Handlers may be agent or non-agent.
+**The essential path is event source → queue → event handler**, drawn thick and boxed above. An
+event source **emits** typed events; whether the core pulls them or the source pushes them is a
+**mode** of the one source participant kind, not two kinds. Every event reaches a handler **through
+the queue**, so the queue is a node here rather than a phrase inside a subgraph label — it is the
+universal intermediary, not a realization detail. An event handler **binds** to event types (or other
+declared fields) and responds to any of its bound events; **one run of one handler against one
+event** is a **handler session**, which is why the handler and the session are not the same box.
+A handler may be agent or non-agent, and a configured handler's operator-facing name is its **role**.
+
+**The operator, storage and the monitoring sink are optional participants**, drawn dotted and
+outside the box: the system runs untouched without them. `INTF-STORE` says a **default in-memory**
+store applies when none is configured, and `INTF-MON` says a sink may be absent or several. The
+**operator** is optional on the **event path** in the same sense, while being the only actor who
+authors the wiring — the operator shapes what flows without standing in the flow. So the event source
+and the event handler are this system's **essential participants** and those three are its
+**optional participants**: the second axis the method requires of every interface, alongside its
+counterparty's kind.
+
+**The frequency asymmetry is why that split is worth drawing.** A new event source or a new event
+handler is added often, and that extension is what the tool exists for; storage and monitoring are
+configured once or never. Grouping all five interfaces on **kind** alone would flatten exactly that
+difference away, so this set groups them on kind **and** participation.
+
+The interfaces themselves are in [interfaces](interfaces.md), each carrying an illustrative message
+example, because the method asks a set to show intent through examples
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · GOAL-7`); those examples are what
+the interface conformance suite checks (`INV-INTF-2`).
+
+### The boundary principle
+
+pr-pool knows an event was **delivered**. It knows **nothing** about what happens inside an event
+handler and **nothing** about how an event source derives its events. What is left is the whole of
+what pr-pool does: **enqueue, offer, accept-or-decline, expire, depth**.
+
+One question generates that boundary: **does pr-pool ACT on the value, or merely HAND IT OVER?** A
+value pr-pool acts on is part of pr-pool's own configuration and contract. A value pr-pool only
+hands over is an **opaque token** — equally welcome, and it stays opaque. **Enforcing or
+interpreting another tool's internals is what is out of scope.** A `command` handler's argv is the
+shape of that grey area: it looks like another application's configuration living inside pr-pool's,
+but pr-pool invokes it and never reads it, so it is a **pass-through** and belongs.
+**Pass-through is fine; enforcing another tool's limit is not.**
+
+Asking that one question is what puts the following five outside pr-pool's contract. They are **one
+boundary, not five unrelated trims**:
+
+1. **The handler's status callback** — what a running handler reports about its own progress is the
+   handler's, so pr-pool takes no such stream back.
+2. **Post-acceptance failure classes** — after acceptance the handler owns persistence, resume and
+   retry, so a failure past that point is not pr-pool's to classify.
+3. **Per-role capacity** — how many events a handler will run at once is the handler's own limit to
+   keep, and pr-pool declares it nowhere.
+4. **Per-run `state` and `progress` fields in the operator's status reply** — the same handler
+   internals reached by a second route, so the same answer applies.
+5. **Tool-specific event-source query types** — how a source finds its events is the source's, so
+   pr-pool declares **one opaque source contract** rather than one type per tool.
+
+Content the boundary puts outside this set is **relocated**, not discarded: it moves to pr-pool's
+decision area by the method's relocation procedure
+(`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior · USECASE-5`). `GOAL-MIN-1` is this
+principle's rule form; the principle is stated here, once, and nowhere else restated as a rule.
 
 ## Scope (extent + floor)
 
@@ -44,16 +106,25 @@ implementation is a detail the core never sees. Handlers may be agent or non-age
 
 ## External references
 
-This set follows the behavior-docs method and cites elements the method defines. Each external
-element it references is declared here with the owner's UUID, so a cross-set reference resolves by
-the owner's UUID — not the mutable name (a rename never breaks the seam). The owner set-path is the
-cited `<repo> · <set-path>`; every owner below lives in the method set. The **what it is** column is
-one line, so a reader learns why the row is there without following the reference, and the UUID is
-rendered as a link to the owner's remote-served definition. **The UUID is the authority; the URL may
-rot** — a dead link is an inconvenience, never a broken identity.
+This set follows the behavior-docs method and cites elements the method defines, and its
+implementation cites elements a downstream deployment set defines. Each external element it
+references is declared here with the owner's UUID, so a cross-set reference resolves by the owner's
+UUID — not the mutable name (a rename never breaks the seam). The owner set-path is the cited
+`<repo> · <set-path>`, and this table spans **two** owner sets: the **method** set (the rules this
+set follows) and the **ZR deployment** set (the deployment that implements these interfaces, whose
+elements pr-pool's own implementation cites). The **what it is** column is one line, so a reader
+learns why the row is there without following the reference, and the UUID is rendered as a link to
+the owner's remote-served definition. **The UUID is the authority; the URL may rot** — a dead link is
+an inconvenience, never a broken identity. A row declares **one** element: where the implementation
+cites a whole family (`INTF-ZR-*`), the family resolves through the declared member below.
 
-| Name     | What it is                                                                  | Owner set-path                                                   | Owner UUID                                                                                                                                      |
-| -------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `INV-11` | a set's extent is exactly what its stories, use cases and journeys require  | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [f8174e40-806c-4c42-97da-996efd7c6e23](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |
-| `INV-18` | inter-consistency at every interface, reconciled by the counterparty's kind | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4c6a764b-02f5-4c85-afae-a082fe6c21cd](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |
-| `INV-19` | a set MAY declare a precedence ordering over its own invariants             | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4325bdf4-2458-4606-8b37-2e5e996aa53a](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md) |
+| Name             | What it is                                                                                                              | Owner set-path                                                   | Owner UUID                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-11`         | a set's extent is exactly what its stories, use cases and journeys require                                              | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [f8174e40-806c-4c42-97da-996efd7c6e23](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `INV-18`         | inter-consistency at every interface, reconciled by the counterparty's kind                                             | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4c6a764b-02f5-4c85-afae-a082fe6c21cd](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `INV-19`         | a set MAY declare a precedence ordering over its own invariants                                                         | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [4325bdf4-2458-4606-8b37-2e5e996aa53a](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `GOAL-7`         | a set SHOULD show intent through examples                                                                               | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [42ad1aa1-af11-4387-bf02-e0f028f80434](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/invariants.md)       |
+| `USECASE-5`      | the method's procedure for relocating implementation content out of a behavior doc                                      | `phillipgreenii-nix-agent-support · behavior-docs/docs/behavior` | [7d6de948-3ef5-426a-949e-2dd872f06d28](https://github.com/phillipgreenii/nix-agent-support/blob/main/behavior-docs/docs/behavior/journeys.md)         |
+| `INV-CCPOOL-6`   | a handler run held for a human decision is preserved, not reaped, and the accepting handler owns its resume             | `phillipg-nix-ziprecruiter · modules/zm/pr-pool/docs/behavior`   | [a5f2e14b-1a49-4bfd-be44-69acc603d685](https://github.com/phillipgziprecruiter/phillipg_mbp/blob/main/modules/zm/pr-pool/docs/behavior/invariants.md) |
+| `INV-FRESH-1`    | don't act on stale truth — a readiness signal derived from data past its bound MUST NOT be presented as current         | `phillipg-nix-ziprecruiter · modules/zm/pr-pool/docs/behavior`   | [ceac8879-4bfd-45c7-94ed-9d8c3bd11c38](https://github.com/phillipgziprecruiter/phillipg_mbp/blob/main/modules/zm/pr-pool/docs/behavior/invariants.md) |
+| `INTF-ZR-SOURCE` | the deployment's event sources implementing `INTF-SOURCE` — the declared member the `INTF-ZR-*` family resolves through | `phillipg-nix-ziprecruiter · modules/zm/pr-pool/docs/behavior`   | [9dad0914-4589-4690-9814-2f5936628722](https://github.com/phillipgziprecruiter/phillipg_mbp/blob/main/modules/zm/pr-pool/docs/behavior/interfaces.md) |
