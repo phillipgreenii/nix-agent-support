@@ -14,12 +14,29 @@ import (
 )
 
 type evalResult struct {
-	ID             int    `json:"id"`
-	ToolName       string `json:"tool_name"`
-	ToolSummary    string `json:"tool_summary"`
-	CommandClass   string `json:"command_class"`
-	HookDecision   string `json:"hook_decision"`
-	ReplayResult   string `json:"replay_result"`
+	ID           int    `json:"id"`
+	ToolName     string `json:"tool_name"`
+	ToolSummary  string `json:"tool_summary"`
+	CommandClass string `json:"command_class"`
+	HookDecision string `json:"hook_decision"`
+	ReplayResult string `json:"replay_result"`
+	// replay_module / replay_reason are the DECIDING rule's Module and Reason,
+	// taken from the RuleResult the CURRENT engine returned for this row. They are
+	// per-site attribution for the replay verdict — for asks and for `{}` alike —
+	// and are what makes ADR 0043's decision-3 demonstration executable from
+	// `evaluate` alone (its Consequences name their absence a blocking
+	// prerequisite).
+	//
+	// NOT the stored hook_reason column: that records what an OLDER binary said,
+	// so joining on it would attribute today's verdict to yesterday's rule. (Nor
+	// is it reachable here — asklog.QueryRows does not select it.)
+	//
+	// Empty is meaningful, not missing: engine.Evaluate manufactures its terminal
+	// Abstain with no Module, so an empty pair on an `abstain` row IS the
+	// attribution "the chain was exhausted and no rule had an opinion". Empty on a
+	// stale-cwd row means no replay ran at all, exactly like replay_result.
+	ReplayModule   string `json:"replay_module"`
+	ReplayReason   string `json:"replay_reason"`
 	SettingsResult string `json:"settings_result,omitempty"`
 	Category       string `json:"category"`
 	Outcome        string `json:"outcome"`
@@ -54,7 +71,23 @@ Claude Code settings file so misses can be attributed to settings
 coverage.
 
 Use --approval-source to restrict evaluation to a single approval-mechanism
-bucket (unknown|bypass|auto|settings|hook|user).`,
+bucket (unknown|bypass|auto|settings|hook|user).
+
+--format json also emits replay_module and replay_reason: the rule that PRODUCED
+the replay verdict, and its reason. That is per-site attribution for the replay
+itself, so an ask breakdown needs no second pass through the binary in hook mode:
+
+  claude-extended-tool-approver evaluate --days 3 --format json |
+    jq -r '.[] | select(.replay_result == "ask")
+           | .replay_module + " | " + (.replay_reason | split("\n")[0] | .[0:33])' |
+    sort | uniq -c | sort -rn
+
+A reason is a rule's CONSTANT text with the offending detail interpolated into
+it, so module plus a fixed-width prefix of the reason's first LINE is the site
+key. Both trims are load-bearing: the detail can be a path, a whole heredoc or a
+multi-line bd comment, and without them one site fragments across dozens of
+lines. The width is a knob — widen it if two sites collapse together, narrow it
+if one site splits.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runEvaluate(days, since, settingsPath, format, approvalSource, missesOnly)
@@ -167,6 +200,15 @@ func runEvaluate(daysVal int, sinceVal, settingsPathVal, formatVal, approvalSour
 		}
 		result := eng.EvaluateHook(input)
 		r.ReplayResult = decisionToDBString(result.Decision)
+		// The returned RuleResult IS the deciding one, which is why attribution is
+		// read off it rather than off result.Trace. Trace is chronological, so its
+		// FIRST entry is whichever rule ran first — routinely an abstaining one —
+		// and for a Bash compound the verdict comes from EvaluateExpression's
+		// most-restrictive fold, where the winning leaf can be any leaf. Both make
+		// trace[0] the wrong answer; MostRestrictive carries the winner's Module and
+		// Reason through the fold, so the returned struct is already the final word.
+		r.ReplayModule = result.Module
+		r.ReplayReason = result.Reason
 
 		// Settings evaluation
 		if se != nil {
