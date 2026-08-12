@@ -2,6 +2,7 @@ package hookio
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
@@ -13,26 +14,40 @@ type Decision int
 // fold depends on: a compound/expression takes the MOST restrictive
 // (numerically largest) decision among its leaves.
 //
-//	Approve < Abstain < Ask < Reject
+//	Approve < NoOpinion < Ask < Reject
 //
 // Approve is LEAST restrictive — a green light that suppresses Claude Code's own
-// permission prompt. Abstain means ceta has no opinion and defers to that prompt;
-// it MUST outrank Approve so a compound containing ANY non-approving leaf is never
-// green-lit as a whole (pg2-t4uyx). Reject is most restrictive.
+// permission prompt. NoOpinion means ceta HANDLED the input and has no opinion, so
+// it defers to that prompt; it MUST outrank Approve so a compound containing ANY
+// non-approving leaf is never green-lit as a whole (pg2-t4uyx). Reject is most
+// restrictive.
+//
+// NoOpinion was called Abstain until ADR 0043. The rename is an IDENTIFIER rename
+// only: the SERIALIZED value stays "abstain" (see String below and the three other
+// emitters named in that ADR's Decision). The old name carried three unrelated
+// meanings at once — "not my business", "handled, no opinion", and "I could not
+// determine" — and ADR 0043 moved the first and third out of band onto the
+// (RuleResult, error) pair RuleModule.Evaluate now returns, leaving NoOpinion with
+// the second meaning ONLY. It is terminal: the engine stops the chain on it.
 //
 // Consequence: Approve is now the zero value. Every RuleResult MUST set Decision
 // explicitly (audited: all do). Do not reorder without re-auditing the fold in
 // internal/engine/engine.go and every `Decision`-ordering comparison.
 const (
 	Approve Decision = iota
-	Abstain
+	NoOpinion
 	Ask
 	Reject
 )
 
+// String is a SERIALIZATION boundary, not a debug helper: its output is persisted
+// (asklog's hook_decision / decision_trace_entries.decision, `evaluate`'s
+// replay_result) and tens of thousands of logged rows key on it. NoOpinion MUST
+// keep emitting "abstain" — ADR 0043's Decision requires it so historical joins and
+// the replay differential survive the rename.
 func (d Decision) String() string {
 	switch d {
-	case Abstain:
+	case NoOpinion:
 		return "abstain"
 	case Approve:
 		return "approve"
@@ -45,6 +60,50 @@ func (d Decision) String() string {
 	}
 }
 
+// ErrNotApplicable reports that this rule does not govern this input. It is a
+// CONTROL SIGNAL, not a failure (cf. fs.SkipDir): the engine's first-match chain
+// treats it as "continue to the next rule" and ignores the returned RuleResult
+// entirely.
+//
+// It MUST be returned BARE. Wrapping it with fmt.Errorf("%w") is FORBIDDEN (ADR
+// 0043's Decision, point 5): a wrap that buries it — or one that accidentally makes
+// a genuine failure match it — is not a compile error and no test catches it, and
+// the failure mode is a SILENT AUTO-APPROVAL. Callers therefore compare with
+// errors.Is, and the guard against wrapping is the review rule plus
+// TestErrNotApplicableIsNeverWrapped in this package.
+var ErrNotApplicable = errors.New("rule does not apply")
+
+// NotApplicable is the canonical not-my-business return for a rule. Use it instead
+// of spelling the pair out, so the "bare error, zero-value result" contract is
+// stated in exactly one place.
+func NotApplicable() (RuleResult, error) { return RuleResult{}, ErrNotApplicable }
+
+// FromRecursion translates the verdict of a recursively-evaluated INNER expression
+// (Evaluator.EvaluateExpression, which returns a bare RuleResult) into the
+// (RuleResult, error) pair a RuleModule must return when it forwards that verdict
+// as its own.
+//
+// The translation the ADR 0043 Consequences demand be stated explicitly: an inner
+// NoOpinion is the inner chain's LOOP-EXHAUSTION verdict — no inner rule owned the
+// expression — so a rule that merely forwards it has formed no opinion of its own
+// and MUST let the outer chain continue. Returning it as a verdict instead would
+// make the outer chain STOP, which is a decision change (before ADR 0043 the same
+// forwarded Abstain meant "continue").
+//
+// Any other inner decision (Approve/Ask/Reject) IS an opinion and is forwarded
+// verbatim as a terminal verdict, exactly as before.
+//
+// This is for a rule that adopts the inner verdict WHOLESALE. A rule that FOLDS the
+// inner verdict with its own (envvars) must fold the RuleResult first — inside a
+// MostRestrictive fold NoOpinion is the floor and an error has no representation —
+// and apply this translation only to the folded result.
+func FromRecursion(inner RuleResult) (RuleResult, error) {
+	if inner.Decision == NoOpinion {
+		return NotApplicable()
+	}
+	return inner, nil
+}
+
 type RuleResult struct {
 	Decision Decision
 	Reason   string
@@ -53,11 +112,19 @@ type RuleResult struct {
 }
 
 // MostRestrictive returns whichever of current/candidate is more restrictive
-// under the Decision ordering (Approve < Abstain < Ask < Reject); ties keep
+// under the Decision ordering (Approve < NoOpinion < Ask < Reject); ties keep
 // current. This is the shared most-risky-wins aggregation primitive for
 // substitution-body recursion (pg2-1q5i3); sibling env-value recursion
 // (pg2-gkd5e) reuses it so both fold identically. An expression is Approve iff
-// EVERY level affirmatively Approves; any Abstain/Ask/Reject at any level wins.
+// EVERY level affirmatively Approves; any NoOpinion/Ask/Reject at any level wins.
+//
+// The fold is a DIFFERENT MACHINE from the first-match chain, and ADR 0043 turns on
+// the difference: the fold is seeded at Approve, so "contribute nothing" here is
+// Approve, NOT NoOpinion. A failure therefore MUST contribute the NoOpinion FLOOR
+// inside a fold and MUST NOT be routed to the chain's "continue" — routing it there
+// would contribute the Approve identity and manufacture an approval, reinstating
+// pg2-wguam and pg2-2u5jf. Errors consequently have no representation in this
+// function's inputs at all: they are consumed at the engine's chain chokepoint.
 func MostRestrictive(current, candidate RuleResult) RuleResult {
 	if candidate.Decision > current.Decision {
 		return candidate
@@ -143,9 +210,36 @@ type WebFetchToolInput struct {
 	Prompt string `json:"prompt"`
 }
 
+// RuleModule is one rule in the engine's first-match-wins chain.
+//
+// Evaluate returns THREE distinguishable outcomes (ADR 0043), which the engine
+// discriminates at one chokepoint:
+//
+//	(res, nil)                       HANDLED — res.Decision is the verdict and the
+//	                                 chain STOPS here. NoOpinion is a legitimate
+//	                                 verdict: "I handled this and my answer is no
+//	                                 gate", which emits {} and defers to Claude Code.
+//	(RuleResult{}, ErrNotApplicable) NOT MY BUSINESS — the chain CONTINUES and the
+//	                                 RuleResult is ignored. This is what the old
+//	                                 Abstain-as-loop-sentinel meant.
+//	(RuleResult{}, otherErr)         COULD NOT DETERMINE — evidence gathering failed.
+//	                                 The engine records it per rule and continues.
+//
+// Choosing between the first two is the whole of the conversion risk, and the test
+// is DIRECTIONAL: does a LATER rule need to act on this input? If yes it MUST be
+// ErrNotApplicable (a terminal NoOpinion would shadow that rule — the shape
+// claudetools and killshell have, guarded by
+// TestIntegration_KillShellThroughChain's "does not shadow the later path-safety
+// rule"). If the chain must STOP here it MUST be NoOpinion (ErrNotApplicable would
+// let a later rule approve — the shape pathsafety's agent-config write branch has,
+// required by ADR 0041's Decision).
+//
+// A rule that CANNOT complete an identity or ownership check MAY instead return its
+// own fail-closed verdict with a nil error; killshell does exactly that and its Ask
+// is named in ADR 0043's error policy as the one carve-out.
 type RuleModule interface {
 	Name() string
-	Evaluate(input *HookInput) RuleResult
+	Evaluate(input *HookInput) (RuleResult, error)
 }
 
 // StackFrame represents a level in the recursive evaluation call stack.
@@ -205,7 +299,7 @@ var devFdPattern = regexp.MustCompile(`^/dev/fd/[0-9]+$`)
 //   - the engine's redirection evaluation, where the PathEvaluator does not model
 //     these pseudo-files (it classifies them PathUnknown) and without the
 //     short-circuit a redirect to one would demote an otherwise-approved command
-//     to Abstain (pg2-9ctmb);
+//     to NoOpinion (pg2-9ctmb);
 //   - the gitdir rule's copy-out detection, where an output redirection is what
 //     turns a read of git metadata into a capture of it — but writing to a
 //     terminal or discarding to /dev/null captures nothing, so `ls .git/hooks
@@ -224,6 +318,13 @@ func IsSafeRedirectTarget(path string) bool {
 
 // Evaluator allows rules to recursively evaluate inner expressions
 // through the full rule chain.
+//
+// It deliberately returns a BARE RuleResult, not the (RuleResult, error) pair
+// RuleModule returns: the inner chain has already run to completion, so
+// "not applicable" and "could not determine" were both consumed inside it and the
+// only thing left is a verdict. An exhausted inner chain surfaces as the terminal
+// NoOpinion. A rule forwarding that verdict as its OWN must translate it — see
+// FromRecursion, which is where the ADR 0043 recursion-boundary rule lives.
 type Evaluator interface {
 	EvaluateExpression(expr string, stack []StackFrame, origin *HookInput) RuleResult
 }

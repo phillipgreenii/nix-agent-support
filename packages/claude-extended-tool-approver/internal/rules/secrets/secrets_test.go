@@ -48,13 +48,13 @@ func TestRule(t *testing.T) {
 		// False-positive avoidance (pg2-ia640.2): the grep/rg positional PATTERN,
 		// grep -e/-f pattern-source values, rg value-flag values, and the jq value
 		// flags + bare filter are NOT secret file paths — must Abstain, not Ask.
-		{"grep pattern .env is not a file", bashInput("grep .env file.log"), hookio.Abstain},
-		{"rg pattern .env is not a file", bashInput("rg .env somefile.log"), hookio.Abstain},
-		{"grep -e .env pattern value is not a file", bashInput("grep -e .env file.log"), hookio.Abstain},
-		{"grep -f .env pattern-file value is not a file", bashInput("grep -f .env file.log"), hookio.Abstain},
-		{"rg -g glob value is not a file", bashInput("rg -g '*.env' pattern file.log"), hookio.Abstain},
-		{"jq --arg value .env is not a file", bashInput("jq --arg x .env '.'"), hookio.Abstain},
-		{"jq bare filter .credentials is not a file", bashInput("jq '.credentials' data.json"), hookio.Abstain},
+		{"grep pattern .env is not a file", bashInput("grep .env file.log"), hookio.NoOpinion},
+		{"rg pattern .env is not a file", bashInput("rg .env somefile.log"), hookio.NoOpinion},
+		{"grep -e .env pattern value is not a file", bashInput("grep -e .env file.log"), hookio.NoOpinion},
+		{"grep -f .env pattern-file value is not a file", bashInput("grep -f .env file.log"), hookio.NoOpinion},
+		{"rg -g glob value is not a file", bashInput("rg -g '*.env' pattern file.log"), hookio.NoOpinion},
+		{"jq --arg value .env is not a file", bashInput("jq --arg x .env '.'"), hookio.NoOpinion},
+		{"jq bare filter .credentials is not a file", bashInput("jq '.credentials' data.json"), hookio.NoOpinion},
 
 		// Regression — a real secret FILE arg still Asks (pattern/filter exemption
 		// must not suppress the actual secret file reference).
@@ -79,39 +79,39 @@ func TestRule(t *testing.T) {
 		// OVER-MATCH GUARD: a `--` long option that merely contains `c` must NOT be
 		// treated as a `-c` wrapper (else its following token — the rcfile path — is
 		// wrongly scanned as an inner command).
-		{"bash --rcfile not a wrapper", bashInput("bash --rcfile ~/.bashrc"), hookio.Abstain},
+		{"bash --rcfile not a wrapper", bashInput("bash --rcfile ~/.bashrc"), hookio.NoOpinion},
 		// A combined-flag wrapper whose inner command reads no secret must not
 		// over-fire.
-		{"bash -lc echo hi", bashInput("bash -lc 'echo hi'"), hookio.Abstain},
+		{"bash -lc echo hi", bashInput("bash -lc 'echo hi'"), hookio.NoOpinion},
 
 		// Bash without a secret path → Abstain (defer to rest of chain)
-		{"cat readme", bashInput("cat README.md"), hookio.Abstain},
-		{"echo hello", bashInput("echo hello"), hookio.Abstain},
-		{"ls tmp", bashInput("ls /tmp"), hookio.Abstain},
+		{"cat readme", bashInput("cat README.md"), hookio.NoOpinion},
+		{"echo hello", bashInput("echo hello"), hookio.NoOpinion},
+		{"ls tmp", bashInput("ls /tmp"), hookio.NoOpinion},
 		// bare "secrets" word (kubectl subcommand) must NOT be flagged
-		{"kubectl get secrets not flagged", bashInput("kubectl get secrets"), hookio.Abstain},
+		{"kubectl get secrets not flagged", bashInput("kubectl get secrets"), hookio.NoOpinion},
 
 		// File tools
 		{"Read credentials", fileInput("Read", "~/.claude/.credentials"), hookio.Ask},
-		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.Abstain},
+		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.NoOpinion},
 		{"Write to secret", fileInput("Write", "~/.ssh/authorized_keys"), hookio.Ask},
-		{"Edit normal file", fileInput("Edit", "src/app.go"), hookio.Abstain},
+		{"Edit normal file", fileInput("Edit", "src/app.go"), hookio.NoOpinion},
 
 		// Search tools
 		{"Grep in secrets dir", searchInput("Grep", "password", "secrets/"), hookio.Ask},
-		{"Grep normal dir", searchInput("Grep", "TODO", "internal/"), hookio.Abstain},
-		{"Glob no path", searchInput("Glob", "**/*.go", ""), hookio.Abstain},
+		{"Grep normal dir", searchInput("Grep", "TODO", "internal/"), hookio.NoOpinion},
+		{"Glob no path", searchInput("Glob", "**/*.go", ""), hookio.NoOpinion},
 
 		// Unrelated tools → Abstain
-		{"WebFetch", &hookio.HookInput{ToolName: "WebFetch"}, hookio.Abstain},
+		{"WebFetch", &hookio.HookInput{ToolName: "WebFetch"}, hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.Evaluate(tt.input)
+			got := hookio.Verdict(r.Evaluate(tt.input))
 			if got.Decision != tt.want {
 				t.Errorf("Evaluate(%s) decision = %v, want %v (reason %q)", tt.name, got.Decision, tt.want, got.Reason)
 			}
-			if got.Decision != hookio.Abstain && got.Module != r.Name() {
+			if got.Decision != hookio.NoOpinion && got.Module != r.Name() {
 				t.Errorf("Evaluate(%s) module = %q, want %q", tt.name, got.Module, r.Name())
 			}
 		})
@@ -140,7 +140,7 @@ func TestRule_DenyListedSecretRejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := r.Evaluate(tt.input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(tt.input)); got.Decision != tt.want {
 				t.Errorf("Evaluate(%s) = %v, want %v (reason %q)", tt.name, got.Decision, tt.want, got.Reason)
 			}
 		})
@@ -219,7 +219,7 @@ func TestRule_SecretViaSymlink_Ask(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.Evaluate(tt.input)
+			got := hookio.Verdict(r.Evaluate(tt.input))
 			if got.Decision != hookio.Ask {
 				t.Errorf("Evaluate(%s) = %v, want ask (reason %q)", tt.name, got.Decision, got.Reason)
 			}
@@ -264,7 +264,7 @@ func TestRule_CredentialFileIsItselfASymlink_Ask(t *testing.T) {
 		{"cat", bashInput("cat " + named)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.Evaluate(tt.input)
+			got := hookio.Verdict(r.Evaluate(tt.input))
 			if got.Decision != hookio.Ask {
 				t.Errorf("Evaluate(%s) = %v, want ask (reason %q)", tt.name, got.Decision, got.Reason)
 			}
@@ -293,7 +293,7 @@ func TestRule_NonCredentialSymlink_Abstain(t *testing.T) {
 		{"Grep in notes dir", searchInput("Grep", "TODO", filepath.Join(root, "notes"))},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := r.Evaluate(tt.input); got.Decision != hookio.Abstain {
+			if got := hookio.Verdict(r.Evaluate(tt.input)); got.Decision != hookio.NoOpinion {
 				t.Errorf("Evaluate(%s) = %v, want abstain (reason %q)", tt.name, got.Decision, got.Reason)
 			}
 		})
@@ -315,15 +315,15 @@ func TestRule_NilEvaluator_NamedFormStillRuns(t *testing.T) {
 		{"Read ssh key", fileInput("Read", "~/.ssh/id_rsa"), hookio.Ask},
 		{"cat dotenv", bashInput("cat .env"), hookio.Ask},
 		{"Grep secrets dir", searchInput("Grep", "password", "secrets/"), hookio.Ask},
-		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.Abstain},
+		{"Read normal file", fileInput("Read", "internal/main.go"), hookio.NoOpinion},
 		// Resolved form — unavailable without an evaluator, so it degrades to the
 		// pre-pass behavior (Abstain) rather than panicking.
-		{"Read symlink into .ssh", fileInput("Read", filepath.Join(root, "mykeys", "id_rsa")), hookio.Abstain},
-		{"cat symlink into .ssh", bashInput("cat " + filepath.Join(root, "mykeys", "id_rsa")), hookio.Abstain},
+		{"Read symlink into .ssh", fileInput("Read", filepath.Join(root, "mykeys", "id_rsa")), hookio.NoOpinion},
+		{"cat symlink into .ssh", bashInput("cat " + filepath.Join(root, "mykeys", "id_rsa")), hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.Evaluate(tt.input)
+			got := hookio.Verdict(r.Evaluate(tt.input))
 			if got.Decision != tt.want {
 				t.Errorf("Evaluate(%s) = %v, want %v (reason %q)", tt.name, got.Decision, tt.want, got.Reason)
 			}
@@ -342,12 +342,12 @@ func TestRule_BareWordNotResolved_Abstain(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := New(patheval.NewWithCWD(project, project))
-	if got := r.Evaluate(bashInput("kubectl get secrets")); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(bashInput("kubectl get secrets"))); got.Decision != hookio.NoOpinion {
 		t.Errorf("kubectl get secrets = %v, want abstain (reason %q)", got.Decision, got.Reason)
 	}
 	// The same directory named path-shaped IS a hit — via the named form, since
 	// `./secrets/prod.json` is already lexically secret.
-	if got := r.Evaluate(bashInput("cat ./secrets/prod.json")); got.Decision != hookio.Ask {
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat ./secrets/prod.json"))); got.Decision != hookio.Ask {
 		t.Errorf("cat ./secrets/prod.json = %v, want ask (reason %q)", got.Decision, got.Reason)
 	}
 }
@@ -368,16 +368,16 @@ func TestRule_ResolutionBudgetBounded(t *testing.T) {
 	}
 	padding := strings.Join(pad, " ")
 
-	if got := r.Evaluate(bashInput("cat " + link + " " + padding)); got.Decision != hookio.Ask {
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat " + link + " " + padding))); got.Decision != hookio.Ask {
 		t.Errorf("symlink within budget = %v, want ask (reason %q)", got.Decision, got.Reason)
 	}
-	if got := r.Evaluate(bashInput("cat " + padding + " " + link)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat " + padding + " " + link))); got.Decision != hookio.NoOpinion {
 		t.Errorf("symlink past the %d-resolution cap = %v, want abstain — the cap is the documented bound (reason %q)",
 			maxResolutions, got.Decision, got.Reason)
 	}
 	// The lexical pass is NOT capped: a named secret past the same padding still
 	// hits, so the cap can never cost more than the resolved-form refinement.
-	if got := r.Evaluate(bashInput("cat " + padding + " " + filepath.Join(root, ".ssh", "id_rsa"))); got.Decision != hookio.Ask {
+	if got := hookio.Verdict(r.Evaluate(bashInput("cat " + padding + " " + filepath.Join(root, ".ssh", "id_rsa")))); got.Decision != hookio.Ask {
 		t.Errorf("named secret past the cap = %v, want ask (reason %q)", got.Decision, got.Reason)
 	}
 }
@@ -394,7 +394,7 @@ func TestRule_DenyListedSecretViaSymlink_Rejects(t *testing.T) {
 	}
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{DenyRead: []string{resolvedSSH}})
 	r := New(pe)
-	got := r.Evaluate(fileInput("Read", filepath.Join(root, "mykeys", "id_rsa")))
+	got := hookio.Verdict(r.Evaluate(fileInput("Read", filepath.Join(root, "mykeys", "id_rsa"))))
 	if got.Decision != hookio.Reject {
 		t.Errorf("Read deny-listed secret via symlink = %v, want reject (reason %q)", got.Decision, got.Reason)
 	}

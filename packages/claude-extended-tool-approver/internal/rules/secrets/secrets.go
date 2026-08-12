@@ -11,6 +11,7 @@
 package secrets
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -70,30 +71,46 @@ func New(pe *patheval.PathEvaluator) *Rule { return &Rule{pe: pe} }
 
 func (r *Rule) Name() string { return "secrets" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	switch input.ToolName {
 	case "Read", "Write", "Edit", "MultiEdit", "Delete":
-		if path, err := input.FilePath(); err == nil {
-			if ref, ok := r.pathRef(path); ok {
-				return r.decide(ref, writeTools[input.ToolName])
-			}
+		path, err := input.FilePath()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("secrets: read file_path: %w", err)
+		}
+		if ref, ok := r.pathRef(path); ok {
+			return r.decide(ref, writeTools[input.ToolName]), nil
 		}
 	case "Glob", "Grep":
-		if path, err := input.SearchPath(); err == nil {
-			if ref, ok := r.pathRef(path); ok {
-				return r.decide(ref, false)
-			}
+		path, err := input.SearchPath()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("secrets: read search path: %w", err)
+		}
+		if ref, ok := r.pathRef(path); ok {
+			return r.decide(ref, false), nil
 		}
 	case "Bash":
-		if cmd, err := input.BashCommand(); err == nil {
-			if ref, ok := r.bashRef(cmd); ok {
-				// Bash read/write intent is ambiguous per-argument; treat as a
-				// read for deny-list purposes (the bead is about reads).
-				return r.decide(ref, false)
-			}
+		cmd, err := input.BashCommand()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("secrets: read bash command: %w", err)
+		}
+		if ref, ok := r.bashRef(cmd); ok {
+			// Bash read/write intent is ambiguous per-argument; treat as a
+			// read for deny-list purposes (the bead is about reads).
+			return r.decide(ref, false), nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	// NOT-APPLICABLE, not NoOpinion: this rule exists to stop path-safety and
+	// safe-commands (both registered AFTER it) from silently approving a
+	// credential path, so on a path it did NOT match those rules MUST still be
+	// reached (ADR 0043's Decision, point 2 — Shape B).
+	//
+	// The three malformed-input branches above used to land HERE, on this one
+	// shared return, so "no secret path in this call" and "I could not read the
+	// tool input" were the same value — the gitdir dual-meaning defect in a second
+	// place. They are now genuine errors, recorded per rule, and the chain still
+	// continues, so the decision is unchanged.
+	return hookio.NotApplicable()
 }
 
 // secretRef is a path reference that matched secretpath.IsSecret. It carries the

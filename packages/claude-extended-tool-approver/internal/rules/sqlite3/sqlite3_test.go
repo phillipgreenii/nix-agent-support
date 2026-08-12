@@ -24,10 +24,10 @@ func TestSqlite3Rule(t *testing.T) {
 		{"select on project db", `sqlite3 /tmp/project/test.db "SELECT * FROM t"`, hookio.Approve},
 		{"select on nix store db", `sqlite3 /nix/store/abc/test.db "SELECT 1"`, hookio.Approve},
 		{"insert on project db", `sqlite3 /tmp/project/test.db "INSERT INTO t VALUES(1)"`, hookio.Approve},
-		{"insert on readonly db", `sqlite3 /nix/store/abc/test.db "INSERT INTO t VALUES(1)"`, hookio.Abstain},
-		{"create table", `sqlite3 /tmp/project/test.db "CREATE TABLE t(id INT)"`, hookio.Abstain},
-		{"drop table", `sqlite3 /tmp/project/test.db "DROP TABLE t"`, hookio.Abstain},
-		{"select on unknown path", `sqlite3 /home/other/test.db "SELECT 1"`, hookio.Abstain},
+		{"insert on readonly db", `sqlite3 /nix/store/abc/test.db "INSERT INTO t VALUES(1)"`, hookio.NoOpinion},
+		{"create table", `sqlite3 /tmp/project/test.db "CREATE TABLE t(id INT)"`, hookio.NoOpinion},
+		{"drop table", `sqlite3 /tmp/project/test.db "DROP TABLE t"`, hookio.NoOpinion},
+		{"select on unknown path", `sqlite3 /home/other/test.db "SELECT 1"`, hookio.NoOpinion},
 		{"select with json flag", `sqlite3 -json /tmp/project/test.db "SELECT 1"`, hookio.Approve},
 		{"dot-command schema", `sqlite3 /tmp/project/test.db ".schema"`, hookio.Approve},
 		{"dot-command tables", `sqlite3 /tmp/project/test.db ".tables"`, hookio.Approve},
@@ -35,9 +35,9 @@ func TestSqlite3Rule(t *testing.T) {
 		{"dot-command mode", `sqlite3 /tmp/project/test.db ".mode json"`, hookio.Approve},
 		{"dot-command dbinfo", `sqlite3 /tmp/project/test.db ".dbinfo"`, hookio.Approve},
 		{"dot-command schema on nix store", `sqlite3 /nix/store/abc/test.db ".schema"`, hookio.Approve},
-		{"dot-command on unknown path", `sqlite3 /home/other/test.db ".schema"`, hookio.Abstain},
-		{"pragma unknown", `sqlite3 /tmp/project/test.db "PRAGMA table_info(t)"`, hookio.Abstain},
-		{"not sqlite3", "ls -la", hookio.Abstain},
+		{"dot-command on unknown path", `sqlite3 /home/other/test.db ".schema"`, hookio.NoOpinion},
+		{"pragma unknown", `sqlite3 /tmp/project/test.db "PRAGMA table_info(t)"`, hookio.NoOpinion},
+		{"not sqlite3", "ls -la", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,7 +46,7 @@ func TestSqlite3Rule(t *testing.T) {
 				ToolInput: mustJSON(map[string]string{"command": tt.command}),
 				CWD:       "/tmp/project",
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
@@ -62,8 +62,8 @@ func TestSqlite3Rule_NonBash(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/test.db"}),
 		CWD:       "/tmp/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("non-bash: got %v, want abstain", got.Decision)
 	}
 }

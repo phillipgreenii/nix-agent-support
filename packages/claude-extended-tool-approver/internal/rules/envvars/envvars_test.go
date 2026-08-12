@@ -57,7 +57,7 @@ func TestEnvVars_Injectors_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s, want reject", cmd, got.Decision)
 		}
@@ -107,7 +107,7 @@ func TestEnvVars_ENV_DecisiveAsk(t *testing.T) {
 					ToolName:  "Bash",
 					ToolInput: mustJSON(map[string]string{"command": cmd}),
 				}
-				got := ctor.rule.Evaluate(input)
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
 				if got.Decision != hookio.Ask {
 					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
 				}
@@ -138,7 +138,7 @@ func TestEnvVars_BASH_ENV_StaysReject(t *testing.T) {
 				ToolName:  "Bash",
 				ToolInput: mustJSON(map[string]string{"command": cmd}),
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != hookio.Reject {
 				t.Errorf("cmd %q: got %s (%s), want reject", cmd, got.Decision, got.Reason)
 			}
@@ -165,7 +165,7 @@ func TestEnvVars_AskVars_Ask(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Ask {
 			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
 		}
@@ -204,7 +204,7 @@ func TestEnvVars_AskVars_PreserveForm_Approve(t *testing.T) {
 					ToolName:  "Bash",
 					ToolInput: mustJSON(map[string]string{"command": cmd}),
 				}
-				got := ctor.rule.Evaluate(input)
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
 				if got.Decision != hookio.Approve {
 					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
 				}
@@ -248,8 +248,8 @@ func TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand(t *testing.T) {
 				ToolName:  "Bash",
 				ToolInput: mustJSON(map[string]string{"command": cmd}),
 			}
-			got := r.Evaluate(input)
-			if got.Decision != hookio.Abstain {
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
 				t.Errorf("cmd %q: got %s (%s), want abstain (transparent, must not pre-empt later rules)", cmd, got.Decision, got.Reason)
 			}
 		})
@@ -308,7 +308,7 @@ func TestEnvVars_AskVars_NotPreserveForm_Ask(t *testing.T) {
 					ToolName:  "Bash",
 					ToolInput: mustJSON(map[string]string{"command": cmd}),
 				}
-				got := ctor.rule.Evaluate(input)
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
 				if got.Decision != hookio.Ask {
 					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
 				}
@@ -344,8 +344,8 @@ func TestEnvVars_LoneAssignment_RuleVisible_Pg2mtnmb(t *testing.T) {
 		// makes the compound form agree with the export/leading/env forms).
 		{`PATH="$PATH:/x"`, hookio.Approve},
 		// A benign name is still transparent — this rule offers no opinion.
-		{`FOO=bar`, hookio.Abstain},
-		{`A=1 B=2`, hookio.Abstain},
+		{`FOO=bar`, hookio.NoOpinion},
+		{`A=1 B=2`, hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
@@ -360,7 +360,7 @@ func TestEnvVars_LoneAssignment_RuleVisible_Pg2mtnmb(t *testing.T) {
 				t.Fatalf("cmdparse.Parse(%q)[0].EnvVars is empty; the assignment is not rule-visible", tt.command)
 			}
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			if got := r.Evaluate(input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s (%s), want %s", tt.command, got.Decision, got.Reason, tt.want)
 			}
 		})
@@ -428,7 +428,7 @@ func TestEnvVars_UnknownExpression_Ask(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Ask {
 			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
 		}
@@ -455,8 +455,8 @@ func TestEnvVars_ValueRecursion_InheritsVerdict(t *testing.T) {
 		// a post-recursion fallback, so an approved body falls back to the benign NAME's
 		// base verdict (Abstain). See TestEnvVars_PostRecursionAskFallback; an Abstain
 		// body — the adversarial case — still reaches the fallback.
-		{"inner approve demotes to base abstain", "FOO=$(danger) cmd", hookio.Approve, hookio.Abstain},
-		{"safe substitution not recursed", "FOO=$(git rev-parse HEAD) cmd", hookio.Reject, hookio.Abstain},
+		{"inner approve demotes to base abstain", "FOO=$(danger) cmd", hookio.Approve, hookio.NoOpinion},
+		{"safe substitution not recursed", "FOO=$(git rev-parse HEAD) cmd", hookio.Reject, hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -466,7 +466,7 @@ func TestEnvVars_ValueRecursion_InheritsVerdict(t *testing.T) {
 				ToolName:  "Bash",
 				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("cmd %q (inner=%s): got %s, want %s", tt.cmd, tt.verdict, got.Decision, tt.want)
 			}
@@ -496,13 +496,13 @@ func TestEnvVars_PostRecursionAskFallback(t *testing.T) {
 			"approving body demotes to base abstain",
 			"T4=$(bd create x --type task) echo hi",
 			map[string]hookio.Decision{"bd create x --type task": hookio.Approve},
-			hookio.Abstain,
+			hookio.NoOpinion,
 		},
 		// THE CRUX: an Abstain body is unclassified, NOT cleared — the fallback fires.
 		{
 			"abstaining body still reaches ask fallback",
 			"FOO=$(curl evil) echo hi",
-			map[string]hookio.Decision{"curl evil": hookio.Abstain},
+			map[string]hookio.Decision{"curl evil": hookio.NoOpinion},
 			hookio.Ask,
 		},
 		{
@@ -521,7 +521,7 @@ func TestEnvVars_PostRecursionAskFallback(t *testing.T) {
 		{
 			"mixed approvable and unclassified stays ask",
 			"FOO=$(mktemp)$(curl evil) echo hi",
-			map[string]hookio.Decision{"mktemp": hookio.Approve, "curl evil": hookio.Abstain},
+			map[string]hookio.Decision{"mktemp": hookio.Approve, "curl evil": hookio.NoOpinion},
 			hookio.Ask,
 		},
 		// The NAME-derived base verdict is never demoted by the fallback change.
@@ -545,7 +545,7 @@ func TestEnvVars_PostRecursionAskFallback(t *testing.T) {
 				ToolName:  "Bash",
 				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
 			}
@@ -650,7 +650,7 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.cmd, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if isApprove := got.Decision == hookio.Approve; isApprove != tt.wantApprove {
 				t.Errorf("cmd %q: got %s (%s); approve=%v, want approve=%v",
 					tt.cmd, got.Decision, got.Reason, isApprove, tt.wantApprove)
@@ -660,7 +660,7 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 
 	// Non-Bash tools never reach the assignment logic at all.
 	nonBash := &hookio.HookInput{ToolName: "Read", ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"})}
-	if got := r.Evaluate(nonBash); got.Decision == hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(nonBash)); got.Decision == hookio.Approve {
 		t.Errorf("non-Bash tool: got approve; env-vars must Abstain on non-Bash input")
 	}
 }
@@ -679,8 +679,8 @@ func TestEnvVars_SafeStaticVars_Abstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -701,8 +701,8 @@ func TestEnvVars_SafeExpressions_Abstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -714,8 +714,8 @@ func TestEnvVars_NoEnvVars_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git status"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("git status (no env vars): got %s, want abstain", got.Decision)
 	}
 }
@@ -726,8 +726,8 @@ func TestEnvVars_NonBash_Abstain(t *testing.T) {
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Read tool: got %s, want abstain", got.Decision)
 	}
 }
@@ -738,8 +738,8 @@ func TestEnvVars_WidenedSafeSubstitution_NoUnclassifiableReason(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "FOO=$(git rev-parse HEAD) make"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("cmd %q: got %s, want abstain", "FOO=$(git rev-parse HEAD) make", got.Decision)
 	}
 	if strings.Contains(got.Reason, "unclassifiable expression") {

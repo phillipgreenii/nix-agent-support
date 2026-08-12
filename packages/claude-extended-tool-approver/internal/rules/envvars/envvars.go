@@ -304,28 +304,35 @@ func isStaticAbsolutePath(component string) bool {
 	return true
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("envvars: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 
-	// Aggregate every assignment's sub-verdict most-restrictive-wins. Abstain is
-	// the identity: a command with no (or only benign) assignments yields Abstain,
-	// deferring to the rest of the chain.
+	// THIS IS A FOLD, NOT A CHAIN, so ADR 0043's "continue" has no representation
+	// inside it and NoOpinion — not an error — is the seed and the floor. Routing
+	// anything here through the error channel would be trap 4: MostRestrictive is
+	// escalate-only from a NoOpinion seed, and dropping to the Approve identity
+	// would manufacture an approval.
+	//
+	// Aggregate every assignment's sub-verdict most-restrictive-wins. NoOpinion is
+	// the identity: a command with no (or only benign) assignments folds to
+	// NoOpinion, which the single translation at the END of this function turns into
+	// the chain's not-applicable so the rest of the chain still runs.
 	//
 	// An Approve sub-verdict is HELD ASIDE rather than folded, for two reasons.
-	// MostRestrictive is escalate-only (Approve < Abstain), so folding it would
+	// MostRestrictive is escalate-only (Approve < NoOpinion), so folding it would
 	// simply discard it. And it is surfaced only when it can do no harm: no other
 	// assignment produced anything more restrictive, and the assignment is the whole
 	// leaf — condition 3 of the Rule contract, which stops the Approve from
 	// short-circuiting the rules that run after this one. Beside a real command the
-	// verified-safe assignment contributes nothing and the leaf stays Abstain.
-	result := hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	// verified-safe assignment contributes nothing and the leaf stays NoOpinion.
+	result := hookio.RuleResult{Decision: hookio.NoOpinion, Module: r.Name()}
 	var held *hookio.RuleResult
 	for _, pc := range parsed {
 		wholeLeaf := assignmentIsWholeLeaf(pc)
@@ -341,22 +348,31 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			result = hookio.MostRestrictive(result, sub)
 		}
 	}
-	if result.Decision == hookio.Abstain && held != nil {
-		return *held
+	if result.Decision == hookio.NoOpinion && held != nil {
+		return *held, nil
 	}
-	return result
+	// THE ONE TRANSLATION POINT from fold vocabulary to chain vocabulary: a folded
+	// NoOpinion is "nothing here was mine", which before ADR 0043 the engine read as
+	// "continue" — so it MUST become ErrNotApplicable, not a terminal verdict, or
+	// every ordinary `A=1 cmd` would stop the chain and never reach safe-commands.
+	// hookio.FromRecursion is that translation; it is the same rule the recursing
+	// rules (nix/docker/kubectl) apply to an inner expression's verdict.
+	return hookio.FromRecursion(result)
 }
 
 // evaluateAssignment returns the sub-verdict for a single NAME=VALUE assignment.
 // The NAME gives the base verdict (injector→Reject, injectorAskVar→Ask,
-// PATH/HOME→Ask-unless-verified-safe, else→Abstain)
-// and a VALUE that embeds an unclassifiable substitution escalates decisively
+// PATH/HOME→Ask-unless-verified-safe, else→NoOpinion) — a FOLD sub-verdict, so it is
+// a plain RuleResult and never an error. A VALUE that embeds an unclassifiable
+// substitution escalates decisively
 // (never auto-approve) and inherits a stronger verdict from recursing the body.
 func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput) hookio.RuleResult {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
-	result := hookio.RuleResult{Decision: hookio.Abstain, Module: name}
+	// NoOpinion, not an error: this is a fold sub-verdict (see Evaluate), and the
+	// fold has no representation for the chain's "continue".
+	result := hookio.RuleResult{Decision: hookio.NoOpinion, Module: name}
 	switch {
 	case injectorVars[ev.Name] || strings.HasPrefix(ev.Name, "BASH_FUNC_"):
 		result = hookio.RuleResult{

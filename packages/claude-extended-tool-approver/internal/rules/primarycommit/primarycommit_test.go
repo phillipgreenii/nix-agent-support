@@ -53,18 +53,18 @@ func TestPrimaryCommitRule(t *testing.T) {
 		{"bypass: commit --amend on primary", "git commit --amend", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 		{"auto: commit on primary", "git commit -m x", "Bash", "auto", canonMain(), hookio.Reject},
 		{"dontAsk: commit on primary", "git commit -m x", "Bash", "dontAsk", canonMain(), hookio.Reject},
-		{"default: commit on primary (no friction)", "git commit -m x", "Bash", "default", canonMain(), hookio.Abstain},
-		{"acceptEdits: commit on primary (does not auto-approve Bash)", "git commit -m x", "Bash", "acceptEdits", canonMain(), hookio.Abstain},
-		{"plan: commit on primary", "git commit -m x", "Bash", "plan", canonMain(), hookio.Abstain},
-		{"empty mode: commit on primary", "git commit -m x", "Bash", "", canonMain(), hookio.Abstain},
-		{"bypass: off primary", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat"}, hookio.Abstain},
-		{"bypass: linked worktree", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: false, primary: "main", cur: "main"}, hookio.Abstain},
-		{"bypass: detached", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: ""}, hookio.Abstain},
-		{"bypass: non-commit git", "git status", "Bash", "bypassPermissions", canonMain(), hookio.Abstain},
-		{"bypass: commit-tree", "git commit-tree abc", "Bash", "bypassPermissions", canonMain(), hookio.Abstain},
-		{"bypass: non-git bash", "ls -la", "Bash", "bypassPermissions", canonMain(), hookio.Abstain},
-		{"bypass: non-bash tool", "", "Read", "bypassPermissions", canonMain(), hookio.Abstain},
-		{"bypass: resolver error (fail-open)", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonicalErr: errors.New("x")}, hookio.Abstain},
+		{"default: commit on primary (no friction)", "git commit -m x", "Bash", "default", canonMain(), hookio.NoOpinion},
+		{"acceptEdits: commit on primary (does not auto-approve Bash)", "git commit -m x", "Bash", "acceptEdits", canonMain(), hookio.NoOpinion},
+		{"plan: commit on primary", "git commit -m x", "Bash", "plan", canonMain(), hookio.NoOpinion},
+		{"empty mode: commit on primary", "git commit -m x", "Bash", "", canonMain(), hookio.NoOpinion},
+		{"bypass: off primary", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat"}, hookio.NoOpinion},
+		{"bypass: linked worktree", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: false, primary: "main", cur: "main"}, hookio.NoOpinion},
+		{"bypass: detached", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: ""}, hookio.NoOpinion},
+		{"bypass: non-commit git", "git status", "Bash", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		{"bypass: commit-tree", "git commit-tree abc", "Bash", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		{"bypass: non-git bash", "ls -la", "Bash", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		{"bypass: non-bash tool", "", "Read", "bypassPermissions", canonMain(), hookio.NoOpinion},
+		{"bypass: resolver error (fail-open)", "git commit -m x", "Bash", "bypassPermissions", &stubResolver{canonicalErr: errors.New("x")}, hookio.NoOpinion},
 		{"bypass: compound commit && push", "git commit -m x && git push", "Bash", "bypassPermissions", canonMain(), hookio.Reject},
 
 		// --- tc-2phi8: alias hides the commit subcommand -> expand and gate ---
@@ -77,22 +77,22 @@ func TestPrimaryCommitRule(t *testing.T) {
 		// injected `-c` beats a config alias of the same name.
 		{"bypass: injected alias overrides config (to commit)", "git -c alias.ci='commit -am x' ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "status"}}, hookio.Reject},
 		// same alias but OFF primary -> Abstain.
-		{"bypass: config alias to commit off primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Abstain},
+		{"bypass: config alias to commit off primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "feat", aliases: map[string]string{"ci": "commit -am x"}}, hookio.NoOpinion},
 		// harmless alias (not a commit) -> Abstain.
-		{"bypass: harmless alias (st=status)", "git st", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"st": "status"}}, hookio.Abstain},
+		{"bypass: harmless alias (st=status)", "git st", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"st": "status"}}, hookio.NoOpinion},
 		// alias to commit-tree is NOT a commit -> Abstain (matches the bare commit-tree case).
-		{"bypass: alias to commit-tree", "git ct", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ct": "commit-tree abc"}}, hookio.Abstain},
+		{"bypass: alias to commit-tree", "git ct", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ct": "commit-tree abc"}}, hookio.NoOpinion},
 		// interactive mode: an alias to a primary commit must NOT prompt.
-		{"default: config alias to commit on primary (no friction)", "git ci", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "commit -am x"}}, hookio.Abstain},
+		{"default: config alias to commit on primary (no friction)", "git ci", "Bash", "default", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "commit -am x"}}, hookio.NoOpinion},
 		// shell alias (`!…`) body re-parsed and its git commands re-checked.
 		{"bypass: shell alias committing on primary", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!git commit -am x"}}, hookio.Reject},
-		{"bypass: shell alias not a commit (echo)", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!echo hi"}}, hookio.Abstain},
+		{"bypass: shell alias not a commit (echo)", "git ci", "Bash", "bypassPermissions", &stubResolver{canonical: true, primary: "main", cur: "main", aliases: map[string]string{"ci": "!echo hi"}}, hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := New(tt.res)
 			in := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.command), CWD: "/repo", PermissionMode: tt.mode}
-			if got := r.Evaluate(in).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(in)).Decision; got != tt.want {
 				t.Errorf("Decision = %v, want %v", got, tt.want)
 			}
 		})
@@ -118,8 +118,8 @@ func TestPrimaryCommit_DashC_EffectiveDir(t *testing.T) {
 }
 
 func TestPrimaryCommit_NilResolver(t *testing.T) {
-	got := New(nil).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON("git commit"), CWD: "/repo", PermissionMode: "bypassPermissions"}).Decision
-	if got != hookio.Abstain {
+	got := hookio.Verdict(New(nil).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON("git commit"), CWD: "/repo", PermissionMode: "bypassPermissions"})).Decision
+	if got != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain", got)
 	}
 }

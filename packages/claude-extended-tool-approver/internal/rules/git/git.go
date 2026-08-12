@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,13 +64,13 @@ func (r *Rule) Name() string {
 	return "git"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("git: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -82,32 +83,40 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		// pre-subcommand span so `git commit -c <commit>` (a different flag) and
 		// `git -C <path>` are NOT falsely abstained.
 		if hasGitConfigInjection(pc.Args) {
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git: -c/--config-env injects config; deferring to prompt", Module: r.Name()}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "git: -c/--config-env injects config; deferring to prompt"
+			return hookio.NotApplicable()
 		}
 		chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
 		if subcmd == "" {
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			return hookio.NotApplicable()
 		}
-		res := r.classify(pc, subcmd, rest)
+		// classify's own not-applicable (and any genuine failure) propagates
+		// UNCHANGED. That is what preserves the pre-ADR-0043 outcome: classify used
+		// to answer Abstain and Evaluate returned it, so the chain continued. It also
+		// SKIPS the chdir demotion below, correctly — that demotion only ever
+		// demotes an Approve, and there is no Approve to demote here.
+		res, err := r.classify(pc, subcmd, rest)
+		if err != nil {
+			return hookio.RuleResult{}, err
+		}
 		// A `-C <path>` chdir runs the subcommand against a directory other than
-		// the invocation CWD. When the rule would otherwise Approve, demote to
-		// Abstain if that directory is unsafe for the subcommand's access class:
+		// the invocation CWD. When the rule would otherwise Approve, withdraw the
+		// approval if that directory is unsafe for the subcommand's access class:
 		// a read-only subcommand needs the dir to be readable, a modifying one
-		// needs it writable. Most-restrictive aggregation then defers to the
-		// prompt (Abstain, never a hard Reject — the check uses CanRead/CanWrite,
-		// not IsDeny*) instead of auto-approving a write into an unknown zone
-		// (pg2-b3eow). Gated to a non-empty -C so a bare git command keeps its
-		// verdict regardless of the CWD's zone.
+		// needs it writable. The chain then continues and most-restrictive
+		// aggregation defers to the prompt (never a hard Reject — the check uses
+		// CanRead/CanWrite, not IsDeny*) instead of auto-approving a write into an
+		// unknown zone (pg2-b3eow). Gated to a non-empty -C so a bare git command
+		// keeps its verdict regardless of the CWD's zone.
 		if res.Decision == hookio.Approve && !r.chdirSafe(input.CWD, chdirs, subcmd) {
-			return hookio.RuleResult{
-				Decision: hookio.Abstain,
-				Reason:   "git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)",
-				Module:   r.Name(),
-			}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "git: -C target directory is unsafe for a " + subcmd + " (deferred to claude-code)"
+			return hookio.NotApplicable()
 		}
-		return res
+		return res, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // classify returns the base verdict for a git subcommand, independent of any
@@ -171,7 +180,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 //     and `git --config-en=X=Y log` each answered `unknown option: …`, while every
 //     full spelling worked. So the exact-token test IS git's own parse there, and
 //     prefix-matching them would over-match with no bypass to close.
-func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) hookio.RuleResult {
+func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string) (hookio.RuleResult, error) {
 	// push: the force / remote-ref-destroying spellings (pg2-bohpm) and a NETWORK
 	// destination given in place of a remote name (pg2-abb65) are REJECTED — see
 	// pushVerdict for both rulings and their rationale. Every other push falls
@@ -179,7 +188,7 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	// to a LOCAL PATH, and same-branch --force-with-lease keep their verdict.
 	if subcmd == "push" {
 		if res, ok := r.pushVerdict(rest); ok {
-			return res
+			return res, nil
 		}
 	}
 	// branch: THE VERDICT IS BY SAFETY, NOT BY FLAG (operator ruling pg2-4yy4r item 5,
@@ -190,24 +199,22 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	// (`GIT_DIR=/other git branch -d foo`) and the `-C <path>` chdir demotion applying
 	// to a safe `git branch` exactly as they did before. See isBranchUnsafe.
 	if subcmd == "branch" && isBranchUnsafe(rest) {
-		return hookio.RuleResult{
-			Decision: hookio.Abstain,
-			Reason:   "git: git branch with git's own guard removed (-D/-M/-C, or an explicit -f/--force); deferring to prompt",
-			Module:   r.Name(),
-		}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "git: git branch with git's own guard removed (-D/-M/-C, or an explicit -f/--force); deferring to prompt"
+		return hookio.NotApplicable()
 	}
 	if readOnlySubcommands[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "read-only git command",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if subcmd == "checkout" {
 		if hasRedirectEnvVar(pc) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git checkout", Module: r.Name()}, nil
 	}
 	// rebase: approve unless interactive without automated editor.
 	//
@@ -227,43 +234,45 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	if subcmd == "rebase" {
 		if hasFlag(rest, "-i") || cmdparse.HasLongFlagPrefix(rest, "interactive") {
 			if !hasSequenceEditorEnvVar(pc) {
-				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "git rebase -i requires editor", Module: r.Name()}
+				// Not applicable (ADR 0043): the chain must continue. Former Reason,
+				// kept because it is the only record of WHY: "git rebase -i requires editor"
+				return hookio.NotApplicable()
 			}
 		}
 		if hasRedirectEnvVar(pc) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
 	// filter-branch: approve (history rewriting used by agents for commit cleanup)
 	if subcmd == "filter-branch" {
 		if hasRedirectEnvVar(pc) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
 	// tag: always reject — tags cause confusion in this workflow
 	if subcmd == "tag" {
-		return hookio.RuleResult{Decision: hookio.Reject, Reason: "git: git tag is prohibited — tags cause confusion in this workflow", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Reject, Reason: "git: git tag is prohibited — tags cause confusion in this workflow", Module: r.Name()}, nil
 	}
 	// remote: a MUTATION is Reject, a read-only inspection stays Approve — see
 	// remoteVerdict for the ruling and the flag-displacement defect it closes.
 	if subcmd == "remote" {
-		return r.remoteVerdict(rest)
+		return r.remoteVerdict(rest), nil
 	}
 	// config: a WRITE to a key that disables a safety interlock, points git at a
 	// program of the caller's choosing, or repoints a remote is gated; a READ and
 	// every ordinary write keep their Approve — see configVerdict for the key-by-key
 	// ruling and the invariant each verdict rests on.
 	if subcmd == "config" {
-		return r.configVerdict(pc, rest)
+		return r.configVerdict(pc, rest), nil
 	}
 	// modifying: approve (includes tag, mv, rm, worktree, etc.)
 	if modifyingSubcommands[subcmd] {
 		if hasRedirectEnvVar(pc) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}, nil
 	}
 	// reset: approve unless --hard, IN ANY SPELLING GIT ACCEPTS.
 	//
@@ -349,17 +358,14 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 		//	--hard, any abbreviation, no redirect   -> Abstain  (the ruling)
 		//	soft / mixed / keep / merge, no redirect -> Approve (unchanged)
 		if hasRedirectEnvVar(pc) {
-			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
+			return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}, nil
 		}
 		if cmdparse.HasLongFlagPrefix(rest, "hard") {
-			return hookio.RuleResult{
-				Decision: hookio.Abstain,
-				Reason: "git:destructive: git reset --hard is destructive — not prompted by this rule per operator ruling 2026-07-30, " +
-					"deferred to claude-code (auto-approve mode, then settings, then the prompt)",
-				Module: r.Name(),
-			}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "git:destructive: git reset --hard is destructive — not prompted by this rule per operator ruling 2026-07-30, " + "deferred to claude-code (auto-approve mode, then settings, then the prompt)"
+			return hookio.NotApplicable()
 		}
-		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}
+		return hookio.RuleResult{Decision: hookio.Approve, Reason: "git:modifying: git reset (soft) is safe", Module: r.Name()}, nil
 	}
 	// clean: ABSTAIN, IN EVERY SPELLING, WITH NO FLAG INSPECTION AT ALL — operator
 	// ruling 2026-07-30, recorded as pg2-4yy4r item 3 and implemented by pg2-u0e0c.
@@ -444,13 +450,11 @@ func (r *Rule) classify(pc cmdparse.ParsedCommand, subcmd string, rest []string)
 	//     later rule approves a `git` leaf" claim above is scoped to a BARE leaf. `git
 	//     clean -h` is NOT that form (isHelpRequest wants `--help`) and measures `{}`.
 	if subcmd == "clean" {
-		return hookio.RuleResult{
-			Decision: hookio.Abstain,
-			Reason:   "git: git clean irreversibly deletes untracked files; deferring to prompt",
-			Module:   r.Name(),
-		}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "git: git clean irreversibly deletes untracked files; deferring to prompt"
+		return hookio.NotApplicable()
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // remoteVerdict returns the verdict for a `git remote` — rest being the args AFTER

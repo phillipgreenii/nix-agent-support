@@ -55,11 +55,11 @@ func TestFormatOutput_Ask(t *testing.T) {
 }
 
 func TestFormatOutput_Abstain(t *testing.T) {
-	result := RuleResult{Decision: Abstain}
+	result := RuleResult{Decision: NoOpinion}
 	got := FormatOutput(result, nil)
 	s := strings.TrimSpace(string(got))
 	if s != "{}" {
-		t.Errorf("FormatOutput Abstain = %q, want {}", s)
+		t.Errorf("FormatOutput NoOpinion = %q, want {}", s)
 	}
 }
 
@@ -82,11 +82,11 @@ func TestFormatOutput_WithUpdatedInput(t *testing.T) {
 }
 
 func TestFormatOutput_Abstain_IgnoresUpdatedInput(t *testing.T) {
-	result := RuleResult{Decision: Abstain}
+	result := RuleResult{Decision: NoOpinion}
 	ui := map[string]interface{}{"command": "rtk git status"}
 	got := FormatOutput(result, ui)
 	s := strings.TrimSpace(string(got))
 	if s != "{}" {
-		t.Errorf("FormatOutput Abstain with updatedInput = %q, want {}", s)
+		t.Errorf("FormatOutput NoOpinion with updatedInput = %q, want {}", s)
 	}
 }

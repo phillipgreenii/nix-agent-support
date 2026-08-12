@@ -41,26 +41,44 @@ func New(store ShellStore) *Rule { return &Rule{store: store} }
 
 func (r *Rule) Name() string { return "killshell" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
+	// ErrNotApplicable, and it MUST NOT become a terminal NoOpinion: path-safety is
+	// registered IMMEDIATELY AFTER this rule and owns the file tools, so stopping
+	// the chain here would shadow it. That is the ORDERING-the-other-direction
+	// shape ADR 0043 names, pinned by engine_integration_test.go's
+	// TestIntegration_KillShellThroughChain / "does not shadow the later
+	// path-safety rule".
 	if input.ToolName != "KillShell" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
+	// THE ONE FAIL-CLOSED CARVE-OUT of ADR 0043's error policy, named there by
+	// rule: this rule's whole purpose is an OWNERSHIP check, so a malformed or
+	// absent shell_id is not something to defer on. It returns its own Ask with a
+	// NIL error, so the engine treats it as HANDLED and stops.
+	//
+	// It MUST NOT be routed through the error channel: continue-by-default would
+	// leave the chain to fall through to the terminal NoOpinion, which emits {} and
+	// AUTO-APPROVES terminating an unverifiable background shell in `auto` mode.
+	// Note the form too — `if err := f(); err != nil || ...` — which a scan for the
+	// literal `if err != nil` does not match.
 	var ti killShellInput
 	if err := json.Unmarshal(input.ToolInput, &ti); err != nil || ti.ShellID == "" {
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
 			Reason:   "KillShell missing shell_id — cannot determine ownership",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 
+	// Same carve-out, second form: no ownership store at all (offline replay, or a
+	// hook that has not opened the ask-log). Ask, with a nil error.
 	if r.store == nil {
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
 			Reason:   "cannot verify ownership of shell " + ti.ShellID,
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 
 	if owner, known := r.store.ShellOwner(ti.ShellID); known && owner == "agent" {
@@ -68,12 +86,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			Decision: hookio.Approve,
 			Reason:   "agent-owned background shell " + ti.ShellID + " — safe to terminate",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 
 	return hookio.RuleResult{
 		Decision: hookio.Ask,
 		Reason:   "shell " + ti.ShellID + " is not a tracked agent-owned shell — confirm termination",
 		Module:   r.Name(),
-	}
+	}, nil
 }

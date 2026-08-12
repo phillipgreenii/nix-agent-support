@@ -9,7 +9,7 @@
 // uses it constantly. A hard Reject would break those workflows. Ask keeps a
 // human in the loop — it can never be a silent auto-approval (Ask outranks
 // Approve in the most-restrictive fold) — without hard-blocking legitimate
-// traversal. A single-level `../` stays Abstain (defer entirely).
+// traversal. A single-level `../` is not-applicable (this rule defers entirely).
 //
 // This is a lexical guard, complementing (not duplicating) ceta's zone-based
 // path rules (`path-safety`, `safe-commands`), which only see tokens that "look
@@ -22,6 +22,7 @@
 package pathtraversal
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -33,20 +34,30 @@ func New() *Rule { return &Rule{} }
 
 func (r *Rule) Name() string { return "path-traversal" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
+	// Not-applicable, never a terminal NoOpinion: this rule is a Bash-only
+	// early-band validator, and every non-Bash tool belongs to a LATER rule
+	// (path-safety, mcp, claude-tools). Stopping the chain here would shadow all of
+	// them.
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		// A genuine failure, not "not mine": the tool IS Bash, so this rule does
+		// govern the input and merely could not read it. The engine records it per
+		// rule and continues, which is the same chain outcome the shared Abstain
+		// produced before ADR 0043.
+		return hookio.RuleResult{}, fmt.Errorf("path-traversal: read bash command: %w", err)
 	}
 	if strings.Contains(cmdStr, "../..") {
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
 			Reason:   "path traversal detected (../..) — confirm before proceeding",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	// No traversal marker: this rule has nothing to say and the generic approvers
+	// after it MUST still run, so not-applicable.
+	return hookio.NotApplicable()
 }

@@ -22,7 +22,7 @@ func TestVault_EmptyConfigAbstains(t *testing.T) {
 		"vault status",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(cmd)}
-		if got := r.Evaluate(input).Decision; got != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)).Decision; got != hookio.NoOpinion {
 			t.Errorf("empty config: %q => %v, want Abstain", cmd, got)
 		}
 	}
@@ -47,10 +47,10 @@ func TestVault_Configured(t *testing.T) {
 		{"delete asks", "vault delete secret/foo", hookio.Ask},
 		{"kv put asks", "vault kv put secret/foo x=1", hookio.Ask},
 		{"kv delete asks", "vault kv delete secret/foo", hookio.Ask},
-		{"unknown subcommand abstains", "vault lease renew abc", hookio.Abstain},
-		{"bare kv abstains", "vault kv", hookio.Abstain},
-		{"non-vault abstains", "kubectl get pods", hookio.Abstain},
-		{"non-bash abstains", "", hookio.Abstain},
+		{"unknown subcommand abstains", "vault lease renew abc", hookio.NoOpinion},
+		{"bare kv abstains", "vault kv", hookio.NoOpinion},
+		{"non-vault abstains", "kubectl get pods", hookio.NoOpinion},
+		{"non-bash abstains", "", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,7 +59,7 @@ func TestVault_Configured(t *testing.T) {
 				tool = "Read"
 			}
 			input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})

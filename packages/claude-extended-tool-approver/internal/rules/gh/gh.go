@@ -1,6 +1,7 @@
 package gh
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -64,13 +65,13 @@ func (r *Rule) Name() string {
 	return "gh"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("gh: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -94,24 +95,24 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "read-only gh status",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if resource == "auth" && subcmd == "status" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh auth status",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if resource == "api" {
-			return r.apiVerdict(resourceArgs)
+			return r.apiVerdict(resourceArgs), nil
 		}
 		if resource == "search" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh search",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if resource == "pr" && subcmd == "merge" {
 			// ghFlagTokens with `gh pr merge`'s OWN arity table, not create's: `-m`/`-r` are
@@ -128,118 +129,108 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				// intact: toggling --auto refreshes the merge-commit message from the current
 				// PR title/body. Do not change to Reject; do not weaken the `gh pr ready` Ask
 				// without moving this branch with it, because the two together ARE the gate.
-				return hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "gh pr merge --auto: allowed (cannot merge until `gh pr ready`, which Asks; --auto refreshes merge message from PR title/body)",
-					Module:   r.Name(),
-				}
+				// Not applicable (ADR 0043): the chain must continue. Former Reason,
+				// kept because it is the only record of WHY: "gh pr merge --auto: allowed (cannot merge until `gh pr ready`, which Asks; --auto refreshes merge message from PR title/body)"
+				return hookio.NotApplicable()
 			}
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
 				Reason:   "gh pr merge (immediate) is prohibited: it merges now, bypassing the draft-first landing flow. Open/keep the PR as draft and use --auto, or merge via the WORKSPACE landing flow.",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		// The draft-first PR gate (pg2-25oru). Both branches live in pr.go; they are
 		// tested here rather than under readOnlyPR/modifyingIssue because `create` and
 		// `ready` are the two acts the draft-first ruling keys on, and `ready` reached the
 		// final Abstain before this existed.
 		if resource == "pr" && prCreateSubcommands[subcmd] {
-			return r.prCreateVerdict(rest)
+			return r.prCreateVerdict(rest), nil
 		}
 		if resource == "pr" && subcmd == "ready" {
-			return r.prReadyVerdict(rest)
+			return r.prReadyVerdict(rest), nil
 		}
 		if modifyingIssue[subcmd] && resource == "issue" {
 			return hookio.RuleResult{
 				Decision: hookio.Ask,
 				Reason:   "modifying gh issue command",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if readOnlyPR[subcmd] && resource == "pr" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh pr",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if readOnlyIssue[subcmd] && resource == "issue" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh issue",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if readOnlyRepo[subcmd] && resource == "repo" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh repo",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if resource == "run" && subcmd == "rerun" {
 			runID := extractRunID(pc.Args)
 			if runID == "" {
-				return hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "gh run rerun: no run ID found",
-					Module:   r.Name(),
-				}
+				// Not applicable (ADR 0043): the chain must continue. Former Reason,
+				// kept because it is the only record of WHY: "gh run rerun: no run ID found"
+				return hookio.NotApplicable()
 			}
 			if r.resolver == nil {
-				return hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "gh run rerun: no resolver configured",
-					Module:   r.Name(),
-				}
+				// Not applicable (ADR 0043): the chain must continue. Former Reason,
+				// kept because it is the only record of WHY: "gh run rerun: no resolver configured"
+				return hookio.NotApplicable()
 			}
+			// THE ADR 0043 CANONICAL ERROR SITE. This resolver shells out
+			// (`git rev-parse` under a timeout), and the pre-ADR code folded the
+			// failure into the loop sentinel, DISCARDING the error — the exact
+			// conflation the ADR's Context quotes. It is now a genuine error on the
+			// out-of-band channel: recorded per rule, and the chain still continues,
+			// so the decision is unchanged. NEVER a %w of ErrNotApplicable.
 			currentBranch, err := r.resolver.CurrentBranch(input.CWD)
 			if err != nil {
-				return hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "gh run rerun: cannot determine current branch",
-					Module:   r.Name(),
-				}
+				return hookio.RuleResult{}, fmt.Errorf("gh: resolve current branch for `gh run rerun`: %w", err)
 			}
 			runBranch, err := r.resolver.RunBranch(runID)
 			if err != nil {
-				return hookio.RuleResult{
-					Decision: hookio.Abstain,
-					Reason:   "gh run rerun: cannot determine run branch",
-					Module:   r.Name(),
-				}
+				return hookio.RuleResult{}, fmt.Errorf("gh: resolve branch of run %s: %w", runID, err)
 			}
 			if currentBranch == runBranch {
 				return hookio.RuleResult{
 					Decision: hookio.Approve,
 					Reason:   "gh run rerun for current branch",
 					Module:   r.Name(),
-				}
+				}, nil
 			}
-			return hookio.RuleResult{
-				Decision: hookio.Abstain,
-				Reason:   "gh run rerun for different branch",
-				Module:   r.Name(),
-			}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "gh run rerun for different branch"
+			return hookio.NotApplicable()
 		}
 		if readOnlyRun[subcmd] && resource == "run" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh run",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if readOnlyRelease[subcmd] && resource == "release" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only gh release",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 func isGhExecutable(exec string) bool {

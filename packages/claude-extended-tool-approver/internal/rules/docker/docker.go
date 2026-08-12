@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -63,13 +64,13 @@ func (r *Rule) Name() string {
 	return "docker"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("docker: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -79,13 +80,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		return r.evaluateDocker(pc.Args, input)
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateDocker(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateDocker(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	subcmd := firstNonFlag(args)
 	if subcmd == "" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	if safeSubcommands[subcmd] {
@@ -93,7 +94,7 @@ func (r *Rule) evaluateDocker(args []string, input *hookio.HookInput) hookio.Rul
 			Decision: hookio.Approve,
 			Reason:   "docker: docker " + subcmd + " is approved",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 
 	if subcmd == "run" {
@@ -103,10 +104,10 @@ func (r *Rule) evaluateDocker(args []string, input *hookio.HookInput) hookio.Rul
 		return r.evaluateExec(args, input)
 	}
 
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	// Find args after "run"
 	runIdx := -1
 	for i, a := range args {
@@ -116,7 +117,7 @@ func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) hookio.RuleRe
 		}
 	}
 	if runIdx < 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	runArgs := args[runIdx+1:]
 
@@ -129,22 +130,24 @@ func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) hookio.RuleRe
 		}
 	}
 	if !hasRM {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	// Parse past flags to find image and command
 	image, cmdArgs := parseRunArgs(runArgs)
 	if image == "" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if len(cmdArgs) == 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	// Parse bind mounts from run args. Malformed mount syntax → abstain.
 	mounts, ok := parseMounts(runArgs)
 	if !ok {
-		return hookio.RuleResult{Decision: hookio.Abstain, Reason: "docker: unparseable mount spec", Module: r.Name()}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "docker: unparseable mount spec"
+		return hookio.NotApplicable()
 	}
 
 	// Check for bash -c pattern
@@ -155,10 +158,14 @@ func (r *Rule) evaluateRun(args []string, input *hookio.HookInput) hookio.RuleRe
 	stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "docker run", Expression: outerExpr}}
 
 	scopedInput := r.withContainerEval(input, mounts)
-	return r.exprEval.EvaluateExpression(innerExpr, stack, scopedInput)
+	// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+	// hookio.FromRecursion states the translation in one place.
+	return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerExpr, stack, scopedInput))
 }
 
-func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	// Find args after "exec"
 	execIdx := -1
 	for i, a := range args {
@@ -168,14 +175,14 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleR
 		}
 	}
 	if execIdx < 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	execArgs := args[execIdx+1:]
 
 	// Skip flags, find container name, then command
 	_, cmdArgs := parseRunArgs(execArgs)
 	if len(cmdArgs) == 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	innerExpr := extractInnerCommand(cmdArgs)
@@ -186,7 +193,11 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleR
 	// docker exec cannot observe the container's mount list from the command
 	// line; treat all inner paths as container-internal.
 	scopedInput := r.withContainerEval(input, []patheval.Mount{})
-	return r.exprEval.EvaluateExpression(innerExpr, stack, scopedInput)
+	// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+	// hookio.FromRecursion states the translation in one place.
+	return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerExpr, stack, scopedInput))
 }
 
 // withContainerEval returns a clone of input with PathEval set to a

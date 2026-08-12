@@ -21,6 +21,7 @@
 package curl
 
 import (
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -110,13 +111,13 @@ func (r *Rule) Name() string {
 	return "curl"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("curl: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 
@@ -127,17 +128,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		foundCurl = true
 		if !r.allURLsAllowed(pc.Args) {
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			return hookio.NotApplicable()
 		}
 	}
 	if !foundCurl {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	return hookio.RuleResult{
 		Decision: hookio.Approve,
 		Reason:   "curl: allowed request to allowed domain",
 		Module:   r.Name(),
-	}
+	}, nil
 }
 
 // effectiveMethod returns the uppercase HTTP method curl would use: an explicit

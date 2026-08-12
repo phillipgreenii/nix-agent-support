@@ -19,12 +19,25 @@ type mockRule struct {
 }
 
 func (m *mockRule) Name() string { return m.name }
-func (m *mockRule) Evaluate(*hookio.HookInput) hookio.RuleResult {
-	return hookio.RuleResult{Decision: m.decision, Reason: m.reason, Module: m.name}
+
+// Evaluate maps this mock's single `decision` field onto ADR 0043's two-channel
+// return WITHOUT changing what any case in this file asserts.
+//
+// A mock declared with NoOpinion has always stood for "this rule does not handle the
+// input, keep going" — that is what the pre-ADR-0043 loop sentinel meant, and every
+// case below was written against that meaning. Under ADR 0043 that meaning moved to
+// the error channel, so the mock returns ErrNotApplicable for it. A mock that wants
+// to pin the NEW terminal-NoOpinion VERDICT instead uses conformance_test.go's
+// noOpinionRule, which returns it with a nil error.
+func (m *mockRule) Evaluate(*hookio.HookInput) (hookio.RuleResult, error) {
+	if m.decision == hookio.NoOpinion {
+		return hookio.NotApplicable()
+	}
+	return hookio.RuleResult{Decision: m.decision, Reason: m.reason, Module: m.name}, nil
 }
 
 func TestEngine_FirstNonAbstainWins(t *testing.T) {
-	abstain := &mockRule{name: "abstain", decision: hookio.Abstain}
+	abstain := &mockRule{name: "abstain", decision: hookio.NoOpinion}
 	approve := &mockRule{name: "approve", decision: hookio.Approve, reason: "ok"}
 	reject := &mockRule{name: "reject", decision: hookio.Reject, reason: "no"}
 
@@ -41,14 +54,14 @@ func TestEngine_FirstNonAbstainWins(t *testing.T) {
 }
 
 func TestEngine_AllAbstainReturnsAbstain(t *testing.T) {
-	a1 := &mockRule{name: "a1", decision: hookio.Abstain}
-	a2 := &mockRule{name: "a2", decision: hookio.Abstain}
+	a1 := &mockRule{name: "a1", decision: hookio.NoOpinion}
+	a2 := &mockRule{name: "a2", decision: hookio.NoOpinion}
 
 	e := New(a1, a2)
 	input := &hookio.HookInput{ToolName: "Bash"}
 	got := e.Evaluate(input)
 
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain", got.Decision)
 	}
 }
@@ -58,7 +71,7 @@ func TestEngine_NoRulesReturnsAbstain(t *testing.T) {
 	input := &hookio.HookInput{ToolName: "Bash"}
 	got := e.Evaluate(input)
 
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain", got.Decision)
 	}
 }
@@ -122,7 +135,7 @@ func TestEngine_NonAbstainAlwaysHasReason(t *testing.T) {
 			e := New(rule)
 			input := &hookio.HookInput{ToolName: "Bash"}
 			got := e.Evaluate(input)
-			if got.Decision != hookio.Abstain && got.Reason == "" {
+			if got.Decision != hookio.NoOpinion && got.Reason == "" {
 				t.Errorf("Decision %v has empty Reason — all non-Abstain results must include a reason", got.Decision)
 			}
 		})
@@ -157,26 +170,30 @@ type conditionalMockRule struct {
 }
 
 func (m *conditionalMockRule) Name() string { return "conditional" }
-func (m *conditionalMockRule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+
+// Evaluate: every NoOpinion this mock used to return meant the pre-ADR-0043 loop
+// sentinel "not mine, keep going", so under ADR 0043 they are ErrNotApplicable. The
+// assertions in this file are unchanged by that mapping.
+func (m *conditionalMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	cmd, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+		return hookio.NotApplicable()
 	}
 	parsed := cmdparse.Parse(cmd)
 	for _, pc := range parsed {
 		if m.rejectPrefix != "" && strings.HasPrefix(pc.Executable, m.rejectPrefix) {
-			return hookio.RuleResult{Decision: hookio.Reject, Reason: "rejected", Module: m.Name()}
+			return hookio.RuleResult{Decision: hookio.Reject, Reason: "rejected", Module: m.Name()}, nil
 		}
 		if m.approvePrefix != "" && strings.HasPrefix(pc.Executable, m.approvePrefix) {
-			return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}
+			return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}, nil
 		}
 		for _, p := range m.approveExecs {
 			if strings.HasPrefix(pc.Executable, p) {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "approved", Module: m.Name()}, nil
 			}
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+	return hookio.NotApplicable()
 }
 
 func TestEngine_RegisterRules(t *testing.T) {
@@ -223,7 +240,7 @@ func TestEngine_EvaluateHook_BashUsesExpressionFold(t *testing.T) {
 		ToolInput: json.RawMessage(`{"command":"git status && rm -rf /home/user/x"}`),
 	}
 	got := e.EvaluateHook(input)
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (Bash must route through the EvaluateExpression fold)", got.Decision)
 	}
 }
@@ -249,7 +266,7 @@ func TestEngine_EvaluateExpression_AbstainDemotesApprove(t *testing.T) {
 	origin := &hookio.HookInput{ToolName: "Bash", CWD: "/tmp/project"}
 
 	got := e.EvaluateExpression("git status && rm -rf /home/user/important", nil, origin)
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (abstaining rm leaf must demote the git approve)", got.Decision)
 	}
 
@@ -270,23 +287,25 @@ type envAssignmentMockRule struct {
 }
 
 func (m *envAssignmentMockRule) Name() string { return "env-assignment-mock" }
-func (m *envAssignmentMockRule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+
+// Evaluate: same NoOpinion-means-not-applicable mapping as conditionalMockRule.
+func (m *envAssignmentMockRule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	cmd, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+		return hookio.NotApplicable()
 	}
 	m.seen = append(m.seen, cmd)
 	for _, pc := range cmdparse.Parse(cmd) {
 		for _, ev := range pc.EnvVars {
 			if m.rejectVar != "" && ev.Name == m.rejectVar {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: "injector", Module: m.Name()}
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "injector", Module: m.Name()}, nil
 			}
 			if m.approveVar != "" && ev.Name == m.approveVar {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "verified safe", Module: m.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "verified safe", Module: m.Name()}, nil
 			}
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: m.Name()}
+	return hookio.NotApplicable()
 }
 
 // TestEngine_EvaluateExpression_AssignmentOnlyLeafReachesRuleChain is the pg2-mtnmb
@@ -352,7 +371,7 @@ func TestEngine_EvaluateExpression_AssignmentOnlyLeafIsNeutralWhenNoRuleObjects(
 
 	// The neutrality is scoped to the assignments: a genuinely unowned COMMAND leaf
 	// still demotes (the pg2-t4uyx invariant is untouched).
-	if got := e.EvaluateExpression("A=1 && rm -rf /important", nil, origin); got.Decision != hookio.Abstain {
+	if got := e.EvaluateExpression("A=1 && rm -rf /important", nil, origin); got.Decision != hookio.NoOpinion {
 		t.Errorf("EvaluateExpression(%q) = %v, want Abstain (unowned command leaf must still demote)", "A=1 && rm -rf /important", got.Decision)
 	}
 }
@@ -381,7 +400,7 @@ func TestEngine_EvaluateExpression_UnownedAssignmentsOnlyAbstain(t *testing.T) {
 		"A=1 && B=2",
 		"SUMMARY='mangled remnant that swallowed the real command",
 	} {
-		if got := e.EvaluateExpression(cmd, nil, origin); got.Decision != hookio.Abstain {
+		if got := e.EvaluateExpression(cmd, nil, origin); got.Decision != hookio.NoOpinion {
 			t.Errorf("EvaluateExpression(%q) = %v (%s), want Abstain (nothing executes and no rule judged it)",
 				cmd, got.Decision, got.Reason)
 		}
@@ -423,7 +442,7 @@ func TestEngine_EvaluateExpression_CycleDetection(t *testing.T) {
 		{RuleName: "docker", Command: "docker run", Expression: "echo hello"},
 	}
 	got := e.EvaluateExpression("echo hello", stack, origin)
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (cycle detected)", got.Decision)
 	}
 	if !strings.Contains(got.Reason, "cycle") {
@@ -509,7 +528,7 @@ func TestEngine_EvaluateExpression_SubstitutionRecursion(t *testing.T) {
 		{"rejecting inner backtick", "echo `rm -rf /`", hookio.Reject},
 		{"rejecting inner process sub", "echo <(rm -rf /)", hookio.Reject},
 		// An unowned (abstaining) inner command demotes the outer approve.
-		{"abstaining inner demotes", "echo $(unowned thing)", hookio.Abstain},
+		{"abstaining inner demotes", "echo $(unowned thing)", hookio.NoOpinion},
 		// Nested: the inner rm surfaces on re-evaluation of the outer body.
 		{"nested rm surfaces", "echo $(cat $(rm -rf /))", hookio.Reject},
 		{"process sub nested in cmd sub", "echo $(cat <(rm -rf /))", hookio.Reject},
@@ -538,7 +557,7 @@ func TestEngine_EvaluateExpression_SubstitutionCycleDetection(t *testing.T) {
 		{RuleName: "docker", Command: "docker run", Expression: "echo hello"},
 	}
 	got := e.EvaluateExpression("echo $(echo hello)", stack, origin)
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (substitution body cycles with ancestor)", got.Decision)
 	}
 }
@@ -596,8 +615,8 @@ func TestEngine_EvaluateExpression_NonDeviceRedirectsStillEvaluated(t *testing.T
 		want hookio.Decision
 	}{
 		{"write to read-only nix path still rejects", "echo hi > /nix/store/bad.txt", hookio.Reject},
-		{"write to unknown path still abstains", "echo hi > /home/other/nope.txt", hookio.Abstain},
-		{"non-special /dev device still abstains", "echo hi > /dev/sda", hookio.Abstain},
+		{"write to unknown path still abstains", "echo hi > /home/other/nope.txt", hookio.NoOpinion},
+		{"non-special /dev device still abstains", "echo hi > /dev/sda", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -628,14 +647,14 @@ func TestEngine_EvaluateExpression_CdRelativeRedirection(t *testing.T) {
 	}{
 		// Control / pre-fix isolation: without a cd the relative target resolves
 		// under the non-writable base cwd and demotes to Abstain.
-		{"relative redirect at origin is non-writable", "echo hi > ./out", hookio.Abstain},
+		{"relative redirect at origin is non-writable", "echo hi > ./out", hookio.NoOpinion},
 		// Fixed behavior: cd into a read-write zone re-roots the relative target.
 		{"cd into writable zone re-roots relative redirect", "cd /tmp && echo hi > ./out", hookio.Approve},
 		// Relative cd target resolves against the running cwd (origin.CWD=/etc):
 		// /etc/../tmp == /tmp, a read-write zone.
 		{"relative cd target re-roots relative redirect", "cd ../tmp && echo hi > ./out", hookio.Approve},
 		// Control: cd into a non-writable location must NOT approve.
-		{"cd into non-writable location does not approve", "cd /usr && echo hi > ./out", hookio.Abstain},
+		{"cd into non-writable location does not approve", "cd /usr && echo hi > ./out", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -668,14 +687,14 @@ func TestEngine_EvaluateExpression_CdConservativeBranches(t *testing.T) {
 	}{
 		// `cd -` (previous dir) carries a `-`-prefixed arg — the conservative branch
 		// refuses to re-root, so ./out stays under /etc (Abstain).
-		{"cd - does not re-root", "cd - && echo hi > ./out", hookio.Abstain},
+		{"cd - does not re-root", "cd - && echo hi > ./out", hookio.NoOpinion},
 		// Two args — the `len(pc.Args) == 1` guard refuses to re-root (Abstain).
-		{"cd two relative args does not re-root", "cd a b && echo hi > ./out", hookio.Abstain},
+		{"cd two relative args does not re-root", "cd a b && echo hi > ./out", hookio.NoOpinion},
 		// Discriminating two-arg case: the FIRST arg IS a writable zone (/tmp). If the
 		// multi-arg guard were removed and the code re-rooted on pc.Args[0], ./out
 		// would resolve under /tmp and Approve — so this case flips to Approve the
 		// moment the guard breaks, proving the guard is exercised.
-		{"cd two args first writable does not re-root", "cd /tmp extra && echo hi > ./out", hookio.Abstain},
+		{"cd two args first writable does not re-root", "cd /tmp extra && echo hi > ./out", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -688,8 +707,8 @@ func TestEngine_EvaluateExpression_CdConservativeBranches(t *testing.T) {
 }
 
 func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
-	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "not relevant"}
-	a2 := &mockRule{name: "rule-b", decision: hookio.Abstain, reason: "also not relevant"}
+	a1 := &mockRule{name: "rule-a", decision: hookio.NoOpinion, reason: "not relevant"}
+	a2 := &mockRule{name: "rule-b", decision: hookio.NoOpinion, reason: "also not relevant"}
 	winner := &mockRule{name: "rule-c", decision: hookio.Approve, reason: "matched"}
 	after := &mockRule{name: "rule-d", decision: hookio.Reject, reason: "should not appear"}
 
@@ -707,10 +726,10 @@ func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
 	if len(got.Trace) != 3 {
 		t.Fatalf("Trace has %d entries, want 3 (2 abstains + 1 winner)", len(got.Trace))
 	}
-	if got.Trace[0].RuleName != "rule-a" || got.Trace[0].Decision != hookio.Abstain {
+	if got.Trace[0].RuleName != "rule-a" || got.Trace[0].Decision != hookio.NoOpinion {
 		t.Errorf("Trace[0] = %+v, want rule-a/Abstain", got.Trace[0])
 	}
-	if got.Trace[1].RuleName != "rule-b" || got.Trace[1].Decision != hookio.Abstain {
+	if got.Trace[1].RuleName != "rule-b" || got.Trace[1].Decision != hookio.NoOpinion {
 		t.Errorf("Trace[1] = %+v, want rule-b/Abstain", got.Trace[1])
 	}
 	if got.Trace[2].RuleName != "rule-c" || got.Trace[2].Decision != hookio.Approve {
@@ -722,15 +741,15 @@ func TestEngine_TraceEnabled_CollectsAllRules(t *testing.T) {
 }
 
 func TestEngine_TraceEnabled_AllAbstains(t *testing.T) {
-	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "nope"}
-	a2 := &mockRule{name: "rule-b", decision: hookio.Abstain, reason: "also nope"}
+	a1 := &mockRule{name: "rule-a", decision: hookio.NoOpinion, reason: "nope"}
+	a2 := &mockRule{name: "rule-b", decision: hookio.NoOpinion, reason: "also nope"}
 
 	e := New(a1, a2)
 	e.SetTrace(true)
 	input := &hookio.HookInput{ToolName: "Bash"}
 	got := e.Evaluate(input)
 
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Fatalf("Decision = %v, want Abstain", got.Decision)
 	}
 	if got.Trace == nil {
@@ -753,7 +772,7 @@ func TestEngine_TraceDisabled_NilTrace(t *testing.T) {
 }
 
 func TestEngine_TraceEnabled_LogsToStderr(t *testing.T) {
-	a1 := &mockRule{name: "rule-a", decision: hookio.Abstain, reason: "skip"}
+	a1 := &mockRule{name: "rule-a", decision: hookio.NoOpinion, reason: "skip"}
 	winner := &mockRule{name: "rule-b", decision: hookio.Approve, reason: "ok"}
 
 	e := New(a1, winner)
@@ -794,7 +813,7 @@ func TestEngine_EvaluateExpression_RedirectionPaths(t *testing.T) {
 		{"stdin from nix store", "docker load < /nix/store/image.tar.gz", hookio.Approve},
 		{"stdout to project", "cmd > /tmp/project/out.txt", hookio.Approve},
 		{"stdout to readonly", "cmd > /nix/store/bad.txt", hookio.Reject},
-		{"stdin from unknown", "cmd < /home/other/file", hookio.Abstain},
+		{"stdin from unknown", "cmd < /home/other/file", hookio.NoOpinion},
 
 		// tc-xs8x: every one of these write spellings reached this check as an
 		// ordinary ARGUMENT, so the protected path was never evaluated and the

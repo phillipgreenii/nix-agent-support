@@ -65,7 +65,7 @@ func TestFactory_ConfigDriven_ZRConfigLoaded(t *testing.T) {
 		// flag-form dev-scope.
 		{"kc syncdev flag dev workspace", "bin/kc syncdev --ws d-phillipg01", hookio.Approve},
 		// non-dev positional target must NOT be approved.
-		{"kc sync non-dev target abstains", "bin/kc sync -f x prod-target", hookio.Abstain},
+		{"kc sync non-dev target abstains", "bin/kc sync -f x prod-target", hookio.NoOpinion},
 		// buildtools: migrated ZR tools/scripts.
 		{"prove approves", "prove -v t/foo.t", hookio.Approve},
 		{"migrated script direct", "zr-proto-regenerate.sh", hookio.Approve},
@@ -123,10 +123,10 @@ func TestFactory_CommandAwareBlocks_Configured(t *testing.T) {
 		// curl: configured domain + per-domain method.
 		{"curl allowed domain GET approved", "curl https://api.internal.example/health", hookio.Approve, ""},
 		{"curl per-domain POST approved", "curl -X POST https://api.internal.example/submit", hookio.Approve, ""},
-		{"curl elsewhere abstains", "curl https://evil.example.test/x", hookio.Abstain, ""},
+		{"curl elsewhere abstains", "curl https://evil.example.test/x", hookio.NoOpinion, ""},
 		// monorepo: approved command + dangerous-env deferral.
 		{"monorepo approved command", "tc build", hookio.Approve, ""},
-		{"monorepo dangerous env defers", "TC_DANGER=1 tc build", hookio.Abstain, ""},
+		{"monorepo dangerous env defers", "TC_DANGER=1 tc build", hookio.NoOpinion, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

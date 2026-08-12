@@ -15,6 +15,7 @@
 package monorepo
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -54,13 +55,13 @@ func (r *Rule) Name() string {
 	return "monorepo"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("monorepo: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	projectRoot := r.eval.ProjectRoot()
@@ -75,11 +76,9 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			if dangerousEnvs, ok := r.dangerousEnvByWrapper[basename]; ok {
 				for _, ev := range pc.EnvVars {
 					if dangerousEnvs[ev.Name] {
-						return hookio.RuleResult{
-							Decision: hookio.Abstain,
-							Reason:   "monorepo: " + basename + " with dangerous env var: " + ev.Name + " (deferred to claude-code)",
-							Module:   r.Name(),
-						}
+						// Not applicable (ADR 0043): the chain must continue. Former Reason,
+						// kept because it is the only record of WHY: "monorepo: " + basename + " with dangerous env var: " + ev.Name + " (deferred to claude-code)"
+						return hookio.NotApplicable()
 					}
 				}
 			}
@@ -87,8 +86,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "monorepo approved command",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }

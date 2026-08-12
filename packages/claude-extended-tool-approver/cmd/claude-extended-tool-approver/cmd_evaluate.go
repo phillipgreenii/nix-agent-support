@@ -32,7 +32,7 @@ type evalResult struct {
 	// is it reachable here — asklog.QueryRows does not select it.)
 	//
 	// Empty is meaningful, not missing: engine.Evaluate manufactures its terminal
-	// Abstain with no Module, so an empty pair on an `abstain` row IS the
+	// NoOpinion with no Module, so an empty pair on an `abstain` row IS the
 	// attribution "the chain was exhausted and no rule had an opinion". Empty on a
 	// stale-cwd row means no replay ran at all, exactly like replay_result.
 	ReplayModule   string `json:"replay_module"`
@@ -325,7 +325,7 @@ func decisionToDBString(d hookio.Decision) string {
 		return "deny"
 	case hookio.Ask:
 		return "ask"
-	case hookio.Abstain:
+	case hookio.NoOpinion:
 		return "abstain"
 	default:
 		return "unknown"

@@ -128,9 +128,10 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		new(webfetch.Rule),
 		claudetools.New(),
 		// killshell gates the (non-Bash) KillShell tool by shell ownership. It is
-		// harmless for every other tool (Abstain), and claudetools already Abstains
-		// on KillShell, so ordering here is safe. shells may be nil (offline replay
-		// / no store) — the rule then fails secure (Ask).
+		// harmless for every other tool (ErrNotApplicable — NOT a terminal NoOpinion,
+		// which would shadow path-safety below it), and claudetools is likewise
+		// not-applicable on KillShell, so ordering here is safe. shells may be nil
+		// (offline replay / no store) — the rule then fails secure (Ask).
 		killshell.New(shells),
 		pathsafety.New(pe),
 		mcp.New(),
@@ -147,12 +148,13 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		dockerRule,
 		// Command-aware classifiers (curl/ssh/vault) are config-driven MECHANISMS
 		// (kubectl/buildtools template) fed the rules.json ssh/vault/curl blocks.
-		// They Abstain on an empty config, so with no injected data they defer.
+		// They report not-applicable on an empty config, so with no injected data
+		// they defer to the rest of the chain.
 		// They MUST precede safe-commands: once a consumer supplies data, a
 		// configured ssh/vault/curl leaf has to be decided by its dedicated rule,
 		// not pre-approved by safe-commands as a bare "safe command". safe-commands
-		// currently Abstains on these executables anyway, but ordering them first
-		// makes that guarantee explicit and robust against future safe-list drift.
+		// is currently not-applicable on these executables anyway, but ordering them
+		// first makes that guarantee explicit and robust against future safe-list drift.
 		curl.New(cfg.Curl),
 		sshrule.New(cfg.Ssh),
 		vaultrule.New(cfg.Vault),

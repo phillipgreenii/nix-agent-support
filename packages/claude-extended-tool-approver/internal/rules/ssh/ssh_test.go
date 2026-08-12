@@ -29,7 +29,7 @@ func TestSSH_EmptyConfigAbstains(t *testing.T) {
 		"ssh -oPubkeyAuthentication=no host ls",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(cmd)}
-		if got := r.Evaluate(input).Decision; got != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)).Decision; got != hookio.NoOpinion {
 			t.Errorf("empty config: %q => %v, want Abstain", cmd, got)
 		}
 	}
@@ -72,8 +72,8 @@ func TestSSH_Configured(t *testing.T) {
 		{"scp download approved", "scp host:/tmp/log.txt .", hookio.Approve},
 		{"scp download secret asks", "scp host:/home/u/.env .", hookio.Ask},
 		{"scp upload asks", "scp ./local.txt host:/tmp/", hookio.Ask},
-		{"non-ssh abstains", "ls -la", hookio.Abstain},
-		{"non-bash abstains", "", hookio.Abstain},
+		{"non-ssh abstains", "ls -la", hookio.NoOpinion},
+		{"non-bash abstains", "", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestSSH_Configured(t *testing.T) {
 				tool = "Read"
 			}
 			input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -141,7 +141,7 @@ func TestSSH_RedirectionClassification(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -196,7 +196,7 @@ func TestSSH_QuotedSeparatorDoesNotSplit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -231,7 +231,7 @@ func TestSSH_RedirectionSurvivesQuoteAwareSplit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -276,7 +276,7 @@ func TestSSH_PipelineSinkIsAnAllowlist(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -314,7 +314,7 @@ func TestSSH_ExecPrefixAndEnvAssignment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -357,7 +357,7 @@ func TestSSH_SubstitutionInRemoteCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -493,7 +493,7 @@ func TestSSH_QuotedRedirectionCharIsNotARedirection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})
@@ -536,7 +536,7 @@ func TestSSH_DangerousInlineFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
 			}
 		})

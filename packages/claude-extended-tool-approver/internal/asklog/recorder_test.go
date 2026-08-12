@@ -176,7 +176,7 @@ func TestRecordPreToolDecision_Approve(t *testing.T) {
 func TestRecordPreToolDecision_Abstain(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-abs", json.RawMessage(`{"command":"some-unknown-cmd"}`))
-	result := hookio.RuleResult{Decision: hookio.Abstain, Reason: ""}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion, Reason: ""}
 
 	err := RecordPreToolDecision(s, input, result)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestRecordPreToolDecision_Abstain(t *testing.T) {
 func TestFullLifecycle_Abstain_ThenApproved(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-abs2", json.RawMessage(`{"command":"unknown-cmd"}`))
-	result := hookio.RuleResult{Decision: hookio.Abstain}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion}
 
 	_ = RecordPreToolDecision(s, input, result)
 	_ = ResolveApproved(s, input, "")
@@ -210,7 +210,7 @@ func TestFullLifecycle_Abstain_ThenApproved(t *testing.T) {
 func TestFullLifecycle_Abstain_ThenNeverResolved(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-abs3", json.RawMessage(`{"command":"unknown-cmd"}`))
-	result := hookio.RuleResult{Decision: hookio.Abstain}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion}
 
 	_ = RecordPreToolDecision(s, input, result)
 	_ = ResolveUnresolvedAll(s, "sess1")
@@ -358,7 +358,7 @@ func TestResolveUnresolvedAll_LeavesAlreadyResolvedRowsAlone(t *testing.T) {
 
 	// An actual decline -> 'denied'.
 	declined := testInput("sess1", "Bash", "tool-den", json.RawMessage(`{"command":"declined-cmd"}`))
-	_ = RecordPreToolDecision(s, declined, hookio.RuleResult{Decision: hookio.Abstain})
+	_ = RecordPreToolDecision(s, declined, hookio.RuleResult{Decision: hookio.NoOpinion})
 	declined.Reason = "user said no"
 	_ = RecordPermissionDenied(s, declined)
 
@@ -413,7 +413,7 @@ func TestOutcomeThreeWayDistinction(t *testing.T) {
 			session: "decline",
 			record: func(t *testing.T, s *Store, in *hookio.HookInput) {
 				t.Helper()
-				if err := RecordPreToolDecision(s, in, hookio.RuleResult{Decision: hookio.Abstain}); err != nil {
+				if err := RecordPreToolDecision(s, in, hookio.RuleResult{Decision: hookio.NoOpinion}); err != nil {
 					t.Fatalf("RecordPreToolDecision: %v", err)
 				}
 				in.Reason = "user declined"
@@ -574,7 +574,7 @@ func TestFullLifecycle_BuiltinASK_Approved(t *testing.T) {
 func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-pd1", json.RawMessage(`{"command":"rm -rf /tmp/build"}`))
-	result := hookio.RuleResult{Decision: hookio.Abstain}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion}
 
 	_ = RecordPreToolDecision(s, input, result)
 	if n := countRows(t, s, "outcome='pending'"); n != 1 {
@@ -669,8 +669,8 @@ func TestRecordPreToolDecision_WithTrace(t *testing.T) {
 		Reason:   "force push detected",
 		Module:   "git",
 		Trace: []hookio.TraceEntry{
-			{RuleName: "envvars", Decision: hookio.Abstain, Reason: "not relevant"},
-			{RuleName: "assume", Decision: hookio.Abstain, Reason: "not an assume command"},
+			{RuleName: "envvars", Decision: hookio.NoOpinion, Reason: "not relevant"},
+			{RuleName: "assume", Decision: hookio.NoOpinion, Reason: "not an assume command"},
 			{RuleName: "git", Decision: hookio.Ask, Reason: "force push detected"},
 		},
 	}
@@ -881,7 +881,7 @@ func TestRecordPermissionRequest_FallbackSetsPermissionMode(t *testing.T) {
 func TestFullLifecycle_Abstain_ThenPermissionDenied(t *testing.T) {
 	s := testStore(t)
 	input := testInput("sess1", "Bash", "tool-pd4", json.RawMessage(`{"command":"dangerous-cmd"}`))
-	result := hookio.RuleResult{Decision: hookio.Abstain}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion}
 
 	_ = RecordPreToolDecision(s, input, result)
 

@@ -48,7 +48,7 @@ func TestGH_ReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -68,7 +68,7 @@ func TestGH_Modifying_Ask(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Ask {
 			t.Errorf("cmd %q: got %s, want ask", cmd, got.Decision)
 		}
@@ -81,7 +81,7 @@ func TestGH_PrMerge_Reject(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "gh pr merge"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Reject {
 		t.Errorf("gh pr merge: got %s, want reject", got.Decision)
 	}
@@ -99,8 +99,8 @@ func TestGH_PrMergeAuto_Abstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -113,7 +113,7 @@ func TestGH_PrMergeAutoMerge_Reject(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "gh pr merge --auto-merge"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Reject {
 		t.Errorf("gh pr merge --auto-merge: got %s, want reject", got.Decision)
 	}
@@ -134,7 +134,7 @@ func TestGH_DraftFirstRuledTable(t *testing.T) {
 		{"gh pr create --web", hookio.Approve},
 		{"gh pr ready", hookio.Ask},
 		{"gh pr ready --undo", hookio.Approve},
-		{"gh pr merge --auto", hookio.Abstain},
+		{"gh pr merge --auto", hookio.NoOpinion},
 		{"gh pr merge", hookio.Reject},
 	}
 	for _, tt := range tests {
@@ -301,7 +301,7 @@ func TestGH_PrMergeAutoNegated_Reject(t *testing.T) {
 		}
 	}
 	for _, cmd := range []string{"gh pr merge --auto=true", "gh pr merge --auto=1", "gh pr merge 123 --auto"} {
-		if got := evalGH(t, cmd); got.Decision != hookio.Abstain {
+		if got := evalGH(t, cmd); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — this IS --auto", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -442,7 +442,7 @@ func TestGH_SeparatedValue_PrMerge(t *testing.T) {
 		"gh pr merge -s --auto",
 		"gh pr merge --delete-branch --auto",
 	} {
-		if got := evalGH(t, cmd); got.Decision != hookio.Abstain {
+		if got := evalGH(t, cmd); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — this IS --auto", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -572,11 +572,11 @@ func TestGH_FlagTokens(t *testing.T) {
 // evalGH is the shared one-command driver for the pg2-cl0v2 `gh api` fixtures.
 func evalGH(t *testing.T, cmd string) hookio.RuleResult {
 	t.Helper()
-	return New(nil).Evaluate(&hookio.HookInput{
+	return hookio.Verdict(New(nil).Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": cmd}),
 		CWD:       "/tmp/test-repo",
-	})
+	}))
 }
 
 // TestGH_ApiMutatingMethod_NotApproved is the pg2-cl0v2 core guard: an explicit
@@ -890,7 +890,7 @@ func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
 		// The landed merge controls.
 		{"gh pr merge", "gh --repo o/r pr merge", hookio.Reject},
 		{"gh pr merge", "gh pr -R o/r merge", hookio.Reject},
-		{"gh pr merge --auto", "gh --repo o/r pr merge --auto", hookio.Abstain},
+		{"gh pr merge --auto", "gh --repo o/r pr merge --auto", hookio.NoOpinion},
 		{"gh pr merge --auto=false", "gh --repo o/r pr merge --auto=false", hookio.Reject},
 		// `gh api` (pg2-cl0v2). The PUT row is the LIVE route: measured, `gh -X PUT api
 		// repos/o/r/pulls/5/merge` dumps `> PUT /api/v3/repos/o/r/pulls/5/merge`, so the
@@ -1075,8 +1075,8 @@ func TestGH_NonGh_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git status"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("git status: got %s, want abstain", got.Decision)
 	}
 }
@@ -1087,8 +1087,8 @@ func TestGH_NonBash_Abstain(t *testing.T) {
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Read: got %s, want abstain", got.Decision)
 	}
 }
@@ -1119,19 +1119,19 @@ func TestGH_RunRerun(t *testing.T) {
 			name:     "branches differ",
 			cmd:      "gh run rerun 12345",
 			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "main"},
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			name:     "current branch error",
 			cmd:      "gh run rerun 12345",
 			resolver: &stubResolver{currentErr: errFailed},
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			name:     "run branch error (timeout)",
 			cmd:      "gh run rerun 12345",
 			resolver: &stubResolver{currentBranch: "feature-x", runErr: errFailed},
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			name:     "flags before run ID",
@@ -1149,19 +1149,19 @@ func TestGH_RunRerun(t *testing.T) {
 			name:     "no run ID",
 			cmd:      "gh run rerun",
 			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "feature-x"},
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			name:     "nil resolver",
 			cmd:      "gh run rerun 12345",
 			resolver: nil,
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			name:     "non-numeric run ID",
 			cmd:      "gh run rerun not-a-number",
 			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "feature-x"},
-			want:     hookio.Abstain,
+			want:     hookio.NoOpinion,
 		},
 		{
 			// pg2-by1ij: the run branch is reached through the same resolution as every
@@ -1188,7 +1188,7 @@ func TestGH_RunRerun(t *testing.T) {
 				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
 				CWD:       "/tmp/test-repo",
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s, want %s (reason: %s)", tt.cmd, got.Decision, tt.want, got.Reason)
 			}

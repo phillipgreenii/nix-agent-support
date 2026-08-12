@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/metrics"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
@@ -34,14 +36,23 @@ func isDynamicRedirectTarget(path string) bool {
 	return strings.ContainsAny(path, "$`")
 }
 
+// RuleErrorSink records a GENUINE rule failure (not hookio.ErrNotApplicable, which
+// is a control signal) against the rule that produced it. Declared here rather than
+// imported so the engine depends on the capability, not on a particular sink
+// (dependency inversion); internal/metrics.RuleErrors satisfies it.
+type RuleErrorSink interface {
+	Record(rule string, err error)
+}
+
 type Engine struct {
 	rules    []hookio.RuleModule
 	pathEval *patheval.PathEvaluator
 	trace    bool
+	errSink  RuleErrorSink
 }
 
 func New(rules ...hookio.RuleModule) *Engine {
-	return &Engine{rules: rules}
+	return &Engine{rules: rules, errSink: metrics.DefaultRuleErrors}
 }
 
 // RegisterRules sets the rule list (for create-then-register pattern).
@@ -72,43 +83,109 @@ func (e *Engine) SetTrace(enabled bool) {
 	e.trace = enabled
 }
 
+// SetRuleErrorSink overrides where genuine rule failures are recorded. A nil sink
+// is honoured (failures are then only logged), so a test can silence the counter
+// without reaching into the default.
+func (e *Engine) SetRuleErrorSink(s RuleErrorSink) {
+	e.errSink = s
+}
+
+// Evaluate runs the first-match-wins chain.
+//
+// This is the ONE chokepoint that discriminates ADR 0043's three rule outcomes, and
+// its signature deliberately stays a BARE RuleResult: by the time the chain is
+// exhausted, participation and failure have both been consumed here, so the only
+// thing left to report is a verdict. That also means *Engine does NOT satisfy
+// hookio.RuleModule — it never did (it has no Name method), and now its Evaluate
+// signature differs too. engine_conformance_test.go pins both halves of that so a
+// future "just register the engine as a rule" cannot happen silently.
+//
+// The three cases:
+//
+//	err == nil                       -> the rule HANDLED it. Return its verdict,
+//	                                    including a NoOpinion verdict, which is
+//	                                    terminal and emits {}.
+//	errors.Is(err, ErrNotApplicable) -> NOT MY BUSINESS. Continue; the RuleResult is
+//	                                    ignored (ADR 0043's Decision, point 2).
+//	any other err                    -> COULD NOT DETERMINE. Record it PER RULE in
+//	                                    the error sink, log it, and continue — ADR
+//	                                    0043's error policy is continue-by-default.
+//	                                    A rule whose whole purpose is an identity or
+//	                                    ownership check it could not complete does
+//	                                    NOT come through here: it returns its own
+//	                                    fail-closed verdict with a nil error, which
+//	                                    is the first case (killshell's Ask).
+//
+// Loop exhaustion still MANUFACTURES the terminal NoOpinion, unchanged.
 func (e *Engine) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 	var trace []hookio.TraceEntry
 
 	for _, rule := range e.rules {
-		result := rule.Evaluate(input)
+		result, err := rule.Evaluate(input)
 
+		// A non-nil error means the RuleResult is not a verdict, so the trace must
+		// not present it as one: NoOpinion (the value the chain effectively carries
+		// forward) plus the out-of-band reason, which is the only place the
+		// distinction between "not applicable" and a real failure is visible.
 		if e.trace {
+			traced := result
+			if err != nil {
+				traced = hookio.RuleResult{Decision: hookio.NoOpinion, Reason: err.Error()}
+			}
 			entry := hookio.TraceEntry{
 				RuleName: rule.Name(),
-				Decision: result.Decision,
-				Reason:   result.Reason,
+				Decision: traced.Decision,
+				Reason:   traced.Reason,
 			}
 			trace = append(trace, entry)
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: TRACE %s -> %s: %s\n",
-				rule.Name(), result.Decision, result.Reason)
+				rule.Name(), traced.Decision, traced.Reason)
 		}
 
-		if result.Decision != hookio.Abstain {
-			if input.ToolName == "Bash" {
-				if cmd, err := input.BashCommand(); err == nil {
-					if comment := cmdparse.ExtractComment(cmd); comment != "" {
-						result.Reason = result.Reason + " (note: " + comment + ")"
-					}
+		if err != nil {
+			// errors.Is, never ==, and never a wrap-tolerant substring match: ADR
+			// 0043 forbids wrapping ErrNotApplicable precisely so this comparison
+			// cannot be defeated from the rule side.
+			if !errors.Is(err, hookio.ErrNotApplicable) {
+				e.recordRuleError(rule.Name(), err)
+				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> error (continuing): %v\n",
+					rule.Name(), err)
+			}
+			continue
+		}
+
+		// nil error == HANDLED, so EVERY decision short-circuits — including
+		// NoOpinion, which under ADR 0043 is the rule saying "I handled this and my
+		// answer is no gate". Only the error branch above continues the loop.
+		if result.Decision != hookio.NoOpinion && input.ToolName == "Bash" {
+			// The trailing-comment annotation is for a GATING verdict a human will
+			// read on the prompt; a NoOpinion emits {} and shows nobody a reason, so
+			// it is left alone exactly as the pre-ADR-0043 Abstain path was.
+			if cmd, err := input.BashCommand(); err == nil {
+				if comment := cmdparse.ExtractComment(cmd); comment != "" {
+					result.Reason = result.Reason + " (note: " + comment + ")"
 				}
 			}
-			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> %s: %s\n",
-				rule.Name(), result.Decision, result.Reason)
-			result.Trace = trace
-			return result
 		}
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: %s -> %s: %s\n",
+			rule.Name(), result.Decision, result.Reason)
+		result.Trace = trace
+		return result
 	}
 
-	result := hookio.RuleResult{Decision: hookio.Abstain}
+	result := hookio.RuleResult{Decision: hookio.NoOpinion}
 	if e.trace {
 		result.Trace = trace
 	}
 	return result
+}
+
+// recordRuleError funnels sink writes through one nil check so SetRuleErrorSink(nil)
+// is a supported way to silence the counter.
+func (e *Engine) recordRuleError(rule string, err error) {
+	if e.errSink != nil {
+		e.errSink.Record(rule, err)
+	}
 }
 
 // EvaluateHook is the single dispatch point for real hook decisions (Facade).
@@ -132,7 +209,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	for _, frame := range stack {
 		if frame.Expression == normalized {
 			return hookio.RuleResult{
-				Decision: hookio.Abstain,
+				Decision: hookio.NoOpinion,
 				Reason:   "recursive evaluation: cycle detected (command repeated in stack)",
 				Module:   "engine",
 			}
@@ -148,7 +225,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// Parse into sub-commands
 	parsed := cmdparse.Parse(cleaned)
 	if len(parsed) == 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
+		return hookio.RuleResult{Decision: hookio.NoOpinion, Module: "engine"}
 	}
 
 	// Evaluate each sub-command, track most restrictive.
@@ -235,8 +312,8 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 		cmdResult := e.Evaluate(syntheticInput)
 
 		// Evaluate I/O redirections. With the restrictiveness ordering
-		// (Approve < Abstain < Ask < Reject) a plain most-restrictive-wins
-		// comparison correctly lets an unknown redirection path (Abstain) demote
+		// (Approve < NoOpinion < Ask < Reject) a plain most-restrictive-wins
+		// comparison correctly lets an unknown redirection path (NoOpinion) demote
 		// an otherwise-approved command — no special case needed.
 		redirResult := e.evaluateRedirections(pc.Redirections, currentPathEval)
 		cmdResult = hookio.MostRestrictive(cmdResult, redirResult)
@@ -254,7 +331,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 			e.evaluateSubstitutionsIn(cmdparse.StripLeadingEnvAssignments(pc.Raw), normalized, stack, origin))
 
 		// A heredoc BODY is opaque to the rule chain, so a heredoc-bearing leaf is
-		// FLOORED at Abstain — but the body's own substitutions are still recursed when
+		// FLOORED at NoOpinion — but the body's own substitutions are still recursed when
 		// the delimiter was unquoted, because those genuinely execute (pg2-r2rf3).
 		if pc.HasHeredoc {
 			cmdResult = hookio.MostRestrictive(cmdResult, heredocFloor())
@@ -285,7 +362,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 	// Floor for an expression that is NOTHING BUT env assignments no rule owns
 	// (pg2-mtnmb): it executes nothing and nobody judged it, so ceta has no verdict —
-	// Abstain, exactly as it did when Parse dropped these segments and the expression
+	// NoOpinion, exactly as it did when Parse dropped these segments and the expression
 	// reached zero leaves above. Without this, `A=1` alone would newly auto-approve,
 	// and — the real hazard — a parser desync of the pg2-3ggxm class that turns a real
 	// command into a PHANTOM NAME=VALUE would manufacture an `allow` out of a parse
@@ -296,7 +373,7 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 	// the leading / export / env forms.
 	if !judgedLeaf && mostRestrictive.Decision == hookio.Approve {
 		return hookio.RuleResult{
-			Decision: hookio.Abstain,
+			Decision: hookio.NoOpinion,
 			Reason:   "env assignments only, no rule has an opinion (nothing is executed)",
 			Module:   "engine",
 		}
@@ -313,23 +390,23 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 // to Claude Code's own prompt — the same conservative floor the pre-pg2-r2rf3 engine
 // applied.
 //
-// What changed is HOW it is applied. It used to be an early `return Abstain` from
+// What changed is HOW it is applied. It used to be an early `return NoOpinion` from
 // EvaluateExpression, which fired on the FIRST heredoc leaf and THREW AWAY whatever
 // decision an earlier leaf had already earned:
 //
-//	grep .git/config x && cat <<EOF   ->  Abstain  (gitdir's Ask discarded)
-//	cat <<EOF && grep .git/config x   ->  Abstain
+//	grep .git/config x && cat <<EOF   ->  NoOpinion  (gitdir's Ask discarded)
+//	cat <<EOF && grep .git/config x   ->  NoOpinion
 //
 // Same two operations, and the verdict depended on which side of the `&&` the heredoc
 // sat on — worse, a real Reject could be silently dropped, the "guard quietly stopped
 // applying" class. Folding it through hookio.MostRestrictive instead makes the result
 // ORDER-INDEPENDENT (max over a total order) and keeps every sibling leaf's decision:
-// both spellings above now Ask. Because Abstain outranks Approve, the floor still
+// both spellings above now Ask. Because NoOpinion outranks Approve, the floor still
 // guarantees a heredoc-bearing expression can never be green-lit, so this cannot move
 // anything toward `allow`.
 func heredocFloor() hookio.RuleResult {
 	return hookio.RuleResult{
-		Decision: hookio.Abstain,
+		Decision: hookio.NoOpinion,
 		Reason:   "heredoc body is not evaluable as a command (deferred to claude-code)",
 		Module:   "engine",
 	}
@@ -387,12 +464,12 @@ func (e *Engine) evaluateSubstitutionsIn(text, normalized string, stack []hookio
 // reached. The carrier is incidental: `echo "$(echo don't)" "$(rm -rf .git/objects)"`
 // auto-approved with no heredoc at all, the second substitution simply discarded.
 //
-// Abstain — defer to Claude Code — is the correct verdict for text ceta cannot parse,
+// NoOpinion — defer to Claude Code — is the correct verdict for text ceta cannot parse,
 // and it is folded through MostRestrictive rather than returned, so it can neither be
 // order-dependent nor mask a Reject an enumerated sibling substitution earned.
 func unparseableSubstitutionFloor(reason string) hookio.RuleResult {
 	return hookio.RuleResult{
-		Decision: hookio.Abstain,
+		Decision: hookio.NoOpinion,
 		Reason:   "unparseable command text (" + reason + "): substitutions cannot be enumerated (deferred to claude-code)",
 		Module:   "engine",
 	}
@@ -415,13 +492,13 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 
 		// Static allowlist FLOOR for command substitutions ($()/backtick): a body
 		// the static allowlist rejects (e.g. `git show HEAD` — textconv/external-diff
-		// RCE) can be no LESS restrictive than Abstain even if full-engine recursion
+		// RCE) can be no LESS restrictive than NoOpinion even if full-engine recursion
 		// would approve the inner command. Recursion only ADDS demotions. Process
 		// substitutions have no static allowlist and are governed by recursion alone.
 		if sub.IsCommandSubstitution() && !cmdparse.IsSafeSubstitutionBody(sub.Body) &&
-			subResult.Decision < hookio.Abstain {
+			subResult.Decision < hookio.NoOpinion {
 			subResult = hookio.RuleResult{
-				Decision: hookio.Abstain,
+				Decision: hookio.NoOpinion,
 				Reason:   "command substitution not on static safe allowlist: " + sub.Body,
 				Module:   "engine",
 			}
@@ -448,7 +525,7 @@ func (e *Engine) foldSubstitutionScan(scan cmdparse.SubstitutionScan, normalized
 // verdict as the leading / `export` / `env` forms of the same assignment.
 //
 // judged reports whether a rule actually had an opinion. It is false both when the
-// leaf carries no assignments at all and when the chain Abstained on them — see the
+// leaf carries no assignments at all and when the chain had no opinion on them — see the
 // NEUTRAL discussion below and the caller's judgedLeaf floor.
 //
 // rootExpr is the whole expression this leaf was split out of, forwarded as
@@ -470,13 +547,13 @@ func (e *Engine) evaluateAssignmentOnlyLeaf(pc cmdparse.ParsedCommand, cwd, root
 		PathEval:       origin.PathEval,
 		RootExpression: rootExpr,
 	}
-	if chainResult := e.Evaluate(syntheticInput); chainResult.Decision != hookio.Abstain {
+	if chainResult := e.Evaluate(syntheticInput); chainResult.Decision != hookio.NoOpinion {
 		return chainResult, true
 	}
 	// NEUTRAL when no rule has a decisive opinion. An assignment-only leaf EXECUTES
 	// NOTHING — it binds shell variables — so with nothing to object to it must
 	// contribute nothing to the fold, exactly as evaluateRedirections returns Approve
-	// for a leaf with no redirections. Folding the chain's Abstain instead would
+	// for a leaf with no redirections. Folding the chain's NoOpinion instead would
 	// demote every ordinary `count=$(...) && cmd` / `A=1 && cmd` from allow to
 	// abstain: a mass over-ask (~2041 corpus rows) with no security gain, since the
 	// risk an assignment-only leaf DOES carry is judged above —
@@ -520,12 +597,12 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 	}
 	// Redirections present but no path evaluator
 	if pe == nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: "engine"}
+		return hookio.RuleResult{Decision: hookio.NoOpinion, Module: "engine"}
 	}
-	// dynamic holds the first unresolvable target's Abstain. It is NOT returned
+	// dynamic holds the first unresolvable target's NoOpinion. It is NOT returned
 	// early: the remaining redirections must still be evaluated so a STATIC
 	// read-only target later in the same command (`> "$T" > /etc/hosts`) still
-	// produces its Reject instead of being masked by this Abstain.
+	// produces its Reject instead of being masked by this NoOpinion.
 	var dynamic *hookio.RuleResult
 	for _, r := range redirs {
 		// Standard special device files are always-safe redirect targets; skip
@@ -543,7 +620,7 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 		if isDynamicRedirectTarget(r.Path) {
 			if dynamic == nil {
 				dynamic = &hookio.RuleResult{
-					Decision: hookio.Abstain,
+					Decision: hookio.NoOpinion,
 					Reason:   "redirection: dynamically-expanded target " + r.Path + " (deferred to claude-code)",
 					Module:   "engine",
 				}
@@ -557,7 +634,7 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 		// silently becoming read-only here.
 		if !r.Kind.IsWrite() {
 			if !access.CanRead() {
-				return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: stdin from non-readable path " + r.Path, Module: "engine"}
+				return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: stdin from non-readable path " + r.Path, Module: "engine"}
 			}
 			continue
 		}
@@ -565,7 +642,7 @@ func (e *Engine) evaluateRedirections(redirs []hookio.Redirection, override *pat
 			return hookio.RuleResult{Decision: hookio.Reject, Reason: "redirection: write to read-only path " + r.Path, Module: "engine"}
 		}
 		if !access.CanWrite() {
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
+			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + r.Path, Module: "engine"}
 		}
 	}
 	if dynamic != nil {

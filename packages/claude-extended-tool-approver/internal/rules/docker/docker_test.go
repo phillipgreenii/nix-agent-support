@@ -39,7 +39,7 @@ func TestDockerRule(t *testing.T) {
 			"true && ls":         {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 			"bash -c echo hello": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
-		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
 	r := New(mockEval, nil)
 
@@ -62,15 +62,15 @@ func TestDockerRule(t *testing.T) {
 		{"docker run --rm dangerous cmd", "docker run --rm myimage rm -rf /", "Bash", hookio.Reject},
 		{"docker run --rm bash -c safe", "docker run --rm myimage bash -c 'bats'", "Bash", hookio.Approve},
 		{"docker exec safe", "docker exec container1 bats", "Bash", hookio.Approve},
-		{"docker run no --rm no cmd", "docker run myimage", "Bash", hookio.Abstain},
-		{"docker run --rm no cmd", "docker run --rm myimage", "Bash", hookio.Abstain},
-		{"docker run no --rm with cmd", "docker run myimage bats", "Bash", hookio.Abstain},
-		{"not docker", "ls -la", "Bash", hookio.Abstain},
+		{"docker run no --rm no cmd", "docker run myimage", "Bash", hookio.NoOpinion},
+		{"docker run --rm no cmd", "docker run --rm myimage", "Bash", hookio.NoOpinion},
+		{"docker run no --rm with cmd", "docker run myimage bats", "Bash", hookio.NoOpinion},
+		{"not docker", "ls -la", "Bash", hookio.NoOpinion},
 		{"docker run --rm gosu passthrough", "docker run --rm img gosu claude whoami", "Bash", hookio.Approve},
 		{"docker run --rm bash -c init-firewall and gosu", `docker run --rm img bash -c "init-firewall.sh && gosu claude ls"`, "Bash", hookio.Approve},
 		{"docker run --rm bash -c gosu nested bash", `docker run --rm img bash -c "gosu claude bash -c 'echo hello'"`, "Bash", hookio.Approve},
 		{"docker run --rm bash -c su passthrough", `docker run --rm img bash -c "su claude -s /bin/bash -c 'whoami'"`, "Bash", hookio.Approve},
-		{"non-bash", "", "Read", hookio.Abstain},
+		{"non-bash", "", "Read", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,7 +79,7 @@ func TestDockerRule(t *testing.T) {
 				ToolInput: mustJSON(map[string]string{"command": tt.command}),
 				CWD:       "/tmp/project",
 			}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
@@ -209,8 +209,8 @@ func TestDockerRule_MountAwareRegressions(t *testing.T) {
 				ToolInput: mustJSON(map[string]string{"command": tt.command}),
 				CWD:       projectRoot,
 			}
-			got := r.Evaluate(input)
-			if got.Decision == hookio.Abstain {
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision == hookio.NoOpinion {
 				t.Fatalf("rule abstained: %s", got.Reason)
 			}
 			if cap.lastOrigin == nil || cap.lastOrigin.PathEval == nil {

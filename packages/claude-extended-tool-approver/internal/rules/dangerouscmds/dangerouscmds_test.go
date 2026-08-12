@@ -48,17 +48,17 @@ func TestDangerousCommands(t *testing.T) {
 		{"nice wraps dd", "nice dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
 		{"timeout wraps dd", "timeout 5 dd if=/dev/zero of=/dev/sda", "Bash", hookio.Reject},
 		// Not on the denylist / handled elsewhere.
-		{"curl not here (curl rule)", "curl https://x", "Bash", hookio.Abstain},
-		{"ssh not here (ssh rule)", "ssh host ls", "Bash", hookio.Abstain},
-		{"kill not in scope", "kill 1234", "Bash", hookio.Abstain},
-		{"safe ls", "ls -la", "Bash", hookio.Abstain},
-		{"dangerous as substring arg", "echo sudo", "Bash", hookio.Abstain},
-		{"non-bash", "", "Read", hookio.Abstain},
+		{"curl not here (curl rule)", "curl https://x", "Bash", hookio.NoOpinion},
+		{"ssh not here (ssh rule)", "ssh host ls", "Bash", hookio.NoOpinion},
+		{"kill not in scope", "kill 1234", "Bash", hookio.NoOpinion},
+		{"safe ls", "ls -la", "Bash", hookio.NoOpinion},
+		{"dangerous as substring arg", "echo sudo", "Bash", hookio.NoOpinion},
+		{"non-bash", "", "Read", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("Decision = %v, want %v", got, tt.want)
 			}
 		})
@@ -76,28 +76,28 @@ func TestMountOperandGate(t *testing.T) {
 		want    hookio.Decision
 	}{
 		// --- read-only listing forms: no longer dangerous ---
-		{"bare mount", "mount", hookio.Abstain},
-		{"bare mount piped", "mount | grep ziprecruiter", hookio.Abstain},
+		{"bare mount", "mount", hookio.NoOpinion},
+		{"bare mount piped", "mount | grep ziprecruiter", hookio.NoOpinion},
 		// Row 310193's exact shape: the listing reached the rule only as an
 		// assignment-only segment's command substitution (pg2-mtnmb made that
 		// position rule-visible), so the position is pinned explicitly.
-		{"row 310193 shape: VAR=$(mount | awk)", `DATA_DEV=$(mount | awk '/on \/System\/Volumes\/Data /{print $1; exit}')`, hookio.Abstain},
-		{"assignment substitution, plain", "X=$(mount)", hookio.Abstain},
-		{"listing inside a compound", `echo "--- mounts ---" && mount | head -5`, hookio.Abstain},
-		{"full path bare mount", "/sbin/mount", hookio.Abstain},
-		{"env-prefixed bare mount", "env mount", hookio.Abstain},
+		{"row 310193 shape: VAR=$(mount | awk)", `DATA_DEV=$(mount | awk '/on \/System\/Volumes\/Data /{print $1; exit}')`, hookio.NoOpinion},
+		{"assignment substitution, plain", "X=$(mount)", hookio.NoOpinion},
+		{"listing inside a compound", `echo "--- mounts ---" && mount | head -5`, hookio.NoOpinion},
+		{"full path bare mount", "/sbin/mount", hookio.NoOpinion},
+		{"env-prefixed bare mount", "env mount", hookio.NoOpinion},
 		// --- informational flags: allowed ---
-		{"show-labels short", "mount -l", hookio.Abstain},
-		{"show-labels long", "mount --show-labels", hookio.Abstain},
-		{"verbose short", "mount -v", hookio.Abstain},
-		{"verbose long", "mount --verbose", hookio.Abstain},
-		{"version", "mount -V", hookio.Abstain},
-		{"help", "mount --help", hookio.Abstain},
-		{"type filter short", "mount -t apfs", hookio.Abstain},
-		{"type filter long", "mount --types nfs", hookio.Abstain},
-		{"type filter inline long", "mount --types=nfs", hookio.Abstain},
-		{"clustered informational shorts", "mount -lv", hookio.Abstain},
-		{"informational combination", "mount -l -v -t ext4", hookio.Abstain},
+		{"show-labels short", "mount -l", hookio.NoOpinion},
+		{"show-labels long", "mount --show-labels", hookio.NoOpinion},
+		{"verbose short", "mount -v", hookio.NoOpinion},
+		{"verbose long", "mount --verbose", hookio.NoOpinion},
+		{"version", "mount -V", hookio.NoOpinion},
+		{"help", "mount --help", hookio.NoOpinion},
+		{"type filter short", "mount -t apfs", hookio.NoOpinion},
+		{"type filter long", "mount --types nfs", hookio.NoOpinion},
+		{"type filter inline long", "mount --types=nfs", hookio.NoOpinion},
+		{"clustered informational shorts", "mount -lv", hookio.NoOpinion},
+		{"informational combination", "mount -l -v -t ext4", hookio.NoOpinion},
 		// --- operand-bearing / unprovable forms: still Reject ---
 		{"device and dir", "mount /dev/sdb /mnt", hookio.Reject},
 		{"single fstab operand", "mount /mnt", hookio.Reject},
@@ -126,7 +126,7 @@ func TestMountOperandGate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Evaluate(%q).Decision = %v (%s), want %v", tt.command, got.Decision, got.Reason, tt.want)
 			}

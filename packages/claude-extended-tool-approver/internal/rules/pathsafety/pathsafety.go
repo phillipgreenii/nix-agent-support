@@ -1,6 +1,7 @@
 package pathsafety
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -138,77 +139,89 @@ func (r *Rule) isAgentConfigWrite(path string) bool {
 	return isAgentConfigPath(r.eval.ResolvePath(path))
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if fileTools[input.ToolName] {
 		path, err := input.FilePath()
 		if err != nil {
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			return hookio.RuleResult{}, fmt.Errorf("path-safety: read tool path: %w", err)
 		}
 		switch input.ToolName {
 		case "Read":
 			if r.eval.IsDenyRead(path) {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: "path is deny-read: " + path, Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "path is deny-read: " + path, Module: r.Name()}, nil
 			}
 			access := r.eval.Evaluate(path)
 			if access.CanRead() {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows read: " + path, Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows read: " + path, Module: r.Name()}, nil
 			}
-			return hookio.RuleResult{
-				Decision: hookio.Abstain,
-				Reason:   "path is " + access.String() + " " + path + " (deferred to claude-code)",
-				Module:   r.Name(),
-			}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "path is " + access.String() + " " + path + " (deferred to claude-code)"
+			return hookio.NotApplicable()
 		case "Write", "Edit", "MultiEdit", "Delete":
 			if r.eval.IsDenyWrite(path) {
-				return hookio.RuleResult{Decision: hookio.Reject, Reason: "path is deny-write: " + path, Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Reject, Reason: "path is deny-write: " + path, Module: r.Name()}, nil
 			}
 			// ADR 0041: CETA MUST NOT approve a write to an agent-config or
-			// agent-instruction file under `.claude/`; it abstains so the verdict
-			// stays with Claude Code (the interactive prompt, or the
+			// agent-instruction file under `.claude/`; it declines to decide so the
+			// verdict stays with Claude Code (the interactive prompt, or the
 			// auto_mode_classifier in auto mode). This check MUST sit ahead of the
-			// CanWrite() approve below and INSIDE this branch: Abstain means
-			// "continue to the next rule", so a separate rule returning Abstain
-			// ahead of path-safety would be a silent no-op — path-safety itself has
-			// to stop approving. Reads are unaffected (see the Read case above).
+			// CanWrite() approve below and INSIDE this branch, because ADR 0041
+			// requires PATH-SAFETY ITSELF to stop approving: a separate rule ahead of
+			// path-safety returning the continue sentinel would be a silent no-op.
+			//
+			// THIS IS THE ONE SITE IN THE WHOLE RULESET THAT ADR 0043 CONVERTS TO A
+			// TERMINAL NoOpinion RATHER THAN ErrNotApplicable (its Decision, point 4).
+			// The two are NOT interchangeable here and getting it backwards reverses
+			// ADR 0041: ErrNotApplicable means "continue", and a later rule that then
+			// approved the write would defeat the control outright. NoOpinion emits
+			// {} and stops the chain, which is exactly "ceta declines to approve, the
+			// verdict is Claude Code's".
+			//
+			// It is behaviour-preserving in this position: path-safety is followed
+			// only by mcp (mcp__ tools) and Bash-only rules, so no later rule acts on
+			// a Write/Edit/MultiEdit/Delete today. Stopping here therefore reaches
+			// the same {} the continue-to-exhaustion path reached.
 			if r.isAgentConfigWrite(path) {
 				return hookio.RuleResult{
-					Decision: hookio.Abstain,
+					Decision: hookio.NoOpinion,
 					Reason:   "agent-config write under " + agentConfigDir + "/: " + path + " (deferred to claude-code)",
 					Module:   r.Name(),
-				}
+				}, nil
 			}
 			access := r.eval.Evaluate(path)
 			if access.CanWrite() {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows write: " + path, Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows write: " + path, Module: r.Name()}, nil
 			}
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "path access unknown: " + path + " (deferred to claude-code)", Module: r.Name()}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "path access unknown: " + path + " (deferred to claude-code)"
+			return hookio.NotApplicable()
 		default:
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			return hookio.NotApplicable()
 		}
 	} else if searchTools[input.ToolName] {
 		return r.evaluateSearch(input)
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateSearch(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateSearch(input *hookio.HookInput) (hookio.RuleResult, error) {
 	path, err := input.SearchPath()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("path-safety: read tool path: %w", err)
 	}
 	if path == "" {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "search tool with no explicit path (defaults to CWD)",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if r.eval.IsDenyRead(path) {
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
 			Reason:   "search path is deny-read: " + path,
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	access := r.eval.Evaluate(path)
 	if access.CanRead() {
@@ -216,11 +229,9 @@ func (r *Rule) evaluateSearch(input *hookio.HookInput) hookio.RuleResult {
 			Decision: hookio.Approve,
 			Reason:   "search path allows read: " + path,
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{
-		Decision: hookio.Abstain,
-		Reason:   "search path is " + access.String() + " " + path + " (deferred to claude-code)",
-		Module:   r.Name(),
-	}
+	// Not applicable (ADR 0043): the chain must continue. Former Reason,
+	// kept because it is the only record of WHY: "search path is " + access.String() + " " + path + " (deferred to claude-code)"
+	return hookio.NotApplicable()
 }

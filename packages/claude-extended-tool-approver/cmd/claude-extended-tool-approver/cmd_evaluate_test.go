@@ -344,7 +344,7 @@ func TestReplayAttribution_IsNotTheFirstTraceEntry(t *testing.T) {
 	if first.RuleName == result.Module {
 		t.Fatalf("trace[0] is already the deciding rule (%q), so this test proves nothing; pick a command whose first-running rule abstains", first.RuleName)
 	}
-	if first.Decision != hookio.Abstain {
+	if first.Decision != hookio.NoOpinion {
 		t.Errorf("trace[0] %s decided %v; expected an abstain, i.e. a rule that did NOT decide this input", first.RuleName, first.Decision)
 	}
 }

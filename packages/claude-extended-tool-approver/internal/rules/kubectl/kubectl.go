@@ -1,6 +1,7 @@
 package kubectl
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -112,13 +113,13 @@ func (r *Rule) Name() string {
 	return "kubectl"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("kubectl: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -127,52 +128,58 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		operation := r.extractOperation(pc.Args)
 		if operation == "" {
-			return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+			return hookio.NotApplicable()
 		}
 		if r.execOps[operation] {
 			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
 				return r.evaluateExec(pc.Args, input)
 			}
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kubectl exec (defer to mode/settings)", Module: r.Name()}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "non-dev kubectl exec (defer to mode/settings)"
+			return hookio.NotApplicable()
 		}
 		if operation == "rollout" {
 			if rolloutReadOnlySubcommands[r.rolloutSubcommand(pc.Args)] {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only kubectl command", Module: r.Name()}, nil
 			}
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "modifying kubectl command (defer)", Module: r.Name()}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "modifying kubectl command (defer)"
+			return hookio.NotApplicable()
 		}
 		if r.scopedApproveOps[operation] {
 			if r.isDevWorkspaceScope(operation, pc.Args, pc.EnvVars) {
-				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}
+				return hookio.RuleResult{Decision: hookio.Approve, Reason: "kc dev-workspace command", Module: r.Name()}, nil
 			}
-			return hookio.RuleResult{Decision: hookio.Abstain, Reason: "non-dev kc command (defer)", Module: r.Name()}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "non-dev kc command (defer)"
+			return hookio.NotApplicable()
 		}
 		if r.readOnlyOps[operation] {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "read-only kubectl command",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		// Everything else (apply, delete, scale, exec, etc.) -> defer to mode/settings
-		return hookio.RuleResult{
-			Decision: hookio.Abstain,
-			Reason:   "modifying kubectl command (defer)",
-			Module:   r.Name(),
-		}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "modifying kubectl command (defer)"
+		return hookio.NotApplicable()
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // evaluateExec recurses into the inner command after `--` through the full
 // rule chain, using a pod-internal path evaluator (docker-exec pattern).
-func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	inner := innerAfterDoubleDash(args)
 	if len(inner) == 0 {
-		return hookio.RuleResult{Decision: hookio.Abstain, Reason: "kc exec without inner command", Module: r.Name()}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "kc exec without inner command"
+		return hookio.NotApplicable()
 	}
 	if r.exprEval == nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	innerExpr := extractInnerCommand(inner)
 	outerExpr := strings.Join(strings.Fields(strings.Join(args, " ")), " ")
@@ -181,7 +188,11 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) hookio.RuleR
 	if r.pe != nil {
 		scoped.PathEval = r.pe.WithMounts([]patheval.Mount{}) // pod-internal paths
 	}
-	return r.exprEval.EvaluateExpression(innerExpr, stack, &scoped)
+	// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+	// hookio.FromRecursion states the translation in one place.
+	return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerExpr, stack, &scoped))
 }
 
 // innerAfterDoubleDash returns the args after the first `--`, or nil if none.

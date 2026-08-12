@@ -29,6 +29,7 @@
 package dangerouscmds
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -51,13 +52,13 @@ func New() *Rule { return &Rule{} }
 
 func (r *Rule) Name() string { return "dangerous-commands" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("dangerous-commands: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -67,10 +68,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Reject,
 				Reason:   "dangerous command blocked: " + base,
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // isDangerous reports whether an invocation of base with args is dangerous: base

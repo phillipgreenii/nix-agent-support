@@ -128,6 +128,7 @@
 package gitdir
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -169,12 +170,18 @@ func New() *Rule { return &Rule{} }
 
 func (r *Rule) Name() string { return "git-directory" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	switch input.ToolName {
 	case "Bash":
 		cmd, err := input.BashCommand()
 		if err != nil {
-			break
+			// THE SPLIT ADR 0043's Consequences require. This used to `break` into
+			// the shared final return below, so ONE Abstain literal carried two
+			// unrelated meanings — "no .git path in this call" and "I could not read
+			// the Bash command" — and the second was indistinguishable from the
+			// first. It is now a genuine failure, recorded per rule; the chain
+			// outcome (continue) is unchanged.
+			return hookio.RuleResult{}, fmt.Errorf("git-directory: read bash command: %w", err)
 		}
 		// The engine hands this rule ONE leaf of a compound at a time, but a leaf
 		// that merely BINDS a path (`f="$r/.git/info/exclude"`) is identical whether
@@ -190,41 +197,56 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			return r.verdict(dir)
 		}
 	case "Read":
-		if path, err := input.FilePath(); err == nil && isGitMetadataPath(path) {
+		path, err := input.FilePath()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
+		}
+		if isGitMetadataPath(path) {
 			return r.verdict(dirRead)
 		}
 	case "Write", "Edit", "MultiEdit", "Delete":
-		if path, err := input.FilePath(); err == nil && isGitMetadataPath(path) {
+		path, err := input.FilePath()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("git-directory: read file_path: %w", err)
+		}
+		if isGitMetadataPath(path) {
 			return r.verdict(dirWrite)
 		}
 	case "Glob", "Grep":
-		if path, err := input.SearchPath(); err == nil && isGitMetadataPath(path) {
+		path, err := input.SearchPath()
+		if err != nil {
+			return hookio.RuleResult{}, fmt.Errorf("git-directory: read search path: %w", err)
+		}
+		if isGitMetadataPath(path) {
 			return r.verdict(dirRead)
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	// No .git path anywhere in this call: not this rule's business, and the generic
+	// approvers registered after it MUST still run.
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) verdict(d direction) hookio.RuleResult {
+// verdict returns the (RuleResult, error) pair because its dirRead branch is a
+// NOT-APPLICABLE, not a verdict: its own former Reason said so in words — "no
+// verdict; later rules decide". A terminal NoOpinion there would stop the chain and
+// prevent path-safety/safe-commands from deciding a plain `.git` READ, which is a
+// decision change this bead forbids.
+func (r *Rule) verdict(d direction) (hookio.RuleResult, error) {
 	switch d {
 	case dirWrite:
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
 			Reason:   "refusing to write git metadata under .git/ directly — modify it through git commands only",
 			Module:   r.Name(),
-		}
+		}, nil
 	case dirCopyOut:
 		return hookio.RuleResult{
 			Decision: hookio.Ask,
 			Reason:   "copying git metadata out of .git/ to another location — .git/config can carry a credential in a remote URL",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{
-		Decision: hookio.Abstain,
-		Reason:   "reading git metadata under .git/ is a read-only inspection (no verdict; later rules decide)",
-		Module:   r.Name(),
-	}
+	return hookio.NotApplicable()
 }
 
 // bashAccess reports whether leafText operates on a path inside a `.git`

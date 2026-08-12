@@ -24,14 +24,14 @@ func TestPathTraversal(t *testing.T) {
 		{"cd escape", "cd ../../..", "Bash", hookio.Ask},
 		{"deep escape", "ls ../../../secrets", "Bash", hookio.Ask},
 		{"workspace-root navigation", "cd ../.. && ls", "Bash", hookio.Ask},
-		{"single level ok", "cat ../README.md", "Bash", hookio.Abstain},
-		{"no traversal", "ls -la", "Bash", hookio.Abstain},
-		{"non-bash", "", "Read", hookio.Abstain},
+		{"single level ok", "cat ../README.md", "Bash", hookio.NoOpinion},
+		{"no traversal", "ls -la", "Bash", hookio.NoOpinion},
+		{"non-bash", "", "Read", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.command)}
-			if got := r.Evaluate(input).Decision; got != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
 				t.Errorf("Decision = %v, want %v", got, tt.want)
 			}
 		})

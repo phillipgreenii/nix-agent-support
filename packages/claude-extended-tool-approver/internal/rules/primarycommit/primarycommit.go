@@ -22,6 +22,7 @@
 package primarycommit
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -57,21 +58,29 @@ func New(resolver PrimaryResolver) *Rule { return &Rule{resolver: resolver} }
 
 func (r *Rule) Name() string { return "primary-commit" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
-	abstain := hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
+	// Every former `return abstain` in this function meant "keep going": this rule
+	// is registered BEFORE the generic git rule precisely so it can hard-deny an
+	// auto-approving commit on primary before git approves it, which requires git
+	// to still be reached in every other case. So they are all ErrNotApplicable and
+	// none may become a terminal NoOpinion.
 	if input.ToolName != "Bash" {
-		return abstain
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return abstain
+		// Genuine failure: the tool IS Bash, so this rule governs the input.
+		return hookio.RuleResult{}, fmt.Errorf("primary-commit: read bash command: %w", err)
 	}
 	for _, pc := range cmdparse.Parse(cmdStr) {
 		if !isGit(pc.Executable) {
 			continue
 		}
+		// No resolver injected: the rule has no way to know what the primary is, so
+		// it does not govern this input. This is a CONSTRUCTION condition, not a
+		// runtime failure, so it is not-applicable rather than an error.
 		if r.resolver == nil {
-			return abstain
+			return hookio.NotApplicable()
 		}
 		targets, primary := r.commitTargetsPrimary(pc, input.CWD, true)
 		if !targets {
@@ -84,11 +93,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Reject,
 				Reason:   "primary-commit: refusing a commit on the primary branch (" + primary + ") of the canonical clone in an auto-approving session — advancing shared primary requires explicit human direction (R-6); use a feature branch/worktree.",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
-		return abstain
+		// Commit on primary in an interactive/default session: trusted (R-6), and the
+		// git rule after us still gets to judge the command on its own merits.
+		return hookio.NotApplicable()
 	}
-	return abstain
+	// No git leaf, or none that targets primary.
+	return hookio.NotApplicable()
 }
 
 // commitTargetsPrimary reports whether a single parsed git invocation is a `git commit`

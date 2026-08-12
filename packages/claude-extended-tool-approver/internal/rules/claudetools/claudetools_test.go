@@ -2,6 +2,7 @@ package claudetools
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -26,7 +27,7 @@ func TestClaudeTools_ApprovedTools(t *testing.T) {
 	r := New()
 	for _, tool := range approved {
 		input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("tool %q: got %s, want approve", tool, got.Decision)
 		}
@@ -39,7 +40,7 @@ func TestClaudeTools_PlanModeToolsAbstain(t *testing.T) {
 	r := New()
 	for _, tool := range []string{"ExitPlanMode", "EnterPlanMode"} {
 		input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("tool %q: got %s, want abstain", tool, got.Decision)
 		}
 	}
@@ -53,8 +54,8 @@ func TestClaudeTools_FileTools_Abstain(t *testing.T) {
 			ToolName:  tool,
 			ToolInput: mustJSON(map[string]string{"file_path": "/project/foo.go"}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("tool %q: got %s, want abstain (handled by path-safety)", tool, got.Decision)
 		}
 	}
@@ -66,23 +67,36 @@ func TestClaudeTools_Bash_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "echo hello"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Bash: got %s, want abstain (handled by command-specific modules)", got.Decision)
 	}
 }
 
 func TestClaudeTools_AbstainTools(t *testing.T) {
-	abstainTools := []string{"ExitPlanMode"}
+	deferredTools := []string{"ExitPlanMode"}
 	r := New()
-	for _, tool := range abstainTools {
+	for _, tool := range deferredTools {
 		input := &hookio.HookInput{ToolName: tool, ToolInput: mustJSON(map[string]string{})}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got, err := r.Evaluate(input)
+		if hookio.Verdict(got, err).Decision != hookio.NoOpinion {
 			t.Errorf("tool %q: got %s, want abstain (user-interaction tool)", tool, got.Decision)
 		}
-		if got.Reason == "" {
-			t.Errorf("tool %q: expected reason to be set for explicit abstain", tool)
+		// This used to assert a non-empty Reason, as the marker of an EXPLICIT
+		// deferral rather than an incidental fall-through. ADR 0043's decision 2
+		// empties the RuleResult on a not-applicable return, so the explicitness now
+		// lives in the channel itself plus the membership below — which is the fact
+		// the test is really about: a plan-mode gate MUST NOT be auto-approved.
+		if !errors.Is(err, hookio.ErrNotApplicable) {
+			t.Errorf("tool %q: err = %v, want ErrNotApplicable (the chain must continue)", tool, err)
+		}
+		if approvedTools[tool] {
+			t.Errorf("tool %q is in approvedTools — auto-approving its PreToolUse short-circuits the "+
+				"native plan-review gate (pg2-9cist)", tool)
+		}
+		if !abstainTools[tool] {
+			t.Errorf("tool %q is no longer in abstainTools, so nothing keeps it out of a future "+
+				"approve list", tool)
 		}
 	}
 }
@@ -90,8 +104,8 @@ func TestClaudeTools_AbstainTools(t *testing.T) {
 func TestClaudeTools_Unknown_Abstain(t *testing.T) {
 	r := New()
 	input := &hookio.HookInput{ToolName: "UnknownTool", ToolInput: mustJSON(map[string]string{})}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("UnknownTool: got %s, want abstain", got.Decision)
 	}
 }
@@ -102,8 +116,8 @@ func TestClaudeTools_WebFetch_Abstain(t *testing.T) {
 		ToolName:  "WebFetch",
 		ToolInput: mustJSON(map[string]string{"url": "https://example.com", "prompt": ""}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("WebFetch: got %s, want abstain (handled by webfetch rule)", got.Decision)
 	}
 }
@@ -116,8 +130,8 @@ func TestClaudeTools_SearchTools_Abstain(t *testing.T) {
 			ToolName:  tool,
 			ToolInput: mustJSON(map[string]string{"pattern": "**/*.go"}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("tool %q: got %s, want abstain (handled by path-safety)", tool, got.Decision)
 		}
 	}

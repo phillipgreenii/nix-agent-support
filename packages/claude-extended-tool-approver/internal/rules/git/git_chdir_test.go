@@ -49,7 +49,7 @@ func TestGit_Chdir_ReadOnlySub_ReadableZone_Approve(t *testing.T) {
 		"git -C /tmp/scratch diff",
 	}
 	for _, cmd := range approve {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (readable -C dir, read-only sub)", cmd, got.Decision, got.Reason)
 		}
@@ -66,8 +66,8 @@ func TestGit_Chdir_ReadOnlySub_UnsafeZone_Abstain(t *testing.T) {
 		"git -C ../outside status", // relative, escapes project via CWD
 	}
 	for _, cmd := range abstain {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (unreadable -C dir)", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -78,7 +78,7 @@ func TestGit_Chdir_ReadOnlySub_UnsafeZone_Abstain(t *testing.T) {
 func TestGit_Chdir_ReadWriteAsymmetry(t *testing.T) {
 	r := newWithProject(t)
 	// read-only zone dir, read sub -> Approve
-	if got := r.Evaluate(chdirInput("git -C /nix/store/abc123-foo log", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /nix/store/abc123-foo log", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C <ro> log: got %s, want approve", got.Decision)
 	}
 	// same read-only zone dir, modifying subs -> Abstain
@@ -87,8 +87,8 @@ func TestGit_Chdir_ReadWriteAsymmetry(t *testing.T) {
 		"git -C /nix/store/abc123-foo commit -m x",
 	}
 	for _, cmd := range modAbstain {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (read-only dir, write-class sub)", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -103,7 +103,7 @@ func TestGit_Chdir_ModifyingSub_WritableZone_Approve(t *testing.T) {
 		"git -C /tmp/scratch stash",
 	}
 	for _, cmd := range approve {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (writable -C dir, modifying sub)", cmd, got.Decision, got.Reason)
 		}
@@ -119,8 +119,8 @@ func TestGit_Chdir_ModifyingSub_NonWritable_Abstain(t *testing.T) {
 		"git -C /usr/bin branch feat",
 	}
 	for _, cmd := range abstain {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (non-writable -C dir, modifying sub)", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -130,18 +130,18 @@ func TestGit_Chdir_ModifyingSub_NonWritable_Abstain(t *testing.T) {
 func TestGit_Chdir_RelativeResolvedAgainstCWD(t *testing.T) {
 	r := newWithProject(t)
 	// CWD in the writable zone; ./sub stays inside it.
-	if got := r.Evaluate(chdirInput("git -C ./sub status", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C ./sub status", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C ./sub (cwd in zone): got %s, want approve", got.Decision)
 	}
-	if got := r.Evaluate(chdirInput("git -C ./sub add .", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C ./sub add .", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C ./sub add (cwd in zone): got %s, want approve", got.Decision)
 	}
 	// CWD out of zone; a relative ./sub is also out of zone.
-	if got := r.Evaluate(chdirInput("git -C ./sub status", "/etc")); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C ./sub status", "/etc"))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C ./sub (cwd out of zone): got %s, want abstain", got.Decision)
 	}
 	// Multiple -C compound (git applies each relative one on top of the running dir).
-	if got := r.Evaluate(chdirInput("git -C /home/user/project -C sub status", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /home/user/project -C sub status", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C /home/user/project -C sub status: got %s, want approve", got.Decision)
 	}
 }
@@ -151,21 +151,21 @@ func TestGit_Chdir_RelativeResolvedAgainstCWD(t *testing.T) {
 func TestGit_Chdir_OutsideMapSubcommands(t *testing.T) {
 	r := newWithProject(t)
 	// checkout is write-class: writable zone Approves, read-only zone Abstains.
-	if got := r.Evaluate(chdirInput("git -C /home/user/project checkout main", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /home/user/project checkout main", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C <rw> checkout: got %s, want approve", got.Decision)
 	}
-	if got := r.Evaluate(chdirInput("git -C /nix/store/abc123-foo checkout main", projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /nix/store/abc123-foo checkout main", projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C <ro> checkout: got %s, want abstain (write-class)", got.Decision)
 	}
 	// soft reset is write-class.
-	if got := r.Evaluate(chdirInput("git -C /nix/store/abc123-foo reset --soft HEAD~1", projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /nix/store/abc123-foo reset --soft HEAD~1", projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C <ro> reset --soft: got %s, want abstain (write-class)", got.Decision)
 	}
 	// read-only remote is read-class: read-only zone still Approves, unknown zone Abstains.
-	if got := r.Evaluate(chdirInput("git -C /nix/store/abc123-foo remote -v", projectCWD)); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /nix/store/abc123-foo remote -v", projectCWD))); got.Decision != hookio.Approve {
 		t.Errorf("git -C <ro> remote -v: got %s, want approve (read-class)", got.Decision)
 	}
-	if got := r.Evaluate(chdirInput("git -C /etc remote -v", projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc remote -v", projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C <unknown> remote -v: got %s, want abstain", got.Decision)
 	}
 }
@@ -178,12 +178,12 @@ func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 	// spelling an Abstain, and Abstain IS the demotion target — so it can no longer
 	// distinguish "left alone" from "demoted". `git config core.hooksPath` is an Ask
 	// that no pg2-4yy4r ruling touched, so it carries the claim now.
-	if got := r.Evaluate(chdirInput("git -C /etc config core.hooksPath /tmp/h", projectCWD)); got.Decision != hookio.Ask {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc config core.hooksPath /tmp/h", projectCWD))); got.Decision != hookio.Ask {
 		t.Errorf("git -C /etc config core.hooksPath: got %s, want ask (an unsafe -C dir must not demote an Ask)", got.Decision)
 	}
 	// `clean` is asserted anyway, for the same reason `reset --hard` is below: the -C
 	// gate must not turn an already-abstaining verdict into anything ELSE.
-	if got := r.Evaluate(chdirInput("git -C /etc clean -fd", projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc clean -fd", projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C /etc clean -fd: got %s, want abstain (pg2-u0e0c; the -C gate leaves a non-Approve alone)", got.Decision)
 	}
 	// `reset --hard` is an Abstain since pg2-ur9zc (operator ruling pg2-4yy4r item
@@ -192,16 +192,16 @@ func TestGit_Chdir_NonApproveVerdicts_Unaffected(t *testing.T) {
 	// because the -C gate must not turn it into anything ELSE: chdirSafe fires only
 	// on a would-be Approve, so an already-abstaining verdict passes through
 	// untouched, reason and all.
-	if got := r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc reset --hard HEAD", projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C /etc reset --hard: got %s, want abstain (the -C gate leaves a non-Approve alone)", got.Decision)
 	}
 	// push --force is a Reject since pg2-bohpm (was Ask); either way the -C gate
 	// must leave it alone.
-	if got := r.Evaluate(chdirInput("git -C /etc push --force", projectCWD)); got.Decision != hookio.Reject {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc push --force", projectCWD))); got.Decision != hookio.Reject {
 		t.Errorf("git -C /etc push --force: got %s, want reject (unchanged by the -C gate)", got.Decision)
 	}
 	// tag -> Reject even with an unsafe -C dir.
-	if got := r.Evaluate(chdirInput("git -C /etc tag v1.0", projectCWD)); got.Decision != hookio.Reject {
+	if got := hookio.Verdict(r.Evaluate(chdirInput("git -C /etc tag v1.0", projectCWD))); got.Decision != hookio.Reject {
 		t.Errorf("git -C /etc tag: got %s, want reject (unchanged)", got.Decision)
 	}
 }
@@ -213,7 +213,7 @@ func TestGit_Chdir_BareGit_Unaffected_ByCWDZone(t *testing.T) {
 	// CWD out of every zone; bare git must still Approve.
 	approve := []string{"git status", "git add .", "git commit -m x", "git log"}
 	for _, cmd := range approve {
-		got := r.Evaluate(chdirInput(cmd, "/etc"))
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, "/etc")))
 		if got.Decision != hookio.Approve {
 			t.Errorf("bare %q (cwd out of zone): got %s (%s), want approve (no -C gate)", cmd, got.Decision, got.Reason)
 		}
@@ -228,7 +228,7 @@ func TestGit_Chdir_NilEvaluator_Legacy_Approve(t *testing.T) {
 		"git -C /nix/store/abc add .",
 	}
 	for _, cmd := range approve {
-		got := r.Evaluate(chdirInput(cmd, projectCWD))
+		got := hookio.Verdict(r.Evaluate(chdirInput(cmd, projectCWD)))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q (nil eval): got %s, want approve (legacy behavior)", cmd, got.Decision)
 		}
@@ -239,7 +239,7 @@ func TestGit_Chdir_NilEvaluator_Legacy_Approve(t *testing.T) {
 // dir and a configured evaluator (the guard fires before the -C path logic).
 func TestGit_Chdir_ConfigInjection_StillAbstains(t *testing.T) {
 	r := newWithProject(t)
-	if got := r.Evaluate(chdirInput(`git -C /home/user/project -c core.pager="touch /tmp/pwned" log`, projectCWD)); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(chdirInput(`git -C /home/user/project -c core.pager="touch /tmp/pwned" log`, projectCWD))); got.Decision != hookio.NoOpinion {
 		t.Errorf("git -C <rw> -c core.pager=EVIL log: got %s, want abstain (RCE guard)", got.Decision)
 	}
 }

@@ -25,8 +25,8 @@ func TestGit_ConfigInjection_Abstain(t *testing.T) {
 	}
 	for _, cmd := range abstain {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (config injection)", cmd, got.Decision)
 		}
 	}
@@ -40,7 +40,7 @@ func TestGit_ConfigInjection_Abstain(t *testing.T) {
 	}
 	for _, cmd := range notInjection {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (must not be flagged as injection)", cmd, got.Decision, got.Reason)
 		}
@@ -71,7 +71,7 @@ func TestGit_ReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -89,7 +89,7 @@ func TestGit_Modifying_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -107,7 +107,7 @@ func TestGit_ResetSoft_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -129,8 +129,8 @@ func TestGit_ResetHard_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git reset --hard HEAD~1"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("git reset --hard: got %s (%s), want abstain (operator ruling pg2-4yy4r item 4: this rule does not prompt for it)", got.Decision, got.Reason)
 	}
 }
@@ -156,8 +156,8 @@ func TestGit_NonGit_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("ls: got %s, want abstain", got.Decision)
 	}
 }
@@ -168,8 +168,8 @@ func TestGit_NonBash_Abstain(t *testing.T) {
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Read: got %s, want abstain", got.Decision)
 	}
 }
@@ -195,7 +195,7 @@ func TestGit_GitDirReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (read-only with redirected context)", cmd, got.Decision)
 		}
@@ -224,7 +224,7 @@ func TestGit_GitDirModifying_Ask(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Ask {
 			t.Errorf("cmd %q: got %s, want ask (modifying with redirected context)", cmd, got.Decision)
 		}
@@ -244,7 +244,7 @@ func TestGit_CosmeticEnvVars_Unchanged(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (cosmetic env var shouldn't change decision)", cmd, got.Decision)
 		}
@@ -257,7 +257,7 @@ func TestGit_RebaseNonInteractive_Approve(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git rebase main"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("git rebase main: got %s, want approve", got.Decision)
 	}
@@ -275,7 +275,7 @@ func TestGit_Checkout_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -293,7 +293,7 @@ func TestGit_CheckoutDot_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -312,7 +312,7 @@ func TestGit_MvRm_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -334,7 +334,7 @@ func TestGit_Worktree_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -347,7 +347,7 @@ func TestGit_CherryPick_Approve(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git cherry-pick abc123"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("git cherry-pick: got %s, want approve", got.Decision)
 	}
@@ -359,8 +359,8 @@ func TestGit_RebaseInteractive_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git rebase -i HEAD~3"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("git rebase -i: got %s, want abstain (interactive)", got.Decision)
 	}
 }
@@ -376,7 +376,7 @@ func TestGit_RebaseInteractiveWithSequenceEditor_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (automated interactive rebase)", cmd, got.Decision)
 		}
@@ -394,7 +394,7 @@ func TestGit_FilterBranch_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -407,7 +407,7 @@ func TestGit_FilterBranchWithGitDir_Ask(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": `GIT_DIR=/other git filter-branch --msg-filter 'cat' HEAD~1..HEAD`}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Ask {
 		t.Errorf("git filter-branch with GIT_DIR: got %s, want ask", got.Decision)
 	}
@@ -425,7 +425,7 @@ func TestGit_Tag_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s, want reject", cmd, got.Decision)
 		}
@@ -477,7 +477,7 @@ func TestGit_RemoteMutating_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Approve {
 			t.Fatalf("cmd %q: got APPROVE (%s) — the remote verb was displaced out of the blocked set; the pg2-8imjo defect", cmd, got.Reason)
 		}
@@ -514,7 +514,7 @@ func TestGit_RemoteReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (read-only git remote must stay approvable)", cmd, got.Decision, got.Reason)
 		}
@@ -532,8 +532,8 @@ func TestGit_RemoteMutation_TextIsNotAnOperation(t *testing.T) {
 		cmd  string
 		want hookio.Decision
 	}{
-		{`bd comment pg2-8imjo -m "git remote set-url origin https://example.invalid/x.git measured allow"`, hookio.Abstain},
-		{`bd update pg2-8imjo --notes "do not run git remote -v add upstream https://example.invalid/x.git"`, hookio.Abstain},
+		{`bd comment pg2-8imjo -m "git remote set-url origin https://example.invalid/x.git measured allow"`, hookio.NoOpinion},
+		{`bd update pg2-8imjo --notes "do not run git remote -v add upstream https://example.invalid/x.git"`, hookio.NoOpinion},
 		{`git commit -m "git remote set-url is prohibited (pg2-8imjo)"`, hookio.Approve},
 		{`git commit -m "the git remote add gate was flag-displaceable"`, hookio.Approve},
 	}
@@ -542,7 +542,7 @@ func TestGit_RemoteMutation_TextIsNotAnOperation(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Reject {
 			t.Errorf("cmd %q: got REJECT (%s) — a remote mutation appearing as TEXT must not be denied", tc.cmd, got.Reason)
 		}
@@ -575,7 +575,7 @@ func TestGit_PushForceWithLease_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (same-branch lease must stay approvable)", cmd, got.Decision, got.Reason)
 		}
@@ -603,7 +603,7 @@ func TestGit_PushForceWithLease_CrossBranch_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (cross-branch lease)", cmd, got.Decision, got.Reason)
 		}
@@ -619,7 +619,7 @@ func TestGit_PushForceWithLease_NonOriginRemote_Ask(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git push --force-with-lease upstream main"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Ask {
 		t.Errorf("git push --force-with-lease upstream main: got %s (%s), want ask (unchanged)", got.Decision, got.Reason)
 	}
@@ -649,7 +649,7 @@ func TestGit_PushForce_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (force-push)", cmd, got.Decision, got.Reason)
 		}
@@ -675,7 +675,7 @@ func TestGit_PushDelete_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (remote-ref delete)", cmd, got.Decision, got.Reason)
 		}
@@ -698,7 +698,7 @@ func TestGit_PushMirror_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (--mirror)", cmd, got.Decision, got.Reason)
 		}
@@ -733,7 +733,7 @@ func TestGit_PushOrdinary_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (ordinary push)", cmd, got.Decision, got.Reason)
 		}
@@ -775,7 +775,7 @@ func TestGit_PushToNetworkURL_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (network push destination)", cmd, got.Decision, got.Reason)
 		}
@@ -803,7 +803,7 @@ func TestGit_PushToLocalPath_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (a LOCAL path destination is deliberately ungated)", cmd, got.Decision, got.Reason)
 		}
@@ -826,7 +826,7 @@ func TestGit_PushNetworkURL_OrderedBeforeLeaseAsk(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Ask {
 			t.Fatalf("cmd %q: got ASK (%s) — the non-origin --force-with-lease branch shadowed the pg2-abb65 URL Reject", cmd, got.Reason)
 		}
@@ -848,15 +848,15 @@ func TestGit_PushURL_TextIsNotADestination(t *testing.T) {
 	}{
 		{`git commit -m "push to https://example.invalid/x.git is prohibited"`, hookio.Approve},
 		{`git commit -m "git push git@example.invalid:evil/x.git main was allowed"`, hookio.Approve},
-		{`bd comment pg2-abb65 -m "git push https://example.invalid/x.git main measured allow"`, hookio.Abstain},
-		{`bd update pg2-abb65 --notes "do not push to ssh://git@example.invalid/x.git"`, hookio.Abstain},
+		{`bd comment pg2-abb65 -m "git push https://example.invalid/x.git main measured allow"`, hookio.NoOpinion},
+		{`bd update pg2-abb65 --notes "do not push to ssh://git@example.invalid/x.git"`, hookio.NoOpinion},
 	}
 	for _, tc := range cases {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Reject {
 			t.Errorf("cmd %q: got REJECT (%s) — a URL appearing as TEXT is not a push destination", tc.cmd, got.Reason)
 		}
@@ -881,15 +881,15 @@ func TestGit_PushForce_TextIsNotAnOperation(t *testing.T) {
 		{`git commit -m "never --force push"`, hookio.Approve},
 		{`git commit -m "do not git push origin +main"`, hookio.Approve},
 		// Not a git executable at all: the rule never runs.
-		{`bd comment pg2-bohpm -m "git push --force is prohibited"`, hookio.Abstain},
-		{`bd update pg2-bohpm --notes "do not git push --force or push origin +main"`, hookio.Abstain},
+		{`bd comment pg2-bohpm -m "git push --force is prohibited"`, hookio.NoOpinion},
+		{`bd update pg2-bohpm --notes "do not git push --force or push origin +main"`, hookio.NoOpinion},
 	}
 	for _, tc := range cases {
 		input := &hookio.HookInput{
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Reject {
 			t.Errorf("cmd %q: got REJECT (%s) — a prohibited spelling appearing as TEXT must not be denied", tc.cmd, got.Reason)
 		}
@@ -917,11 +917,11 @@ func TestGit_BranchForceDelete_NeverApproves(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "git branch -D feat"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision == hookio.Approve {
 		t.Fatalf("git branch -D feat: got APPROVE (%s) — it fell through to modifyingSubcommands[\"branch\"]; the documented trap", got.Reason)
 	}
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("git branch -D feat: got %s (%s), want abstain (operator ruling pg2-4yy4r item 5, 2026-07-31: Abstain on any unsafe `git branch` spelling)", got.Decision, got.Reason)
 	}
 }
@@ -995,7 +995,7 @@ func TestGit_ConfigSafetyKeyWrite_Ask(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Approve {
 			t.Fatalf("cmd %q: got APPROVE (%s) — the config key was not seen at this operand position; the pg2-szadj defect", cmd, got.Reason)
 		}
@@ -1027,7 +1027,7 @@ func TestGit_ConfigRedirectKeyWrite_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s (%s), want reject (config-spelled remote redirect must match the git remote set-url Reject)", cmd, got.Decision, got.Reason)
 		}
@@ -1066,7 +1066,7 @@ func TestGit_ConfigRead_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (a config READ must stay approvable)", cmd, got.Decision, got.Reason)
 		}
@@ -1108,7 +1108,7 @@ func TestGit_ConfigOrdinaryWrite_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve — a blanket gate on config WRITES is the wrong fix (pg2-szadj)", cmd, got.Decision, got.Reason)
 		}
@@ -1135,7 +1135,7 @@ func TestGit_ConfigWrite_TextIsNotAnOperation(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Reject || got.Decision == hookio.Ask {
 			t.Errorf("cmd %q: got %s (%s) — a config write appearing as TEXT must not be gated", tc.cmd, got.Decision, got.Reason)
 		}
@@ -1162,8 +1162,8 @@ func TestGit_ConfigInjectionRoute_StillAbstains(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (the -c injection guard must not be regressed by pg2-szadj)", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -1196,7 +1196,7 @@ func TestGit_ConfigRedirectedContext(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != tc.want {
 			t.Errorf("cmd %q: got %s (%s), want %s — %s", tc.cmd, got.Decision, got.Reason, tc.want, tc.why)
 		}
@@ -1243,7 +1243,7 @@ func TestGit_ConfigSeparatedFlagValue(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": tc.cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != tc.want {
 			t.Errorf("cmd %q: got %s (%s), want %s — %s", tc.cmd, got.Decision, got.Reason, tc.want, tc.why)
 		}
@@ -1299,11 +1299,11 @@ func TestGit_Clean_UniformAbstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision == hookio.Approve {
 			t.Fatalf("cmd %q: got APPROVE (%s) — a flag-aware split of the clean arm approved a spelling; the ruling forbids inspecting a clean flag at all", cmd, got.Reason)
 		}
-		if got.Decision != hookio.Abstain {
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — pg2-u0e0c gives every clean spelling ONE verdict", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -1331,7 +1331,7 @@ func TestGit_Clean_EmitsEmptyHookOutput(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := New(nil).Evaluate(input)
+		got := hookio.Verdict(New(nil).Evaluate(input))
 		out := string(hookio.FormatOutput(got, nil))
 		if out != "{}" {
 			t.Errorf("cmd %q: emitted %s, want {} — anything else is a DECISION handed to Claude Code, and `permissionDecision: \"allow\"` would auto-approve an irreversible delete of untracked files", cmd, out)

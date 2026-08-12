@@ -2,6 +2,7 @@ package configrules
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -290,13 +291,13 @@ func NewFromConfig(cfg *Config) *Rule {
 
 func (r *Rule) Name() string { return "config-rules" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("config-rules: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	// First pass: a blocked leaf ANYWHERE in the compound is the most-restrictive
@@ -312,7 +313,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Reject,
 				Reason:   "config-rules: " + base + " is in blocked list",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
 	// Second pass: no leaf is blocked, so an approved leaf may Approve (an approved
@@ -321,14 +322,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		base := filepath.Base(pc.Executable)
 		if r.approved[base] {
 			if len(pc.EnvVars) > 0 {
-				return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+				return hookio.NotApplicable()
 			}
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "config-rules: " + base + " is in approved list",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }

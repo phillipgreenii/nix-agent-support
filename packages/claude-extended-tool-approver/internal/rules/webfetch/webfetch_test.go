@@ -22,7 +22,7 @@ func makeWebFetchInput(url string) *hookio.HookInput {
 
 func TestWebFetch_RawGitHub_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://raw.githubusercontent.com/owner/repo/main/file.go"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://raw.githubusercontent.com/owner/repo/main/file.go")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -30,7 +30,7 @@ func TestWebFetch_RawGitHub_Approve(t *testing.T) {
 
 func TestWebFetch_Blob_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/blob/main/src/file.go"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/blob/main/src/file.go")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -38,7 +38,7 @@ func TestWebFetch_Blob_Approve(t *testing.T) {
 
 func TestWebFetch_Raw_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/raw/main/file.go"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/raw/main/file.go")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -54,7 +54,7 @@ func TestWebFetch_RepoRoot_Approve(t *testing.T) {
 		"https://github.com/owner/repo?tab=readme-ov-file#section",
 	}
 	for _, url := range approve {
-		got := r.Evaluate(makeWebFetchInput(url))
+		got := hookio.Verdict(r.Evaluate(makeWebFetchInput(url)))
 		if got.Decision != hookio.Approve {
 			t.Errorf("url %q: got %s, want approve", url, got.Decision)
 		}
@@ -63,8 +63,8 @@ func TestWebFetch_RepoRoot_Approve(t *testing.T) {
 
 func TestWebFetch_NonGitHub_Abstain(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://example.com/file.go"))
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://example.com/file.go")))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("got %s, want abstain", got.Decision)
 	}
 }
@@ -75,8 +75,8 @@ func TestWebFetch_EmptyURL_Abstain(t *testing.T) {
 		ToolName:  "WebFetch",
 		ToolInput: mustJSON(map[string]string{"url": "", "prompt": ""}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("got %s, want abstain", got.Decision)
 	}
 }
@@ -87,15 +87,15 @@ func TestWebFetch_NonWebFetchTool_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "curl https://github.com/owner/repo/blob/main/file.go"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("got %s, want abstain (not WebFetch tool)", got.Decision)
 	}
 }
 
 func TestWebFetch_DocsAnthropic_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://docs.anthropic.com/en/docs/overview"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://docs.anthropic.com/en/docs/overview")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -103,7 +103,7 @@ func TestWebFetch_DocsAnthropic_Approve(t *testing.T) {
 
 func TestWebFetch_MDN_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://developer.mozilla.org/en-US/docs/Web/JavaScript"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://developer.mozilla.org/en-US/docs/Web/JavaScript")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -111,7 +111,7 @@ func TestWebFetch_MDN_Approve(t *testing.T) {
 
 func TestWebFetch_NixosOrg_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://nixos.org/manual/nix/stable/"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://nixos.org/manual/nix/stable/")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -119,7 +119,7 @@ func TestWebFetch_NixosOrg_Approve(t *testing.T) {
 
 func TestWebFetch_PkgGoDev_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://pkg.go.dev/fmt"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://pkg.go.dev/fmt")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}
@@ -127,15 +127,15 @@ func TestWebFetch_PkgGoDev_Approve(t *testing.T) {
 
 func TestWebFetch_GitHubReleaseBinary_Abstain(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/releases/download/v1.0/binary.tar.gz"))
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://github.com/owner/repo/releases/download/v1.0/binary.tar.gz")))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("got %s, want abstain (release binary)", got.Decision)
 	}
 }
 
 func TestWebFetch_RegistryNpmjs_Approve(t *testing.T) {
 	r := New()
-	got := r.Evaluate(makeWebFetchInput("https://registry.npmjs.org/express"))
+	got := hookio.Verdict(r.Evaluate(makeWebFetchInput("https://registry.npmjs.org/express")))
 	if got.Decision != hookio.Approve {
 		t.Errorf("got %s, want approve", got.Decision)
 	}

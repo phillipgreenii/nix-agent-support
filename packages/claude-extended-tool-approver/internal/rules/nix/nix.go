@@ -1,6 +1,7 @@
 package nix
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -63,13 +64,13 @@ func (r *Rule) Name() string {
 	return "nix"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("nix: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -96,13 +97,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "nix: " + basename + " is read-only",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if basename == "statix" {
 			return r.evaluateStatix(pc.Args)
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // statixReadOnly are the statix subcommands that only lint/report; "fix" mutates
@@ -111,22 +112,22 @@ var statixReadOnly = map[string]bool{
 	"check": true, "explain": true,
 }
 
-func (r *Rule) evaluateStatix(args []string) hookio.RuleResult {
+func (r *Rule) evaluateStatix(args []string) (hookio.RuleResult, error) {
 	sub := firstNonFlag(args)
 	if statixReadOnly[sub] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: statix " + sub + " is read-only",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	subcmd := firstNonFlag(args)
 	if subcmd == "" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if subcmd == "develop" && r.exprEval != nil {
 		// `nix develop -c <cmd>` and `nix develop --command <cmd>` both run an
@@ -140,14 +141,18 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) hookio.RuleRe
 		if innerCmd != "" {
 			outerExpr := normalizeExpr("nix " + strings.Join(args, " "))
 			stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix develop", Expression: outerExpr}}
-			return r.exprEval.EvaluateExpression(innerCmd, stack, input)
+			// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+			// hookio.FromRecursion states the translation in one place.
+			return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
 		}
 		// No inner command: approve develop as usual
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: nix develop is approved",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if subcmd == "shell" && r.exprEval != nil {
 		innerCmd := extractAfterFlag(args, "-c")
@@ -157,14 +162,18 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) hookio.RuleRe
 		if innerCmd != "" {
 			outerExpr := normalizeExpr("nix " + strings.Join(args, " "))
 			stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix shell", Expression: outerExpr}}
-			return r.exprEval.EvaluateExpression(innerCmd, stack, input)
+			// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+			// hookio.FromRecursion states the translation in one place.
+			return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
 		}
 		// No -c flag: just entering a shell with packages available — approve
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: nix shell (no command) is approved",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if subcmd == "flake" {
 		flakeSub := firstNonFlagAfter(args, "flake")
@@ -173,61 +182,61 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) hookio.RuleRe
 				Decision: hookio.Approve,
 				Reason:   "nix: nix flake " + flakeSub + " is approved",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if nixApproved[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: nix " + subcmd + " is approved",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 var rebuildApproved = map[string]bool{
 	"build": true, "check": true, "dry-activate": true, "dry-build": true,
 }
 
-func (r *Rule) evaluateRebuild(basename string, args []string) hookio.RuleResult {
+func (r *Rule) evaluateRebuild(basename string, args []string) (hookio.RuleResult, error) {
 	subcmd := firstNonFlag(args)
 	if rebuildReject[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
 			Reason:   "nix: " + basename + " " + subcmd + " requires human",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if rebuildApproved[subcmd] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "nix: " + basename + " " + subcmd + " is safe (no activation)",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateNixEnv(args []string) hookio.RuleResult {
+func (r *Rule) evaluateNixEnv(args []string) (hookio.RuleResult, error) {
 	for _, a := range args {
 		if nixEnvRejectFlags[a] {
 			return hookio.RuleResult{
 				Decision: hookio.Reject,
 				Reason:   "nix: nix-env " + a + " modifies global profile",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if a == "--query" || a == "-q" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "nix: nix-env query is read-only",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 var nixStoreReadOnly = map[string]bool{
@@ -239,20 +248,20 @@ var nixStoreReadOnly = map[string]bool{
 	"--dump-db": true,
 }
 
-func (r *Rule) evaluateNixStore(args []string) hookio.RuleResult {
+func (r *Rule) evaluateNixStore(args []string) (hookio.RuleResult, error) {
 	for _, a := range args {
 		if nixStoreReadOnly[a] {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "nix: nix-store " + a + " is read-only",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) (hookio.RuleResult, error) {
 	innerCmd := extractAfterFlag(args, "--run")
 	if innerCmd == "" {
 		innerCmd = extractAfterFlag(args, "--command")
@@ -260,14 +269,18 @@ func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) hookio.R
 	if innerCmd != "" {
 		outerExpr := normalizeExpr("nix-shell " + strings.Join(args, " "))
 		stack := []hookio.StackFrame{{RuleName: r.Name(), Command: "nix-shell", Expression: outerExpr}}
-		return r.exprEval.EvaluateExpression(innerCmd, stack, input)
+		// ADR 0043 RECURSION BOUNDARY. NOT `..., nil`: an inner NoOpinion is the inner
+		// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
+		// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
+		// hookio.FromRecursion states the translation in one place.
+		return hookio.FromRecursion(r.exprEval.EvaluateExpression(innerCmd, stack, input))
 	}
 	// nix-shell without --run: just entering a shell — approve
 	return hookio.RuleResult{
 		Decision: hookio.Approve,
 		Reason:   "nix: nix-shell (no command) is approved",
 		Module:   r.Name(),
-	}
+	}, nil
 }
 
 func normalizeExpr(s string) string {

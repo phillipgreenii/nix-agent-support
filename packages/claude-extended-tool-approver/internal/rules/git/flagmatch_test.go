@@ -34,10 +34,10 @@ import (
 // evalCmd is the shared "ask the rule about one command string" helper.
 func evalCmd(t *testing.T, cmd string) hookio.RuleResult {
 	t.Helper()
-	return New(nil).Evaluate(&hookio.HookInput{
+	return hookio.Verdict(New(nil).Evaluate(&hookio.HookInput{
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": cmd}),
-	})
+	}))
 }
 
 // longFlagSpellings returns every spelling of canonical that git's parse-options
@@ -67,7 +67,7 @@ func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 	for _, flag := range longFlagSpellings("hard") {
 		cmd := "git reset " + flag + " HEAD~1"
 		got := evalCmd(t, cmd)
-		if got.Decision != hookio.Abstain {
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — real git PERFORMS the hard reset for --hard/--har/--ha/--h (measured git 2.54.0, 2026-07-30), so no spelling may Approve", cmd, got.Decision, got.Reason)
 		}
 		if strings.Contains(strings.ToLower(got.Reason), "soft") {
@@ -76,7 +76,7 @@ func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 	}
 	// `--hard=x` is rejected by real git ("option `hard' takes no value"), so gating
 	// it costs nothing and matching the glued form keeps the matcher uniform.
-	if got := evalCmd(t, "git reset --har=x HEAD~1"); got.Decision != hookio.Abstain {
+	if got := evalCmd(t, "git reset --har=x HEAD~1"); got.Decision != hookio.NoOpinion {
 		t.Errorf("git reset --har=x: got %s, want abstain", got.Decision)
 	}
 }
@@ -88,7 +88,7 @@ func TestGit_ResetHardAbbrev_NeverApprovedNorCalledSoft(t *testing.T) {
 func TestGit_RebaseInteractiveAbbrev_EditorRequired(t *testing.T) {
 	for _, flag := range longFlagSpellings("interactive") {
 		bare := "git rebase " + flag + " HEAD~1"
-		if got := evalCmd(t, bare); got.Decision != hookio.Abstain {
+		if got := evalCmd(t, bare); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain (interactive rebase requires an editor)", bare, got.Decision, got.Reason)
 		}
 		withEditor := `GIT_SEQUENCE_EDITOR="sed -i 's/^pick /fixup /'" git rebase ` + flag + " HEAD~1"
@@ -255,14 +255,14 @@ func TestGit_Pg2os1kq_PinnedProbeRows(t *testing.T) {
 		// ruled (pg2-4yy4r item 4) that this rule does not prompt for a hard reset.
 		// The row this bead's probe was ABOUT is still pinned — none of the four may
 		// Approve, which is what pg2-os1kq measured going wrong.
-		{"git reset --hard HEAD~1", hookio.Abstain, "was ASK, correct for pg2-os1kq; Abstain since pg2-ur9zc"},
-		{"git reset --har  HEAD~1", hookio.Abstain, "was ALLOW — destroys the working tree"},
-		{"git reset --ha   HEAD~1", hookio.Abstain, "was ALLOW — destroys the working tree"},
-		{"git reset --h    HEAD~1", hookio.Abstain, "was ALLOW — the shortest accepted spelling"},
+		{"git reset --hard HEAD~1", hookio.NoOpinion, "was ASK, correct for pg2-os1kq; Abstain since pg2-ur9zc"},
+		{"git reset --har  HEAD~1", hookio.NoOpinion, "was ALLOW — destroys the working tree"},
+		{"git reset --ha   HEAD~1", hookio.NoOpinion, "was ALLOW — destroys the working tree"},
+		{"git reset --h    HEAD~1", hookio.NoOpinion, "was ALLOW — the shortest accepted spelling"},
 		{"git push --force origin main", hookio.Reject, "was already correct"},
 		{"git push --force-with-leas origin main", hookio.Approve, "allow is CORRECT: same-branch lease to origin"},
 		{"git push --force-with-leas origin main:other", hookio.Reject, "cross-branch: already denied before this bead"},
-		{"git rebase --interactiv", hookio.Abstain, "was ALLOW — skipped the editor requirement"},
+		{"git rebase --interactiv", hookio.NoOpinion, "was ALLOW — skipped the editor requirement"},
 	}
 	for _, row := range rows {
 		got := evalCmd(t, row.cmd)
@@ -307,15 +307,15 @@ func TestGit_SiblingBeadVerdicts_Unchanged(t *testing.T) {
 		// their PURPOSE at the new level: the arm is FLAG-BLIND, so all three must
 		// agree. `--f` is the abbreviation row — if it ever diverges from bare `git
 		// clean`, a long-flag test was reintroduced (pg2-u0e0c).
-		{"pg2-u0e0c git clean stays flag-blind", "git clean", hookio.Abstain},
-		{"pg2-u0e0c git clean -fdx", "git clean -fdx", hookio.Abstain},
-		{"pg2-u0e0c git clean --f", "git clean --f", hookio.Abstain},
+		{"pg2-u0e0c git clean stays flag-blind", "git clean", hookio.NoOpinion},
+		{"pg2-u0e0c git clean -fdx", "git clean -fdx", hookio.NoOpinion},
+		{"pg2-u0e0c git clean --f", "git clean --f", hookio.NoOpinion},
 		// `git branch -D` was pinned here as Ask from pg2-bohpm until pg2-fkmg4's
 		// operator ruling (2026-07-31) moved every UNGUARDED `git branch` spelling to
 		// Abstain. The row stays, at its new verdict, because what it guards is that
 		// the branch gate still FIRES — the failure it exists to catch is a fall-through
 		// to modifyingSubcommands["branch"] and an APPROVE.
-		{"pg2-fkmg4 branch -D", "git branch -D feat", hookio.Abstain},
+		{"pg2-fkmg4 branch -D", "git branch -D feat", hookio.NoOpinion},
 	}
 	for _, row := range rows {
 		if got := evalCmd(t, row.cmd); got.Decision != row.want {
@@ -344,11 +344,11 @@ func TestGit_BranchForceDelete_PinnedProbeRows(t *testing.T) {
 		want hookio.Decision
 		note string
 	}{
-		{"git branch -D foo", hookio.Abstain, "was ask before pg2-fkmg4; the level moved, the gate did not"},
-		{"git branch -Df foo", hookio.Abstain, "was ALLOW before pg2-os1kq — clustered short"},
-		{"git branch -fD foo", hookio.Abstain, "was ALLOW before pg2-os1kq — clustered short, reversed"},
-		{"git branch --delete --force foo", hookio.Abstain, "was ALLOW before pg2-os1kq — LONG-FORM EQUIVALENT, not an abbreviation"},
-		{"git branch --delet --forc foo", hookio.Abstain, "was ALLOW before pg2-os1kq — abbreviated long form"},
+		{"git branch -D foo", hookio.NoOpinion, "was ask before pg2-fkmg4; the level moved, the gate did not"},
+		{"git branch -Df foo", hookio.NoOpinion, "was ALLOW before pg2-os1kq — clustered short"},
+		{"git branch -fD foo", hookio.NoOpinion, "was ALLOW before pg2-os1kq — clustered short, reversed"},
+		{"git branch --delete --force foo", hookio.NoOpinion, "was ALLOW before pg2-os1kq — LONG-FORM EQUIVALENT, not an abbreviation"},
+		{"git branch --delet --forc foo", hookio.NoOpinion, "was ALLOW before pg2-os1kq — abbreviated long form"},
 		{"git branch -d foo", hookio.Approve, "allow is CORRECT: -d refuses unmerged branches, so git's guard holds"},
 	}
 	for _, row := range rows {
@@ -405,7 +405,7 @@ func TestGit_BranchForceDelete_EverySpelling(t *testing.T) {
 		if got.Decision == hookio.Approve {
 			t.Errorf("cmd %q: got APPROVE (%s) — this force-deletes an unmerged branch, making its commits unreachable", cmd, got.Reason)
 		}
-		if got.Decision != hookio.Abstain {
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — pg2-fkmg4's ruling defers every UNGUARDED `git branch` spelling to the prompt", cmd, got.Decision, got.Reason)
 		}
 	}
@@ -497,7 +497,7 @@ func TestGit_BranchFlags_AreCaseSensitive(t *testing.T) {
 		if got := evalCmd(t, p.guarded); got.Decision != hookio.Approve {
 			t.Errorf("%s: got %s (%s), want allow — the lowercase %s is GUARDED by git and MUST NOT read as its uppercase twin", p.guarded, got.Decision, got.Reason, p.op)
 		}
-		if got := evalCmd(t, p.fused); got.Decision != hookio.Abstain {
+		if got := evalCmd(t, p.fused); got.Decision != hookio.NoOpinion {
 			t.Errorf("%s: got %s (%s), want abstain — the uppercase %s is that operation FUSED with --force", p.fused, got.Decision, got.Reason, p.op)
 		}
 	}
@@ -540,21 +540,21 @@ func TestGit_Pg2fkmg4_PinnedProbeRows(t *testing.T) {
 		note string
 	}{
 		// The bead's ten verbatim rows.
-		{"git branch -D foo", hookio.Abstain, "was ask; delete FUSED with force"},
-		{"git branch -Df foo", hookio.Abstain, "bead said ALLOW, was already ask (pg2-os1kq)"},
-		{"git branch -fD foo", hookio.Abstain, "bead said ALLOW, was already ask (pg2-os1kq)"},
-		{"git branch --delete --force foo", hookio.Abstain, "bead said ALLOW, was already ask (pg2-os1kq)"},
-		{"git branch --delet --forc foo", hookio.Abstain, "bead said ALLOW, was already ask (pg2-os1kq)"},
-		{"git branch -M old new", hookio.Abstain, "was ALLOW — measured clobbering: keepme bdfdb1f -> bad17ef"},
-		{"git branch -C a b", hookio.Abstain, "was ALLOW — measured overwriting an existing branch"},
+		{"git branch -D foo", hookio.NoOpinion, "was ask; delete FUSED with force"},
+		{"git branch -Df foo", hookio.NoOpinion, "bead said ALLOW, was already ask (pg2-os1kq)"},
+		{"git branch -fD foo", hookio.NoOpinion, "bead said ALLOW, was already ask (pg2-os1kq)"},
+		{"git branch --delete --force foo", hookio.NoOpinion, "bead said ALLOW, was already ask (pg2-os1kq)"},
+		{"git branch --delet --forc foo", hookio.NoOpinion, "bead said ALLOW, was already ask (pg2-os1kq)"},
+		{"git branch -M old new", hookio.NoOpinion, "was ALLOW — measured clobbering: keepme bdfdb1f -> bad17ef"},
+		{"git branch -C a b", hookio.NoOpinion, "was ALLOW — measured overwriting an existing branch"},
 		{"git branch -d merged", hookio.Approve, "allow is CORRECT: git refuses an unmerged branch"},
 		{"git branch -m old new", hookio.Approve, "allow is CORRECT: git refuses an existing target"},
 		{"git branch", hookio.Approve, "allow is CORRECT: a read"},
 		// The four extra spellings the acceptance criteria name.
 		{"git branch --no-force other main", hookio.Approve, "a NEGATION is not the flag — the `--no-` trap"},
-		{"git branch -d --force foo", hookio.Abstain, "explicit force removes the delete guard"},
-		{"git branch --delete -f foo", hookio.Abstain, "same, short force"},
-		{"git branch foo -D", hookio.Abstain, "flag AFTER the operand: position must not matter"},
+		{"git branch -d --force foo", hookio.NoOpinion, "explicit force removes the delete guard"},
+		{"git branch --delete -f foo", hookio.NoOpinion, "same, short force"},
+		{"git branch foo -D", hookio.NoOpinion, "flag AFTER the operand: position must not matter"},
 	}
 	for _, row := range rows {
 		got := evalCmd(t, row.cmd)
@@ -613,7 +613,7 @@ func TestGit_BranchUnguarded_Abstain(t *testing.T) {
 			t.Errorf("cmd %q: got APPROVE (%s) — %s, so git's own guard is GONE and this must not auto-approve", c.cmd, got.Reason, c.why)
 			continue
 		}
-		if got.Decision != hookio.Abstain {
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s (%s), want abstain — %s (operator ruling pg2-4yy4r item 5: Abstain on any unsafe spelling)", c.cmd, got.Decision, got.Reason, c.why)
 		}
 	}
@@ -665,15 +665,15 @@ func TestGit_BranchScope_OtherSubcommandsUnchanged(t *testing.T) {
 		// The row stays here on purpose: this guard's job is to pin that the `branch`
 		// predicate is unreachable from `reset`, and it does that just as well against
 		// reset's CURRENT verdict as against its old one.
-		{"git reset --hard HEAD~1", hookio.Abstain},
+		{"git reset --hard HEAD~1", hookio.NoOpinion},
 		{"git reset --soft HEAD~1", hookio.Approve},
-		{"git clean", hookio.Abstain},
-		{"git clean -fdx", hookio.Abstain},
+		{"git clean", hookio.NoOpinion},
+		{"git clean -fdx", hookio.NoOpinion},
 		{"git push --force origin main", hookio.Reject},
 		{"git push -f origin main", hookio.Reject},
 		{"git push --delete origin main", hookio.Reject},
 		{"git push origin main", hookio.Approve},
-		{"git rebase --interactiv", hookio.Abstain},
+		{"git rebase --interactiv", hookio.NoOpinion},
 		{"git remote -v add upstream https://example.invalid/x.git", hookio.Reject},
 		{"git remote -v", hookio.Approve},
 		{"git config core.hooksPath /tmp/h", hookio.Ask},

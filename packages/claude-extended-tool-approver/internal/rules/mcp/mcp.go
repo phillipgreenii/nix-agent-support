@@ -51,25 +51,33 @@ func (r *Rule) Name() string {
 	return "mcp"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
+	// Not an MCP tool at all: not this rule's business, and rules registered after
+	// it own the remaining tools.
 	if !strings.HasPrefix(input.ToolName, "mcp__") {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if allowedMCPTools[input.ToolName] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "allowed MCP tool",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 	if isReadOnlyMCPTool(input.ToolName) {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "read-only MCP tool (non-mutating verb)",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	// An mcp__ tool this rule could not positively clear. Kept NOT-APPLICABLE
+	// rather than converted to a terminal NoOpinion: preserving the pre-ADR-0043
+	// chain outcome is this change's whole contract, and turning it terminal would
+	// shadow every later rule for MCP tools. Promoting it is exactly the kind of
+	// per-site conversion ADR 0043's Decision point 3 requires its own
+	// demonstration for.
+	return hookio.NotApplicable()
 }
 
 // isReadOnlyMCPTool reports whether an mcp__server__tool name denotes a

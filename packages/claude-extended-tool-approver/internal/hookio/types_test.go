@@ -3,14 +3,14 @@ package hookio
 import "testing"
 
 // TestDecisionOrdering pins the restrictiveness order the engine's
-// EvaluateExpression fold depends on: Approve < Abstain < Ask < Reject. Reordering
+// EvaluateExpression fold depends on: Approve < NoOpinion < Ask < Reject. Reordering
 // these iota constants silently breaks the fold (e.g. an Abstaining leaf would stop
 // demoting an approving sibling), so this guards the ordering directly at its
 // source rather than only through the engine (pg2-t4uyx).
 func TestDecisionOrdering(t *testing.T) {
-	if Approve >= Abstain || Abstain >= Ask || Ask >= Reject {
-		t.Fatalf("Decision ordering broken: Approve=%d Abstain=%d Ask=%d Reject=%d; want Approve<Abstain<Ask<Reject",
-			Approve, Abstain, Ask, Reject)
+	if Approve >= NoOpinion || NoOpinion >= Ask || Ask >= Reject {
+		t.Fatalf("Decision ordering broken: Approve=%d NoOpinion=%d Ask=%d Reject=%d; want Approve<NoOpinion<Ask<Reject",
+			Approve, NoOpinion, Ask, Reject)
 	}
 	// Approve MUST be the zero value: every RuleResult that does not set Decision
 	// defaults to the LEAST restrictive verdict, so a rule that forgets to set it
@@ -21,14 +21,14 @@ func TestDecisionOrdering(t *testing.T) {
 }
 
 // TestMostRestrictive_AbstainOutranksApprove is the named regression for bypass #7
-// (Abstain-outranks-Approve ordering, types.go MostRestrictive). MostRestrictive is
+// (NoOpinion-outranks-Approve ordering, types.go MostRestrictive). MostRestrictive is
 // the shared most-risky-wins primitive the engine folds every leaf/redirection/
-// substitution through; the security-critical property is that Abstain (ceta has
+// substitution through; the security-critical property is that NoOpinion (ceta has
 // no opinion → defer to Claude's own prompt) MUST beat Approve, so a compound with
 // ANY non-approving leaf is never green-lit as a whole (pg2-t4uyx, pg2-1q5i3).
 func TestMostRestrictive_AbstainOutranksApprove(t *testing.T) {
 	approve := RuleResult{Decision: Approve, Module: "a"}
-	abstain := RuleResult{Decision: Abstain, Module: "b"}
+	abstain := RuleResult{Decision: NoOpinion, Module: "b"}
 	ask := RuleResult{Decision: Ask, Module: "c"}
 	reject := RuleResult{Decision: Reject, Module: "d"}
 
@@ -37,10 +37,10 @@ func TestMostRestrictive_AbstainOutranksApprove(t *testing.T) {
 		current, candidate RuleResult
 		want               Decision
 	}{
-		// The core invariant: Abstain must win over Approve regardless of argument
+		// The core invariant: NoOpinion must win over Approve regardless of argument
 		// position (the fold seeds with Approve and feeds each leaf as candidate).
-		{"approve then abstain", approve, abstain, Abstain},
-		{"abstain then approve", abstain, approve, Abstain},
+		{"approve then abstain", approve, abstain, NoOpinion},
+		{"abstain then approve", abstain, approve, NoOpinion},
 		// Ask and Reject outrank both.
 		{"approve then ask", approve, ask, Ask},
 		{"approve then reject", approve, reject, Reject},

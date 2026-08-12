@@ -72,33 +72,31 @@ func (r *Rule) Name() string {
 	return "claude-tools"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	// MCP tools (mcp__*) are handled by the MCP rule module
 	if strings.HasPrefix(input.ToolName, "mcp__") {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if abstainTools[input.ToolName] {
-		return hookio.RuleResult{
-			Decision: hookio.Abstain,
-			Reason:   "claude-tools: " + input.ToolName + " is a user-interaction tool (always abstain)",
-			Module:   r.Name(),
-		}
+		// Not applicable (ADR 0043): the chain must continue. Former Reason,
+		// kept because it is the only record of WHY: "claude-tools: " + input.ToolName + " is a user-interaction tool (always abstain)"
+		return hookio.NotApplicable()
 	}
 	if fileTools[input.ToolName] {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if searchTools[input.ToolName] {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if input.ToolName == "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	if approvedTools[input.ToolName] {
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "approved Claude tool",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }

@@ -1,6 +1,7 @@
 package buildtools
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -157,13 +158,13 @@ func (r *Rule) Name() string {
 	return "build-tools"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("build-tools: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -173,7 +174,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "approved build tool",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		// Base-generic verb-scoped approvals (stay in the base, not config).
 		if basename == "devbox" && baseVerbIs(pc.Args, "devbox", "search") {
@@ -181,21 +182,21 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "devbox search is approved",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if basename == "cue" && baseVerbIs(pc.Args, "cue", "vet") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "cue vet is approved (read-only validation)",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		if basename == "jar" && baseVerbIs(pc.Args, "jar", "xf") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "approved build tool: jar xf (extraction)",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		// Consumer-configured verb-scoped approvals (additive over the base).
 		if verbs := r.verbScoped[basename]; verbs != nil {
@@ -204,7 +205,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 					Decision: hookio.Approve,
 					Reason:   "approved verb-scoped tool: " + basename + " " + sub,
 					Module:   r.Name(),
-				}
+				}, nil
 			}
 		}
 		if r.approvedScripts[basename] {
@@ -212,7 +213,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Approve,
 				Reason:   "approved project script: " + basename,
 				Module:   r.Name(),
-			}
+			}, nil
 		}
 		// bash/sh <script> — check if the script arg is an approved script/tool.
 		if (basename == "bash" || basename == "sh") && len(pc.Args) > 0 {
@@ -222,11 +223,11 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 					Decision: hookio.Approve,
 					Reason:   "approved project script via " + basename + ": " + scriptBase,
 					Module:   r.Name(),
-				}
+				}, nil
 			}
 		}
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
 // baseVerbFlags is the BUILT-IN pre-verb flag allowlist behind the base-generic

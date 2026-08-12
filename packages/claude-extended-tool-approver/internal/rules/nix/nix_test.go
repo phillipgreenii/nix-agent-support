@@ -35,7 +35,7 @@ func TestNix_ReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -55,12 +55,12 @@ func TestNix_PrefetchAndStatix(t *testing.T) {
 		{"statix check", hookio.Approve},
 		{"statix check ./flake.nix", hookio.Approve},
 		{"statix explain W20", hookio.Approve},
-		{"statix fix", hookio.Abstain},
-		{"statix", hookio.Abstain},
+		{"statix fix", hookio.NoOpinion},
+		{"statix", hookio.NoOpinion},
 	}
 	for _, c := range cases {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
-		if got := r.Evaluate(input); got.Decision != c.want {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != c.want {
 			t.Errorf("cmd %q: got %s, want %s", c.cmd, got.Decision, c.want)
 		}
 	}
@@ -82,7 +82,7 @@ func TestNix_FlakeApprove(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -95,8 +95,8 @@ func TestNix_Run_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "nix run nixpkgs#hello"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("nix run: got %s, want abstain (executes arbitrary code)", got.Decision)
 	}
 }
@@ -116,7 +116,7 @@ func TestNix_DarwinRebuildSwitch_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s, want reject", cmd, got.Decision)
 		}
@@ -138,7 +138,7 @@ func TestNix_DarwinRebuildBuild_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -161,7 +161,7 @@ func TestNix_NixEnvInstall_Reject(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Reject {
 			t.Errorf("cmd %q: got %s, want reject", cmd, got.Decision)
 		}
@@ -179,7 +179,7 @@ func TestNix_NixEnvQuery_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -205,7 +205,7 @@ func TestNix_NixStore_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -218,7 +218,7 @@ func TestNix_NixInstantiate_Approve(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "nix-instantiate --eval -E '1+1'"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("nix-instantiate: got %s, want approve", got.Decision)
 	}
@@ -230,8 +230,8 @@ func TestNix_NonNix_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("ls: got %s, want abstain", got.Decision)
 	}
 }
@@ -262,7 +262,7 @@ func TestNixRule_ShellCommand(t *testing.T) {
 			"shellcheck --exclude=SC1091 /tmp/test.sh": {Decision: hookio.Approve, Reason: "approved", Module: "mock"},
 			"rm -rf /": {Decision: hookio.Reject, Reason: "rejected", Module: "mock"},
 		},
-		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
 	r := NewWithEvaluator(mockEval)
 
@@ -273,14 +273,14 @@ func TestNixRule_ShellCommand(t *testing.T) {
 	}{
 		{"shell -c safe", "nix shell nixpkgs#shellcheck -c shellcheck --exclude=SC1091 /tmp/test.sh", hookio.Approve},
 		{"shell -c dangerous", "nix shell nixpkgs#coreutils -c rm -rf /", hookio.Reject},
-		{"shell -c unknown", "nix shell nixpkgs#hello -c unknown-tool", hookio.Abstain},
+		{"shell -c unknown", "nix shell nixpkgs#hello -c unknown-tool", hookio.NoOpinion},
 		{"shell --command", "nix shell nixpkgs#shellcheck --command shellcheck --exclude=SC1091 /tmp/test.sh", hookio.Approve},
 		{"shell without command", "nix shell nixpkgs#hello", hookio.Approve},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command}), CWD: "/tmp/project"}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v (reason: %s)", got.Decision, tt.want, got.Reason)
 			}
@@ -294,7 +294,7 @@ func TestNixRule_DevelopCommand(t *testing.T) {
 			"bats":     {Decision: hookio.Approve, Reason: "approved", Module: "mock"},
 			"rm -rf /": {Decision: hookio.Reject, Reason: "rejected", Module: "mock"},
 		},
-		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
 	r := NewWithEvaluator(mockEval)
 
@@ -305,7 +305,7 @@ func TestNixRule_DevelopCommand(t *testing.T) {
 	}{
 		{"develop command bats", "nix develop --command bats", hookio.Approve},
 		{"develop command dangerous", "nix develop --command rm -rf /", hookio.Reject},
-		{"develop command unknown", "nix develop --command unknown-tool", hookio.Abstain},
+		{"develop command unknown", "nix develop --command unknown-tool", hookio.NoOpinion},
 		{"develop without command", "nix develop", hookio.Approve},
 		// -c is an alias for --command; must recurse the same way (pg2-t4uyx).
 		{"develop -c bats", "nix develop -c bats", hookio.Approve},
@@ -314,7 +314,7 @@ func TestNixRule_DevelopCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command}), CWD: "/tmp/project"}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}

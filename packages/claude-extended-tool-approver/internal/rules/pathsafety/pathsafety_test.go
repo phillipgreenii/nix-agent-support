@@ -24,7 +24,7 @@ func TestPathSafety_ReadInProject_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/home/user/project/foo.go"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Read in project: got %s, want approve", got.Decision)
 	}
@@ -38,7 +38,7 @@ func TestPathSafety_WriteInProject_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/home/user/project/foo.go", "content": "x"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Write in project: got %s, want approve", got.Decision)
 	}
@@ -52,7 +52,7 @@ func TestPathSafety_ReadNixStore_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/nix/store/abc123-foo"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Read /nix/store: got %s, want approve (read-only paths support reads)", got.Decision)
 	}
@@ -66,8 +66,8 @@ func TestPathSafety_WriteNixStore_Abstain(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/nix/store/abc123-foo", "content": "x"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Write /nix/store: got %s, want abstain (read-only path, deferred to claude-code)", got.Decision)
 	}
 }
@@ -80,8 +80,8 @@ func TestPathSafety_WriteUnknownPath_Abstain(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/etc/hosts", "content": "x"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Write unknown path: got %s, want abstain", got.Decision)
 	}
 }
@@ -94,8 +94,8 @@ func TestPathSafety_ReadUnknownPath_Abstain(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/usr/bin/ls"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Read /usr/bin/ls: got %s, want abstain (unknown path)", got.Decision)
 	}
 }
@@ -108,7 +108,7 @@ func TestPathSafety_DeleteInProject_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/home/user/project/foo.go"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Delete in project: got %s, want approve", got.Decision)
 	}
@@ -122,8 +122,8 @@ func TestPathSafety_Bash_Abstain(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"command": "echo hello"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Bash: got %s, want abstain", got.Decision)
 	}
 }
@@ -136,7 +136,7 @@ func TestPathSafety_WriteTmp_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/foo.txt", "content": "x"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Write /tmp: got %s, want approve", got.Decision)
 	}
@@ -160,7 +160,7 @@ func TestPathSafety_DenyRead_Rejects(t *testing.T) {
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/Users/phillipg/.ssh/id_rsa"}),
 	}
-	result := rule.Evaluate(input)
+	result := hookio.Verdict(rule.Evaluate(input))
 	if result.Decision != hookio.Reject {
 		t.Errorf("Decision = %v, want Reject for denyRead path", result.Decision)
 	}
@@ -176,7 +176,7 @@ func TestPathSafety_DenyWrite_Rejects(t *testing.T) {
 		ToolName:  "Edit",
 		ToolInput: mustJSON(map[string]string{"file_path": "/Users/phillipg/.ssh/known_hosts"}),
 	}
-	result := rule.Evaluate(input)
+	result := hookio.Verdict(rule.Evaluate(input))
 	if result.Decision != hookio.Reject {
 		t.Errorf("Decision = %v, want Reject for denyWrite path", result.Decision)
 	}
@@ -192,7 +192,7 @@ func TestPathSafety_DenyWrite_CWD_Rejects(t *testing.T) {
 		ToolName:  "Write",
 		ToolInput: mustJSON(map[string]string{"file_path": "/project/secrets/key.pem", "content": "x"}),
 	}
-	result := rule.Evaluate(input)
+	result := hookio.Verdict(rule.Evaluate(input))
 	if result.Decision != hookio.Reject {
 		t.Errorf("Decision = %v, want Reject for denyWrite path under CWD", result.Decision)
 	}
@@ -208,7 +208,7 @@ func TestPathSafety_AllowWrite_Approves(t *testing.T) {
 		ToolName:  "Write",
 		ToolInput: mustJSON(map[string]string{"file_path": "/Users/phillipg/.local/share/contained-claude/state.json", "content": "x"}),
 	}
-	result := rule.Evaluate(input)
+	result := hookio.Verdict(rule.Evaluate(input))
 	if result.Decision != hookio.Approve {
 		t.Errorf("Decision = %v, want Approve for allowWrite path", result.Decision)
 	}
@@ -222,7 +222,7 @@ func TestPathSafety_GlobInProject_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "**/*.go", "path": "/home/user/project/src"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Glob in project: got %s (%s), want approve", got.Decision, got.Reason)
 	}
@@ -236,7 +236,7 @@ func TestPathSafety_GlobNoPath_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "**/*.go"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Glob no path (defaults to CWD): got %s (%s), want approve", got.Decision, got.Reason)
 	}
@@ -250,7 +250,7 @@ func TestPathSafety_GrepInProject_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "TODO", "path": "/home/user/project/src"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Grep in project: got %s (%s), want approve", got.Decision, got.Reason)
 	}
@@ -264,7 +264,7 @@ func TestPathSafety_GrepNoPath_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "TODO"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Grep no path (defaults to CWD): got %s (%s), want approve", got.Decision, got.Reason)
 	}
@@ -278,7 +278,7 @@ func TestPathSafety_GlobNixStore_Approve(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "**/*.nix", "path": "/nix/store/abc123-foo"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Glob /nix/store: got %s (%s), want approve (read-only paths support search)", got.Decision, got.Reason)
 	}
@@ -292,8 +292,8 @@ func TestPathSafety_GlobUnknownPath_Abstain(t *testing.T) {
 		ToolInput: mustJSON(map[string]string{"pattern": "*", "path": "/usr/local/bin"}),
 		CWD:       "/home/user/project",
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Glob /usr/local/bin: got %s, want abstain (unknown path)", got.Decision)
 	}
 }
@@ -308,7 +308,7 @@ func TestPathSafety_GlobDenyRead_Reject(t *testing.T) {
 		ToolName:  "Glob",
 		ToolInput: mustJSON(map[string]string{"pattern": "*", "path": "/Users/phillipg/.ssh"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Reject {
 		t.Errorf("Glob deny-read path: got %s, want reject", got.Decision)
 	}
@@ -324,7 +324,7 @@ func TestPathSafety_GrepDenyRead_Reject(t *testing.T) {
 		ToolName:  "Grep",
 		ToolInput: mustJSON(map[string]string{"pattern": "password", "path": "/Users/phillipg/.ssh"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Reject {
 		t.Errorf("Grep deny-read path: got %s, want reject", got.Decision)
 	}
@@ -374,8 +374,8 @@ func TestPathSafety_WriteProjectAgentConfig_Abstain(t *testing.T) {
 			if !pe.Evaluate(tc.path).CanWrite() {
 				t.Fatalf("precondition: %s is not in a writable zone, so this case cannot show the carve-out is load-bearing", tc.path)
 			}
-			got := r.Evaluate(writeInput(tc.tool, tc.path, project))
-			if got.Decision != hookio.Abstain {
+			got := hookio.Verdict(r.Evaluate(writeInput(tc.tool, tc.path, project)))
+			if got.Decision != hookio.NoOpinion {
 				t.Errorf("%s %s: got %s (%s), want abstain (ADR 0041 — verdict belongs to claude-code)", tc.tool, tc.path, got.Decision, got.Reason)
 			}
 		})
@@ -388,11 +388,11 @@ func TestPathSafety_WriteAgentConfig_EncodesNoVerdict(t *testing.T) {
 	const project = "/home/user/project"
 	pe := patheval.New(project)
 	r := New(pe)
-	got := r.Evaluate(writeInput("Write", project+"/.claude/settings.local.json", project))
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", project+"/.claude/settings.local.json", project)))
 	if got.Decision == hookio.Ask || got.Decision == hookio.Reject {
 		t.Errorf("agent-config write: got %s, want abstain — CETA must not encode a verdict of its own", got.Decision)
 	}
-	if got.Decision != hookio.Abstain {
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("agent-config write: got %s, want abstain", got.Decision)
 	}
 }
@@ -420,7 +420,7 @@ func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pe := patheval.New(project)
 			r := New(pe)
-			got := r.Evaluate(writeInput("Write", tc.path, project))
+			got := hookio.Verdict(r.Evaluate(writeInput("Write", tc.path, project)))
 			if got.Decision != hookio.Approve {
 				t.Errorf("Write %s: got %s (%s), want approve — ADR 0041 covers agent config/instruction only", tc.path, got.Decision, got.Reason)
 			}
@@ -455,27 +455,27 @@ func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
 		want hookio.Decision
 	}{
 		// --- part 1 of the predicate: the PARENT DIRECTORY name ---
-		{"dir .CLAUDE + config basename", project + "/.CLAUDE/settings.local.json", hookio.Abstain},
+		{"dir .CLAUDE + config basename", project + "/.CLAUDE/settings.local.json", hookio.NoOpinion},
 		{"dir .CLAUDE + one level deeper", project + "/.CLAUDE/skills/x.md", hookio.Approve},
-		{"dir .Claude + config basename", project + "/.Claude/settings.json", hookio.Abstain},
+		{"dir .Claude + config basename", project + "/.Claude/settings.json", hookio.NoOpinion},
 		{"dir .Claude + one level deeper", project + "/.Claude/plugins/foo/plugin.json", hookio.Approve},
 
 		// --- part 2 of the predicate: the config BASENAME set ---
-		{"basename Settings.Local.json", project + "/.claude/Settings.Local.json", hookio.Abstain},
-		{"basename SETTINGS.JSON", project + "/.claude/SETTINGS.JSON", hookio.Abstain},
-		{"basename MCP.json", project + "/.claude/MCP.json", hookio.Abstain},
-		{"basename .MCP.JSON", project + "/.claude/.MCP.JSON", hookio.Abstain},
+		{"basename Settings.Local.json", project + "/.claude/Settings.Local.json", hookio.NoOpinion},
+		{"basename SETTINGS.JSON", project + "/.claude/SETTINGS.JSON", hookio.NoOpinion},
+		{"basename MCP.json", project + "/.claude/MCP.json", hookio.NoOpinion},
+		{"basename .MCP.JSON", project + "/.claude/.MCP.JSON", hookio.NoOpinion},
 		{"basename SETTINGS.JSON one level deeper", project + "/.claude/agents/SETTINGS.JSON", hookio.Approve},
 
 		// --- part 3 of the predicate: the `.md` EXTENSION (folded before the fix too;
 		// pinned here so the three parts are asserted side by side and cannot drift) ---
-		{"ext RULES.MD", project + "/.claude/RULES.MD", hookio.Abstain},
-		{"ext Claude.Md", project + "/.claude/Claude.Md", hookio.Abstain},
+		{"ext RULES.MD", project + "/.claude/RULES.MD", hookio.NoOpinion},
+		{"ext Claude.Md", project + "/.claude/Claude.Md", hookio.NoOpinion},
 		{"ext DEPLOY.MD one level deeper", project + "/.claude/commands/DEPLOY.MD", hookio.Approve},
 
 		// --- every part varied at once ---
-		{"all-caps dir and config basename", project + "/.CLAUDE/SETTINGS.LOCAL.JSON", hookio.Abstain},
-		{"all-caps dir and instruction basename", project + "/.CLAUDE/CLAUDE.MD", hookio.Abstain},
+		{"all-caps dir and config basename", project + "/.CLAUDE/SETTINGS.LOCAL.JSON", hookio.NoOpinion},
+		{"all-caps dir and instruction basename", project + "/.CLAUDE/CLAUDE.MD", hookio.NoOpinion},
 		{"all-caps dir, one level deeper", project + "/.CLAUDE/SKILLS/MY-SKILL/SKILL.MD", hookio.Approve},
 
 		// --- folding MUST NOT turn into fuzzy matching: a directory that merely
@@ -495,7 +495,7 @@ func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
 				if !pe.Evaluate(tc.path).CanWrite() {
 					t.Fatalf("precondition: %s is not in a writable zone, so this case cannot distinguish the carve-out from zone classification", tc.path)
 				}
-				got := r.Evaluate(writeInput(tool, tc.path, project))
+				got := hookio.Verdict(r.Evaluate(writeInput(tool, tc.path, project)))
 				if got.Decision != tc.want {
 					t.Errorf("%s %s: got %s (%s), want %s", tool, tc.path, got.Decision, got.Reason, tc.want)
 				}
@@ -568,8 +568,8 @@ func TestPathSafety_WriteAgentConfig_FoldsNotMerelyLowercases(t *testing.T) {
 	if !pe.Evaluate(p).CanWrite() {
 		t.Fatalf("precondition: %s is not in a writable zone, so this case cannot distinguish the carve-out from zone classification", p)
 	}
-	got := r.Evaluate(writeInput("Write", p, project))
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", p, project)))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Write %s: got %s (%s), want abstain — the predicate must FOLD case (strings.EqualFold), not merely lowercase", p, got.Decision, got.Reason)
 	}
 }
@@ -595,7 +595,7 @@ func TestPathSafety_ReadAgentConfig_StillApprove(t *testing.T) {
 			ToolInput: mustJSON(map[string]string{"file_path": p}),
 			CWD:       project,
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("Read %s: got %s (%s), want approve (reads are unaffected)", p, got.Decision, got.Reason)
 		}
@@ -619,8 +619,8 @@ func TestPathSafety_WriteUserGlobalAgentConfig_Abstain(t *testing.T) {
 	} {
 		pe := patheval.New(project)
 		r := New(pe)
-		got := r.Evaluate(writeInput("Write", p, project))
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(writeInput("Write", p, project)))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("Write %s: got %s (%s), want abstain (ADR 0041 covers ~/.claude too)", p, got.Decision, got.Reason)
 		}
 	}
@@ -638,8 +638,8 @@ func TestPathSafety_WriteUserGlobalAgentConfig_HomeIsProjectRoot_Abstain(t *test
 	if !pe.Evaluate(p).CanWrite() {
 		t.Fatalf("precondition: %s is not writable with $HOME as project root, so this case cannot show the carve-out is load-bearing", p)
 	}
-	got := r.Evaluate(writeInput("Write", p, home))
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", p, home)))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Write %s with $HOME as project root: got %s (%s), want abstain", p, got.Decision, got.Reason)
 	}
 }
@@ -670,7 +670,7 @@ func TestPathSafety_WriteUserGlobalClaudeData_Approve(t *testing.T) {
 		if !pe.Evaluate(p).CanWrite() {
 			t.Fatalf("precondition: %s is not in a writable zone, so an Approve here would not show the carve-out let it through", p)
 		}
-		got := r.Evaluate(writeInput("Write", p, home))
+		got := hookio.Verdict(r.Evaluate(writeInput("Write", p, home)))
 		if got.Decision != hookio.Approve {
 			t.Errorf("Write %s: got %s (%s), want approve — agent data, not agent config", p, got.Decision, got.Reason)
 		}
@@ -690,8 +690,8 @@ func TestPathSafety_WriteAgentConfig_NonAbsoluteForms_Abstain(t *testing.T) {
 	} {
 		pe := patheval.New(project)
 		r := New(pe)
-		got := r.Evaluate(writeInput("Write", p, project))
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(writeInput("Write", p, project)))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("Write %q: got %s (%s), want abstain", p, got.Decision, got.Reason)
 		}
 	}
@@ -714,8 +714,8 @@ func TestPathSafety_WriteAgentConfigViaSymlink_Abstain(t *testing.T) {
 	}
 	pe := patheval.New(project)
 	r := New(pe)
-	got := r.Evaluate(writeInput("Write", link, project))
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", link, project)))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Write via symlink to .claude/settings.local.json: got %s (%s), want abstain", got.Decision, got.Reason)
 	}
 }
@@ -730,7 +730,7 @@ func TestPathSafety_WriteAgentConfig_DenyWriteStillRejects(t *testing.T) {
 		DenyWrite: []string{project + "/.claude"},
 	})
 	r := New(pe)
-	got := r.Evaluate(writeInput("Write", project+"/.claude/settings.local.json", project))
+	got := hookio.Verdict(r.Evaluate(writeInput("Write", project+"/.claude/settings.local.json", project)))
 	if got.Decision != hookio.Reject {
 		t.Errorf("deny-write agent config: got %s (%s), want reject (explicit user config wins)", got.Decision, got.Reason)
 	}

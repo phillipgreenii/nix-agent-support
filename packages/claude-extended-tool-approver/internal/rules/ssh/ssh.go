@@ -35,6 +35,7 @@
 package ssh
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -100,22 +101,29 @@ func lowerAll(items []string) []string {
 
 func (r *Rule) Name() string { return "ssh" }
 
-func (r *Rule) abstain() hookio.RuleResult {
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
-}
+// notApplicable replaces the former abstain() helper. Every one of its call sites
+// meant "this rule does not govern this input" and relied on the engine continuing,
+// which is now the ErrNotApplicable control signal rather than a verdict. It is
+// deliberately NOT a terminal NoOpinion: this rule is ordered BEFORE safe-commands
+// specifically so a configured ssh leaf reaches it first, and a terminal verdict
+// here would stop safe-commands (and everything after it) from ever seeing an
+// UNconfigured one.
+func (r *Rule) notApplicable() (hookio.RuleResult, error) { return hookio.NotApplicable() }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return r.abstain()
+		return r.notApplicable()
 	}
 	// WS2 safe default: with no injected policy data, defer entirely. WS3 wires
 	// the rules.json config that flips `configured` on.
 	if !r.configured {
-		return r.abstain()
+		return r.notApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return r.abstain()
+		// Genuine failure, not "not mine": the tool is Bash and this rule IS
+		// configured, so it does govern the input and merely could not read it.
+		return hookio.RuleResult{}, fmt.Errorf("ssh: read bash command: %w", err)
 	}
 	for _, pc := range cmdparse.Parse(cmdStr) {
 		base := filepath.Base(pc.Executable)
@@ -125,12 +133,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Reject,
 				Reason:   "sshpass wrapper is forbidden — use key-based auth",
 				Module:   r.Name(),
-			}
+			}, nil
 		case "ssh", "scp":
-			return r.evaluateSSHScp(base, pc.Args)
+			return r.evaluateSSHScp(base, pc.Args), nil
 		}
 	}
-	return r.abstain()
+	// No ssh/scp/sshpass leaf in the command.
+	return r.notApplicable()
 }
 
 // evaluateSSHScp classifies a single ssh/scp leaf.

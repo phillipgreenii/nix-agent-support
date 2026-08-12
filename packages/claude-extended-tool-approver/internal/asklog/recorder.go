@@ -26,7 +26,7 @@ func hookDecisionString(d hookio.Decision) string {
 		return "allow"
 	case hookio.Ask:
 		return "ask"
-	case hookio.Abstain:
+	case hookio.NoOpinion:
 		return "abstain"
 	default:
 		return "unknown"

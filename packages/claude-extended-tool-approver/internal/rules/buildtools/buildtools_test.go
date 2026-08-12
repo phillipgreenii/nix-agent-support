@@ -40,7 +40,7 @@ func TestBuildtools_Approved_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -76,7 +76,7 @@ func TestBuildtools_BdAllSubcommands_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -97,7 +97,7 @@ func TestBuildtools_Prek_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -110,7 +110,7 @@ func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "devbox search nodejs"}),
 	}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("devbox search nodejs: got %s, want approve", got.Decision)
 	}
@@ -122,8 +122,8 @@ func TestBuildtools_Npm_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "npm install"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("npm install: got %s, want abstain", got.Decision)
 	}
 }
@@ -143,12 +143,12 @@ func TestBuildtools_JarXf(t *testing.T) {
 		want    hookio.Decision
 	}{
 		{"jar xf", "jar xf /tmp/cache/some.jar", hookio.Approve},
-		{"jar cf not approved", "jar cf output.jar src/", hookio.Abstain},
+		{"jar cf not approved", "jar cf output.jar src/", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}
@@ -159,7 +159,7 @@ func TestBuildtools_JarXf(t *testing.T) {
 func TestBuildtools_GenerateBuildDeps(t *testing.T) {
 	r := New(zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/generate-build-deps"})}
-	got := r.Evaluate(input)
+	got := hookio.Verdict(r.Evaluate(input))
 	if got.Decision != hookio.Approve {
 		t.Errorf("Decision = %v, want Approve", got.Decision)
 	}
@@ -169,7 +169,7 @@ func TestBuildTools_Prove(t *testing.T) {
 	r := New(zrBuildtoolsConfig(t))
 	for _, cmd := range []string{"prove -v t/foo.t", "mp/ui/customer/bin/devxp/prove t/bar.t", "yath test"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s want approve", cmd, got.Decision)
 		}
 	}
@@ -184,13 +184,13 @@ func TestBuildtools_CueVet(t *testing.T) {
 	}{
 		{"cue vet approve", "cue vet ./schemas/ 2>&1", hookio.Approve},
 		{"cue vet with path", "cue vet ./common/schemas/", hookio.Approve},
-		{"cue export abstain", "cue export ./schemas/", hookio.Abstain},
-		{"cue eval abstain", "cue eval ./schemas/", hookio.Abstain},
+		{"cue export abstain", "cue export ./schemas/", hookio.NoOpinion},
+		{"cue eval abstain", "cue eval ./schemas/", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}
@@ -212,7 +212,7 @@ func TestBuildtools_ApprovedScripts(t *testing.T) {
 	for _, s := range scripts {
 		for _, cmd := range []string{s, "bin/" + s, "bash " + s, "sh " + s, "FOO=bar " + s} {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-			if got := r.Evaluate(input); got.Decision != hookio.Approve {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 				t.Errorf("cmd %q: got %s, want approve (migrated approvedScript)", cmd, got.Decision)
 			}
 		}
@@ -225,10 +225,10 @@ func TestBuildtools_VerbScopedFromConfig(t *testing.T) {
 	r := New(configrules.BuildtoolsConfig{
 		VerbScopedApprovals: []configrules.VerbScopedApproval{{Tool: "mytool", Verb: "check"}},
 	})
-	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool check ./x"})}); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool check ./x"})})); got.Decision != hookio.Approve {
 		t.Errorf("mytool check: got %s, want approve", got.Decision)
 	}
-	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool run ./x"})}); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool run ./x"})})); got.Decision != hookio.NoOpinion {
 		t.Errorf("mytool run: got %s, want abstain (verb not approved)", got.Decision)
 	}
 }
@@ -296,7 +296,7 @@ func TestBuildtools_JustVerbScoped_ApprovedRecipes(t *testing.T) {
 		"cd /repo/media/management/calibre && just check kprod",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (verb-scoped just recipe)", cmd, got.Decision)
 		}
 	}
@@ -325,7 +325,7 @@ func TestBuildtools_JustVerbScoped_MutatingRecipesAbstain(t *testing.T) {
 		"cd /repo/infrastructure/machines/ansible && just converge-synology databackup",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (recipe not verb-scoped)", cmd, got.Decision)
 		}
 	}
@@ -355,7 +355,7 @@ func TestBuildtools_JustVerbScoped_ValueFlagResolvesVerb(t *testing.T) {
 		"just -f infrastructure/k3s/prometheus-stack/justfile status kagents",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (value flag must not consume the verb slot)", cmd, got.Decision)
 		}
 	}
@@ -382,7 +382,7 @@ func TestBuildtools_JustVerbScoped_ValueFlagSafety(t *testing.T) {
 		"just -f /repo/justfile",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (mutating recipe MUST NOT auto-approve)", cmd, got.Decision)
 		}
 	}
@@ -401,7 +401,7 @@ func TestBuildtools_JustVerbScoped_MissingValueDoesNotApprove(t *testing.T) {
 		"just --justfile lint-rules",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (no resolvable verb)", cmd, got.Decision)
 		}
 	}
@@ -428,7 +428,7 @@ func TestBuildtools_JustVerbScoped_UndeclaredValueFlagAbstains(t *testing.T) {
 		"just --chooser /bin/evil check",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (undeclared value flag must stay fail-safe)", cmd, got.Decision)
 		}
 	}
@@ -473,7 +473,7 @@ func TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling(t *testi
 			"just --justfile=/repo/justfile " + f + " /bin/evil check",
 		} {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 				t.Errorf("cmd %q: got %s, want abstain (execution-altering flag must never resolve a verb)", cmd, got.Decision)
 			}
 		}
@@ -489,7 +489,7 @@ func TestBuildtools_JustVerbScoped_ExecutionFlagsAbstainInEverySpelling(t *testi
 			"just -f /repo/justfile " + f + " check",
 		} {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 				t.Errorf("cmd %q: got %s, want abstain (undeclared boolean flag must not resolve a verb)", cmd, got.Decision)
 			}
 		}
@@ -529,7 +529,7 @@ func TestBuildtools_JustVerbScoped_NonCanonicalFlagSpellingsAbstain(t *testing.T
 		"just --unstable=1 check",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (unrecognized flag spelling must fail closed)", cmd, got.Decision)
 		}
 	}
@@ -557,7 +557,7 @@ func TestBuildtools_JustVerbScoped_AllowedFlagsStillApprove(t *testing.T) {
 		"just --timestamp --justfile /repo/justfile status kagents",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (declared/allowed flags must still resolve the verb)", cmd, got.Decision)
 		}
 	}
@@ -582,13 +582,13 @@ func TestBuildtools_AllowedFlags_AbsentEntryIsUnchanged(t *testing.T) {
 		{"unknown boolean flag is skipped", "mytool --whatever check", hookio.Approve},
 		{"unknown glued flag is still skipped (pre-existing behavior)", "mytool --shell=/bin/x check", hookio.Approve},
 		{"end-of-flags is still skipped", "mytool -- check", hookio.Approve},
-		{"unknown separated value flag still eats the verb", "mytool --shell /bin/x check", hookio.Abstain},
-		{"unapproved verb", "mytool run", hookio.Abstain},
+		{"unknown separated value flag still eats the verb", "mytool --shell /bin/x check", hookio.NoOpinion},
+		{"unapproved verb", "mytool run", hookio.NoOpinion},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			if got := r.Evaluate(input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s, want %s (no allowedFlags entry must mean no behavior change)", tt.command, got.Decision, tt.want)
 			}
 		})
@@ -620,13 +620,13 @@ func TestBuildtools_AllowedFlags_EmptyEntryIsStrict(t *testing.T) {
 			}{
 				{"mytool check", hookio.Approve},
 				{"mytool -f ./cfg check", hookio.Approve},
-				{"mytool --whatever check", hookio.Abstain},
-				{"mytool --shell=/bin/x check", hookio.Abstain},
-				{"mytool -- check", hookio.Abstain},
+				{"mytool --whatever check", hookio.NoOpinion},
+				{"mytool --shell=/bin/x check", hookio.NoOpinion},
+				{"mytool -- check", hookio.NoOpinion},
 			}
 			for _, c := range cases {
 				input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.command})}
-				if got := r.Evaluate(input); got.Decision != c.want {
+				if got := hookio.Verdict(r.Evaluate(input)); got.Decision != c.want {
 					t.Errorf("cmd %q: got %s, want %s", c.command, got.Decision, c.want)
 				}
 			}
@@ -653,12 +653,12 @@ func TestBuildtools_AllowedFlags_MisdeclarationFailsSafe(t *testing.T) {
 		"mytool --shell=/bin/evil check",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (a mis-declared allowed flag must not approve)", cmd, got.Decision)
 		}
 	}
 	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "mytool --does-not-exist check"})}
-	if got := r.Evaluate(input); got.Decision != hookio.Approve {
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 		t.Errorf("declaring a nonexistent flag must be inert: got %s, want approve", got.Decision)
 	}
 }
@@ -705,12 +705,12 @@ func TestBuildtools_ValueFlags_NoDeclarationIsUnchanged(t *testing.T) {
 	}{
 		{"mytool check ./x", hookio.Approve},
 		{"mytool --verbose check", hookio.Approve},
-		{"mytool -f ./cfg check", hookio.Abstain},
-		{"mytool run ./x", hookio.Abstain},
+		{"mytool -f ./cfg check", hookio.NoOpinion},
+		{"mytool run ./x", hookio.NoOpinion},
 	}
 	for _, tt := range cases {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-		if got := r.Evaluate(input); got.Decision != tt.want {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 			t.Errorf("cmd %q: got %s, want %s (undeclared-tool behavior must not change)", tt.command, got.Decision, tt.want)
 		}
 	}
@@ -733,16 +733,16 @@ func TestBuildtools_ValueFlags_Arity(t *testing.T) {
 	}{
 		{"two-token flag resolves the verb", "mytool --opt NAME VALUE check", hookio.Approve},
 		{"two-token flag glued supplies the first value", "mytool --opt=NAME VALUE check", hookio.Approve},
-		{"two-token flag truncated consumes the verb", "mytool --opt NAME check", hookio.Abstain},
+		{"two-token flag truncated consumes the verb", "mytool --opt NAME check", hookio.NoOpinion},
 		{"one-token flag resolves the verb", "mytool --one v check", hookio.Approve},
-		{"malformed arity suffix is dropped", "mytool --bad v check", hookio.Abstain},
-		{"zero arity is dropped", "mytool --worse v check", hookio.Abstain},
-		{"negative arity is dropped", "mytool --neg v check", hookio.Abstain},
+		{"malformed arity suffix is dropped", "mytool --bad v check", hookio.NoOpinion},
+		{"zero arity is dropped", "mytool --worse v check", hookio.NoOpinion},
+		{"negative arity is dropped", "mytool --neg v check", hookio.NoOpinion},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			if got := r.Evaluate(input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s, want %s", tt.command, got, tt.want)
 			}
 		})
@@ -792,7 +792,7 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 		"devbox search x", "cue vet ./x", "jar xf /tmp/a.jar",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q under empty config: got %s, want approve (base generic tool)", cmd, got.Decision)
 		}
 	}
@@ -806,7 +806,7 @@ func TestBuildtools_EmptyConfig_ZRToolsAbstain(t *testing.T) {
 		"pre-merge-py-check", "bash pre-merge-protobuf-check", "sh fix-ai-tools-ownership",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q under empty config: got %s, want abstain (ZR tool not baked in base)", cmd, got.Decision)
 		}
 	}
@@ -820,7 +820,7 @@ func TestBuildtools_EmptyConfig_JustAbstains(t *testing.T) {
 	r := New(configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{"just check", "just build", "just deploy kinfra"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q under empty config: got %s, want abstain (just is not a base generic tool)", cmd, got.Decision)
 		}
 	}
@@ -880,7 +880,7 @@ func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
 		"jar xf /tmp/a.jar META-INF/MANIFEST.MF",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (pinned base approval)", cmd, got.Decision)
 		}
 	}
@@ -918,7 +918,7 @@ func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tc.command})}
-			if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 				t.Errorf("cmd %q: got %s, want abstain", tc.command, got.Decision)
 			}
 		})
@@ -935,7 +935,7 @@ func TestBuildtools_BaseVerbs_WrongVerbAbstains(t *testing.T) {
 		"jar cf out.jar src/", "jar xvf /tmp/a.jar", "jar",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}

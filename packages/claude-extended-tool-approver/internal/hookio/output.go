@@ -3,7 +3,7 @@ package hookio
 import "encoding/json"
 
 func FormatOutput(result RuleResult, updatedInput map[string]interface{}) []byte {
-	if result.Decision == Abstain {
+	if result.Decision == NoOpinion {
 		return []byte("{}")
 	}
 	decisionStr := ""

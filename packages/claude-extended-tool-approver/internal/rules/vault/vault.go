@@ -19,6 +19,7 @@
 package vault
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -52,22 +53,26 @@ func toSet(items []string) map[string]bool {
 
 func (r *Rule) Name() string { return "vault" }
 
-func (r *Rule) abstain() hookio.RuleResult {
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
-}
+// notApplicable replaces the former abstain() helper. Every call site meant "this
+// rule does not govern this input" and relied on the engine continuing — now the
+// ErrNotApplicable control signal, NOT a terminal NoOpinion, which would shadow
+// safe-commands and everything else registered after this rule.
+func (r *Rule) notApplicable() (hookio.RuleResult, error) { return hookio.NotApplicable() }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return r.abstain()
+		return r.notApplicable()
 	}
 	// WS2 safe default: with no injected verbs, defer entirely. WS3 wires the
 	// rules.json config that flips `configured` on.
 	if !r.configured {
-		return r.abstain()
+		return r.notApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return r.abstain()
+		// Genuine failure: the tool is Bash and the rule IS configured, so it
+		// governs this input and merely could not read it.
+		return hookio.RuleResult{}, fmt.Errorf("vault: read bash command: %w", err)
 	}
 	for _, pc := range cmdparse.Parse(cmdStr) {
 		if filepath.Base(pc.Executable) != "vault" {
@@ -75,31 +80,38 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		return r.classify(pc.Args)
 	}
-	return r.abstain()
+	// No `vault` leaf in the command.
+	return r.notApplicable()
 }
 
 // classify decides based on the vault subcommand, preferring a two-token
 // compound match (e.g. "kv get") over the single leading token (e.g. "kv").
-func (r *Rule) classify(args []string) hookio.RuleResult {
+//
+// It returns the (RuleResult, error) pair rather than a bare result because its
+// fall-through is a not-applicable, which has no representation as a RuleResult:
+// an unrecognized subcommand must let the chain continue exactly as it did when
+// this returned Abstain.
+func (r *Rule) classify(args []string) (hookio.RuleResult, error) {
 	if len(args) >= 2 {
 		compound := args[0] + " " + args[1]
 		if r.readVerbs[compound] {
-			return r.approve("kv/compound read verb: " + compound)
+			return r.approve("kv/compound read verb: " + compound), nil
 		}
 		if r.writeVerbs[compound] {
-			return r.ask("vault write verb requires approval: " + compound)
+			return r.ask("vault write verb requires approval: " + compound), nil
 		}
 	}
 	if len(args) >= 1 {
 		sub := args[0]
 		if r.readVerbs[sub] {
-			return r.approve("vault read verb: " + sub)
+			return r.approve("vault read verb: " + sub), nil
 		}
 		if r.writeVerbs[sub] {
-			return r.ask("vault write verb requires approval: " + sub)
+			return r.ask("vault write verb requires approval: " + sub), nil
 		}
 	}
-	return r.abstain()
+	// Subcommand in neither verb set: unclassified, so defer to the chain.
+	return r.notApplicable()
 }
 
 func (r *Rule) approve(reason string) hookio.RuleResult {

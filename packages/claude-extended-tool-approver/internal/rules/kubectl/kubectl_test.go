@@ -45,7 +45,7 @@ func TestKubectl_ReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -64,7 +64,7 @@ func TestKubectl_KubeconfigReadOnly_Approve(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
+		got := hookio.Verdict(r.Evaluate(input))
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
@@ -83,8 +83,8 @@ func TestKubectl_KubeconfigModifying_Abstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -105,8 +105,8 @@ func TestKubectl_Modifying_Abstain(t *testing.T) {
 			ToolName:  "Bash",
 			ToolInput: mustJSON(map[string]string{"command": cmd}),
 		}
-		got := r.Evaluate(input)
-		if got.Decision != hookio.Abstain {
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -118,8 +118,8 @@ func TestKubectl_DoubleDash_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "kubectl -- get pods"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("kubectl -- get pods: got %s, want abstain (-- before operation)", got.Decision)
 	}
 }
@@ -130,8 +130,8 @@ func TestKubectl_NonKubectl_Abstain(t *testing.T) {
 		ToolName:  "Bash",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("ls -la: got %s, want abstain", got.Decision)
 	}
 }
@@ -145,7 +145,7 @@ func TestKubectl_FlagValueNotOperation(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain (delete is modifying)", cmd, got.Decision)
 		}
 	}
@@ -161,7 +161,7 @@ func TestKubectl_ReadOnlyAdditions_Approve(t *testing.T) {
 	}
 	for _, cmd := range cmds {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
 	}
@@ -171,7 +171,7 @@ func TestKubectl_RolloutMutating_Abstain(t *testing.T) { // regression guard
 	r := New(nil, nil, zrKubectlConfig(t))
 	for _, cmd := range []string{"kubectl rollout restart deploy/foo", "kubectl rollout undo deploy/foo"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -186,7 +186,7 @@ func TestKubectl_DevxpNative(t *testing.T) {
 	}
 	for _, cmd := range approve {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
 		}
 	}
@@ -198,7 +198,7 @@ func TestKubectl_DevxpNative(t *testing.T) {
 	}
 	for _, cmd := range abstain {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q: got %s, want abstain", cmd, got.Decision)
 		}
 	}
@@ -228,7 +228,7 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 			// recurses here and the mock would let it through — exposing the spoof.
 			"bats -n d-fake": {Decision: hookio.Approve, Reason: "ok", Module: "mock"},
 		},
-		defaultResult: hookio.RuleResult{Decision: hookio.Abstain, Module: "mock"},
+		defaultResult: hookio.RuleResult{Decision: hookio.NoOpinion, Module: "mock"},
 	}
 	r := New(mockEval, nil, zrKubectlConfig(t))
 	tests := []struct {
@@ -238,15 +238,15 @@ func TestKubectl_ExecRecursion(t *testing.T) {
 		{"dev exe safe inner", "bin/kc exe --ws d-phillipg01 -n mp--ui--customer -c test-runner -- bats", hookio.Approve},
 		{"dev shell bash -c inner", "bin/kc shell --ws d-phillipg01 -n X -c test-runner -- bash -c 'prove -v t/foo.t'", hookio.Approve},
 		{"dev exe sqitch inner asks", "bin/kc exe -n d-phillipgs0-db--sqitch -c sqitch-ui -- shell zr-sqitch deploy zr_finance", hookio.Ask},
-		{"NON-dev exec stays abstain", "kubectl exec -n prod pod -- rm -rf /var/lib/data", hookio.Abstain},
-		{"NON-dev exec no ns stays abstain", "kubectl exec -it pod/foo -- bash", hookio.Abstain},
-		{"dev exe no double-dash abstains", "bin/kc exe --ws d-phillipg01 -c test-runner", hookio.Abstain},
-		{"prod exec with decoy inner d- flag", "kubectl exec -n prod pod -- bats -n d-fake", hookio.Abstain},
+		{"NON-dev exec stays abstain", "kubectl exec -n prod pod -- rm -rf /var/lib/data", hookio.NoOpinion},
+		{"NON-dev exec no ns stays abstain", "kubectl exec -it pod/foo -- bash", hookio.NoOpinion},
+		{"dev exe no double-dash abstains", "bin/kc exe --ws d-phillipg01 -c test-runner", hookio.NoOpinion},
+		{"prod exec with decoy inner d- flag", "kubectl exec -n prod pod -- bats -n d-fake", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
-			if got := r.Evaluate(input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 				t.Errorf("cmd %q: got %s want %s (reason %q)", tt.command, got.Decision, tt.want, got.Reason)
 			}
 		})
@@ -311,7 +311,7 @@ func TestKubectl_EmptyConfig_BaseGenericApproves(t *testing.T) {
 	// Generic kubectl read-only verbs still approve with no config.
 	for _, cmd := range []string{"kubectl get pods", "kubectl version", "kubectl rollout status deploy/foo"} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s, want approve (base generic)", cmd, got.Decision)
 		}
 	}
@@ -321,7 +321,7 @@ func TestKubectl_EmptyConfig_NoKcAlias(t *testing.T) {
 	r := emptyRule()
 	// `kc` is NOT recognized as kubectl without executableAliases config, so the
 	// rule abstains (leaves it to other rules / the user prompt).
-	if got := r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/kc get pods"})}); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "bin/kc get pods"})})); got.Decision != hookio.NoOpinion {
 		t.Errorf("bin/kc get pods under empty config: got %s, want abstain (kc not a base alias)", got.Decision)
 	}
 	// isKubectlExecutable must not treat kc as kubectl under empty config.
@@ -343,7 +343,7 @@ func TestKubectl_EmptyConfig_ZRVerbsAbstain(t *testing.T) {
 		"kubectl sync -f x d-phillipg01", "kubectl syncdev d-phillipg01",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 			t.Errorf("cmd %q under empty config: got %s, want abstain (ZR verb not baked in base)", cmd, got.Decision)
 		}
 	}
@@ -369,7 +369,7 @@ func TestKubectl_EmptyConfig_NoDevWorkspaceScope(t *testing.T) {
 			t.Errorf("cmd %q under empty config: unexpectedly dev-scoped (base must have no d- literal)", cmd)
 		}
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
-		if got := r.Evaluate(input); got.Decision == hookio.Approve {
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision == hookio.Approve {
 			t.Errorf("cmd %q under empty config: got Approve, want non-approve (no dev-scope in base)", cmd)
 		}
 	}

@@ -1,6 +1,7 @@
 package webfetch
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -35,22 +36,22 @@ func (r *Rule) Name() string {
 	return "webfetch"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "WebFetch" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	uStr := input.WebFetchURL()
 	if uStr == "" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	u, err := url.Parse(uStr)
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("webfetch: parse url: %w", err)
 	}
 	host := strings.ToLower(u.Hostname())
 
 	if !matchesDomain(host) {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	// GitHub-specific: approve most pages, block release binary downloads
@@ -59,24 +60,22 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		segments := strings.Split(path, "/")
 		// Block release binary downloads (e.g. /owner/repo/releases/download/v1.0/binary.tar.gz)
 		if len(segments) >= 5 && segments[2] == "releases" && segments[3] == "download" {
-			return hookio.RuleResult{
-				Decision: hookio.Abstain,
-				Reason:   "webfetch: GitHub release binary download (deferred to claude-code)",
-				Module:   r.Name(),
-			}
+			// Not applicable (ADR 0043): the chain must continue. Former Reason,
+			// kept because it is the only record of WHY: "webfetch: GitHub release binary download (deferred to claude-code)"
+			return hookio.NotApplicable()
 		}
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "webfetch: GitHub page",
 			Module:   r.Name(),
-		}
+		}, nil
 	}
 
 	return hookio.RuleResult{
 		Decision: hookio.Approve,
 		Reason:   "webfetch: approved domain " + host,
 		Module:   r.Name(),
-	}
+	}, nil
 }
 
 func matchesDomain(host string) bool {

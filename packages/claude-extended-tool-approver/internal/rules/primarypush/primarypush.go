@@ -40,6 +40,7 @@
 package primarypush
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -70,21 +71,25 @@ func New(resolver primarycommit.PrimaryResolver) *Rule { return &Rule{resolver: 
 
 func (r *Rule) Name() string { return "primary-push" }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
-	abstain := hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
+	// As in primary-commit: every former `return abstain` meant "keep going", and
+	// this rule MUST precede the generic git rule without shadowing it, so all of
+	// them are ErrNotApplicable and none may become a terminal NoOpinion.
 	if input.ToolName != "Bash" {
-		return abstain
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return abstain
+		// Genuine failure: the tool IS Bash, so this rule governs the input.
+		return hookio.RuleResult{}, fmt.Errorf("primary-push: read bash command: %w", err)
 	}
 	for _, pc := range cmdparse.Parse(cmdStr) {
 		if !isGit(pc.Executable) {
 			continue
 		}
+		// No resolver injected: a construction condition, not a runtime failure.
 		if r.resolver == nil {
-			return abstain
+			return hookio.NotApplicable()
 		}
 		advances, primary := r.pushAdvancesPrimary(pc, input.CWD, true)
 		if !advances {
@@ -97,11 +102,14 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 				Decision: hookio.Reject,
 				Reason:   "primary-push: refusing a push that advances the primary branch (" + primary + ") of the canonical clone in an auto-approving session — advancing shared primary requires explicit human direction / PR flow (R-6/R-8); push a feature branch instead.",
 				Module:   r.Name(),
-			}
+			}, nil
 		}
-		return abstain
+		// Push advances primary in an interactive/default session: trusted (R-6/R-8),
+		// and the git rule after us still judges the command on its own merits.
+		return hookio.NotApplicable()
 	}
-	return abstain
+	// No git leaf, or none that advances primary.
+	return hookio.NotApplicable()
 }
 
 // pushAdvancesPrimary reports whether a single parsed git invocation would advance the

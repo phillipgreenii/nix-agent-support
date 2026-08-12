@@ -23,14 +23,14 @@ func TestAssumeRule(t *testing.T) {
 		{"bare assume", "assume", "Bash", hookio.Reject},
 		{"assume with args", "assume my-role", "Bash", hookio.Reject},
 		{"full path assume", "/usr/local/bin/assume", "Bash", hookio.Reject},
-		{"not assume", "ls -la", "Bash", hookio.Abstain},
-		{"assume in arg", "echo assume", "Bash", hookio.Abstain},
-		{"non-bash tool", "", "Read", hookio.Abstain},
+		{"not assume", "ls -la", "Bash", hookio.NoOpinion},
+		{"assume in arg", "echo assume", "Bash", hookio.NoOpinion},
+		{"non-bash tool", "", "Read", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.command)}
-			got := r.Evaluate(input)
+			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v", got.Decision, tt.want)
 			}

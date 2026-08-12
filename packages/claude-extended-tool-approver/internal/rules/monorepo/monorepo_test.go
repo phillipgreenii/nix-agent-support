@@ -22,8 +22,8 @@ func TestMonorepo_Unknown_Abstain(t *testing.T) {
 		CWD:       "/home/user/monorepo",
 		ToolInput: mustJSON(map[string]string{"command": "ls -la"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("ls -la: got %s, want abstain", got.Decision)
 	}
 }
@@ -35,8 +35,8 @@ func TestMonorepo_NonBash_Abstain(t *testing.T) {
 		ToolName:  "Read",
 		ToolInput: mustJSON(map[string]string{"file_path": "/tmp/x"}),
 	}
-	got := r.Evaluate(input)
-	if got.Decision != hookio.Abstain {
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Read: got %s, want abstain", got.Decision)
 	}
 }
@@ -59,7 +59,7 @@ func TestMonorepo_EmptyConfigAbstains(t *testing.T) {
 		CWD:       "/home/user/monorepo",
 		ToolInput: mustJSON(map[string]string{"command": "tc build"}),
 	}
-	if got := r.Evaluate(input); got.Decision != hookio.Abstain {
+	if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
 		t.Errorf("empty config `tc build`: got %s, want abstain", got.Decision)
 	}
 }
@@ -79,9 +79,9 @@ func TestMonorepo_ConfiguredApprove(t *testing.T) {
 	}{
 		{"approved command", "tc build", hookio.Approve},
 		{"second approved command", "uv sync", hookio.Approve},
-		{"approved with dangerous env defers", "TC_DANGER=1 tc build", hookio.Abstain},
+		{"approved with dangerous env defers", "TC_DANGER=1 tc build", hookio.NoOpinion},
 		{"approved with benign env approves", "FOO=1 tc build", hookio.Approve},
-		{"unapproved command abstains", "make all", hookio.Abstain},
+		{"unapproved command abstains", "make all", hookio.NoOpinion},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestMonorepo_ConfiguredApprove(t *testing.T) {
 				CWD:       "/home/user/monorepo",
 				ToolInput: mustJSON(map[string]string{"command": tt.command}),
 			}
-			if got := r.Evaluate(input); got.Decision != tt.want {
+			if got := hookio.Verdict(r.Evaluate(input)); got.Decision != tt.want {
 				t.Errorf("%q: got %s, want %s", tt.command, got.Decision, tt.want)
 			}
 		})

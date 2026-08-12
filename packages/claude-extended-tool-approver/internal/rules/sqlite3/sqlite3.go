@@ -1,6 +1,7 @@
 package sqlite3
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -44,13 +45,13 @@ func (r *Rule) Name() string {
 	return "sqlite3"
 }
 
-func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
+func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	if input.ToolName != "Bash" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 	cmdStr, err := input.BashCommand()
 	if err != nil {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.RuleResult{}, fmt.Errorf("sqlite3: read bash command: %w", err)
 	}
 	parsed := cmdparse.Parse(cmdStr)
 	for _, pc := range parsed {
@@ -60,13 +61,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		}
 		return r.evaluateSqlite3(pc.Args)
 	}
-	return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+	return hookio.NotApplicable()
 }
 
-func (r *Rule) evaluateSqlite3(args []string) hookio.RuleResult {
+func (r *Rule) evaluateSqlite3(args []string) (hookio.RuleResult, error) {
 	dbPath, query := parseArgs(args)
 	if dbPath == "" || query == "" {
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 
 	access := r.pathEval.Evaluate(dbPath)
@@ -78,15 +79,15 @@ func (r *Rule) evaluateSqlite3(args []string) hookio.RuleResult {
 			Decision: hookio.Approve,
 			Reason:   "sqlite3: read query on " + access.String() + " path",
 			Module:   r.Name(),
-		}
+		}, nil
 	case kind == queryWrite && access.CanWrite():
 		return hookio.RuleResult{
 			Decision: hookio.Approve,
 			Reason:   "sqlite3: write query on read-write path",
 			Module:   r.Name(),
-		}
+		}, nil
 	default:
-		return hookio.RuleResult{Decision: hookio.Abstain, Module: r.Name()}
+		return hookio.NotApplicable()
 	}
 }
 
