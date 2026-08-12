@@ -4,7 +4,7 @@ Claude Code extended tool approval with rule-based permission evaluation and dec
 
 ## What it does
 
-Evaluates tool invocations against an ordered chain of rule modules (envvars, git, pathsafety, etc.), returning APPROVE, ASK, DENY, or ABSTAIN. Logs all ASK and DENY decisions plus their outcomes to a SQLite database.
+Evaluates tool invocations against an ordered chain of rule modules (envvars, git, pathsafety, etc.), returning APPROVE, ASK, DENY, or NO-OPINION (serialized as `abstain`, and emitted as `{}` so Claude Code decides). Logs all ASK and DENY decisions plus their outcomes to a SQLite database.
 
 ## Hook Events
 
@@ -52,7 +52,7 @@ decision is unaffected, but the failure is counted per rule and written to
 A row means "this rule failed on this call", so the ABSENCE of rows for a rule is the
 evidence it is healthy — no zero-count rows are written. The table exists because the
 hook is one short-lived process per tool call: an in-process counter can never show
-that a resolver is failing *systematically*.
+that a resolver is failing _systematically_.
 
 ```bash
 # Which rules are failing, and how often (last 7 days)
@@ -144,7 +144,11 @@ sqlite3 "$DB" -header -column \
 
 ## Rule Modules
 
-Rules are evaluated in order; first non-ABSTAIN wins (Bash compounds fold most-restrictive-wins).
+Rules are evaluated in order; the first rule that HANDLES the input wins (Bash compounds
+fold most-restrictive-wins). A rule that does not govern the input reports
+`hookio.ErrNotApplicable` and the chain continues; a rule that handles it and has no
+gate to apply returns NO-OPINION, which is terminal. See
+`docs/adr/0043-ceta-rule-verdict-vocabulary.md`.
 
 `internal/setup.RuleChain` is the single source of truth for this list and its order.
 Register a new rule **there and nowhere else**: the engine integration suite
