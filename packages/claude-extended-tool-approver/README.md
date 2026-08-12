@@ -336,10 +336,31 @@ gets Go's 10m default and has headroom; a tighter budget may not.
 
 ## Dependencies
 
-Go deps are not vendored. The Nix build uses `vendorHash` to fetch modules reproducibly. After changing Go dependencies (adding/removing imports, `go get -u`, etc.), refresh the hash:
+Go deps are not vendored. The Nix build uses the **gomod2nix** engine: `default.nix` passes
+`gomod2nixToml = ./gomod2nix.toml`, and that file is committed beside `go.mod`. There is **no
+`vendorHash`** for this package — do not reintroduce one. After changing Go dependencies (adding or
+removing an import, `go get`, `go get -u`), regenerate it:
 
 ```bash
-./update-deps.sh
+go mod tidy && nix run github:nix-community/gomod2nix -- generate   # then COMMIT gomod2nix.toml
 ```
 
-Or refresh everything at once via the workspace-level `../../update-locks.sh`. See [ADR 0035](../../docs/adr/0035-vendor-hash-with-nix-update-for-go-packages.md) for background.
+`./update-deps.sh` is the wrapper for the same thing (it delegates to
+`../update-gomod2nix-deps.sh`), and the workspace-level `../../update-locks.sh` refreshes
+everything at once. Authority: `phillipg-nix-repo-base` ADR 0008 and this repo's `CLAUDE.md`
+under "Versioning of Custom Packages". A missing regeneration fails the Nix build, which
+`nix flake check` catches.
+
+## Command structure: the `cmdparse` parser seam
+
+`internal/cmdparse` is migrating from several independent text passes to ONE real shell parser
+(`mvdan.cc/sh/v3`) behind a single lowering seam, per
+[ADR 0039](../../docs/adr/0039-ceta-shell-parser-front-end.md).
+
+- `internal/cmdparse/shellparse.go` is the **seam** — the only file in this module allowed to import
+  `mvdan.cc/sh/v3`, enforced by `TestSeamIsTheOnlyParserImporter`.
+- It currently runs in **SHADOW**: the outgoing front end (`StripCommentsPreservingHeredocs` then
+  `Parse`) is still authoritative for every verdict, and disagreements are logged to stderr. Set
+  `CETA_SHADOW_PARSER=0` to skip the second parse.
+- `internal/cmdparse/LOWERING.md` records the per-construct coverage, the corpus population later
+  migration steps must cite, and the latency-gate result.

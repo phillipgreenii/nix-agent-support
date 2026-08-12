@@ -224,6 +224,15 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 
 	// Parse into sub-commands
 	parsed := cmdparse.Parse(cleaned)
+
+	// SHADOW MODE (ADR 0039's Decision, migration step 1). The candidate front end
+	// — one real shell parser behind the cmdparse seam — runs alongside the two
+	// lines above and logs disagreements. The OUTGOING verdict stays authoritative:
+	// LogShadowDisagreement returns nothing, so nothing below can read it. Note the
+	// argument is the ORIGINAL expr, not `cleaned`: the candidate handles comments
+	// as parser facts (KeepComments) and MUST NOT be handed pre-stripped text.
+	cmdparse.LogShadowDisagreement(expr, parsed)
+
 	if len(parsed) == 0 {
 		return hookio.RuleResult{Decision: hookio.NoOpinion, Module: "engine"}
 	}

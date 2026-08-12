@@ -52,3 +52,7 @@ schema = 3
   [mod.'modernc.org/sqlite']
     version = 'v1.56.0'
     hash = 'sha256-dm+ehuPSqdZ4k+PNPnhj7YaXk2nVAx2sdQi9/UpVUuA='
+
+  [mod.'mvdan.cc/sh/v3']
+    version = 'v3.13.1'
+    hash = 'sha256-FM+2xpGELZLm4Gc09OE5Z3JeNLPMvzeb1wRcdAIeKy4='
