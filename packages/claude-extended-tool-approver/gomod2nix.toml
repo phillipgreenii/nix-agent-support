@@ -38,16 +38,16 @@ schema = 3
     hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
-    version = 'v1.74.4'
-    hash = 'sha256-DcxhQA8poGw638ZHuBaEvpiyi0/K/B57ge/YhzyfJxs='
+    version = 'v1.75.3'
+    hash = 'sha256-71+GTX0yxQPIbVPdsDswLOsjsujd1ZcvXzAbDpfyBGI='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
     hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
 
   [mod.'modernc.org/memory']
-    version = 'v1.11.0'
-    hash = 'sha256-MkybF8vvrxXS5j7O8w3skwTo0aMo1yjWS0K440rYcHM='
+    version = 'v1.12.0'
+    hash = 'sha256-NWya2V+lWCyzn6zyAg79CCr29+yyHZTLCMeZSMAUnqs='
 
   [mod.'modernc.org/sqlite']
     version = 'v1.56.0'
