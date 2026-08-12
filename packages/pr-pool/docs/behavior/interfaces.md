@@ -125,11 +125,15 @@ stateDiagram-v2
 ## Event delivery (shared by `INTF-SOURCE` and `INTF-HANDLER`)
 
 Delivery of an **event** from a source to a handler goes through the core's **durable, ordered,
-de-duped, TTL-bounded queue** and is **at-least-once** (`INV-EVT-1`, `ADR 0031`). An event is
-enqueued durably and the core **offers it until a handler accepts** (`INV-CONC-1`); it is **dropped
-only when its `ttl` expires without acceptance** (unconsumed-expired). An accepted event is
-**retained in the queue until its `ttl`**, so a handler that binds within the TTL can still receive
-it, and delivery **survives a restart**.
+de-duped, retention-bounded queue** and is **at-least-once** (`INV-EVT-1`, `ADR 0031`). An event is
+enqueued durably and the core **offers it until a handler accepts** (`INV-CONC-1`), and **every
+matching handler gets at least one opportunity** — nothing is dropped un-offered. An event carries an
+optional **`at`** (the source stamp; absent, the core's own ingest-now applies) and an optional
+**`expiresAt`** (an absolute instant; absent, `at` applies). If the event is **already expired at the
+moment an attempt is made, that attempt is the last one for that handler**, after which the event is
+dropped unconditionally (unconsumed-expired, `INV-EVT-4`). An accepted event is **retained** while its
+`id` is still needed for de-duplication and while any matching handler is still owed an attempt, and
+delivery **survives a restart**.
 
 **Acceptance** is the reply that hands responsibility to the handler: an inline **completion**
 (synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The core's delivery
@@ -137,17 +141,19 @@ responsibility ends at acceptance; the durable record is written **after accepta
 so a **narrow crash window** (accepted but not yet persisted) MAY redeliver. Therefore:
 
 - an **event handler MUST tolerate duplicates** (be idempotent) — the crash window, a pre-accept
-  re-offer within `ttl`, or a source re-emitting can redeliver the same event (`INV-EVT-2`);
-- the core **de-duplicates by event `id` across the retained-until-`ttl` id set** — including ids
-  already delivered/accepted (`INV-EVT-3`) — so a source never has to track "did I already emit
-  this";
+  re-offer while the event is unexpired, or a source re-emitting can redeliver the same event
+  (`INV-EVT-2`);
+- the core **de-duplicates by event `id` across the retained id set** — including ids already
+  delivered/accepted (`INV-EVT-3`) — so a source never has to track "did I already emit this". With
+  the born-expired default that retention window is roughly one dispatch cycle, so a pull source's
+  next-trigger re-emit is **not** deduped (`INV-EVT-3`);
 - a **pull source** re-derives current truth on its next **query trigger**; a **push-only source**'s
-  events are now **durable to TTL** (no longer lost on a core restart), lost only if nothing accepts
-  them before they expire.
+  events are now **durable through their retention** (no longer lost on a core restart), lost only if
+  nothing accepts them before they expire.
 
-A callback bearing a **tracking id the core does not recognize** (never issued, or already
-TTL-expired and evicted) is **acknowledged and ignored** — a logged no-op, not an error, and it does
-not resurrect an expired event (`INV-INTF-1`).
+A callback bearing a **tracking id the core does not recognize** (never issued, or already expired and
+evicted) is **acknowledged and ignored** — a logged no-op, not an error, and it does not resurrect an
+expired event (`INV-INTF-1`).
 
 ## `INTF-SOURCE` — event source <!-- uuid: fe42416a-5f10-4db1-b8c3-46b1609213c7 -->
 
@@ -170,18 +176,21 @@ lifecycle is known.
   "schemaVersion": "1",
   "id": "evt-abc123",
   "type": "review-requested",
-  "ttl": "15m",
   "at": "2026-07-16T12:00:00Z",
+  "expiresAt": "2026-07-16T12:15:00Z",
   "payload": {
     "note": "source-defined; OPAQUE to the core unless a path is declared"
   }
 }
 ```
 
-- `id` — unique; the core de-duplicates on it across the retained-until-`ttl` id set (`INV-EVT-3`).
+- `id` — unique; the core de-duplicates on it across the retained id set (`INV-EVT-3`).
 - `type` — the primary field a **binding** matches on.
-- `ttl` — how long the core **holds, offers, and retains** the event in the queue before dropping it
-  if still unaccepted (`INV-EVT-1`).
+- `at` — **optional** source stamp. Absent, the core's own "now" at ingest is used (`INV-EVT-1`).
+- `expiresAt` — **optional**, an **absolute instant**. Absent, `at` is used, so an event carrying
+  neither field is **born expired**: offered once to every matching handler, then dropped
+  (`INV-EVT-4`). Setting it in the future is how a retry window is requested; nothing computes a
+  duration.
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
   always receives a struct. The core neither reads nor validates it.
 
@@ -198,8 +207,8 @@ lifecycle is known.
 This is the field-matching model `INV-DISP-1` states as a rule.
 
 **Unknown type.** An event whose `type` no configured binding matches is **accepted into the queue**
-and, with no handler to take it, **waits and expires at its `ttl`** (**unconsumed-expired**) — not a
-rejection of the source. The core records it to logs and the unconsumed-expired metric; a `type` with
+and, with no handler to offer it to, **is dropped unconsumed-expired** — not a rejection of the
+source. The core records it to logs and the unconsumed-expired metric; a `type` with
 **no configured binding at all** is also surfaced as a **config-time warning** (`JOURNEY-VALIDATE`).
 This is the "no event misses" visibility signal, not a runtime error (`INV-DISP-3`).
 
@@ -217,7 +226,7 @@ sequenceDiagram
     Core-->>Src: { id, accepted }
     Note over Core,Src: push — source-initiated
     Src->>Core: ingest-event { id, events: [Event] }
-    Core-->>Src: { id, accepted }  (unknown type still queued → unconsumed-expired at ttl)
+    Core-->>Src: { id, accepted }  (unknown type still queued → unconsumed-expired, offered to nobody)
 ```
 
 ## `INTF-HANDLER` — event handler <!-- uuid: 10939663-7a48-4d44-8c4a-9a2df8ae4654 -->
@@ -237,7 +246,7 @@ sequenceDiagram
   "event": {
     "id": "evt-abc123",
     "type": "review-requested",
-    "ttl": "15m",
+    "expiresAt": "2026-07-16T12:15:00Z",
     "payload": {}
   },
   "callback": "pr-pool session-status --socket … --token …"
@@ -277,7 +286,7 @@ instead, so the two never collide.
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
 | `retryable`      | transient (network blip, flake)                               | post-accept: handler retries; MAY surface / re-emit |
 | `resource-limit` | a capacity/quota ceiling (e.g. a usage window) — not a defect | post-accept: handler pauses, resumes once it lifts  |
-| `unavailable`    | cannot take work now (down, starting, or at capacity)         | pre-accept decline: core re-offers within `ttl`     |
+| `unavailable`    | cannot take work now (down, starting, or at capacity)         | pre-accept decline: core re-offers while unexpired  |
 | `critical`       | MUST NOT be retried; a human is needed                        | post-accept: surfaced to a human; never re-offered  |
 
 The core itself re-offers **only on a pre-accept decline** — an `unavailable` report, or a **`busy`
@@ -396,7 +405,7 @@ config** — the mechanism behind `STORY-OP-3`. They scope which sources and han
 | Subcommand                | Arguments                      | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `run`                     | —                              | Start the core as a long-running **daemon** (socket service); route events as sources emit them until stopped.                                                                                                                                                                                                                                                                                                                                                         |
-| `run-until-idle`          | —                              | Start the socket service and dispatch from the durable queue; **exit once the queue is drained and no offer is outstanding** (every enqueued event accepted or TTL-expired, and no handler holding an offer, `INV-LIFE-1`). The default when no subcommand is given.                                                                                                                                                                                                   |
+| `run-until-idle`          | —                              | Start the socket service and dispatch from the durable queue; **exit once the queue is drained and no offer is outstanding** (every enqueued event accepted or expired, and no handler holding an offer, `INV-LIFE-1`). The default when no subcommand is given.                                                                                                                                                                                                       |
 | `run-role <role> <event>` | role, event                    | **Smoke test**: dispatch **one named event** through **one handler** (its CLI-facing name is its _role_), then tear down. Runs **no discovery** — the event is explicit. Sets a **test-mode** signal (env) so the handler knows a test is in flight.                                                                                                                                                                                                                   |
 | `run-query <query>`       | query                          | **Smoke test**: run **one pull source's query** once, **read-only**, and print the events it would emit. Also sets the test-mode signal.                                                                                                                                                                                                                                                                                                                               |
 | `push-inject <json>`      | event JSON                     | Inject an **arbitrary operator-supplied event** into the **live** core — the same core-side enqueue as the `ingest-event` manager callback, but **operator-initiated**, locating/authenticating the core like the other operator subcommands. Durable via the queue, delivered at-least-once and deduped (`INV-EVT-*`). **Distinct** from `ingest-event` (a manager→core callback) and `run-role` (a smoke test that tears down). Primarily for manual/test injection. |
@@ -424,7 +433,7 @@ Request (stdin):
     {
       "id": "evt-abc123",
       "type": "review-requested",
-      "ttl": "15m",
+      "expiresAt": "2026-07-16T12:15:00Z",
       "payload": {}
     }
   ]
@@ -443,7 +452,7 @@ still-retained **duplicate** `id` is accepted too, because de-duplication is the
 `accepted` is not a fresh-append count and a caller cannot distinguish the two over this interface.
 
 Under the durable queue an event whose `type` matches no binding is **still accepted** (exit `0`,
-counted in `accepted`) — it is enqueued and **expires unconsumed** at its `ttl`; visibility comes from
+counted in `accepted`) — it is enqueued and **expires unconsumed**; visibility comes from
 the **config-time warning** (`JOURNEY-VALIDATE`) and the **unconsumed-expired** metric, not from a
 rejection (`INV-DISP-3`). The `rejected` list therefore carries only **malformed** events (bad schema
 or missing required fields), each with a reason — e.g. exit `1` with:
@@ -456,7 +465,7 @@ or missing required fields), each with a reason — e.g. exit `1` with:
   "rejected": [
     {
       "id": "evt-abc123",
-      "reason": "malformed: missing required field \"ttl\""
+      "reason": "malformed: missing required field \"type\""
     }
   ]
 }
@@ -540,9 +549,10 @@ sequenceDiagram
 The **configuration structure** is itself a first-class interface — the operator authors it, and
 the CLI resolves it (`config --show`). It declares: the participants (each with its command, mode,
 and — for a monitoring sink — its selected metrics); the sources and their queries (with query
-trigger and `ttl`); the handlers and their event-type **bindings** (including any declared
-matchable fields); and the workflow wiring the core validates (`INV-WORKFLOW-1`). The `--only` /
-`--disable` selectors above restrict the _active_ subset of this config per run without editing it.
+trigger); the handlers and their event-type **bindings** (including any declared matchable fields);
+and the workflow wiring the core validates (`INV-WORKFLOW-1`). Expiry is **not** declared here — it
+rides on each event as `at` / `expiresAt` (`INV-EVT-1`, `INV-EVT-4`). The `--only` / `--disable`
+selectors above restrict the _active_ subset of this config per run without editing it.
 
 The **full configuration schema** is not yet pinned; it is tracked as an open question
 (`OQ-CONFIG`), with pr-pool's existing TOML as prior art.
@@ -556,6 +566,5 @@ The **full configuration schema** is not yet pinned; it is tracked as an open qu
   by a verbatim peer cross-check: an implementer **cites** this contract and states only its own
   side, and a counterparty with no set leans on the same suite as its sole reconciliation. Each
   interface here **is** the authoritative contract its implementations adhere to.
-- **Open questions** (tracked in [journeys](journeys.md)): `OQ-EVT-TTL-ORIGIN` (TTL clock origin:
-  event `at` vs ingest), `OQ-WORKFLOW` (pre-runtime wiring validation of the bindings), and
-  `OQ-CONFIG` (the full configuration schema).
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-WORKFLOW` (pre-runtime wiring
+  validation of the bindings) and `OQ-CONFIG` (the full configuration schema).

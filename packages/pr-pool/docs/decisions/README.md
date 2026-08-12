@@ -45,4 +45,5 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 
 ## Entries
 
-_None yet._
+- [`DEC-EVENT-1`](event.md) — expiry is an absolute instant (`at` + `expiresAt`), so there is no
+  clock origin to pick.

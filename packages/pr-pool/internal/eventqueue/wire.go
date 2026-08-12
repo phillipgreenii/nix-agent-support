@@ -105,10 +105,9 @@ func EncodeEvent(evt Event) ([]byte, error) {
 }
 
 // parseAt reads the optional wire `at` source-stamp (RFC3339, event.schema.json).
-// `at` MAY be absent (empty), in which case Event.At is the zero time — the core
-// treats At as optional (OQ-EVT-TTL-ORIGIN: this implementation's TTL clock
-// origin is ingest time, not At); a present-but-unparseable value is a malformed
-// event, classified like ParseTTL's rejection.
+// `at` MAY be absent (empty), in which case Event.At is the zero time and the
+// core's own now at ingest applies (INV-EVT-1); a present-but-unparseable value
+// is a malformed event, classified like ParseTTL's rejection.
 func parseAt(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil

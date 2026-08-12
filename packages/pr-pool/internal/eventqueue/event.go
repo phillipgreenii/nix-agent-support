@@ -32,9 +32,11 @@ type Event struct {
 	// dropping it if still unaccepted (INV-EVT-1). Parsed from a duration string
 	// like "15m" on the wire.
 	TTL time.Duration
-	// At is the event's source-stamped creation time. MAY be zero. Whether At or
-	// ingest time is the TTL clock origin is an open question
-	// (OQ-EVT-TTL-ORIGIN); this implementation uses ingest time (see Queue).
+	// At is the event's source-stamped creation time. MAY be zero, in which case
+	// the core's own now at ingest applies (INV-EVT-1). The behavior contract now
+	// bounds expiry by an absolute instant rather than a duration, so there is no
+	// clock origin left to choose; this implementation still derives expiry from
+	// ingest time and TTL until the wire contract catches up (see Queue).
 	At time.Time
 	// Payload MUST be a JSON object (keyed structure), OPAQUE to the core unless
 	// a binding declares a matchable path (INV-DISP-1). The core neither reads

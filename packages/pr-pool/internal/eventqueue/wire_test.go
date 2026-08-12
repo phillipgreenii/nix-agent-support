@@ -30,8 +30,8 @@ func TestDecodeEvent_FullEvent(t *testing.T) {
 	}
 }
 
-// `at` is OPTIONAL: absent leaves the zero time (the TTL clock origin is ingest
-// time, OQ-EVT-TTL-ORIGIN).
+// `at` is OPTIONAL: absent leaves the zero time, and the core's own now at
+// ingest applies (INV-EVT-1).
 func TestDecodeEvent_AtIsOptional(t *testing.T) {
 	got, err := DecodeEvent([]byte(`{"id":"e","type":"t","ttl":"5m"}`))
 	if err != nil {

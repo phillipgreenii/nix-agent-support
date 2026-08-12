@@ -12,21 +12,29 @@ their own terms in a downstream deployment set.
 ## Events and matching
 
 - **Event** — a typed, self-contained fact a source emits and the core routes. Carries an `id`, a
-  `type`, a `ttl`, and an opaque `payload`.
+  `type`, an optional `at`, an optional `expiresAt`, and an opaque `payload`.
 - **Event type** — the primary field a binding matches on.
 - **Binding** — the rule associating an event handler with the events it handles: a **match** over
   event fields. `type` is the default field; a binding MAY match on other declared fields. A matched
   field that is absent on an event simply does not match (it is not an error).
 - **Query trigger** — what fires a pull event source's query: a **periodic** tick. (A tick is a query
   _trigger_, not a dispatched event.)
-- **TTL** — how long the core **holds, offers, and retains** an event in the queue before dropping
-  it if still unaccepted (`INV-EVT-1`).
+- **`at`** — an event's **optional source stamp**, the instant the source says the fact happened.
+  Absent, the core's own **ingest-now** applies (`INV-EVT-1`).
+- **`expiresAt`** — the **optional absolute instant** past which the core stops retrying an event.
+  Absent, it defaults to `at`, so an event carrying neither field is **born expired**: it is offered
+  once to every matching handler and then dropped (`INV-EVT-1`, `INV-EVT-4`).
+- **Retention** — how long the core keeps an event: through `expiresAt` and the one final attempt
+  each matching handler is still owed, and no longer. Retention bounds both the queue entry and the
+  `id` the core de-duplicates on (`INV-EVT-3`, `INV-EVT-4`).
 - **Tracking id** — the id the core assigns to a call so a deferred reply or later callback can be
   matched back to it. Per-call.
-- **Queue** — the core's **durable, ordered, de-duped, TTL-bounded** store of events (`INV-EVT-1`,
-  `ADR 0031`). An event stays in the queue until its TTL **even after acceptance**, so a handler that
-  binds within the TTL can still receive it and de-duplication (`INV-EVT-3`) covers already-delivered
-  ids. A deployment MAY opt in to evicting an event once all bound handlers have accepted it.
+- **Queue** — the core's **durable, ordered, de-duped, retention-bounded** store of events
+  (`INV-EVT-1`, `ADR 0031`). An event stays in the queue for its **retention even after
+  acceptance** — not so a late-binding handler can pick it up, but so **every matching handler still
+  owed an attempt gets one** and so **de-duplication by `id`** (`INV-EVT-3`) still covers
+  already-delivered ids. A deployment MAY opt in to evicting an event once all bound handlers have
+  accepted it.
 - **Acceptance** — a handler's signal that it has taken responsibility for an event: an inline
   **completion** (synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The
   core retries delivery **only until acceptance** (`INV-FAIL-1`); after acceptance the handler owns
@@ -63,8 +71,8 @@ their own terms in a downstream deployment set.
 ## Outcomes
 
 - **Failure class** — the coarse category a handler failure carries.
-- **retryable** — a transient condition; the same event MAY be re-offered within its TTL and may then
-  succeed.
+- **retryable** — a transient condition; the same event MAY be re-offered while it is unexpired
+  (`INV-EVT-4`) and may then succeed.
 - **resource-limit** — a capacity or quota ceiling was reached (e.g. a usage window); not a defect,
   and the handler will be able again once the ceiling lifts.
 - **unavailable** — the handler cannot accept work right now (down, starting, or at capacity); an

@@ -95,7 +95,7 @@ principle's rule form; the principle is stated here, once, and nowhere else rest
 ## Scope (extent + floor)
 
 - **Extent (in)** — matching and routing typed events to bound handlers; the participant interfaces
-  and their common contract; the **durable, ordered, de-duped, TTL-bounded event queue** with
+  and their common contract; the **durable, ordered, de-duped, retention-bounded event queue** with
   at-least-once delivery; concurrency and per-handler capacity; the operator CLI; the metric catalog;
   the **wiring** (declared routing graph + validation); the daemon / run-until-idle lifecycle.
 - **Extent (out)** — concrete participant **implementations** (ccpool, beads, prometheus, …) and any

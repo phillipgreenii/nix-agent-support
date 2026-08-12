@@ -17,16 +17,17 @@ governed by these same delivery invariants, `INV-EVT-*`.)
 ```mermaid
 flowchart TD
     emit["a source emits a typed event"] --> enq["append to the durable queue (INV-EVT-1)"]
-    enq --> dedup{"id already in the queue within ttl? (incl. already-accepted)"}
+    enq --> dedup{"id still retained in the queue? (incl. already-accepted)"}
     dedup -->|yes| drop["de-duplicated (INV-EVT-3)"]
     dedup -->|no| match{"a binding matches the event's fields? (type + declared fields)"}
-    match -->|no binding matches type| noh["no handler: waits in queue → unconsumed-expired at ttl; logged + metric; config-time warning (INV-DISP-3)"]
+    match -->|no binding matches type| noh["no matching handler, so no attempt is owed: dropped unconsumed-expired, logged + metric, config-time warning (INV-DISP-3)"]
     match -->|matched| offer["offer to a bound handler's head — one outstanding offer per handler (INV-CONC-1)"]
     offer --> acc{"handler accepts? (ack or completion)"}
-    acc -->|"busy / pre-accept decline"| reoffer["re-offer within ttl, or offer elsewhere (INV-FAIL-1)"]
+    acc -->|"busy / pre-accept decline"| exp{"was the event already past expiresAt when that attempt was made?"}
+    exp -->|no| reoffer["re-offer, or offer elsewhere (INV-FAIL-1)"]
     reoffer --> acc
-    acc -->|accepted| mark["mark accepted per (event, handler); retain in queue until ttl (INV-EVT-1)"]
-    offer -->|ttl expires unaccepted| expire["dropped undelivered — unconsumed-expired (INV-EVT-1)"]
+    exp -->|yes| expire["that attempt was this handler's last: dropped undelivered — unconsumed-expired (INV-EVT-4)"]
+    acc -->|accepted| mark["mark accepted per (event, handler), then retain while a dedup id or an owed attempt remains (INV-EVT-1)"]
 ```
 
 - **`INV-DISP-1`** <!-- uuid: 5ad7c9a4-37ea-4496-8f23-51964a8aae54 --> — Sources **emit typed events**; handlers **bind** to events via a **binding**
@@ -40,37 +41,61 @@ flowchart TD
   source, handler, or deployment lives in the core.
 - **`INV-DISP-3`** <!-- uuid: 421db242-e1fc-49ba-a1a6-38211abf5569 --> — An event whose `type` **no
   configured binding matches** is **not** a runtime error under the durable queue: it is enqueued and,
-  with no handler to accept it, **waits and expires at its `ttl`** (**unconsumed-expired**,
-  `INV-EVT-1`) — a visibility signal ("no event misses"), recorded to logs and metrics, not a
-  rejection of the caller. Visibility is surfaced two ways: **config-time**, `JOURNEY-VALIDATE` emits
-  a **warning** when a source-emitted `type` has **no configured binding at all** (you would queue
-  events nothing can take); and at runtime the **unconsumed-expired** metric counts such drops. A
-  binding merely **disabled for this run** (`--only`/`--disable`) is expected and is neither warned
-  nor an error — its events simply wait to `ttl`. (An _absent declared field_ is a non-match, not a
-  no-binding condition.)
+  with no handler to offer it to, **is dropped unconsumed-expired** (`INV-EVT-1`, `INV-EVT-4`) — a
+  visibility signal ("no event misses"), recorded to logs and metrics, not a rejection of the caller.
+  Under `INV-EVT-4` that count is now a **genuine miss** rather than a scheduling artifact: either
+  every matching handler had at least one opportunity and none took it, or nothing matched at all. A
+  busy handler can no longer be the reason an event expired unoffered, which makes the "no event
+  misses" signal considerably more meaningful. Visibility is surfaced two ways: **config-time**,
+  `JOURNEY-VALIDATE` emits a **warning** when a source-emitted `type` has **no configured binding at
+  all** (you would queue events nothing can take); and at runtime the **unconsumed-expired** metric
+  counts such drops. A binding merely **disabled for this run** (`--only`/`--disable`) is expected and
+  is neither warned nor an error — its events are offered to nobody and expire. (An _absent declared
+  field_ is a non-match, not a no-binding condition.)
 
 ## Delivery
 
-- **`INV-EVT-1`** <!-- uuid: faf59ce3-6a27-42c8-8bfa-0903f895eed6 --> — The core holds a
-  **durable, ordered, de-duped, TTL-bounded event queue** (`ADR 0031`), and event delivery is
-  **at-least-once**: an event is enqueued durably, and the core **attempts delivery until a handler
-  accepts it**. The durable record is written **after acceptance is confirmed**, so a narrow crash
-  window MAY redeliver (absorbed by idempotent handlers, `INV-EVT-2`). An event is **dropped only
-  when its `ttl` expires without acceptance** (**unconsumed-expired**); an accepted event is
-  **retained in the queue until its `ttl`** so a handler that binds within the TTL can still receive
-  it. Delivery therefore **survives a restart** — the storage mechanism (jsonl / DB / WAL) is a
-  realization choice, not behavior. _(The `crashing` lifecycle signal in `INV-LIFE-1` stays
-  best-effort — that is a separate concern from event-data durability.)_
+- **`INV-EVT-1`** <!-- uuid: faf59ce3-6a27-42c8-8bfa-0903f895eed6 --> — **The delivery-opportunity
+  guarantee.** The core holds a **durable, ordered, de-duped, retention-bounded event queue**
+  (`ADR 0031`), and **every matching handler WILL get at least one opportunity to accept a matching
+  event**: nothing is ever dropped **un-offered**. Delivery is **at-least-once** — an event is
+  enqueued durably and the core **attempts delivery until a handler accepts it**, over the window
+  `INV-EVT-4` bounds. An event carries an optional **`at`** (the source stamp; **absent, the core's
+  own "now" at ingest is used**) and an optional **`expiresAt`** (an **absolute instant**; **absent,
+  `at` is used**). Nothing computes a duration, and neither field is configured — they ride on the
+  event. The durable record is written **after acceptance is confirmed**, so a narrow crash window MAY
+  redeliver (absorbed by idempotent handlers, `INV-EVT-2`). An accepted event is **retained** while
+  its `id` is still needed for de-duplication (`INV-EVT-3`) and while any matching handler is still
+  owed its opportunity. Delivery therefore **survives a restart** — the storage mechanism
+  (jsonl / DB / WAL) is a realization choice, not behavior. _(The `crashing` lifecycle signal in
+  `INV-LIFE-1` stays best-effort — that is a separate concern from event-data durability.)_
 - **`INV-EVT-2`** <!-- uuid: 06649d39-2734-409a-8098-f3c2cef44cbe --> — A handler **MUST tolerate
   duplicate events** (be idempotent) — required, because at-least-once delivery (`INV-EVT-1`) and the
   narrow crash window MAY redeliver an accepted event. A source **MAY** emit the same event more than
-  once; the durable queue makes **both pull and push** events durable to TTL, so a push-only source
-  no longer loses events it cannot re-derive.
+  once; the durable queue makes **both pull and push** events durable through their retention, so a
+  push-only source no longer loses events it cannot re-derive.
 - **`INV-EVT-3`** <!-- uuid: d54ad229-ed48-4862-aa27-bc2181b4d6c4 --> — The core **de-duplicates by
-  event `id` across the retained-until-`ttl` id set** — including ids of events already delivered or
-  accepted — so a source never needs to track whether it already emitted an event, and a re-emit
-  within TTL is dropped as a duplicate. _(The **TTL clock origin** — event `at` vs ingest time — is
-  `OQ-EVT-TTL-ORIGIN`.)_
+  event `id` across the retained id set** — including ids of events already delivered or accepted — so
+  a source never needs to track whether it already emitted an event, and a re-emit **within
+  retention** is dropped as a duplicate. **Retention ends when the final attempts owed under
+  `INV-EVT-4` are complete**, which has a consequence worth stating rather than discovering: with the
+  born-expired default the dedup window **collapses to roughly one dispatch cycle**, so a pull query
+  re-emitting on its next trigger will **not** be deduped. That is consistent with "re-emission, not
+  resurrection" and is a real change; an operator who wants a wider dedup window sets `expiresAt`.
+- **`INV-EVT-4`** <!-- uuid: 840afb74-2159-447f-985b-33b27dfc35da --> — **Retry is bounded, and the
+  bound is evaluated at attempt time.** If the event is **already expired at the moment an attempt is
+  made, that attempt is the last one for that handler**: accept or decline, the core does not offer
+  that event to that handler again, and once no handler is still owed an attempt the event is dropped
+  **unconditionally** (**unconsumed-expired**, `INV-DISP-3`). No attempt history is kept — the expiry
+  check at attempt time is the whole decision. Before `expiresAt` the re-offer behavior of
+  `INV-FAIL-1` holds unchanged, so **`expiresAt` IS the retry window**: setting it in the future is
+  how retries are requested, and absent it there is no retry. Because `expiresAt` defaults to `at` and
+  `at` defaults to the core's ingest-now, the default event is **born expired**, and the default
+  behavior is therefore **offer once to every matching handler, then drop** — a best-effort default
+  needing no configuration, and one under which an event can no longer expire without ever having been
+  offered to a busy handler. _(Why expiry is an absolute instant rather than a duration — and why that
+  shape leaves no clock origin to choose — is recorded in
+  `phillipgreenii-nix-agent-support · packages/pr-pool/docs/decisions · DEC-EVENT-1`.)_
 
 ## Interfaces
 
@@ -85,7 +110,7 @@ flowchart TD
   (synchronous — `accept == complete`) or a **deferred ack** reconciled later over the participant's
   callback, keyed by the tracking id (asynchronous — `accept == ack`, outcome reported later). The
   core's delivery responsibility **ends at acceptance** (`INV-EVT-1`, `INV-FAIL-1`). A callback
-  bearing a **tracking id the core does not recognize** — never issued, or already TTL-expired and
+  bearing a **tracking id the core does not recognize** — never issued, or already expired and
   evicted — is **acknowledged and ignored** (a logged no-op): not an error, and it does not resurrect
   an expired event. The core **accepts messages only after a participant is `started` and before it
   is `stopping`** (the lifecycle is owned by `INV-LIFE-1`).
@@ -108,15 +133,16 @@ sequenceDiagram
     A-->>Core: accept (ack)
     Core->>B: offer event E2
     B-->>Core: busy — pre-accept decline (at capacity)
-    Note over Core: not a defect — re-offer E2 within its ttl (INV-FAIL-1)
-    Core->>A: re-offer E2 once A has capacity (still within ttl)
+    Note over Core: not a defect — re-offer E2 while it is unexpired (INV-FAIL-1)
+    Core->>A: re-offer E2 once A has capacity (still unexpired)
     A-->>Core: accept → later session-status completed
 ```
 
 - **`INV-CONC-1`** <!-- uuid: 20c84e0f-8ffb-428c-9acc-dcaabb4fdf1b --> — Capacity is
   **handler-enforced** via a **pre-accept `busy` decline**, not a core-tracked number: the core
   offers an event and the handler declines with `busy` when at capacity, and the core then re-offers
-  within `ttl` (`INV-FAIL-1`). **"One event → one session" holds _within_ a handler**; **fan-out is
+  while the event is unexpired (`INV-FAIL-1`, bounded by `INV-EVT-4`). **"One event → one session"
+  holds _within_ a handler**; **fan-out is
   _across_ handlers** — the core tracks acceptance per `(event, handler)` (`INV-EVT-1`) and keeps
   **one outstanding offer per handler** (per-handler serial FIFO, `ADR 0031`). Concurrency is **not
   assumed safe for every event type** — a `type` **MAY** be marked to **serialize** (e.g. a shutdown
@@ -125,8 +151,9 @@ sequenceDiagram
   actor's** concern, complementary to and not duplicating the core's acceptance tracking.)_
 - **`INV-FAIL-1`** <!-- uuid: 2da0d587-f116-42e6-b986-8abf80ed023c --> — Failure classes split at
   the **acceptance boundary** (`INV-EVT-1`, `ADR 0031`). **Pre-accept declines** — a handler is
-  `busy` (at capacity) or `unavailable` — are the **core's** to handle: it re-offers the event within
-  its `ttl`, to the same handler once the ceiling lifts or to another bound handler. **Post-accept
+  `busy` (at capacity) or `unavailable` — are the **core's** to handle: it re-offers the event **while
+  it is unexpired** (`INV-EVT-4`), to the same handler once the ceiling lifts or to another bound
+  handler. **Post-accept
   outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that has
   **already accepted** the event — are the **handler's** own (once it accepts, the handler owns
   persistence/resume/retry); the core does **not** re-offer post-accept work. Such an outcome is
@@ -154,8 +181,9 @@ sequenceDiagram
   **metric catalog** (each metric's `name`, `kind`, `unit`, labels); a **monitoring sink** pulls or
   pushes a declared subset (`INTF-MON`). Observability covers **metrics and logs** (traces are a later
   concern). The catalog MUST declare at least: **queue depth** (gauge, per `type`), **failure rate**
-  (counter, per failure class), and **unconsumed-expired** (counter, per `type` — events that reached
-  `ttl` with no handler accepting them, the concrete "no event misses" signal, `INV-DISP-3`),
+  (counter, per failure class), and **unconsumed-expired** (counter, per `type` — events that expired
+  with no handler accepting them, which under `INV-EVT-4` is a genuine miss and is the concrete "no
+  event misses" signal, `INV-DISP-3`),
   alongside the existing throughput / backlog / liveness metrics. The metric catalog is the neutral
   **shape**; **OTel** is the default **emission transport for metrics only** (a neutral standard, not
   a mandated tool — `GOAL-MIN-1` still holds), while logs stay JSONL; the concrete backend is a
@@ -165,7 +193,7 @@ sequenceDiagram
 - **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs as a **socket
   service** in both modes — a long-running **daemon** (`run`) and a one-off **run-until-idle**, which
   exits when the **queue is drained and no offer is outstanding** (every enqueued event is accepted
-  or TTL-expired, and no handler has an outstanding offer), then stops. Both keep the socket
+  or expired, and no handler has an outstanding offer), then stops. Both keep the socket
   available so push sources can reach it. The core signals each registered participant through the
   lifecycle `starting → started → stopping → stopped`, plus a **best-effort `crashing`** signal on
   sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no correctness rule may

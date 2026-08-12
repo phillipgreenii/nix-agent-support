@@ -37,16 +37,16 @@ load and failure.
   event types, so parallelism never corrupts order-dependent work. _(→ `INV-CONC-1`; safety over
   efficiency, `INV-PREC-1`.)_
 - **`STORY-OP-8`** <!-- uuid: 627ec338-12a6-483d-a792-2168bc3841a8 --> — rely on clear **delivery semantics** (durable, at-least-once, de-duped,
-  `ttl`-bounded), so I design handlers to be idempotent and know an accepted event survives a
-  restart. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
+  retention-bounded), so I design handlers to be idempotent and know an accepted event survives a
+  restart. _(→ `INV-EVT-1`, `INV-EVT-2`, `INV-EVT-3`, `INV-EVT-4`; `JOURNEY-FLOW`, `JOURNEY-FAIL`.)_
 - **`STORY-OP-9`** <!-- uuid: 9d593740-745e-42fd-a74c-2a283b57b81c --> — declare the **wiring** tying sources → event types → handlers through their
   bindings, so the wiring is a first-class, inspectable artifact rather than an emergent accident.
   _(→ `JOURNEY-WORKFLOW`; `INV-WORKFLOW-1`.)_
 - **`STORY-OP-10`** <!-- uuid: 738e4c5e-01f9-4c2b-bb11-81ed0a4c6dc9 --> — **validate** that wiring before running — no orphan event types, no unhandled
   source output, no disconnected handlers, no unbounded loops — so I get a pass/fail report, not a
   runtime surprise. _(→ `JOURNEY-VALIDATE`; `INV-WORKFLOW-1`.)_
-- **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **by its class** (`retryable` re-offered within
-  `ttl`, `resource-limit` paused and re-offered, `unavailable` deferred, `critical` never retried
+- **`STORY-OP-11`** <!-- uuid: 49f4499d-019f-47e4-a66c-773c20137f6d --> — have a handler failure handled **by its class** (`retryable` re-offered while
+  unexpired, `resource-limit` paused and re-offered, `unavailable` deferred, `critical` never retried
   and sent to a human), so transient trouble self-heals and only genuine defects reach me.
   _(→ `JOURNEY-PAUSE`, `JOURNEY-FAIL`; `INV-FAIL-1`.)_
 - **`STORY-OP-12`** <!-- uuid: 20a9f5f1-9b4a-4f67-a18b-bb1dedf23153 --> — trust that when the core must trade off, it prefers **safety over continuity
@@ -58,7 +58,7 @@ load and failure.
 - **`STORY-OBS-1`** <!-- uuid: ce97e9c6-5719-4b18-9de9-fa1900b951bd --> — see throughput, backlog, failures, and liveness through dashboards fed by the
   **metric catalog**, so I know the system's health. _(→ `JOURNEY-OBSERVE`; `INV-OBS-1`.)_
 - **`STORY-OBS-2`** <!-- uuid: 257f9e86-187b-4ee8-8123-b75b71d976b5 --> — distinguish a **source infrastructure failure** from a genuinely idle "no
-  work" reading, and see `ttl`-drops and failure classes as metrics, so a silent outage does not
+  work" reading, and see **expiry drops** and failure classes as metrics, so a silent outage does not
   read as "nothing to do." _(→ `JOURNEY-FAIL`, `JOURNEY-OBSERVE`; `INV-DISP-3`, `INV-OBS-1`.)_
 
 **Coverage (traceability).** Per the method's rule that a set's extent is exactly what its stories
@@ -91,8 +91,8 @@ contract, then run the **conformance suite** (positive + negative) before trusti
    lifecycle. Messages are accepted **only after `started` and before `stopping`**.
 3. Implement the interface's subcommands:
    - **`INTF-SOURCE`** — `query` returning `{ events }` or `{ deferred: true }` (then push via
-     callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`,
-     `ttl`, `at`, and a **JSON-object** `payload`.
+     callback); or, for a push source, invoke the ingest callback. Each event carries `id`, `type`, an
+     optional `at`, an optional `expiresAt`, and a **JSON-object** `payload`.
    - **`INTF-HANDLER`** — accept a `dispatch`, reply with an inline outcome or `{ deferred: true }`,
      and (if deferred) push `running / paused / completed / failed` via the callback; a `failed`
      carries a **failure class** (`INV-FAIL-1`). MUST tolerate a **duplicate event** idempotently
@@ -142,16 +142,17 @@ sequenceDiagram
   the per-handler concurrency ceiling.
 - **Bindings** — for each handler, the **event-type match** it responds to. `type` is the default
   field; a binding MAY match other declared fields (`INV-DISP-1`).
-- **Per-event `ttl`** — how long the core **holds, offers, and retains** an event in the queue
-  before dropping it if unaccepted (`INV-EVT-1`), and any event type **marked to serialize**
-  (`INV-CONC-1`, see `OQ-CONC-MARK`).
+- **Serialize marks** — any event type **marked to serialize** (`INV-CONC-1`, see `OQ-CONC-MARK`).
 - **Monitoring sink** (`INTF-MON`, optional) — its mode and the **metric subset** it handles.
 - **Storage** (`ACTOR-STO` via `INTF-STORE`, optional; the default is in-memory).
 - **Selectors** — `--only` / `--disable` to restrict the active set of sources/handlers for a single
   run **without editing config** (`STORY-OP-3`).
 
-The resolved config is validated as a routing graph (`JOURNEY-VALIDATE`) and run (`JOURNEY-RUN`). The
-full configuration **schema** is not yet fixed (see `OQ-CONFIG`).
+The resolved config is validated as a routing graph (`JOURNEY-VALIDATE`) and run (`JOURNEY-RUN`).
+**Expiry is not authored here.** Each event carries its own optional `at` and `expiresAt`
+(`INV-EVT-1`), and an event with neither is expired on arrival — so the default needs no config entry,
+and an operator who wants a retry window sets `expiresAt` on the event (`INV-EVT-4`). The full
+configuration **schema** is not yet fixed (see `OQ-CONFIG`).
 
 ```mermaid
 flowchart TD
@@ -162,8 +163,8 @@ flowchart TD
     parts --> sto["storage INTF-STORE: optional; in-memory default"]
     src --> bind["bindings: each handler matches event types (type default; INV-DISP-1)"]
     hdl --> bind
-    bind --> ttl["per-event ttl (INV-EVT-1); order-dependent types marked to serialize (INV-CONC-1)"]
-    ttl --> sel["optional --only / --disable selectors restrict the active set per run"]
+    bind --> ser["order-dependent types marked to serialize (INV-CONC-1). expiry is not configured, it rides on each event (INV-EVT-1)"]
+    ser --> sel["optional --only / --disable selectors restrict the active set per run"]
     sel --> out["resolved config then JOURNEY-VALIDATE then JOURNEY-RUN"]
 ```
 
@@ -210,10 +211,10 @@ malformed graph) from a **warning** (a graph that would queue events nobody can 
 
 - **Orphan event type** — a binding matches a `type` no configured source emits → error.
 - **Unhandled source output** — a source emits a `type` **no configured binding covers at all** →
-  **warning** (`INV-DISP-3`): under the durable queue such events simply wait and expire at TTL
-  (unconsumed-expired, `INV-EVT-1`), so it is a visibility signal ("no event misses"), not a runtime
-  error. A binding merely **disabled for this run** (`--only`/`--disable`) is expected and does not
-  warn.
+  **warning** (`INV-DISP-3`): under the durable queue such events are enqueued, offered to nobody, and
+  dropped **unconsumed-expired** (`INV-EVT-1`, `INV-EVT-4`), so it is a visibility signal ("no event
+  misses"), not a runtime error. A binding merely **disabled for this run** (`--only`/`--disable`) is
+  expected and does not warn.
 - **Disconnected handler** — a handler no binding can reach → error.
 - **Loop** — a re-entry cycle (`handler → query → same type`) that would not terminate → flagged.
 
@@ -226,7 +227,7 @@ flowchart TD
     wf["declared routing graph (INV-WORKFLOW-1)"] --> c1{"every bound type emitted by some source?"}
     c1 -->|no| e1["orphan event type: ERROR"]
     c1 -->|yes| c2{"every source-emitted type covered by some binding?"}
-    c2 -->|"no binding at all"| w2["unhandled source output: WARNING — events wait to TTL (INV-DISP-3, INV-EVT-1)"]
+    c2 -->|"no binding at all"| w2["unhandled source output: WARNING — events are offered to nobody and expire unconsumed (INV-DISP-3, INV-EVT-4)"]
     c2 -->|"yes / only disabled this run"| c3{"every handler reachable by some binding?"}
     w2 --> c3
     c3 -->|no| e3["disconnected handler: ERROR"]
@@ -250,7 +251,7 @@ it while it runs (`INV-LIFE-1`).
 
 - **`run`** — run continuously as a daemon; sources and managers **push** over the socket.
 - **`run-until-idle`** — dispatch from the durable queue and exit once the **queue is drained and no
-  offer is outstanding** (every enqueued event accepted or TTL-expired, and no handler holding an
+  offer is outstanding** (every enqueued event accepted or expired, and no handler holding an
   offer, `INV-LIFE-1`); the socket stays open throughout so managers can still push.
 
 Both modes keep the socket available. The operator inspects a running core with `status` (resolved
@@ -267,7 +268,7 @@ flowchart TD
     sel --> sock["start the socket service"]
     sock --> mode{"run vs run-until-idle?"}
     mode -->|run| daemon["daemon: run continuously; sources/managers push over the socket"]
-    mode -->|run-until-idle| rui["dispatch everything deliverable; await deferred work up to ttl; exit"]
+    mode -->|run-until-idle| rui["dispatch everything deliverable, await deferred work until it expires, then exit"]
     daemon --> life["both keep the socket available (INV-LIFE-1)"]
     rui --> life
     life --> inspect["inspect live via status / config (INTF-CLI)"]
@@ -281,7 +282,7 @@ sync-or-deferred reply and status, to completion — with the handler's new work
 events via a query.
 
 **Flow.** A source **emits** a typed event (a pull source on its query trigger; a push source on its
-ingest callback). The core **de-duplicates by `id` within `ttl`** (`INV-EVT-3`) and **routes by
+ingest callback). The core **de-duplicates by `id` within retention** (`INV-EVT-3`) and **routes by
 `type`** (`INV-DISP-1`). An event whose `type` no handler binds is an **error** — recorded to logs
 and metrics, and returned to the caller on the push/ingest path (`INV-DISP-3`). Otherwise the core
 **dispatches** the event to a handler as a **handler-session** (tracked by the request `id`),
@@ -292,7 +293,7 @@ later as fresh events through a query.
 
 ```mermaid
 flowchart TD
-    emit["a source emits a typed event"] --> dedup["core de-duplicates by id within ttl (INV-EVT-3)"]
+    emit["a source emits a typed event"] --> dedup["core de-duplicates by id within retention (INV-EVT-3)"]
     dedup --> route{"a handler bound to its type? (INV-DISP-1)"}
     route -->|no| err["error to logs + metrics; error to caller on push (INV-DISP-3)"]
     route -->|yes| disp["core dispatches to one handler-session, bounded by capacity (INV-CONC-1)"]
@@ -315,7 +316,7 @@ sequenceDiagram
     else push source
         SRC->>CORE: ingest-event callback
     end
-    CORE->>CORE: de-dup by id within ttl (INV-EVT-3) route by type (INV-DISP-1)
+    CORE->>CORE: de-dup by id within retention (INV-EVT-3) route by type (INV-DISP-1)
     Note over CORE: unknown type is an error to logs+metrics and to the caller (INV-DISP-3)
     CORE->>HDL: dispatch event as a handler-session (tracking id)
     alt sync
@@ -361,10 +362,11 @@ boundary** (`INV-FAIL-1`), without pinning an open call.
 
 **Flow — pre-accept (`busy`).** A handler at capacity **declines pre-accept** with `busy`
 (`INV-CONC-1`). This is the **core's** to handle: preferring **continuity over efficiency**
-(`INV-PREC-1`), it re-offers the event **within `ttl`** once the handler frees up, or offers it to
-another bound handler; the event stays durable in the queue until then (`INV-EVT-1`). If `ttl`
-expires still-unaccepted, the event is dropped (unconsumed-expired) — a pull source re-derives it on
-its next trigger.
+(`INV-PREC-1`), it re-offers the event **while it is unexpired** once the handler frees up, or offers
+it to another bound handler; the event stays durable in the queue until then (`INV-EVT-1`). Once the
+event is past its `expiresAt`, the next attempt on a handler is **that handler's last** (`INV-EVT-4`),
+and with no handler still owed one the event is dropped (unconsumed-expired) — a pull source re-derives
+it on its next trigger.
 
 **Flow — post-accept (`resource-limit`).** A handler that has **already accepted** an event and then
 hits a usage-window / quota ceiling reports **`resource-limit`**. Post-accept, the **handler owns**
@@ -380,7 +382,7 @@ sequenceDiagram
     alt at capacity (pre-accept)
         HDL-->>CORE: busy (INV-CONC-1)
         Note over CORE: continuity over efficiency (INV-PREC-1)
-        CORE->>HDL: re-offer within ttl once capacity returns
+        CORE->>HDL: re-offer once capacity returns, while the event is unexpired
     else accepted, then hits a ceiling (post-accept)
         HDL-->>CORE: accept (ack)
         HDL-->>CORE: session-status resource-limit — handler pauses/resumes (INV-FAIL-1)
@@ -398,8 +400,9 @@ continuity > efficiency) shapes each response.
 acceptance:
 
 - **pre-accept declines** — `busy` (at capacity, `INV-CONC-1`) or `unavailable` (can't take work
-  now) — are the **core's**: it re-offers the event **within `ttl`**, once the handler frees up or to
-  another bound handler; the event stays durable in the queue until accepted or TTL (`INV-EVT-1`).
+  now) — are the **core's**: it re-offers the event **while it is unexpired** (`INV-EVT-4`), once the
+  handler frees up or to another bound handler; the event stays durable in the queue until accepted or
+  expired (`INV-EVT-1`).
 - **post-accept outcomes** — `retryable`, `resource-limit`, or `critical`, reported by a handler that
   **already accepted** — are the **handler's** own (it owns persistence/resume/retry once it
   accepts). The core does **not** re-offer accepted work; the outcome is surfaced back or becomes a
@@ -408,10 +411,10 @@ acceptance:
 ```mermaid
 flowchart TD
     off["core offers event to a bound handler (INV-CONC-1)"] --> acc{"accepted?"}
-    acc -->|"no — busy / unavailable (pre-accept)"| reoff["core re-offers within ttl, or to another handler (INV-FAIL-1)"]
-    reoff --> ttl{"still within ttl?"}
-    ttl -->|yes| off
-    ttl -->|no| drop["dropped undelivered — unconsumed-expired (INV-EVT-1)"]
+    acc -->|"no — busy / unavailable (pre-accept)"| reoff["core re-offers, or offers to another handler (INV-FAIL-1)"]
+    reoff --> exp{"was the event already past expiresAt when that attempt was made?"}
+    exp -->|no| off
+    exp -->|yes| drop["that attempt was this handler's last: dropped undelivered — unconsumed-expired (INV-EVT-4)"]
     acc -->|yes| own["handler owns the work: persist / resume / retry"]
     own --> out{"post-accept outcome?"}
     out -->|retryable / resource-limit| surf["handler retries/resumes, or surfaces / emits a new event (INV-FAIL-1)"]
@@ -438,11 +441,13 @@ sequenceDiagram
     end
 ```
 
-**Flow — event `ttl`-drop.** An event stays in the **durable queue** until its `ttl` (`INV-EVT-1`),
-surviving restarts; it is dropped only when the `ttl` expires **without acceptance**
-(unconsumed-expired) — the `ttl` branch in the flow above. A pull source re-derives it on its next
-trigger; a push-only source's event was durable to TTL, so it is lost only if nothing accepted it
-before it expired (`INV-EVT-2`).
+**Flow — event expiry drop.** An event stays in the **durable queue** for its **retention**
+(`INV-EVT-1`), surviving restarts. It is dropped when every matching handler has had the one attempt it
+is owed and none accepted (unconsumed-expired) — the expiry branch in the flow above, which is
+evaluated at attempt time and keeps no attempt history (`INV-EVT-4`). Because the default event is
+expired on arrival, that is the common case: offered once to each matching handler, then gone. A pull
+source re-derives it on its next trigger; a push-only source's event was durable through its retention,
+so it is lost only if nothing accepted it before it expired (`INV-EVT-2`).
 
 **Flow — core crash.** On a fatal condition the core makes a **best-effort** `crashing` signal to
 registered participants (`INV-LIFE-1`). That signal stays best-effort and MAY be lost — but event
@@ -499,16 +504,10 @@ sequenceDiagram
 Each states the gap, its owner, a resolution path, and where it blocks.
 
 - **`OQ-CONFIG`** <!-- uuid: e004fda6-f6e6-41e1-8ec4-0b90c17fd2b2 --> — the full **configuration schema**: participants (command + mode), event sources,
-  handlers/roles + their event-type **bindings**, per-event `ttl`, caps, monitoring/storage
-  selection, and the `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet
-  fixed. _Owner_: operator/author. _Path_: extract from pr-pool's TOML prior art and settle the
-  schema. _Blocks_: authoring config (`JOURNEY-CONFIG`); `INTF-CLI`.
-- **`OQ-EVT-TTL-ORIGIN`** <!-- uuid: 48ca567c-6b64-4a98-b3c0-dc5f03b2b46b --> — the **TTL clock
-  origin**: whether an event's `ttl` is measured from the event's `at` (creation) time or from the
-  time the core **ingests** it. _Gap_: the durable queue de-dups and expires by `ttl` (`INV-EVT-3`),
-  but which instant starts the clock is unsettled. _Owner_: author. _Path_: decide `at` vs. ingest
-  when settling the queue's realization. _Blocks_: exact dedup/expiry timing (`INV-EVT-1`,
-  `INV-EVT-3`); the queue implementation.
+  handlers/roles + their event-type **bindings**, caps, monitoring/storage selection, and the
+  `--only` / `--disable` selectors. _Gap_: the authored config shape is not yet fixed. _Owner_:
+  operator/author. _Path_: extract from pr-pool's TOML prior art and pin the schema. _Blocks_:
+  authoring config (`JOURNEY-CONFIG`); `INTF-CLI`.
 - **`OQ-CONC-MARK`** <!-- uuid: 427e52f7-223f-428e-b8c7-e8140d557f8e --> — **how an event type is marked to serialize** (`INV-CONC-1`). _Gap_: the
   mechanism for declaring an order-dependent type is undecided. _Owner_: author. _Path_: decide a
   per-type config flag vs. a binding attribute. _Blocks_: safe handling of order-dependent events;
