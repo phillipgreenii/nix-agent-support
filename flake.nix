@@ -1157,6 +1157,89 @@
                 assert disabled.home.file == { };
                 pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
 
+              # Durable eval test (pg2-sij2i) for the wayfinder/beads MATCHED PAIR: the
+              # `wayfinder-beads` skill in this repo's marketplace exists only to bind
+              # `/wayfinder` (from the third-party `mattpocock-skills` plugin) onto beads.
+              # Ship one without the other and it fails SILENTLY in the worse direction —
+              # `/wayfinder` takes its local-markdown fallback and writes planning state to
+              # `.scratch/` files. Same drift-guard rationale as
+              # test-integrate-branch-support-enable-default below.
+              test-wayfinder-beads-pairing =
+                let
+                  ownPkgs = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                  mkt = ownPkgs.phillipgreenii-nix-agent-support-marketplace or null;
+
+                  evalThirdparty =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pgii-claude-plugins/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the surface this module reads/writes; the real
+                            # options live in claude-settings / home-manager.
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.settings = {
+                                extraKnownMarketplaces = lib.mkOption {
+                                  type = lib.types.attrs;
+                                  default = { };
+                                };
+                                enabledPlugins = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                plugins = lib.mkOption {
+                                  type = lib.types.listOf lib.types.str;
+                                  default = [ ];
+                                };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  # This repo's half, as homeModules.default declares it.
+                  ours = evalThirdparty {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      plugins.thirdparty.officialPlugins = [ "mattpocock-skills" ];
+                    };
+                  };
+                  # Plus a consumer declaring its OWN list, to prove `listOf` concatenates
+                  # rather than one definition overriding the other.
+                  withConsumer = evalThirdparty {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      plugins.thirdparty.officialPlugins = [
+                        "mattpocock-skills"
+                        "skill-creator"
+                      ];
+                    };
+                  };
+                  key = "mattpocock-skills@claude-plugins-official";
+                in
+                # The plugin half: declared, enabled, and in the install list.
+                assert ours.phillipgreenii.programs.claude-code.settings.enabledPlugins.${key} == true;
+                assert lib.elem key ours.phillipgreenii.programs.claude-code.settings.plugins;
+                # A consumer's own entries survive alongside ours (concatenation).
+                assert lib.elem "skill-creator@claude-plugins-official"
+                  withConsumer.phillipgreenii.programs.claude-code.settings.plugins;
+                assert lib.elem key withConsumer.phillipgreenii.programs.claude-code.settings.plugins;
+                # The skill half: this repo's marketplace must actually carry
+                # `wayfinder-beads`, enabled by default, or the binding never loads.
+                assert mkt != null;
+                assert lib.any (p: p.name == "wayfinder-beads" && p.defaultEnabled) mkt.passthru.plugins;
+                pkgs.runCommand "wayfinder-beads-pairing-ok" { } "touch $out";
+
               # Durable eval test (pg2-sikj3) for the integrate-branch-support enable
               # DEFAULT: the CLI (the detector the integrate-branch plugin's dispatcher
               # invokes as a bare PATH command) must ship exactly when the integrate-branch
@@ -2341,27 +2424,49 @@
             in
             {
               imports = [ ./home ];
-              # `_module.args` must sit under `config` here: this module also sets a
-              # top-level `config.<...>` (nixProvided below), and the module system
-              # forbids a bare top-level `_module` alongside an explicit `config`.
-              config._module.args = { inherit mkBashBuildersFor inputs; };
-              # Auto-register repo-base's nix-built Claude marketplace AND this repo's
-              # own (consumer half of the pattern documented in repo-base
-              # docs/claude-marketplaces.md).
-              #
-              # System-guarded: repo-base publishes its package only on x86_64-linux +
-              # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
-              # rev may predate the package. The `? …` guards make a missing package a
-              # graceful empty no-op instead of an eval error.
-              config.phillipgreenii.programs.claude-code.marketplaces.nixProvided =
-                let
-                  p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
-                  own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
-                in
-                (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
-                ++ (lib.optional (
-                  own ? phillipgreenii-nix-agent-support-marketplace
-                ) own.phillipgreenii-nix-agent-support-marketplace);
+              # Everything this module contributes sits under ONE `config` attrset. The
+              # module system forbids a bare top-level `_module` alongside an explicit
+              # `config`, so `_module.args` has to live under `config` too — and statix
+              # rejects splitting `config` across several `config.<path> =` assignments,
+              # so they are collapsed here rather than written one per concern.
+              config = {
+                _module.args = { inherit mkBashBuildersFor inputs; };
+                phillipgreenii.programs.claude-code = {
+                  # Auto-register repo-base's nix-built Claude marketplace AND this repo's
+                  # own (consumer half of the pattern documented in repo-base
+                  # docs/claude-marketplaces.md).
+                  #
+                  # System-guarded: repo-base publishes its package only on x86_64-linux +
+                  # aarch64-darwin (agent-support builds 4 systems), AND a locked repo-base
+                  # rev may predate the package. The `? …` guards make a missing package a
+                  # graceful empty no-op instead of an eval error.
+                  marketplaces.nixProvided =
+                    let
+                      p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                      own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                    in
+                    (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
+                    ++ (lib.optional (
+                      own ? phillipgreenii-nix-agent-support-marketplace
+                    ) own.phillipgreenii-nix-agent-support-marketplace);
+
+                  # `mattpocock-skills` is declared HERE, not in a machine flake, because
+                  # it is one half of a MATCHED PAIR with this repo's `wayfinder-beads`
+                  # plugin: that skill's entire purpose is to bind `/wayfinder` (and
+                  # `/triage`, `/to-tickets`, `/to-spec`) onto beads, so shipping the skill
+                  # to a machine without the plugin ships a binding for something absent,
+                  # and shipping the plugin without the skill lets `/wayfinder` take its
+                  # SILENT local-markdown fallback. Declaring both in this module is what
+                  # makes them arrive together on every consumer, rather than only wherever
+                  # a machine flake remembered to list the plugin. Guarded by
+                  # `checks.<system>.test-wayfinder-beads-pairing`. See bead pg2-sij2i.
+                  #
+                  # The option is `listOf str`, so this concatenates with any consumer's
+                  # own `officialPlugins` rather than overriding it — a machine may still
+                  # add its own without touching this.
+                  plugins.thirdparty.officialPlugins = [ "mattpocock-skills" ];
+                };
+              };
             };
           # Shape-B wrapper: imports the producer's HM module and sets options
           # with this flake's self + name. Downstream consumers see the configured

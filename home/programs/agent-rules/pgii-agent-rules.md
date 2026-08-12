@@ -133,17 +133,20 @@ MUST be isolated; if they modify files directly, the test MUST generate the scen
 > The `mattpocock-skills` plugin's skills (`/wayfinder`, `/triage`, `/to-tickets`, `/to-spec`)
 > each read a per-repo "issue tracker" doc. They ship templates for GitHub, GitLab and local
 > markdown only, and DEFAULT SILENTLY to local markdown when no tracker is provided — which
-> would put planning state in `.scratch/` files, contradicting the beads-only rule. The
-> workspace's tracker description is therefore written by hand, once, and MUST be found.
+> would put planning state in `.scratch/` files, contradicting the beads-only rule. The beads
+> binding is therefore written once and MUST be found from anywhere.
 
-- **T-1** For any repo in the `pn-workspace`, the tracker doc is
-  `/Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/docs/agents/issue-tracker.md`.
-  A skill that asks for an issue tracker MUST read it and MUST NOT fall back to local
-  markdown, `.scratch/`, or GitHub Issues. `/wayfinder`'s "Wayfinding operations" section is
-  in that file.
-- **T-2** An agent MUST NOT run `/setup-matt-pocock-skills` in a workspace repo. It would
-  propose GitHub (a GitHub `git remote` is its default posture) and overwrite T-1's doc with
-  its GitHub template. Changing trackers is an operator decision.
+- **T-1** When a skill asks for this repo's "issue tracker", the answer is beads, and the
+  binding is the **`wayfinder-beads` skill** — invoke it. It carries the `bd` operation
+  mapping, `/wayfinder`'s "Wayfinding operations", and the triage label vocabulary. An agent
+  MUST NOT fall back to local markdown, `.scratch/`, or GitHub Issues in a beads repo.
+- **T-2** An agent MUST NOT run `/setup-matt-pocock-skills`. It would propose GitHub (a GitHub
+  `git remote` is its default posture) and write its own tracker doc over the top. Changing
+  trackers is an operator decision.
+- **T-3** T-1 names a SKILL, never a path, and that is deliberate: the skill ships in this
+  flake's nix-built marketplace, which `homeModules` registers automatically on every machine
+  that imports it, so the binding needs no per-machine or per-repo file. An absolute path here
+  would bind the rule to one checkout on one machine. MUST NOT reintroduce one.
 
 ### Handoff Preconditions
 
