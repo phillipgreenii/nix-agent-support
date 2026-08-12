@@ -1000,13 +1000,13 @@ func (e *Emitter) LogEvent(name string, attrs map[string]string) {
 	var rec otellog.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetSeverity(severityForEvent(name))
-	rec.SetBody(otellog.StringValue(name))
-	rec.AddAttributes(otellog.String("event_name", name))
+	rec.SetBody(attribute.StringValue(name))
+	rec.AddAttributes(attribute.String("event_name", name))
 	for k, v := range attrs {
 		if v == "" {
 			continue
 		}
-		rec.AddAttributes(otellog.String(k, v))
+		rec.AddAttributes(attribute.String(k, v))
 	}
 	e.logger.Emit(context.Background(), rec)
 }

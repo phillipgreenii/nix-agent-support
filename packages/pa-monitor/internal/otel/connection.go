@@ -194,14 +194,14 @@ func (e *ConnEmitter) LogEvent(name string, attrs map[string]string) {
 	var rec otellog.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetSeverity(severityForEvent(name))
-	rec.SetBody(otellog.StringValue(name))
-	rec.AddAttributes(otellog.String("event_name", name))
-	rec.AddAttributes(otellog.String("component", e.component))
+	rec.SetBody(attribute.StringValue(name))
+	rec.AddAttributes(attribute.String("event_name", name))
+	rec.AddAttributes(attribute.String("component", e.component))
 	for k, v := range attrs {
 		if v == "" {
 			continue
 		}
-		rec.AddAttributes(otellog.String(k, v))
+		rec.AddAttributes(attribute.String(k, v))
 	}
 	e.logger.Emit(context.Background(), rec)
 }

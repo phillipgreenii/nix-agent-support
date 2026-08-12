@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -111,7 +112,7 @@ func TestInit_NoEndpoint_InstallsNoopLoggerProvider(t *testing.T) {
 	}
 	lg := lp.Logger("probe")
 	var rec otellog.Record
-	rec.SetBody(otellog.StringValue("probe"))
+	rec.SetBody(attribute.StringValue("probe"))
 	lg.Emit(context.Background(), rec)
 }
 

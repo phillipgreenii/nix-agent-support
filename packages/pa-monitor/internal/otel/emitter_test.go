@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -51,7 +52,7 @@ func TestEmitter_LogEvent_ProducesRecord(t *testing.T) {
 		t.Errorf("severity = %v, want Info", rec.Severity())
 	}
 	got := map[string]string{}
-	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+	rec.WalkAttributes(func(kv attribute.KeyValue) bool {
 		got[string(kv.Key)] = kv.Value.AsString()
 		return true
 	})
@@ -97,7 +98,7 @@ func TestEmitter_RecordNudgeSendFailed_EmitsWarnEndToEnd(t *testing.T) {
 		t.Errorf("body = %q, want nudge.send_failed", rec.Body().AsString())
 	}
 	got := map[string]string{}
-	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+	rec.WalkAttributes(func(kv attribute.KeyValue) bool {
 		got[string(kv.Key)] = kv.Value.AsString()
 		return true
 	})

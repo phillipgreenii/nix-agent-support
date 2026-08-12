@@ -94,7 +94,7 @@ func TestConnEmitter_LogEvent_BridgeDeliverFailedIsWarn(t *testing.T) {
 		t.Errorf("severity = %v, want Warn (bridge.deliver_failed is error-like)", rec.Severity())
 	}
 	got := map[string]string{}
-	rec.WalkAttributes(func(kv otellog.KeyValue) bool {
+	rec.WalkAttributes(func(kv attribute.KeyValue) bool {
 		got[string(kv.Key)] = kv.Value.AsString()
 		return true
 	})
