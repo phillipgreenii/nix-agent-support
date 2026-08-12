@@ -3,6 +3,7 @@ package gh
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -583,6 +584,229 @@ func TestGH_ParseGhAPICall(t *testing.T) {
 	}
 }
 
+// TestGH_GlobalFlagBeforeCommandPath is the pg2-by1ij regression fixture. cobra lets a
+// global flag precede — or sit inside — gh's command path, and while Evaluate read the path
+// positionally EVERY such spelling resolved `resource` to a flag, matched no branch and
+// reached the final Abstain, which an auto-approving session accepts. It bypassed the whole
+// rule, so this pins one row per branch that has a NON-ABSTAIN verdict, not just pr.
+//
+// Each row is stated as a PAIR and asserted twice: the prefixed spelling must reach the
+// named verdict AND the same verdict as its plain form. Written that way, a future change
+// that relaxed both together — the failure mode a lone `want` table cannot see — still
+// fails the plain-form fixtures elsewhere in this file, while a change that reopens the
+// bypass fails the parity half here.
+//
+// Every `--repo`/`-R`/`-X` spelling below was MEASURED ACCEPTED by gh 2.97.0 on 2026-08-12
+// (see gh.go's measurement table) EXCEPT the three rows marked NO --repo: measured, gh
+// answers `unknown flag: --repo` for `status`, `auth status` and `repo view`, none of which
+// takes that flag (`gh repo view` names its repository POSITIONALLY). Those three pin the
+// EXTRACTION rather than a runnable spelling, and they are here because their branches
+// Approve — a reading of the path that reached them by a different route must still land on
+// the same verdict. `search` is NOT one of them: `gh search issues --repo` is its own flag
+// and the spelling runs.
+func TestGH_GlobalFlagBeforeCommandPath(t *testing.T) {
+	tests := []struct {
+		plain    string
+		prefixed string
+		want     hookio.Decision
+	}{
+		// The draft-first gate (pg2-25oru), in every spelling of the inherited flag.
+		{"gh pr create", "gh --repo o/r pr create", hookio.Reject},
+		{"gh pr create", "gh --repo=o/r pr create", hookio.Reject},
+		{"gh pr create", "gh -R o/r pr create", hookio.Reject},
+		{"gh pr create", "gh -Ro/r pr create", hookio.Reject},
+		{"gh pr create", "gh -R=o/r pr create", hookio.Reject},
+		{"gh pr create", "gh pr --repo o/r create", hookio.Reject}, // INSIDE the path
+		{"gh pr create", "gh pr -R o/r create", hookio.Reject},     //
+		{"gh pr new", "gh --repo o/r pr new", hookio.Reject},       // the `new` alias
+		{"gh pr create --draft", "gh --repo o/r pr create --draft", hookio.Approve},
+		{"gh pr create -d", "gh -R o/r pr create -d", hookio.Approve},
+		{"gh pr create -d", "gh -Ro/r pr create -d", hookio.Approve},
+		{"gh pr create --web", "gh --repo o/r pr create --web", hookio.Approve},
+		{"gh pr ready", "gh --repo o/r pr ready", hookio.Ask},
+		{"gh pr ready --undo", "gh --repo o/r pr ready --undo", hookio.Approve},
+		// The landed merge controls.
+		{"gh pr merge", "gh --repo o/r pr merge", hookio.Reject},
+		{"gh pr merge", "gh pr -R o/r merge", hookio.Reject},
+		{"gh pr merge --auto", "gh --repo o/r pr merge --auto", hookio.Abstain},
+		{"gh pr merge --auto=false", "gh --repo o/r pr merge --auto=false", hookio.Reject},
+		// `gh api` (pg2-cl0v2). The PUT row is the LIVE route: measured, `gh -X PUT api
+		// repos/o/r/pulls/5/merge` dumps `> PUT /api/v3/repos/o/r/pulls/5/merge`, so the
+		// method really is honoured from before the `api` word — which is why apiVerdict
+		// is handed the argv WITH those flags and not the branches' `rest`.
+		{"gh api -X PUT repos/o/r/pulls/5/merge", "gh -X PUT api repos/o/r/pulls/5/merge", hookio.Reject},
+		{"gh api -XPUT repos/o/r/pulls/5/merge", "gh -XPUT api repos/o/r/pulls/5/merge", hookio.Reject},
+		{"gh api -X POST repos/o/r/pulls -f title=x", "gh -X POST api repos/o/r/pulls -f title=x", hookio.Ask},
+		{"gh api repos/o/r", "gh --hostname github.com api repos/o/r", hookio.Approve},
+		// The read-only branches.
+		{"gh issue create", "gh --repo o/r issue create", hookio.Ask},
+		{"gh pr view", "gh --repo o/r pr view", hookio.Approve},
+		{"gh pr list", "gh -R o/r pr list", hookio.Approve},
+		{"gh issue list", "gh -R o/r issue list", hookio.Approve},
+		{"gh run list", "gh --repo o/r run list", hookio.Approve},
+		{"gh release list", "gh --repo o/r release list", hookio.Approve},
+		{"gh search issues", "gh -R o/r search issues", hookio.Approve},
+		{"gh repo view", "gh --repo o/r repo view", hookio.Approve},     // NO --repo
+		{"gh auth status", "gh --repo o/r auth status", hookio.Approve}, // NO --repo
+		{"gh status", "gh --repo o/r status", hookio.Approve},           // NO --repo
+	}
+	for _, tt := range tests {
+		gotPrefixed := evalGH(t, tt.prefixed)
+		if gotPrefixed.Decision != tt.want {
+			t.Errorf("cmd %q: got %s (%s), want %s — a global flag before the command path must not bypass the rule",
+				tt.prefixed, gotPrefixed.Decision, gotPrefixed.Reason, tt.want)
+		}
+		if gotPlain := evalGH(t, tt.plain); gotPrefixed.Decision != gotPlain.Decision {
+			t.Errorf("cmd %q got %s but its plain form %q got %s — the two spellings run the same command",
+				tt.prefixed, gotPrefixed.Decision, tt.plain, gotPlain.Decision)
+		}
+	}
+}
+
+// TestGH_GlobalFlagBeforeApi_NotAbstain pins the ONE parity gap pg2-by1ij leaves, so it is
+// recorded rather than discovered later. `--repo` is not an inherited flag of `gh api`
+// (measured: `gh --repo o/r api repos/o/r` answers `unknown flag: --repo`), so it is absent
+// from api.go's MEASURED arity tables and parseGhAPICall reads it as boolean — which makes
+// its VALUE the endpoint operand, exactly the mis-attribution that file's doc already
+// records. The direction is the safe one and this asserts it: the verdict is the generic
+// mutation Ask, never Approve and never the fall-through Abstain that was the bypass.
+//
+// It is not closed by adding `repo`/`R` to those tables because they are read off
+// `gh api --help` and gh REFUSES this spelling outright, so the entry would encode a flag
+// api does not have in order to sharpen a command that cannot run. What would justify it:
+// gh making `--repo` inherited by `api`, which is a re-measurement of `gh api --help`.
+func TestGH_GlobalFlagBeforeApi_NotAbstain(t *testing.T) {
+	cmds := []string{
+		"gh --repo o/r api repos/o/r/pulls/5/merge -X PUT",
+		"gh -R o/r api repos/o/r/pulls -f title=x",
+	}
+	for _, cmd := range cmds {
+		got := evalGH(t, cmd)
+		if got.Decision != hookio.Ask {
+			t.Errorf("cmd %q: got %s (%s), want ask — the endpoint is mis-attributed by design, but the mutation floor must hold",
+				cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestGH_CommandPath pins the resolution itself, so a regression is reported as a PARSE
+// fact and not only as a changed verdict — the same reason TestGH_ParseGhAPICall exists.
+// Every expectation is MEASURED against gh 2.97.0, 2026-08-12; gh.go's block above
+// ghNoValueLongFlags names the command that produced each reading.
+func TestGH_CommandPath(t *testing.T) {
+	tests := []struct {
+		name             string
+		args             []string
+		resource, subcmd string
+		resourceArgs     []string
+		rest             []string
+	}{
+		{
+			name: "plain path is unchanged by the skip", args: []string{"pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"create"}, rest: nil,
+		},
+		{
+			name: "separated long value", args: []string{"--repo", "o/r", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"--repo", "o/r", "create"}, rest: []string{"--repo", "o/r"},
+		},
+		{
+			name: "'='-glued long is ONE token", args: []string{"--repo=o/r", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"--repo=o/r", "create"}, rest: []string{"--repo=o/r"},
+		},
+		{
+			name: "bare short takes the next token", args: []string{"-R", "o/r", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"-R", "o/r", "create"}, rest: []string{"-R", "o/r"},
+		},
+		{
+			name: "short with a glued value", args: []string{"-Ro/r", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"-Ro/r", "create"}, rest: []string{"-Ro/r"},
+		},
+		{
+			name: "short with an '='-glued value", args: []string{"-R=o/r", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"-R=o/r", "create"}, rest: []string{"-R=o/r"},
+		},
+		{
+			name: "flag INSIDE the path", args: []string{"pr", "--repo", "o/r", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"--repo", "o/r", "create"}, rest: []string{"--repo", "o/r"},
+		},
+		{
+			// The load-bearing api row: the method precedes the `api` word, and
+			// resourceArgs must still carry it AND the endpoint.
+			name:     "api keeps its endpoint and its pre-path method",
+			args:     []string{"-X", "PUT", "api", "repos/o/r/pulls/5/merge"},
+			resource: "api", subcmd: "repos/o/r/pulls/5/merge",
+			resourceArgs: []string{"-X", "PUT", "repos/o/r/pulls/5/merge"}, rest: []string{"-X", "PUT"},
+		},
+		{
+			name: "a REGISTERED global bool consumes nothing", args: []string{"--help", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"--help", "create"}, rest: []string{"--help"},
+		},
+		{
+			// -h is NOT registered on gh's root, so cobra consumes `pr` as its value and
+			// resolves no `pr` command at all. Measured: `unknown command "create"`.
+			name: "an UNREGISTERED short consumes the next token", args: []string{"-h", "pr", "create"},
+			resource: "create", subcmd: "",
+			resourceArgs: []string{"-h", "pr"}, rest: []string{"-h", "pr"},
+		},
+		{
+			name: "nothing after `--` is a command word", args: []string{"--", "pr", "create"},
+			resource: "", subcmd: "",
+			resourceArgs: []string{"--", "pr", "create"}, rest: []string{"--", "pr", "create"},
+		},
+		{
+			// `--` must SURVIVE in rest: pg2-25oru's `gh pr create -- --draft` Reject
+			// depends on cmdparse.HasLongFlag seeing the terminator.
+			name: "`--` survives in rest", args: []string{"pr", "create", "--", "--draft"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"create", "--", "--draft"}, rest: []string{"--", "--draft"},
+		},
+		{
+			name:     "a lone `-` is skipped, not treated as a value-taking flag",
+			args:     []string{"-", "pr", "create"},
+			resource: "pr", subcmd: "create",
+			resourceArgs: []string{"-", "create"}, rest: []string{"-"},
+		},
+		{
+			name: "a flag needing a value at the end leaves no command word", args: []string{"--repo"},
+			resource: "", subcmd: "",
+			resourceArgs: []string{"--repo"}, rest: []string{"--repo"},
+		},
+		{
+			name: "resource with no subcommand", args: []string{"api"},
+			resource: "api", subcmd: "",
+			resourceArgs: nil, rest: nil,
+		},
+		{
+			name: "no args at all", args: nil,
+			resource: "", subcmd: "",
+			resourceArgs: nil, rest: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource, subcmd, resourceArgs, rest := ghCommandPath(tt.args)
+			if resource != tt.resource || subcmd != tt.subcmd {
+				t.Errorf("ghCommandPath(%q) path = %q/%q, want %q/%q",
+					tt.args, resource, subcmd, tt.resource, tt.subcmd)
+			}
+			if !slices.Equal(resourceArgs, tt.resourceArgs) {
+				t.Errorf("ghCommandPath(%q) resourceArgs = %q, want %q", tt.args, resourceArgs, tt.resourceArgs)
+			}
+			if !slices.Equal(rest, tt.rest) {
+				t.Errorf("ghCommandPath(%q) rest = %q, want %q", tt.args, rest, tt.rest)
+			}
+		})
+	}
+}
+
 func TestGH_NonGh_Abstain(t *testing.T) {
 	r := New(nil)
 	input := &hookio.HookInput{
@@ -676,6 +900,21 @@ func TestGH_RunRerun(t *testing.T) {
 			cmd:      "gh run rerun not-a-number",
 			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "feature-x"},
 			want:     hookio.Abstain,
+		},
+		{
+			// pg2-by1ij: the run branch is reached through the same resolution as every
+			// other, so the global-flag spellings must land on it too. extractRunID needs
+			// no change of its own — it finds the `rerun` token and scans after it.
+			name:     "global flag before the command path",
+			cmd:      "gh --repo o/r run rerun 12345",
+			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "feature-x"},
+			want:     hookio.Approve,
+		},
+		{
+			name:     "global flag inside the command path",
+			cmd:      "gh run -R o/r rerun 12345",
+			resolver: &stubResolver{currentBranch: "feature-x", runBranch: "feature-x"},
+			want:     hookio.Approve,
 		},
 	}
 

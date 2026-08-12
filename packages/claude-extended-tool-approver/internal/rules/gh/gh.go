@@ -77,18 +77,18 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 		if !isGhExecutable(pc.Executable) {
 			continue
 		}
-		resource, subcmd := "", ""
-		// rest are the tokens AFTER the `<resource> <subcommand>` pair — the argv slice
-		// every flag test below is asked about, so a verdict cannot be changed by the
-		// subcommand words themselves and is independent of where in `rest` a flag sits.
-		var rest []string
-		if len(pc.Args) >= 1 {
-			resource = pc.Args[0]
-		}
-		if len(pc.Args) >= 2 {
-			subcmd = pc.Args[1]
-			rest = pc.Args[2:]
-		}
+		// The command path is resolved by ghCommandPath, NOT read positionally off
+		// pc.Args[0]/pc.Args[1]: cobra lets a global flag precede or sit inside the path,
+		// and the positional read resolved `resource` to that flag, so every such
+		// spelling matched no branch and reached the final Abstain — a bypass of the WHOLE
+		// rule (pg2-by1ij; see the block below its definition for the measurements).
+		//
+		// rest are the tokens with BOTH path words removed — the argv slice every flag
+		// test below is asked about, so a verdict cannot be changed by the subcommand
+		// words themselves and is independent of where in `rest` a flag sits.
+		// resourceArgs keeps the SUBCOMMAND word and is what the api branch needs; see
+		// ghCommandPath's doc for why the two differ.
+		resource, subcmd, resourceArgs, rest := ghCommandPath(pc.Args)
 		if resource == "status" {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
@@ -104,7 +104,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 			}
 		}
 		if resource == "api" {
-			return r.apiVerdict(pc.Args[1:])
+			return r.apiVerdict(resourceArgs)
 		}
 		if resource == "search" {
 			return hookio.RuleResult{
@@ -240,6 +240,191 @@ func (r *Rule) Evaluate(input *hookio.HookInput) hookio.RuleResult {
 
 func isGhExecutable(exec string) bool {
 	return exec == "gh" || filepath.Base(exec) == "gh"
+}
+
+// A GLOBAL FLAG BEFORE THE COMMAND PATH (pg2-by1ij)
+//
+// gh is cobra, and cobra finds a command by STRIPPING FLAGS from argv, so a flag may
+// legally precede — or sit inside — the command words. Until pg2-by1ij this rule read the
+// path POSITIONALLY (`resource = pc.Args[0]`, `subcmd = pc.Args[1]`), so `gh --repo o/r pr
+// create` resolved resource to "--repo", matched NO branch, and reached the final Abstain,
+// which a bypassPermissions/auto session auto-approves. That escaped the whole rule at
+// once, not one branch: the pg2-25oru draft-first Reject, the landed `gh pr merge` Reject
+// and the pg2-cl0v2 `gh api` merge Reject all sat behind the same extraction.
+//
+// MEASURED, gh 2.97.0 (nixpkgs), 2026-08-12, each spelling run from a directory that is
+// NOT a git repository and pointed at an unresolvable host, reading whether it reached
+// gh's own execution (spelling ACCEPTED) or failed at parsing (REFUSED):
+//
+//	gh --repo H/o/r pr create --title x --body y  -> ACCEPTED (reached the network)
+//	gh --repo=H/o/r pr create …                  -> ACCEPTED ('='-glued: ONE token)
+//	gh -R H/o/r pr create …                      -> ACCEPTED (short, separated value)
+//	gh -RH/o/r pr create …                       -> ACCEPTED (short, glued value)
+//	gh -R=H/o/r pr create …                      -> ACCEPTED (pflag's '='-glued short)
+//	gh pr --repo H/o/r create …                  -> ACCEPTED — the flag sits INSIDE the
+//	                                                path, so skipping only LEADING flags
+//	                                                would still be bypassed
+//	gh pr -R H/o/r merge                         -> ACCEPTED ("argument required when
+//	                                                using the --repo flag")
+//	gh --repo H/o/r pr ready                     -> ACCEPTED (likewise)
+//	gh --repo H/o/r issue create …               -> ACCEPTED
+//	gh --repo H/o/r pr view 1                    -> ACCEPTED
+//	gh -X PUT api repos/o/r/pulls/5/merge        -> ACCEPTED, and with --verbose it dumped
+//	                                                `> PUT /api/v3/repos/o/r/pulls/5/merge`
+//	                                                — the api MERGE, method set BEFORE the
+//	                                                `api` word
+//	gh --hostname H api repos/o/r                -> ACCEPTED (an api flag, same position)
+//	gh --repo H/o/r api repos/o/r                -> REFUSED: `unknown flag: --repo`; gh api
+//	                                                inherits only --help
+//	gh --help pr create                          -> prints `gh pr create` help: --help is a
+//	                                                REGISTERED bool, so it does NOT consume
+//	                                                the following token
+//	gh -h pr create                              -> `unknown command "create" for "gh"`: -h
+//	                                                is NOT registered, so it DID consume
+//	                                                `pr` as its value
+//	gh --version pr create                       -> `unknown flag: --version` with
+//	                                                `Usage: gh pr` — a bool on the ROOT (it
+//	                                                kept `pr`) but value-taking one level
+//	                                                down, where it ate `create`
+//	gh -- pr create                              -> `unknown command "pr"`: nothing after a
+//	                                                `--` is a command word
+//	gh - pr create                               -> resolves `gh pr create`, then refuses
+//	                                                the operand: `unknown argument "-"`
+//
+// WHY THIS CANNOT LOOSEN AN EXISTING VERDICT. Whenever pc.Args[0] and pc.Args[1] are both
+// non-flag tokens — every spelling the rule answered before — ghCommandPath returns the
+// SAME pair the positional read did, `rest` is exactly the old `pc.Args[2:]`, and
+// `resourceArgs` is exactly the old `pc.Args[1:]` the api branch was handed. Every OTHER
+// spelling used to reach the final Abstain, so a newly-resolved path can only ADD a gate.
+// The pg2-25oru and pg2-cl0v2 fixtures therefore pin unchanged behavior through unchanged
+// code, which is what makes them a regression check on this change rather than a rewrite
+// of it.
+//
+// ONE CONSEQUENCE IS WORTH NAMING: `gh --help pr create` now resolves to `pr create` and
+// is REJECTED, though it only prints help. That is not new for a help invocation —
+// `gh pr create --help` is Rejected today by the same reading, because the rule keys on the
+// command path and not on the help flag — and it is inert, since gh creates nothing. What
+// would justify carving help out: observed friction on a `--help` spelling in the decision
+// log, which would be one carve-out covering both positions, not a change here.
+//
+// `run rerun` needs nothing from this: extractRunID locates the `rerun` token itself and
+// scans AFTER it, skipping leading-dash tokens, so a flag before the path never reached it.
+
+// ghNoValueLongFlags are the long flags that do NOT consume the following token while
+// cobra searches for gh's command path — gh's ROOT flags, read off `gh --help` on
+// gh 2.97.0 (2026-08-12): `--help` (registered persistent, so it reaches every level) and
+// `--version` (root only). Any OTHER long flag is treated as value-taking, which is
+// cobra's own rule for a flag it finds unregistered and is the reading `--repo o/r` needs.
+//
+// IT IS A NO-VALUE LIST, NOT A VALUE-TAKING ONE, because the two error directions are not
+// equal. Omitting a value-taking flag would leave its VALUE read as the resource — the
+// pre-pg2-by1ij bypass restated. Omitting a no-value flag consumes one token too many,
+// which moves the resource LATER and can therefore only resolve FEWER branches than the
+// positional read already did, i.e. back to today's Abstain — never past a gate.
+//
+// THERE IS NO SHORT-FLAG ENTRY, and that is measured rather than forgotten: gh registers
+// no shorthand for --help (`gh -h pr create` answers `unknown command "create"`, so `-h`
+// ate `pr`) and none for --version, so a bare short is always treated as value-taking.
+// WHAT TO RE-MEASURE when gh changes: the FLAGS section of `gh --help`, for a new GLOBAL
+// BOOLEAN flag — one missing from this map would consume the resource word and return that
+// spelling to the fall-through Abstain.
+var ghNoValueLongFlags = map[string]bool{"help": true, "version": true}
+
+// ghCommandPath resolves a gh invocation's COMMAND PATH — the `<resource> <subcommand>`
+// pair every branch in Evaluate keys on — from args, the tokens AFTER the gh executable
+// (cmdparse.ParsedCommand.Args). Either is "" when argv holds no such word.
+//
+// It returns two argv slices, and the difference between them is load-bearing:
+//
+//   - rest is args with BOTH path words removed: the flag slice the `<resource>
+//     <subcommand>` branches ask about. It KEEPS the flags that preceded the path, which
+//     is what gh's own leaf command receives, so `gh --repo o/r pr create -d` is read as
+//     the draft create it is.
+//   - resourceArgs is args with only the RESOURCE word removed, and is what the `api`
+//     branch must be given: `gh api` takes no subcommand, so the second command word is
+//     its ENDPOINT and apiVerdict needs it. Handing api `rest` instead would drop the
+//     pre-path flags, and measured (above) `gh -X PUT api repos/o/r/pulls/5/merge` really
+//     does send that PUT — read without its `-X PUT` it would resolve to a GET and be
+//     APPROVED, one notch WEAKER than the Abstain it produces today. That is the whole
+//     reason for two slices rather than one.
+func ghCommandPath(args []string) (resource, subcmd string, resourceArgs, rest []string) {
+	words := ghCommandWordIndexes(args, 2)
+	resourceArgs = args
+	if len(words) > 0 {
+		resource = args[words[0]]
+		resourceArgs = omitIndexes(args, words[:1])
+	}
+	if len(words) > 1 {
+		subcmd = args[words[1]]
+	}
+	return resource, subcmd, resourceArgs, omitIndexes(args, words)
+}
+
+// ghCommandWordIndexes returns the indexes in args of the first `want` COMMAND WORDS,
+// skipping flags the way cobra's own command search does: a long flag consumes the NEXT
+// token unless it is '='-glued or listed in ghNoValueLongFlags; a BARE short (`-R`,
+// exactly two characters) consumes the next token; a short carrying its value in the same
+// token (`-Ro/r`, `-R=o/r`) consumes nothing; and nothing after a `--` end-of-options
+// terminator is a command word. A lone `-` is neither flag nor command word — cobra drops
+// it from the search, and measured `gh - pr create` does resolve `gh pr create` — so it is
+// skipped without consuming anything.
+//
+// The skip is applied at EVERY level, not just ahead of the resource, because a flag may
+// sit INSIDE the path: measured, `gh pr --repo o/r create` creates a pull request. gh's
+// per-level flag sets differ (`--version` is boolean on the root but value-taking one
+// level down — measured), so using ONE table for all levels is an approximation. It errs
+// only for a root-only boolean written at a deeper level, a spelling gh itself refuses as
+// an unknown flag, so nothing can run whatever this answers.
+//
+// Indexing the bytes of a token is a deliberate look at ONE already-tokenized,
+// already-unquoted argument, the same pg2-x9452 Guard 2 false positive cmdparse's
+// HasShortFlag and parseGhAPICall record: no lexical or quoting decision is made here.
+func ghCommandWordIndexes(args []string, want int) []int {
+	out := make([]int, 0, want)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return out // end of options: no command word past it
+		}
+		if strings.HasPrefix(a, "--") {
+			if name, _, glued := strings.Cut(a[2:], "="); !glued && !ghNoValueLongFlags[name] {
+				i++ // `--repo o/r`: the next token is this flag's VALUE
+			}
+			continue
+		}
+		if len(a) == 2 && a[0] == '-' {
+			i++ // `-R o/r`: a BARE short's value is the next token
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			continue // a cluster or a glued short value, or a lone `-`: one token
+		}
+		out = append(out, i)
+		if len(out) >= want {
+			return out
+		}
+	}
+	return out
+}
+
+// omitIndexes returns args without the tokens at the ASCENDING indexes in drop. It is the
+// single rule behind both of ghCommandPath's argv slices: a command WORD is removed and
+// everything else — every flag, every operand, in order — is kept, which is the argv gh
+// hands the command it resolved.
+func omitIndexes(args []string, drop []int) []string {
+	if len(drop) == 0 {
+		return args
+	}
+	out := make([]string, 0, len(args)-len(drop))
+	next := 0
+	for i, a := range args {
+		if next < len(drop) && drop[next] == i {
+			next++
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // There is no local hasFlag. It was an EXACT-TOKEN test, which is the wrong shape for

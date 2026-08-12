@@ -70,16 +70,16 @@ import (
 // from the git rule, whose matchers must cover git's unique-prefix abbreviations.
 // Re-measure before adding prefix handling; today it would be dead code.
 //
-// KNOWN RESIDUAL BYPASS, not closed here. `gh --repo o/r pr create` is ACCEPTED by gh
-// (measured the same day: it reached the same title/body validation), because cobra
-// lets an inherited flag precede the command path. Evaluate resolves resource/subcmd as
-// pc.Args[0]/pc.Args[1], so that spelling reads as resource "--repo", matches no branch
-// and reaches the final Abstain — escaping this gate. It escapes the LANDED `gh pr
-// merge` Reject the same way, so it is a pre-existing property of the rule's
-// resource resolution rather than of this gate, and closing it means re-deriving
-// resource/subcmd for EVERY branch (including apiVerdict's args). That is its own
-// reviewable change, not a tidy-up. What would justify making it one: any observed
-// `gh <pre-subcommand-flag> pr …` invocation in the decision log.
+// THE PRE-SUBCOMMAND-FLAG BYPASS IS CLOSED (pg2-by1ij), and this gate depends on that.
+// `gh --repo o/r pr create` is ACCEPTED by gh (measured the same day: it reached the same
+// title/body validation), because cobra lets an inherited flag precede the command path.
+// While Evaluate resolved resource/subcmd as pc.Args[0]/pc.Args[1] that spelling read as
+// resource "--repo", matched no branch and reached the final Abstain, escaping this gate —
+// and the LANDED `gh pr merge` Reject with it. pg2-by1ij replaced the positional read with
+// ghCommandPath, which skips the flags cobra skips at every level of the path; see its doc
+// and the measurement table above it in gh.go. The verdicts here are unchanged by that
+// work: TestGH_GlobalFlagBeforeCommandPath pins each spelling to the SAME verdict as its
+// plain form, so a regression in the extraction fails as a draft-first failure too.
 
 // prCreateValueShorts are the `gh pr create` short flags that CONSUME A VALUE, read off
 // `gh pr create --help` on gh 2.97.0 (2026-08-12): -a/--assignee, -B/--base, -b/--body,
