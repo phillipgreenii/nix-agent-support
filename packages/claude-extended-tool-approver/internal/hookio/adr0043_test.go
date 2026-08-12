@@ -43,7 +43,11 @@ func TestNoOpinionStillSerializesAsAbstain(t *testing.T) {
 // Decision-ordering comparison behave identically. A reorder here would silently
 // change what a compound expression folds to.
 func TestRestrictivenessOrderIsUnchanged(t *testing.T) {
-	if !(Approve < NoOpinion && NoOpinion < Ask && Ask < Reject) {
+	// Named rather than written as an inline negated conjunction so it reads in the
+	// positive form the doc comment states it in (staticcheck QF1001 rejects the
+	// inline form) — the same shape gitdir_test.go's strictlyIncreasing uses.
+	orderHolds := Approve < NoOpinion && NoOpinion < Ask && Ask < Reject
+	if !orderHolds {
 		t.Fatalf("restrictiveness order broken: Approve=%d NoOpinion=%d Ask=%d Reject=%d",
 			Approve, NoOpinion, Ask, Reject)
 	}

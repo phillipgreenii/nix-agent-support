@@ -165,7 +165,9 @@ func TestPrimaryPush_DashC_EffectiveDir(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.cmd, func(t *testing.T) {
 			s := canonMain()
-			New(s).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(c.cmd), CWD: c.cwd, PermissionMode: "bypassPermissions"})
+			// Return values discarded on purpose: this case asserts the resolver saw the
+			// right effective dir (s.gotDir), not the verdict.
+			_, _ = New(s).Evaluate(&hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(c.cmd), CWD: c.cwd, PermissionMode: "bypassPermissions"})
 			if s.gotDir != c.wantDir {
 				t.Errorf("effective dir = %q, want %q", s.gotDir, c.wantDir)
 			}

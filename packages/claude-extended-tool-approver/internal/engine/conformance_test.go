@@ -7,7 +7,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
-// engineEvaluateSignature is the CHAIN-RUNNER signature. Pinning it at compile time
+// This is the CHAIN-RUNNER signature. Pinning it at compile time
 // is the guard ADR 0043's Consequences demand: before that ADR, *Engine.Evaluate had
 // the SAME shape as hookio.RuleModule.Evaluate, so widening the interface changes
 // which of the two this method matches with NO compile error anywhere. If someone
@@ -19,7 +19,11 @@ import (
 // terminal NoOpinion, so there is nothing left for an error to mean here. It is also
 // what keeps every existing caller — including the ordering tests this bead must not
 // edit the expectations of — reading a single verdict.
-var engineEvaluateSignature func(*hookio.HookInput) hookio.RuleResult = (*Engine)(nil).Evaluate
+//
+// Written as `var _` rather than a named variable so golangci-lint's `unused` check
+// does not flag it: a compile-time assertion is consumed by the compiler, never by
+// code, so there is nothing to reference it.
+var _ func(*hookio.HookInput) hookio.RuleResult = (*Engine)(nil).Evaluate
 
 // TestEngineIsNotItselfARuleModule records the OTHER half of that trap, and corrects
 // the ADR's premise while doing so.
